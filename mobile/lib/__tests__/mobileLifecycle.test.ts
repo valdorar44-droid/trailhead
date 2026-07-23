@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   boundedRetainedScrollOffset,
+  createMapVisualRefreshCoordinator,
   mapLocationWatchShouldRun,
   mapVisualWorkShouldRun,
   screenIsActive,
+  visualWorkRequestIsCurrent,
 } from '../screenActivityState';
 import { completeLegacyMapSearch } from '../legacyMapSearchPolicy';
 import { subscriptionManagementUrl } from '../subscriptionManagement';
@@ -43,9 +45,45 @@ test('idle Map sensing pauses on blur/background while active navigation continu
 test('hidden Map pauses visual layers without stopping the navigation runtime', () => {
   assert.equal(mapVisualWorkShouldRun(true, true, false), true);
   assert.equal(mapVisualWorkShouldRun(false, true, false), false);
-  assert.equal(mapVisualWorkShouldRun(false, true, true), true);
+  assert.equal(mapVisualWorkShouldRun(false, true, true), false);
   assert.equal(mapVisualWorkShouldRun(false, false, true), false);
   assert.equal(mapLocationWatchShouldRun(false, true), true);
+});
+
+test('visual work requests cannot commit across blur and refocus generations', () => {
+  assert.equal(visualWorkRequestIsCurrent(true, 4, 4), true);
+  assert.equal(visualWorkRequestIsCurrent(false, 4, 4), false);
+  assert.equal(visualWorkRequestIsCurrent(true, 5, 4), false);
+});
+
+test('retained Map runs exactly one visual refresh for each refocus', () => {
+  const bounds = { n: 40.1, s: 39.9, e: -109.8, w: -110.2 };
+  const movedBounds = { ...bounds, e: -109.7 };
+  const coordinator = createMapVisualRefreshCoordinator(true, 0);
+
+  assert.equal(coordinator.resume(bounds, 0, 0), false, 'initial mount is not a refocus');
+  assert.equal(coordinator.region(bounds, 0, 0), true);
+
+  coordinator.transition(false, 1);
+  assert.equal(coordinator.region(bounds, 1, 10), false, 'blur cancels visual commits');
+  coordinator.transition(true, 2);
+  assert.equal(coordinator.hasPendingResume(), true);
+  coordinator.transition(true, 2);
+  assert.equal(coordinator.hasPendingResume(), true, 'rerenders do not consume or duplicate the pending refresh');
+  assert.equal(coordinator.resume(bounds, 2, 100), true);
+  assert.equal(coordinator.resume(bounds, 2, 101), false, 'the fallback timer commits once');
+  assert.equal(coordinator.region(bounds, 2, 200), false, 'an equivalent late native region event is deduplicated');
+  assert.equal(coordinator.region(movedBounds, 2, 220), true, 'real camera movement still refreshes');
+
+  coordinator.transition(false, 3);
+  coordinator.transition(true, 4);
+  coordinator.transition(false, 5);
+  assert.equal(coordinator.resume(bounds, 4, 300), false, 'blur before the timer fires cancels the resume');
+
+  coordinator.transition(true, 6);
+  assert.equal(coordinator.resume(bounds, 5, 400), false, 'stale asynchronous bounds cannot commit');
+  assert.equal(coordinator.region(bounds, 6, 410), true, 'a native event wins over the pending fallback');
+  assert.equal(coordinator.resume(bounds, 6, 420), false);
 });
 
 test('legacy Map search preserves server order and requires explicit selection', () => {

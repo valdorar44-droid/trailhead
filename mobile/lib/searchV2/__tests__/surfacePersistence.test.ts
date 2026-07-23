@@ -104,6 +104,26 @@ test('Map lazy-loads the renderer once and keeps the mounted presentation on war
   assert.doesNotMatch(mapSource, /const WebView: any =/);
 });
 
+test('hidden Native Map pauses renderer work without erasing route or selection semantics', () => {
+  assert.match(mapSource, /visualWorkActive=\{mapVisualWorkActive\}/);
+  assert.match(mapSource, /waypoints=\{waypoints\}/);
+  assert.match(mapSource, /searchMarker=\{!mapMissionVisible && searchRouteCard/);
+  assert.match(mapSource, /routeBuildCoords=\{routeBuildSession\?\.routeCoords \?\? \[\]\}/);
+  assert.match(mapSource, /originalsRouteCoords=\{originalsMapExperience\.routeCoords\}/);
+  assert.doesNotMatch(mapSource, /waypoints=\{mapVisualWorkActive \? waypoints : \[\]\}/);
+  assert.doesNotMatch(mapSource, /searchMarker=\{mapVisualWorkActive/);
+
+  assert.match(nativeMapSource, /visualWorkActive\?: boolean;/);
+  assert.match(nativeMapSource, /preferredFramesPerSecond=\{visualWorkActive \? 60 : 1\}/);
+  assert.match(nativeMapSource, /\{visualWorkActive \? \(\s*<>[\s\S]*id="camps"/);
+  assert.match(nativeMapSource, /if \(!visualWorkActiveRef\.current \|\| !feat\?\.properties \|\| !mapRef\.current\) return;/);
+  assert.match(nativeMapSource, /tileProbeSeqRef\.current \+= 1;/);
+  assert.match(nativeMapSource, /mvumFetchAbortRef\.current\?\.abort\(\);/);
+  assert.match(nativeMapSource, /avaFetchAbortRef\.current\?\.abort\(\);/);
+  assert.match(nativeMapSource, /radarFetchAbortRef\.current\?\.abort\(\);/);
+  assert.match(nativeMapSource, /onBoundsChange\(\{ \.\.\.bounds, zoom: boundsZoomRef\.current \}\);/);
+});
+
 test('Native Map initializes only the selected renderer and keeps POI taps in native style layers', () => {
   assert.doesNotMatch(nativeMapSource, /^import MapboxGL from/m);
   assert.doesNotMatch(nativeMapSource, /^import MapLibreGL from/m);

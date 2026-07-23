@@ -171,7 +171,11 @@ import { CREDIT_REWARDS } from '@/lib/credits';
 import { useConnectivitySync } from '@/lib/connectivitySync';
 import { completeLegacyMapSearch } from '@/lib/legacyMapSearchPolicy';
 import { useScreenActivity } from '@/lib/screenActivity';
-import { mapLocationWatchShouldRun, mapVisualWorkShouldRun } from '@/lib/screenActivityState';
+import {
+  mapLocationWatchShouldRun,
+  mapVisualWorkShouldRun,
+  visualWorkRequestIsCurrent,
+} from '@/lib/screenActivityState';
 import { useKeyboardInset } from '@/lib/keyboardInset';
 import { mapModeOwnsRoutePreview, resolveMapExperienceMode } from '@/lib/mapExperienceMode';
 import {
@@ -7313,6 +7317,29 @@ function MapScreen() {
     screenActivity.isAppActive,
     navMode,
   );
+  const mapVisualWorkActiveRef = useRef(mapVisualWorkActive);
+  const mapVisualWorkGenerationRef = useRef(0);
+  if (mapVisualWorkActiveRef.current !== mapVisualWorkActive) {
+    mapVisualWorkActiveRef.current = mapVisualWorkActive;
+    mapVisualWorkGenerationRef.current += 1;
+  }
+
+  useEffect(() => {
+    if (mapVisualWorkActive) return;
+    const clearPending = (ref: { current: ReturnType<typeof setTimeout> | null }) => {
+      if (ref.current) clearTimeout(ref.current);
+      ref.current = null;
+    };
+    clearPending(pendingPoiFetchRef);
+    clearPending(pendingCampFetchRef);
+    clearPending(pendingWaterNavFetchRef);
+    clearPending(pendingRenderedFeatureRef);
+    poiFetchSeqRef.current += 1;
+    campAreaRequestRef.current += 1;
+    setPlacesLoading(false);
+    setIsLoadingAreaCamps(false);
+    setCampDiscoveryLoadingKey('');
+  }, [mapVisualWorkActive]);
 
   const fitOriginalsRoute = useCallback(() => {
     if (!originalsMapExperience.active || originalsMapExperience.routeCoords.length < 2) return;
@@ -8135,6 +8162,13 @@ function MapScreen() {
     radiusDeg = 3.0,
     force = false,
   ) => {
+    if (!mapVisualWorkActiveRef.current) return;
+    const visualGeneration = mapVisualWorkGenerationRef.current;
+    const requestIsCurrent = () => visualWorkRequestIsCurrent(
+      mapVisualWorkActiveRef.current,
+      mapVisualWorkGenerationRef.current,
+      visualGeneration,
+    );
     const vp = viewportRef.current;
     const target = center
       ?? (vp ? { lat: (vp.n + vp.s) / 2, lng: (vp.e + vp.w) / 2 } : null)
@@ -8149,7 +8183,7 @@ function MapScreen() {
 
     lastPinFetchRef.current = { lat: target.lat, lng: target.lng, ts: Date.now() };
     api.getNearbyPins(target.lat, target.lng, radiusDeg)
-      .then(setCommunityPins)
+      .then(pins => { if (requestIsCurrent()) setCommunityPins(pins); })
       .catch(() => {});
     const canLoadDispersedLeads = Boolean(user?.is_admin || user?.map_contributor?.approved);
     if (!canLoadDispersedLeads) {
@@ -8159,10 +8193,12 @@ function MapScreen() {
     }
     api.getDispersedLeadsNearby(target.lat, target.lng, Math.min(65, Math.max(12, radiusDeg * 55)), 80)
       .then(res => {
+        if (!requestIsCurrent()) return;
         setDispersedLeadAccess(res.access);
         setDispersedLeadPins((res.leads ?? []).map(dispersedLeadToPin));
       })
       .catch((err) => {
+        if (!requestIsCurrent()) return;
         if (err?.status === 401 || err?.status === 403) {
           setDispersedLeadAccess(null);
           setDispersedLeadPins([]);
@@ -9308,6 +9344,13 @@ function MapScreen() {
   }
 
   function fetchPois(center: { lat: number; lng: number }, radius = 28, categoriesOverride?: string) {
+    if (!mapVisualWorkActiveRef.current) return;
+    const visualGeneration = mapVisualWorkGenerationRef.current;
+    const visualRequestIsCurrent = () => visualWorkRequestIsCurrent(
+      mapVisualWorkActiveRef.current,
+      mapVisualWorkGenerationRef.current,
+      visualGeneration,
+    );
     if (extremeMapLayerActive && !!extremeConfig?.feature_flags?.search) {
       setPlacesLoading(false);
       setPois([]);
@@ -9320,7 +9363,7 @@ function MapScreen() {
     const categories = categoriesOverride || placeCategoryRequest();
     api.getNearbySmartPack(center.lat, center.lng, radius, categories)
       .then(pack => {
-        if (seq < poiFetchSeqRef.current - 2) return;
+        if (!visualRequestIsCurrent() || seq !== poiFetchSeqRef.current) return;
         const smartPois = (pack.places ?? [])
           .filter(p => String(p.type) !== 'camp')
           .filter(p => (p.name && p.name.trim()) || UTILITY_PLACE_TYPES.has(String(p.type || ''))) as OsmPoi[];
@@ -9329,17 +9372,19 @@ function MapScreen() {
         setPlacesLoadedAt(Date.now());
       })
       .catch(() => {
+        if (!visualRequestIsCurrent()) return;
         api.getNearbyPlaces(center.lat, center.lng, radius, categories, 'auto')
           .then(p => {
-            if (seq < poiFetchSeqRef.current - 2) return;
+            if (!visualRequestIsCurrent() || seq !== poiFetchSeqRef.current) return;
             if (!p.length) throw new Error('empty nearby places');
             mergePoiBatch(p, center);
             setPlacesLoadedAt(Date.now());
           })
           .catch(() => {
+            if (!visualRequestIsCurrent()) return;
             api.getOsmPois(center.lat, center.lng, radius, 'fuel,water,trail,trailhead,viewpoint,peak,hot_spring,parking')
               .then(p => {
-                if (seq < poiFetchSeqRef.current - 2) return;
+                if (!visualRequestIsCurrent() || seq !== poiFetchSeqRef.current) return;
                 mergePoiBatch(p, center);
                 setPlacesLoadedAt(Date.now());
               })
@@ -9347,11 +9392,13 @@ function MapScreen() {
           });
       })
       .finally(() => {
-        if (seq === poiFetchSeqRef.current) setPlacesLoading(false);
+        if (visualRequestIsCurrent() && seq === poiFetchSeqRef.current) setPlacesLoading(false);
       });
   }
 
   function queueViewportPlaceFetch(bounds: { n: number; s: number; e: number; w: number; zoom: number }) {
+    if (!mapVisualWorkActiveRef.current) return;
+    const visualGeneration = mapVisualWorkGenerationRef.current;
     if ((bounds.zoom ?? 0) < 10) return;
     const center = { lat: (bounds.n + bounds.s) / 2, lng: (bounds.e + bounds.w) / 2 };
     const last = lastPoiFetchRef.current;
@@ -9362,12 +9409,15 @@ function MapScreen() {
     if (pendingPoiFetchRef.current) clearTimeout(pendingPoiFetchRef.current);
     pendingPoiFetchRef.current = setTimeout(() => {
       pendingPoiFetchRef.current = null;
+      if (!visualWorkRequestIsCurrent(mapVisualWorkActiveRef.current, mapVisualWorkGenerationRef.current, visualGeneration)) return;
       setShowPois(true);
       fetchPois(center, poiRadiusForBounds(bounds));
     }, 260);
   }
 
   function queueRenderedFeatureRefresh(bounds: { n: number; s: number; e: number; w: number; zoom: number }) {
+    if (!mapVisualWorkActiveRef.current) return;
+    const visualGeneration = mapVisualWorkGenerationRef.current;
     if ((bounds.zoom ?? 0) < 9) {
       setVisibleRenderedFeatures([]);
       return;
@@ -9375,8 +9425,10 @@ function MapScreen() {
     if (pendingRenderedFeatureRef.current) clearTimeout(pendingRenderedFeatureRef.current);
     pendingRenderedFeatureRef.current = setTimeout(() => {
       pendingRenderedFeatureRef.current = null;
+      if (!visualWorkRequestIsCurrent(mapVisualWorkActiveRef.current, mapVisualWorkGenerationRef.current, visualGeneration)) return;
       nativeMapRef.current?.queryVisibleFeatures?.()
         .then(features => {
+          if (!visualWorkRequestIsCurrent(mapVisualWorkActiveRef.current, mapVisualWorkGenerationRef.current, visualGeneration)) return;
           setVisibleRenderedFeatures((features ?? []).slice(0, 24).map((feature, idx) => ({ ...feature, result_index: idx })));
         })
         .catch(() => {});
@@ -9384,6 +9436,8 @@ function MapScreen() {
   }
 
   function queueViewportCampFetch(bounds: { n: number; s: number; e: number; w: number; zoom: number }) {
+    if (!mapVisualWorkActiveRef.current) return;
+    const visualGeneration = mapVisualWorkGenerationRef.current;
     const activeMinZoom = campDiscoveryWideActive ? MIN_MANUAL_CAMP_SEARCH_ZOOM : MIN_CAMP_SEARCH_ZOOM;
     if ((bounds.zoom ?? 0) < activeMinZoom) return;
     const center = { lat: (bounds.n + bounds.s) / 2, lng: (bounds.e + bounds.w) / 2 };
@@ -9397,6 +9451,7 @@ function MapScreen() {
     if (pendingCampFetchRef.current) clearTimeout(pendingCampFetchRef.current);
     pendingCampFetchRef.current = setTimeout(() => {
       pendingCampFetchRef.current = null;
+      if (!visualWorkRequestIsCurrent(mapVisualWorkActiveRef.current, mapVisualWorkGenerationRef.current, visualGeneration)) return;
       lastCampFetchRef.current = center;
       loadCampsInArea(
         { ...bounds, zoom: Math.max(bounds.zoom ?? 0, activeMinZoom) },
@@ -9417,6 +9472,13 @@ function MapScreen() {
   }
 
   function queueWaterNavigationLineFetch(bounds: { n: number; s: number; e: number; w: number; zoom: number }, force = false) {
+    if (!mapVisualWorkActiveRef.current) return;
+    const visualGeneration = mapVisualWorkGenerationRef.current;
+    const requestIsCurrent = () => visualWorkRequestIsCurrent(
+      mapVisualWorkActiveRef.current,
+      mapVisualWorkGenerationRef.current,
+      visualGeneration,
+    );
     if (!layerNautical) return;
     if ((bounds.zoom ?? 0) < 8) {
       setWaterNavLineData(null);
@@ -9431,19 +9493,20 @@ function MapScreen() {
     if (pendingWaterNavFetchRef.current) clearTimeout(pendingWaterNavFetchRef.current);
     pendingWaterNavFetchRef.current = setTimeout(() => {
       pendingWaterNavFetchRef.current = null;
+      if (!requestIsCurrent()) return;
       lastWaterNavFetchRef.current = center;
       api.getWaterNavigationLines(bounds.n, bounds.s, bounds.e, bounds.w)
-        .then(fc => setWaterNavLineData(fc))
-        .catch(() => setWaterNavLineData(null));
+        .then(fc => { if (requestIsCurrent()) setWaterNavLineData(fc); })
+        .catch(() => { if (requestIsCurrent()) setWaterNavLineData(null); });
       api.getWaterConditions(center.lat, center.lng)
-        .then(result => setWaterConditions(result))
-        .catch(() => setWaterConditions(null));
+        .then(result => { if (requestIsCurrent()) setWaterConditions(result); })
+        .catch(() => { if (requestIsCurrent()) setWaterConditions(null); });
       api.getWaterSpotCards(bounds.n, bounds.s, bounds.e, bounds.w)
-        .then(result => setWaterSpotCards(result))
-        .catch(() => setWaterSpotCards(null));
+        .then(result => { if (requestIsCurrent()) setWaterSpotCards(result); })
+        .catch(() => { if (requestIsCurrent()) setWaterSpotCards(null); });
       api.getFishingConditions(center.lat, center.lng)
-        .then(result => setFishingConditions(result))
-        .catch(() => setFishingConditions(null));
+        .then(result => { if (requestIsCurrent()) setFishingConditions(result); })
+        .catch(() => { if (requestIsCurrent()) setFishingConditions(null); });
     }, force ? 40 : 320);
   }
 
@@ -18229,6 +18292,13 @@ function MapScreen() {
     types: string[],
     opts: { force?: boolean; radiusCapMi?: number; minZoom?: number; campOnly?: boolean; openSheet?: boolean } = {},
   ): Promise<CampsitePin[] | null> {
+    if (!mapVisualWorkActiveRef.current) return null;
+    const visualGeneration = mapVisualWorkGenerationRef.current;
+    const visualRequestIsCurrent = () => visualWorkRequestIsCurrent(
+      mapVisualWorkActiveRef.current,
+      mapVisualWorkGenerationRef.current,
+      visualGeneration,
+    );
     const boundsKey = [
       bounds.n.toFixed(3),
       bounds.s.toFixed(3),
@@ -18331,6 +18401,7 @@ function MapScreen() {
       const camps = campsResult.status === 'fulfilled'
         ? campsResult.value.filter(camp => !isTrailheadExploreCampFallback(camp))
         : [];
+      if (!visualRequestIsCurrent()) return null;
       if (campsResult.status === 'rejected' && campsResult.reason instanceof PaywallError) {
         setPaywallCode(campsResult.reason.code);
         setPaywallMessage(campsResult.reason.message);
@@ -18341,7 +18412,7 @@ function MapScreen() {
         }
         return null;
       }
-      if (campAreaRequestRef.current !== requestId) return null;
+      if (!visualRequestIsCurrent() || campAreaRequestRef.current !== requestId) return null;
       const fullIds = new Set(
         fullResult.status === 'fulfilled' ? fullResult.value.map(f => f.camp_id) : []
       );
@@ -18399,7 +18470,7 @@ function MapScreen() {
       }
       return tagged;
     } catch (e: any) {
-      if (campAreaRequestRef.current !== requestId) return null;
+      if (!visualRequestIsCurrent() || campAreaRequestRef.current !== requestId) return null;
       if (e instanceof PaywallError) {
         setPaywallCode(e.code); setPaywallMessage(e.message); setPaywallVisible(true);
       } else {
@@ -18407,7 +18478,7 @@ function MapScreen() {
         setTimeout(() => setSearchResult(null), 3000);
       }
     }
-    if (campAreaRequestRef.current === requestId) {
+    if (visualRequestIsCurrent() && campAreaRequestRef.current === requestId) {
       setIsLoadingAreaCamps(false);
       setCampDiscoveryLoadingKey('');
     }
@@ -23367,19 +23438,20 @@ function MapScreen() {
         // ── Native MapLibre SDK (new binary required) ───────────────────────
         <NativeMapSurface
           ref={nativeMapRef}
-          waypoints={mapVisualWorkActive ? waypoints : []}
-          camps={!mapVisualWorkActive || mapMissionVisible || routeBuildMapActive || scopedMapSearchActive || waterFollowActive ? [] : nativeMapCampPins as any}
-          gas={!mapVisualWorkActive || mapMissionVisible || routeBuildMapActive || scopedMapSearchActive ? [] : routeSearchGas as any}
-          pois={!mapVisualWorkActive || mapMissionVisible || routeBuildMapActive ? [] : scopedMapSearchPois}
-          offlineTrailFeatures={mapVisualWorkActive && layerTrails ? offlineV2Catalog.trail_features : undefined}
-          waterNavLines={!mapVisualWorkActive || mapMissionVisible || scopedMapSearchActive ? null : waterNavLines}
-          waterSpotCards={!mapVisualWorkActive || mapMissionVisible || scopedMapSearchActive ? [] : allWaterSpotCards}
-          waterCorridor={!mapVisualWorkActive || mapMissionVisible ? null : waterCorridor}
-          waterFollowRoute={!mapVisualWorkActive || mapMissionVisible ? null : waterFollowRoute}
-          reports={!mapVisualWorkActive || mapMissionVisible || scopedMapSearchActive || safeWaterPlanningActive || waterFollowActive ? [] : mapReports}
-          communityPins={!mapVisualWorkActive || mapMissionVisible || scopedMapSearchActive || safeWaterPlanningActive || waterFollowActive ? [] : displayCommunityPins}
-          searchMarker={mapVisualWorkActive && !mapMissionVisible && searchRouteCard ? { lat: searchRouteCard.lat, lng: searchRouteCard.lng, name: searchRouteCard.name } : null}
-          userLoc={mapVisualWorkActive ? userLoc : null}
+          visualWorkActive={mapVisualWorkActive}
+          waypoints={waypoints}
+          camps={mapMissionVisible || routeBuildMapActive || scopedMapSearchActive || waterFollowActive ? [] : nativeMapCampPins as any}
+          gas={mapMissionVisible || routeBuildMapActive || scopedMapSearchActive ? [] : routeSearchGas as any}
+          pois={mapMissionVisible || routeBuildMapActive ? [] : scopedMapSearchPois}
+          offlineTrailFeatures={layerTrails ? offlineV2Catalog.trail_features : undefined}
+          waterNavLines={mapMissionVisible || scopedMapSearchActive ? null : waterNavLines}
+          waterSpotCards={mapMissionVisible || scopedMapSearchActive ? [] : allWaterSpotCards}
+          waterCorridor={mapMissionVisible ? null : waterCorridor}
+          waterFollowRoute={mapMissionVisible ? null : waterFollowRoute}
+          reports={mapMissionVisible || scopedMapSearchActive || safeWaterPlanningActive || waterFollowActive ? [] : mapReports}
+          communityPins={mapMissionVisible || scopedMapSearchActive || safeWaterPlanningActive || waterFollowActive ? [] : displayCommunityPins}
+          searchMarker={!mapMissionVisible && searchRouteCard ? { lat: searchRouteCard.lat, lng: searchRouteCard.lng, name: searchRouteCard.name } : null}
+          userLoc={userLoc}
           navMode={navMode}
           navCameraFollow={navCameraFollow}
           nativeNavEngineActive={USE_IOS_NATIVE_NAV_ENGINE}
@@ -23391,39 +23463,39 @@ function MapScreen() {
           rendererMode={mapRendererMode ?? 'maplibre'}
           routeProviderMode={activeRouteProviderMode}
           routeOpts={routeOpts}
-          traceMode={mapVisualWorkActive && trailTraceMode}
-          traceDraftCoords={mapVisualWorkActive && trailTraceMode ? trailTraceDraft : []}
-          traceRouteCoords={mapVisualWorkActive ? trailTraceRoute : []}
-          tracePinCoords={mapVisualWorkActive && trailPinCaptureMode ? trailCapturePins : []}
-          trailPreviewCoords={mapVisualWorkActive && trailPreviewOpen && trailPreviewManifest?.status === 'available' ? trailPreviewManifest.coordinates ?? [] : []}
+          traceMode={trailTraceMode}
+          traceDraftCoords={trailTraceMode ? trailTraceDraft : []}
+          traceRouteCoords={trailTraceRoute}
+          tracePinCoords={trailPinCaptureMode ? trailCapturePins : []}
+          trailPreviewCoords={trailPreviewOpen && trailPreviewManifest?.status === 'available' ? trailPreviewManifest.coordinates ?? [] : []}
           trailPreviewProgress={trailPreviewProgress}
           trailPreviewTone={trailPreviewTone}
-          routeBuildActive={mapVisualWorkActive && routeBuildMapActive}
-          routeBuildCoords={mapVisualWorkActive ? routeBuildSession?.routeCoords ?? [] : []}
+          routeBuildActive={routeBuildMapActive}
+          routeBuildCoords={routeBuildSession?.routeCoords ?? []}
           routeBuildReveal={routeBuildReveal}
-          routeBuildStops={mapVisualWorkActive ? routeBuildSession?.previewStops ?? [] : []}
-          originalsRouteActive={mapVisualWorkActive && originalsMapExperience.active && !navMode}
-          originalsRouteCoords={mapVisualWorkActive ? originalsMapExperience.routeCoords : []}
+          routeBuildStops={routeBuildSession?.previewStops ?? []}
+          originalsRouteActive={originalsMapExperience.active && !navMode}
+          originalsRouteCoords={originalsMapExperience.routeCoords}
           originalsRouteProgress={originalsMapExperience.routeProgress}
-          originalsCueStops={mapVisualWorkActive ? originalsMapExperience.cues : []}
+          originalsCueStops={originalsMapExperience.cues}
           suppressFeatureTaps={mapTapToolOwnsFeatureSelection}
-          showLandOverlay={mapVisualWorkActive && showLands}
-          showUsgsOverlay={mapVisualWorkActive && showUsgs}
-          showTerrain={mapVisualWorkActive && map3dEnabled && !navMode}
-          showTrailOverlay={mapVisualWorkActive && layerTrails}
-          showMvum={mapVisualWorkActive && layerMvum}
-          showFire={mapVisualWorkActive && layerFire}
+          showLandOverlay={showLands}
+          showUsgsOverlay={showUsgs}
+          showTerrain={map3dEnabled && !navMode}
+          showTrailOverlay={layerTrails}
+          showMvum={layerMvum}
+          showFire={layerFire}
           onFireOverlayStatusChange={setFireOverlayStatus}
-          showAva={mapVisualWorkActive && layerAva}
-          showRadar={mapVisualWorkActive && layerRadar}
-          showNautical={mapVisualWorkActive && layerNautical}
+          showAva={layerAva}
+          showRadar={layerRadar}
+          showNautical={layerNautical}
           hideMapStatusBadge={!mapVisualWorkActive || scopedMapSearchActive}
-          missionBriefActive={mapVisualWorkActive && missionBriefOverlay.active}
-          missionBriefFullRoute={mapVisualWorkActive ? missionBriefOverlay.fullRoute : []}
-          missionBriefProgressRoute={mapVisualWorkActive ? missionBriefOverlay.progressRoute : []}
-          missionBriefMarker={mapVisualWorkActive ? missionBriefOverlay.marker : null}
-          missionBriefCallouts={mapVisualWorkActive ? missionBriefOverlay.callouts : []}
-          missionBriefWarning={mapVisualWorkActive && missionBriefOverlay.warning}
+          missionBriefActive={missionBriefOverlay.active}
+          missionBriefFullRoute={missionBriefOverlay.fullRoute}
+          missionBriefProgressRoute={missionBriefOverlay.progressRoute}
+          missionBriefMarker={missionBriefOverlay.marker}
+          missionBriefCallouts={missionBriefOverlay.callouts}
+          missionBriefWarning={missionBriefOverlay.warning}
           onMapReady={() => {
             webLoadedRef.current = true;
             setMapSurfaceReady(true);

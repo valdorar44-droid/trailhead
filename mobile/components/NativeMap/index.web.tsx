@@ -57,6 +57,7 @@ export interface NativeMapHandle {
 }
 
 export interface NativeMapProps {
+  visualWorkActive?: boolean;
   waypoints:     WP[];
   camps:         CampsitePin[];
   gas:           { lat: number; lng: number; name: string }[];

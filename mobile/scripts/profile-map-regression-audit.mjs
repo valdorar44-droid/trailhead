@@ -281,29 +281,91 @@ assert(
   'A successful route-weather response renders before best-effort disk persistence',
 );
 
-const nativeMapRenderStart = map.indexOf('<NativeMap');
+const nativeMapRenderStart = map.indexOf('<NativeMapSurface');
 const nativeMapRenderEnd = map.indexOf('onMapReady={() => {', nativeMapRenderStart);
 const nativeMapRender = nativeMapRenderStart >= 0 && nativeMapRenderEnd > nativeMapRenderStart
   ? map.slice(nativeMapRenderStart, nativeMapRenderEnd)
   : '';
-for (const prop of ['camps', 'gas', 'pois', 'waterNavLines', 'waterSpotCards', 'reports', 'communityPins']) {
+assert(
+  nativeMapRender.includes('visualWorkActive={mapVisualWorkActive}'),
+  'Map passes explicit visual activity to the mounted native renderer',
+);
+for (const [prop, expression] of [
+  ['waypoints', 'waypoints'],
+  ['userLoc', 'userLoc'],
+  ['routeBuildActive', 'routeBuildMapActive'],
+  ['routeBuildCoords', 'routeBuildSession?.routeCoords ?? []'],
+  ['routeBuildStops', 'routeBuildSession?.previewStops ?? []'],
+  ['originalsRouteCoords', 'originalsMapExperience.routeCoords'],
+  ['originalsCueStops', 'originalsMapExperience.cues'],
+]) {
+  assert(
+    nativeMapRender.includes(`${prop}={${expression}}`),
+    `Map preserves ${prop} while visual work is paused`,
+  );
+}
+for (const prop of [
+  'waypoints',
+  'camps',
+  'gas',
+  'pois',
+  'waterNavLines',
+  'waterSpotCards',
+  'reports',
+  'communityPins',
+  'searchMarker',
+  'userLoc',
+  'routeBuildActive',
+  'routeBuildCoords',
+  'routeBuildStops',
+  'originalsRouteCoords',
+  'originalsCueStops',
+]) {
   const propMatch = nativeMapRender.match(new RegExp(`${prop}=\\{([^\\n]+)`));
   const expression = propMatch?.[1] ?? '';
   assert(
-    expression.includes('!mapVisualWorkActive') && expression.includes('mapMissionVisible'),
-    `Hidden Map and route preview suppress ${prop} while retaining visible route state`,
+    expression.length > 0 && !expression.includes('mapVisualWorkActive'),
+    `Map does not erase ${prop} to pause hidden visual work`,
   );
 }
+
+const visualSourceTreeStart = nativeMap.indexOf('{visualWorkActive ? (');
+const visualSourceTreeEnd = nativeMap.indexOf(') : null}\n      </MapGL.MapView>', visualSourceTreeStart);
+const visualSourceTree = visualSourceTreeStart >= 0 && visualSourceTreeEnd > visualSourceTreeStart
+  ? nativeMap.slice(visualSourceTreeStart, visualSourceTreeEnd)
+  : '';
 assert(
-  nativeMapRender.includes('waypoints={mapVisualWorkActive ? waypoints : []}')
-    && nativeMapRender.includes('routeBuildActive={mapVisualWorkActive && routeBuildMapActive}'),
-  'Visible route review retains waypoints and route-build geometry through the shared activity contract',
+  nativeMap.includes('visualWorkActive?: boolean;')
+    && nativeMap.includes('visualWorkActive = true,')
+    && visualSourceTree.includes('<MapGL.ShapeSource')
+    && visualSourceTree.includes('<MapGL.MarkerView')
+    && visualSourceTree.includes('waypoints.map((wp, i) => ('),
+  'Native Map gates its rendered source tree internally while remaining mounted',
 );
 assert(
-  screenActivityState.includes('export function mapVisualWorkShouldRun(')
-    && screenActivityState.includes('return screenActive || (appActive && navigationActive);')
+  nativeMap.includes('preferredFramesPerSecond={visualWorkActive ? 60 : 1}')
+    && nativeMap.includes('scrollEnabled={visualWorkActive}')
+    && nativeMap.includes('followUserLocation={!!(visualWorkActive && navMode && navCameraFollow)}')
+    && nativeMap.includes('if (!visualWorkActiveRef.current || !feat?.properties || !mapRef.current) return;')
+    && nativeMap.includes('onBoundsChange({ ...bounds, zoom: boundsZoomRef.current });'),
+  'Hidden Native Map pauses frame, gesture, interaction, and viewport work before a controlled refocus refresh',
+);
+
+const visualWorkContractStart = screenActivityState.indexOf('export function mapVisualWorkShouldRun(');
+const visualWorkContractEnd = screenActivityState.indexOf('\n}', visualWorkContractStart);
+const visualWorkContract = visualWorkContractStart >= 0 && visualWorkContractEnd > visualWorkContractStart
+  ? screenActivityState.slice(visualWorkContractStart, visualWorkContractEnd)
+  : '';
+const locationWatchContractStart = screenActivityState.indexOf('export function mapLocationWatchShouldRun(');
+const locationWatchContractEnd = screenActivityState.indexOf('\n}', locationWatchContractStart);
+const locationWatchContract = locationWatchContractStart >= 0 && locationWatchContractEnd > locationWatchContractStart
+  ? screenActivityState.slice(locationWatchContractStart, locationWatchContractEnd)
+  : '';
+assert(
+  visualWorkContract.includes('return screenActive;')
+    && locationWatchContract.includes('return screenActive || navigationActive;')
     && map.includes('const mapVisualWorkActive = mapVisualWorkShouldRun('),
-  'Map visual work pauses off-screen without unmounting the shared renderer',
+  'Map visual work follows screen focus while background navigation location remains independent',
 );
 
 assert(nativeMap.includes("slot: 'bottom'") && nativeMap.includes('belowLayerID: publicLandBelowLayerID'),

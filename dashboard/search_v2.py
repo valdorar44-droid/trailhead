@@ -18,6 +18,7 @@ import threading
 import time
 import unicodedata
 from collections import OrderedDict, deque
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Literal
 
@@ -1011,6 +1012,16 @@ ExternalSearchProviderV2 = Callable[[SearchRequestV2, int, str], Awaitable[list[
 SearchSourceLoaderV2 = Callable[[], tuple[list[SearchDocumentV2], str]]
 
 
+# The production service owns one guarded in-memory SQLite connection. A
+# dedicated single worker matches that connection's actual concurrency and
+# keeps canceled typeahead prefixes out of the default executor, where they
+# would otherwise keep running and pile up behind SearchIndexV2's lock.
+_CANONICAL_SEARCH_EXECUTOR = ThreadPoolExecutor(
+    max_workers=1,
+    thread_name_prefix="trailhead-search-v2",
+)
+
+
 class SearchV2Service:
     def __init__(
         self,
@@ -1044,11 +1055,24 @@ class SearchV2Service:
         self._external_session_calls: OrderedDict[str, deque[float]] = OrderedDict()
         self._external_subject_calls: OrderedDict[str, deque[float]] = OrderedDict()
         self._index = SearchIndexV2()
+        self._canonical_revision = ""
+        self._canonical_work_lock = threading.RLock()
+        self._canonical_work_sequence = 0
+        self._canonical_work_by_key: OrderedDict[
+            str, tuple[int, Future[Any]]
+        ] = OrderedDict()
 
     async def prewarm(self) -> tuple[int, str]:
-        documents, revision = await asyncio.to_thread(self._source_loader)
-        await asyncio.to_thread(self._index.ensure, documents, revision)
-        return len(documents), self._index.revision
+        def work() -> tuple[int, str]:
+            documents, revision = self._source_loader()
+            self._index.ensure(documents, revision)
+            return len(documents), self._index.revision
+
+        result = await self._run_canonical_work(work)
+        if result is None:  # Prewarm has no latest-wins key.
+            return 0, self._canonical_revision
+        self._canonical_revision = result[1]
+        return result
 
     async def page(
         self,
@@ -1058,12 +1082,32 @@ class SearchV2Service:
         external_subject: str | None = None,
     ) -> SearchPageV2:
         started = time.perf_counter()
-        documents, revision = await asyncio.to_thread(self._source_loader)
-        await asyncio.to_thread(self._index.ensure, documents, revision)
         fingerprint = _request_fingerprint(request, mode)
-        offset = _decode_cursor(request.cursor, fingerprint, self._index.revision)
-        target = min(_MAX_CURSOR_OFFSET + 31, offset + request.limit + 1)
-        internal = await asyncio.to_thread(self._index.search, request, target)
+
+        def work() -> tuple[list[SearchResultV2], int, str]:
+            documents, revision = self._source_loader()
+            self._index.ensure(documents, revision)
+            index_revision = self._index.revision
+            offset = _decode_cursor(request.cursor, fingerprint, index_revision)
+            target = min(_MAX_CURSOR_OFFSET + 31, offset + request.limit + 1)
+            return self._index.search(request, target), offset, index_revision
+
+        canonical = await self._run_canonical_work(
+            work,
+            latest_key=self._canonical_latest_key(request),
+        )
+        if canonical is None:
+            return SearchPageV2(
+                query=request.query,
+                results=[],
+                next_cursor=None,
+                has_more=False,
+                source_counts={"trailhead": 0, "external": 0},
+                revision=self._canonical_revision,
+                elapsed_ms=max(0, round((time.perf_counter() - started) * 1000)),
+            )
+        internal, offset, index_revision = canonical
+        self._canonical_revision = index_revision
         combined = list(internal)
         external_count = 0
         if (
@@ -1087,7 +1131,7 @@ class SearchV2Service:
             external_count = max(0, len(combined) - len(internal))
         page_results = combined[offset:offset + request.limit]
         has_more = len(combined) > offset + request.limit
-        next_cursor = _encode_cursor(offset + request.limit, fingerprint, self._index.revision) if has_more else None
+        next_cursor = _encode_cursor(offset + request.limit, fingerprint, index_revision) if has_more else None
         source_counts = {
             "trailhead": sum(1 for result in page_results if result.persistence_policy == "canonical"),
             "external": sum(1 for result in page_results if result.persistence_policy == "temporary"),
@@ -1100,9 +1144,93 @@ class SearchV2Service:
             next_cursor=next_cursor,
             has_more=has_more,
             source_counts=source_counts,
-            revision=self._index.revision,
+            revision=index_revision,
             elapsed_ms=max(0, round((time.perf_counter() - started) * 1000)),
         )
+
+    def _canonical_latest_key(
+        self,
+        request: SearchRequestV2,
+    ) -> str:
+        # Only an explicit client search session proves that two requests are
+        # successive typeahead generations. An account or network subject can
+        # have independent Map, Explore, and Route Editor searches in flight.
+        material = str(request.session_id or "").strip()
+        if not material:
+            return ""
+        return hashlib.sha256(material.encode("utf-8")).hexdigest()[:24]
+
+    async def _run_canonical_work(
+        self,
+        work: Callable[[], Any],
+        *,
+        latest_key: str = "",
+    ) -> Any | None:
+        with self._canonical_work_lock:
+            self._canonical_work_sequence += 1
+            token = self._canonical_work_sequence
+            if latest_key:
+                previous = self._canonical_work_by_key.get(latest_key)
+                if previous is not None:
+                    previous[1].cancel()
+            future = _CANONICAL_SEARCH_EXECUTOR.submit(work)
+            if latest_key:
+                self._canonical_work_by_key[latest_key] = (token, future)
+                self._canonical_work_by_key.move_to_end(latest_key)
+                self._trim_canonical_work_locked()
+
+        try:
+            result = await asyncio.wrap_future(future)
+        except asyncio.CancelledError:
+            task = asyncio.current_task()
+            caller_cancelled = task is not None and task.cancelling() > 0
+            superseded = latest_key and not self._canonical_work_is_current(latest_key, token)
+            future.cancel()
+            if latest_key:
+                future.add_done_callback(
+                    lambda _future: self._clear_canonical_work(latest_key, token)
+                )
+            if superseded and not caller_cancelled:
+                return None
+            raise
+        except Exception:
+            if latest_key and not self._canonical_work_is_current(latest_key, token):
+                return None
+            if latest_key:
+                self._clear_canonical_work(latest_key, token)
+            raise
+
+        if latest_key:
+            with self._canonical_work_lock:
+                current = self._canonical_work_by_key.get(latest_key)
+                if current is None or current[0] != token:
+                    return None
+                self._canonical_work_by_key.pop(latest_key, None)
+        return result
+
+    def _canonical_work_is_current(self, key: str, token: int) -> bool:
+        with self._canonical_work_lock:
+            current = self._canonical_work_by_key.get(key)
+            return current is not None and current[0] == token
+
+    def _clear_canonical_work(self, key: str, token: int) -> None:
+        with self._canonical_work_lock:
+            current = self._canonical_work_by_key.get(key)
+            if current is not None and current[0] == token:
+                self._canonical_work_by_key.pop(key, None)
+
+    def _trim_canonical_work_locked(self) -> None:
+        if len(self._canonical_work_by_key) <= 4096:
+            return
+        completed = [
+            key for key, (_token, future) in self._canonical_work_by_key.items()
+            if future.done()
+        ]
+        for key in completed:
+            self._canonical_work_by_key.pop(key, None)
+        while len(self._canonical_work_by_key) > 4096:
+            _key, (_token, future) = self._canonical_work_by_key.popitem(last=False)
+            future.cancel()
 
     async def _external_results(
         self,

@@ -1,5 +1,5 @@
 import type { SearchV2Client } from './client';
-import { SearchV2SessionController } from './session';
+import { SearchV2SessionController, type SearchV2Scheduler } from './session';
 import type { SearchPageV2, SearchRequestV2, SearchResultV2 } from './types';
 
 export type SearchRaceQaEvidence = {
@@ -16,6 +16,7 @@ export type SearchRaceQaEvidence = {
  */
 export async function runSearchRaceQaCheck(): Promise<SearchRaceQaEvidence> {
   const requests = new Map<string, Deferred<SearchPageV2>>();
+  const scheduler = new QaSearchScheduler();
   const client: SearchV2Client = {
     suggest: request => {
       const pending = deferred<SearchPageV2>();
@@ -35,12 +36,15 @@ export async function runSearchRaceQaCheck(): Promise<SearchRaceQaEvidence> {
   const controller = new SearchV2SessionController({
     client,
     context: { surface: 'explore', include_external: false },
+    scheduler,
     createSessionId: () => 'qa-search-race-session',
   });
 
   try {
     controller.setQuery('Moab');
+    scheduler.advance(220);
     controller.setQuery('Yosemite');
+    scheduler.advance(220);
 
     const slowA = requireRequest(requests, 'Moab');
     const fastB = requireRequest(requests, 'Yosemite');
@@ -78,6 +82,33 @@ type Deferred<T> = {
   promise: Promise<T>;
   resolve: (value: T) => void;
 };
+
+class QaSearchScheduler implements SearchV2Scheduler {
+  private now = 0;
+  private nextId = 1;
+  private readonly tasks = new Map<number, { at: number; handler: () => void }>();
+
+  setTimeout = (handler: () => void, delayMs: number): number => {
+    const id = this.nextId++;
+    this.tasks.set(id, { at: this.now + delayMs, handler });
+    return id;
+  };
+
+  clearTimeout = (handle: unknown): void => {
+    this.tasks.delete(Number(handle));
+  };
+
+  advance(milliseconds: number): void {
+    this.now += milliseconds;
+    const due = [...this.tasks.entries()]
+      .filter(([, task]) => task.at <= this.now)
+      .sort((left, right) => left[1].at - right[1].at);
+    for (const [id, task] of due) {
+      this.tasks.delete(id);
+      task.handler();
+    }
+  }
+}
 
 function deferred<T>(): Deferred<T> {
   let resolve!: (value: T) => void;

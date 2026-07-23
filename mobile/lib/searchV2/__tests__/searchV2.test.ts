@@ -357,7 +357,7 @@ test('HTTP client resolves only an explicitly selected provider row with its ori
   assert.equal(body.selected_detail_ref, 'provider:mapbox:place.moab:0123456789abcdef0123456789abcdef');
 });
 
-test('typeahead shows offline and canonical rows immediately, then debounces provider fallback', async () => {
+test('typeahead shows offline rows immediately, then debounces canonical and provider work', async () => {
   const scheduler = new ManualScheduler();
   const canonical = deferred<SearchPageV2>();
   const enriched = deferred<SearchPageV2>();
@@ -381,20 +381,21 @@ test('typeahead shows offline and canonical rows immediately, then debounces pro
 
   controller.setQuery('Moab');
   assert.deepEqual(controller.getState().results.map(item => item.title), ['Moab offline']);
-  assert.deepEqual(calls, [false]);
+  assert.deepEqual(calls, []);
   assert.equal(controller.getState().loadingPresentation, 'inline');
   assert.equal(controller.getState().isEnriching, true);
   assert.equal(controller.getState().selectedResult, null);
+
+  scheduler.advance(219);
+  assert.deepEqual(calls, []);
+  scheduler.advance(1);
+  assert.deepEqual(calls, [false]);
 
   canonical.resolve(makePage([makeResult('server-moab', 'Moab', 'canonical-moab')]));
   await flushPromises();
   assert.deepEqual(controller.getState().results.map(item => item.title), ['Moab']);
   assert.equal(controller.getState().loadingPresentation, 'inline');
   assert.equal(controller.getState().isEnriching, true);
-
-  scheduler.advance(219);
-  assert.deepEqual(calls, [false]);
-  scheduler.advance(1);
   assert.deepEqual(calls, [false, true]);
 
   enriched.resolve(makePage([
@@ -410,7 +411,46 @@ test('typeahead shows offline and canonical rows immediately, then debounces pro
   assert.equal(controller.getState().selectedResult?.result_id, 'server-moab');
 });
 
+test('rapid destination typing issues one canonical request for the finished query', async () => {
+  const scheduler = new ManualScheduler();
+  const pending = deferred<SearchPageV2>();
+  const calls: SearchRequestV2[] = [];
+  const controller = new SearchV2SessionController({
+    client: pageClient({ suggest: request => {
+      calls.push(request);
+      return pending.promise;
+    } }),
+    context: { surface: 'map', include_external: false },
+    debounceMs: 220,
+    scheduler,
+    createSessionId: () => 'session-yellowstone',
+  });
+  const query = 'Yellowstone National Park';
+
+  for (let length = 2; length < query.length; length += 1) {
+    controller.setQuery(query.slice(0, length));
+    scheduler.advance(100);
+  }
+  controller.setQuery(query);
+
+  assert.equal(calls.length, 0);
+  scheduler.advance(219);
+  assert.equal(calls.length, 0);
+  scheduler.advance(1);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].query, query);
+  assert.equal(calls[0].include_external, false);
+
+  pending.resolve(makePage([makeResult('yellowstone', 'Yellowstone National Park')]));
+  await flushPromises();
+  assert.deepEqual(
+    controller.getState().results.map(item => item.title),
+    ['Yellowstone National Park'],
+  );
+});
+
 test('offline catalog refresh preserves server order, selection, query, and session while rejecting an older refresh', async () => {
+  const scheduler = new ManualScheduler();
   const olderRefresh = deferred<SearchResultV2[]>();
   const currentRefresh = deferred<SearchResultV2[]>();
   const offlineSessions: string[] = [];
@@ -428,6 +468,7 @@ test('offline catalog refresh preserves server order, selection, query, and sess
       });
     } }),
     context: { surface: 'downloads', include_external: false },
+    scheduler,
     offlineProvider: request => {
       offlineSessions.push(String(request.session_id));
       offlineCalls += 1;
@@ -441,7 +482,10 @@ test('offline catalog refresh preserves server order, selection, query, and sess
   });
 
   controller.setQuery('Moab');
+  assert.equal(serverCalls, 0);
+  scheduler.advance(220);
   await flushPromises();
+  assert.equal(serverCalls, 1);
   controller.selectResult(second.result_id);
 
   const olderPending = controller.refreshOffline();
@@ -470,6 +514,7 @@ test('offline catalog refresh preserves server order, selection, query, and sess
 });
 
 test('delayed offline refresh cannot commit after the query generation changes', async () => {
+  const scheduler = new ManualScheduler();
   const staleRefresh = deferred<SearchResultV2[]>();
   let moabOfflineCalls = 0;
   const controller = new SearchV2SessionController({
@@ -477,6 +522,7 @@ test('delayed offline refresh cannot commit after the query generation changes',
       makeResult(`server-${request.query.toLowerCase()}`, request.query),
     ]) }),
     context: { surface: 'downloads', include_external: false },
+    scheduler,
     offlineProvider: request => {
       if (request.query === 'Moab') {
         moabOfflineCalls += 1;
@@ -488,9 +534,11 @@ test('delayed offline refresh cannot commit after the query generation changes',
   });
 
   controller.setQuery('Moab');
+  scheduler.advance(220);
   await flushPromises();
   const pending = controller.refreshOffline();
   controller.setQuery('Arches');
+  scheduler.advance(220);
   await flushPromises();
   staleRefresh.resolve([makeResult('offline-moab-stale', 'Downloaded Moab')]);
   await pending;
@@ -545,11 +593,12 @@ test('pausing cancels pending work without clearing warm search results', async 
   canonical.resolve(makePage([makeResult('server-moab', 'Moab', 'canonical-moab')]));
   await flushPromises();
   scheduler.advance(220);
-  assert.equal(calls, 1);
+  assert.equal(calls, 0);
   assert.deepEqual(controller.getState().results.map(item => item.title), ['Moab offline']);
 });
 
 test('reopening restarts an interrupted suggestion without clearing warm rows or selection', async () => {
+  const scheduler = new ManualScheduler();
   const first = deferred<SearchPageV2>();
   const resumed = deferred<SearchPageV2>();
   const sessions: string[] = [];
@@ -563,11 +612,13 @@ test('reopening restarts an interrupted suggestion without clearing warm rows or
       return calls === 1 ? first.promise : resumed.promise;
     } }),
     context: { surface: 'map', include_external: false },
+    scheduler,
     offlineProvider: () => [warm],
     createSessionId: () => issuedSessions.shift() ?? 'session-overflow',
   });
 
   controller.setQuery('Moab');
+  scheduler.advance(220);
   controller.selectResult(warm.result_id);
   controller.pause();
   assert.deepEqual(controller.getState().results.map(item => item.title), ['Moab offline']);
@@ -711,6 +762,7 @@ test('client validates scoped search and explicit-selection pairs before transpo
 });
 
 test('coordinate-less provider suggestions resolve only after their row is pressed', async () => {
+  const scheduler = new ManualScheduler();
   const resolveRequests: SearchRequestV2[] = [];
   const unresolved = makeResult('mapbox:place.moab', 'Moab');
   unresolved.coordinates = null;
@@ -736,12 +788,15 @@ test('coordinate-less provider suggestions resolve only after their row is press
       surface: 'map', intent: 'destination', scope: 'nearby',
       center: { lat: 38.57, lng: -109.55 }, include_external: true,
     },
+    scheduler,
     createSessionId: () => 'session-original',
   });
 
   controller.setQuery('Moab');
-  await flushPromises();
   assert.equal(resolveRequests.length, 0);
+  assert.equal(controller.getState().results.length, 0);
+  scheduler.advance(220);
+  await flushPromises();
   assert.equal(controller.getState().results[0].coordinates, null);
 
   const selection = controller.resolveResult(unresolved.result_id);
@@ -796,6 +851,7 @@ test('successful provider resolve keeps its matching token then rotates the next
   assert.deepEqual(resolveSessions, ['session-a']);
 
   controller.setQuery('Arches');
+  scheduler.advance(220);
   await flushPromises();
   assert.equal(suggestSessions.at(-1), 'session-b');
 });
@@ -842,6 +898,7 @@ test('abandoned sessions rotate after 180 seconds but warm provider rows retain 
   assert.deepEqual(resolveSessions, ['session-a'], 'the old row retrieves with the token that created it');
 
   controller.setQuery('Canyonlands');
+  scheduler.advance(220);
   await flushPromises();
   assert.equal(suggestSessions.at(-1), 'session-b', 'new activity uses the rotated session');
 });
@@ -862,17 +919,21 @@ test('search activity extends the abandoned-session deadline deterministically',
   });
 
   controller.setQuery('Moab');
+  scheduler.advance(220);
   await flushPromises();
   scheduler.advance(179_000);
   controller.setQuery('Arches');
+  scheduler.advance(220);
   await flushPromises();
-  scheduler.advance(179_999);
+  scheduler.advance(179_000);
   controller.setQuery('Canyonlands');
+  scheduler.advance(220);
   await flushPromises();
   assert.deepEqual(canonicalSessions.slice(0, 3), ['session-a', 'session-a', 'session-a']);
 
   scheduler.advance(180_000);
   controller.setQuery('Zion');
+  scheduler.advance(220);
   await flushPromises();
   assert.equal(canonicalSessions.at(-1), 'session-b');
 });
@@ -894,6 +955,7 @@ test('elapsed inactivity rotates before a request when the native timer was susp
   });
 
   controller.setQuery('Moab');
+  scheduler.advance(220);
   await flushPromises();
   assert.equal(sessions.at(-1), 'session-a');
 
@@ -901,6 +963,7 @@ test('elapsed inactivity rotates before a request when the native timer was susp
   // suspended JavaScript timer had a chance to run.
   currentTime = 180_001;
   controller.setQuery('Arches');
+  scheduler.advance(220);
   await flushPromises();
   assert.equal(sessions.at(-1), 'session-b');
 });
@@ -922,17 +985,20 @@ test('pause abandons the provider session without clearing warm results', async 
   });
 
   controller.setQuery('Moab');
+  scheduler.advance(220);
   await flushPromises();
   const beforePause = controller.getState().results;
   controller.pause();
   assert.deepEqual(controller.getState().results, beforePause);
 
   controller.setQuery('Arches');
+  scheduler.advance(220);
   await flushPromises();
   assert.equal(sessions.at(-1), 'session-b');
 });
 
 test('typing a new query cancels an in-flight explicit selection without committing it', async () => {
+  const scheduler = new ManualScheduler();
   const pendingResolve = deferred<Awaited<ReturnType<SearchV2Client['resolve']>>>();
   const unresolved = makeResult('mapbox:place.moab', 'Moab');
   unresolved.coordinates = null;
@@ -947,9 +1013,11 @@ test('typing a new query cancels an in-flight explicit selection without committ
       resolve: async () => pendingResolve.promise,
     }),
     context: { surface: 'map' },
+    scheduler,
     createSessionId: () => 'session-original',
   });
   controller.setQuery('Moab');
+  scheduler.advance(220);
   await flushPromises();
   const selecting = controller.resolveResult(unresolved.result_id);
   controller.setQuery('Arches');
@@ -965,7 +1033,7 @@ test('typing a new query cancels an in-flight explicit selection without committ
   assert.equal(controller.getState().resolvingResultId, null);
 });
 
-test('canonical-only contexts skip the provider pass and finish without a debounce wait', async () => {
+test('canonical-only contexts debounce once and skip the provider pass', async () => {
   const scheduler = new ManualScheduler();
   const calls: SearchRequestV2[] = [];
   const controller = new SearchV2SessionController({
@@ -979,8 +1047,11 @@ test('canonical-only contexts skip the provider pass and finish without a deboun
   });
 
   controller.setQuery('Moab');
+  assert.equal(calls.length, 0);
+  scheduler.advance(219);
+  assert.equal(calls.length, 0);
+  scheduler.advance(1);
   await flushPromises();
-  scheduler.advance(250);
 
   assert.equal(calls.length, 1);
   assert.equal(calls[0].include_external, false);
@@ -1036,13 +1107,15 @@ test('slow-A/fast-B rejects stale results and requires explicit selection', asyn
   });
   const controller = new SearchV2SessionController({
     client,
-    context: { surface: 'explore' },
+    context: { surface: 'explore', include_external: false },
     scheduler,
     createSessionId: () => 'session-test',
   });
 
   controller.setQuery('Moab');
+  scheduler.advance(220);
   controller.setQuery('Yosemite');
+  scheduler.advance(220);
   requests.get('Yosemite:false')?.resolve(makePage([makeResult('yosemite', 'Yosemite')]));
   await flushPromises();
   requests.get('Moab:false')?.resolve(makePage([makeResult('moab', 'Moab')]));
@@ -1091,7 +1164,10 @@ test('changing search context restarts the active session and rejects old-contex
   });
 
   controller.setQuery('camp');
+  scheduler.advance(220);
   controller.setContext({ surface: 'map', scope: 'nearby', center: { lat: 39, lng: -110 } });
+  assert.equal(requests.length, 1);
+  scheduler.advance(220);
   assert.equal(requests.length, 2);
   assert.equal(requests[1].request.center?.lat, 39);
 

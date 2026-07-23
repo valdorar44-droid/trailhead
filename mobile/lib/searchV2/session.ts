@@ -197,16 +197,41 @@ export class SearchV2SessionController {
     }
     this.touchExternalSession();
 
-    // Canonical Trailhead suggestions start immediately. The slower provider
-    // fallback is a separate debounced pass, so it can never hold useful local
-    // results behind a network deadline.
-    void this.loadCanonicalSuggestions(generation, !shouldEnrich);
+    const canonicalRequest = {
+      ...this.buildRequest(normalized, 'suggest'),
+      include_external: false,
+    };
+    const hasCachedCanonical = this.applyCachedSuggestionRequest(
+      canonicalRequest,
+      generation,
+      !shouldEnrich,
+    );
     if (shouldEnrich) {
-      this.debounceHandle = this.scheduler.setTimeout(() => {
-        this.debounceHandle = null;
-        void this.loadEnrichedSuggestions(generation);
-      }, this.debounceMs);
+      const enrichedRequest = {
+        ...this.buildRequest(normalized, 'suggest'),
+        include_external: true,
+      };
+      if (this.applyCachedSuggestionRequest(enrichedRequest, generation, true)) return;
+    } else if (hasCachedCanonical) {
+      return;
     }
+
+    // Offline and exact cached rows are already visible. Debounce every
+    // uncached network pass so typing one destination cannot enqueue one
+    // server-side index search for every prefix. Run the provider pass only
+    // after canonical search settles; it enriches useful Trailhead rows but
+    // never blocks them.
+    this.debounceHandle = this.scheduler.setTimeout(() => {
+      this.debounceHandle = null;
+      void (async () => {
+        if (!hasCachedCanonical) {
+          await this.loadCanonicalSuggestions(generation, !shouldEnrich);
+        }
+        if (shouldEnrich && this.isGenerationCurrent(generation)) {
+          await this.loadEnrichedSuggestions(generation);
+        }
+      })();
+    }, this.debounceMs);
   }
 
   async search(query = this.state.query): Promise<void> {
@@ -514,13 +539,8 @@ export class SearchV2SessionController {
       ...this.buildRequest(this.state.query, 'suggest'),
       include_external: false,
     };
+    if (this.applyCachedSuggestionRequest(request, generation, isFinalPass)) return;
     const cacheKey = searchV2CacheKey('suggest', request);
-    const cached = this.cache.get(cacheKey);
-    if (cached) {
-      this.rememberResultSessions(cached.results, request.session_id);
-      this.applySuggestionPage(cached, generation, isFinalPass);
-      return;
-    }
 
     this.requestController?.abort();
     const controller = new AbortController();
@@ -538,7 +558,7 @@ export class SearchV2SessionController {
         || this.enrichedGeneration === generation
       ) return;
       // The provider pass is still allowed to recover an empty canonical pass.
-      if (!isFinalPass && (this.debounceHandle !== null || this.enrichmentController)) return;
+      if (!isFinalPass) return;
       this.applySuggestionFailure(error, generation);
     } finally {
       if (this.requestController === controller) this.requestController = null;
@@ -551,14 +571,8 @@ export class SearchV2SessionController {
       ...this.buildRequest(this.state.query, 'suggest'),
       include_external: true,
     };
+    if (this.applyCachedSuggestionRequest(request, generation, true)) return;
     const cacheKey = searchV2CacheKey('suggest', request);
-    const cached = this.cache.get(cacheKey);
-    if (cached) {
-      this.rememberResultSessions(cached.results, request.session_id);
-      this.enrichedGeneration = generation;
-      this.applySuggestionPage(cached, generation, true);
-      return;
-    }
 
     this.enrichmentController?.abort();
     const controller = new AbortController();
@@ -581,6 +595,19 @@ export class SearchV2SessionController {
     } finally {
       if (this.enrichmentController === controller) this.enrichmentController = null;
     }
+  }
+
+  private applyCachedSuggestionRequest(
+    request: SearchRequestV2,
+    generation: number,
+    enrichmentComplete: boolean,
+  ): boolean {
+    const cached = this.cache.get(searchV2CacheKey('suggest', request));
+    if (!cached || !this.isGenerationCurrent(generation)) return false;
+    this.rememberResultSessions(cached.results, request.session_id);
+    if (enrichmentComplete) this.enrichedGeneration = generation;
+    this.applySuggestionPage(cached, generation, enrichmentComplete);
+    return true;
   }
 
   private applySuggestionPage(

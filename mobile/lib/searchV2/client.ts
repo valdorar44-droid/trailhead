@@ -25,9 +25,10 @@ export type HttpSearchV2ClientOptions = {
 
 const DEFAULT_SEARCH_DEADLINES_MS = Object.freeze({
   // This is a resilience ceiling, not the performance target. Canonical
-  // results are still expected in under 400 ms, but a slow radio should not
-  // turn an otherwise useful Trailhead match into an empty error state.
-  canonicalSuggest: 20_000,
+  // results are expected in under 400 ms; after three seconds the session
+  // moves on to its bounded provider recovery instead of leaving quick search
+  // apparently stuck behind a server or radio stall.
+  canonicalSuggest: 3_000,
   suggest: 1_500,
   results: 1_500,
   resolve: 4_000,

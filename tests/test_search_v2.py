@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import re
+import threading
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -108,6 +109,99 @@ class SearchV2ServiceTests(unittest.IsolatedAsyncioTestCase):
                 query="camps",
                 categories=[f"category_{index}" for index in range(25)],
             )
+
+    async def test_same_session_typeahead_executes_only_the_active_and_latest_query(self):
+        query = "Yellowstone National Park"
+        documents = [_document("destination:yellowstone", query)]
+        service = SearchV2Service(lambda: (documents, "yellowstone-v1"))
+        started = threading.Event()
+        release = threading.Event()
+        observed: list[str] = []
+        original_search = service._index.search
+
+        def blocked_search(request: SearchRequestV2, target: int):
+            observed.append(request.query)
+            if len(observed) == 1:
+                started.set()
+                if not release.wait(timeout=5):
+                    raise RuntimeError("search queue fixture timed out")
+            return original_search(request, target)
+
+        prefixes = [query[:length] for length in range(3, len(query) + 1)]
+        tasks: list[asyncio.Task] = []
+        try:
+            with patch.object(service._index, "search", side_effect=blocked_search):
+                tasks.append(asyncio.create_task(service.page(SearchRequestV2(
+                    query=prefixes[0],
+                    session_id="yellowstone-session",
+                    include_external=False,
+                ), mode="suggest")))
+                self.assertTrue(await asyncio.to_thread(started.wait, 2))
+
+                for prefix in prefixes[1:]:
+                    tasks.append(asyncio.create_task(service.page(SearchRequestV2(
+                        query=prefix,
+                        session_id="yellowstone-session",
+                        include_external=False,
+                    ), mode="suggest")))
+                    await asyncio.sleep(0)
+
+                release.set()
+                responses = await asyncio.gather(*tasks)
+        finally:
+            release.set()
+
+        self.assertEqual(observed, [prefixes[0], query])
+        self.assertTrue(all(not response.results for response in responses[:-1]))
+        self.assertEqual(
+            [result.title for result in responses[-1].results],
+            [query],
+        )
+        self.assertEqual(len(service._canonical_work_by_key), 0)
+
+    async def test_caller_cancellation_propagates_while_running_search_cleans_up(self):
+        documents = [_document("destination:yellowstone", "Yellowstone National Park")]
+        service = SearchV2Service(lambda: (documents, "yellowstone-v1"))
+        started = threading.Event()
+        release = threading.Event()
+        finished = threading.Event()
+        original_search = service._index.search
+
+        def blocked_search(request: SearchRequestV2, target: int):
+            started.set()
+            try:
+                if not release.wait(timeout=5):
+                    raise RuntimeError("search cancellation fixture timed out")
+                return original_search(request, target)
+            finally:
+                finished.set()
+
+        with patch.object(service._index, "search", side_effect=blocked_search):
+            active = asyncio.create_task(service.page(SearchRequestV2(
+                query="Yellowstone",
+                session_id="cancel-session",
+                include_external=False,
+            ), mode="suggest"))
+            self.assertTrue(await asyncio.to_thread(started.wait, 2))
+            active.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await active
+            release.set()
+            self.assertTrue(await asyncio.to_thread(finished.wait, 2))
+
+        response = await service.page(SearchRequestV2(
+            query="Yellowstone National Park",
+            session_id="cancel-session",
+            include_external=False,
+        ), mode="suggest")
+        self.assertEqual([result.title for result in response.results], ["Yellowstone National Park"])
+        self.assertEqual(len(service._canonical_work_by_key), 0)
+
+    def test_latest_work_never_coalesces_requests_without_an_explicit_session(self):
+        service = _fixture_service()
+        request = SearchRequestV2(query="Moab", include_external=False)
+
+        self.assertEqual(service._canonical_latest_key(request), "")
 
     async def test_moab_destination_exact_identity_wins(self):
         service = _fixture_service()

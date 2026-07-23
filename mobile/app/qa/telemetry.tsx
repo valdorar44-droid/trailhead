@@ -10,7 +10,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRootNavigationState, useRouter } from 'expo-router';
 import * as Application from 'expo-application';
 import Constants from 'expo-constants';
 import * as Updates from 'expo-updates';
@@ -40,6 +40,7 @@ import {
   telemetryQaNativeCrashState,
   telemetryQaSurfaceIsAvailable,
 } from '@/lib/telemetry/qa';
+import { resolveTelemetryQaAccess } from '@/lib/telemetry/qaAccess';
 import {
   NATIVE_CRASH_ACKNOWLEDGEMENT,
   type TelemetryQaCheck,
@@ -60,11 +61,18 @@ function artifactCount(
 export default function TelemetryQaScreen() {
   const C = useTheme();
   const router = useRouter();
+  const rootNavigationState = useRootNavigationState();
   const user = useStore(state => state.user);
   const token = useStore(state => state.token);
+  const authHydrated = useStore(state => state.authHydrated);
   const activeTrip = useStore(state => state.activeTrip);
   const originals = useOriginalsRuntime();
-  const allowed = telemetryQaSurfaceIsAvailable(Boolean(token && user?.is_admin));
+  const surfaceAllowed = telemetryQaSurfaceIsAvailable(Boolean(token && user?.is_admin));
+  const access = resolveTelemetryQaAccess({
+    authHydrated,
+    navigationReady: Boolean(rootNavigationState?.key),
+    surfaceAllowed,
+  });
   const [snapshot, setSnapshot] = useState<QaDiagnosticsSnapshotV1 | null>(null);
   const [snapshotState, setSnapshotState] = useState<'loading' | 'ready' | 'unavailable'>('loading');
   const [probeStatus, setProbeStatus] = useState<ProbeStatus>('idle');
@@ -88,11 +96,11 @@ export default function TelemetryQaScreen() {
   const releaseIdentityText = useMemo(() => JSON.stringify(releaseIdentity), [releaseIdentity]);
 
   useEffect(() => {
-    if (!allowed) router.replace('/(tabs)/profile' as any);
-  }, [allowed, router]);
+    if (access === 'redirect') router.replace('/(tabs)/profile' as any);
+  }, [access, router]);
 
   const refreshSnapshot = useCallback(async () => {
-    if (!allowed || !user?.id) return;
+    if (access !== 'allowed' || !user?.id) return;
     setSnapshotState('loading');
     try {
       const ownerScope = `account:${String(user.id)}`;
@@ -177,7 +185,7 @@ export default function TelemetryQaScreen() {
       setSnapshot(null);
       setSnapshotState('unavailable');
     }
-  }, [activeTrip, allowed, originals.manifest, originals.session, releaseIdentity, user?.id]);
+  }, [access, activeTrip, originals.manifest, originals.session, releaseIdentity, user?.id]);
 
   useEffect(() => {
     void refreshSnapshot();
@@ -236,7 +244,7 @@ export default function TelemetryQaScreen() {
     [snapshot],
   );
 
-  if (!allowed) {
+  if (access !== 'allowed') {
     return <SafeAreaView testID="qa.telemetry.blocked" style={{ flex: 1, backgroundColor: C.bg }} />;
   }
 

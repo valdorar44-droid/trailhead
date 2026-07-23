@@ -748,6 +748,7 @@ export type WeatherUnitMode = 'auto' | 'imperial' | 'metric';
 interface AppState {
   user: User | null;
   token: string | null;
+  authHydrated: boolean;
   activeTrip: TripResult | null;
   rigProfile: RigProfile | null;
   tripHistory: TripHistoryItem[];
@@ -791,6 +792,7 @@ interface AppState {
   welcomeSetupRunId: number;
   tourTargets: Record<string, TourTargetRect>;
   setAuth: (token: string, user: User) => void;
+  setAuthHydrated: (hydrated: boolean) => void;
   signOut: () => Promise<void>;
   clearAuthAndLocalData: () => Promise<void>;
   setActiveTrip: (
@@ -852,6 +854,7 @@ interface AppState {
 export const useStore = create<AppState>((set) => ({
   user: null,
   token: null,
+  authHydrated: false,
   activeTrip: null,
   rigProfile: null,
   tripHistory: [],
@@ -914,6 +917,8 @@ export const useStore = create<AppState>((set) => ({
         .catch(() => false);
     }
   },
+
+  setAuthHydrated: (hydrated) => set({ authHydrated: hydrated }),
 
   signOut: async () => {
     closeAllRouteBuildRequests();

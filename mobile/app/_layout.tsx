@@ -80,6 +80,7 @@ function askToAddSignedOutTrips(count: number): Promise<boolean> {
 
 function RootLayout() {
   const setAuth            = useStore(s => s.setAuth);
+  const setAuthHydrated    = useStore(s => s.setAuthHydrated);
   const setPlan            = useStore(s => s.setPlan);
   const setActiveTrip      = useStore(s => s.setActiveTrip);
   const setUserLoc         = useStore(s => s.setUserLoc);
@@ -586,7 +587,10 @@ function RootLayout() {
       await cancelTripRepositorySync().catch(() => {});
       await initializeTripRepository().catch(() => {});
     }).finally(() => {
-      if (!launchCancelled) setStartupReady(true);
+      if (!launchCancelled) {
+        setAuthHydrated(true);
+        setStartupReady(true);
+      }
     });
 
     // NOTE: Do NOT call iap.initConnection() / getAvailablePurchases() here.

@@ -54,7 +54,7 @@
     "test:plan-deep-links": "node --import tsx lib/__tests__/planDeepLinks.test.ts",
     "test:search-v2": "node --import tsx lib/searchV2/__tests__/presentation.test.ts && node --import tsx lib/searchV2/__tests__/surfacePersistence.test.ts && node --import tsx lib/searchV2/__tests__/searchV2.test.ts",
     "test:referrals": "node --import tsx lib/referrals/__tests__/referralLinks.test.ts && node scripts/branch-native-lifecycle.test.mjs",
-    "test:telemetry": "node --import tsx lib/telemetry/__tests__/sanitize.test.ts && node --import tsx lib/telemetry/__tests__/sampling.test.ts && node --import tsx lib/telemetry/__tests__/qaPolicy.test.ts && node --import tsx lib/qa/__tests__/diagnostics.test.ts && node --import tsx lib/__tests__/offlinePlacePackDiagnostics.test.ts && node --import tsx lib/tripRepository/__tests__/qaInstrumentation.test.ts",
+    "test:telemetry": "node --import tsx lib/telemetry/__tests__/sanitize.test.ts && node --import tsx lib/telemetry/__tests__/sampling.test.ts && node --import tsx lib/telemetry/__tests__/qaPolicy.test.ts && node --import tsx lib/telemetry/__tests__/qaAccess.test.ts && node --import tsx lib/qa/__tests__/diagnostics.test.ts && node --import tsx lib/__tests__/offlinePlacePackDiagnostics.test.ts && node --import tsx lib/tripRepository/__tests__/qaInstrumentation.test.ts",
     "ota": "npx --yes eas-cli@21.0.2 env:exec preview \"node scripts/publish-eas-update.mjs preview\" --non-interactive",
     "ota:production": "npx --yes eas-cli@21.0.2 env:exec production \"node scripts/publish-eas-update.mjs production\" --non-interactive",
     "eas-build-post-install": "node scripts/prepare-eas-native-env.mjs",

@@ -15,10 +15,11 @@ import {
   applyTripRepositoryRemoteTrip,
   applyTripRepositoryRemoteTripTombstone,
   acknowledgeTripRepositoryOutbox,
+  clearTripRepositoryOutboxSyncingTransient,
   failTripRepositoryOutbox,
   getTripRepositoryOutbox,
   getTripRepositorySnapshot,
-  markTripRepositoryOutboxSyncing,
+  markTripRepositoryOutboxSyncingTransient,
   retryTripRepositoryOutboxEntries,
   subscribeTripRepository,
   tripRepositoryScopeKey,
@@ -656,9 +657,13 @@ async function runSync(session: ActiveSyncSession): Promise<TripRepositorySyncRe
   const entries = getTripRepositoryOutbox().filter(entry => entry.ownerScope === session.ownerScope);
   const processed = await processTripRepositoryOutbox(entries, {
     isSessionCurrent: () => sessionIsCurrent(session),
-    markSyncing: entry => markTripRepositoryOutboxSyncing([entry.id]),
+    markSyncing: entry => markTripRepositoryOutboxSyncingTransient([entry.id], session.ownerScope),
+    clearSyncing: entriesToClear => clearTripRepositoryOutboxSyncingTransient(
+      entriesToClear.map(entry => entry.id),
+      session.ownerScope,
+    ),
     syncEntry: entry => entry.entityType === 'trip' ? syncTrip(session, entry) : syncSavedEntity(session, entry),
-    acknowledge: entry => acknowledgeTripRepositoryOutbox([entry.id]),
+    acknowledge: acknowledged => acknowledgeTripRepositoryOutbox(acknowledged.map(entry => entry.id)),
     fail: (entry, message) => failTripRepositoryOutbox([entry.id], message),
     resolveFailure: async (entry, error) => {
       const currentOutbox = getTripRepositoryOutbox();

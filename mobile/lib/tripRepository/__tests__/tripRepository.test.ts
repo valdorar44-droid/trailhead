@@ -495,6 +495,23 @@ async function persistentOutboxContract() {
   assert.ok(restored.getSnapshot().sync.lastSyncedAt);
 }
 
+async function unchangedOnlineStateDoesNotPersist() {
+  const storage = new CountingStorage();
+  const { repository } = deterministicRepository(storage);
+  await repository.initialize('online-noop');
+
+  storage.resetCounts();
+  await repository.setOnline(true);
+  assert.equal(storage.writes, 0, 'repeating the persisted online state is a no-op');
+
+  await repository.setOnline(false);
+  assert.equal(storage.writes, 1, 'an actual connectivity transition is durable');
+
+  storage.resetCounts();
+  await repository.setOnline(false);
+  assert.equal(storage.writes, 0, 'repeating the offline state is also a no-op');
+}
+
 async function legacyMigrationAndQuarantine() {
   const { storage, repository } = deterministicRepository();
   await repository.initialize('legacy-user');
@@ -1215,11 +1232,12 @@ async function authChangeCancelsOutboxBeforeNextMutation() {
   const result = await processTripRepositoryOutbox(entries, {
     isSessionCurrent: () => sessionCurrent,
     markSyncing: async () => {},
+    clearSyncing: async () => {},
     syncEntry: async entry => {
       sent.push(entry.id);
       sessionCurrent = false;
     },
-    acknowledge: async entry => { acknowledged.push(entry.id); },
+    acknowledge: async batch => { acknowledged.push(...batch.map(entry => entry.id)); },
     fail: async () => {},
     resolveFailure: async () => ({ resolved: false, conflict: false, message: 'failed' }),
   });
@@ -1227,6 +1245,138 @@ async function authChangeCancelsOutboxBeforeNextMutation() {
   assert.equal(result.canceled, true);
   assert.deepEqual(sent, ['entry-a']);
   assert.deepEqual(acknowledged, []);
+}
+
+async function startupOutboxSuccessUsesOneDurableAcknowledgement() {
+  const storage = new CountingStorage();
+  const { repository } = deterministicRepository(storage);
+  const ownerScope = 'account:batched-startup';
+  await repository.initialize(ownerScope);
+  await repository.saveEntity(createSavedEntity({ id: 'batch-a', title: 'Batch A', kind: 'place' }));
+  await repository.saveEntity(createSavedEntity({ id: 'batch-b', title: 'Batch B', kind: 'camp' }));
+  await repository.saveEntity(createSavedEntity({ id: 'batch-c', title: 'Batch C', kind: 'trail' }));
+  const entries = repository.getOutbox();
+  const acknowledgedBatches: string[][] = [];
+  const sent: string[] = [];
+  const scopeKey = tripRepositoryScopeKey(ownerScope);
+  storage.resetCounts();
+
+  const result = await processTripRepositoryOutbox(entries, {
+    isSessionCurrent: () => true,
+    markSyncing: async entry => {
+      await repository.markOutboxSyncingTransient([entry.id], ownerScope);
+      const durable = JSON.parse(storage.values.get(scopeKey) ?? '{}') as { outbox?: RepositoryOutboxEntryV1[] };
+      assert.equal(
+        durable.outbox?.find(candidate => candidate.id === entry.id)?.status,
+        'pending',
+        'transient syncing status must not enter the durable repository',
+      );
+    },
+    clearSyncing: entriesToClear => repository.clearOutboxSyncingTransient(
+      entriesToClear.map(entry => entry.id),
+      ownerScope,
+    ),
+    syncEntry: async entry => { sent.push(entry.id); },
+    acknowledge: async batch => {
+      acknowledgedBatches.push(batch.map(entry => entry.id));
+      await repository.acknowledgeOutbox(batch.map(entry => entry.id));
+    },
+    fail: (entry, message) => repository.failOutbox([entry.id], message),
+    resolveFailure: async () => ({ resolved: false, conflict: false, message: 'failed' }),
+  });
+
+  assert.deepEqual(sent, entries.map(entry => entry.id));
+  assert.deepEqual(acknowledgedBatches, [entries.map(entry => entry.id)]);
+  assert.equal(storage.writes, 1, 'the complete successful run has one durable acknowledgement write');
+  assert.equal(repository.getOutbox().length, 0);
+  assert.equal(result.completed, 3);
+  assert.equal(result.canceled, false);
+}
+
+async function canceledOutboxBatchKeepsAccumulatedSuccessDurable() {
+  const storage = new CountingStorage();
+  const { repository } = deterministicRepository(storage);
+  const ownerScope = 'account:canceled-startup';
+  await repository.initialize(ownerScope);
+  await repository.saveEntity(createSavedEntity({ id: 'cancel-a', title: 'Cancel A', kind: 'place' }));
+  await repository.saveEntity(createSavedEntity({ id: 'cancel-b', title: 'Cancel B', kind: 'place' }));
+  const entries = repository.getOutbox();
+  let sessionCurrent = true;
+  let acknowledged = 0;
+  storage.resetCounts();
+
+  const result = await processTripRepositoryOutbox(entries, {
+    isSessionCurrent: () => sessionCurrent,
+    markSyncing: async entry => {
+      await repository.markOutboxSyncingTransient([entry.id], ownerScope);
+      if (entry.id === entries[1].id) sessionCurrent = false;
+    },
+    clearSyncing: entriesToClear => repository.clearOutboxSyncingTransient(
+      entriesToClear.map(entry => entry.id),
+      ownerScope,
+    ),
+    syncEntry: async () => {},
+    acknowledge: async () => { acknowledged += 1; },
+    fail: (entry, message) => repository.failOutbox([entry.id], message),
+    resolveFailure: async () => ({ resolved: false, conflict: false, message: 'failed' }),
+  });
+
+  assert.equal(result.canceled, true);
+  assert.equal(result.completed, 0, 'unacknowledged remote writes remain durable and retry idempotently');
+  assert.equal(acknowledged, 0, 'a canceled account session cannot acknowledge its accumulated writes');
+  assert.equal(storage.writes, 0, 'transient marks and cancellation do not rewrite the repository');
+  assert.deepEqual(repository.getOutbox().map(entry => entry.status), ['pending', 'pending']);
+
+  const restored = deterministicRepository(storage).repository;
+  await restored.initialize(ownerScope);
+  assert.deepEqual(restored.getOutbox().map(entry => entry.status), ['pending', 'pending']);
+}
+
+async function outboxFailuresRemainDurableAndPreserveBatchOrder() {
+  const entries = [
+    outboxEntry('fail-a1', 'trip-a'),
+    outboxEntry('skip-a2', 'trip-a'),
+    outboxEntry('success-b', 'trip-b'),
+    outboxEntry('resolved-c', 'trip-c'),
+    outboxEntry('success-d', 'trip-d'),
+  ];
+  const events: string[] = [];
+  const acknowledgedBatches: string[][] = [];
+  const result = await processTripRepositoryOutbox(entries, {
+    isSessionCurrent: () => true,
+    markSyncing: async entry => { events.push(`mark:${entry.id}`); },
+    clearSyncing: async () => {},
+    syncEntry: async entry => {
+      events.push(`sync:${entry.id}`);
+      if (entry.id === 'fail-a1' || entry.id === 'resolved-c') throw new Error(entry.id);
+    },
+    acknowledge: async batch => {
+      const ids = batch.map(entry => entry.id);
+      acknowledgedBatches.push(ids);
+      events.push(`ack:${ids.join(',')}`);
+    },
+    fail: async entry => { events.push(`fail:${entry.id}`); },
+    resolveFailure: async entry => entry.id === 'resolved-c'
+      ? { resolved: true, conflict: true, message: 'conflict preserved' }
+      : { resolved: false, conflict: false, message: 'hard failure' },
+  });
+
+  assert.deepEqual(events, [
+    'mark:fail-a1',
+    'sync:fail-a1',
+    'fail:fail-a1',
+    'mark:success-b',
+    'sync:success-b',
+    'mark:resolved-c',
+    'sync:resolved-c',
+    'mark:success-d',
+    'sync:success-d',
+    'ack:success-b,resolved-c,success-d',
+  ]);
+  assert.deepEqual(acknowledgedBatches, [['success-b', 'resolved-c', 'success-d']]);
+  assert.equal(result.completed, 2, 'resolved conflicts retain the existing completed-count semantics');
+  assert.equal(result.blockedByConflict, true);
+  assert.equal(result.error, 'hard failure');
 }
 
 async function failedRevisionBlocksOnlyItsEntity() {
@@ -1240,8 +1390,9 @@ async function failedRevisionBlocksOnlyItsEntity() {
   const result = await processTripRepositoryOutbox(entries, {
     isSessionCurrent: () => true,
     markSyncing: async () => {},
+    clearSyncing: async () => {},
     syncEntry: async entry => { sent.push(entry.id); },
-    acknowledge: async entry => { acknowledged.push(entry.id); },
+    acknowledge: async batch => { acknowledged.push(...batch.map(entry => entry.id)); },
     fail: async () => {},
     resolveFailure: async () => ({ resolved: false, conflict: false, message: 'failed' }),
   });
@@ -1274,11 +1425,12 @@ async function supersededSyncingUpsertCannotBlockDelete() {
   const result = await processTripRepositoryOutbox(entries, {
     isSessionCurrent: () => true,
     markSyncing: async () => {},
+    clearSyncing: async () => {},
     syncEntry: async entry => {
       if (isOutboxEntrySupersededByDelete(entry, entries)) return;
       sent.push(entry.id);
     },
-    acknowledge: async entry => { acknowledged.push(entry.id); },
+    acknowledge: async batch => { acknowledged.push(...batch.map(entry => entry.id)); },
     fail: async () => {},
     resolveFailure: async () => ({ resolved: false, conflict: false, message: 'failed' }),
   });
@@ -1293,8 +1445,9 @@ async function supersededSyncingUpsertCannotBlockDelete() {
   const failurePass = await processTripRepositoryOutbox([syncing], {
     isSessionCurrent: () => true,
     markSyncing: async () => {},
+    clearSyncing: async () => {},
     syncEntry: async () => { throw new Error('request failed'); },
-    acknowledge: async entry => { acknowledgedAfterFailure.push(entry.id); },
+    acknowledge: async batch => { acknowledgedAfterFailure.push(...batch.map(entry => entry.id)); },
     fail: async entry => { failed.push(entry.id); },
     resolveFailure: async entry => isOutboxEntrySupersededByDelete(entry, entries)
       ? { resolved: true, conflict: false, message: 'superseded' }
@@ -1308,6 +1461,7 @@ async function supersededSyncingUpsertCannotBlockDelete() {
   await processTripRepositoryOutbox([deletion], {
     isSessionCurrent: () => true,
     markSyncing: async () => {},
+    clearSyncing: async () => {},
     syncEntry: async entry => { sentOnNextPass.push(entry.id); },
     acknowledge: async () => {},
     fail: async () => {},
@@ -1484,6 +1638,7 @@ async function run() {
   await singleDeletePersistsExplicitIntent();
   await optimisticRevisionContract();
   await persistentOutboxContract();
+  await unchangedOnlineStateDoesNotPersist();
   await legacyMigrationAndQuarantine();
   await legacyMigrationDoesNotResurrectDeletedTrips();
   await corruptRepositoryRecovery();
@@ -1498,6 +1653,9 @@ async function run() {
   await remoteReconciliation();
   await legacyAcknowledgementDoesNotDualWrite();
   await authChangeCancelsOutboxBeforeNextMutation();
+  await startupOutboxSuccessUsesOneDurableAcknowledgement();
+  await canceledOutboxBatchKeepsAccumulatedSuccessDurable();
+  await outboxFailuresRemainDurableAndPreserveBatchOrder();
   await failedRevisionBlocksOnlyItsEntity();
   await supersededSyncingUpsertCannotBlockDelete();
   await tombstonesPreserveRevisionAcrossResave();

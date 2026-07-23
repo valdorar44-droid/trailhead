@@ -16,8 +16,9 @@ export type OutboxProcessingResult = {
 type OutboxProcessingDependencies = {
   isSessionCurrent: () => boolean;
   markSyncing: (entry: RepositoryOutboxEntryV1) => Promise<void>;
+  clearSyncing: (entries: RepositoryOutboxEntryV1[]) => Promise<void>;
   syncEntry: (entry: RepositoryOutboxEntryV1) => Promise<void>;
-  acknowledge: (entry: RepositoryOutboxEntryV1) => Promise<void>;
+  acknowledge: (entries: RepositoryOutboxEntryV1[]) => Promise<void>;
   fail: (entry: RepositoryOutboxEntryV1, message: string) => Promise<void>;
   resolveFailure: (entry: RepositoryOutboxEntryV1, error: unknown) => Promise<OutboxFailureResolution>;
 };
@@ -67,13 +68,21 @@ export async function processTripRepositoryOutbox(
   dependencies: OutboxProcessingDependencies,
 ): Promise<OutboxProcessingResult> {
   const blockedEntities = new Set<string>();
+  const markedEntries: RepositoryOutboxEntryV1[] = [];
+  const acknowledgedEntries: RepositoryOutboxEntryV1[] = [];
   let completed = 0;
+  let pendingCompleted = 0;
   let blockedByConflict = false;
   let firstError: string | undefined;
 
+  const canceledResult = async (): Promise<OutboxProcessingResult> => {
+    await dependencies.clearSyncing(markedEntries);
+    return { completed, canceled: true, blockedByConflict, error: firstError };
+  };
+
   for (const entry of entries) {
     if (!dependencies.isSessionCurrent()) {
-      return { completed, canceled: true, blockedByConflict, error: firstError };
+      return canceledResult();
     }
 
     const key = entityKey(entry);
@@ -85,20 +94,21 @@ export async function processTripRepositoryOutbox(
     }
 
     await dependencies.markSyncing(entry);
+    markedEntries.push(entry);
     if (!dependencies.isSessionCurrent()) {
-      return { completed, canceled: true, blockedByConflict, error: firstError };
+      return canceledResult();
     }
 
     try {
       await dependencies.syncEntry(entry);
       if (!dependencies.isSessionCurrent()) {
-        return { completed, canceled: true, blockedByConflict, error: firstError };
+        return canceledResult();
       }
-      await dependencies.acknowledge(entry);
-      completed += 1;
+      acknowledgedEntries.push(entry);
+      pendingCompleted += 1;
     } catch (error) {
       if (!dependencies.isSessionCurrent()) {
-        return { completed, canceled: true, blockedByConflict, error: firstError };
+        return canceledResult();
       }
       let resolution: OutboxFailureResolution;
       try {
@@ -111,17 +121,33 @@ export async function processTripRepositoryOutbox(
         };
       }
       if (!dependencies.isSessionCurrent()) {
-        return { completed, canceled: true, blockedByConflict, error: firstError };
+        return canceledResult();
       }
 
       blockedEntities.add(key);
       blockedByConflict ||= resolution.conflict;
       firstError ??= resolution.message;
       if (resolution.resolved) {
-        await dependencies.acknowledge(entry);
+        acknowledgedEntries.push(entry);
       } else {
         await dependencies.fail(entry, resolution.message);
       }
+    }
+  }
+
+  if (!dependencies.isSessionCurrent()) return canceledResult();
+  if (acknowledgedEntries.length > 0) {
+    try {
+      await dependencies.acknowledge(acknowledgedEntries);
+      completed = pendingCompleted;
+    } catch (error) {
+      await dependencies.clearSyncing(markedEntries);
+      return {
+        completed,
+        canceled: false,
+        blockedByConflict,
+        error: firstError ?? (error instanceof Error ? error.message : 'Synced changes are waiting to be saved.'),
+      };
     }
   }
 

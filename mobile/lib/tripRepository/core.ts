@@ -271,10 +271,14 @@ function canonicalEntityKind(value: unknown): SavedEntityKind {
   return kind;
 }
 
-function outboxStatus(entries: RepositoryOutboxEntryV1[], meta: PersistedSyncMeta): TripRepositorySyncStatus {
+function outboxStatus(
+  entries: RepositoryOutboxEntryV1[],
+  meta: PersistedSyncMeta,
+  transientSyncingIds: ReadonlySet<string> = new Set(),
+): TripRepositorySyncStatus {
   const pendingCount = entries.length;
   const failedCount = entries.filter(entry => entry.status === 'failed').length;
-  const syncing = entries.some(entry => entry.status === 'syncing');
+  const syncing = entries.some(entry => entry.status === 'syncing' || transientSyncingIds.has(entry.id));
   const state = !meta.online
     ? 'offline'
     : syncing
@@ -294,7 +298,11 @@ function outboxStatus(entries: RepositoryOutboxEntryV1[], meta: PersistedSyncMet
   };
 }
 
-function snapshotFromState(state: PersistedRepositoryStateV2, initialized: boolean): TripRepositorySnapshot {
+function snapshotFromState(
+  state: PersistedRepositoryStateV2,
+  initialized: boolean,
+  transientSyncingIds: ReadonlySet<string> = new Set(),
+): TripRepositorySnapshot {
   const trips = Object.values(state.trips).sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id));
   const savedEntities = Object.values(state.savedEntities).sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id));
   return {
@@ -303,7 +311,7 @@ function snapshotFromState(state: PersistedRepositoryStateV2, initialized: boole
     revision: state.revision,
     trips,
     savedEntities,
-    sync: outboxStatus(state.outbox, state.syncMeta),
+    sync: outboxStatus(state.outbox, state.syncMeta, transientSyncingIds),
     migrationReceipts: [...state.migrationReceipts].sort((a, b) => b.createdAt - a.createdAt),
   };
 }
@@ -371,6 +379,7 @@ export class TripRepository {
   private listeners = new Set<() => void>();
   private writeChain: Promise<unknown> = Promise.resolve();
   private loadHadCorruption = false;
+  private transientOutboxSyncing = new Map<string, { attempts: number; updatedAt: number }>();
 
   constructor(dependencies: TripRepositoryDependencies) {
     this.storage = dependencies.storage;
@@ -386,7 +395,11 @@ export class TripRepository {
   getSnapshot = (): TripRepositorySnapshot => this.snapshot;
 
   private emit() {
-    this.snapshot = snapshotFromState(this.state, true);
+    const currentIds = new Set(this.state.outbox.map(entry => entry.id));
+    for (const id of this.transientOutboxSyncing.keys()) {
+      if (!currentIds.has(id)) this.transientOutboxSyncing.delete(id);
+    }
+    this.snapshot = snapshotFromState(this.state, true, new Set(this.transientOutboxSyncing.keys()));
     for (const listener of this.listeners) listener();
   }
 
@@ -570,6 +583,7 @@ export class TripRepository {
         this.ownerScope = ownerScope;
         this.ownerScopeKey = ownerScopeKey;
         this.state = nextState;
+        this.transientOutboxSyncing.clear();
         this.loadHadCorruption = loadHadCorruption;
         this.emit();
         return this.snapshot;
@@ -631,6 +645,7 @@ export class TripRepository {
       this.ownerScope = destinationScope;
       this.ownerScopeKey = destinationKey;
       this.state = destinationState;
+      this.transientOutboxSyncing.clear();
 
       const mergeKey = `scope_merge:${sourceKey}:${sourceState.revision}`;
       const previouslyMerged = Boolean(destinationState.migrationKeys[mergeKey]);
@@ -822,6 +837,7 @@ export class TripRepository {
       const erasedCurrentScope = ownerScope === this.ownerScope;
       if (erasedCurrentScope) {
         this.state = emptyState(ownerScope);
+        this.transientOutboxSyncing.clear();
         this.emit();
       }
       await this.storage.erase(ownerScopeKey);
@@ -1504,13 +1520,54 @@ export class TripRepository {
   }
 
   getOutbox(): RepositoryOutboxEntryV1[] {
-    return this.state.outbox.map(entry => ({ ...entry }));
+    return this.state.outbox.map(entry => {
+      const transient = this.transientOutboxSyncing.get(entry.id);
+      return transient
+        ? {
+          ...entry,
+          status: 'syncing',
+          attempts: transient.attempts,
+          updatedAt: transient.updatedAt,
+          lastError: undefined,
+        }
+        : { ...entry };
+    });
+  }
+
+  async markOutboxSyncingTransient(ids: string[], expectedOwnerScope = this.ownerScope): Promise<void> {
+    return this.serialize(async () => {
+      if (this.ownerScope !== expectedOwnerScope) return;
+      const wanted = new Set(ids);
+      if (wanted.size === 0) return;
+      const now = this.now();
+      let changed = false;
+      for (const entry of this.state.outbox) {
+        if (!wanted.has(entry.id) || entry.status === 'failed') continue;
+        const current = this.transientOutboxSyncing.get(entry.id);
+        this.transientOutboxSyncing.set(entry.id, {
+          attempts: (current?.attempts ?? entry.attempts) + 1,
+          updatedAt: now,
+        });
+        changed = true;
+      }
+      if (changed) this.emit();
+    });
+  }
+
+  async clearOutboxSyncingTransient(ids: string[], expectedOwnerScope = this.ownerScope): Promise<void> {
+    return this.serialize(async () => {
+      if (this.ownerScope !== expectedOwnerScope) return;
+      let changed = false;
+      for (const id of ids) changed = this.transientOutboxSyncing.delete(id) || changed;
+      if (changed) this.emit();
+    });
   }
 
   async markOutboxSyncing(ids: string[]): Promise<void> {
     return this.serialize(async () => {
       const wanted = new Set(ids);
       const now = this.now();
+      for (const id of wanted) this.transientOutboxSyncing.delete(id);
       this.state.outbox = this.state.outbox.map(entry => wanted.has(entry.id)
         ? { ...entry, status: 'syncing', attempts: entry.attempts + 1, updatedAt: now, lastError: undefined }
         : entry);
@@ -1522,6 +1579,8 @@ export class TripRepository {
   async acknowledgeOutbox(ids: string[]): Promise<void> {
     return this.serialize(async () => {
       const wanted = new Set(ids);
+      if (wanted.size === 0) return;
+      for (const id of wanted) this.transientOutboxSyncing.delete(id);
       this.state.outbox = this.state.outbox.filter(entry => !wanted.has(entry.id));
       this.state.syncMeta.lastSyncedAt = this.now();
       this.state.syncMeta.lastError = undefined;
@@ -1533,9 +1592,18 @@ export class TripRepository {
     return this.serialize(async () => {
       const wanted = new Set(ids);
       const now = this.now();
-      this.state.outbox = this.state.outbox.map(entry => wanted.has(entry.id)
-        ? { ...entry, status: 'failed', updatedAt: now, lastError: text(error, 'Sync failed') }
-        : entry);
+      this.state.outbox = this.state.outbox.map(entry => {
+        if (!wanted.has(entry.id)) return entry;
+        const transient = this.transientOutboxSyncing.get(entry.id);
+        return {
+          ...entry,
+          status: 'failed',
+          attempts: transient?.attempts ?? entry.attempts,
+          updatedAt: now,
+          lastError: text(error, 'Sync failed'),
+        };
+      });
+      for (const id of wanted) this.transientOutboxSyncing.delete(id);
       this.state.syncMeta.lastError = text(error, 'Sync failed');
       await this.persist();
     });
@@ -1567,6 +1635,7 @@ export class TripRepository {
 
   async setOnline(online: boolean): Promise<void> {
     return this.serialize(async () => {
+      if (this.state.syncMeta.online === online) return;
       this.state.syncMeta.online = online;
       await this.persist();
     });

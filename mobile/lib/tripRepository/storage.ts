@@ -61,8 +61,11 @@ export class NativeFileTripRepositoryStorage implements TripRepositoryStorage {
     this.writeCounter += 1;
     const temporary = `${directory}state.${Date.now()}.${this.writeCounter}.tmp`;
     await FileSystem.writeAsStringAsync(temporary, value, { encoding: FileSystem.EncodingType.UTF8 });
-    const verification = await FileSystem.readAsStringAsync(temporary);
-    JSON.parse(verification);
+    const temporaryInfo = await FileSystem.getInfoAsync(temporary);
+    if (!temporaryInfo.exists || temporaryInfo.isDirectory || !temporaryInfo.size) {
+      await FileSystem.deleteAsync(temporary, { idempotent: true }).catch(() => {});
+      throw new Error('Trip repository staging file was not written.');
+    }
 
     await FileSystem.deleteAsync(backup, { idempotent: true }).catch(() => {});
     const primaryInfo = await FileSystem.getInfoAsync(primary);

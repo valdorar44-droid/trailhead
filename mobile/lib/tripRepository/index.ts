@@ -137,6 +137,14 @@ export function markTripRepositoryOutboxSyncing(ids: string[]) {
   return repository.markOutboxSyncing(ids);
 }
 
+export function markTripRepositoryOutboxSyncingTransient(ids: string[], expectedOwnerScope?: string) {
+  return repository.markOutboxSyncingTransient(ids, expectedOwnerScope);
+}
+
+export function clearTripRepositoryOutboxSyncingTransient(ids: string[], expectedOwnerScope?: string) {
+  return repository.clearOutboxSyncingTransient(ids, expectedOwnerScope);
+}
+
 export function acknowledgeTripRepositoryOutbox(ids: string[]) {
   return repository.acknowledgeOutbox(ids);
 }

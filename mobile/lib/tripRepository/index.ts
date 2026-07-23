@@ -16,6 +16,10 @@ import type {
   TripNoteInput,
   TripRepositoryUserScope,
 } from './types';
+import type {
+  TripRepositoryRemoteBatchItem,
+  TripRepositoryRemoteBatchOptions,
+} from './core';
 
 export * from './types';
 export * from './originalExperience';
@@ -27,6 +31,11 @@ export {
   TripRepository,
   TripRepositoryConflictError,
   tripRepositoryScopeKey,
+} from './core';
+export type {
+  TripRepositoryRemoteBatchItem,
+  TripRepositoryRemoteBatchOptions,
+  TripRepositoryRemoteBatchResult,
 } from './core';
 export { NativeFileTripRepositoryStorage, WebTripRepositoryStorage } from './storage';
 export { readLegacyTripRepositoryData } from './legacy';
@@ -176,6 +185,13 @@ export function applyTripRepositoryRemoteTripTombstone(id: string, revision: num
 
 export function applyTripRepositoryRemoteSavedEntityTombstone(id: string, revision: number, deletedAt?: number) {
   return repository.applyRemoteSavedEntityTombstone(id, revision, deletedAt);
+}
+
+export function applyTripRepositoryRemoteBatch(
+  items: TripRepositoryRemoteBatchItem[],
+  options?: TripRepositoryRemoteBatchOptions,
+) {
+  return repository.applyRemoteBatch(items, options);
 }
 
 export function eraseTripRepositoryScope(scope: TripRepositoryUserScope) {

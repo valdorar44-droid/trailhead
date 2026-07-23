@@ -1,5 +1,9 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import type { TripRepositoryStorage } from './core';
+import {
+  recordTripRepositoryPersist,
+  recordTripRepositoryStateFileBytes,
+} from './qaInstrumentation';
 
 const ROOT = `${FileSystem.documentDirectory ?? ''}trip_repository_v2/`;
 
@@ -33,11 +37,19 @@ export class NativeFileTripRepositoryStorage implements TripRepositoryStorage {
     const primary = this.statePath(ownerScopeKey);
     const backup = `${primary}.bak`;
     const primaryInfo = await FileSystem.getInfoAsync(primary);
-    if (primaryInfo.exists) return FileSystem.readAsStringAsync(primary);
+    if (primaryInfo.exists) {
+      const value = await FileSystem.readAsStringAsync(primary);
+      recordTripRepositoryStateFileBytes(ownerScopeKey, primaryInfo.size);
+      return value;
+    }
     const backupInfo = await FileSystem.getInfoAsync(backup);
-    if (!backupInfo.exists) return null;
+    if (!backupInfo.exists) {
+      recordTripRepositoryStateFileBytes(ownerScopeKey, 0);
+      return null;
+    }
     const value = await FileSystem.readAsStringAsync(backup);
     await FileSystem.copyAsync({ from: backup, to: primary }).catch(() => {});
+    recordTripRepositoryStateFileBytes(ownerScopeKey, backupInfo.size);
     return value;
   }
 
@@ -58,6 +70,8 @@ export class NativeFileTripRepositoryStorage implements TripRepositoryStorage {
     try {
       await FileSystem.moveAsync({ from: temporary, to: primary });
       await FileSystem.deleteAsync(backup, { idempotent: true }).catch(() => {});
+      const persistedInfo = await FileSystem.getInfoAsync(primary).catch(() => null);
+      recordTripRepositoryPersist(ownerScopeKey, persistedInfo?.exists ? persistedInfo.size : 0);
     } catch (error) {
       const backupInfo = await FileSystem.getInfoAsync(backup).catch(() => null);
       if (backupInfo?.exists) await FileSystem.moveAsync({ from: backup, to: primary }).catch(() => {});
@@ -89,11 +103,16 @@ export class WebTripRepositoryStorage implements TripRepositoryStorage {
   }
 
   async read(ownerScopeKey: string): Promise<string | null> {
-    return window.localStorage.getItem(this.stateKey(ownerScopeKey));
+    const value = window.localStorage.getItem(this.stateKey(ownerScopeKey));
+    // Native preview diagnostics use file metadata. Avoid another full-state
+    // string pass in web builds solely to estimate UTF-8 storage size.
+    recordTripRepositoryStateFileBytes(ownerScopeKey, 0);
+    return value;
   }
 
   async write(ownerScopeKey: string, value: string): Promise<void> {
     window.localStorage.setItem(this.stateKey(ownerScopeKey), value);
+    recordTripRepositoryPersist(ownerScopeKey, 0);
   }
 
   async preserveCorrupt(ownerScopeKey: string, value: string, reason: string): Promise<string> {

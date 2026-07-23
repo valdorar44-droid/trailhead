@@ -6,6 +6,7 @@ import {
   TripRepository,
   TripRepositoryConflictError,
   tripRepositoryScopeKey,
+  type TripRepositoryRemoteBatchItem,
 } from '../core';
 import {
   hasRunnableTripRepositoryOutboxEntries,
@@ -100,6 +101,114 @@ class DelayedReadStorage extends MemoryTripRepositoryStorage {
       await this.readReleased;
     }
     return super.read(ownerScopeKey);
+  }
+}
+
+class CountingStorage extends MemoryTripRepositoryStorage {
+  reads = 0;
+  writes = 0;
+
+  resetCounts() {
+    this.reads = 0;
+    this.writes = 0;
+  }
+
+  override async read(ownerScopeKey: string): Promise<string | null> {
+    this.reads += 1;
+    return super.read(ownerScopeKey);
+  }
+
+  override async write(ownerScopeKey: string, value: string): Promise<void> {
+    this.writes += 1;
+    await super.write(ownerScopeKey, value);
+  }
+}
+
+class FailOnceReadStorage extends CountingStorage {
+  private failingKey: string | null = null;
+
+  failNextRead(ownerScopeKey: string) {
+    this.failingKey = ownerScopeKey;
+  }
+
+  override async read(ownerScopeKey: string): Promise<string | null> {
+    if (ownerScopeKey === this.failingKey) {
+      this.failingKey = null;
+      this.reads += 1;
+      throw new Error('fixture read failed');
+    }
+    return super.read(ownerScopeKey);
+  }
+}
+
+class FailNextWriteStorage extends CountingStorage {
+  private failingKey: string | null = null;
+
+  failNextWrite(ownerScopeKey: string) {
+    this.failingKey = ownerScopeKey;
+  }
+
+  override async write(ownerScopeKey: string, value: string): Promise<void> {
+    if (ownerScopeKey === this.failingKey) {
+      this.failingKey = null;
+      this.writes += 1;
+      throw new Error('fixture write failed');
+    }
+    await super.write(ownerScopeKey, value);
+  }
+}
+
+class DelayedCountingReadStorage extends CountingStorage {
+  private blockedKey: string | null = null;
+  private releaseRead: (() => void) | null = null;
+  private markReadStarted: (() => void) | null = null;
+  private readReleased: Promise<void> | null = null;
+  readStarted: Promise<void> = Promise.resolve();
+
+  blockNextRead(ownerScopeKey: string) {
+    this.blockedKey = ownerScopeKey;
+    this.readStarted = new Promise<void>(resolve => { this.markReadStarted = resolve; });
+    this.readReleased = new Promise<void>(resolve => { this.releaseRead = resolve; });
+  }
+
+  release() {
+    this.releaseRead?.();
+  }
+
+  override async read(ownerScopeKey: string): Promise<string | null> {
+    if (ownerScopeKey === this.blockedKey && this.readReleased) {
+      this.blockedKey = null;
+      this.markReadStarted?.();
+      await this.readReleased;
+    }
+    return super.read(ownerScopeKey);
+  }
+}
+
+class DelayedWriteStorage extends CountingStorage {
+  private blockedKey: string | null = null;
+  private releaseWrite: (() => void) | null = null;
+  private markWriteStarted: (() => void) | null = null;
+  private writeReleased: Promise<void> | null = null;
+  writeStarted: Promise<void> = Promise.resolve();
+
+  blockNextWrite(ownerScopeKey: string) {
+    this.blockedKey = ownerScopeKey;
+    this.writeStarted = new Promise<void>(resolve => { this.markWriteStarted = resolve; });
+    this.writeReleased = new Promise<void>(resolve => { this.releaseWrite = resolve; });
+  }
+
+  release() {
+    this.releaseWrite?.();
+  }
+
+  override async write(ownerScopeKey: string, value: string): Promise<void> {
+    if (ownerScopeKey === this.blockedKey && this.writeReleased) {
+      this.blockedKey = null;
+      this.markWriteStarted?.();
+      await this.writeReleased;
+    }
+    await super.write(ownerScopeKey, value);
   }
 }
 
@@ -573,6 +682,394 @@ async function identicalScopeMergeDeduplicatesCanonicalIds() {
   assert.equal(repository.getOutbox().length, outboxBefore);
 }
 
+async function applyRemoteItemSequentially(repository: TripRepository, item: TripRepositoryRemoteBatchItem) {
+  if (item.kind === 'trip') return repository.applyRemoteTrip(item.record);
+  if (item.kind === 'saved_entity') return repository.applyRemoteSavedEntity(item.record);
+  if (item.kind === 'trip_tombstone') {
+    return repository.applyRemoteTripTombstone(item.id, item.revision, item.deletedAt);
+  }
+  return repository.applyRemoteSavedEntityTombstone(item.id, item.revision, item.deletedAt);
+}
+
+async function seedLargeRemoteBatchRepository(repository: TripRepository): Promise<TripRepositoryRemoteBatchItem[]> {
+  const ownerScope = 'account:batch-user';
+  await repository.initialize('batch-user');
+  const dirtyTrip = await repository.upsertTrip(createTripDocument({
+    id: 'dirty-trip',
+    title: 'Local dirty trip',
+    createdAt: 10,
+    updatedAt: 10,
+  }));
+  const dirtyTripDelete = await repository.upsertTrip(createTripDocument({
+    id: 'dirty-trip-delete',
+    title: 'Local trip deleted remotely',
+    createdAt: 11,
+    updatedAt: 11,
+  }));
+  const equalTripTombstone = await repository.upsertTrip(createTripDocument({
+    id: 'equal-trip-tombstone',
+    title: 'Already deleted trip',
+    createdAt: 12,
+    updatedAt: 12,
+  }), { enqueueSync: false });
+  await repository.deleteTrip(equalTripTombstone.id, {
+    expectedRevision: equalTripTombstone.revision,
+    enqueueSync: false,
+  });
+
+  const dirtyEntity = await repository.saveEntity(createSavedEntity({
+    id: 'dirty-entity',
+    title: 'Local dirty place',
+    kind: 'place',
+    createdAt: 20,
+    updatedAt: 20,
+  }));
+  const dirtyEntityDelete = await repository.saveEntity(createSavedEntity({
+    id: 'dirty-entity-delete',
+    title: 'Local place deleted remotely',
+    kind: 'camp',
+    createdAt: 21,
+    updatedAt: 21,
+  }));
+  const equalEntityTombstone = await repository.saveEntity(createSavedEntity({
+    id: 'equal-entity-tombstone',
+    title: 'Already deleted place',
+    kind: 'place',
+    createdAt: 22,
+    updatedAt: 22,
+  }), { enqueueSync: false });
+  await repository.removeEntity(equalEntityTombstone.id, {
+    expectedRevision: equalEntityTombstone.revision,
+    enqueueSync: false,
+  });
+
+  const items: TripRepositoryRemoteBatchItem[] = [];
+  for (let index = 0; index < 120; index += 1) {
+    items.push({
+      kind: 'trip',
+      record: createTripDocument({
+        id: `remote-trip-${index}`,
+        ownerScope,
+        revision: index + 1,
+        title: `Remote trip ${index}`,
+        createdAt: 1_000 + index,
+        updatedAt: 2_000 + index,
+      }),
+    });
+  }
+  items.push(
+    {
+      kind: 'trip',
+      record: {
+        ...dirtyTrip,
+        ownerScope,
+        revision: 8,
+        title: 'Server trip',
+        updatedAt: 3_000,
+      },
+    },
+    { kind: 'trip_tombstone', id: dirtyTripDelete.id, revision: 9, deletedAt: 3_100 },
+    {
+      kind: 'trip',
+      record: {
+        ...equalTripTombstone,
+        ownerScope,
+        revision: equalTripTombstone.revision + 1,
+        updatedAt: 3_200,
+      },
+    },
+  );
+
+  for (let index = 0; index < 240; index += 1) {
+    items.push({
+      kind: 'saved_entity',
+      record: createSavedEntity({
+        id: `remote-entity-${index}`,
+        ownerScope,
+        revision: index + 1,
+        title: `Remote place ${index}`,
+        kind: index % 2 === 0 ? 'camp' : 'place',
+        createdAt: 4_000 + index,
+        updatedAt: 5_000 + index,
+      }),
+    });
+  }
+  items.push(
+    {
+      kind: 'saved_entity',
+      record: {
+        ...dirtyEntity,
+        ownerScope,
+        revision: 10,
+        title: 'Server place',
+        updatedAt: 6_000,
+      },
+    },
+    { kind: 'saved_entity_tombstone', id: dirtyEntityDelete.id, revision: 11, deletedAt: 6_100 },
+    {
+      kind: 'saved_entity',
+      record: {
+        ...equalEntityTombstone,
+        ownerScope,
+        revision: equalEntityTombstone.revision + 1,
+        updatedAt: 6_200,
+      },
+    },
+  );
+  return items;
+}
+
+async function remoteBatchMatchesRecordByRecordSemanticsAndPersistsOnce() {
+  const sequentialStorage = new CountingStorage();
+  const batchStorage = new CountingStorage();
+  const sequential = deterministicRepository(sequentialStorage).repository;
+  const batched = deterministicRepository(batchStorage).repository;
+  const sequentialItems = await seedLargeRemoteBatchRepository(sequential);
+  const batchItems = await seedLargeRemoteBatchRepository(batched);
+  assert.deepEqual(batchItems, sequentialItems);
+  sequentialStorage.resetCounts();
+  batchStorage.resetCounts();
+
+  for (const item of sequentialItems) await applyRemoteItemSequentially(sequential, item);
+  const result = await batched.applyRemoteBatch(batchItems, { expectedOwnerScope: 'account:batch-user' });
+
+  assert.equal(result.processed, batchItems.length);
+  assert.equal(result.conflicts, 4);
+  assert.equal(batchStorage.writes, 1, 'one fetched page is serialized and persisted once');
+  assert.equal(sequentialStorage.writes, result.changed, 'record-by-record writes match the changed-record count');
+  assert.ok(sequentialStorage.writes > 350, 'the fixture represents a large account page');
+  assert.deepEqual(batched.getSnapshot(), sequential.getSnapshot());
+  assert.deepEqual(batched.getOutbox(), sequential.getOutbox());
+  const scopeKey = tripRepositoryScopeKey('account:batch-user');
+  assert.deepEqual(
+    JSON.parse(batchStorage.values.get(scopeKey) ?? '{}'),
+    JSON.parse(sequentialStorage.values.get(scopeKey) ?? '{}'),
+    'batching retains persisted conflict, tombstone, revision, and outbox semantics',
+  );
+}
+
+async function sameScopeInitializationReusesTheCurrentRepositoryState() {
+  const storage = new CountingStorage();
+  const { repository } = deterministicRepository(storage);
+  await repository.initialize('same-scope');
+  await repository.upsertTrip(createTripDocument({ id: 'kept-trip', title: 'Kept trip' }));
+  storage.resetCounts();
+  let sameScopeEmissions = 0;
+  const unsubscribe = repository.subscribe(() => { sameScopeEmissions += 1; });
+  const before = repository.getSnapshot();
+  const [after, duplicateAfter] = await Promise.all([
+    repository.initialize('account:same-scope'),
+    repository.initialize('same-scope'),
+  ]);
+  unsubscribe();
+  assert.equal(after, before);
+  assert.equal(duplicateAfter, before);
+  assert.equal(storage.reads, 0, 'an initialized scope is not parsed from disk again');
+  assert.equal(storage.writes, 0);
+  assert.equal(sameScopeEmissions, 0, 'same-scope initialization does not emit unchanged state');
+  assert.equal(repository.getTrip('kept-trip')?.title, 'Kept trip');
+
+  const concurrentStorage = new DelayedCountingReadStorage();
+  const concurrentRepository = deterministicRepository(concurrentStorage).repository;
+  const scopeKey = tripRepositoryScopeKey('account:concurrent-scope');
+  concurrentStorage.blockNextRead(scopeKey);
+  const concurrentSnapshots: unknown[] = [];
+  const unsubscribeConcurrent = concurrentRepository.subscribe(() => {
+    concurrentSnapshots.push(concurrentRepository.getSnapshot());
+  });
+  const firstInitialize = concurrentRepository.initialize('concurrent-scope');
+  await concurrentStorage.readStarted;
+  const secondInitialize = concurrentRepository.initialize('account:concurrent-scope');
+  concurrentStorage.release();
+  const [firstSnapshot, secondSnapshot] = await Promise.all([firstInitialize, secondInitialize]);
+  unsubscribeConcurrent();
+  assert.equal(concurrentStorage.reads, 1, 'concurrent same-scope initialization shares one disk read');
+  assert.equal(concurrentSnapshots.length, 1, 'concurrent same-scope initialization emits once');
+  assert.equal(firstSnapshot, secondSnapshot);
+  assert.equal(firstSnapshot, concurrentSnapshots[0]);
+}
+
+async function failedInitializationLeavesThePreviousScopeRetryable() {
+  const storage = new FailOnceReadStorage();
+  const seedTarget = deterministicRepository(storage).repository;
+  await seedTarget.initialize('read-target');
+  await seedTarget.upsertTrip(
+    createTripDocument({ id: 'target-trip', title: 'Target trip' }),
+    { enqueueSync: false },
+  );
+
+  const repository = deterministicRepository(storage).repository;
+  await repository.initialize('read-source');
+  await repository.upsertTrip(
+    createTripDocument({ id: 'source-trip', title: 'Source trip' }),
+    { enqueueSync: false },
+  );
+  const before = repository.getSnapshot();
+  let emissions = 0;
+  const unsubscribe = repository.subscribe(() => { emissions += 1; });
+  storage.resetCounts();
+  storage.failNextRead(tripRepositoryScopeKey('account:read-target'));
+
+  await assert.rejects(repository.initialize('read-target'), /fixture read failed/);
+  assert.equal(repository.getSnapshot(), before);
+  assert.equal(repository.getSnapshot().ownerScope, 'account:read-source');
+  assert.equal(repository.getTrip('source-trip')?.title, 'Source trip');
+  assert.equal(repository.getTrip('target-trip'), null);
+  assert.equal(emissions, 0, 'a failed scope read never emits or replaces the active scope');
+
+  const retried = await repository.initialize('account:read-target');
+  unsubscribe();
+  assert.equal(storage.reads, 2, 'a failed scope read is retried instead of being short-circuited');
+  assert.equal(emissions, 1);
+  assert.equal(retried.ownerScope, 'account:read-target');
+  assert.equal(repository.getTrip('target-trip')?.title, 'Target trip');
+  assert.equal(repository.getTrip('source-trip'), null);
+}
+
+async function failedRemoteBatchWriteRollsBackWithoutEmission() {
+  const storage = new FailNextWriteStorage();
+  const repository = deterministicRepository(storage).repository;
+  await repository.initialize('atomic-write');
+  await repository.upsertTrip(
+    createTripDocument({ id: 'committed-trip', title: 'Committed trip' }),
+    { enqueueSync: false },
+  );
+  const before = repository.getSnapshot();
+  const scopeKey = tripRepositoryScopeKey('account:atomic-write');
+  const persistedBefore = storage.values.get(scopeKey);
+  const remoteItems: TripRepositoryRemoteBatchItem[] = [
+    {
+      kind: 'trip',
+      record: createTripDocument({
+        id: 'unpersisted-trip',
+        ownerScope: 'account:atomic-write',
+        revision: 2,
+        title: 'Must roll back',
+        createdAt: 100,
+        updatedAt: 200,
+      }),
+    },
+    {
+      kind: 'saved_entity',
+      record: createSavedEntity({
+        id: 'unpersisted-place',
+        ownerScope: 'account:atomic-write',
+        revision: 2,
+        title: 'Must roll back too',
+        kind: 'place',
+        createdAt: 100,
+        updatedAt: 200,
+      }),
+    },
+  ];
+  let emissions = 0;
+  const unsubscribe = repository.subscribe(() => { emissions += 1; });
+  storage.resetCounts();
+  storage.failNextWrite(scopeKey);
+
+  await assert.rejects(
+    repository.applyRemoteBatch(remoteItems, { expectedOwnerScope: 'account:atomic-write' }),
+    /fixture write failed/,
+  );
+  assert.equal(storage.writes, 1);
+  assert.equal(emissions, 0, 'a failed page write never emits staged records');
+  assert.equal(repository.getSnapshot(), before);
+  assert.equal(repository.getTrip('unpersisted-trip'), null);
+  assert.equal(repository.getSavedEntity('unpersisted-place'), null);
+  assert.equal(repository.getTrip('committed-trip')?.title, 'Committed trip');
+  assert.equal(storage.values.get(scopeKey), persistedBefore);
+
+  storage.resetCounts();
+  assert.equal(await repository.initialize('atomic-write'), before);
+  assert.equal(storage.reads, 0, 'a rolled-back same-scope repository stays safely initialized');
+  const applied = await repository.applyRemoteBatch(
+    remoteItems,
+    { expectedOwnerScope: 'account:atomic-write' },
+  );
+  unsubscribe();
+  assert.equal(applied.changed, 2);
+  assert.equal(emissions, 1, 'the successfully persisted retry emits exactly once');
+  assert.equal(repository.getTrip('unpersisted-trip')?.title, 'Must roll back');
+  assert.equal(repository.getSavedEntity('unpersisted-place')?.title, 'Must roll back too');
+}
+
+async function remoteBatchIsCanceledOrCommittedWithinOneAccountScope() {
+  const delayedRead = new DelayedReadStorage();
+  const cancellationRepository = deterministicRepository(delayedRead).repository;
+  await cancellationRepository.initialize('scope-batch-b');
+  await cancellationRepository.upsertTrip(
+    createTripDocument({ id: 'scope-b-trip', title: 'Scope B trip' }),
+    { enqueueSync: false },
+  );
+  await cancellationRepository.initialize('scope-batch-a');
+  delayedRead.blockNextRead(tripRepositoryScopeKey('account:scope-batch-b'));
+  const switchingBeforeBatch = cancellationRepository.initialize('scope-batch-b');
+  await delayedRead.readStarted;
+  const canceledBatch = cancellationRepository.applyRemoteBatch([{
+    kind: 'trip',
+    record: createTripDocument({
+      id: 'must-not-cross-accounts',
+      ownerScope: 'account:scope-batch-a',
+      revision: 1,
+      title: 'Old account remote trip',
+      createdAt: 100,
+      updatedAt: 100,
+    }),
+  }], { expectedOwnerScope: 'account:scope-batch-a' });
+  delayedRead.release();
+  await switchingBeforeBatch;
+  await assert.rejects(canceledBatch, /owner scope changed/);
+  assert.equal(cancellationRepository.getSnapshot().ownerScope, 'account:scope-batch-b');
+  assert.equal(cancellationRepository.getTrip('must-not-cross-accounts'), null);
+  assert.equal(cancellationRepository.getTrip('scope-b-trip')?.title, 'Scope B trip');
+
+  const delayedWrite = new DelayedWriteStorage();
+  const atomicRepository = deterministicRepository(delayedWrite).repository;
+  await atomicRepository.initialize('atomic-b');
+  await atomicRepository.upsertTrip(
+    createTripDocument({ id: 'atomic-b-trip', title: 'Atomic B trip' }),
+    { enqueueSync: false },
+  );
+  await atomicRepository.initialize('atomic-a');
+  const atomicItems: TripRepositoryRemoteBatchItem[] = Array.from({ length: 180 }, (_, index) => ({
+    kind: 'trip' as const,
+    record: createTripDocument({
+      id: `atomic-trip-${index}`,
+      ownerScope: 'account:atomic-a',
+      revision: 1,
+      title: `Atomic trip ${index}`,
+      createdAt: 10_000 + index,
+      updatedAt: 20_000 + index,
+    }),
+  }));
+  delayedWrite.blockNextWrite(tripRepositoryScopeKey('account:atomic-a'));
+  const emittedBatchSnapshots: ReturnType<TripRepository['getSnapshot']>[] = [];
+  const unsubscribeBatch = atomicRepository.subscribe(() => {
+    emittedBatchSnapshots.push(atomicRepository.getSnapshot());
+  });
+  const applying = atomicRepository.applyRemoteBatch(atomicItems, { expectedOwnerScope: 'account:atomic-a' });
+  await delayedWrite.writeStarted;
+  assert.equal(atomicRepository.getSnapshot().trips.length, 0);
+  assert.equal(atomicRepository.getTrip('atomic-trip-0'), null, 'direct getters retain committed state until persistence succeeds');
+  assert.equal(emittedBatchSnapshots.length, 0, 'listeners never observe a partially persisted page');
+  const switchingDuringBatch = atomicRepository.initialize('atomic-b');
+  delayedWrite.release();
+  await applying;
+  assert.equal(emittedBatchSnapshots.length, 1, 'one persisted remote page emits exactly once');
+  assert.equal(emittedBatchSnapshots[0].trips.length, atomicItems.length);
+  assert.ok(atomicItems.every(item => item.kind === 'trip'
+    && emittedBatchSnapshots[0].trips.some(trip => trip.id === item.record.id)));
+  unsubscribeBatch();
+  await switchingDuringBatch;
+  assert.equal(atomicRepository.getSnapshot().ownerScope, 'account:atomic-b');
+  assert.deepEqual(atomicRepository.listTrips({ includeArchived: true }).map(trip => trip.id), ['atomic-b-trip']);
+
+  const restoredA = deterministicRepository(delayedWrite).repository;
+  await restoredA.initialize('atomic-a');
+  assert.equal(restoredA.listTrips({ includeArchived: true }).length, atomicItems.length);
+  assert.ok(atomicItems.every(item => item.kind === 'trip' && restoredA.getTrip(item.record.id) != null));
+}
+
 async function remoteReconciliation() {
   const { repository } = deterministicRepository();
   await repository.initialize(77);
@@ -993,6 +1490,11 @@ async function run() {
   await explicitAnonymousMerge();
   await changedScopeMergeUpdatesOnlyChangedRecords();
   await identicalScopeMergeDeduplicatesCanonicalIds();
+  await remoteBatchMatchesRecordByRecordSemanticsAndPersistsOnce();
+  await sameScopeInitializationReusesTheCurrentRepositoryState();
+  await failedInitializationLeavesThePreviousScopeRetryable();
+  await failedRemoteBatchWriteRollsBackWithoutEmission();
+  await remoteBatchIsCanceledOrCommittedWithinOneAccountScope();
   await remoteReconciliation();
   await legacyAcknowledgementDoesNotDualWrite();
   await authChangeCancelsOutboxBeforeNextMutation();

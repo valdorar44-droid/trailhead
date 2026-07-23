@@ -9,6 +9,7 @@ import type {
 } from './api';
 import { TRAILHEAD_API_BASE } from './apiBase';
 import {
+  applyTripRepositoryRemoteBatch,
   applyTripRepositoryRemoteSavedEntity,
   applyTripRepositoryRemoteSavedEntityTombstone,
   applyTripRepositoryRemoteTrip,
@@ -20,14 +21,20 @@ import {
   markTripRepositoryOutboxSyncing,
   retryTripRepositoryOutboxEntries,
   subscribeTripRepository,
+  tripRepositoryScopeKey,
   type RepositoryOutboxEntryV1,
   type SavedEntityV1,
+  type TripRepositoryRemoteBatchItem,
   type TripDocumentV2,
   type SavedEntityKind,
   type TripItemKind,
   type TripItemV1,
   type TripNoteV1,
 } from './tripRepository';
+import {
+  recordTripRepositoryHydrationPage,
+  recordTripRepositoryHydrationResult,
+} from './tripRepository/qaInstrumentation';
 import { tripExperienceRefFromApi } from './tripRepository/originalExperience';
 import {
   hasRunnableTripRepositoryOutboxEntries,
@@ -551,23 +558,34 @@ async function hydrateWithSession(session: ActiveSyncSession): Promise<{ trips: 
 
   let trips = 0;
   let savedEntities = 0;
+  const scopeKey = tripRepositoryScopeKey(session.ownerScope);
   let tripCursor: string | undefined;
   const tripCursors = new Set<string>();
   do {
     const page = await syncRequest<AccountTripDocumentPage>(session, tripListPath(tripCursor));
-    for (const item of page.items) {
-      if (!sessionIsCurrent(session)) return { trips, savedEntities };
-      if (item.status === 'deleted') {
-        await applyTripRepositoryRemoteTripTombstone(
-          item.trip_id,
-          item.revision,
-          item.deleted_at ? milliseconds(item.deleted_at) : undefined,
-        );
-        continue;
-      }
-      await applyTripRepositoryRemoteTrip(remoteTripDocument(item, snapshot.ownerScope));
-      trips += 1;
+    recordTripRepositoryHydrationPage(scopeKey, page.items.length);
+    if (!sessionIsCurrent(session)) {
+      recordTripRepositoryHydrationResult(scopeKey, { skipped: page.items.length });
+      return { trips, savedEntities };
     }
+    const remoteItems: TripRepositoryRemoteBatchItem[] = page.items.map(item => item.status === 'deleted'
+      ? {
+          kind: 'trip_tombstone',
+          id: item.trip_id,
+          revision: item.revision,
+          deletedAt: item.deleted_at ? milliseconds(item.deleted_at) : undefined,
+        }
+      : {
+          kind: 'trip',
+          record: remoteTripDocument(item, session.ownerScope),
+        });
+    const batch = await applyTripRepositoryRemoteBatch(remoteItems, { expectedOwnerScope: session.ownerScope });
+    recordTripRepositoryHydrationResult(scopeKey, {
+      applied: batch.changed,
+      skipped: batch.processed - batch.changed,
+    });
+    trips += page.items.filter(item => item.status !== 'deleted').length;
+    if (!sessionIsCurrent(session)) return { trips, savedEntities };
     const next = page.next_cursor || undefined;
     if (next && tripCursors.has(next)) throw new Error('Trip sync returned a repeated page.');
     if (next) tripCursors.add(next);
@@ -578,19 +596,29 @@ async function hydrateWithSession(session: ActiveSyncSession): Promise<{ trips: 
   const libraryCursors = new Set<string>();
   do {
     const page = await syncRequest<AccountLibraryPage>(session, libraryListPath(libraryCursor));
-    for (const item of page.items) {
-      if (!sessionIsCurrent(session)) return { trips, savedEntities };
-      if (item.status === 'deleted') {
-        await applyTripRepositoryRemoteSavedEntityTombstone(
-          item.canonical_id,
-          item.revision,
-          item.deleted_at ? milliseconds(item.deleted_at) : undefined,
-        );
-        continue;
-      }
-      await applyTripRepositoryRemoteSavedEntity(remoteSavedEntity(item, snapshot.ownerScope));
-      savedEntities += 1;
+    recordTripRepositoryHydrationPage(scopeKey, page.items.length);
+    if (!sessionIsCurrent(session)) {
+      recordTripRepositoryHydrationResult(scopeKey, { skipped: page.items.length });
+      return { trips, savedEntities };
     }
+    const remoteItems: TripRepositoryRemoteBatchItem[] = page.items.map(item => item.status === 'deleted'
+      ? {
+          kind: 'saved_entity_tombstone',
+          id: item.canonical_id,
+          revision: item.revision,
+          deletedAt: item.deleted_at ? milliseconds(item.deleted_at) : undefined,
+        }
+      : {
+          kind: 'saved_entity',
+          record: remoteSavedEntity(item, session.ownerScope),
+        });
+    const batch = await applyTripRepositoryRemoteBatch(remoteItems, { expectedOwnerScope: session.ownerScope });
+    recordTripRepositoryHydrationResult(scopeKey, {
+      applied: batch.changed,
+      skipped: batch.processed - batch.changed,
+    });
+    savedEntities += page.items.filter(item => item.status !== 'deleted').length;
+    if (!sessionIsCurrent(session)) return { trips, savedEntities };
     const next = page.next_cursor || undefined;
     if (next && libraryCursors.has(next)) throw new Error('Saved-place sync returned a repeated page.');
     if (next) libraryCursors.add(next);

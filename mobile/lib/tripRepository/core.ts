@@ -80,6 +80,28 @@ export interface TripRepositoryDependencies {
   createId?: (prefix: string) => string;
 }
 
+export type TripRepositoryRemoteBatchItem =
+  | { kind: 'trip'; record: TripDocumentV2 }
+  | { kind: 'saved_entity'; record: SavedEntityV1 }
+  | { kind: 'trip_tombstone'; id: string; revision: number; deletedAt?: number }
+  | { kind: 'saved_entity_tombstone'; id: string; revision: number; deletedAt?: number };
+
+export interface TripRepositoryRemoteBatchOptions {
+  expectedOwnerScope?: TripRepositoryUserScope;
+}
+
+export interface TripRepositoryRemoteBatchResult {
+  processed: number;
+  changed: number;
+  conflicts: number;
+}
+
+type RemoteMutationResult<T> = {
+  result: T;
+  changed: boolean;
+  conflict: boolean;
+};
+
 export class TripRepositoryConflictError extends Error {
   readonly entityId: string;
   readonly expectedRevision: number;
@@ -526,17 +548,35 @@ export class TripRepository {
 
   async initialize(scope?: TripRepositoryUserScope): Promise<TripRepositorySnapshot> {
     return this.serialize(async () => {
-      this.ownerScope = normalizeTripRepositoryScope(scope);
-      this.ownerScopeKey = tripRepositoryScopeKey(this.ownerScope);
-      const raw = await this.storage.read(this.ownerScopeKey);
+      const ownerScope = normalizeTripRepositoryScope(scope);
+      if (this.snapshot.initialized && ownerScope === this.ownerScope) return this.snapshot;
+      const ownerScopeKey = tripRepositoryScopeKey(ownerScope);
+      const previousLoadHadCorruption = this.loadHadCorruption;
       this.loadHadCorruption = false;
-      this.state = raw ? await this.loadState(raw) : emptyState(this.ownerScope);
-      if (raw && this.loadHadCorruption) {
-        await this.persist();
-      } else {
+      try {
+        const raw = await this.storage.read(ownerScopeKey);
+        const nextState = raw
+          ? await this.loadState(raw, ownerScope, ownerScopeKey)
+          : emptyState(ownerScope);
+        const loadHadCorruption = this.loadHadCorruption;
+
+        // Repair storage before exposing a new scope. A read or repair failure
+        // must leave the previously initialized repository completely intact so
+        // a retry cannot be mistaken for an already initialized scope.
+        if (raw && loadHadCorruption) {
+          await this.storage.write(ownerScopeKey, JSON.stringify(nextState));
+        }
+
+        this.ownerScope = ownerScope;
+        this.ownerScopeKey = ownerScopeKey;
+        this.state = nextState;
+        this.loadHadCorruption = loadHadCorruption;
         this.emit();
+        return this.snapshot;
+      } catch (error) {
+        this.loadHadCorruption = previousLoadHadCorruption;
+        throw error;
       }
-      return this.snapshot;
     });
   }
 
@@ -1019,46 +1059,59 @@ export class TripRepository {
     });
   }
 
+  private validateRemoteTrip(remote: TripDocumentV2) {
+    if (!isTripDocument(remote)) throw new Error('Remote trip is invalid');
+    if (remote.ownerScope !== this.ownerScope) {
+      throw new Error(`Remote trip owner scope ${remote.ownerScope} does not match ${this.ownerScope}`);
+    }
+    if (finiteNumber(remote.revision) == null || finiteNumber(remote.createdAt) == null || finiteNumber(remote.updatedAt) == null) {
+      throw new Error('Remote trip revision and timestamps are required');
+    }
+  }
+
+  private applyRemoteTripMutation(remote: TripDocumentV2): RemoteMutationResult<TripRepositoryRemoteResult<TripDocumentV2>> {
+    const local = this.state.trips[remote.id];
+    const localTombstone = this.state.tombstones[tombstoneKey('trip', remote.id)];
+    const localRevision = Math.max(local?.revision ?? 0, localTombstone?.revision ?? 0);
+    if (localRevision > remote.revision || Boolean(localTombstone && localTombstone.revision === remote.revision)) {
+      return { result: { record: local ?? remote }, changed: false, conflict: false };
+    }
+    const dirtyEntries = this.state.outbox.filter(entry => entry.entityType === 'trip'
+      && entry.entityId === remote.id
+      && entry.operation !== 'delete');
+    let conflictCopy: TripDocumentV2 | undefined;
+    if (local && dirtyEntries.length > 0 && comparableJson(local) !== comparableJson(remote)) {
+      const now = this.now();
+      const conflictId = this.createId('trip_conflict');
+      conflictCopy = normalizedTrip({
+        ...local,
+        id: conflictId,
+        title: `${local.title} (local changes)`,
+        legacy: { source: 'remote_reconciliation_conflict', payload: { originalId: local.id } },
+        createdAt: local.createdAt,
+      }, this.ownerScope, now, 1);
+      this.state.trips[conflictId] = conflictCopy;
+      const dirtyIds = new Set(dirtyEntries.map(entry => entry.id));
+      this.state.outbox = this.state.outbox.filter(entry => !dirtyIds.has(entry.id));
+      this.enqueueOutbox('trip', conflictId, 'upsert', conflictCopy, conflictCopy.revision);
+    }
+    const stored = { ...remote, ownerScope: this.ownerScope };
+    this.state.trips[remote.id] = stored;
+    delete this.state.tombstones[tombstoneKey('trip', remote.id)];
+    this.state.revision += 1;
+    return {
+      result: { record: stored, conflictCopy },
+      changed: true,
+      conflict: Boolean(conflictCopy),
+    };
+  }
+
   async applyRemoteTrip(remote: TripDocumentV2): Promise<TripRepositoryRemoteResult<TripDocumentV2>> {
     return this.serialize(async () => {
-      if (!isTripDocument(remote)) throw new Error('Remote trip is invalid');
-      if (remote.ownerScope !== this.ownerScope) {
-        throw new Error(`Remote trip owner scope ${remote.ownerScope} does not match ${this.ownerScope}`);
-      }
-      if (finiteNumber(remote.revision) == null || finiteNumber(remote.createdAt) == null || finiteNumber(remote.updatedAt) == null) {
-        throw new Error('Remote trip revision and timestamps are required');
-      }
-      const local = this.state.trips[remote.id];
-      const localTombstone = this.state.tombstones[tombstoneKey('trip', remote.id)];
-      const localRevision = Math.max(local?.revision ?? 0, localTombstone?.revision ?? 0);
-      if (localRevision > remote.revision || Boolean(localTombstone && localTombstone.revision === remote.revision)) {
-        return { record: local ?? remote };
-      }
-      const dirtyEntries = this.state.outbox.filter(entry => entry.entityType === 'trip'
-        && entry.entityId === remote.id
-        && entry.operation !== 'delete');
-      let conflictCopy: TripDocumentV2 | undefined;
-      if (local && dirtyEntries.length > 0 && comparableJson(local) !== comparableJson(remote)) {
-        const now = this.now();
-        const conflictId = this.createId('trip_conflict');
-        conflictCopy = normalizedTrip({
-          ...local,
-          id: conflictId,
-          title: `${local.title} (local changes)`,
-          legacy: { source: 'remote_reconciliation_conflict', payload: { originalId: local.id } },
-          createdAt: local.createdAt,
-        }, this.ownerScope, now, 1);
-        this.state.trips[conflictId] = conflictCopy;
-        const dirtyIds = new Set(dirtyEntries.map(entry => entry.id));
-        this.state.outbox = this.state.outbox.filter(entry => !dirtyIds.has(entry.id));
-        this.enqueueOutbox('trip', conflictId, 'upsert', conflictCopy, conflictCopy.revision);
-      }
-      const stored = { ...remote, ownerScope: this.ownerScope };
-      this.state.trips[remote.id] = stored;
-      delete this.state.tombstones[tombstoneKey('trip', remote.id)];
-      this.state.revision += 1;
-      await this.persist();
-      return { record: stored, conflictCopy };
+      this.validateRemoteTrip(remote);
+      const mutation = this.applyRemoteTripMutation(remote);
+      if (mutation.changed) await this.persist();
+      return mutation.result;
     });
   }
 
@@ -1113,46 +1166,59 @@ export class TripRepository {
     });
   }
 
+  private validateRemoteSavedEntity(remote: SavedEntityV1) {
+    if (!isSavedEntity(remote)) throw new Error('Remote saved entity is invalid');
+    if (remote.ownerScope !== this.ownerScope) {
+      throw new Error(`Remote saved entity owner scope ${remote.ownerScope} does not match ${this.ownerScope}`);
+    }
+    if (finiteNumber(remote.revision) == null || finiteNumber(remote.createdAt) == null || finiteNumber(remote.updatedAt) == null) {
+      throw new Error('Remote saved entity revision and timestamps are required');
+    }
+  }
+
+  private applyRemoteSavedEntityMutation(remote: SavedEntityV1): RemoteMutationResult<TripRepositoryRemoteResult<SavedEntityV1>> {
+    const local = this.state.savedEntities[remote.id];
+    const localTombstone = this.state.tombstones[tombstoneKey('saved_entity', remote.id)];
+    const localRevision = Math.max(local?.revision ?? 0, localTombstone?.revision ?? 0);
+    if (localRevision > remote.revision || Boolean(localTombstone && localTombstone.revision === remote.revision)) {
+      return { result: { record: local ?? remote }, changed: false, conflict: false };
+    }
+    const dirtyEntries = this.state.outbox.filter(entry => entry.entityType === 'saved_entity'
+      && entry.entityId === remote.id
+      && entry.operation !== 'delete');
+    let conflictCopy: SavedEntityV1 | undefined;
+    if (local && dirtyEntries.length > 0 && comparableJson(local) !== comparableJson(remote)) {
+      const now = this.now();
+      const conflictId = this.createId('entity_conflict');
+      conflictCopy = normalizedEntity({
+        ...local,
+        id: conflictId,
+        title: `${local.title} (local changes)`,
+        facts: { ...(local.facts ?? {}), remoteReconciliationConflict: { originalId: local.id } },
+        createdAt: local.createdAt,
+      }, this.ownerScope, now, 1);
+      this.state.savedEntities[conflictId] = conflictCopy;
+      const dirtyIds = new Set(dirtyEntries.map(entry => entry.id));
+      this.state.outbox = this.state.outbox.filter(entry => !dirtyIds.has(entry.id));
+      this.enqueueOutbox('saved_entity', conflictId, 'upsert', conflictCopy, conflictCopy.revision);
+    }
+    const stored = { ...remote, ownerScope: this.ownerScope };
+    this.state.savedEntities[remote.id] = stored;
+    delete this.state.tombstones[tombstoneKey('saved_entity', remote.id)];
+    this.state.revision += 1;
+    return {
+      result: { record: stored, conflictCopy },
+      changed: true,
+      conflict: Boolean(conflictCopy),
+    };
+  }
+
   async applyRemoteSavedEntity(remote: SavedEntityV1): Promise<TripRepositoryRemoteResult<SavedEntityV1>> {
     return this.serialize(async () => {
-      if (!isSavedEntity(remote)) throw new Error('Remote saved entity is invalid');
-      if (remote.ownerScope !== this.ownerScope) {
-        throw new Error(`Remote saved entity owner scope ${remote.ownerScope} does not match ${this.ownerScope}`);
-      }
-      if (finiteNumber(remote.revision) == null || finiteNumber(remote.createdAt) == null || finiteNumber(remote.updatedAt) == null) {
-        throw new Error('Remote saved entity revision and timestamps are required');
-      }
-      const local = this.state.savedEntities[remote.id];
-      const localTombstone = this.state.tombstones[tombstoneKey('saved_entity', remote.id)];
-      const localRevision = Math.max(local?.revision ?? 0, localTombstone?.revision ?? 0);
-      if (localRevision > remote.revision || Boolean(localTombstone && localTombstone.revision === remote.revision)) {
-        return { record: local ?? remote };
-      }
-      const dirtyEntries = this.state.outbox.filter(entry => entry.entityType === 'saved_entity'
-        && entry.entityId === remote.id
-        && entry.operation !== 'delete');
-      let conflictCopy: SavedEntityV1 | undefined;
-      if (local && dirtyEntries.length > 0 && comparableJson(local) !== comparableJson(remote)) {
-        const now = this.now();
-        const conflictId = this.createId('entity_conflict');
-        conflictCopy = normalizedEntity({
-          ...local,
-          id: conflictId,
-          title: `${local.title} (local changes)`,
-          facts: { ...(local.facts ?? {}), remoteReconciliationConflict: { originalId: local.id } },
-          createdAt: local.createdAt,
-        }, this.ownerScope, now, 1);
-        this.state.savedEntities[conflictId] = conflictCopy;
-        const dirtyIds = new Set(dirtyEntries.map(entry => entry.id));
-        this.state.outbox = this.state.outbox.filter(entry => !dirtyIds.has(entry.id));
-        this.enqueueOutbox('saved_entity', conflictId, 'upsert', conflictCopy, conflictCopy.revision);
-      }
-      const stored = { ...remote, ownerScope: this.ownerScope };
-      this.state.savedEntities[remote.id] = stored;
-      delete this.state.tombstones[tombstoneKey('saved_entity', remote.id)];
-      this.state.revision += 1;
-      await this.persist();
-      return { record: stored, conflictCopy };
+      this.validateRemoteSavedEntity(remote);
+      const mutation = this.applyRemoteSavedEntityMutation(remote);
+      if (mutation.changed) await this.persist();
+      return mutation.result;
     });
   }
 
@@ -1162,41 +1228,58 @@ export class TripRepository {
     deletedAt = this.now(),
   ): Promise<{ deleted: boolean; ignored?: boolean; conflictCopy?: TripDocumentV2 }> {
     return this.serialize(async () => {
-      const local = this.state.trips[id];
-      const currentTombstone = this.state.tombstones[tombstoneKey('trip', id)];
-      const cleanRevision = Math.max(1, Math.round(finiteNumber(revision) ?? 1));
-      const localRevision = Math.max(local?.revision ?? 0, currentTombstone?.revision ?? 0);
-      if (localRevision > cleanRevision) return { deleted: false, ignored: true };
-      if (!local && currentTombstone?.revision === cleanRevision) return { deleted: true };
-      const dirtyEntries = this.state.outbox.filter(entry => entry.entityType === 'trip' && entry.entityId === id);
-      const dirtyUpserts = dirtyEntries.filter(entry => entry.operation !== 'delete');
-      let conflictCopy: TripDocumentV2 | undefined;
-      if (local && dirtyUpserts.length > 0) {
-        const now = this.now();
-        const conflictId = this.createId('trip_conflict');
-        conflictCopy = normalizedTrip({
-          ...local,
-          id: conflictId,
-          title: `${local.title} (local changes)`,
-          legacy: { source: 'remote_deletion_conflict', payload: { originalId: local.id } },
-          createdAt: local.createdAt,
-        }, this.ownerScope, now, 1);
-        this.state.trips[conflictId] = conflictCopy;
-        this.enqueueOutbox('trip', conflictId, 'upsert', conflictCopy, conflictCopy.revision);
-      }
-      const dirtyIds = new Set(dirtyEntries.map(entry => entry.id));
-      this.state.outbox = this.state.outbox.filter(entry => !dirtyIds.has(entry.id));
-      delete this.state.trips[id];
-      this.state.tombstones[tombstoneKey('trip', id)] = {
-        entityType: 'trip',
-        entityId: id,
-        revision: cleanRevision,
-        deletedAt: finiteNumber(deletedAt) ?? this.now(),
-      };
-      this.state.revision += 1;
-      await this.persist();
-      return { conflictCopy, deleted: true };
+      const mutation = this.applyRemoteTripTombstoneMutation(id, revision, deletedAt);
+      if (mutation.changed) await this.persist();
+      return mutation.result;
     });
+  }
+
+  private applyRemoteTripTombstoneMutation(
+    id: string,
+    revision: number,
+    deletedAt: number,
+  ): RemoteMutationResult<{ deleted: boolean; ignored?: boolean; conflictCopy?: TripDocumentV2 }> {
+    const local = this.state.trips[id];
+    const currentTombstone = this.state.tombstones[tombstoneKey('trip', id)];
+    const cleanRevision = Math.max(1, Math.round(finiteNumber(revision) ?? 1));
+    const localRevision = Math.max(local?.revision ?? 0, currentTombstone?.revision ?? 0);
+    if (localRevision > cleanRevision) {
+      return { result: { deleted: false, ignored: true }, changed: false, conflict: false };
+    }
+    if (!local && currentTombstone?.revision === cleanRevision) {
+      return { result: { deleted: true }, changed: false, conflict: false };
+    }
+    const dirtyEntries = this.state.outbox.filter(entry => entry.entityType === 'trip' && entry.entityId === id);
+    const dirtyUpserts = dirtyEntries.filter(entry => entry.operation !== 'delete');
+    let conflictCopy: TripDocumentV2 | undefined;
+    if (local && dirtyUpserts.length > 0) {
+      const now = this.now();
+      const conflictId = this.createId('trip_conflict');
+      conflictCopy = normalizedTrip({
+        ...local,
+        id: conflictId,
+        title: `${local.title} (local changes)`,
+        legacy: { source: 'remote_deletion_conflict', payload: { originalId: local.id } },
+        createdAt: local.createdAt,
+      }, this.ownerScope, now, 1);
+      this.state.trips[conflictId] = conflictCopy;
+      this.enqueueOutbox('trip', conflictId, 'upsert', conflictCopy, conflictCopy.revision);
+    }
+    const dirtyIds = new Set(dirtyEntries.map(entry => entry.id));
+    this.state.outbox = this.state.outbox.filter(entry => !dirtyIds.has(entry.id));
+    delete this.state.trips[id];
+    this.state.tombstones[tombstoneKey('trip', id)] = {
+      entityType: 'trip',
+      entityId: id,
+      revision: cleanRevision,
+      deletedAt: finiteNumber(deletedAt) ?? this.now(),
+    };
+    this.state.revision += 1;
+    return {
+      result: { conflictCopy, deleted: true },
+      changed: true,
+      conflict: Boolean(conflictCopy),
+    };
   }
 
   async applyRemoteSavedEntityTombstone(
@@ -1205,40 +1288,111 @@ export class TripRepository {
     deletedAt = this.now(),
   ): Promise<{ deleted: boolean; ignored?: boolean; conflictCopy?: SavedEntityV1 }> {
     return this.serialize(async () => {
-      const local = this.state.savedEntities[id];
-      const currentTombstone = this.state.tombstones[tombstoneKey('saved_entity', id)];
-      const cleanRevision = Math.max(1, Math.round(finiteNumber(revision) ?? 1));
-      const localRevision = Math.max(local?.revision ?? 0, currentTombstone?.revision ?? 0);
-      if (localRevision > cleanRevision) return { deleted: false, ignored: true };
-      if (!local && currentTombstone?.revision === cleanRevision) return { deleted: true };
-      const dirtyEntries = this.state.outbox.filter(entry => entry.entityType === 'saved_entity' && entry.entityId === id);
-      const dirtyUpserts = dirtyEntries.filter(entry => entry.operation !== 'delete');
-      let conflictCopy: SavedEntityV1 | undefined;
-      if (local && dirtyUpserts.length > 0) {
-        const now = this.now();
-        const conflictId = this.createId('entity_conflict');
-        conflictCopy = normalizedEntity({
-          ...local,
-          id: conflictId,
-          title: `${local.title} (local changes)`,
-          facts: { ...(local.facts ?? {}), remoteDeletionConflict: { originalId: local.id } },
-          createdAt: local.createdAt,
-        }, this.ownerScope, now, 1);
-        this.state.savedEntities[conflictId] = conflictCopy;
-        this.enqueueOutbox('saved_entity', conflictId, 'upsert', conflictCopy, conflictCopy.revision);
+      const mutation = this.applyRemoteSavedEntityTombstoneMutation(id, revision, deletedAt);
+      if (mutation.changed) await this.persist();
+      return mutation.result;
+    });
+  }
+
+  private applyRemoteSavedEntityTombstoneMutation(
+    id: string,
+    revision: number,
+    deletedAt: number,
+  ): RemoteMutationResult<{ deleted: boolean; ignored?: boolean; conflictCopy?: SavedEntityV1 }> {
+    const local = this.state.savedEntities[id];
+    const currentTombstone = this.state.tombstones[tombstoneKey('saved_entity', id)];
+    const cleanRevision = Math.max(1, Math.round(finiteNumber(revision) ?? 1));
+    const localRevision = Math.max(local?.revision ?? 0, currentTombstone?.revision ?? 0);
+    if (localRevision > cleanRevision) {
+      return { result: { deleted: false, ignored: true }, changed: false, conflict: false };
+    }
+    if (!local && currentTombstone?.revision === cleanRevision) {
+      return { result: { deleted: true }, changed: false, conflict: false };
+    }
+    const dirtyEntries = this.state.outbox.filter(entry => entry.entityType === 'saved_entity' && entry.entityId === id);
+    const dirtyUpserts = dirtyEntries.filter(entry => entry.operation !== 'delete');
+    let conflictCopy: SavedEntityV1 | undefined;
+    if (local && dirtyUpserts.length > 0) {
+      const now = this.now();
+      const conflictId = this.createId('entity_conflict');
+      conflictCopy = normalizedEntity({
+        ...local,
+        id: conflictId,
+        title: `${local.title} (local changes)`,
+        facts: { ...(local.facts ?? {}), remoteDeletionConflict: { originalId: local.id } },
+        createdAt: local.createdAt,
+      }, this.ownerScope, now, 1);
+      this.state.savedEntities[conflictId] = conflictCopy;
+      this.enqueueOutbox('saved_entity', conflictId, 'upsert', conflictCopy, conflictCopy.revision);
+    }
+    const dirtyIds = new Set(dirtyEntries.map(entry => entry.id));
+    this.state.outbox = this.state.outbox.filter(entry => !dirtyIds.has(entry.id));
+    delete this.state.savedEntities[id];
+    this.state.tombstones[tombstoneKey('saved_entity', id)] = {
+      entityType: 'saved_entity',
+      entityId: id,
+      revision: cleanRevision,
+      deletedAt: finiteNumber(deletedAt) ?? this.now(),
+    };
+    this.state.revision += 1;
+    return {
+      result: { conflictCopy, deleted: true },
+      changed: true,
+      conflict: Boolean(conflictCopy),
+    };
+  }
+
+  async applyRemoteBatch(
+    items: TripRepositoryRemoteBatchItem[],
+    options: TripRepositoryRemoteBatchOptions = {},
+  ): Promise<TripRepositoryRemoteBatchResult> {
+    const expectedOwnerScope = normalizeTripRepositoryScope(options.expectedOwnerScope ?? this.ownerScope);
+    return this.serialize(async () => {
+      if (this.ownerScope !== expectedOwnerScope) {
+        throw new Error(`Trip repository owner scope changed from ${expectedOwnerScope} to ${this.ownerScope}`);
       }
-      const dirtyIds = new Set(dirtyEntries.map(entry => entry.id));
-      this.state.outbox = this.state.outbox.filter(entry => !dirtyIds.has(entry.id));
-      delete this.state.savedEntities[id];
-      this.state.tombstones[tombstoneKey('saved_entity', id)] = {
-        entityType: 'saved_entity',
-        entityId: id,
-        revision: cleanRevision,
-        deletedAt: finiteNumber(deletedAt) ?? this.now(),
+
+      for (const item of items) {
+        if (item.kind === 'trip') this.validateRemoteTrip(item.record);
+        else if (item.kind === 'saved_entity') this.validateRemoteSavedEntity(item.record);
+      }
+
+      const committedState = this.state;
+      const stagedState: PersistedRepositoryStateV2 = {
+        ...committedState,
+        trips: { ...committedState.trips },
+        savedEntities: { ...committedState.savedEntities },
+        tombstones: { ...committedState.tombstones },
+        outbox: [...committedState.outbox],
       };
-      this.state.revision += 1;
-      await this.persist();
-      return { conflictCopy, deleted: true };
+      let changed = 0;
+      let conflicts = 0;
+      try {
+        // The mutation helpers are synchronous. Stage against a detached state,
+        // then restore the committed state before the first await so direct
+        // getters and subscribers cannot observe an unpersisted page.
+        this.state = stagedState;
+        for (const item of items) {
+          const mutation = item.kind === 'trip'
+            ? this.applyRemoteTripMutation(item.record)
+            : item.kind === 'saved_entity'
+              ? this.applyRemoteSavedEntityMutation(item.record)
+              : item.kind === 'trip_tombstone'
+                ? this.applyRemoteTripTombstoneMutation(item.id, item.revision, item.deletedAt ?? this.now())
+                : this.applyRemoteSavedEntityTombstoneMutation(item.id, item.revision, item.deletedAt ?? this.now());
+          if (mutation.changed) changed += 1;
+          if (mutation.conflict) conflicts += 1;
+        }
+      } finally {
+        this.state = committedState;
+      }
+
+      if (changed > 0) {
+        await this.storage.write(this.ownerScopeKey, JSON.stringify(stagedState));
+        this.state = stagedState;
+        this.emit();
+      }
+      return { processed: items.length, changed, conflicts };
     });
   }
 

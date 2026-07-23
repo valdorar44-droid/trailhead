@@ -4379,6 +4379,8 @@ function GuideScreenContent() {
         name: title,
         lat: Number(lat),
         lng: Number(lng),
+        type: place.summary.category || place.category || 'place',
+        displayType: place.summary.category || place.category || mapCategory,
         category: mapCategory,
         region: place.card?.region,
         summary: place.profile.summary || place.profile.hook || place.summary.short_description || place.summary.hook,

@@ -1,0 +1,76 @@
+appId: ${APP_ID}
+name: Map place sheet drills into things to see and visitor information
+tags:
+  - search
+  - map
+  - sheets
+  - related
+  - nps
+  - current-selectors
+---
+- launchApp:
+    clearState: false
+    stopApp: true
+- tapOn: "Map tab"
+- extendedWaitUntil:
+    visible:
+      id: "map.search.inline.input"
+    timeout: 20000
+- tapOn:
+    id: "map.search.inline.input"
+- eraseText: 80
+- inputText: "Yosemite National Park"
+- extendedWaitUntil:
+    visible:
+      id: "map.search.inline.result.place:nps:yose"
+    timeout: 30000
+- tapOn:
+    id: "map.search.inline.result.place:nps:yose"
+- extendedWaitUntil:
+    visible:
+      id: "place-sheet-place-place-place-nps-yose-content"
+    timeout: 15000
+- scrollUntilVisible:
+    element:
+      id: "place-sheet-place-place-place-nps-yose-related.things-to-see"
+    direction: DOWN
+    timeout: 30000
+    speed: 65
+- tapOn:
+    id: "place-sheet-place-place-place-nps-yose-related.things-to-see.item.explore-place-nps-child-yose-places-anderson-cabin"
+- extendedWaitUntil:
+    visible:
+      id: "place-sheet-place-place-explore-place-nps-child-yose-places-anderson-cabin-content"
+    timeout: 15000
+- assertVisible: "Anderson Cabin"
+- assertVisible: "Place to see"
+- assertVisible: "Tourist parties provided business.*"
+- takeScreenshot: map-related-thing-to-see-sheet
+- pressKey: Back
+- extendedWaitUntil:
+    visible:
+      id: "place-sheet-place-place-place-nps-yose-content"
+    timeout: 15000
+- scrollUntilVisible:
+    element:
+      id: "place-sheet-place-place-place-nps-yose-related.visitor-centers"
+    direction: DOWN
+    timeout: 30000
+    speed: 65
+- tapOn:
+    id: "place-sheet-place-place-place-nps-yose-related.visitor-centers.item.explore-place-nps-child-yose-visitorcenters-big-oak-flat-information-station"
+- extendedWaitUntil:
+    visible:
+      id: "place-sheet-place-place-explore-place-nps-child-yose-visitorcenters-big-oak-flat-information-station-content"
+    timeout: 15000
+- assertVisible: "Big Oak Flat Information Station"
+- assertVisible: "Visitor Center"
+- assertVisible: ".*information desk.*"
+- takeScreenshot: map-related-visitor-center-sheet
+- pressKey: Back
+- extendedWaitUntil:
+    visible:
+      id: "place-sheet-place-place-place-nps-yose-content"
+    timeout: 15000
+- assertVisible: "Yosemite National Park"
+- takeScreenshot: map-related-nps-parent-return

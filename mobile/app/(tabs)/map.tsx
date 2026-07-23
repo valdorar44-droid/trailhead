@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useMemo, useCallback, useReducer, Component, forwardRef, useImperativeHandle, type ForwardRefExoticComponent, type RefAttributes } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Linking, Animated, TextInput, ActivityIndicator, Modal, Image, Share, Alert, AppState, Keyboard, KeyboardAvoidingView, Platform, PanResponder, useWindowDimensions, InteractionManager, type ViewProps } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Linking, Animated, TextInput, ActivityIndicator, Modal, Image, Share, Alert, AppState, BackHandler, Keyboard, KeyboardAvoidingView, Platform, PanResponder, useWindowDimensions, InteractionManager, type ViewProps } from 'react-native';
 import { requireOptionalNativeModule } from 'expo-modules-core';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { NativeMapDebugEvent, NativeMapHandle } from '@/components/NativeMap';
@@ -9968,8 +9968,9 @@ function MapScreen() {
         name: explore.name,
         lat: explore.lat,
         lng: explore.lng,
-        type: 'place',
-        subtype: explore.category || 'Explore area',
+        type: explore.type || 'place',
+        subtype: explore.displayType || explore.category || 'Explore area',
+        display_type: explore.displayType || explore.category || undefined,
         source: 'trailhead_explore',
         source_label: sourceLabel,
         summary: explore.summary || explore.note || '',
@@ -21375,6 +21376,15 @@ function MapScreen() {
     postWebMessage(JSON.stringify({ type: 'fly_to', lat: parent.place.lat, lng: parent.place.lng, name: parent.place.name }));
   }
 
+  useEffect(() => {
+    if (!relatedPlaceReturnStack.length) return;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      restoreRelatedPlaceParent();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [relatedPlaceReturnStack]);
+
   function openNearbyPlace(place: OsmPoi, day?: number | null) {
     setSelectedCamp(null);
     setShowCampDetail(false);
@@ -27006,6 +27016,7 @@ function MapScreen() {
           selectedCampRef.current = camp;
           setCampDetail(null); setCampInsight(null); setWikiArticles([]);
           setCampFullness(null); setCampWeather(null);
+          loadSelectedCampAmbient(camp);
           nativeMapRef.current?.flyTo(camp.lat, camp.lng, 12, camp.name);
           postWebMessage(JSON.stringify({ type: 'fly_to', lat: camp.lat, lng: camp.lng, name: camp.name }));
         }}
@@ -27263,7 +27274,7 @@ function MapScreen() {
               return (
               <>
 	                {summaryText ? (
-	                  <View style={s.detailSection}>
+	                  <View style={s.detailSection} testID={`${selectedCampSheetModel!.testID}-summary`}>
 	                    <Text style={s.detailSectionTitle}>Summary</Text>
 	                    <ExpandableDetailText text={summaryText} style={s.detailDesc} linkColor={C.orange} />
 	                  </View>

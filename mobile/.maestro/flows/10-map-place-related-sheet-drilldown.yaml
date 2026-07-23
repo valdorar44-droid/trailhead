@@ -45,8 +45,7 @@ tags:
 - assertVisible: "The Badger Pass Ski Area.*"
 - assertVisible: "Navigate"
 - takeScreenshot: map-related-place-sheet-drilldown
-- tapOn:
-    id: "place-sheet-place-place-explore-place-nps-child-yose-thingstodo-go-skiing-at-badger-pass-back"
+- pressKey: Back
 - extendedWaitUntil:
     visible:
       id: "place-sheet-place-place-place-nps-yose-content"

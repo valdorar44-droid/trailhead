@@ -179,6 +179,13 @@ function relatedToSourcePackLike(item?: RelatedContextPlace | null): SourcePackL
   };
 }
 
+function hasCanonicalDisplayType(item: RelatedContextPlace | null | undefined, expected: string) {
+  const id = String(item?.id || '').toLowerCase();
+  const source = String(item?.source || '').toLowerCase();
+  const canonical = source === 'trailhead_explore' || id.startsWith('explore:place:');
+  return canonical && compactText(item?.display_type).toLowerCase() === expected;
+}
+
 export function relatedPlaceCanShow(item?: RelatedContextPlace | null) {
   if (!item?.name) return false;
   return sourcePackItemCanShow(relatedToSourcePackLike(item)) && !sourcePackItemLooksLikeSpeciesProfile(relatedToSourcePackLike(item));
@@ -216,11 +223,12 @@ export function relatedThingToDoCanShow(item?: RelatedContextPlace | null) {
   return relatedPlaceCanShow(item)
     && !relatedPlaceLooksLikeGenericRoad(item)
     && !/\bpodcast\b/i.test(itemTitle(like))
-    && sourcePackItemLooksLikeActivity(like);
+    && (hasCanonicalDisplayType(item, 'activity') || sourcePackItemLooksLikeActivity(like));
 }
 
 export function relatedThingToSeeCanShow(item?: RelatedContextPlace | null) {
-  return relatedPlaceCanShow(item) && sourcePackThingToSeeCanShow(relatedToSourcePackLike(item));
+  return relatedPlaceCanShow(item)
+    && (hasCanonicalDisplayType(item, 'place to see') || sourcePackThingToSeeCanShow(relatedToSourcePackLike(item)));
 }
 
 export function uniqueRelatedPlaces<T extends RelatedContextPlace>(items: T[]) {

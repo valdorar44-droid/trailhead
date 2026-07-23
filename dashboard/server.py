@@ -29684,13 +29684,13 @@ def _map_card_base_from_request(body: MapCardResolveRequest) -> dict:
 
 
 def _canonical_search_explore_card(body: MapCardResolveRequest) -> dict | None:
-    """Return the exact Explore record behind a canonical Search V2 row.
+    """Return the exact Explore record behind a trusted canonical selection.
 
-    Search rows intentionally keep a stable ``place:*`` identity. Hydrating
-    that identity here prevents generic nearby/town enrichment from replacing
-    authoritative type, photo, description, and official-link fields.
+    Search rows and Explore-to-Map handoffs keep stable ``place:*`` identities.
+    Hydrating that identity here prevents generic nearby/town enrichment from
+    replacing authoritative type, photo, description, and official-link fields.
     """
-    if str(body.source or "").strip().lower() != "trailhead_search":
+    if str(body.source or "").strip().lower() not in {"trailhead_search", "trailhead_explore"}:
         return None
     candidates: list[str] = []
     for value in (body.place_id, body.provider_place_id, body.id):
@@ -30505,7 +30505,7 @@ def _map_card_cache_key(body: MapCardResolveRequest) -> str:
         f"{float(body.lat):.4f}",
         f"{float(body.lng):.4f}",
     ])
-    return f"map_card_v13:{hashlib.sha1(base.encode()).hexdigest()[:24]}"
+    return f"map_card_v14:{hashlib.sha1(base.encode()).hexdigest()[:24]}"
 
 
 def _contains_restricted_provider(value: object) -> bool:

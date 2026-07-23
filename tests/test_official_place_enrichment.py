@@ -347,7 +347,7 @@ class OfficialPlaceEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["related"]["things_to_do"][0]["name"], "Volleyball Camp")
         self.assertEqual(result["related"]["context_status"]["rail_counts"]["things_to_do"], 1)
 
-    async def test_canonical_search_park_keeps_exact_catalog_classification_and_media(self):
+    async def test_canonical_search_and_explore_park_keep_exact_catalog_classification_and_media(self):
         catalog_place = {
             "id": "place:nps:yell",
             "summary": {
@@ -383,28 +383,33 @@ class OfficialPlaceEndpointTests(unittest.IsolatedAsyncioTestCase):
             patch.object(server, "trails_discover", new=AsyncMock(return_value={"trails": []})),
             patch.object(server, "_open_town_profile", new=town_profile),
         ):
-            body = server.MapCardResolveRequest(
-                kind="place",
-                id="place:nps:yell",
-                place_id="place:nps:yell",
-                source="trailhead_search",
-                source_label="National Park Service",
-                name="Yellowstone National Park",
-                lat=44.5982442,
-                lng=-110.5471695,
-                type="park",
-                subtype="park",
-            )
-            result = await server.resolve_map_card(body, user=None)
+            results = []
+            bodies = []
+            for source in ("trailhead_search", "trailhead_explore"):
+                body = server.MapCardResolveRequest(
+                    kind="place",
+                    id="place:nps:yell",
+                    place_id="place:nps:yell",
+                    source=source,
+                    source_label="National Park Service",
+                    name="Yellowstone National Park",
+                    lat=44.5982442,
+                    lng=-110.5471695,
+                    type="park",
+                    subtype="park",
+                )
+                bodies.append(body)
+                results.append(await server.resolve_map_card(body, user=None))
 
-        self.assertEqual(result["card"]["id"], "place:nps:yell")
-        self.assertEqual(result["card"]["type"], "park")
-        self.assertEqual(result["card"]["display_type"], "Park")
-        self.assertEqual(result["card"]["photo_url"], catalog_card["photo_url"])
-        self.assertEqual(result["card"]["official_url"], catalog_card["official_url"])
-        self.assertNotIn("town_profile", result["card"])
+        for result in results:
+            self.assertEqual(result["card"]["id"], "place:nps:yell")
+            self.assertEqual(result["card"]["type"], "park")
+            self.assertEqual(result["card"]["display_type"], "Park")
+            self.assertEqual(result["card"]["photo_url"], catalog_card["photo_url"])
+            self.assertEqual(result["card"]["official_url"], catalog_card["official_url"])
+            self.assertNotIn("town_profile", result["card"])
         town_profile.assert_not_awaited()
-        self.assertTrue(server._map_card_cache_key(body).startswith("map_card_v13:"))
+        self.assertTrue(all(server._map_card_cache_key(body).startswith("map_card_v14:") for body in bodies))
 
     def test_canonical_nps_children_fill_real_related_sheet_rails(self):
         children = [

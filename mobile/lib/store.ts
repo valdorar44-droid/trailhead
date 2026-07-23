@@ -591,6 +591,8 @@ export interface ExploreMapSelection {
   name: string;
   lat: number;
   lng: number;
+  type?: string;
+  displayType?: string;
   category?: string;
   region?: string;
   summary?: string;

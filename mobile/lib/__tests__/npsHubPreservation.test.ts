@@ -12,6 +12,7 @@ import {
   resolveNpsHubLevel,
   restoreNpsHubListFromMap,
 } from './support/npsHubPreservation';
+import { relatedThingToDoCanShow, relatedThingToSeeCanShow } from '../exploreContextFilters';
 
 test('NPS hub evidence covers direct, one-group, and two-group hierarchies', () => {
   assert.deepEqual(
@@ -45,6 +46,21 @@ test('production source-pack children retain canonical identity in the main-map 
   assert.doesNotMatch(handoff, /closeSelectedExplore\(\);/);
   assert.match(
     guideSource,
+    /type: place\.summary\.category \|\| place\.category \|\| 'place'/,
+    'Explore hands the canonical semantic entity type to the main map',
+  );
+  assert.match(
+    guideSource,
+    /displayType: place\.summary\.category \|\| place\.category \|\| mapCategory/,
+    'Explore hands the user-facing canonical type to the main map',
+  );
+  assert.match(
+    readFileSync(resolve(testDirectory, '../../app/(tabs)/map.tsx'), 'utf8'),
+    /type: explore\.type \|\| 'place',[\s\S]*?display_type: explore\.displayType \|\| explore\.category \|\| undefined/,
+    'the main map preserves the Explore semantic type instead of flattening every entity to place',
+  );
+  assert.match(
+    guideSource,
     /visible=\{!!selectedExplore && !selectedExploreSuspendedForMap\}/,
     'the hub remains mounted while the main map is visible',
   );
@@ -63,6 +79,29 @@ test('production source-pack children retain canonical identity in the main-map 
     /onNavigationStateChange=\{setSelectedExploreNavigation\}/,
     'the restored Explore sheet must receive the same controlled navigation state',
   );
+});
+
+test('official canonical rail labels survive client filtering without keyword guessing', () => {
+  assert.equal(relatedThingToDoCanShow({
+    id: 'explore:place:nps-child:yose:thingstodo:junior-ranger',
+    name: 'Junior Ranger Day',
+    lat: 37.8,
+    lng: -119.5,
+    type: 'attraction',
+    display_type: 'Activity',
+    source: 'trailhead_explore',
+    summary: 'A ranger-led park activity.',
+  }), true);
+  assert.equal(relatedThingToSeeCanShow({
+    id: 'explore:place:nps-child:yose:places:anderson-cabin',
+    name: 'Anderson Cabin',
+    lat: 37.8,
+    lng: -119.5,
+    type: 'attraction',
+    display_type: 'Place to see',
+    source: 'trailhead_explore',
+    summary: 'A documented historic place in Yosemite.',
+  }), true);
 });
 
 for (const fixture of NPS_HUB_PRESERVATION_FIXTURES) {

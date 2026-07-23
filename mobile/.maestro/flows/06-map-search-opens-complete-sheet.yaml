@@ -28,8 +28,13 @@ tags:
     visible:
       id: "place-sheet-place-place-place-nps-yell-content"
     timeout: 10000
-- assertVisible: "Navigate"
 - assertVisible: "Park"
 - assertVisible:
     id: "place-sheet-place-place-place-nps-yell-content"
+- scrollUntilVisible:
+    element: "Navigate"
+    direction: DOWN
+    timeout: 20000
+    speed: 65
+- assertVisible: "Navigate"
 - takeScreenshot: map-search-complete-place-sheet

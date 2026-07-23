@@ -13,6 +13,7 @@ import {
   checkedStateFromNode,
   classifyActiveMapSession,
   evaluateMemoryGate,
+  horizontalCarouselSwipePoints,
   median,
   parseMemoryGateArgs,
   restoreCapturedHeavyLayers,
@@ -25,6 +26,21 @@ assert.equal(MAP_LAYER_CYCLE_COUNT, 10);
 assert.equal(MAX_TOTAL_PSS_KB, 512_000);
 assert.equal(MAX_GROWTH_PERCENT, 10);
 assert.deepEqual(HEAVY_MAP_LAYER_KEYS, ['3d', 'lands', 'usgs', 'pois', 'trails', 'fire', 'ava', 'radar', 'mvum']);
+
+const phoneCarouselBounds = { left: 0, top: 1_200, right: 720, bottom: 1_500 };
+assert.deepEqual(
+  horizontalCarouselSwipePoints(phoneCarouselBounds, 'forward'),
+  [480, 1_350, 240, 1_350],
+  'the gate must advance less than one layer card so a clipped middle card cannot be skipped',
+);
+assert.deepEqual(
+  horizontalCarouselSwipePoints(phoneCarouselBounds, 'reverse'),
+  [240, 1_350, 480, 1_350],
+);
+assert.throws(
+  () => horizontalCarouselSwipePoints({ left: 0, top: 0, right: 70, bottom: 100 }, 'forward'),
+  error => error instanceof MemoryGateError && error.code === 'carousel_bounds_unavailable',
+);
 
 const parsed = parseMemoryGateArgs([
   '--serial', 'RFCR408DA9B',

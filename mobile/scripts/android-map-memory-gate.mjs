@@ -371,17 +371,27 @@ function tapNode(adb, serial, node) {
   });
 }
 
-function swipeWithin(adb, serial, bounds, direction, durationMs = 220) {
+export function horizontalCarouselSwipePoints(bounds, direction) {
   if (!bounds || bounds.right - bounds.left < 80 || bounds.bottom - bounds.top < 24) {
     throw new MemoryGateError('carousel_bounds_unavailable');
   }
-  const inset = Math.max(12, Math.floor((bounds.right - bounds.left) * 0.14));
-  const left = bounds.left + inset;
-  const right = bounds.right - inset;
+  const width = bounds.right - bounds.left;
+  // Move by less than one phone-sized layer card. A near-full-width swipe can
+  // jump from the third card to the fifth card, leaving the fourth card's
+  // accessibility node clipped out on both frames and making the gate report
+  // a false missing-layer failure.
+  const travel = Math.min(240, Math.max(56, Math.floor(width * 0.34)), width - 24);
+  const centerX = Math.floor((bounds.left + bounds.right) / 2);
+  const left = Math.floor(centerX - travel / 2);
+  const right = Math.ceil(centerX + travel / 2);
   const y = Math.floor((bounds.top + bounds.bottom) / 2);
-  const points = direction === 'forward'
+  return direction === 'forward'
     ? [right, y, left, y]
     : [left, y, right, y];
+}
+
+function swipeWithin(adb, serial, bounds, direction, durationMs = 220) {
+  const points = horizontalCarouselSwipePoints(bounds, direction);
   runAdb(adb, deviceArgs(serial, ['shell', 'input', 'swipe', ...points.map(String), String(durationMs)]), {
     failureCode: 'carousel_swipe_failed',
   });

@@ -323,14 +323,33 @@ Read this file before resuming the 1.0.10 overhaul after a restart or context co
 - Open P0/P1 defects reproduced on this candidate: none. Remaining release evidence debt: final frozen-candidate Memory Gate V3, Search V2 production-like latency sampling, paired iOS M2 delta, and later full regression.
 - Task-owned background processes: none. Maestro and the Gradle daemon were stopped; only ADB remains intentionally active. The long-lived Codex MCP processes and pre-existing localhost forwarder are not Trailhead test jobs.
 
+## Checkpoint M3.1 — Layer parity and stable Explore module registry
+
+- Timestamp: `2026-07-23T12:52:00-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; implementation HEAD: `9796809387af9d186aa3e48384fc5bbf9bd9651b`. No preview OTA was published for this partial M3 checkpoint.
+- Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; `.cursor/` and `dashboard/explore_serving_index_v2.json` remain excluded and unstaged.
+- The existing, user-verified Layers gallery remains the rendered UI. `mapLayerRegistry.ts` now owns exact ordered descriptors for all 10 base styles, 10 premium styles, 10 overlays, and 5 tools, including internal availability, source/freshness, offline capability, and legend metadata. Dynamic state and handlers bind to that registry instead of duplicating display inventory.
+- Exact-key registry tests prevent silently dropping 3D, public land, topo, places, trails, Water Safety, wildfire, avalanche, radar, MVUM, Offline entry, styles, or map tools during the later presentation migration.
+- Explore detail modules now use one typed canonical order and a per-place/data-revision registry. Same-revision enrichment may add or improve modules but cannot make an already-visible tab disappear. A genuine new data revision may remove a module; if the selected module is removed, the UI shows `Section unavailable` and an explicit return to overview instead of silently swapping screens.
+- No park module is fabricated. Existing adaptive NPS list → detail → map → back behavior, exact-place media policy, source content, and scroll/search/child return state remain unchanged.
+- The generic `PlaceSheetShell`, `SheetCoordinator`, stable identity adapters, stale-enrichment generation checks, and campground parity contract were already present before this checkpoint. Their characterization tests pass; do not rewrite them as new work.
+- Focused verification passed:
+  - Layer registry `2/2` and layers/filters routing `2/2`.
+  - Explore module registry `3/3`.
+  - NPS preservation/navigation `11/11`.
+  - Sheet coordinator `2/2` and place adapters `5/5`.
+  - Explore feed audit, TypeScript, copy audit (`160` files), and `git diff --check`.
+- Open P0/P1 defects reproduced by this delta: none. The next device delta should focus on the reported hub-tab glitch and unavailable-module presentation; broad Layers and NPS crawls remain unnecessary.
+- Task-owned background processes: none. No Gradle, Maestro, Metro, Expo/EAS, Railway, memory gate, or Trailhead test job remains; ADB is intentionally available.
+
 ## Next exact actions
 
 1. Review the M2 device screenshot and interaction packet without repeating the broad crawl or memory run.
-2. Begin M3 with the working Layers implementation preserved behind one exact-key registry/parity test; do not reopen manual layer functionality testing.
-3. Migrate the shared sheet chrome incrementally: generic place, campground, trail/trailhead, report, then Explore hub. Retire no old sheet until its parity test passes.
-4. Repair Explore hub tab/data-state glitches with one stable typed module registry, deterministic richness-preserving merges, explicit loading/ready/empty/error states, virtualized lists, and no fabricated NPS modules.
+2. Run the narrow Android hub delta against the next paired preview: list → module → child → map → back, same-revision enrichment, and explicit unavailable-module recovery.
+3. Continue sheet migration from the characterized baseline: generic place is already on the shell; audit campground visual/chrome parity next without deleting its independent feature modules.
+4. Then audit trail/trailhead, report, and Explore hub shell families. Retire no old surface until its exact parity contract and device return path pass.
 5. Preserve campground site types and all existing modules, NPS hub depth, Viator external booking, comments, ratings, edits, reports, Offline, Originals, navigation, and the compass.
-6. After each M3 family, run only its deterministic delta, publish a paired preview from one immutable SHA when warranted, and append the next checkpoint.
+6. When the M3 device delta is ready, run the relevant pre-preview gate, publish one paired preview from one immutable SHA, and append the next checkpoint.
 
 ## Checkpoint maintenance
 

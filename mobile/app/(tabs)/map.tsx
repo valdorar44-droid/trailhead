@@ -21,6 +21,7 @@ import MapFilterSheet from '@/components/map/MapFilterSheet';
 import MapLegendSheet from '@/components/map/MapLegendSheet';
 import MapLayerSheetContent from '@/components/map/MapLayerSheetContent';
 import MapSearchSheet, { type MapSearchQuickAction, type MapSearchResultItem } from '@/components/map/MapSearchSheet';
+import { searchResultSubtitleV2, searchResultTrailingLabelV2 } from '@/components/search/SearchResultRowV2';
 import MapStyleSheet from '@/components/map/MapStyleSheet';
 import MapWeatherPeek from '@/components/map/MapWeatherPeek';
 import MapWeatherSheet from '@/components/map/MapWeatherSheet';
@@ -218,6 +219,8 @@ import {
   searchPlaceIsTemporary,
   searchResultV2ToDisplayPlace,
   searchResultV2ToLegacyPlace,
+  type SearchBoundsV2,
+  type SearchResultV2,
   useSearchV2Session,
 } from '@/lib/searchV2';
 import { useTabBarVisibility } from '@/lib/tabBarVisibility';
@@ -6412,6 +6415,8 @@ function MapScreen() {
   const [mapSearchSession, setMapSearchSession] = useState<ScopedMapSearchSession | null>(null);
   const [inlineSearchOpen, setInlineSearchOpen] = useState(false);
   const [showFullMapSearch, setShowFullMapSearch] = useState(false);
+  const [mapSearchViewportScope, setMapSearchViewportScope] = useState<SearchBoundsV2 | null>(null);
+  const [mapSearchAreaDirty, setMapSearchAreaDirty] = useState(false);
   const { visible: keyboardVisible } = useKeyboardInset();
   const inlineSearchInputRef = useRef<TextInput | null>(null);
   const [inlineSearchFocusRequest, setInlineSearchFocusRequest] = useState(0);
@@ -6700,11 +6705,17 @@ function MapScreen() {
   const mapSearchV2Context = useMemo(() => ({
     surface: 'map' as const,
     intent: 'any' as const,
-    scope: 'global' as const,
-    center: userLoc ? { lat: userLoc.lat, lng: userLoc.lng } : undefined,
+    scope: mapSearchViewportScope ? 'viewport' as const : 'global' as const,
+    center: mapSearchViewportScope
+      ? {
+          lat: (mapSearchViewportScope.north + mapSearchViewportScope.south) / 2,
+          lng: (mapSearchViewportScope.east + mapSearchViewportScope.west) / 2,
+        }
+      : userLoc ? { lat: userLoc.lat, lng: userLoc.lng } : undefined,
+    bounds: mapSearchViewportScope || undefined,
     include_external: true,
     limit: 10,
-  }), [userLoc?.lat, userLoc?.lng]);
+  }), [mapSearchViewportScope, userLoc?.lat, userLoc?.lng]);
   const mapSearchV2 = useSearchV2Session({
     enabled: searchV2Enabled,
     active: screenActivity.isActive && (inlineSearchOpen || showFullMapSearch) && !navMode,
@@ -6753,25 +6764,19 @@ function MapScreen() {
     showFullMapSearch,
   ]);
   const mapSearchDisplayResults = useMemo<MapSearchResultItem[]>(() => {
-    if (!searchV2Enabled) return searchResults;
+    if (searchV2Enabled) return [];
+    return searchResults;
+  }, [searchResults, searchV2Enabled]);
+  const mapSearchV2RenderResults = useMemo<SearchResultV2[]>(() => {
+    if (!searchV2Enabled) return [];
     if (!mapSearchOwnerIsCurrent) return [];
     if (normalizeSearchV2Query(searchQuery) !== mapSearchV2.state.query) return [];
-    const rows = mapSearchV2.state.results.map(result => ({
-      ...searchResultV2ToDisplayPlace(result),
-      resolving: mapSearchV2.state.resolvingResultId === result.result_id,
-    }));
-    if (mapSearchV2.state.status === 'error' && rows.length === 0) {
-      return [{ name: '__error__' }];
-    }
-    return rows;
+    return mapSearchV2.state.results;
   }, [
     mapSearchV2.state.query,
-    mapSearchV2.state.resolvingResultId,
     mapSearchV2.state.results,
-    mapSearchV2.state.status,
     mapSearchOwnerIsCurrent,
     searchQuery,
-    searchResults,
     searchV2Enabled,
   ]);
   const [waterNavLines, setWaterNavLines] = useState<WaterNavigationLinesResponse | null>(null);
@@ -10603,6 +10608,19 @@ function MapScreen() {
     setShowFullMapSearch(true);
   }
 
+  function searchCurrentMapArea() {
+    const bounds = viewportRef.current;
+    if (!bounds || normalizeSearchV2Query(searchQueryRef.current).length < 2) return;
+    setMapSearchViewportScope({
+      north: bounds.n,
+      south: bounds.s,
+      east: bounds.e,
+      west: bounds.w,
+    });
+    setMapSearchAreaDirty(false);
+    Keyboard.dismiss();
+  }
+
   function closeFullMapSearch(clear = false) {
     setShowFullMapSearch(false);
     cancelMapSearchRequest();
@@ -10610,6 +10628,8 @@ function MapScreen() {
       setSearchQuery('');
       setSearchResults([]);
       setMapSearchSession(null);
+      setMapSearchViewportScope(null);
+      setMapSearchAreaDirty(false);
       if (searchV2Enabled) mapSearchV2.setQuery('');
     }
     Keyboard.dismiss();
@@ -10622,6 +10642,8 @@ function MapScreen() {
     if (clear) {
       setSearchQuery('');
       setMapSearchSession(null);
+      setMapSearchViewportScope(null);
+      setMapSearchAreaDirty(false);
       if (searchV2Enabled) mapSearchV2.setQuery('');
     }
     Keyboard.dismiss();
@@ -23550,6 +23572,11 @@ function MapScreen() {
           }}
           onMapGesture={() => {
             const now = Date.now();
+            if (searchV2Enabled
+              && normalizeSearchV2Query(searchQueryRef.current).length >= 2
+              && (inlineSearchOpen || showFullMapSearch)) {
+              setMapSearchAreaDirty(true);
+            }
             if (trailPreviewOpen) setTrailPreviewPauseSignal(v => v + 1);
             if (navModeStateRef.current) {
               const recentlyHandled = now - lastNavMapGestureRef.current < 1200;
@@ -24431,7 +24458,11 @@ function MapScreen() {
                 setSearchQuery(text);
                 if (!inlineSearchOpen) setInlineSearchOpen(true);
                 if (mapSearchSession && normalizeScopedSearchText(text) !== mapSearchSession.query) setMapSearchSession(null);
-                if (text.trim().length < 2) setSearchResults([]);
+                if (text.trim().length < 2) {
+                  setSearchResults([]);
+                  setMapSearchViewportScope(null);
+                  setMapSearchAreaDirty(false);
+                }
               }}
               placeholder="Search places or services"
               placeholderTextColor={mapChrome.textMuted}
@@ -24469,15 +24500,53 @@ function MapScreen() {
             )}
           </View>
 
-          {inlineSearchOpen && (mapSearchDisplayResults.length > 0 || isSearching) && (
+          {inlineSearchOpen && (
+            isSearching
+            || (searchV2Enabled ? mapSearchV2RenderResults.length > 0 : mapSearchDisplayResults.length > 0)
+            || (searchV2Enabled && mapSearchV2.state.status === 'error')
+          ) && (
             <View style={[s.inlineMapSearchResults, mapChrome.toast, inlineSearchResultsMaxHeight ? { maxHeight: inlineSearchResultsMaxHeight } : null]}>
-              {isSearching && mapSearchDisplayResults.length === 0 ? (
+              {isSearching && (searchV2Enabled ? mapSearchV2RenderResults.length === 0 : mapSearchDisplayResults.length === 0) ? (
                 <View style={s.inlineMapSearchStateRow}>
                   <ActivityIndicator size="small" color={mapChrome.toastText} />
                   <Text style={[s.inlineMapSearchStateText, { color: mapChrome.textMuted }]}>Searching</Text>
                 </View>
-              ) : mapSearchDisplayResults.some(place => place.name === '__error__') ? (
+              ) : searchV2Enabled && mapSearchV2.state.status === 'error' && mapSearchV2RenderResults.length === 0 ? (
                 <Text style={[s.inlineMapSearchStateText, { color: mapChrome.textMuted }]}>Search unavailable</Text>
+              ) : !searchV2Enabled && mapSearchDisplayResults.some(place => place.name === '__error__') ? (
+                <Text style={[s.inlineMapSearchStateText, { color: mapChrome.textMuted }]}>Search unavailable</Text>
+              ) : searchV2Enabled ? (
+                mapSearchV2RenderResults.slice(0, 4).map(result => {
+                  const subtitle = searchResultSubtitleV2(result);
+                  const trailing = searchResultTrailingLabelV2(result, weatherUnitMode);
+                  return (
+                    <TouchableOpacity
+                      key={result.result_id}
+                      style={s.inlineMapSearchResultRow}
+                      onPress={() => void selectSearchResult(searchResultV2ToDisplayPlace(result))}
+                      testID={`map.search.inline.result.${result.result_id}`}
+                      activeOpacity={0.84}
+                      accessibilityRole="button"
+                      accessibilityLabel={[result.title, subtitle, trailing].filter(Boolean).join(', ')}
+                    >
+                      <View style={s.inlineMapSearchResultIcon}>
+                        {mapSearchV2.state.resolvingResultId === result.result_id ? (
+                          <ActivityIndicator size="small" color={C.orange} />
+                        ) : (
+                          <Ionicons name="location-outline" size={14} color={C.orange} />
+                        )}
+                      </View>
+                      <View style={s.inlineMapSearchResultCopy}>
+                        <Text style={[s.inlineMapSearchResultName, { color: mapChrome.toastText }]} numberOfLines={1}>
+                          {result.title}
+                        </Text>
+                        <Text style={[s.inlineMapSearchResultMeta, { color: mapChrome.textMuted }]} numberOfLines={1}>
+                          {subtitle}{trailing ? ` · ${trailing}` : ''}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })
               ) : (
                 mapSearchDisplayResults.slice(0, 4).map(place => {
                   const hasCoordinates = typeof place.lat === 'number' && Number.isFinite(place.lat)
@@ -24520,6 +24589,19 @@ function MapScreen() {
               )}
             </View>
           )}
+          {inlineSearchOpen && searchV2Enabled && mapSearchAreaDirty && normalizeSearchV2Query(searchQuery).length >= 2 ? (
+            <TouchableOpacity
+              style={[s.inlineMapSearchAreaButton, mapChrome.toast]}
+              onPress={searchCurrentMapArea}
+              testID="map.search.this-area"
+              activeOpacity={0.84}
+              accessibilityRole="button"
+              accessibilityLabel="Search this area"
+            >
+              <Ionicons name="search-outline" size={16} color={C.orange} />
+              <Text style={[s.inlineMapSearchAreaText, { color: mapChrome.toastText }]}>Search this area</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       )}
 
@@ -25736,6 +25818,16 @@ function MapScreen() {
           visible={showFullMapSearch}
           query={searchQuery}
           results={mapSearchDisplayResults}
+          searchV2Results={searchV2Enabled ? mapSearchV2RenderResults : undefined}
+          searchV2SettledQuery={mapSearchV2.state.query}
+          searchV2Mode={mapSearchV2.state.mode}
+          searchV2Status={mapSearchV2.state.status}
+          searchV2LoadingPresentation={mapSearchV2.state.loadingPresentation}
+          searchV2IsEnriching={mapSearchV2.state.isEnriching}
+          searchV2ResolvingResultId={mapSearchV2.state.resolvingResultId}
+          searchV2HasMore={mapSearchV2.state.hasMore}
+          searchV2LoadMoreError={mapSearchV2.state.loadMoreError ? 'More results could not load.' : ''}
+          unitMode={weatherUnitMode}
           searching={isSearching}
           hasLocation={!!userLoc}
           recent={searchHistory}
@@ -25743,13 +25835,18 @@ function MapScreen() {
           onQueryChange={text => {
             setSearchQuery(text);
             if (mapSearchSession && normalizeScopedSearchText(text) !== mapSearchSession.query) setMapSearchSession(null);
-            if (text.trim().length < 2) setSearchResults([]);
+            if (text.trim().length < 2) {
+              setSearchResults([]);
+              setMapSearchViewportScope(null);
+              setMapSearchAreaDirty(false);
+            }
           }}
           onSubmit={queryOverride => {
             if (queryOverride != null) setSearchQuery(queryOverride);
             searchMap(queryOverride);
           }}
           onSelect={place => { void selectSearchResult(place); }}
+          onSelectSearchV2={result => { void selectSearchResult(searchResultV2ToDisplayPlace(result)); }}
           onRoute={place => {
             if (!userLoc) {
               setQuickToast('Turn on location to preview a route.');
@@ -25768,6 +25865,25 @@ function MapScreen() {
               );
             });
           }}
+          onRouteSearchV2={result => {
+            if (!userLoc) {
+              setQuickToast('Turn on location to preview a route.');
+              setTimeout(() => setQuickToast(''), 2400);
+              return;
+            }
+            void resolvePressedMapSearchResult(searchResultV2ToDisplayPlace(result)).then(selected => {
+              if (!selected) return;
+              if (!searchPlaceIsTemporary(selected)) {
+                addSearchHistory({ name: selected.name, lat: selected.lat, lng: selected.lng, searchedAt: Date.now() });
+              }
+              setShowFullMapSearch(false);
+              previewSearchRoute(
+                { name: 'My Location', lat: userLoc.lat, lng: userLoc.lng, isCurrentLocation: true },
+                selected,
+              );
+            });
+          }}
+          onLoadMoreSearchV2={() => { void mapSearchV2.loadNextPage(); }}
           onQuickAction={action => {
             if (action.id === 'trails-in-view') {
               closeFullMapSearch(false);
@@ -25782,6 +25898,8 @@ function MapScreen() {
             setSearchQuery('');
             setSearchResults([]);
             setMapSearchSession(null);
+            setMapSearchViewportScope(null);
+            setMapSearchAreaDirty(false);
           }}
         />
       )}
@@ -30595,6 +30713,29 @@ const makeStyles = (C: ColorPalette) => {
     fontSize: 10,
     fontFamily: mono,
     letterSpacing: 0,
+  },
+  inlineMapSearchAreaButton: {
+    alignSelf: 'center',
+    minHeight: Platform.OS === 'android' ? 48 : 44,
+    marginTop: 8,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: C.orange + '77',
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 8,
+  },
+  inlineMapSearchAreaText: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '800',
   },
   scopedSearchRail: {
     position: 'absolute',

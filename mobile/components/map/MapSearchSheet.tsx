@@ -15,8 +15,16 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { TrailheadSkeletonLine } from '@/components/TrailheadUI';
+import SearchResultRowV2, { type SearchDistanceUnitMode } from '@/components/search/SearchResultRowV2';
 import { useTheme, type ColorPalette } from '@/lib/design';
 import { cleanExploreSourceLabel } from '@/lib/exploreContextFilters';
+import {
+  searchV2ShouldShowEmptyState,
+  type SearchPageModeV2,
+  type SearchResultV2,
+  type SearchV2SessionStatus,
+} from '@/lib/searchV2';
 import { trailheadFonts } from '@/lib/typography';
 
 export type MapSearchResultItem = {
@@ -49,6 +57,16 @@ type Props = {
   visible: boolean;
   query: string;
   results: MapSearchResultItem[];
+  searchV2Results?: SearchResultV2[];
+  searchV2SettledQuery?: string;
+  searchV2Mode?: SearchPageModeV2;
+  searchV2Status?: SearchV2SessionStatus;
+  searchV2LoadingPresentation?: 'none' | 'inline' | 'skeleton';
+  searchV2IsEnriching?: boolean;
+  searchV2ResolvingResultId?: string | null;
+  searchV2HasMore?: boolean;
+  searchV2LoadMoreError?: string;
+  unitMode?: SearchDistanceUnitMode;
   searching: boolean;
   hasLocation: boolean;
   recent: Array<{ name: string; lat?: number; lng?: number; source_label?: string }>;
@@ -57,6 +75,9 @@ type Props = {
   onSubmit: (query?: string) => void;
   onSelect: (place: MapSearchResultItem) => void;
   onRoute: (place: MapSearchResultItem) => void;
+  onSelectSearchV2?: (result: SearchResultV2) => void;
+  onRouteSearchV2?: (result: SearchResultV2) => void;
+  onLoadMoreSearchV2?: () => void;
   onQuickAction: (action: MapSearchQuickAction) => void;
   onClose: () => void;
   onClear: () => void;
@@ -66,6 +87,16 @@ export default function MapSearchSheet({
   visible,
   query,
   results,
+  searchV2Results,
+  searchV2SettledQuery = query,
+  searchV2Mode = 'suggest',
+  searchV2Status = 'idle',
+  searchV2LoadingPresentation = 'none',
+  searchV2IsEnriching = false,
+  searchV2ResolvingResultId = null,
+  searchV2HasMore = false,
+  searchV2LoadMoreError = '',
+  unitMode = 'auto',
   searching,
   hasLocation,
   recent,
@@ -74,6 +105,9 @@ export default function MapSearchSheet({
   onSubmit,
   onSelect,
   onRoute,
+  onSelectSearchV2,
+  onRouteSearchV2,
+  onLoadMoreSearchV2,
   onQuickAction,
   onClose,
   onClear,
@@ -83,8 +117,21 @@ export default function MapSearchSheet({
   const insets = useSafeAreaInsets();
   const inputRef = useRef<TextInput | null>(null);
   const cleanQuery = query.trim();
+  const usingSearchV2 = searchV2Results != null;
   const hasError = results.some(result => result.name === '__error__');
   const usableResults = results.filter(result => result.name !== '__error__');
+  const activeResults = usingSearchV2 ? searchV2Results : [];
+  const showInitialSkeleton = usingSearchV2
+    && searchV2LoadingPresentation === 'skeleton'
+    && activeResults.length === 0;
+  const showSearchV2Empty = usingSearchV2 && searchV2ShouldShowEmptyState({
+    displayedQuery: query,
+    settledQuery: searchV2SettledQuery,
+    status: searchV2Status,
+    isEnriching: searchV2IsEnriching,
+    resultCount: activeResults.length,
+  });
+  const showSearchAll = usingSearchV2 && searchV2Mode === 'suggest' && cleanQuery.length >= 2;
 
   useEffect(() => {
     if (!visible) return;
@@ -183,27 +230,56 @@ export default function MapSearchSheet({
               </>
             ) : null}
 
-            {cleanQuery.length >= 2 || searching || hasError || usableResults.length > 0 ? (
+            {cleanQuery.length >= 2 || searching || hasError || usableResults.length > 0 || activeResults.length > 0 ? (
               <View style={s.resultsBlock}>
                 <View style={s.resultsHeader}>
-                  <Text style={s.sectionTitle}>{cleanQuery ? 'SUGGESTIONS' : 'RESULTS'}</Text>
-                  {usableResults.length ? <Text style={s.count}>{usableResults.length}</Text> : null}
+                  <Text style={s.sectionTitle}>{usingSearchV2 && searchV2Mode === 'results' ? 'RESULTS' : 'SUGGESTIONS'}</Text>
+                  {(usingSearchV2 ? activeResults.length : usableResults.length) ? (
+                    <Text style={s.count}>{usingSearchV2 ? activeResults.length : usableResults.length}</Text>
+                  ) : null}
                 </View>
-                {searching && usableResults.length === 0 ? (
+                {showInitialSkeleton ? (
+                  <View style={s.skeletonList} testID="map.search.loading" accessibilityLabel="Loading search results">
+                    {[0, 1, 2].map(index => <MapSearchRowSkeleton key={index} styles={s} />)}
+                  </View>
+                ) : searching && (usingSearchV2 ? activeResults.length === 0 : usableResults.length === 0) ? (
                   <View style={s.stateCard} testID="map.search.loading">
                     <ActivityIndicator size="small" color={C.orange} />
-                    <Text style={s.stateText}>Looking nearby</Text>
+                    <Text style={s.stateText}>Searching</Text>
                   </View>
-                ) : hasError ? (
+                ) : usingSearchV2 && searchV2Status === 'error' && activeResults.length === 0 ? (
                   <View style={s.stateCard} testID="map.search.error">
                     <Ionicons name="cloud-offline-outline" size={18} color={C.text3} />
                     <Text style={s.stateText}>Search is not available right now.</Text>
                   </View>
-                ) : usableResults.length === 0 ? (
+                ) : !usingSearchV2 && hasError ? (
+                  <View style={s.stateCard} testID="map.search.error">
+                    <Ionicons name="cloud-offline-outline" size={18} color={C.text3} />
+                    <Text style={s.stateText}>Search is not available right now.</Text>
+                  </View>
+                ) : usingSearchV2 && showSearchV2Empty ? (
+                  <View style={s.stateCard} testID="map.search.empty">
+                    <Ionicons name="search-outline" size={18} color={C.text3} />
+                    <Text style={s.stateText}>No matches found</Text>
+                  </View>
+                ) : !usingSearchV2 && usableResults.length === 0 ? (
                   <View style={s.stateCard} testID="map.search.empty">
                     <Ionicons name="search-outline" size={18} color={C.text3} />
                     <Text style={s.stateText}>Try a nearby town, park, or service.</Text>
                   </View>
+                ) : usingSearchV2 ? (
+                  activeResults.map(result => (
+                    <SearchResultRowV2
+                      key={result.result_id}
+                      result={result}
+                      unitMode={unitMode}
+                      resolving={searchV2ResolvingResultId === result.result_id}
+                      trailingAction={onRouteSearchV2 ? 'route' : 'open'}
+                      onTrailingPress={onRouteSearchV2 ? () => onRouteSearchV2(result) : undefined}
+                      onPress={() => onSelectSearchV2?.(result)}
+                      testID={`map.search.result.${result.result_id}`}
+                    />
+                  ))
                 ) : (
                   usableResults.slice(0, 18).map((place, idx) => (
                     <ResultRow
@@ -217,6 +293,33 @@ export default function MapSearchSheet({
                     />
                   ))
                 )}
+                {showSearchAll ? (
+                  <TouchableOpacity
+                    style={s.searchAllButton}
+                    onPress={() => onSubmit()}
+                    testID="map.search.search-all"
+                    activeOpacity={0.82}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Search all for ${cleanQuery}`}
+                  >
+                    <Text style={s.searchAllText} numberOfLines={1}>Search all for “{cleanQuery}”</Text>
+                    <Ionicons name="arrow-forward" size={18} color={C.orange} />
+                  </TouchableOpacity>
+                ) : null}
+                {usingSearchV2 && searchV2Mode === 'results' && (searchV2HasMore || searchV2LoadMoreError) ? (
+                  <TouchableOpacity
+                    style={s.loadMoreButton}
+                    onPress={onLoadMoreSearchV2}
+                    testID="map.search.load-more"
+                    activeOpacity={0.82}
+                    disabled={searching}
+                    accessibilityRole="button"
+                    accessibilityLabel={searchV2LoadMoreError ? 'Retry loading search results' : 'Show more search results'}
+                  >
+                    {searching ? <ActivityIndicator size="small" color={C.orange} /> : null}
+                    <Text style={s.loadMoreText}>{searching ? 'Loading' : searchV2LoadMoreError ? 'Try again' : 'Show more'}</Text>
+                  </TouchableOpacity>
+                ) : null}
               </View>
             ) : (
               <View style={s.resultsBlock}>
@@ -254,6 +357,18 @@ export default function MapSearchSheet({
         </KeyboardAvoidingView>
       </SafeAreaView>
     </Modal>
+  );
+}
+
+function MapSearchRowSkeleton({ styles }: { styles: ReturnType<typeof makeStyles> }) {
+  return (
+    <View style={styles.resultRow}>
+      <View style={styles.skeletonIcon} />
+      <View style={styles.skeletonCopy}>
+        <TrailheadSkeletonLine width="72%" height={14} />
+        <TrailheadSkeletonLine width="48%" height={11} />
+      </View>
+    </View>
   );
 }
 
@@ -418,6 +533,9 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   quickText: { color: C.text, fontSize: 13, lineHeight: 18, fontWeight: '700' },
   resultsBlock: { gap: 10 },
+  skeletonList: { gap: 8 },
+  skeletonIcon: { width: 36, height: 36, borderRadius: 12, backgroundColor: C.s2 },
+  skeletonCopy: { flex: 1, gap: 8 },
   resultsHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   count: { color: C.text3, fontSize: 12, lineHeight: 16, fontWeight: '600' },
   stateCard: {
@@ -478,4 +596,28 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     borderWidth: 1,
     borderColor: C.border,
   },
+  searchAllButton: {
+    minHeight: Platform.OS === 'android' ? 48 : 44,
+    borderTopWidth: 1,
+    borderColor: C.border,
+    paddingTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  searchAllText: { flex: 1, color: C.orange, fontSize: 15, lineHeight: 20, fontWeight: '700' },
+  loadMoreButton: {
+    minHeight: Platform.OS === 'android' ? 48 : 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.s1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+  },
+  loadMoreText: { color: C.text, fontSize: 14, lineHeight: 20, fontWeight: '700' },
 });

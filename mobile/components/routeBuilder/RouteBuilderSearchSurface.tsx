@@ -1,8 +1,10 @@
 import { Ionicons } from '@expo/vector-icons';
 import { ActivityIndicator, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import TourTarget from '@/components/TourTarget';
+import SearchResultRowV2, { type SearchDistanceUnitMode } from '@/components/search/SearchResultRowV2';
 import { useTheme, type ColorPalette } from '@/lib/design';
 import type { RouteBuilderSearchPlace, RouteBuilderStopType } from '@/lib/routeBuilder';
+import type { SearchResultV2 } from '@/lib/searchV2';
 import RouteBuilderInsertNotice from './RouteBuilderInsertNotice';
 
 const DEFAULT_STOP_TYPES: RouteBuilderStopType[] = ['start', 'fuel', 'waypoint', 'camp', 'motel'];
@@ -21,6 +23,9 @@ type RouteBuilderSearchSurfaceProps = {
   searching: boolean;
   emptyStateReady?: boolean;
   results: RouteBuilderSearchDisplayPlace[];
+  searchV2Results?: SearchResultV2[];
+  searchV2ResolvingResultId?: string | null;
+  unitMode?: SearchDistanceUnitMode;
   selectedStopName?: string | null;
   targetDay?: number | null;
   fallbackDay?: number | null;
@@ -32,6 +37,7 @@ type RouteBuilderSearchSurfaceProps = {
   onChangeQuery: (query: string) => void;
   onSubmitSearch: () => void;
   onSelectResult: (place: RouteBuilderSearchDisplayPlace) => void;
+  onSelectSearchV2?: (result: SearchResultV2) => void;
   onClearInsert: () => void;
 };
 
@@ -73,6 +79,9 @@ export default function RouteBuilderSearchSurface({
   searching,
   emptyStateReady,
   results,
+  searchV2Results,
+  searchV2ResolvingResultId = null,
+  unitMode = 'auto',
   selectedStopName,
   targetDay,
   fallbackDay,
@@ -84,6 +93,7 @@ export default function RouteBuilderSearchSurface({
   onChangeQuery,
   onSubmitSearch,
   onSelectResult,
+  onSelectSearchV2,
   onClearInsert,
 }: RouteBuilderSearchSurfaceProps) {
   const C = useTheme();
@@ -144,7 +154,27 @@ export default function RouteBuilderSearchSurface({
         </View>
       </TourTarget>
 
-      {results.length > 0 ? (
+      {searchV2Results != null ? (
+        searchV2Results.length > 0 ? (
+          <View style={s.resultsBox} testID="route-builder.search.results">
+            {searchV2Results.map(result => (
+              <SearchResultRowV2
+                key={result.result_id}
+                result={result}
+                unitMode={unitMode}
+                resolving={searchV2ResolvingResultId === result.result_id}
+                onPress={() => onSelectSearchV2?.(result)}
+                testID={`route-builder.search.result.${result.result_id}`}
+                style={s.searchV2ResultRow}
+              />
+            ))}
+          </View>
+        ) : (emptyStateReady ?? (!searching && query.trim().length > 0)) ? (
+          <View style={s.resultsBox} testID="route-builder.search.empty">
+            <Text style={s.emptyText}>No matches found</Text>
+          </View>
+        ) : null
+      ) : results.length > 0 ? (
         <View style={s.resultsBox}>
           {results.map(place => (
             <TouchableOpacity
@@ -249,6 +279,11 @@ const styles = (C: ColorPalette) => StyleSheet.create({
     borderBottomWidth: 1,
     borderColor: C.border,
     backgroundColor: C.s1,
+  },
+  searchV2ResultRow: {
+    borderWidth: 0,
+    borderBottomWidth: 1,
+    borderRadius: 0,
   },
   resultBody: {
     flex: 1,

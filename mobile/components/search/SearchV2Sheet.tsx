@@ -16,10 +16,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { TrailheadSkeletonLine } from '@/components/TrailheadUI';
+import SearchResultRowV2 from '@/components/search/SearchResultRowV2';
 import { useTheme, type ColorPalette } from '@/lib/design';
 import { trailheadFonts } from '@/lib/typography';
 import {
-  formatSearchDistanceV2,
   searchV2ShouldShowEmptyState,
   type SearchPageModeV2,
   type SearchResultV2,
@@ -191,10 +191,8 @@ export default function SearchV2Sheet({
                 { paddingBottom: Math.max(insets.bottom + 28, 40) },
               ]}
               renderItem={({ item }) => (
-                <SearchResultRow
+                <SearchResultRowV2
                   result={item}
-                  colors={C}
-                  styles={styles}
                   unitMode={unitMode}
                   resolving={resolvingResultId === item.result_id}
                   onPress={() => onSelect(item)}
@@ -275,54 +273,6 @@ export default function SearchV2Sheet({
   );
 }
 
-function SearchResultRow({
-  result,
-  colors,
-  styles,
-  unitMode,
-  resolving,
-  onPress,
-}: {
-  result: SearchResultV2;
-  colors: ColorPalette;
-  styles: ReturnType<typeof makeStyles>;
-  unitMode: SearchUnitMode;
-  resolving: boolean;
-  onPress: () => void;
-}) {
-  const trailing = formatSearchDistanceV2(result.distance_meters, unitMode) || searchKindLabel(result.kind);
-  const subtitle = cleanSubtitle(result.subtitle || result.parent || searchKindLabel(result.kind));
-  return (
-    <TouchableOpacity
-      style={styles.resultRow}
-      onPress={onPress}
-      testID={`search-v2.result.${result.result_id}`}
-      disabled={resolving}
-      activeOpacity={0.84}
-      accessibilityRole="button"
-      accessibilityLabel={[result.title, subtitle, trailing].filter(Boolean).join(', ')}
-    >
-      <View style={styles.resultIcon}>
-        <Ionicons name={searchKindIcon(result)} size={20} color={colors.orange} />
-      </View>
-      <View style={styles.resultCopy}>
-        <Text style={styles.resultTitle} numberOfLines={1}>{result.title}</Text>
-        <Text style={styles.resultSubtitle} numberOfLines={1}>{subtitle}</Text>
-      </View>
-      <View style={styles.resultTrailing}>
-        {resolving ? (
-          <ActivityIndicator size="small" color={colors.orange} />
-        ) : (
-          <>
-            <Text style={styles.resultTrailingText} numberOfLines={1}>{trailing}</Text>
-            <Ionicons name="chevron-forward" size={17} color={colors.text2} />
-          </>
-        )}
-      </View>
-    </TouchableOpacity>
-  );
-}
-
 function SearchRowSkeleton({ styles }: { styles: ReturnType<typeof makeStyles> }) {
   return (
     <View style={styles.resultRow}>
@@ -333,32 +283,6 @@ function SearchRowSkeleton({ styles }: { styles: ReturnType<typeof makeStyles> }
       </View>
     </View>
   );
-}
-
-function searchKindLabel(kind: string) {
-  const clean = String(kind || 'Place').replace(/[_-]+/g, ' ').trim().toLowerCase();
-  if (!clean || clean === 'poi') return 'Place';
-  return clean.replace(/\b\w/g, value => value.toUpperCase());
-}
-
-function cleanSubtitle(value: string) {
-  return String(value || '')
-    .replace(/\b(mapbox|geoapify|nominatim|openstreetmap)\b/gi, '')
-    .replace(/[_-]+/g, ' ')
-    .replace(/\s*·\s*·\s*/g, ' · ')
-    .replace(/\s{2,}/g, ' ')
-    .trim() || 'Place';
-}
-
-function searchKindIcon(result: SearchResultV2): keyof typeof Ionicons.glyphMap {
-  const haystack = `${result.kind} ${result.categories.join(' ')} ${result.title}`.toLowerCase();
-  if (/camp|rv|campsite/.test(haystack)) return 'bonfire-outline';
-  if (/trailhead/.test(haystack)) return 'flag-outline';
-  if (/trail|hike/.test(haystack)) return 'trail-sign-outline';
-  if (/fuel|gas/.test(haystack)) return 'car-sport-outline';
-  if (/water/.test(haystack)) return 'water-outline';
-  if (/park|area|region|city|town/.test(haystack)) return 'map-outline';
-  return 'location-outline';
 }
 
 const makeStyles = (C: ColorPalette) => StyleSheet.create({

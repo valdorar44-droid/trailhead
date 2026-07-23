@@ -14,6 +14,7 @@ const premiumPlaceSheetSource = readFileSync(resolve(testDirectory, '../../../co
 const nativeMapSource = readFileSync(resolve(testDirectory, '../../../components/NativeMap/index.tsx'), 'utf8');
 const routeReadySource = readFileSync(resolve(testDirectory, '../../../components/map/RouteBuildProgressSheet.tsx'), 'utf8');
 const routeBuilderSearchSource = readFileSync(resolve(testDirectory, '../../../components/routeBuilder/RouteBuilderSearchSurface.tsx'), 'utf8');
+const searchResultRowSource = readFileSync(resolve(testDirectory, '../../../components/search/SearchResultRowV2.tsx'), 'utf8');
 const mapDrawerSource = readFileSync(resolve(testDirectory, '../../../components/map/MapDrawerSheet.tsx'), 'utf8');
 const mapFilterSource = readFileSync(resolve(testDirectory, '../../../components/map/MapFilterSheet.tsx'), 'utf8');
 const mapLayerSource = readFileSync(resolve(testDirectory, '../../../components/map/MapLayerSheetContent.tsx'), 'utf8');
@@ -51,14 +52,36 @@ test('Explore hides account-owned rows during cleanup and rejects stale selectio
 });
 
 test('Map and Explore retain useful rows while provider completion is still running', () => {
-  assert.match(mapSource, /isSearching && mapSearchDisplayResults\.length === 0/);
-  assert.match(mapSearchSheetSource, /searching && usableResults\.length === 0/);
+  assert.match(mapSource, /isSearching && \(searchV2Enabled \? mapSearchV2RenderResults\.length === 0 : mapSearchDisplayResults\.length === 0\)/);
+  assert.match(mapSearchSheetSource, /searching && \(usingSearchV2 \? activeResults\.length === 0 : usableResults\.length === 0\)/);
   assert.match(searchSheetSource, /searchV2ShouldShowEmptyState\(\{[\s\S]*displayedQuery: query,[\s\S]*settledQuery,/);
   assert.match(exploreSource, /exploreSearchV2\.setQuery\(value\);/);
   assert.match(exploreSource, /settledQuery=\{exploreSearchV2\.state\.query\}/);
   assert.match(routeBuilderSource, /function updateRouteSearchQuery\(value: string\)[\s\S]*routeSearchV2\.setQuery\(value\);/);
   assert.match(routeBuilderSource, /emptyStateReady=\{routeSearchEmptyStateReady\}/);
   assert.doesNotMatch(searchSheetSource, /No matches yet/);
+});
+
+test('Map and Route Editor render server-ranked Search V2 rows until an explicit press', () => {
+  assert.match(mapSource, /const mapSearchV2RenderResults = useMemo<SearchResultV2\[\]>/);
+  assert.match(mapSource, /searchV2Results=\{searchV2Enabled \? mapSearchV2RenderResults : undefined\}/);
+  assert.match(mapSearchSheetSource, /activeResults\.map\(result => \(/);
+  assert.match(mapSearchSheetSource, /<SearchResultRowV2/);
+  assert.match(routeBuilderSource, /searchV2Results=\{searchV2Enabled \? routeSearchV2RenderResults : undefined\}/);
+  assert.match(routeBuilderSearchSource, /searchV2Results\.map\(result => \(/);
+  assert.match(routeBuilderSearchSource, /onPress=\{\(\) => onSelectSearchV2\?\.\(result\)\}/);
+  assert.match(searchResultRowSource, /Surfaces pass SearchResultV2 through/);
+  assert.doesNotMatch(searchResultRowSource, /\.sort\(/);
+  assert.doesNotMatch(searchResultRowSource, /Newer typing/);
+});
+
+test('Map search changes viewport scope only through the explicit Search this area action', () => {
+  assert.match(mapSource, /function searchCurrentMapArea\(\)/);
+  assert.match(mapSource, /setMapSearchViewportScope\(\{[\s\S]*north: bounds\.n,[\s\S]*west: bounds\.w,/);
+  assert.match(mapSource, /scope: mapSearchViewportScope \? 'viewport' as const : 'global' as const/);
+  assert.match(mapSource, /testID="map\.search\.this-area"/);
+  assert.match(mapSource, /onPress=\{searchCurrentMapArea\}/);
+  assert.doesNotMatch(mapSource, /onBoundsChange=\{[\s\S]{0,900}searchCurrentMapArea\(/);
 });
 
 test('temporary place sheets expose session-safe actions only', () => {
@@ -73,7 +96,7 @@ test('temporary place sheets expose session-safe actions only', () => {
 
 test('temporary provider rows are not written to Map history or persisted by Route Builder', () => {
   const guardedHistoryWrites = mapSource.match(/if \(!searchPlaceIsTemporary\([^)]*\)\) \{\s*addSearchHistory/g) || [];
-  assert.equal(guardedHistoryWrites.length, 2);
+  assert.equal(guardedHistoryWrites.length, 3);
   assert.match(routeBuilderSource, /const temporaryProviderStop = inputStops\.find\(stop => searchPlaceIsTemporary\(stop\)\);/);
   assert.match(routeBuilderSource, /temporaryProviderStop[\s\S]*cannot be saved/);
 });
@@ -143,7 +166,7 @@ test('Map, Search V2, Route Editor, and route-ready actions expose stable automa
   assert.match(mapSource, /testID="map\.navigation\.end"/);
   assert.match(mapSource, /testID="map\.navigation\.recenter"/);
   assert.match(searchSheetSource, /testID="search-v2\.input"/);
-  assert.match(searchSheetSource, /testID=\{`search-v2\.result\.\$\{result\.result_id\}`\}/);
+  assert.match(searchResultRowSource, /testID = `search-v2\.result\.\$\{result\.result_id\}`/);
   assert.match(mapSearchSheetSource, /testID="map\.search\.input"/);
   assert.match(routeBuilderSearchSource, /testID="route-builder\.search\.input"/);
   assert.match(routeBuilderSearchSource, /testID="route-builder\.search\.submit"/);

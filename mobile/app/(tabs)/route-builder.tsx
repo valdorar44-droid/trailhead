@@ -1986,6 +1986,17 @@ function RouteBuilderScreenContent() {
       resultCount: routeSearchV2.state.results.length,
     })
     : undefined;
+  const routeSearchV2RenderResults = useMemo(() => {
+    if (!searchV2Enabled || !routeSearchOwnerIsCurrent) return [];
+    if (normalizeSearchV2Query(query) !== routeSearchV2.state.query) return [];
+    return routeSearchV2.state.results;
+  }, [
+    query,
+    routeSearchOwnerIsCurrent,
+    routeSearchV2.state.query,
+    routeSearchV2.state.results,
+    searchV2Enabled,
+  ]);
   const [activePlaceFilters, setActivePlaceFilters] = useState<string[]>(DEFAULT_PLACE_FILTERS);
   const [showPlaceFilters, setShowPlaceFilters] = useState(false);
   const [selectedRoutePlace, setSelectedRoutePlace] = useState<RoutePlaceSelection | null>(null);
@@ -7091,6 +7102,9 @@ function RouteBuilderScreenContent() {
           searching={searching}
           emptyStateReady={routeSearchEmptyStateReady}
           results={searchResults}
+          searchV2Results={searchV2Enabled ? routeSearchV2RenderResults : undefined}
+          searchV2ResolvingResultId={routeSearchV2.state.resolvingResultId}
+          unitMode={weatherUnitMode}
           selectedStopName={selectedInsertStop?.name}
           targetDay={insertTargetDay}
           fallbackDay={selectedInsertStop?.day}
@@ -7101,6 +7115,15 @@ function RouteBuilderScreenContent() {
           onSubmitSearch={runSearch}
           onSelectResult={place => {
             void resolveRouteBuilderSearchPlace(place).then(selected => {
+              if (selected) addPlace(selected);
+            });
+          }}
+          onSelectSearchV2={result => {
+            const selectedRow = {
+              ...searchResultV2ToDisplayPlace(result),
+              source: 'search',
+            };
+            void resolveRouteBuilderSearchPlace(selectedRow).then(selected => {
               if (selected) addPlace(selected);
             });
           }}

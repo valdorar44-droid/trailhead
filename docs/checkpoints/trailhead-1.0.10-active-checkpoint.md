@@ -1,6 +1,6 @@
 # Trailhead 1.0.10 Active Checkpoint
 
-Last updated: 2026-07-23 09:18:14 CDT (America/Winnipeg)
+Last updated: 2026-07-23 09:39:11 CDT (America/Winnipeg)
 
 ## Resume protocol
 
@@ -170,6 +170,22 @@ Read this file before resuming the 1.0.10 overhaul after a restart or context co
 - Exact next action: advance the clean detached harness worktree to `898ddc485c524ffb427ddede3645069c8f1ee9b6`, rerun the same exact `62e40b1` Samsung command without clearing account data, and preserve the complete atomic report and recovery curves.
 - Do not repeat: production preflight/deployment, paired OTA, Figma/research packets, the 33-run Android crawl, NPS research, broad Layers testing, or the partial `layer_carousel_unavailable` run.
 - Task-owned process state: no Gradle, Metro, Expo, EAS, Railway, Maestro, test, or memory-gate process remains. Only the ADB daemon is intentionally active for the connected Samsung and emulator.
+
+## Checkpoint A.4 — Transient carousel read isolated
+
+- Timestamp: `2026-07-23T09:39:11-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; harness-fix HEAD: `adbef769902a8eb7d4d2001de86d338555237b16`; installed OTA source remains `62e40b1519e7a53061dd4cac02a2db96edf0be0a`.
+- Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. `.cursor/` and `dashboard/explore_serving_index_v2.json` remain unstaged and untouched.
+- The second exact candidate-bound report is preserved at `/home/sean/.openclaw/workspace/trailhead/output/android-map-memory-gate/2026-07-23T14-19-59-003Z/report.json`, SHA-256 `550d2d4f69c2bffed85bef824bd51ea1797e1ce9f5124344f7cd2f9fc3c0aa74`.
+- It again stopped before layer-state capture or cycle one with the shared `layer_carousel_unavailable` code, while the process remained alive/unchanged with 13 foreground proofs and zero exit, OOM, LMK, ANR, or process-death records. No layer had been toggled.
+- Explore passed again and improved: median total PSS `393288` KB with maximum `485552` KB; median RSS `437972` KB with maximum `530232` KB. This independently confirms the compact-hydration fix closed the earlier Explore idle P1.
+- Direct timing proved `map.layers.toggle-carousel` is visible two seconds after opening the sheet. A read-only reproduction of the gate's exact horizontal traversal found all nine stress cards and their checked states without a missing selector or state change: `3d`, `lands`, `pois`, and `trails` true; `usgs`, `fire`, `ava`, `radar`, and `mvum` false.
+- The shared failure therefore came from a transient UI-tree frame during the later traversal, not sheet readiness or product functionality. Commit `adbef76` now passively reacquires the exact visible carousel for at most 15 seconds whenever a traversal read temporarily lacks it. It performs no tap or swipe while missing and still fails closed if the exact node does not return.
+- Deterministic tests cover transient reacquisition, exact 15-second timeout, and invalid-snapshot fail-closed behavior. `npm run test:android-map-memory` and `git diff --check` pass; memory budgets, required cycle count, checked-state capture, and durable restoration are unchanged.
+- Open P0 defects: none. Open/pending P1 acceptance: one complete ten-cycle gate and the affected Android/iOS M1 delta. M1 is not accepted yet.
+- Exact next action: advance the clean detached harness worktree to `adbef769902a8eb7d4d2001de86d338555237b16`, rerun the same exact Samsung command, then preserve the complete report and recovery curves.
+- Do not repeat: the two partial carousel reports, manual Layers functionality checks, production/deployment/OTA work, Figma/NPS research, or the 33-run crawl.
+- Task-owned process state: no Gradle, Metro, Expo, EAS, Railway, Maestro, test, or memory-gate process remains. Only ADB is intentionally active.
 
 ## Verified completed work
 

@@ -513,7 +513,8 @@ async function unchangedOnlineStateDoesNotPersist() {
 }
 
 async function legacyMigrationAndQuarantine() {
-  const { storage, repository } = deterministicRepository();
+  const storage = new CountingStorage();
+  const { repository } = deterministicRepository(storage);
   await repository.initialize('legacy-user');
   const input = {
     tripHistory: JSON.stringify([
@@ -552,9 +553,62 @@ async function legacyMigrationAndQuarantine() {
   assert.ok(result.receipts.some(receipt => receipt.source === 'trip_history' && receipt.corruptCount === 1));
   assert.ok(storage.corrupt.size >= 2, 'invalid legacy payloads and records are retained');
 
+  storage.resetCounts();
+  const revisionBeforeSecondMigration = repository.getSnapshot().revision;
+  const receiptCountBeforeSecondMigration = repository.getSnapshot().migrationReceipts.length;
+  let secondMigrationEmissions = 0;
+  const unsubscribe = repository.subscribe(() => { secondMigrationEmissions += 1; });
   const second = await repository.migrateLegacy(input);
-  assert.ok(second.receipts.some(receipt => receipt.source === 'trip_history' && receipt.status === 'skipped'));
+  unsubscribe();
+  assert.deepEqual(second.receipts, [], 'an already-migrated legacy payload is a true no-op');
+  assert.equal(storage.writes, 0, 'an already-migrated legacy payload never rewrites the repository');
+  assert.equal(secondMigrationEmissions, 0, 'an already-migrated legacy payload never emits');
+  assert.equal(repository.getSnapshot().revision, revisionBeforeSecondMigration);
+  assert.equal(repository.getSnapshot().migrationReceipts.length, receiptCountBeforeSecondMigration);
   assert.equal(repository.listTrips({ includeArchived: true }).length, 1);
+}
+
+async function failedLegacyMigrationWriteRemainsRetryable() {
+  const storage = new FailNextWriteStorage();
+  const { repository } = deterministicRepository(storage);
+  await repository.initialize('legacy-write-retry');
+  const scopeKey = tripRepositoryScopeKey('account:legacy-write-retry');
+  const input = {
+    tripHistory: JSON.stringify([
+      { trip_id: 'retry-trip', trip_name: 'Retry this import', states: ['UT'], planned_at: 100 },
+    ]),
+  };
+  const before = repository.getSnapshot();
+  const persistedBefore = storage.values.get(scopeKey);
+  let emissions = 0;
+  const unsubscribe = repository.subscribe(() => { emissions += 1; });
+  storage.failNextWrite(scopeKey);
+
+  await assert.rejects(repository.migrateLegacy(input), /fixture write failed/);
+  assert.equal(repository.getSnapshot(), before, 'a failed migration write keeps the committed snapshot');
+  assert.equal(repository.getTrip('retry-trip'), null, 'unpersisted legacy data is not exposed');
+  assert.equal(repository.getOutbox().length, 0, 'unpersisted migration outbox entries are rolled back');
+  assert.equal(repository.getSnapshot().migrationReceipts.length, 0);
+  assert.equal(storage.values.get(scopeKey), persistedBefore);
+  assert.equal(emissions, 0, 'a failed migration write never emits staged data');
+
+  const retried = await repository.migrateLegacy(input);
+  assert.equal(retried.importedTripIds.includes('retry-trip'), true);
+  assert.equal(repository.getTrip('retry-trip')?.title, 'Retry this import');
+  assert.equal(repository.getOutbox().length, 1);
+  assert.equal(emissions, 1, 'the successful retry emits exactly once');
+
+  const restarted = deterministicRepository(storage).repository;
+  await restarted.initialize('legacy-write-retry');
+  assert.equal(restarted.getTrip('retry-trip')?.title, 'Retry this import', 'the retried migration survives restart');
+  assert.equal(restarted.getOutbox().length, 1, 'the retried migration outbox is durable');
+
+  storage.resetCounts();
+  const repeated = await restarted.migrateLegacy(input);
+  unsubscribe();
+  assert.deepEqual(repeated.receipts, []);
+  assert.equal(storage.writes, 0, 'the durable retry key makes a later launch a true no-op');
+  assert.equal(emissions, 1);
 }
 
 async function legacyMigrationDoesNotResurrectDeletedTrips() {
@@ -1202,6 +1256,42 @@ async function identicalRemoteTripsDoNotRewriteTheRepository() {
   assert.equal(second.record.legacy?.source, 'server_legacy_v1_omitted');
   assert.equal(storage.writes, 0, 'an identical compact row does not serialize the repository again');
   assert.equal(repository.getSnapshot().revision, revisionAfterCompaction);
+
+  const routeThatMustNotBeTraversed = new Proxy({ totalDistance: 12_345 }, {
+    ownKeys() {
+      throw new Error('compact same-revision route was traversed');
+    },
+  });
+  const fastPath = await repository.applyRemoteTrip({
+    ...compactRemote,
+    route: routeThatMustNotBeTraversed,
+  });
+  assert.equal(fastPath.record, repository.getTrip(compactRemote.id));
+  assert.equal(storage.writes, 0, 'a compact same-revision server row bypasses recursive route comparison');
+}
+
+async function identicalRemoteSavedEntitiesDoNotRewriteTheRepository() {
+  const storage = new CountingStorage();
+  const repository = deterministicRepository(storage).repository;
+  await repository.initialize('saved-entity-idempotency');
+  const local = await repository.saveEntity(createSavedEntity({
+    id: 'saved-place',
+    ownerScope: 'account:saved-entity-idempotency',
+    title: 'Saved place',
+    kind: 'place',
+  }), { enqueueSync: false });
+  storage.resetCounts();
+
+  const unchanged = await repository.applyRemoteSavedEntity({ ...local });
+  assert.equal(unchanged.record, local);
+  assert.equal(storage.writes, 0, 'an unchanged saved entity does not serialize the repository');
+
+  const changed = await repository.applyRemoteSavedEntity({
+    ...local,
+    title: 'Server-corrected place',
+  });
+  assert.equal(changed.record.title, 'Server-corrected place');
+  assert.equal(storage.writes, 1, 'a same-revision content correction remains authoritative');
 }
 
 async function legacyAcknowledgementDoesNotDualWrite() {
@@ -1672,6 +1762,7 @@ async function run() {
   await persistentOutboxContract();
   await unchangedOnlineStateDoesNotPersist();
   await legacyMigrationAndQuarantine();
+  await failedLegacyMigrationWriteRemainsRetryable();
   await legacyMigrationDoesNotResurrectDeletedTrips();
   await corruptRepositoryRecovery();
   await explicitAnonymousMerge();
@@ -1684,6 +1775,7 @@ async function run() {
   await remoteBatchIsCanceledOrCommittedWithinOneAccountScope();
   await remoteReconciliation();
   await identicalRemoteTripsDoNotRewriteTheRepository();
+  await identicalRemoteSavedEntitiesDoNotRewriteTheRepository();
   await legacyAcknowledgementDoesNotDualWrite();
   await authChangeCancelsOutboxBeforeNextMutation();
   await startupOutboxSuccessUsesOneDurableAcknowledgement();

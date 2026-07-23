@@ -29,6 +29,7 @@ import {
   TripRepositoryUserScope,
   TripStatus,
 } from './types';
+import { OMITTED_SERVER_LEGACY_SOURCE } from './compactSync';
 
 const REPOSITORY_SCHEMA_VERSION = 2 as const;
 
@@ -209,6 +210,13 @@ function comparableJson(value: unknown): string {
 
 function contentHash(value: unknown): string {
   return stableHash(comparableJson(value));
+}
+
+function isMatchingCompactServerRevision(local: TripDocumentV2, remote: TripDocumentV2): boolean {
+  return local.revision === remote.revision
+    && local.updatedAt === remote.updatedAt
+    && local.legacy?.source === OMITTED_SERVER_LEGACY_SOURCE
+    && remote.legacy?.source === OMITTED_SERVER_LEGACY_SOURCE;
 }
 
 function emptyState(ownerScope: string): PersistedRepositoryStateV2 {
@@ -1095,6 +1103,9 @@ export class TripRepository {
     const dirtyEntries = this.state.outbox.filter(entry => entry.entityType === 'trip'
       && entry.entityId === remote.id
       && entry.operation !== 'delete');
+    if (local && dirtyEntries.length === 0 && isMatchingCompactServerRevision(local, remote)) {
+      return { result: { record: local }, changed: false, conflict: false };
+    }
     if (
       local
       && dirtyEntries.length === 0
@@ -1210,6 +1221,14 @@ export class TripRepository {
     const dirtyEntries = this.state.outbox.filter(entry => entry.entityType === 'saved_entity'
       && entry.entityId === remote.id
       && entry.operation !== 'delete');
+    if (
+      local
+      && dirtyEntries.length === 0
+      && localRevision === remote.revision
+      && comparableJson(local) === comparableJson(remote)
+    ) {
+      return { result: { record: local }, changed: false, conflict: false };
+    }
     let conflictCopy: SavedEntityV1 | undefined;
     if (local && dirtyEntries.length > 0 && comparableJson(local) !== comparableJson(remote)) {
       const now = this.now();
@@ -1799,9 +1818,36 @@ export class TripRepository {
 
   async migrateLegacy(input: LegacyMigrationInput): Promise<LegacyMigrationResult> {
     return this.serialize(async () => {
+      const committedState = this.state;
+      const stagedState: PersistedRepositoryStateV2 = {
+        ...committedState,
+        trips: { ...committedState.trips },
+        savedEntities: { ...committedState.savedEntities },
+        outbox: [...committedState.outbox],
+        migrationReceipts: [...committedState.migrationReceipts],
+        migrationKeys: { ...committedState.migrationKeys },
+      };
       const receipts: RepositoryMigrationReceiptV1[] = [];
       const importedTripIds: string[] = [];
       const importedEntityIds: string[] = [];
+      let migrationStateChanged = false;
+      const enqueueStagedOutbox = (
+        entityType: RepositoryOutboxEntryV1['entityType'],
+        entityId: string,
+        operation: RepositoryOutboxEntryV1['operation'],
+        payload?: unknown,
+        revision?: number,
+      ) => {
+        // enqueueOutbox is synchronous but writes through this.state. Swap only
+        // for that synchronous call so getters never observe unpersisted legacy
+        // imports while parsing/quarantine writes are awaiting storage.
+        this.state = stagedState;
+        try {
+          this.enqueueOutbox(entityType, entityId, operation, payload, revision);
+        } finally {
+          this.state = committedState;
+        }
+      };
 
       const migrateArray = async (
         source: string,
@@ -1811,9 +1857,7 @@ export class TripRepository {
       ) => {
         const serializedSource = typeof raw === 'string' ? raw : serializeUnknown(raw ?? null);
         const sourceKey = `legacy:${source}:${stableHash(serializedSource)}`;
-        if (this.state.migrationKeys[sourceKey]) {
-          const receipt = this.receipt(source, sourceKey, 'skipped', { skipped: 1 }, 'Legacy payload was already migrated');
-          receipts.push(receipt);
+        if (stagedState.migrationKeys[sourceKey]) {
           return;
         }
         const parsed = await this.parseLegacyArray(source, raw);
@@ -1832,11 +1876,11 @@ export class TripRepository {
           }
           if (target === 'trip') {
             const trip = converted as TripDocumentV2;
-            if (this.state.tombstones[tombstoneKey('trip', trip.id)]) {
+            if (stagedState.tombstones[tombstoneKey('trip', trip.id)]) {
               skipped += 1;
               continue;
             }
-            const existing = this.state.trips[trip.id];
+            const existing = stagedState.trips[trip.id];
             if (existing && existing.items.length >= trip.items.length) {
               skipped += 1;
               continue;
@@ -1846,27 +1890,28 @@ export class TripRepository {
               ownerScope: this.ownerScope,
               revision: existing ? existing.revision + 1 : 1,
             };
-            this.state.trips[trip.id] = migrated;
+            stagedState.trips[trip.id] = migrated;
             if (this.ownerScope.startsWith('account:')) {
-              this.enqueueOutbox('trip', trip.id, 'upsert', migrated, migrated.revision);
+              enqueueStagedOutbox('trip', trip.id, 'upsert', migrated, migrated.revision);
             }
             importedTripIds.push(trip.id);
           } else {
             const entity = converted as SavedEntityV1;
-            if (this.state.savedEntities[entity.id]) {
+            if (stagedState.savedEntities[entity.id]) {
               skipped += 1;
               continue;
             }
             const migrated = { ...entity, ownerScope: this.ownerScope, revision: 1 };
-            this.state.savedEntities[entity.id] = migrated;
+            stagedState.savedEntities[entity.id] = migrated;
             if (this.ownerScope.startsWith('account:')) {
-              this.enqueueOutbox('saved_entity', entity.id, 'upsert', migrated, migrated.revision);
+              enqueueStagedOutbox('saved_entity', entity.id, 'upsert', migrated, migrated.revision);
             }
             importedEntityIds.push(entity.id);
           }
           imported += 1;
         }
-        this.state.migrationKeys[sourceKey] = this.now();
+        stagedState.migrationKeys[sourceKey] = this.now();
+        migrationStateChanged = true;
         const status = corrupt > 0 && imported === 0 ? 'quarantined' : imported > 0 ? 'imported' : 'skipped';
         receipts.push(this.receipt(source, sourceKey, status, { imported, skipped, corrupt }, undefined, parsed.preservedRef));
       };
@@ -1895,46 +1940,49 @@ export class TripRepository {
       }, 'entity');
 
       if (input.activeTrip != null && input.activeTrip !== '') {
-        let parsed: unknown = input.activeTrip;
         const sourceRaw = typeof input.activeTrip === 'string' ? input.activeTrip : serializeUnknown(input.activeTrip);
-        if (typeof input.activeTrip === 'string') {
-          try { parsed = JSON.parse(input.activeTrip); } catch {
-            const preservedRef = await this.storage.preserveCorrupt(this.ownerScopeKey, input.activeTrip, 'legacy-active-trip');
-            receipts.push(this.receipt('active_trip', `legacy:active_trip:${stableHash(sourceRaw)}`, 'quarantined', { corrupt: 1 }, 'Legacy active trip JSON was invalid', preservedRef));
-            parsed = null;
+        const sourceKey = `legacy:active_trip:${stableHash(sourceRaw)}`;
+        if (!stagedState.migrationKeys[sourceKey]) {
+          let parsed: unknown = input.activeTrip;
+          if (typeof input.activeTrip === 'string') {
+            try { parsed = JSON.parse(input.activeTrip); } catch {
+              const preservedRef = await this.storage.preserveCorrupt(this.ownerScopeKey, input.activeTrip, 'legacy-active-trip');
+              receipts.push(this.receipt('active_trip', sourceKey, 'quarantined', { corrupt: 1 }, 'Legacy active trip JSON was invalid', preservedRef));
+              parsed = null;
+            }
           }
-        }
-        if (parsed != null) {
-          const sourceKey = `legacy:active_trip:${stableHash(sourceRaw)}`;
-          if (this.state.migrationKeys[sourceKey]) {
-            receipts.push(this.receipt('active_trip', sourceKey, 'skipped', { skipped: 1 }, 'Legacy active trip was already migrated'));
-          } else {
+          if (parsed != null) {
             const trip = this.legacyTripResult(parsed);
             if (!trip) {
               const preservedRef = await this.storage.preserveCorrupt(this.ownerScopeKey, sourceRaw, 'legacy-active-trip-record');
               receipts.push(this.receipt('active_trip', sourceKey, 'quarantined', { corrupt: 1 }, 'Legacy active trip record was invalid', preservedRef));
             } else {
-              const existing = this.state.trips[trip.id];
-              if (this.state.tombstones[tombstoneKey('trip', trip.id)]) {
+              const existing = stagedState.trips[trip.id];
+              if (stagedState.tombstones[tombstoneKey('trip', trip.id)]) {
                 receipts.push(this.receipt('active_trip', sourceKey, 'skipped', { skipped: 1 }, 'Deleted trip was not restored from legacy storage'));
               } else {
                 const migrated = { ...trip, ownerScope: this.ownerScope, revision: (existing?.revision ?? 0) + 1 };
-                this.state.trips[trip.id] = migrated;
+                stagedState.trips[trip.id] = migrated;
                 if (this.ownerScope.startsWith('account:')) {
-                  this.enqueueOutbox('trip', trip.id, 'upsert', migrated, migrated.revision);
+                  enqueueStagedOutbox('trip', trip.id, 'upsert', migrated, migrated.revision);
                 }
                 importedTripIds.push(trip.id);
                 receipts.push(this.receipt('active_trip', sourceKey, 'imported', { imported: 1 }));
               }
             }
-            this.state.migrationKeys[sourceKey] = this.now();
           }
+          stagedState.migrationKeys[sourceKey] = this.now();
+          migrationStateChanged = true;
         }
       }
 
-      this.state.migrationReceipts.push(...receipts);
-      this.state.revision += 1;
-      await this.persist();
+      if (receipts.length > 0 || migrationStateChanged) {
+        stagedState.migrationReceipts.push(...receipts);
+        stagedState.revision += 1;
+        await this.storage.write(this.ownerScopeKey, JSON.stringify(stagedState));
+        this.state = stagedState;
+        this.emit();
+      }
       return { receipts, importedTripIds, importedEntityIds };
     });
   }

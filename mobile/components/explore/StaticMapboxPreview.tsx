@@ -5,6 +5,7 @@ import { api } from '@/lib/api';
 import { storage } from '@/lib/storage';
 import { useStore } from '@/lib/store';
 import { useTheme } from '@/lib/design';
+import { boundedExploreImageUrl, EXPLORE_IMAGE_BOUNDS, exploreImageSource } from '@/lib/mediaPolicy';
 
 export type StaticMapboxPin = {
   id: string;
@@ -83,11 +84,15 @@ export function StaticMapboxPreview({
     () => buildStaticMapboxUrl(cleanPins, token, Math.max(180, Math.min(640, Math.round(height))), mapboxStyle),
     [cleanPins, height, mapboxStyle, token],
   );
+  const safeImageUrl = useMemo(
+    () => boundedExploreImageUrl(imageUrl, EXPLORE_IMAGE_BOUNDS.mapPreview),
+    [imageUrl],
+  );
   const url = useMemo(
-    () => [imageUrl, mapUrl]
+    () => [safeImageUrl, mapUrl]
       .map(candidate => String(candidate || '').trim())
       .find(candidate => candidate && !failedUrls.includes(candidate)) || '',
-    [failedUrls, imageUrl, mapUrl],
+    [failedUrls, mapUrl, safeImageUrl],
   );
   useEffect(() => {
     if (token) return;
@@ -99,7 +104,7 @@ export function StaticMapboxPreview({
   }, [setMapboxToken, token]);
   useEffect(() => {
     setFailedUrls([]);
-  }, [imageUrl, mapUrl]);
+  }, [mapUrl, safeImageUrl]);
   useEffect(() => {
     const retryMedia = () => setFailedUrls([]);
     const appState = AppState.addEventListener('change', state => {
@@ -164,7 +169,7 @@ export function StaticMapboxPreview({
       ) : null}
       {canLoadImage ? (
         <Image
-          source={{ uri: url }}
+          source={exploreImageSource(url)}
           style={[StyleSheet.absoluteFillObject, !imageReady && styles.pendingImage]}
           resizeMode="cover"
           resizeMethod="resize"

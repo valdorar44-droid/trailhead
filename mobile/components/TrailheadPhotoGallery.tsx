@@ -14,6 +14,11 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { mono, useTheme, type ColorPalette } from '@/lib/design';
+import {
+  boundedExploreImageUrl,
+  EXPLORE_IMAGE_BOUNDS,
+  exploreImageSource,
+} from '@/lib/mediaPolicy';
 
 export type TrailheadGalleryPhoto = {
   url: string;
@@ -36,7 +41,12 @@ export default function TrailheadPhotoGallery({ visible, photos, initialIndex = 
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const scrollRef = useRef<ScrollView | null>(null);
-  const safePhotos = useMemo(() => photos.filter(photo => !!photo.url), [photos]);
+  const safePhotos = useMemo(() => photos
+    .map(photo => ({
+      ...photo,
+      url: boundedExploreImageUrl(photo.url, EXPLORE_IMAGE_BOUNDS.detail),
+    }))
+    .filter(photo => !!photo.url), [photos]);
   const startIndex = Math.max(0, Math.min(initialIndex, Math.max(safePhotos.length - 1, 0)));
   const [index, setIndex] = useState(startIndex);
   const active = safePhotos[index];
@@ -86,7 +96,7 @@ export default function TrailheadPhotoGallery({ visible, photos, initialIndex = 
         >
           {safePhotos.map((photo, i) => (
             <View key={`${photo.url}-${i}`} style={[s.slide, { width, height }]}>
-              <Image source={{ uri: photo.url }} style={s.image} resizeMode="contain" />
+              <Image source={exploreImageSource(photo.url)} style={s.image} resizeMode="contain" resizeMethod="resize" />
             </View>
           ))}
         </ScrollView>

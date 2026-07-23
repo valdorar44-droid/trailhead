@@ -36,6 +36,17 @@ import {
 } from '@/lib/routeWaypointSignature';
 import { isFullTripRouteRequest, shouldPersistTripRoute } from '@/lib/routePersistencePolicy';
 import { mapLoadFailureIsFatal } from '@/lib/mapSurfaceLifecycle';
+import {
+  buildFireOverlayRequest,
+  FIRE_OVERLAY_IDLE_STATUS,
+  FIRE_OVERLAY_LOADING_STATUS,
+  FIRE_OVERLAY_UNAVAILABLE_STATUS,
+  fireOverlayGeometryStyle,
+  fireOverlayStatusFromPayload,
+  normalizeFireOverlayPayload,
+  type FireOverlayFeatureCollection,
+  type FireOverlayStatus,
+} from '@/lib/fireOverlay';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Location from 'expo-location';
 
@@ -309,6 +320,7 @@ export interface NativeMapProps {
   showRadar:       boolean;
   showNautical?:   boolean;
   hideMapStatusBadge?: boolean;
+  onFireOverlayStatusChange?: (status: FireOverlayStatus) => void;
 
   // Mission briefing overlays (NativeMap cinematic player)
   missionBriefActive?: boolean;
@@ -849,7 +861,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     onMapReady, onBoundsChange, onMapGesture, onMapTap,
     onCampTap, onGasTap, onPoiTap, onWaterSpotTap, onCommunityPinTap, onTileCampTap, onBaseCampTap, onTrailTap, onWaypointTap,
     onRouteReady, onRoutePersist, onOffRoute, onOffRouteWarn, onBackOnRoute, onRouteProgress,
-    onTraceStart, onTraceMove, onTraceEnd, onDebugEvent, onError,
+    onTraceStart, onTraceMove, onTraceEnd, onDebugEvent, onError, onFireOverlayStatusChange,
   } = props;
 
   const mapRef = useRef<any>(null);
@@ -873,12 +885,24 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   }, [onDebugEvent]);
 
   // ── Overlay data ──────────────────────────────────────────────────────────────
-  const [fireData,   setFireData]   = useState<GeoJSON.FeatureCollection | null>(null);
+  const [fireData,   setFireData]   = useState<FireOverlayFeatureCollection | null>(null);
+  const [fireStatus, setFireStatus] = useState<FireOverlayStatus>(FIRE_OVERLAY_IDLE_STATUS);
+  const fireGeometryStyle = useMemo(
+    () => fireOverlayGeometryStyle(fireStatus),
+    [fireStatus],
+  );
   const [avaData,    setAvaData]    = useState<GeoJSON.FeatureCollection | null>(null);
   const [radarUrl,   setRadarUrl]   = useState<string | null>(null);
   const [mvumRoads,  setMvumRoads]  = useState<GeoJSON.FeatureCollection | null>(null);
   const [mvumTrails, setMvumTrails] = useState<GeoJSON.FeatureCollection | null>(null);
   const boundsRef = useRef<{ n: number; s: number; e: number; w: number } | null>(null);
+  const fireFetchAbortRef = useRef<AbortController | null>(null);
+  const fireFetchGenerationRef = useRef(0);
+  const fireRefreshTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    onFireOverlayStatusChange?.(fireStatus);
+  }, [fireStatus, onFireOverlayStatusChange]);
 
   // MVUM uses viewport-dependent queries — refetch when layer toggled or bounds change
   const fetchMvum = useCallback(async (bounds: { n: number; s: number; e: number; w: number }) => {
@@ -910,14 +934,53 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     if (b) fetchMvum(b);
   }, [showMvum, fetchMvum, waypoints]);
 
+  const fetchFire = useCallback(async (bounds: { n: number; s: number; e: number; w: number }) => {
+    fireFetchAbortRef.current?.abort();
+    const controller = new AbortController();
+    const generation = ++fireFetchGenerationRef.current;
+    fireFetchAbortRef.current = controller;
+    setFireData(null);
+    setFireStatus(FIRE_OVERLAY_LOADING_STATUS);
+    try {
+      const request = buildFireOverlayRequest(API_BASE_URL, bounds);
+      const response = await fetch(request.url, { ...request.init, signal: controller.signal });
+      if (!response.ok) throw new Error(`Fire overlay request failed (${response.status})`);
+      const payload = normalizeFireOverlayPayload(await response.json());
+      if (generation === fireFetchGenerationRef.current && !controller.signal.aborted) {
+        if (!payload) {
+          setFireData(null);
+          setFireStatus(FIRE_OVERLAY_UNAVAILABLE_STATUS);
+          return;
+        }
+        setFireData(payload);
+        setFireStatus(fireOverlayStatusFromPayload(payload));
+      }
+    } catch (error: any) {
+      if (error?.name !== 'AbortError' && generation === fireFetchGenerationRef.current) {
+        setFireData(null);
+        setFireStatus(FIRE_OVERLAY_UNAVAILABLE_STATUS);
+      }
+    }
+  }, []);
+
   useEffect(() => {
-    if (!showFire) { setFireData(null); return; }
-    const url = `${API_BASE_URL}/api/conditions/fire-perimeters`;
-    fetch(url)
-      .then(r => r.json())
-      .then(d => setFireData(d?.features ? d : null))
-      .catch(() => setFireData(null));
-  }, [showFire]);
+    if (!showFire) {
+      fireFetchAbortRef.current?.abort();
+      fireFetchAbortRef.current = null;
+      if (fireRefreshTimeoutRef.current) clearTimeout(fireRefreshTimeoutRef.current);
+      fireRefreshTimeoutRef.current = null;
+      setFireData(null);
+      setFireStatus(FIRE_OVERLAY_IDLE_STATUS);
+      return;
+    }
+    const bounds = boundsRef.current ?? (waypoints.length > 0 ? {
+      n: Math.min(90, Math.max(...waypoints.map(waypoint => waypoint.lat)) + 0.5),
+      s: Math.max(-90, Math.min(...waypoints.map(waypoint => waypoint.lat)) - 0.5),
+      e: Math.min(180, Math.max(...waypoints.map(waypoint => waypoint.lng)) + 0.5),
+      w: Math.max(-180, Math.min(...waypoints.map(waypoint => waypoint.lng)) - 0.5),
+    } : null);
+    if (bounds && bounds.e !== bounds.w) void fetchFire(bounds);
+  }, [fetchFire, showFire, waypoints]);
 
   useEffect(() => {
     if (!showAva) { setAvaData(null); return; }
@@ -2739,6 +2802,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
 
   useEffect(() => () => {
     if (deferredSourceRefreshRef.current) clearTimeout(deferredSourceRefreshRef.current);
+    if (fireRefreshTimeoutRef.current) clearTimeout(fireRefreshTimeoutRef.current);
+    fireFetchAbortRef.current?.abort();
     clearLocateSettleTimers();
   }, [clearLocateSettleTimers]);
 
@@ -2777,6 +2842,13 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     boundsRef.current = { n, s, e, w };
     onBoundsChange({ n, s, e, w, zoom: zoomLevel || 10 });
     if (showMvum) fetchMvum({ n, s, e, w });
+    if (showFire && e !== w) {
+      if (fireRefreshTimeoutRef.current) clearTimeout(fireRefreshTimeoutRef.current);
+      fireRefreshTimeoutRef.current = setTimeout(() => {
+        fireRefreshTimeoutRef.current = null;
+        void fetchFire({ n, s, e, w });
+      }, userDriven ? 500 : 900);
+    }
     if (userDriven) {
       if (deferredSourceRefreshRef.current) clearTimeout(deferredSourceRefreshRef.current);
       emitDebugEvent('source:refresh:deferred', { delay_ms: 1400, center: { lat: (n + s) / 2, lng: (e + w) / 2 } });
@@ -2794,7 +2866,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     } else {
       refreshMapSourcesForBounds(n, s, e, w);
     }
-  }, [emitDebugEvent, onBoundsChange, showMvum, fetchMvum, navMode, persistRecentViewport, showTerrain, refreshMapSourcesForBounds]);
+  }, [emitDebugEvent, onBoundsChange, showMvum, fetchMvum, showFire, fetchFire, navMode, persistRecentViewport, showTerrain, refreshMapSourcesForBounds]);
 
   const handleCampPress = useCallback(async (e: any) => {
     const feat = e.features?.[0];
@@ -4178,11 +4250,18 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         <MapGL.ShapeSource id="fire-overlay" shape={fireData}>
           <MapGL.FillLayer
             id="fire-fill"
-            style={{ fillColor: '#dc2626', fillOpacity: 0.3 }}
+            style={{
+              fillColor: fireGeometryStyle.fillColor,
+              fillOpacity: fireGeometryStyle.fillOpacity,
+            }}
           />
           <MapGL.LineLayer
             id="fire-line"
-            style={{ lineColor: '#ef4444', lineWidth: 1.5, lineOpacity: 0.85 }}
+            style={{
+              lineColor: fireGeometryStyle.lineColor,
+              lineWidth: fireGeometryStyle.lineWidth,
+              lineOpacity: fireGeometryStyle.lineOpacity,
+            }}
           />
         </MapGL.ShapeSource>
       )}

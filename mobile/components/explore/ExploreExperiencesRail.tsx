@@ -3,6 +3,7 @@ import { ActivityIndicator, Animated, Easing, Image, Linking, ScrollView, StyleS
 import { Ionicons } from '@expo/vector-icons';
 import type { BookableExperience } from '@/lib/api';
 import { useTheme } from '@/lib/design';
+import { boundedExploreImageUrl, EXPLORE_IMAGE_BOUNDS, exploreImageSource } from '@/lib/mediaPolicy';
 import { TrailheadRailSkeleton } from '@/components/TrailheadUI';
 
 type Props = {
@@ -137,13 +138,27 @@ function ExperienceCard({
   const image = experience.hero_image_url || experience.images?.find(item => !!item.url)?.url || '';
   const hasCoords = Number.isFinite(Number(experience.lat)) && Number.isFinite(Number(experience.lng));
   const listMode = variant === 'list';
+  const safeImageUrl = boundedExploreImageUrl(
+    mediaUrl(image),
+    listMode ? EXPLORE_IMAGE_BOUNDS.card : EXPLORE_IMAGE_BOUNDS.rail,
+  );
+  const [failedImageUrl, setFailedImageUrl] = useState('');
+  useEffect(() => {
+    setFailedImageUrl('');
+  }, [safeImageUrl]);
   const meta = experienceMeta(experience);
   const provider = experienceProvider(experience);
   return (
     <View style={[listMode ? styles.listCard : styles.card, { borderColor: C.border, backgroundColor: C.s2 }]}>
       <View style={listMode ? styles.listImageWrap : styles.imageWrap}>
-        {image ? (
-          <Image source={{ uri: mediaUrl(image) }} style={styles.image} resizeMode="cover" resizeMethod="resize" />
+        {safeImageUrl && failedImageUrl !== safeImageUrl ? (
+          <Image
+            source={exploreImageSource(safeImageUrl)}
+            style={styles.image}
+            resizeMode="cover"
+            resizeMethod="resize"
+            onError={() => setFailedImageUrl(safeImageUrl)}
+          />
         ) : (
           <View style={[styles.imageFallback, { backgroundColor: C.s3 }]}>
             <Ionicons name="ticket-outline" size={30} color={C.orange} />

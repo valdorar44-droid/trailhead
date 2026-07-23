@@ -3,6 +3,7 @@ import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { ExplorePlaceProfile, ExploreTrailCard } from '@/lib/api';
 import { mono, useTheme } from '@/lib/design';
+import { boundedExploreImageUrl, EXPLORE_IMAGE_BOUNDS, exploreImageSource } from '@/lib/mediaPolicy';
 import { getExploreDisplayTitle, getExploreTrailCards } from './exploreDisplay';
 
 type TrailFilter = 'all' | 'easy' | 'moderate' | 'hard';
@@ -83,6 +84,7 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
         {visibleTrails.map(trail => {
           const selected = selectedId === trail.id;
           const photo = primaryTrailPhoto(trail) || areaPhoto;
+          const safePhoto = boundedExploreImageUrl(mediaUrl(photo), EXPLORE_IMAGE_BOUNDS.trail);
           const featureLabel = cleanTrailLabel(trail.feature_label || trail.feature_type?.replace(/_/g, ' ') || 'Trail');
           const difficulty = cleanTrailDifficulty(trail.difficulty);
           const routeType = cleanTrailRouteType(trail.route_type);
@@ -105,8 +107,8 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
                 onPress={() => setSelectedId(current => current === trail.id ? null : trail.id)}
               >
                 <View style={styles.trailImageShell}>
-                  {photo ? (
-                    <Image source={{ uri: mediaUrl(photo) }} style={styles.trailImage} resizeMode="cover" resizeMethod="resize" />
+                  {safePhoto ? (
+                    <Image source={exploreImageSource(safePhoto)} style={styles.trailImage} resizeMode="cover" resizeMethod="resize" />
                   ) : (
                     <View style={styles.trailImageFallback}>
                       <Ionicons name="trail-sign-outline" size={32} color="#64748b" />
@@ -309,8 +311,8 @@ function primaryTrailPhoto(trail: ExploreTrailCard) {
 
 function primaryAreaPhoto(place: ExplorePlaceProfile) {
   return (
-    place.summary.image_url
-    || place.summary.thumbnail_url
+    place.summary.thumbnail_url
+    || place.summary.image_url
     || place.source_pack?.photos?.find(photo => !!photo.url)?.url
     || ''
   );

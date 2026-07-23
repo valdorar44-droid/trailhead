@@ -18,6 +18,7 @@ import {
   EXPLORE_CATEGORY_CHIPS,
   ExploreCategoryFilterSheet,
   ExploreDetailSheet,
+  createExploreDetailNavigationState,
   ExploreExperiencesRail,
   ExploreHero,
   ExploreHomeControls,
@@ -37,6 +38,7 @@ import {
   isExploreThinOpenReference,
   mergeCuratedExplorePlaces,
   type ExploreCategoryKey,
+  type ExploreDetailNavigationState,
   type ExploreDetailTab,
   type ExploreDetailWeather,
   type ExploreNearbyModule,
@@ -116,6 +118,11 @@ import {
   resolveExploreNearbySearchCenter,
   serviceDestinationQueryFromExploreQuery,
 } from '@/lib/exploreNearbyContext';
+import {
+  boundedExploreImageUrl,
+  exploreImageSource,
+  EXPLORE_IMAGE_BOUNDS,
+} from '@/lib/mediaPolicy';
 
 const EXPLORE_CACHE_KEY = 'trailhead_explore_catalog_index_v3';
 const EXPLORE_CAMPGROUNDS_CACHE_PREFIX = 'trailhead_explore_campgrounds_v1:';
@@ -1750,12 +1757,25 @@ function timeGreeting(date = new Date()) {
 
 function campImageUrl(camp: CampsitePin) {
   const direct = camp.photo_url || camp.hero_photo_url || camp.primary_image || camp.image_url;
-  if (direct) return mediaUrl(direct);
+  if (direct) {
+    const bounded = boundedExploreImageUrl(mediaUrl(direct), EXPLORE_IMAGE_BOUNDS.card);
+    if (bounded) return bounded;
+  }
   for (const item of [...(camp.photos ?? []), ...(camp.photo_candidates ?? [])]) {
-    if (typeof item === 'string' && item) return mediaUrl(item);
-    if (item && typeof item === 'object' && item.url) return mediaUrl(item.url);
+    if (typeof item === 'string' && item) {
+      const bounded = boundedExploreImageUrl(mediaUrl(item), EXPLORE_IMAGE_BOUNDS.card);
+      if (bounded) return bounded;
+    }
+    if (item && typeof item === 'object' && item.url) {
+      const bounded = boundedExploreImageUrl(mediaUrl(item.url), EXPLORE_IMAGE_BOUNDS.card);
+      if (bounded) return bounded;
+    }
   }
   return '';
+}
+
+function livePlaceImageUrl(place: OsmPoi) {
+  return boundedExploreImageUrl(mediaUrl(place.photo_url), EXPLORE_IMAGE_BOUNDS.tile);
 }
 
 function cleanCampTypeLabel(raw?: string | null) {
@@ -2317,6 +2337,10 @@ function GuideScreenContent() {
   const [exploreLocationRequestId, setExploreLocationRequestId] = useState(0);
   const [exploreLocationState, setExploreLocationState] = useState<'idle' | 'requesting' | 'denied' | 'blocked' | 'error'>('idle');
   const [selectedExplore, setSelectedExplore] = useState<ExplorePlaceProfile | null>(null);
+  const [selectedExploreSuspendedForMap, setSelectedExploreSuspendedForMap] = useState(false);
+  const [selectedExploreNavigation, setSelectedExploreNavigation] = useState<ExploreDetailNavigationState>(() => (
+    createExploreDetailNavigationState()
+  ));
   const selectedExploreRef = useRef<ExplorePlaceProfile | null>(null);
   selectedExploreRef.current = selectedExplore;
   const selectedExploreSheetModel = useMemo(() => selectedExplore ? adaptExploreHubSheet({
@@ -2364,7 +2388,15 @@ function GuideScreenContent() {
     dispatchExploreSheet({ type: 'close' });
     selectedExploreRef.current = null;
     setSelectedExplore(null);
+    setSelectedExploreSuspendedForMap(false);
+    setSelectedExploreNavigation(createExploreDetailNavigationState());
   }, []);
+  const suspendSelectedExploreForMap = useCallback(() => {
+    setSelectedExploreSuspendedForMap(true);
+  }, []);
+  useFocusEffect(useCallback(() => {
+    if (selectedExploreRef.current) setSelectedExploreSuspendedForMap(false);
+  }, []));
   const [selectedLivePlace, setSelectedLivePlace] = useState<OsmPoi | null>(null);
   const [paywallVisible, setPaywallVisible] = useState(false);
   const [paywallCode, setPaywallCode] = useState('');
@@ -4352,7 +4384,7 @@ function GuideScreenContent() {
         relatedContext: exploreMapRelatedContext(place, exploreCampgroundsById[place.id] ?? []),
       },
     });
-    closeSelectedExplore();
+    suspendSelectedExploreForMap();
     router.push('/(tabs)/map');
   }
 
@@ -4368,20 +4400,33 @@ function GuideScreenContent() {
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '')
       .slice(0, 60) || 'detail';
+    const canonicalId = String(item.source_id || '').trim()
+      || `source-pack:${selectedExplore?.id || 'explore'}:${sourceKey}`;
+    const image = mediaUrl(item.image_url);
     setPendingMapSelection({
-      kind: 'place',
+      kind: 'explorePlace',
       place: {
-        id: `source-pack:${selectedExplore?.id || 'explore'}:${sourceKey}`,
+        id: canonicalId,
         name: item.title || 'Explore stop',
         lat,
         lng,
-        icon: item.kind === 'campground' ? 'camp' : 'pin',
+        category: item.kind || item.category || 'place',
+        summary: item.description || '',
         note: item.description || item.kind || item.source_label || '',
         sourceLabel: item.source_label || item.source || selectedExplore?.source_pack?.primary,
-        createdAt: Date.now(),
+        sourceUrl: item.url,
+        officialUrl: item.url,
+        imageUrl: image,
+        photos: image ? [{
+          url: image,
+          caption: item.image_caption,
+          credit: item.image_credit,
+          source: item.source_label || item.source,
+          license: item.image_license,
+        }] : [],
       },
     });
-    closeSelectedExplore();
+    suspendSelectedExploreForMap();
     router.push('/(tabs)/map');
   }
 
@@ -4396,7 +4441,7 @@ function GuideScreenContent() {
       return;
     }
     setPendingNavigatePlace({ lat: Number(lat), lng: Number(lng), name: title });
-    closeSelectedExplore();
+    suspendSelectedExploreForMap();
     router.push('/(tabs)/map');
   }
 
@@ -4504,7 +4549,7 @@ function GuideScreenContent() {
 
   function showExploreCampOnMap(camp: CampsitePin) {
     setPendingMapSelection({ kind: 'camp', camp });
-    closeSelectedExplore();
+    suspendSelectedExploreForMap();
     router.push('/(tabs)/map');
   }
 
@@ -4531,7 +4576,7 @@ function GuideScreenContent() {
         createdAt: Date.now(),
       },
     });
-    closeSelectedExplore();
+    suspendSelectedExploreForMap();
     router.push('/(tabs)/map');
   }
 
@@ -4544,7 +4589,7 @@ function GuideScreenContent() {
       return;
     }
     setPendingNavigatePlace({ lat: Number(lat), lng: Number(lng), name: target?.name || trail.title });
-    closeSelectedExplore();
+    suspendSelectedExploreForMap();
     router.push('/(tabs)/map');
   }
 
@@ -4566,7 +4611,7 @@ function GuideScreenContent() {
         createdAt: Date.now(),
       },
     });
-    closeSelectedExplore();
+    suspendSelectedExploreForMap();
     router.push('/(tabs)/map');
   }
 
@@ -4653,6 +4698,7 @@ function GuideScreenContent() {
   function showExploreSheet(place: ExplorePlaceProfile, initialTab: ExploreDetailTab) {
     setProfileReadMode(initialTab);
     const local = exploreTrailAreasById[place.id] ?? place;
+    setSelectedExploreNavigation(createExploreDetailNavigationState(local.id, initialTab));
     const model = adaptExploreHubSheet({
       id: local.id,
       name: local.summary.title,
@@ -4952,7 +4998,7 @@ function GuideScreenContent() {
                 >
                   <View style={s.campgroundImageWrap}>
                     {image ? (
-                      <Image source={{ uri: image }} style={s.campgroundImage} resizeMode="cover" resizeMethod="resize" />
+                      <Image source={exploreImageSource(image)} style={s.campgroundImage} resizeMode="cover" resizeMethod="resize" />
                     ) : (
                       <View style={s.campgroundImageFallback}>
                         <Ionicons name="bonfire-outline" size={28} color={C.orange} />
@@ -5905,10 +5951,17 @@ function GuideScreenContent() {
                     </TouchableOpacity>
                   </View>
                 ) : null}
-                {filteredLiveExplorePlaces.map(place => (
+                {filteredLiveExplorePlaces.map(place => {
+                  const image = livePlaceImageUrl(place);
+                  return (
                   <TouchableOpacity key={place.id} style={s.livePlaceRow} activeOpacity={0.86} onPress={() => setSelectedLivePlace(place)}>
-                    {place.photo_url ? (
-                      <Image source={{ uri: mediaUrl(place.photo_url) }} style={s.livePlacePhoto} resizeMode="cover" resizeMethod="resize" />
+                    {image ? (
+                      <Image
+                        source={exploreImageSource(image)}
+                        style={s.livePlacePhoto}
+                        resizeMode="cover"
+                        resizeMethod="resize"
+                      />
                     ) : (
                       <View style={s.livePlaceIcon}>
                         <Ionicons name="business-outline" size={18} color={C.orange} />
@@ -5922,7 +5975,8 @@ function GuideScreenContent() {
                     </View>
                     <Ionicons name="chevron-up-outline" size={16} color={C.text3} />
                   </TouchableOpacity>
-              ))}
+                  );
+                })}
             </View>
             )}
 
@@ -6364,7 +6418,7 @@ function GuideScreenContent() {
         onShowArea={showSelectedExperienceOnMap}
       />
 
-      <Modal visible={!!selectedExplore} animationType="slide" onRequestClose={closeSelectedExplore}>
+      <Modal visible={!!selectedExplore && !selectedExploreSuspendedForMap} animationType="slide" onRequestClose={closeSelectedExplore}>
         {selectedExplore && (
           <PlaceSheetShell model={selectedExploreSheetModel!}>
           <ExploreDetailSheet
@@ -6408,6 +6462,8 @@ function GuideScreenContent() {
             onTrailMap={trail => showExploreTrailOnMap(selectedExplore, trail)}
             onTrailRoute={trail => directionsToExploreTrailhead(selectedExplore, trail)}
             mediaUrl={mediaUrl}
+            navigationState={selectedExploreNavigation}
+            onNavigationStateChange={setSelectedExploreNavigation}
           />
           </PlaceSheetShell>
         )}

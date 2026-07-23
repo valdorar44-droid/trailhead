@@ -1,6 +1,17 @@
 export { ExploreCategoryChips } from './ExploreCategoryChips';
 export { ExploreCategoryFilterSheet } from './ExploreCategoryFilterSheet';
-export { ExploreDetailSheet, type ExploreDetailTab, type ExploreDetailWeather } from './ExploreDetailSheet';
+export {
+  ExploreDetailSheet,
+  type ExploreDetailWeather,
+} from './ExploreDetailSheet';
+export {
+  createExploreDetailNavigationState,
+  exploreDetailNavigationReducer,
+  type ExploreDetailModuleKey,
+  type ExploreDetailNavigationAction,
+  type ExploreDetailNavigationState,
+  type ExploreDetailTab,
+} from '@/lib/exploreDetailNavigation';
 export { ExploreExperiencesRail } from './ExploreExperiencesRail';
 export { ExploreFilterRow } from './ExploreFilterRow';
 export { GuidedDestinationBrowser, GUIDED_DESTINATIONS, type GuidedDestination } from './GuidedDestinationBrowser';

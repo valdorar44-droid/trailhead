@@ -1,9 +1,10 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Image, Linking, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import type { BookableExperience } from '@/lib/api';
 import { useTheme } from '@/lib/design';
+import { boundedExploreImageUrl, EXPLORE_IMAGE_BOUNDS, exploreImageSource } from '@/lib/mediaPolicy';
 
 type Props = {
   visible: boolean;
@@ -60,7 +61,7 @@ export function GuidedTripDetailModal({
               >
                 {details.images.length ? details.images.map((image, index) => (
                   <View key={`${image.url}:${index}`} style={[styles.heroFrame, { width: heroWidth, backgroundColor: C.s2 }]}>
-                    <Image source={{ uri: mediaUrl(image.url) }} style={styles.heroImage} resizeMode="cover" resizeMethod="resize" />
+                    <GuidedTripImage url={mediaUrl(image.url)} />
                   </View>
                 )) : (
                   <View style={[styles.heroFrame, styles.heroFallback, { width: heroWidth, backgroundColor: C.s2 }]}>
@@ -195,6 +196,31 @@ export function GuidedTripDetailModal({
         )}
       </SafeAreaView>
     </Modal>
+  );
+}
+
+function GuidedTripImage({ url }: { url: string }) {
+  const C = useTheme();
+  const safeUrl = boundedExploreImageUrl(url, EXPLORE_IMAGE_BOUNDS.guidedDetail);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    setFailed(false);
+  }, [safeUrl]);
+  if (!safeUrl || failed) {
+    return (
+      <View style={[styles.heroImage, styles.heroFallback, { backgroundColor: C.s2 }]}>
+        <Ionicons name="ticket-outline" size={34} color={C.orange} />
+      </View>
+    );
+  }
+  return (
+    <Image
+      source={exploreImageSource(safeUrl)}
+      style={styles.heroImage}
+      resizeMode="cover"
+      resizeMethod="resize"
+      onError={() => setFailed(true)}
+    />
   );
 }
 

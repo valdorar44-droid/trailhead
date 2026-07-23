@@ -174,6 +174,17 @@ import { useScreenActivity } from '@/lib/screenActivity';
 import { mapLocationWatchShouldRun, mapVisualWorkShouldRun } from '@/lib/screenActivityState';
 import { useKeyboardInset } from '@/lib/keyboardInset';
 import { mapModeOwnsRoutePreview, resolveMapExperienceMode } from '@/lib/mapExperienceMode';
+import {
+  FIRE_OVERLAY_IDLE_STATUS,
+  FIRE_OVERLAY_LOADING_STATUS,
+  FIRE_OVERLAY_UNAVAILABLE_STATUS,
+  fireOverlayGeometryStyle,
+  fireOverlayStatusColor,
+  fireOverlayStatusLabel,
+  isValidFireOverlayViewport,
+  loadFireOverlayViewport,
+  type FireOverlayStatus,
+} from '@/lib/fireOverlay';
 import { communityRatingTarget } from '@/lib/communityRatingEligibility';
 import {
   initialMapLayersFiltersState,
@@ -4528,7 +4539,14 @@ const buildMapHtml = (
 
   function setNaipLayer(show){showNaipLayer=show;if(!map||!mapReady)return;if(show){if(!map.getSource('naip'))map.addSource('naip',{type:'raster',tiles:['https://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryOnly/MapServer/tile/{z}/{y}/{x}'],tileSize:256,maxzoom:19,attribution:'USGS NAIP'});if(!map.getLayer('naip-layer'))map.addLayer({id:'naip-layer',type:'raster',source:'naip',paint:{'raster-opacity':0.85}},map.getLayer('water-name')?'water-name':undefined);}else{if(map.getLayer('naip-layer'))map.removeLayer('naip-layer');if(map.getSource('naip'))map.removeSource('naip');}}
 
-  function setFireLayer(show){showFireLayer=show;if(!map||!mapReady)return;if(show){if(!map.getSource('fires')){map.addSource('fires',{type:'geojson',data:{type:'FeatureCollection',features:[]}});fetch(apiBase+'/api/conditions/fire-perimeters').then(function(r){return r.json();}).then(function(d){if(map.getSource('fires'))map.getSource('fires').setData(d);}).catch(function(){});}if(!map.getLayer('fires-fill'))map.addLayer({id:'fires-fill',type:'fill',source:'fires',paint:{'fill-color':'#dc2626','fill-opacity':0.3}},map.getLayer('water-name')?'water-name':undefined);if(!map.getLayer('fires-line'))map.addLayer({id:'fires-line',type:'line',source:'fires',paint:{'line-color':'#ef4444','line-width':1.5,'line-opacity':0.85}});}else{['fires-line','fires-fill'].forEach(function(l){if(map.getLayer(l))map.removeLayer(l);});if(map.getSource('fires'))map.removeSource('fires');}}
+  var _fireRequestSeq=0,_fireRequestTimer=null,_fireLastData=null;
+  var _fireStyle={fillColor:'#ef4444',fillOpacity:0.3,lineColor:'#ef4444',lineOpacity:0.9,lineWidth:1.5};
+  function _fireViewport(){if(!map)return null;var b=map.getBounds();var wrap=function(v){return((v+180)%360+360)%360-180;};var n=Math.min(90,b.getNorth()),s=Math.max(-90,b.getSouth()),e=wrap(b.getEast()),w=wrap(b.getWest());return isFinite(n)&&isFinite(s)&&isFinite(e)&&isFinite(w)&&n>s&&e!==w?{n:n,s:s,e:e,w:w}:null;}
+  function _setFirePaint(style){if(!map||!style)return;_fireStyle=style;if(map.getLayer('fires-fill')){map.setPaintProperty('fires-fill','fill-color',style.fillColor);map.setPaintProperty('fires-fill','fill-opacity',style.fillOpacity);}if(map.getLayer('fires-line')){map.setPaintProperty('fires-line','line-color',style.lineColor);map.setPaintProperty('fires-line','line-opacity',style.lineOpacity);map.setPaintProperty('fires-line','line-width',style.lineWidth);}}
+  function _requestFireLayer(){if(!showFireLayer||!map||!mapReady)return;var viewport=_fireViewport();if(!viewport){postRN({type:'fire_overlay_request',request_id:++_fireRequestSeq,invalid_viewport:true});return;}postRN(Object.assign({type:'fire_overlay_request',request_id:++_fireRequestSeq},viewport));}
+  function _scheduleFireLayerRequest(){if(_fireRequestTimer)clearTimeout(_fireRequestTimer);_fireRequestTimer=setTimeout(_requestFireLayer,700);}
+  function _applyFireOverlayMessage(msg){if(!showFireLayer||msg.request_id!==_fireRequestSeq)return;_setFirePaint(msg.style);if(msg.payload&&msg.payload.type==='FeatureCollection'&&Array.isArray(msg.payload.features)){_fireLastData=msg.payload;if(map.getSource('fires'))map.getSource('fires').setData(_fireLastData);}}
+  function setFireLayer(show){showFireLayer=show;if(_fireRequestTimer){clearTimeout(_fireRequestTimer);_fireRequestTimer=null;}if(!map||!mapReady)return;if(show){if(!map.getSource('fires'))map.addSource('fires',{type:'geojson',data:_fireLastData||{type:'FeatureCollection',features:[]}});if(!map.getLayer('fires-fill'))map.addLayer({id:'fires-fill',type:'fill',source:'fires',paint:{'fill-color':_fireStyle.fillColor,'fill-opacity':_fireStyle.fillOpacity}},map.getLayer('water-name')?'water-name':undefined);if(!map.getLayer('fires-line'))map.addLayer({id:'fires-line',type:'line',source:'fires',paint:{'line-color':_fireStyle.lineColor,'line-width':_fireStyle.lineWidth,'line-opacity':_fireStyle.lineOpacity}});_requestFireLayer();}else{_fireRequestSeq++;['fires-line','fires-fill'].forEach(function(l){if(map.getLayer(l))map.removeLayer(l);});if(map.getSource('fires'))map.removeSource('fires');}}
 
   function setAvaLayer(show){showAvaLayer=show;if(!map||!mapReady)return;if(show){if(!map.getSource('ava')){map.addSource('ava',{type:'geojson',data:{type:'FeatureCollection',features:[]}});fetch('https://api.avalanche.org/v2/public/products/map-layer').then(function(r){return r.json();}).then(function(d){if(map.getSource('ava'))map.getSource('ava').setData(d);}).catch(function(){});}if(!map.getLayer('ava-fill'))map.addLayer({id:'ava-fill',type:'fill',source:'ava',paint:{'fill-color':['match',['get','danger_level'],'1','#50C878','2','#FFD700','3','#FF8C00','4','#E63946','5','#1a0a0a','#888888'],'fill-opacity':0.45}},map.getLayer('water-name')?'water-name':undefined);if(!map.getLayer('ava-line'))map.addLayer({id:'ava-line',type:'line',source:'ava',paint:{'line-color':['match',['get','danger_level'],'1','#50C878','2','#FFD700','3','#FF8C00','4','#E63946','5','#1a0a0a','#888888'],'line-width':1.5}});}else{['ava-line','ava-fill'].forEach(function(l){if(map.getLayer(l))map.removeLayer(l);});if(map.getSource('ava'))map.removeSource('ava');}}
 
@@ -4962,6 +4980,7 @@ const buildMapHtml = (
       clearTimeout(boundsTimer);
       boundsTimer=setTimeout(postMapBounds,120);
       if(userMarker){var svg=userMarker.getElement().querySelector('svg');var hdg=smoothedHdg;if(svg&&hdg>=0){svg.style.transform='rotate('+(hdg-map.getBearing())+'deg)';}}
+      if(showFireLayer)_scheduleFireLayerRequest();
       if(showMvumLayer){clearTimeout(_mvumTimer);_mvumTimer=setTimeout(_fetchMvum,700);}
       if(showRoadsLayer){clearTimeout(_roadsTimer);_roadsTimer=setTimeout(_fetchRoads,700);}
     });
@@ -5678,6 +5697,7 @@ const buildMapHtml = (
     if(msg.type==='set_land_overlay')setLandOverlay(!!msg.show);
     if(msg.type==='set_usgs_overlay')setUsgsOverlay(!!msg.show);
     if(msg.type==='set_water_nav_lines'&&map.getSource('water-nav-lines')){map.getSource('water-nav-lines').setData(msg.data||{type:'FeatureCollection',features:[]});}
+    if(msg.type==='fire_overlay_result'||msg.type==='fire_overlay_error'){_applyFireOverlayMessage(msg);return;}
     if(msg.type==='set_layer'){var _s=!!msg.show;if(msg.layer==='terrain')setTerrainLayer(_s);else if(msg.layer==='naip')setNaipLayer(_s);else if(msg.layer==='fire')setFireLayer(_s);else if(msg.layer==='ava')setAvaLayer(_s);else if(msg.layer==='radar')setRadarLayer(_s);else if(msg.layer==='nautical')setNauticalLayer(_s);else if(msg.layer==='mvum')setMvumLayer(_s);else if(msg.layer==='roads')setRoadsLayer(_s);}
     if(msg.type==='download_tiles_bbox'){if(!downloadActive){downloadActive=true;_currentDlLabel=msg.label||'';_dlTiles(msg.n,msg.s,msg.e,msg.w,msg.minZ||10,msg.maxZ||12,!!msg.vectorOnly);}}
     if(msg.type==='download_tiles_route'){if(!downloadActive){downloadActive=true;_currentDlLabel=msg.label||'';_dlTilesRoute(msg.bufferKm||20,msg.minZ||10,msg.maxZ||16,!!msg.vectorOnly,msg.routeCoords);}}
@@ -6949,10 +6969,17 @@ function MapScreen() {
   }), [C, map3dEnabled, mapLayer, premiumMapStyle, themeMode]);
   const [layerTrails, setLayerTrails] = useState(true);
   const [layerFire,    setLayerFire]    = useState(false);
+  const [fireOverlayStatus, setFireOverlayStatus] = useState<FireOverlayStatus>(FIRE_OVERLAY_IDLE_STATUS);
+  const fallbackFireAbortRef = useRef<AbortController | null>(null);
+  const fallbackFireGenerationRef = useRef(0);
   const [layerAva,     setLayerAva]     = useState(false);
   const [layerRadar,   setLayerRadar]   = useState(false);
   const [layerMvum,    setLayerMvum]    = useState(false);
   const [layerNautical, setLayerNautical] = useState(false);
+  useEffect(() => () => {
+    fallbackFireAbortRef.current?.abort();
+    fallbackFireAbortRef.current = null;
+  }, []);
   const safeWaterPlanningActive = Boolean(layerNautical && !navMode && !waterFollowActive);
   const safeWaterSheetOwnsPage = Boolean(
     safeWaterPlanningActive && (!safeWaterPanelCollapsed || waterRouteReview || waterCorridorPickMode),
@@ -9802,7 +9829,7 @@ function MapScreen() {
         subtype: explore.category || 'Explore area',
         source: 'trailhead_explore',
         source_label: sourceLabel,
-        summary: explore.summary || explore.note || 'Suggested explore stop near this area.',
+        summary: explore.summary || explore.note || '',
         photo_url: photoUrl,
         photos,
         website: explore.officialUrl || explore.sourceUrl,
@@ -18560,6 +18587,53 @@ function MapScreen() {
   function onWebMessage(e: any) {
     try {
       const msg = JSON.parse(e.nativeEvent.data);
+      if (msg.type === 'fire_overlay_request') {
+        const requestId = Number(msg.request_id);
+        const viewport = {
+          n: Number(msg.n),
+          s: Number(msg.s),
+          e: Number(msg.e),
+          w: Number(msg.w),
+        };
+        fallbackFireAbortRef.current?.abort();
+        const generation = ++fallbackFireGenerationRef.current;
+        const controller = new AbortController();
+        fallbackFireAbortRef.current = controller;
+        setFireOverlayStatus(FIRE_OVERLAY_LOADING_STATUS);
+        if (!Number.isSafeInteger(requestId) || !isValidFireOverlayViewport(viewport)) {
+          setFireOverlayStatus(FIRE_OVERLAY_UNAVAILABLE_STATUS);
+          postWebMessage(JSON.stringify({
+            type: 'fire_overlay_error',
+            request_id: requestId,
+            status: FIRE_OVERLAY_UNAVAILABLE_STATUS,
+            style: fireOverlayGeometryStyle(FIRE_OVERLAY_UNAVAILABLE_STATUS),
+          }));
+          return;
+        }
+        loadFireOverlayViewport(API_BASE_URL, viewport, { signal: controller.signal })
+          .then(result => {
+            if (controller.signal.aborted || generation !== fallbackFireGenerationRef.current) return;
+            setFireOverlayStatus(result.status);
+            postWebMessage(JSON.stringify({
+              type: 'fire_overlay_result',
+              request_id: requestId,
+              payload: result.payload,
+              status: result.status,
+              style: result.style,
+            }));
+          })
+          .catch((error: any) => {
+            if (error?.name === 'AbortError' || generation !== fallbackFireGenerationRef.current) return;
+            setFireOverlayStatus(FIRE_OVERLAY_UNAVAILABLE_STATUS);
+            postWebMessage(JSON.stringify({
+              type: 'fire_overlay_error',
+              request_id: requestId,
+              status: FIRE_OVERLAY_UNAVAILABLE_STATUS,
+              style: fireOverlayGeometryStyle(FIRE_OVERLAY_UNAVAILABLE_STATUS),
+            }));
+          });
+        return;
+      }
       const webTapCoord = (() => {
         const source = msg?.camp ?? msg?.poi ?? msg;
         const lat = Number(source?.lat);
@@ -18652,6 +18726,7 @@ function MapScreen() {
       if (msg.type === 'map_ready') {
         setMapSurfaceReady(true);
         setMapSurfaceGeneration(generation => generation + 1);
+        if (layerFire) postWebMessage(JSON.stringify({ type: 'set_layer', layer: 'fire', show: true }));
         postWebMessage(JSON.stringify({ type: 'set_waypoints', waypoints, fit: !routeBuildSession }));
         if (routeBuildSession) {
           const buildCoords = routeBuildSession.routeCoords ?? [];
@@ -22608,7 +22683,7 @@ function MapScreen() {
     { key: 'pois', label: 'Places', sub: 'Fuel, water, services', icon: 'location-outline', val: showPois, color: '#3b82f6', onPress: () => togglePoiOverlay(!showPois) },
     { key: 'trails', label: 'Trails & Dirt', sub: 'Tracks and paths', icon: 'trail-sign-outline', val: layerTrails, color: '#22c55e', onPress: () => setLayerTrails(!layerTrails) },
     { key: 'nautical', label: 'Water Safety', sub: 'Markers and hazards', icon: 'boat-outline', val: layerNautical, color: '#0891b2', onPress: () => { if (layerNautical) { closeSafeWaterMode(); return; } setLayerNautical(true); toggleDataLayer('nautical', true); setActivePlaceFilters(prev => Array.from(new Set([...prev, ...WATER_NAV_PLACE_FILTER_IDS]))); } },
-    { key: 'fire', label: 'Wildfire', sub: 'Current fire areas', icon: 'flame-outline', val: layerFire, color: '#ef4444', onPress: () => { const next = !layerFire; setLayerFire(next); toggleDataLayer('fire', next); } },
+    { key: 'fire', label: 'Wildfire', sub: fireOverlayStatusLabel(layerFire ? fireOverlayStatus : FIRE_OVERLAY_IDLE_STATUS), icon: 'flame-outline', val: layerFire, color: fireOverlayStatusColor(fireOverlayStatus), onPress: () => { const next = !layerFire; setLayerFire(next); toggleDataLayer('fire', next); } },
     { key: 'ava', label: 'Avalanche', sub: 'Snow danger areas', icon: 'snow-outline', val: layerAva, color: '#3b82f6', onPress: () => { const next = !layerAva; setLayerAva(next); toggleDataLayer('ava', next); } },
     { key: 'radar', label: 'Radar', sub: 'Rain and storms', icon: 'rainy-outline', val: layerRadar, color: '#06b6d4', onPress: () => { const next = !layerRadar; setLayerRadar(next); toggleDataLayer('radar', next); } },
     { key: 'mvum', label: 'Motor Access', sub: 'Seasonal roads', icon: 'car-outline', val: layerMvum, color: '#22c55e', onPress: () => { const next = !layerMvum; setLayerMvum(next); toggleDataLayer('mvum', next); } },
@@ -23338,6 +23413,7 @@ function MapScreen() {
           showTrailOverlay={mapVisualWorkActive && layerTrails}
           showMvum={mapVisualWorkActive && layerMvum}
           showFire={mapVisualWorkActive && layerFire}
+          onFireOverlayStatusChange={setFireOverlayStatus}
           showAva={mapVisualWorkActive && layerAva}
           showRadar={mapVisualWorkActive && layerRadar}
           showNautical={mapVisualWorkActive && layerNautical}
@@ -27706,7 +27782,13 @@ function MapScreen() {
           <View style={s.layerSheetHandle} />
           <View style={s.layerSheetHeader}>
             {showTrailList ? (
-              <TouchableOpacity onPress={() => setShowTrailList(false)} testID="map.layers.back">
+              <TouchableOpacity
+                style={s.layerSheetHeaderAction}
+                onPress={() => setShowTrailList(false)}
+                testID="map.layers.back"
+                accessibilityRole="button"
+                accessibilityLabel="Back to layers"
+              >
                 <Ionicons name="chevron-back" size={22} color={C.text2} />
               </TouchableOpacity>
             ) : null}
@@ -27717,8 +27799,11 @@ function MapScreen() {
               ) : null}
             </View>
             <TouchableOpacity
+              style={s.layerSheetHeaderAction}
               onPress={() => { setShowTrailList(false); setShowLayerSheet(false); }}
               testID="map.layers.close"
+              accessibilityRole="button"
+              accessibilityLabel="Close layers"
             >
               <Ionicons name="close" size={22} color={C.text2} />
             </TouchableOpacity>
@@ -33051,8 +33136,9 @@ const makeStyles = (C: ColorPalette) => {
     elevation: 24,
   },
   layerSheetHalf: {
-    maxHeight: '56%',
-    minHeight: 390,
+    height: '68%',
+    maxHeight: 720,
+    minHeight: 460,
   },
   layerSheetTall: {
     maxHeight: '82%',
@@ -33071,6 +33157,13 @@ const makeStyles = (C: ColorPalette) => {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 18, paddingTop: 8, paddingBottom: 10,
     borderBottomWidth: 1, borderBottomColor: C.border,
+  },
+  layerSheetHeaderAction: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   layerSheetTitle: { color: C.text, fontSize: 16, fontWeight: '900', letterSpacing: 0 },
   layerRow: {

@@ -241,7 +241,12 @@ export default function MapLayerSheetContent({
       </TouchableOpacity>
 
       <Text style={s.sectionHead}>Map style</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.carousel}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={s.carousel}
+        testID="map.layers.style-carousel"
+      >
         {primaryMapStyleOptions.map(option => {
           const active = option.id === activeMapLayer;
           return (
@@ -251,6 +256,8 @@ export default function MapLayerSheetContent({
               activeOpacity={0.86}
               onPress={() => onSelectMapLayer(option.id)}
               testID={`map.layers.style.${option.id}`}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: active }}
             >
               <View style={[s.stylePreview, { backgroundColor: option.colors[0] }]}>
                 <View style={[s.mapStylePreviewWater, { backgroundColor: option.colors[2] }]} />
@@ -262,7 +269,7 @@ export default function MapLayerSheetContent({
                 <Text style={s.styleTitle} numberOfLines={1}>{option.title}</Text>
                 <Text style={s.styleSub} numberOfLines={1}>{option.sub}</Text>
               </View>
-              {active ? <Ionicons name="checkmark-circle" size={17} color={C.green} /> : null}
+              {active ? <Ionicons name="checkmark-circle" size={17} color={C.orange} /> : null}
             </TouchableOpacity>
           );
         })}
@@ -277,6 +284,8 @@ export default function MapLayerSheetContent({
             activeOpacity={0.86}
             onPress={option.onPress}
             testID={`map.layers.style.${option.id}`}
+            accessibilityRole="radio"
+            accessibilityState={{ selected: extremeMapLayerActive && option.active }}
           >
             <View style={[s.mapboxStylePreview, { borderColor: option.color + '55', backgroundColor: option.color + '14' }]}>
               <Ionicons name={option.icon} size={24} color={option.color} />
@@ -298,6 +307,8 @@ export default function MapLayerSheetContent({
               activeOpacity={0.86}
               onPress={() => onSelectMapLayer(option.id)}
               testID={`map.layers.style.${option.id}`}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: active }}
             >
               <View style={[s.stylePreview, { backgroundColor: option.colors[0] }]}>
                 <View style={[s.mapStylePreviewWater, { backgroundColor: option.colors[2] }]} />
@@ -309,14 +320,19 @@ export default function MapLayerSheetContent({
                 <Text style={s.styleTitle} numberOfLines={1}>{option.title}</Text>
                 <Text style={s.styleSub} numberOfLines={1}>{option.sub}</Text>
               </View>
-              {active ? <Ionicons name="checkmark-circle" size={17} color={C.green} /> : null}
+              {active ? <Ionicons name="checkmark-circle" size={17} color={C.orange} /> : null}
             </TouchableOpacity>
           );
         })}
       </ScrollView>
 
       <Text style={s.sectionHead}>Layers</Text>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.carousel}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={s.carousel}
+        testID="map.layers.toggle-carousel"
+      >
         {layerItems.map(layer => (
           <TouchableOpacity
             key={layer.key}
@@ -324,10 +340,13 @@ export default function MapLayerSheetContent({
             activeOpacity={0.86}
             onPress={layer.onPress}
             testID={`map.layers.toggle.${layer.key}`}
+            accessibilityRole="switch"
+            accessibilityState={{ checked: layer.val }}
+            accessibilityLabel={`${layer.label}. ${layer.sub}`}
           >
             {renderLayerMiniPreview(layer)}
             <Text style={s.styleTitle} numberOfLines={1}>{layer.label}</Text>
-            <Text style={s.styleSub} numberOfLines={1}>{layer.sub}</Text>
+            <Text style={s.styleSub} numberOfLines={2}>{layer.sub}</Text>
           </TouchableOpacity>
         ))}
       </ScrollView>
@@ -335,7 +354,12 @@ export default function MapLayerSheetContent({
       {mapToolsVisible ? (
         <>
           <Text style={s.sectionHead}>Tools</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.carousel}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={s.carousel}
+            testID="map.layers.tool-carousel"
+          >
             {mapToolItems.map(layer => (
               <TouchableOpacity
                 key={layer.key}
@@ -347,6 +371,8 @@ export default function MapLayerSheetContent({
                 activeOpacity={0.86}
                 onPress={layer.onPress}
                 testID={`map.layers.tool.${layer.key}`}
+                accessibilityRole="button"
+                accessibilityState={{ selected: layer.val }}
               >
                 <View style={[s.layerTogglePreview, { borderColor: layer.color + '55', backgroundColor: layer.color + '14' }]}>
                   <Ionicons name={layer.icon} size={22} color={layer.color} />
@@ -420,7 +446,9 @@ export default function MapLayerSheetContent({
 
 const makeStyles = (C: ColorPalette) => StyleSheet.create({
   sheetContent: {
-    paddingBottom: 16,
+    // The app tab bar remains above this over-full-screen modal on some
+    // devices. Keep the last row scrollable clear of it.
+    paddingBottom: 96,
   },
   offlineRow: {
     minHeight: 58,
@@ -468,8 +496,8 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     gap: 7,
   },
   styleCardActive: {
-    borderColor: C.green + '88',
-    backgroundColor: C.green + '12',
+    borderColor: C.orange + '88',
+    backgroundColor: C.orange + '12',
   },
   mapboxStyleCard: {
     borderColor: 'rgba(255,255,255,0.12)',
@@ -493,7 +521,8 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   styleSub: {
     color: C.text3,
-    fontSize: 9,
+    fontSize: 12,
+    lineHeight: 16,
     fontFamily: mono,
     marginTop: 2,
   },
@@ -711,20 +740,21 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   legendText: {
     color: C.text2,
-    fontSize: 11,
+    fontSize: 12,
+    lineHeight: 17,
     fontFamily: mono,
   },
   legendMeta: {
     color: C.text3,
-    fontSize: 10,
+    fontSize: 12,
     fontFamily: mono,
-    lineHeight: 14,
+    lineHeight: 17,
   },
   legendMetaStrong: {
     color: C.text2,
-    fontSize: 10,
+    fontSize: 12,
     fontFamily: mono,
-    lineHeight: 14,
+    lineHeight: 17,
   },
   avaRow: {
     flexDirection: 'row',

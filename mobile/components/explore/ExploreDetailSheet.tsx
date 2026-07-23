@@ -1,8 +1,22 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Image, Linking, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, type ImageResizeMode, type ImageStyle, type StyleProp, type TextStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { ExplorePlaceProfile, ExploreSourcePackItem, ExploreTrailCard } from '@/lib/api';
 import { mono, useTheme } from '@/lib/design';
+import {
+  boundedExploreImageCandidates,
+  EXPLORE_IMAGE_BOUNDS,
+  exploreImageSource,
+  type ExploreImageBounds,
+} from '@/lib/mediaPolicy';
+import {
+  createExploreDetailNavigationState,
+  exploreDetailNavigationReducer,
+  type ExploreDetailModuleKey,
+  type ExploreDetailNavigationAction,
+  type ExploreDetailNavigationState,
+  type ExploreDetailTab,
+} from '@/lib/exploreDetailNavigation';
 import { ExploreTrailArea } from './ExploreTrailArea';
 import { StaticMapboxPreview, type StaticMapboxPin } from './StaticMapboxPreview';
 import {
@@ -22,24 +36,6 @@ import {
   type ExploreNearbyModule,
   type ExploreDisplayContext,
 } from './exploreDisplay';
-
-const DETAIL_STAY_FALLBACK_IMAGE = require('@/assets/explore-hero-moraine-lake.jpg');
-
-type ExploreDetailModuleKey =
-  | 'see'
-  | 'do'
-  | 'stay'
-  | 'visitor'
-  | 'trails'
-  | 'amenities'
-  | 'fees'
-  | 'alerts'
-  | 'calendar'
-  | 'weather'
-  | 'map'
-  | 'story'
-  | 'nearby';
-export type ExploreDetailTab = 'summary' | ExploreDetailModuleKey;
 
 const EMPTY_DETAIL_MESSAGE = 'Check closer to your trip.';
 
@@ -93,16 +89,20 @@ type Props = {
   onTrailMap?: (trail: ExploreTrailCard) => void;
   onTrailRoute?: (trail: ExploreTrailCard) => void;
   mediaUrl: (url?: string | null) => string;
+  navigationState?: ExploreDetailNavigationState;
+  onNavigationStateChange?: React.Dispatch<React.SetStateAction<ExploreDetailNavigationState>>;
 };
 
 function ResilientImage({
   uris,
   style,
   resizeMode = 'cover',
+  onExhausted,
 }: {
   uris: string[];
   style: StyleProp<ImageStyle>;
   resizeMode?: ImageResizeMode;
+  onExhausted?: () => void;
 }) {
   const cleanUris = useMemo(() => {
     const seen = new Set<string>();
@@ -124,20 +124,20 @@ function ResilientImage({
   return (
     <Image
       key={uri}
-      source={{ uri }}
+      source={exploreImageSource(uri)}
       style={style}
       resizeMode={resizeMode}
-      onError={() => setIndex(current => current < cleanUris.length - 1 ? current + 1 : cleanUris.length)}
+      resizeMethod="resize"
+      onError={() => {
+        if (index < cleanUris.length - 1) {
+          setIndex(index + 1);
+          return;
+        }
+        setIndex(cleanUris.length);
+        onExhausted?.();
+      }}
     />
   );
-}
-
-function sizedNpsMediaUrl(url?: string | null, width = 900) {
-  const clean = String(url || '').trim();
-  if (!clean) return '';
-  if (!/^https:\/\/www\.nps\.gov\/common\/uploads\//i.test(clean)) return clean;
-  if (/[?&](width|maxwidth)=/i.test(clean)) return clean;
-  return `${clean}${clean.includes('?') ? '&' : '?'}width=${width}&quality=85&mode=crop`;
 }
 
 function sourcePackItemLooksLikeArticle(item?: ExploreSourcePackItem | null) {
@@ -428,14 +428,30 @@ export function ExploreDetailSheet({
   onTrailMap,
   onTrailRoute,
   mediaUrl,
+  navigationState,
+  onNavigationStateChange,
 }: Props) {
   const C = useTheme();
   const accent = getExploreCategoryColor(place);
   const pack = place.source_pack;
   const sourceUrl = place.source_pack?.booking_url || place.source_pack?.official_url || place.summary.source_url;
-  const [activeModule, setActiveModule] = useState<ExploreDetailModuleKey | null>(null);
-  const [selectedItem, setSelectedItem] = useState<ExploreSourcePackItem | null>(null);
-  const [placeSearch, setPlaceSearch] = useState('');
+  const [localNavigationState, setLocalNavigationState] = useState<ExploreDetailNavigationState>(() => (
+    createExploreDetailNavigationState(place.id, tab)
+  ));
+  const controlledNavigation = navigationState != null && onNavigationStateChange != null;
+  const detailNavigation = controlledNavigation ? navigationState : localNavigationState;
+  const setDetailNavigation = controlledNavigation ? onNavigationStateChange : setLocalNavigationState;
+  const dispatchDetailNavigation = useCallback((action: ExploreDetailNavigationAction) => {
+    setDetailNavigation(previous => exploreDetailNavigationReducer(previous, action));
+  }, [setDetailNavigation]);
+  const activeModule = detailNavigation.activeModule;
+  const selectedItem = detailNavigation.selectedItem;
+  const placeSearch = detailNavigation.placeSearch;
+  const mainScrollRef = useRef<ScrollView | null>(null);
+  const childScrollRef = useRef<ScrollView | null>(null);
+  const mainScrollYRef = useRef(detailNavigation.mainScrollY);
+  const childScrollYRef = useRef(detailNavigation.childScrollY);
+  const [failedChildMediaKey, setFailedChildMediaKey] = useState('');
   const searchNeedle = placeSearch.trim().toLowerCase();
   const cleanStorySentences = useMemo(
     () => storySentences.map(sentence => cleanDetailStoryCopy(sentence, place)).filter(Boolean),
@@ -451,28 +467,47 @@ export function ExploreDetailSheet({
   }), [pack]);
 
   useEffect(() => {
-    setPlaceSearch('');
-    setSelectedItem(null);
-    setActiveModule(tab === 'summary' ? null : tab);
-  }, [place.id, tab]);
+    if (controlledNavigation) return;
+    setLocalNavigationState(createExploreDetailNavigationState(place.id, tab));
+  }, [controlledNavigation, place.id, tab]);
 
-  const mediaCandidates = (...groups: Array<Array<string | null | undefined> | string | null | undefined>) => {
+  useEffect(() => {
+    mainScrollYRef.current = detailNavigation.mainScrollY;
+    childScrollYRef.current = detailNavigation.childScrollY;
+  }, [detailNavigation.childScrollY, detailNavigation.mainScrollY]);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      if (selectedItem) {
+        childScrollRef.current?.scrollTo({ y: detailNavigation.childScrollY, animated: false });
+      } else {
+        mainScrollRef.current?.scrollTo({ y: detailNavigation.mainScrollY, animated: false });
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [activeModule, detailNavigation.childScrollY, detailNavigation.mainScrollY, place.id, selectedItem]);
+
+  const rememberScroll = useCallback((surface: 'main' | 'child') => {
+    dispatchDetailNavigation({
+      type: 'set_scroll',
+      surface,
+      y: surface === 'child' ? childScrollYRef.current : mainScrollYRef.current,
+    });
+  }, [dispatchDetailNavigation]);
+
+  const mediaCandidates = (
+    bounds: ExploreImageBounds,
+    ...groups: Array<Array<string | null | undefined> | string | null | undefined>
+  ) => {
     const urls: string[] = [];
-    const seen = new Set<string>();
     for (const group of groups) {
       const rawList = Array.isArray(group) ? group : [group];
       for (const raw of rawList) {
         const normalized = mediaUrl(raw).trim();
-        if (!normalized) continue;
-        const sized = sizedNpsMediaUrl(normalized);
-        for (const url of [sized, normalized]) {
-          if (!url || seen.has(url)) continue;
-          seen.add(url);
-          urls.push(url);
-        }
+        if (normalized) urls.push(normalized);
       }
     }
-    return urls;
+    return boundedExploreImageCandidates(urls, bounds);
   };
 
   const searchTextForItems = (items?: ExploreSourcePackItem[]) => (items ?? [])
@@ -487,10 +522,10 @@ export function ExploreDetailSheet({
     };
     const count = (items?: ExploreSourcePackItem[]) => Array.isArray(items) ? items.length : 0;
     const countLabel = (value: number, singular: string, plural: string) => `${value} ${value === 1 ? singular : plural}`;
-    const packPhotoCandidates = mediaCandidates((pack?.photos ?? []).map(photo => photo.url));
+    const packPhotoCandidates = mediaCandidates(EXPLORE_IMAGE_BOUNDS.tile, (pack?.photos ?? []).map(photo => photo.url));
     const imageKey = (url: string) => url.replace(/\?.*$/, '');
     const tileImages = (items?: ExploreSourcePackItem[], extra: Array<string | null | undefined> = []) => {
-      const candidates = mediaCandidates((items ?? []).map(item => item.image_url), extra, packPhotoCandidates, imageUrl);
+      const candidates = mediaCandidates(EXPLORE_IMAGE_BOUNDS.tile, (items ?? []).map(item => item.image_url), extra, packPhotoCandidates, imageUrl);
       const primary = candidates.find(url => !usedTileImages.has(imageKey(url))) || candidates[0] || '';
       if (primary) usedTileImages.add(imageKey(primary));
       return { imageUrl: primary, imageCandidates: primary ? [primary, ...candidates.filter(url => url !== primary)] : candidates };
@@ -665,7 +700,13 @@ export function ExploreDetailSheet({
   const heroWeather = weather ?? (place.summary.lat != null && place.summary.lng != null
     ? { icon: 'partly-sunny-outline' as const, temp: 'Weather', detail: 'Forecast' }
     : null);
-  const placeHeroCandidates = mediaCandidates(imageUrl, (pack?.photos ?? []).map(photo => photo.url), place.summary.image_url, place.summary.thumbnail_url);
+  const placeHeroCandidates = mediaCandidates(
+    EXPLORE_IMAGE_BOUNDS.detail,
+    imageUrl,
+    place.summary.image_url,
+    place.summary.thumbnail_url,
+    (pack?.photos ?? []).map(photo => photo.url),
+  );
 
   const filteredItems = (items?: ExploreSourcePackItem[]) => {
     const list = uniqueSourcePackItems((items ?? []).filter(sourcePackItemCanShow));
@@ -718,8 +759,7 @@ export function ExploreDetailSheet({
   };
 
   function openModule(key: ExploreDetailModuleKey) {
-    setSelectedItem(null);
-    setActiveModule(key);
+    dispatchDetailNavigation({ type: 'open_module', module: key });
     if (key === 'story') onTabChange('story');
     if (key === 'nearby') onTabChange('nearby');
     if (key === 'weather') {
@@ -731,7 +771,11 @@ export function ExploreDetailSheet({
   }
 
   function openSourceItem(item: ExploreSourcePackItem) {
-    setSelectedItem(item);
+    // The module list is replaced by the child view. Persist its exact position
+    // before that replacement so Map -> Explore and child -> list both restore it.
+    rememberScroll('main');
+    setFailedChildMediaKey('');
+    dispatchDetailNavigation({ type: 'select_item', item });
   }
 
   function renderAction(
@@ -773,12 +817,15 @@ export function ExploreDetailSheet({
         </View>
       );
     }
-    const moduleFallbackImages = activeModuleDef?.imageCandidates ?? [];
     return (
       <View style={styles.itemList}>
         {items.map((item, idx) => {
           const isStayItem = activeModule === 'stay';
-          const itemImages = mediaCandidates(item.image_url, moduleFallbackImages, imageUrl);
+          // A child row may only represent itself. Module, park, sibling, and
+          // generic destination art remain valid on their own surfaces, but
+          // substituting them here would falsely attribute that scene to this
+          // exact place.
+          const itemImages = mediaCandidates(EXPLORE_IMAGE_BOUNDS.tile, item.image_url);
           const canOpen = !!item.title || !!item.url || itemHasCoords(item);
           const metaLabel = cleanDetailItemMetaLabel(item);
           const itemCopy = sentenceAwarePreview(cleanSourcePackItemCopy(item), isStayItem ? 190 : 230).text;
@@ -792,8 +839,6 @@ export function ExploreDetailSheet({
             >
               {itemImages.length > 0 ? (
                 <ResilientImage uris={itemImages} style={[styles.detailItemImage, isStayItem && styles.detailItemStayImage]} />
-              ) : isStayItem ? (
-                <Image source={DETAIL_STAY_FALLBACK_IMAGE} style={[styles.detailItemImage, styles.detailItemStayImage]} resizeMode="cover" />
               ) : null}
               <View style={styles.detailItemBody}>
                 <Text style={[styles.detailItemTitle, { color: C.text }]}>{item.title || 'Place'}</Text>
@@ -906,14 +951,14 @@ export function ExploreDetailSheet({
           title: getExploreDisplayTitle(place),
           subtitle,
           badgeLabel: module.detail,
-          onPress: onShowArea,
+          onPress: showAreaOnMap,
           height: 360,
         })}
-        <TouchableOpacity style={[styles.roundButton, styles.backButton, { top: Math.max(topInset + 10, 22) }]} onPress={() => { setActiveModule(null); onTabChange('summary'); }}>
+        <TouchableOpacity style={[styles.roundButton, styles.backButton, { top: Math.max(topInset + 10, 22) }]} onPress={() => { dispatchDetailNavigation({ type: 'open_module', module: null }); onTabChange('summary'); }}>
           <Ionicons name="arrow-back" size={25} color="#fff" />
         </TouchableOpacity>
         <View style={[styles.heroRight, { top: Math.max(topInset + 10, 22) }]}>
-          <TouchableOpacity style={styles.roundButton} onPress={onShowArea}>
+          <TouchableOpacity style={styles.roundButton} onPress={showAreaOnMap}>
             <Ionicons name="map-outline" size={23} color="#fff" />
           </TouchableOpacity>
           <TouchableOpacity style={styles.roundButton} onPress={onClose}>
@@ -935,10 +980,16 @@ export function ExploreDetailSheet({
   }
 
   function showItemOnMap(item: ExploreSourcePackItem) {
+    rememberScroll('child');
     if (itemHasCoords(item) && onSourcePackItem) {
       onSourcePackItem(item);
       return;
     }
+    onShowArea();
+  }
+
+  function showAreaOnMap() {
+    rememberScroll(selectedItem ? 'child' : 'main');
     onShowArea();
   }
 
@@ -1041,17 +1092,25 @@ export function ExploreDetailSheet({
   }
 
   function renderChildDetail(item: ExploreSourcePackItem) {
-    const itemImages = item.image_url ? mediaCandidates(item.image_url, activeModuleDef?.imageCandidates ?? [], imageUrl) : [];
+    // Detail imagery is evidence about this exact child. Never fall through to
+    // a module tile, parent park, sibling, or generic destination photograph.
+    const itemImages = mediaCandidates(EXPLORE_IMAGE_BOUNDS.detail, item.image_url);
+    const childMediaKey = [place.id, item.source_id || item.title || '', item.image_url || ''].join('|');
+    const hasExactChildImage = itemImages.length > 0 && failedChildMediaKey !== childMediaKey;
     const siblingItems = activeModule ? moduleItems(activeModule) : moduleItems('map');
     const itemCopy = cleanSourcePackItemCopy(item);
     return (
       <>
         <View style={styles.childHero}>
-          {itemImages.length > 0 ? (
-            <ResilientImage uris={itemImages} style={styles.heroImage} />
+          {hasExactChildImage ? (
+            <ResilientImage
+              uris={itemImages}
+              style={styles.heroImage}
+              onExhausted={() => setFailedChildMediaKey(childMediaKey)}
+            />
           ) : renderMapPreview({ items: siblingItems, activeItem: item, title: item.title || 'Place', height: 340 })}
-          {itemImages.length > 0 && <View style={styles.heroShade} />}
-          <TouchableOpacity style={[styles.roundButton, styles.backButton, { top: Math.max(topInset + 10, 22) }]} onPress={() => setSelectedItem(null)}>
+          {hasExactChildImage && <View style={styles.heroShade} />}
+          <TouchableOpacity style={[styles.roundButton, styles.backButton, { top: Math.max(topInset + 10, 22) }]} onPress={() => dispatchDetailNavigation({ type: 'select_item', item: null })}>
             <Ionicons name="arrow-back" size={25} color="#fff" />
           </TouchableOpacity>
           <View style={[styles.heroRight, { top: Math.max(topInset + 10, 22) }]}>
@@ -1067,21 +1126,30 @@ export function ExploreDetailSheet({
               <Ionicons name="close" size={24} color="#fff" />
             </TouchableOpacity>
           </View>
-          {itemImages.length > 0 && (
+          {hasExactChildImage && (
             <View style={styles.heroText}>
               <Text style={[styles.kicker, { color: '#bbf7d0' }]} numberOfLines={1}>{titleCaseLabel(item.kind || activeModuleDef?.label || 'Place')}</Text>
               <Text style={styles.title} numberOfLines={3}>{item.title || 'Place'}</Text>
             </View>
           )}
         </View>
-        <ScrollView contentContainerStyle={styles.childContent} showsVerticalScrollIndicator={false}>
-          {itemImages.length === 0 && (
+        <ScrollView
+          ref={childScrollRef}
+          contentContainerStyle={styles.childContent}
+          showsVerticalScrollIndicator={false}
+          contentOffset={{ x: 0, y: detailNavigation.childScrollY }}
+          onScroll={event => { childScrollYRef.current = event.nativeEvent.contentOffset.y; }}
+          onScrollEndDrag={() => rememberScroll('child')}
+          onMomentumScrollEnd={() => rememberScroll('child')}
+          scrollEventThrottle={100}
+        >
+          {!hasExactChildImage && (
             <View style={[styles.copyPanel, { borderColor: C.border, backgroundColor: C.s1 }]}>
               <Text style={[styles.copyTitle, { color: C.text }]}>{item.title || 'Place'}</Text>
               {!!itemCopy && <ExpandableText value={itemCopy} textStyle={[styles.copyBody, { color: C.text2 }]} previewChars={420} />}
             </View>
           )}
-          {!!itemCopy && itemImages.length > 0 && (
+          {!!itemCopy && hasExactChildImage && (
             <View style={[styles.copyPanel, { borderColor: C.border, backgroundColor: C.s1 }]}>
               <Text style={[styles.copyTitle, { color: C.text }]}>Details</Text>
               <ExpandableText value={itemCopy} textStyle={[styles.copyBody, { color: C.text2 }]} previewChars={420} />
@@ -1104,7 +1172,7 @@ export function ExploreDetailSheet({
               {!!item.reservation_url && renderAction('Reserve', 'calendar-outline', () => Linking.openURL(item.reservation_url!))}
             </View>
           </View>
-          {!!item.image_credit && (
+          {hasExactChildImage && !!item.image_credit && (
             <Text style={[styles.imageCredit, { color: C.text3 }]}>{item.image_credit}</Text>
           )}
         </ScrollView>
@@ -1231,11 +1299,11 @@ export function ExploreDetailSheet({
             items: mapItems,
             title: 'Directions',
             subtitle: mapItems.length ? `${mapItems.length} places` : getExploreDisplayTitle(place),
-            onPress: onShowArea,
+            onPress: showAreaOnMap,
             height: 240,
           })}
           <View style={styles.mapActions}>
-            {renderAction('Show Area', 'map-outline', onShowArea, true)}
+            {renderAction('Show Area', 'map-outline', showAreaOnMap, true)}
             {renderAction(routeLabel, routeDisabled ? 'checkmark-circle' : 'navigate-outline', onRoute, false, routeDisabled)}
             {renderAction(saved ? 'Saved' : 'Save', saved ? 'bookmark' : 'bookmark-outline', onToggleSave)}
           </View>
@@ -1346,7 +1414,16 @@ export function ExploreDetailSheet({
 
   return (
     <View style={[styles.screen, { backgroundColor: C.bg }]}>
-      <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        ref={mainScrollRef}
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}
+        contentOffset={{ x: 0, y: detailNavigation.mainScrollY }}
+        onScroll={event => { mainScrollYRef.current = event.nativeEvent.contentOffset.y; }}
+        onScrollEndDrag={() => rememberScroll('main')}
+        onMomentumScrollEnd={() => rememberScroll('main')}
+        scrollEventThrottle={100}
+      >
         {activeModuleDef ? renderModuleHero(activeModuleDef) : (
         <View style={styles.hero}>
           {placeHeroCandidates.length > 0 ? (
@@ -1393,7 +1470,7 @@ export function ExploreDetailSheet({
               <Ionicons name="search-outline" size={18} color="rgba(255,255,255,0.78)" />
               <TextInput
                 value={placeSearch}
-                onChangeText={setPlaceSearch}
+                onChangeText={value => dispatchDetailNavigation({ type: 'set_search', value })}
                 placeholder="Search this place"
                 placeholderTextColor="rgba(255,255,255,0.66)"
                 style={styles.placeSearchInput}
@@ -1406,7 +1483,7 @@ export function ExploreDetailSheet({
 
         {!activeModuleDef && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.actionRail}>
-          {renderAction('Area', 'map-outline', onShowArea, true)}
+          {renderAction('Area', 'map-outline', showAreaOnMap, true)}
           {renderAction(routeLabel, routeDisabled ? 'checkmark-circle' : 'navigate-outline', onRoute, false, routeDisabled)}
           {renderAction('Weather', 'partly-sunny-outline', () => openModule('weather'))}
           {renderAction(isPlaying ? 'Stop' : 'Audio', isPlaying ? 'stop' : 'play', onPlayAudio)}
@@ -1507,6 +1584,10 @@ function SourcePack({
             {items.slice(0, 6).map((item, idx) => {
               const hasLocation = item.lat != null && item.lng != null;
               const canOpen = (!!onSourcePackItem && hasLocation) || !!item.url;
+              const miniImageCandidates = boundedExploreImageCandidates(
+                [mediaUrl(item.image_url)],
+                EXPLORE_IMAGE_BOUNDS.tile,
+              );
               return (
                 <TouchableOpacity
                   key={`${item.title}-${idx}`}
@@ -1520,7 +1601,7 @@ function SourcePack({
                     if (item.url) Linking.openURL(item.url);
                   }}
                 >
-                  {!!item.image_url && <ResilientImage uris={[sizedNpsMediaUrl(mediaUrl(item.image_url)), mediaUrl(item.image_url)]} style={styles.miniImage} />}
+                  {miniImageCandidates.length > 0 && <ResilientImage uris={miniImageCandidates} style={styles.miniImage} />}
                   <View style={styles.miniBody}>
                     <Text style={[styles.miniTitle, { color: C.text }]} numberOfLines={2}>{item.title}</Text>
                     {!!cleanSourcePackItemCopy(item) && (

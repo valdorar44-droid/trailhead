@@ -36,9 +36,15 @@ import PlaceSheetShell, { PlaceSheetHeroChrome, PlaceSheetShellHeader } from '@/
 import FirstPartyRatingSection from '@/components/map/FirstPartyRatingSection';
 import { adaptGenericPlaceSheet } from '@/lib/placeSheetAdapters';
 import { communityRatingTarget } from '@/lib/communityRatingEligibility';
+import { boundedExploreImageUrl, EXPLORE_IMAGE_BOUNDS, exploreImageSource } from '@/lib/mediaPolicy';
 
 type Stage = 'full' | 'half' | 'peek';
 const API_BASE = TRAILHEAD_API_BASE;
+
+function boundedPlaceMediaUrl(value?: string | null) {
+  const resolved = mediaUrl(value);
+  return boundedExploreImageUrl(resolved, EXPLORE_IMAGE_BOUNDS.detail);
+}
 
 type PlaceLike = {
   name: string;
@@ -537,24 +543,24 @@ export default function PremiumPlaceSheet({
   const richDetailLocked = (hasPaidProviderSource(place) || !!place.rich_detail_locked) && !detail;
 
   const officialPhotos: TrailheadGalleryPhoto[] = detail?.photos?.length
-    ? detail.photos.map(photo => ({ ...photo, url: mediaUrl(photo.url) }))
+    ? detail.photos.map(photo => ({ ...photo, url: boundedPlaceMediaUrl(photo.url) }))
     : data.photos?.length
-      ? data.photos.map(photo => ({ ...photo, url: mediaUrl(photo.url) }))
+      ? data.photos.map(photo => ({ ...photo, url: boundedPlaceMediaUrl(photo.url) }))
     : data.photo_url
-      ? [{ url: mediaUrl(data.photo_url), source: data.source_label || data.source || '' }]
+      ? [{ url: boundedPlaceMediaUrl(data.photo_url), source: data.source_label || data.source || '' }]
       : [];
   const mapboxPhotos: TrailheadGalleryPhoto[] = [
     data.primary_image,
     ...(data.other_images ?? []),
   ]
-    .map(url => mediaUrl(url))
+    .map(url => boundedPlaceMediaUrl(url))
     .filter(Boolean)
     .map((url, idx) => ({ id: -1000 - idx, url, source: data.source_label || data.enrichment_source || 'Mapbox' }));
   const canonicalHero: TrailheadGalleryPhoto[] = canonical?.hero_photo_url
-    ? [{ url: mediaUrl(canonical.hero_photo_url), source: canonical.hero_photo_source === 'community' ? 'Trailhead community' : canonical.source_label || canonical.source }]
+    ? [{ url: boundedPlaceMediaUrl(canonical.hero_photo_url), source: canonical.hero_photo_source === 'community' ? 'Trailhead community' : canonical.source_label || canonical.source }]
     : [];
   const userPhotos: TrailheadGalleryPhoto[] = (canonical?.photos ?? [])
-    .map(photo => ({ url: mediaUrl(photo.url), caption: photo.caption || undefined, source: photo.username ? `Trailhead photo by ${photo.username}` : 'Trailhead community' }))
+    .map(photo => ({ url: boundedPlaceMediaUrl(photo.url), caption: photo.caption || undefined, source: photo.username ? `Trailhead photo by ${photo.username}` : 'Trailhead community' }))
     .filter(photo => !!photo.url);
   const photos = officialPhotos.length || mapboxPhotos.length
     ? [...officialPhotos, ...mapboxPhotos.filter(photo => !officialPhotos.some(existing => existing.url === photo.url)), ...userPhotos.filter(photo => ![...officialPhotos, ...mapboxPhotos].some(existing => existing.url === photo.url))]
@@ -587,18 +593,11 @@ export default function PremiumPlaceSheet({
     relatedTripServices.length ||
     related?.error
   );
-  const relatedHero = broadDestination ? '' : [
-    ...relatedThingsToDo,
-    ...relatedThingsToSee,
-    ...relatedCampgrounds,
-    ...relatedTrails,
-  ]
-    .filter(item => String(item.type || '').toLowerCase() !== 'event')
-    .map(item => mediaUrl(item.photo_url))
-    .find(Boolean);
   const visiblePhotos = photos.filter(photo => !!photo.url && !failedPhotoUrls.includes(photo.url));
-  const visibleRelatedHero = relatedHero && !failedPhotoUrls.includes(relatedHero) ? relatedHero : '';
-  const hero = visiblePhotos[0]?.url || visibleRelatedHero;
+  // A related-place photo must never represent the selected place. If this
+  // entity has no licensed, bounded media of its own, retain the text-first
+  // sheet instead of showing a plausible-but-wrong hero.
+  const hero = visiblePhotos[0]?.url || '';
   const markPhotoFailed = (url?: string | null) => {
     if (!url) return;
     setFailedPhotoUrls(prev => prev.includes(url) ? prev : [...prev, url]);
@@ -798,7 +797,7 @@ export default function PremiumPlaceSheet({
           >
             {hero ? (
               <TouchableOpacity style={s.hero} activeOpacity={0.9} onPress={() => setGalleryIndex(0)}>
-                <Image source={{ uri: hero }} style={s.heroImage} resizeMode="cover" onError={() => markPhotoFailed(hero)} />
+                <Image source={exploreImageSource(hero)} style={s.heroImage} resizeMode="cover" resizeMethod="resize" onError={() => markPhotoFailed(hero)} />
                 <View style={s.heroShade} />
                 <PlaceSheetHeroChrome model={{ ...sheetModel, title: data.name, subtitle: typeLabel }} />
               </TouchableOpacity>
@@ -1106,7 +1105,7 @@ export default function PremiumPlaceSheet({
                       {!!comment.photos?.length && (
                         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.inlinePhotoRail}>
                           {comment.photos.map(photo => (
-                            <Image key={photo.id} source={{ uri: mediaUrl(photo.url) }} style={s.inlinePhoto} resizeMode="cover" />
+                            <Image key={photo.id} source={exploreImageSource(boundedPlaceMediaUrl(photo.url))} style={s.inlinePhoto} resizeMode="cover" resizeMethod="resize" />
                           ))}
                         </ScrollView>
                       )}
@@ -1201,7 +1200,7 @@ export default function PremiumPlaceSheet({
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.photoRail}>
                   {visiblePhotos.slice(1, 7).map((photo, idx) => (
                     <TouchableOpacity key={`${photo.url}-${idx}`} activeOpacity={0.86} onPress={() => setGalleryIndex(idx + 1)}>
-                      <Image source={{ uri: photo.url }} style={s.railPhoto} resizeMode="cover" onError={() => markPhotoFailed(photo.url)} />
+                      <Image source={exploreImageSource(photo.url)} style={s.railPhoto} resizeMode="cover" resizeMethod="resize" onError={() => markPhotoFailed(photo.url)} />
                     </TouchableOpacity>
                   ))}
                 </ScrollView>
@@ -1290,7 +1289,7 @@ function RelatedRail({
             onPress={() => onPress?.(item)}
           >
             {item.photo_url ? (
-              <Image source={{ uri: mediaUrl(item.photo_url) }} style={styles.relatedPhoto} resizeMode="cover" />
+              <Image source={exploreImageSource(boundedPlaceMediaUrl(item.photo_url))} style={styles.relatedPhoto} resizeMode="cover" resizeMethod="resize" />
             ) : (
               <View style={styles.relatedIcon}>
                 <Ionicons name={itemIcon(item.type)} size={17} color={C.orange} />

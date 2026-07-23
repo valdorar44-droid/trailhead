@@ -1,9 +1,9 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { ExplorePlaceProfile } from '@/lib/api';
 import { useTheme } from '@/lib/design';
-import { isRenderableImageUrl } from '@/lib/mediaPolicy';
+import { boundedExploreImageUrl, EXPLORE_IMAGE_BOUNDS, exploreImageSource } from '@/lib/mediaPolicy';
 import {
   getExploreCardSummary,
   getExploreCardSourceLine,
@@ -61,13 +61,21 @@ export function ExplorePlaceCard({
   const lat = Number(place.summary.lat);
   const lng = Number(place.summary.lng);
   const hasCoordinates = Number.isFinite(lat) && Number.isFinite(lng);
-  const safeImageUrl = isRenderableImageUrl(imageUrl) ? imageUrl : '';
-  const renderMedia = (height: number) => safeImageUrl ? (
+  const safeImageUrl = boundedExploreImageUrl(
+    imageUrl,
+    compact ? EXPLORE_IMAGE_BOUNDS.rail : EXPLORE_IMAGE_BOUNDS.card,
+  );
+  const [failedImageUrl, setFailedImageUrl] = useState('');
+  useEffect(() => {
+    setFailedImageUrl('');
+  }, [safeImageUrl]);
+  const renderMedia = (height: number) => safeImageUrl && failedImageUrl !== safeImageUrl ? (
     <Image
-      source={{ uri: safeImageUrl }}
+      source={exploreImageSource(safeImageUrl)}
       style={styles.image}
       resizeMode="cover"
       resizeMethod="resize"
+      onError={() => setFailedImageUrl(safeImageUrl)}
     />
   ) : hasCoordinates ? (
     <StaticMapboxPreview

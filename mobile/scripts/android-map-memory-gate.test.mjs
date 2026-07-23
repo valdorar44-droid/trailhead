@@ -30,16 +30,49 @@ assert.deepEqual(HEAVY_MAP_LAYER_KEYS, ['3d', 'lands', 'usgs', 'pois', 'trails',
 const phoneCarouselBounds = { left: 0, top: 1_200, right: 720, bottom: 1_500 };
 assert.deepEqual(
   horizontalCarouselSwipePoints(phoneCarouselBounds, 'forward'),
-  [480, 1_350, 240, 1_350],
+  [450, 1_350, 270, 1_350],
   'the gate must advance less than one layer card so a clipped middle card cannot be skipped',
 );
 assert.deepEqual(
   horizontalCarouselSwipePoints(phoneCarouselBounds, 'reverse'),
-  [240, 1_350, 480, 1_350],
+  [270, 1_350, 450, 1_350],
 );
 assert.throws(
   () => horizontalCarouselSwipePoints({ left: 0, top: 0, right: 70, bottom: 100 }, 'forward'),
   error => error instanceof MemoryGateError && error.code === 'carousel_bounds_unavailable',
+);
+const narrowCarouselSwipe = horizontalCarouselSwipePoints(
+  { left: 10, top: 100, right: 90, bottom: 160 },
+  'forward',
+);
+assert.equal(narrowCarouselSwipe[0] - narrowCarouselSwipe[2], 48);
+assert.ok(narrowCarouselSwipe[2] >= 10 && narrowCarouselSwipe[0] <= 90);
+
+// Model the physical carousel rather than teleporting directly to a target.
+// Three cards fit on screen and each bounded drag advances at most one card.
+// This is the exact layout that the former 72%-width fling skipped `pois` in.
+const physicalLayerOrder = ['3d', 'lands', 'usgs', 'pois', 'trails', 'nautical', 'fire', 'ava', 'radar', 'mvum'];
+const seekPhysicalCarousel = (targets, start, step) => {
+  let position = start;
+  const visited = [];
+  for (const target of targets) {
+    for (let attempt = 0; attempt < physicalLayerOrder.length; attempt += 1) {
+      const visible = physicalLayerOrder.slice(position, position + 3);
+      if (visible.includes(target)) {
+        visited.push(target);
+        break;
+      }
+      position = Math.max(0, Math.min(physicalLayerOrder.length - 3, position + step));
+    }
+  }
+  return visited;
+};
+const forwardPhysicalVisit = seekPhysicalCarousel(HEAVY_MAP_LAYER_KEYS, 0, 1);
+assert.deepEqual(forwardPhysicalVisit, HEAVY_MAP_LAYER_KEYS);
+assert.ok(forwardPhysicalVisit.indexOf('pois') < forwardPhysicalVisit.indexOf('trails'));
+assert.deepEqual(
+  seekPhysicalCarousel([...HEAVY_MAP_LAYER_KEYS].reverse(), physicalLayerOrder.length - 3, -1),
+  [...HEAVY_MAP_LAYER_KEYS].reverse(),
 );
 
 const parsed = parseMemoryGateArgs([

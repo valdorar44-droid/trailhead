@@ -380,7 +380,7 @@ export function horizontalCarouselSwipePoints(bounds, direction) {
   // jump from the third card to the fifth card, leaving the fourth card's
   // accessibility node clipped out on both frames and making the gate report
   // a false missing-layer failure.
-  const travel = Math.min(240, Math.max(56, Math.floor(width * 0.34)), width - 24);
+  const travel = Math.min(220, Math.max(48, Math.floor(width * 0.25)), width - 24);
   const centerX = Math.floor((bounds.left + bounds.right) / 2);
   const left = Math.floor(centerX - travel / 2);
   const right = Math.ceil(centerX + travel / 2);
@@ -390,7 +390,7 @@ export function horizontalCarouselSwipePoints(bounds, direction) {
     : [left, y, right, y];
 }
 
-function swipeWithin(adb, serial, bounds, direction, durationMs = 220) {
+function swipeWithin(adb, serial, bounds, direction, durationMs = 450) {
   const points = horizontalCarouselSwipePoints(bounds, direction);
   runAdb(adb, deviceArgs(serial, ['shell', 'input', 'swipe', ...points.map(String), String(durationMs)]), {
     failureCode: 'carousel_swipe_failed',
@@ -518,13 +518,19 @@ async function seekLayerNode(adb, serial, packageName, key, direction) {
 }
 
 async function moveCarouselToStart(adb, serial, packageName) {
-  for (let index = 0; index < 12; index += 1) {
+  for (let index = 0; index < 24; index += 1) {
     const nodes = parseUiNodes(captureUiXml(adb, serial));
     const carousel = nodeForTestId(nodes, 'map.layers.toggle-carousel', packageName, true);
     if (!carousel) throw new MemoryGateError('layer_carousel_unavailable');
-    swipeWithin(adb, serial, carousel.bounds, 'reverse', 160);
-    await waitMs(120);
+    const first = nodes.find(node => (
+      nodeMatchesTestId(node, 'map.layers.toggle.3d', packageName)
+      && nodeVisibleWithin(node, carousel)
+    ));
+    if (first) return;
+    swipeWithin(adb, serial, carousel.bounds, 'reverse');
+    await waitMs(180);
   }
+  throw new MemoryGateError('layer_carousel_start_unavailable');
 }
 
 async function visitLayerStates(adb, serial, packageName, order, desiredState = null) {

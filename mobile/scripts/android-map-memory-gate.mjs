@@ -40,6 +40,8 @@ export const LAYER_SHEET_READY_TIMEOUT_MS = 60_000;
 export const LAYER_SHEET_PASSIVE_GRACE_MS = 30_000;
 export const LAYER_SHEET_REVEAL_INTERVAL_MS = 5_000;
 export const LAYER_SHEET_POLL_INTERVAL_MS = 500;
+export const LAYER_CAROUSEL_REACQUIRE_TIMEOUT_MS = 15_000;
+export const LAYER_CAROUSEL_REACQUIRE_POLL_MS = 500;
 export const LAYER_PERSISTENCE_SETTLE_MS = 2_000;
 export const FINAL_LAYER_REPAIR_MAX_ATTEMPTS = 2;
 export const MAP_LAYER_CYCLE_COUNT = 10;
@@ -1230,12 +1232,54 @@ async function closeLayerSheet(adb, serial, packageName) {
   return true;
 }
 
+export async function awaitLayerCarouselSnapshot({
+  readSnapshot,
+  waitFor = waitMs,
+  now = Date.now,
+  timeoutMs = LAYER_CAROUSEL_REACQUIRE_TIMEOUT_MS,
+  pollIntervalMs = LAYER_CAROUSEL_REACQUIRE_POLL_MS,
+}) {
+  if (typeof readSnapshot !== 'function'
+    || typeof waitFor !== 'function'
+    || typeof now !== 'function'
+    || !Number.isFinite(timeoutMs)
+    || !Number.isFinite(pollIntervalMs)
+    || timeoutMs <= 0
+    || pollIntervalMs <= 0) {
+    throw new MemoryGateError('layer_carousel_reacquire_contract_invalid');
+  }
+
+  const deadline = now() + timeoutMs;
+  while (true) {
+    assertNotCancelled();
+    const snapshot = await readSnapshot();
+    if (!snapshot || !Array.isArray(snapshot.nodes) || !('carousel' in snapshot)) {
+      throw new MemoryGateError('layer_carousel_reacquire_contract_invalid');
+    }
+    if (snapshot.carousel) return snapshot;
+    const remaining = deadline - now();
+    if (remaining <= 0) break;
+    await waitFor(Math.min(pollIntervalMs, remaining));
+  }
+  throw new MemoryGateError('layer_carousel_unavailable');
+}
+
+async function readLayerCarouselSnapshot(adb, serial, packageName) {
+  return awaitLayerCarouselSnapshot({
+    readSnapshot: async () => {
+      const nodes = parseUiNodes(captureUiXml(adb, serial));
+      return {
+        nodes,
+        carousel: nodeForTestId(nodes, 'map.layers.toggle-carousel', packageName, true),
+      };
+    },
+  });
+}
+
 async function seekLayerNode(adb, serial, packageName, key, direction) {
   const testId = `map.layers.toggle.${key}`;
   for (let attempt = 0; attempt < 14; attempt += 1) {
-    const nodes = parseUiNodes(captureUiXml(adb, serial));
-    const carousel = nodeForTestId(nodes, 'map.layers.toggle-carousel', packageName, true);
-    if (!carousel) throw new MemoryGateError('layer_carousel_unavailable');
+    const { nodes, carousel } = await readLayerCarouselSnapshot(adb, serial, packageName);
     const target = nodes.find(node => nodeMatchesTestId(node, testId, packageName) && nodeVisibleWithin(node, carousel));
     if (target) return target;
     swipeWithin(adb, serial, carousel.bounds, direction);
@@ -1246,9 +1290,7 @@ async function seekLayerNode(adb, serial, packageName, key, direction) {
 
 async function moveCarouselToStart(adb, serial, packageName) {
   for (let index = 0; index < 24; index += 1) {
-    const nodes = parseUiNodes(captureUiXml(adb, serial));
-    const carousel = nodeForTestId(nodes, 'map.layers.toggle-carousel', packageName, true);
-    if (!carousel) throw new MemoryGateError('layer_carousel_unavailable');
+    const { nodes, carousel } = await readLayerCarouselSnapshot(adb, serial, packageName);
     const first = nodes.find(node => (
       nodeMatchesTestId(node, 'map.layers.toggle.3d', packageName)
       && nodeVisibleWithin(node, carousel)

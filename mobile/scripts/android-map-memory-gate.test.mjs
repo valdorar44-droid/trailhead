@@ -10,6 +10,8 @@ import {
   FINAL_LAYER_REPAIR_MAX_ATTEMPTS,
   FOREGROUND_PROOF_INTERVAL_MS,
   HEAVY_MAP_LAYER_KEYS,
+  LAYER_CAROUSEL_REACQUIRE_POLL_MS,
+  LAYER_CAROUSEL_REACQUIRE_TIMEOUT_MS,
   LAYER_PERSISTENCE_SETTLE_MS,
   LAYER_SHEET_PASSIVE_GRACE_MS,
   LAYER_SHEET_POLL_INTERVAL_MS,
@@ -24,6 +26,7 @@ import {
   POST_MAP_SETTLE_MS,
   QA_DIAGNOSTICS_URI,
   applyLayerRestorationOutcome,
+  awaitLayerCarouselSnapshot,
   awaitLayerCarouselReady,
   assertAndroidMemoryGateReportV3Privacy,
   assertExactLayerState,
@@ -75,6 +78,8 @@ assert.equal(LAYER_SHEET_READY_TIMEOUT_MS, 60_000);
 assert.equal(LAYER_SHEET_PASSIVE_GRACE_MS, 30_000);
 assert.equal(LAYER_SHEET_REVEAL_INTERVAL_MS, 5_000);
 assert.equal(LAYER_SHEET_POLL_INTERVAL_MS, 500);
+assert.equal(LAYER_CAROUSEL_REACQUIRE_TIMEOUT_MS, 15_000);
+assert.equal(LAYER_CAROUSEL_REACQUIRE_POLL_MS, 500);
 assert.equal(LAYER_PERSISTENCE_SETTLE_MS, 2_000);
 assert.equal(FINAL_LAYER_REPAIR_MAX_ATTEMPTS, 2);
 assert.equal(MAP_LAYER_CYCLE_COUNT, 10);
@@ -147,6 +152,47 @@ await assert.rejects(
     revealContent: async () => {},
   }),
   error => error instanceof MemoryGateError && error.code === 'layer_sheet_readiness_contract_invalid',
+);
+
+let transientCarouselClock = 0;
+let transientCarouselReads = 0;
+const transientCarousel = { bounds: { left: 0, top: 100, right: 720, bottom: 400 } };
+const reacquiredCarousel = await awaitLayerCarouselSnapshot({
+  readSnapshot: async () => {
+    transientCarouselReads += 1;
+    return {
+      nodes: [],
+      carousel: transientCarouselClock >= 1_500 ? transientCarousel : null,
+    };
+  },
+  waitFor: async durationMs => {
+    transientCarouselClock += durationMs;
+  },
+  now: () => transientCarouselClock,
+});
+assert.equal(reacquiredCarousel.carousel, transientCarousel);
+assert.equal(transientCarouselClock, 1_500);
+assert.equal(transientCarouselReads, 4);
+
+let missingCarouselClock = 0;
+await assert.rejects(
+  awaitLayerCarouselSnapshot({
+    readSnapshot: async () => ({ nodes: [], carousel: null }),
+    waitFor: async durationMs => {
+      missingCarouselClock += durationMs;
+    },
+    now: () => missingCarouselClock,
+  }),
+  error => error instanceof MemoryGateError && error.code === 'layer_carousel_unavailable',
+);
+assert.equal(missingCarouselClock, LAYER_CAROUSEL_REACQUIRE_TIMEOUT_MS);
+await assert.rejects(
+  awaitLayerCarouselSnapshot({
+    readSnapshot: async () => null,
+    waitFor: async () => {},
+    now: () => 0,
+  }),
+  error => error instanceof MemoryGateError && error.code === 'layer_carousel_reacquire_contract_invalid',
 );
 
 const harnessHashes = Object.fromEntries(

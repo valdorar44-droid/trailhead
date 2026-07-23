@@ -42,6 +42,7 @@ export const LAYER_SHEET_REVEAL_INTERVAL_MS = 5_000;
 export const LAYER_SHEET_POLL_INTERVAL_MS = 500;
 export const LAYER_CAROUSEL_REACQUIRE_TIMEOUT_MS = 15_000;
 export const LAYER_CAROUSEL_REACQUIRE_POLL_MS = 500;
+export const LAST_ANR_PARSE_PREFIX_MAX_CHARS = 64 * 1024;
 export const LAYER_PERSISTENCE_SETTLE_MS = 2_000;
 export const FINAL_LAYER_REPAIR_MAX_ATTEMPTS = 2;
 export const MAP_LAYER_CYCLE_COUNT = 10;
@@ -359,6 +360,7 @@ export function assertSafeMemoryGateAdbArgs(args) {
   if (shell[0] === 'dumpsys' && ['package', 'meminfo'].includes(shell[1]) && approvedPackage(shell[2]) && shell.length === 3) return true;
   if (shell[0] === 'dumpsys' && exactArgs(shell.slice(1, 3), ['activity', 'services']) && approvedPackage(shell[3]) && shell.length === 4) return true;
   if (shell[0] === 'dumpsys' && exactArgs(shell.slice(1, 3), ['activity', 'exit-info']) && approvedPackage(shell[3]) && shell.length === 4) return true;
+  if (shell[0] === 'dumpsys' && exactArgs(shell.slice(1), ['activity', 'lastanr'])) return true;
   if (shell[0] === 'dumpsys' && exactArgs(shell.slice(1, 3), ['activity', 'activities']) && approvedPackage(shell[3]) && shell.length === 4) return true;
   if (shell[0] === 'uiautomator' && shell[1] === 'dump' && /^\/sdcard\/trailhead-memory-gate-[0-9-]+\.xml$/.test(shell[2] || '') && shell.length === 3) return true;
   if (shell[0] === 'rm' && shell[1] === '-f' && /^\/sdcard\/trailhead-memory-gate-[0-9-]+\.xml$/.test(shell[2] || '') && shell.length === 3) return true;
@@ -488,6 +490,117 @@ export function parseRecognizedExitInfoDump(text, packageName = 'com.trailhead.a
   } catch {
     throw new MemoryGateError('exit_info_unavailable');
   }
+}
+
+/**
+ * Parse only the bounded header of `dumpsys activity lastanr`. Android appends
+ * broad process metadata after these fields, so none of that content is
+ * retained or returned. The raw reason is transient and must never be written
+ * to the privacy-minimal gate report.
+ */
+export function parseRecognizedLastAnrDump(text) {
+  const prefix = String(text ?? '')
+    .replace(/\r\n/g, '\n')
+    .slice(0, LAST_ANR_PARSE_PREFIX_MAX_CHARS);
+  if (!/^ACTIVITY MANAGER LAST ANR \(dumpsys activity lastanr\)\s*$/m.test(prefix)) {
+    throw new MemoryGateError('last_anr_dump_unrecognized');
+  }
+  const lines = prefix.split('\n');
+  const timeLines = lines.filter(line => /^\s*ANR time:\s*/.test(line));
+  const reasonLines = lines.filter(line => /^\s*Reason:\s*/.test(line));
+  if (timeLines.length === 0 && reasonLines.length === 0) {
+    if (/^\s*<?no\s+(?:last\s+)?anrs?\b[^\n>]*>?\s*$/im.test(prefix)) return null;
+    throw new MemoryGateError('last_anr_dump_unrecognized');
+  }
+  if (timeLines.length !== 1 || reasonLines.length !== 1) {
+    throw new MemoryGateError('last_anr_dump_unrecognized');
+  }
+  const anrTime = timeLines[0].replace(/^\s*ANR time:\s*/, '').trim();
+  const reason = reasonLines[0].replace(/^\s*Reason:\s*/, '').trim();
+  if (!anrTime || anrTime.length > 128 || !reason || reason.length > 1_024) {
+    throw new MemoryGateError('last_anr_dump_unrecognized');
+  }
+  return { anrTime, reason };
+}
+
+function validateLastAnrSnapshot(snapshot) {
+  if (snapshot == null) return;
+  if (!snapshot || typeof snapshot !== 'object' || Array.isArray(snapshot)
+    || Object.keys(snapshot).sort().join(',') !== 'anrTime,reason'
+    || typeof snapshot.anrTime !== 'string' || !snapshot.anrTime
+    || typeof snapshot.reason !== 'string' || !snapshot.reason) {
+    throw new MemoryGateError('last_anr_snapshot_invalid');
+  }
+}
+
+function lastAnrFingerprint(snapshot) {
+  return snapshot == null ? null : `${snapshot.anrTime}\n${snapshot.reason}`;
+}
+
+function lastAnrTargetsPackage(snapshot, packageName) {
+  if (snapshot == null) return false;
+  const escapedPackage = packageName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?:^|\\s)${escapedPackage}(?:/|\\s|$)`).test(snapshot.reason);
+}
+
+/**
+ * Compare the device-wide last-ANR record with the pre-launch baseline while
+ * deduplicating repeated terminal checks. Only aggregate counters leave this
+ * monitor; the ANR time and reason remain transient in the closure.
+ */
+export function createLiveAnrMonitorV3({ baseline, packageName = 'com.trailhead.app' } = {}) {
+  if (!APPROVED_TRAILHEAD_ANDROID_PACKAGES.includes(packageName)) {
+    throw new MemoryGateError('last_anr_package_invalid');
+  }
+  validateLastAnrSnapshot(baseline);
+  const baselineFingerprint = lastAnrFingerprint(baseline);
+  const observedNewFingerprints = new Set();
+  let observationCount = 0;
+  return {
+    observe(current) {
+      validateLastAnrSnapshot(current);
+      observationCount += 1;
+      const fingerprint = lastAnrFingerprint(current);
+      const newAnrDetected = Boolean(
+        fingerprint
+        && fingerprint !== baselineFingerprint
+        && lastAnrTargetsPackage(current, packageName)
+        && !observedNewFingerprints.has(fingerprint),
+      );
+      if (newAnrDetected) observedNewFingerprints.add(fingerprint);
+      return {
+        baseline_captured: true,
+        observation_count: observationCount,
+        new_anr_count: observedNewFingerprints.size,
+        newAnrDetected,
+      };
+    },
+  };
+}
+
+export function promoteLiveAnrFailureV3(report) {
+  const count = report?.process?.live_anr_evidence?.new_anr_count;
+  if (!Number.isInteger(count) || count <= 0) return false;
+  const liveAnrCode = 'live_process_anr_observed';
+  const previousCode = report.failure_code;
+  if (previousCode && previousCode !== liveAnrCode) {
+    if (!Array.isArray(report.execution_failure_codes)) report.execution_failure_codes = [];
+    if (report.execution_failure_codes.length < 32
+      && !report.execution_failure_codes.includes(previousCode)) {
+      report.execution_failure_codes.push(previousCode);
+    }
+  }
+  report.failure_code = liveAnrCode;
+  report.result = 'failed';
+  return true;
+}
+
+export function combineAnrCountV3(exitInfoAnrCount, liveAnrCount) {
+  if (!Number.isInteger(exitInfoAnrCount) || exitInfoAnrCount < 0
+    || !Number.isInteger(liveAnrCount) || liveAnrCount < 0) {
+    throw new MemoryGateError('live_anr_count_invalid');
+  }
+  return Math.max(exitInfoAnrCount, liveAnrCount);
 }
 
 export function classifyActiveMapSession({ uiXml = '', serviceDump = '', packageName = 'com.trailhead.app' } = {}) {
@@ -1416,6 +1529,16 @@ function exitInfoSnapshot(adb, serial, packageName) {
   return parseRecognizedExitInfoDump(dump, packageName);
 }
 
+function lastAnrSnapshot(adb, serial) {
+  const dump = runAdb(adb, deviceArgs(serial, [
+    'shell', 'dumpsys', 'activity', 'lastanr',
+  ]), {
+    failureCode: 'last_anr_query_failed',
+    maxBuffer: 2 * 1024 * 1024,
+  });
+  return parseRecognizedLastAnrDump(dump);
+}
+
 export function validatePreviewBuildEvidence(build, expected) {
   const checks = [
     [build?.id === expected.buildId, 'build_id_mismatch'],
@@ -1601,7 +1724,8 @@ const MEMORY_GATE_REPORT_ALLOWED_KEYS = new Set([
   'active_samples', 'active_phase_status', 'object_count_ratchet', 'evaluation', 'policy', 'device_role',
   'navigation', 'preview3d', 'originals', 'alive', 'instance_changed', 'exit_evidence_checked',
   'foreground_proof_count', 'foreground_proof_completed',
-  'terminal_identity_checked', 'exit_evidence',
+  'terminal_identity_checked', 'exit_evidence', 'live_anr_evidence',
+  'baseline_captured', 'observation_count', 'new_anr_count',
   'reportVersion', 'requiredCycleCount', 'cycleEdgeWindow', 'phaseBudgetsKb',
   'exploreIdle', 'exploreRecovery', 'mapIdle', 'heavyPeak', 'activeExperience', 'maxTotalPssKb',
   'referencePssMinusSwapDiagnosticKb', 'maxTotalRssKb', 'postMapRecovery', 'disabledRecovery',
@@ -1763,8 +1887,11 @@ export function assertAndroidMemoryGateReportV3Privacy(report) {
   ], 'report_privacy_invalid_memory_schema');
   assertExactObjectKeys(report.process, [
     'alive', 'instance_changed', 'foreground_proof_count', 'foreground_proof_completed',
-    'exit_evidence_checked', 'terminal_identity_checked', 'exit_evidence',
+    'exit_evidence_checked', 'terminal_identity_checked', 'exit_evidence', 'live_anr_evidence',
   ], 'report_privacy_invalid_process_schema');
+  assertExactObjectKeys(report.process.live_anr_evidence, [
+    'baseline_captured', 'observation_count', 'new_anr_count',
+  ], 'report_privacy_invalid_live_anr_schema');
   assertMemoryGateReportValue(report);
   return true;
 }
@@ -2082,6 +2209,11 @@ async function runGate(options) {
       terminal_identity_checked: false,
       exit_evidence_checked: false,
       exit_evidence: null,
+      live_anr_evidence: {
+        baseline_captured: false,
+        observation_count: 0,
+        new_anr_count: 0,
+      },
     },
     result: 'running',
     failure_code: null,
@@ -2096,6 +2228,7 @@ async function runGate(options) {
   let launchComponent = null;
   let serial = options.serial;
   let exitBaseline = null;
+  let liveAnrMonitor = null;
   const processState = {
     alive: true,
     instanceChanged: false,
@@ -2103,6 +2236,16 @@ async function runGate(options) {
   };
   const phaseSafetyCap = ANDROID_MEMORY_GATE_V3_POLICY.phaseBudgetsKb.activeExperience;
   let mapForegroundProofCount = 0;
+  const observeLiveAnr = () => {
+    if (!liveAnrMonitor) throw new MemoryGateError('last_anr_baseline_unavailable');
+    const observation = liveAnrMonitor.observe(lastAnrSnapshot(adb, serial));
+    report.process.live_anr_evidence = {
+      baseline_captured: observation.baseline_captured,
+      observation_count: observation.observation_count,
+      new_anr_count: observation.new_anr_count,
+    };
+    return observation;
+  };
   const proveMeasurementState = async rootTestId => {
     try {
       const readiness = proveForegroundMeasurementState(
@@ -2118,6 +2261,9 @@ async function runGate(options) {
       if (error instanceof MemoryGateError && error.code === 'duplicate_map_renderer_observed') {
         report.safety.duplicate_renderer_check_completed = true;
         report.safety.duplicate_renderer_observed = true;
+      }
+      if (liveAnrMonitor && observeLiveAnr().new_anr_count > 0) {
+        throw new MemoryGateError('live_process_anr_observed');
       }
       throw error;
     }
@@ -2166,6 +2312,11 @@ async function runGate(options) {
     // Check foreground services before touching app task state. A second warm
     // foreground check catches a durable session whose service is not running.
     assertNoActiveMapSession(adb, serial, options.packageName, false);
+    liveAnrMonitor = createLiveAnrMonitorV3({
+      baseline: lastAnrSnapshot(adb, serial),
+      packageName: options.packageName,
+    });
+    report.process.live_anr_evidence.baseline_captured = true;
     launchComponent = resolveLaunchComponent(adb, serial, options.packageName);
     launchApp(adb, serial, launchComponent);
     await waitMs(2_000);
@@ -2447,6 +2598,16 @@ async function runGate(options) {
     },
     getInitialStates: () => initialStates,
     collectTerminalEvidence: () => {
+      let liveAnrFailure = null;
+      if (liveAnrMonitor) {
+        try {
+          if (observeLiveAnr().new_anr_count > 0) {
+            liveAnrFailure = new MemoryGateError('live_process_anr_observed');
+          }
+        } catch (error) {
+          liveAnrFailure = error;
+        }
+      }
       let identityFailure = null;
       if (exitBaseline) {
         try {
@@ -2459,6 +2620,7 @@ async function runGate(options) {
       report.process.alive = processState.alive;
       report.process.instance_changed = processState.instanceChanged;
       if (!exitBaseline) {
+        if (liveAnrFailure) throw liveAnrFailure;
         if (identityFailure) throw identityFailure;
         return;
       }
@@ -2469,6 +2631,7 @@ async function runGate(options) {
       report.process.exit_evidence_checked = true;
       report.process.exit_evidence = evaluation;
       if (!evaluation.passed) throw new MemoryGateError('process_exit_evidence_failed');
+      if (liveAnrFailure) throw liveAnrFailure;
       if (identityFailure) throw identityFailure;
     },
     restoreLayers: states => {
@@ -2504,6 +2667,7 @@ async function runGate(options) {
       );
       const exitEvaluation = finalizedReport.process.exit_evidence;
       const reasonCounts = exitEvaluation?.failureReasonCounts ?? {};
+      const liveAnrCount = finalizedReport.process.live_anr_evidence.new_anr_count;
       const evaluation = evaluateAndroidMemoryGateV3({
         exploreIdleSamples: finalizedReport.memory.explore_idle_samples,
         mapIdleSamples: finalizedReport.memory.map_idle_samples,
@@ -2521,7 +2685,7 @@ async function runGate(options) {
             + (reasonCounts.reason3Count ?? 0)
             + (reasonCounts.reason17Count ?? 0),
           oomCount: 0,
-          anrCount: reasonCounts.reason6Count ?? 0,
+          anrCount: combineAnrCountV3(reasonCounts.reason6Count ?? 0, liveAnrCount),
           processDeathCount: exitEvaluation?.newRecordCount ?? 0,
           duplicateRendererEvidenceComplete:
             finalizedReport.safety.duplicate_renderer_check_completed,
@@ -2534,6 +2698,7 @@ async function runGate(options) {
         },
       });
       finalizedReport.memory.evaluation = evaluation;
+      promoteLiveAnrFailureV3(finalizedReport);
       if (!evaluation.passed) {
         finalizedReport.result = 'failed';
         finalizedReport.failure_code ||= 'memory_gate_v3_failed';

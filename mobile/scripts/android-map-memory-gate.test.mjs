@@ -12,6 +12,7 @@ import {
   HEAVY_MAP_LAYER_KEYS,
   LAYER_CAROUSEL_REACQUIRE_POLL_MS,
   LAYER_CAROUSEL_REACQUIRE_TIMEOUT_MS,
+  LAST_ANR_PARSE_PREFIX_MAX_CHARS,
   LAYER_PERSISTENCE_SETTLE_MS,
   LAYER_SHEET_PASSIVE_GRACE_MS,
   LAYER_SHEET_POLL_INTERVAL_MS,
@@ -35,7 +36,9 @@ import {
   captureAndDisableHeavyLayers,
   checkedStateFromNode,
   classifyActiveMapSession,
+  combineAnrCountV3,
   convergeLayerState,
+  createLiveAnrMonitorV3,
   durablyRestoreCapturedHeavyLayers,
   ensureLayerSheetReady,
   executeLayerDiagnosticCycles,
@@ -50,7 +53,9 @@ import {
   inspectTopResumedVisibleActivityDump,
   isContinuableLayerWorkloadFailureCode,
   parseMemoryGateArgs,
+  parseRecognizedLastAnrDump,
   parseRecognizedExitInfoDump,
+  promoteLiveAnrFailureV3,
   recordAndVerifyProcessIdentity,
   restoreCapturedHeavyLayers,
   summarizeMemoryWindow,
@@ -80,6 +85,7 @@ assert.equal(LAYER_SHEET_REVEAL_INTERVAL_MS, 5_000);
 assert.equal(LAYER_SHEET_POLL_INTERVAL_MS, 500);
 assert.equal(LAYER_CAROUSEL_REACQUIRE_TIMEOUT_MS, 15_000);
 assert.equal(LAYER_CAROUSEL_REACQUIRE_POLL_MS, 500);
+assert.equal(LAST_ANR_PARSE_PREFIX_MAX_CHARS, 64 * 1024);
 assert.equal(LAYER_PERSISTENCE_SETTLE_MS, 2_000);
 assert.equal(FINAL_LAYER_REPAIR_MAX_ATTEMPTS, 2);
 assert.equal(MAP_LAYER_CYCLE_COUNT, 10);
@@ -413,6 +419,11 @@ const privacyReportFixture = () => ({
     terminal_identity_checked: true,
     exit_evidence_checked: true,
     exit_evidence: null,
+    live_anr_evidence: {
+      baseline_captured: true,
+      observation_count: 8,
+      new_anr_count: 0,
+    },
   },
   result: 'passed',
   failure_code: null,
@@ -450,6 +461,19 @@ assert.throws(
   }),
   error => error instanceof MemoryGateError && error.code === 'report_privacy_invalid_value',
   'undefined must not disappear silently during JSON serialization',
+);
+assert.throws(
+  () => assertAndroidMemoryGateReportV3Privacy({
+    ...privacyReportFixture(),
+    process: {
+      ...privacyReportFixture().process,
+      live_anr_evidence: {
+        ...privacyReportFixture().process.live_anr_evidence,
+        reason: 'raw Android ANR text must never be persisted',
+      },
+    },
+  }),
+  error => error instanceof MemoryGateError && error.code === 'report_privacy_invalid_live_anr_schema',
 );
 
 const atomicReportDirectory = mkdtempSync(join(tmpdir(), 'trailhead-memory-gate-v3-'));
@@ -688,6 +712,77 @@ assert.throws(
   () => parseRecognizedExitInfoDump(recognizedExitInfo.replace('com.trailhead.app', 'com.other')),
   error => error instanceof MemoryGateError && error.code === 'exit_info_dump_unrecognized',
 );
+
+const lastAnrDump = (anrTime, reason, suffix = '') => `ACTIVITY MANAGER LAST ANR (dumpsys activity lastanr)
+  ANR time: ${anrTime}
+  Reason: ${reason}
+${suffix}`;
+const baselineLastAnr = parseRecognizedLastAnrDump(lastAnrDump(
+  'Jul 22, 2026 8:30:00 AM',
+  '1234 com.trailhead.app/com.trailhead.app.MainActivity is not responding. Waited 10010ms for MotionEvent',
+  '  arbitrary metadata that must never be parsed',
+));
+assert.deepEqual(baselineLastAnr, {
+  anrTime: 'Jul 22, 2026 8:30:00 AM',
+  reason: '1234 com.trailhead.app/com.trailhead.app.MainActivity is not responding. Waited 10010ms for MotionEvent',
+});
+assert.equal(parseRecognizedLastAnrDump(
+  'ACTIVITY MANAGER LAST ANR (dumpsys activity lastanr)\n  <no ANR has occurred since boot>',
+), null);
+assert.throws(
+  () => parseRecognizedLastAnrDump(''),
+  error => error instanceof MemoryGateError && error.code === 'last_anr_dump_unrecognized',
+);
+assert.throws(
+  () => parseRecognizedLastAnrDump(
+    'ACTIVITY MANAGER LAST ANR (dumpsys activity lastanr)\n  ANR time: Jul 23, 2026 9:41:44 AM',
+  ),
+  error => error instanceof MemoryGateError && error.code === 'last_anr_dump_unrecognized',
+);
+assert.deepEqual(
+  parseRecognizedLastAnrDump(`${lastAnrDump(
+    'Jul 23, 2026 9:41:44 AM',
+    '88b6070 com.trailhead.app/com.trailhead.app.MainActivity is not responding',
+  )}${'private-metadata\n'.repeat(10_000)}`),
+  {
+    anrTime: 'Jul 23, 2026 9:41:44 AM',
+    reason: '88b6070 com.trailhead.app/com.trailhead.app.MainActivity is not responding',
+  },
+  'bounded parsing ignores the broad metadata tail',
+);
+
+const liveAnrMonitor = createLiveAnrMonitorV3({ baseline: baselineLastAnr });
+assert.deepEqual(liveAnrMonitor.observe({ ...baselineLastAnr }), {
+  baseline_captured: true,
+  observation_count: 1,
+  new_anr_count: 0,
+  newAnrDetected: false,
+}, 'the pre-launch baseline is not a new gate ANR');
+assert.deepEqual(liveAnrMonitor.observe(parseRecognizedLastAnrDump(lastAnrDump(
+  'Jul 23, 2026 9:40:00 AM',
+  '7777 com.other/com.other.MainActivity is not responding',
+))), {
+  baseline_captured: true,
+  observation_count: 2,
+  new_anr_count: 0,
+  newAnrDetected: false,
+}, 'an unrelated app ANR does not fail Trailhead');
+const newTrailheadAnr = parseRecognizedLastAnrDump(lastAnrDump(
+  'Jul 23, 2026 9:41:44 AM',
+  '88b6070 com.trailhead.app/com.trailhead.app.MainActivity is not responding. Waited 10010ms for MotionEvent',
+));
+assert.deepEqual(liveAnrMonitor.observe(newTrailheadAnr), {
+  baseline_captured: true,
+  observation_count: 3,
+  new_anr_count: 1,
+  newAnrDetected: true,
+});
+assert.deepEqual(liveAnrMonitor.observe(newTrailheadAnr), {
+  baseline_captured: true,
+  observation_count: 4,
+  new_anr_count: 1,
+  newAnrDetected: false,
+}, 'terminal evidence does not double-count an ANR already found during foreground proof');
 
 assert.deepEqual(inspectAwakePowerDump(
   'POWER MANAGER (dumpsys power)\nPower Manager State:\n  mWakefulness=Awake',
@@ -1702,6 +1797,78 @@ assert.deepEqual(
 assert.equal(cancellationReport.failure_code, 'cancelled');
 assert.equal(cancellationReport.layers.restored, true);
 
+const cancellationLiveAnrEvents = [];
+const cancellationLiveAnrReport = lifecycleReport();
+cancellationLiveAnrReport.process = {
+  live_anr_evidence: {
+    baseline_captured: true,
+    observation_count: 0,
+    new_anr_count: 0,
+  },
+};
+const cancellationLiveAnrMonitor = createLiveAnrMonitorV3({ baseline: null });
+await executeMemoryGateLifecycle({
+  report: cancellationLiveAnrReport,
+  executeGate: async () => {
+    cancellationLiveAnrEvents.push('execute');
+    throw new MemoryGateError('cancelled');
+  },
+  getInitialStates: () => null,
+  collectTerminalEvidence: async () => {
+    cancellationLiveAnrEvents.push('terminal');
+    const observation = cancellationLiveAnrMonitor.observe(newTrailheadAnr);
+    cancellationLiveAnrReport.process.live_anr_evidence = {
+      baseline_captured: observation.baseline_captured,
+      observation_count: observation.observation_count,
+      new_anr_count: observation.new_anr_count,
+    };
+    if (observation.new_anr_count > 0) {
+      throw new MemoryGateError('live_process_anr_observed');
+    }
+  },
+  restoreLayers: async () => { throw new Error('restoration must not run'); },
+  finalizeReport: async report => {
+    cancellationLiveAnrEvents.push('finalize');
+    promoteLiveAnrFailureV3(report);
+  },
+});
+assert.deepEqual(cancellationLiveAnrEvents, ['execute', 'terminal', 'finalize']);
+assert.equal(cancellationLiveAnrReport.result, 'failed');
+assert.equal(cancellationLiveAnrReport.failure_code, 'live_process_anr_observed');
+assert.deepEqual(cancellationLiveAnrReport.execution_failure_codes, ['cancelled']);
+assert.equal(cancellationLiveAnrReport.terminal_evidence_failure_code, 'live_process_anr_observed');
+assert.equal(cancellationLiveAnrReport.process.live_anr_evidence.new_anr_count, 1);
+assert.equal(combineAnrCountV3(0, 1), 1);
+const liveAnrStability = evaluateAndroidMemoryGateV3({
+  exploreIdleSamples: [privacyMemorySample(400_000, 350_000)],
+  mapIdleSamples: [privacyMemorySample(700_000, 600_000)],
+  cycles: Array.from({ length: 10 }, () => ({
+    heavyPeak: privacyMemorySample(900_000, 800_000),
+    disabledRecovery: privacyMemorySample(700_000, 600_000),
+  })),
+  postMapRecoverySamples: [privacyMemorySample(700_000, 600_000)],
+  exploreRecoverySamples: [privacyMemorySample(400_000, 350_000)],
+  activeSamples: { navigation: [], preview3d: [], originals: [] },
+  stability: {
+    processAlive: true,
+    exitEvidenceChecked: true,
+    cancelled: false,
+    layerStateRestored: true,
+    objectCountRatchetDetected: false,
+    lowMemoryKillCount: 0,
+    oomCount: 0,
+    anrCount: combineAnrCountV3(0, 1),
+    processDeathCount: 0,
+    duplicateRendererEvidenceComplete: true,
+    duplicateRendererCount: 0,
+    stateLossEvidenceComplete: true,
+    stateLossCount: 0,
+  },
+});
+assert.equal(liveAnrStability.stability.anrCount, 1);
+assert.equal(liveAnrStability.stability.checks.noAnr, false);
+assert.equal(liveAnrStability.passed, false, 'a surviving live-process ANR cannot report stable');
+
 assert.equal(assertSafeMemoryGateAdbArgs(['devices', '-l']), true);
 const remoteUi = '/sdcard/trailhead-memory-gate-123-456.xml';
 const allowedDeviceCommands = [
@@ -1711,6 +1878,7 @@ const allowedDeviceCommands = [
   ['shell', 'dumpsys', 'meminfo', 'com.trailhead.app'],
   ['shell', 'dumpsys', 'activity', 'services', 'com.trailhead.app'],
   ['shell', 'dumpsys', 'activity', 'exit-info', 'com.trailhead.app'],
+  ['shell', 'dumpsys', 'activity', 'lastanr'],
   ['shell', 'dumpsys', 'activity', 'activities', 'com.trailhead.app'],
   ['shell', 'uiautomator', 'dump', remoteUi],
   ['exec-out', 'cat', remoteUi],

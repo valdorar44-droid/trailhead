@@ -46,6 +46,12 @@ const checks = [
     args: ['scripts/automation-selector-contract.test.mjs'],
   },
   {
+    label: 'Android memory V3 policy contract',
+    cwd: mobileRoot,
+    cmd: 'node',
+    args: ['scripts/android-memory-gate-v3.test.mjs'],
+  },
+  {
     label: 'Android map-memory gate contract',
     cwd: mobileRoot,
     cmd: 'node',

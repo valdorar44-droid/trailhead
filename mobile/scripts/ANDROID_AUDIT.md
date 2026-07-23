@@ -75,33 +75,41 @@ or a Trailhead Original is active.
 npm run audit:android-map-memory -- --serial RFCR408DA9B `
   --expected-version-name 1.0.10 `
   --expected-version-code 59 `
-  --expected-commit-sha <ota-source-sha> `
-  --expected-build-commit-sha <binary-build-sha> `
+  --expected-commit-sha 83287394ce41f1100bd980c9249f20d364b51db7 `
+  --expected-build-commit-sha cd61f6c3dbf9d176bc49b2d96a2c13fc9470dcaf `
   --runtime native-1.0.10-android.1 `
   --build-id 06142308-0199-46cc-8a4c-fb9d45bca25e `
-  --update-id 019f8c00-d492-71f0-8ea8-5214fb196a3c
+  --update-id 019f8e05-bad8-7925-8d46-54d2627b76b8
 ```
 
-The OTA/source SHA must match the current repository HEAD and the identity
-reported by the running update. The binary-build SHA may be older for a
-compatible JS-only OTA; it must match the server-owned EAS build identified by
-`--build-id`. Both identities are recorded separately in the evidence report.
+The OTA/source SHA must match the identity reported by the running update and
+must be an ancestor of the checked-in harness. The harness SHA is recorded
+separately so a test-only gate improvement can measure an already-installed
+candidate. The binary-build SHA may be older for a compatible JS-only OTA; it
+must match the server-owned EAS build identified by `--build-id`.
 
 The gate never installs, uninstalls, clears app data, changes permissions, or
 changes account state. It brings the current app to the foreground for a safety
-check, force-stops and cold-launches it, opens the existing Map layer controls,
-settles for 90 seconds, and collects three baseline samples. It then enables
-and disables the heavy layer set for ten complete cycles, samples each enabled
-peak, collects three final samples, and restores every layer to its exact
-starting value even when a check fails or the run is interrupted.
+check, force-stops and cold-launches it, and continuously requires the device to
+remain awake with Trailhead visible and top-resumed during measurement. It then
+measures signed-in Explore, an idle Map with the stress layers disabled, both
+the enabled peak and disabled recovery valley for ten cycles, post-Map recovery,
+and Explore recovery. Every layer is restored to its exact starting value even
+when a check fails or the run is interrupted. Layer toggling is a deterministic
+memory workload, not a duplicate functional Layers audit.
 
-Acceptance is intentionally fixed at total PSS strictly below 512000 KB for
-every sample and median baseline-to-final growth strictly below 10%. Those
-limits cannot be weakened with command-line flags. The command writes only a
-small JSON report below ignored `output/android-map-memory-gate/`: candidate
-identity, non-unique device class/version, layer booleans, PSS samples, and gate
-result. It does not store the serial, screenshots, UI hierarchy, logs,
-coordinates, routes, search text, account identifiers, or support/payout data.
+`AndroidMemoryGateReportV3` records PSS, SwapPSS, RSS, a clearly labelled
+PSS-minus-SwapPSS diagnostic, selected native/graphics/unknown categories,
+object counts, cycle slopes, recovery, and numeric process-exit evidence.
+Android defines PSS and RSS as the authoritative memory signals; the subtraction
+is retained only to explain older vendor output and is never called resident
+PSS or used as a pass condition. Explore, idle Map, heavy Map, and active
+navigation/3D/Original experiences have separate source-controlled budgets that
+cannot be changed through CLI flags. Active experience phases are measured by
+their dedicated fixture/device tests rather than being started by this
+non-destructive Map gate. The ignored JSON evidence does not store the serial,
+screenshots, UI hierarchy, logs, coordinates, routes, search text, account
+identifiers, or support/payout data.
 
 The pre-preview and CI suites run only the pure gate contract test; they never
 connect to a device or execute the physical memory gate:

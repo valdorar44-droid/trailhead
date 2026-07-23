@@ -1,22 +1,39 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import {
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
   findAdb,
   parseDevices,
-  parseMeminfo,
   parseUiNodes,
   tapPoint,
 } from './android-audit-lib.mjs';
+import {
+  ANDROID_MEMORY_GATE_V3_POLICY,
+  evaluateAndroidMemoryGateV3,
+  evaluateExitInfoDiffV3,
+  evaluateObjectCountRatchetV3,
+  evaluatePhaseBudgetV3,
+  parseAndroidMeminfoV3,
+  parseExitInfoV3,
+} from './android-memory-gate-v3.mjs';
 import { fetchEasBuild } from './eas-build-evidence.mjs';
 
-export const MAX_TOTAL_PSS_KB = 512_000;
-export const MAX_GROWTH_PERCENT = 10;
 export const BASELINE_SETTLE_MS = 90_000;
+export const POST_MAP_SETTLE_MS = 90_000;
+export const EXPLORE_RECOVERY_SETTLE_MS = 90_000;
+export const CYCLE_PHASE_SETTLE_MS = 5_000;
 export const SAMPLE_GAP_MS = 3_000;
+export const FOREGROUND_PROOF_INTERVAL_MS = 10_000;
 export const LAYER_STATE_CONVERGENCE_TIMEOUT_MS = 5_000;
 export const LAYER_STATE_POLL_INTERVAL_MS = 350;
 export const LAYER_PERSISTENCE_SETTLE_MS = 2_000;
@@ -36,6 +53,30 @@ export const HEAVY_MAP_LAYER_KEYS = Object.freeze([
 export const APPROVED_TRAILHEAD_ANDROID_PACKAGES = Object.freeze(['com.trailhead.app']);
 export const TRAILHEAD_EAS_PROJECT_ID = '92c016d2-6e63-480e-a483-a6898d7e77d5';
 export const QA_DIAGNOSTICS_URI = 'trailhead:///qa/telemetry';
+export const MEMORY_GATE_REPORT_PRIVACY_STATEMENT = 'No serial, coordinates, route geometry, search text, account identifiers, screenshots, UI hierarchy, logs, support content, attachments, payout data, or credentials are stored.';
+export const MEMORY_GATE_HARNESS_ALLOWED_CHANGED_PATHS = Object.freeze([
+  'docs/checkpoints/trailhead-1.0.10-active-checkpoint.md',
+  'mobile/package.json',
+  'mobile/scripts/ANDROID_AUDIT.md',
+  'mobile/scripts/android-audit-lib.mjs',
+  'mobile/scripts/android-map-memory-gate.mjs',
+  'mobile/scripts/android-map-memory-gate.test.mjs',
+  'mobile/scripts/android-memory-gate-v3.mjs',
+  'mobile/scripts/android-memory-gate-v3.test.mjs',
+  'mobile/scripts/eas-build-evidence.mjs',
+  'mobile/scripts/pre-preview-check.mjs',
+]);
+export const MEMORY_GATE_HARNESS_REQUIRED_PATHS = Object.freeze([
+  'mobile/package.json',
+  'mobile/scripts/ANDROID_AUDIT.md',
+  'mobile/scripts/android-audit-lib.mjs',
+  'mobile/scripts/android-map-memory-gate.mjs',
+  'mobile/scripts/android-map-memory-gate.test.mjs',
+  'mobile/scripts/android-memory-gate-v3.mjs',
+  'mobile/scripts/android-memory-gate-v3.test.mjs',
+  'mobile/scripts/eas-build-evidence.mjs',
+  'mobile/scripts/pre-preview-check.mjs',
+]);
 
 const mobileRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const repoRoot = join(mobileRoot, '..');
@@ -145,8 +186,9 @@ captures every original layer value, disables all heavy layers for the baseline,
 samples memory, cycles the heavy map layers ten times, restores the exact captured
 values, and writes privacy-minimal evidence below ignored output/.
 
-The acceptance limits are fixed and cannot be weakened from the command line:
-  total PSS < 512000 KB and median growth < 10%.`);
+The source-controlled phase budgets cannot be weakened from the command line.
+The report separates accounted PSS, SwapPSS, diagnostic PSS-minus-swap, RSS,
+ten-cycle retention, and post-use recovery for this 4 GB stress device.`);
 }
 
 function timestamp() {
@@ -160,6 +202,118 @@ function gitSha() {
   });
   const value = String(result.stdout || '').trim();
   return result.status === 0 && /^[a-f0-9]{40}$/.test(value) ? value : null;
+}
+
+function candidateIsAncestor(candidateSha) {
+  const result = spawnSync('git', ['-C', repoRoot, 'merge-base', '--is-ancestor', candidateSha, 'HEAD'], {
+    encoding: 'utf8',
+    timeout: 15_000,
+  });
+  return result.status === 0;
+}
+
+function gitCommand(args) {
+  return spawnSync('git', ['-C', repoRoot, ...args], {
+    encoding: 'utf8',
+    timeout: 15_000,
+  });
+}
+
+function gitOutputLines(result) {
+  if (result.status !== 0) throw new MemoryGateError('harness_git_inspection_failed');
+  return String(result.stdout || '')
+    .split(/\r?\n/)
+    .map(value => value.trim())
+    .filter(Boolean);
+}
+
+function uniqueSorted(values) {
+  return [...new Set(values)].sort((left, right) => left.localeCompare(right));
+}
+
+export function validateMemoryGateHarnessProvenance({
+  candidateGitSha,
+  harnessGitSha,
+  candidateAncestor,
+  changedPaths,
+  trackedPaths,
+  dirtyPaths,
+  fileHashes,
+}) {
+  if (!/^[a-f0-9]{40}$/.test(String(candidateGitSha || ''))
+    || !/^[a-f0-9]{40}$/.test(String(harnessGitSha || ''))) {
+    throw new MemoryGateError('harness_commit_unavailable');
+  }
+  if (candidateAncestor !== true) {
+    throw new MemoryGateError('candidate_not_ancestor_of_harness');
+  }
+
+  const approved = new Set(MEMORY_GATE_HARNESS_ALLOWED_CHANGED_PATHS);
+  const normalizedChanged = uniqueSorted(changedPaths || []);
+  if (normalizedChanged.some(path => !approved.has(path))) {
+    throw new MemoryGateError('harness_candidate_delta_unapproved');
+  }
+
+  const tracked = new Set(trackedPaths || []);
+  if (MEMORY_GATE_HARNESS_REQUIRED_PATHS.some(path => !tracked.has(path))) {
+    throw new MemoryGateError('harness_file_untracked');
+  }
+  if ((dirtyPaths || []).length > 0) {
+    throw new MemoryGateError('harness_worktree_dirty');
+  }
+
+  const hashEntries = Object.entries(fileHashes || {});
+  if (hashEntries.length !== MEMORY_GATE_HARNESS_REQUIRED_PATHS.length
+    || MEMORY_GATE_HARNESS_REQUIRED_PATHS.some(path => !/^[a-f0-9]{64}$/.test(fileHashes?.[path] || ''))
+    || hashEntries.some(([path]) => !MEMORY_GATE_HARNESS_REQUIRED_PATHS.includes(path))) {
+    throw new MemoryGateError('harness_file_hash_unavailable');
+  }
+
+  return {
+    candidate_is_ancestor: true,
+    approved_candidate_delta: normalizedChanged,
+    harness_file_sha256: Object.fromEntries(
+      MEMORY_GATE_HARNESS_REQUIRED_PATHS.map(path => [path, fileHashes[path]]),
+    ),
+  };
+}
+
+export function collectMemoryGateHarnessProvenance(candidateGitSha) {
+  const harnessGitSha = gitSha();
+  if (!harnessGitSha) throw new MemoryGateError('harness_commit_unavailable');
+  const candidateAncestor = candidateIsAncestor(candidateGitSha);
+  const changedPaths = gitOutputLines(gitCommand([
+    'diff', '--name-only', '--diff-filter=ACDMRTUXB', `${candidateGitSha}..${harnessGitSha}`, '--',
+  ]));
+  const trackedPaths = MEMORY_GATE_HARNESS_REQUIRED_PATHS.filter(path => (
+    gitCommand(['ls-files', '--error-unmatch', '--', path]).status === 0
+  ));
+  const dirtyStatus = gitCommand([
+    'status', '--porcelain=v1', '--untracked-files=all', '--',
+    ...MEMORY_GATE_HARNESS_REQUIRED_PATHS,
+  ]);
+  if (dirtyStatus.status !== 0) throw new MemoryGateError('harness_git_inspection_failed');
+  const dirtyPaths = String(dirtyStatus.stdout || '').trim() ? ['harness_dirty'] : [];
+  const fileHashes = {};
+  for (const path of MEMORY_GATE_HARNESS_REQUIRED_PATHS) {
+    try {
+      fileHashes[path] = createHash('sha256')
+        .update(readFileSync(join(repoRoot, path)))
+        .digest('hex');
+    } catch {
+      throw new MemoryGateError('harness_file_hash_unavailable');
+    }
+  }
+  const provenance = validateMemoryGateHarnessProvenance({
+    candidateGitSha,
+    harnessGitSha,
+    candidateAncestor,
+    changedPaths,
+    trackedPaths,
+    dirtyPaths,
+    fileHashes,
+  });
+  return { harnessGitSha, ...provenance };
 }
 
 function assertEvidenceDirectoryIgnored() {
@@ -195,8 +349,11 @@ export function assertSafeMemoryGateAdbArgs(args) {
   if (command[0] !== 'shell') throw new MemoryGateError('unsafe_adb_command');
   const shell = command.slice(1);
   if (shell[0] === 'getprop' && /^ro\.(?:product\.(?:manufacturer|model)|build\.version\.(?:release|sdk))$/.test(shell[1] || '') && shell.length === 2) return true;
+  if (shell[0] === 'dumpsys' && shell[1] === 'power' && shell.length === 2) return true;
   if (shell[0] === 'dumpsys' && ['package', 'meminfo'].includes(shell[1]) && approvedPackage(shell[2]) && shell.length === 3) return true;
   if (shell[0] === 'dumpsys' && exactArgs(shell.slice(1, 3), ['activity', 'services']) && approvedPackage(shell[3]) && shell.length === 4) return true;
+  if (shell[0] === 'dumpsys' && exactArgs(shell.slice(1, 3), ['activity', 'exit-info']) && approvedPackage(shell[3]) && shell.length === 4) return true;
+  if (shell[0] === 'dumpsys' && exactArgs(shell.slice(1, 3), ['activity', 'activities']) && approvedPackage(shell[3]) && shell.length === 4) return true;
   if (shell[0] === 'uiautomator' && shell[1] === 'dump' && /^\/sdcard\/trailhead-memory-gate-[0-9-]+\.xml$/.test(shell[2] || '') && shell.length === 3) return true;
   if (shell[0] === 'rm' && shell[1] === '-f' && /^\/sdcard\/trailhead-memory-gate-[0-9-]+\.xml$/.test(shell[2] || '') && shell.length === 3) return true;
   if (shell[0] === 'cmd' && exactArgs(shell.slice(1, 7), ['package', 'resolve-activity', '--brief', '-a', 'android.intent.action.MAIN', '-c'])
@@ -272,8 +429,59 @@ function nodeMatchesTestId(node, testId, packageName) {
     || resourceId.endsWith(`:id/${testId}`);
 }
 
+export function hasPositiveVisibleBounds(node) {
+  const bounds = node?.bounds;
+  return Boolean(
+    bounds
+    && Number.isFinite(bounds.left)
+    && Number.isFinite(bounds.top)
+    && Number.isFinite(bounds.right)
+    && Number.isFinite(bounds.bottom)
+    && bounds.right > bounds.left
+    && bounds.bottom > bounds.top
+    && node?.['visible-to-user'] !== 'false',
+  );
+}
+
 function nodeForTestId(nodes, testId, packageName, requireBounds = false) {
-  return nodes.find(node => nodeMatchesTestId(node, testId, packageName) && (!requireBounds || node.bounds)) ?? null;
+  return nodes.find(node => (
+    nodeMatchesTestId(node, testId, packageName)
+    && (!requireBounds || hasPositiveVisibleBounds(node))
+  )) ?? null;
+}
+
+export function inspectRecognizedActiveServiceDump(text, packageName = 'com.trailhead.app') {
+  const source = String(text ?? '').replace(/\r\n/g, '\n');
+  const headerRecognized = /^ACTIVITY MANAGER SERVICES \(dumpsys activity services\)\s*$/m.test(source);
+  const bodyRecognized = /^\s*User \d+ active services:\s*$/m.test(source)
+    || /^\s*(?:No active services|No services found|\(nothing\))\s*$/mi.test(source);
+  const serviceRecords = source.split('\n').filter(line => /\bServiceRecord\{/.test(line));
+  const recordsScopedToPackage = serviceRecords.length === 0
+    || serviceRecords.every(line => line.includes(packageName));
+  if (!headerRecognized || !bodyRecognized || !recordsScopedToPackage) {
+    throw new MemoryGateError('active_service_dump_unrecognized');
+  }
+  return { recognized: true };
+}
+
+export function parseRecognizedExitInfoDump(text, packageName = 'com.trailhead.app') {
+  const source = String(text ?? '').replace(/\r\n/g, '\n');
+  const escapedPackage = packageName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const headerRecognized = /^ACTIVITY MANAGER PROCESS EXIT INFO \(dumpsys activity exit-info\)\s*$/m.test(source);
+  const packageRecognized = new RegExp(`^\\s*package:\\s*${escapedPackage}\\s*$`, 'm').test(source);
+  const historyRecognized = packageRecognized
+    && /^\s*Historical Process Exit for uid=\d+\s*$/m.test(source);
+  const emptyHistoryRecognized = !/^\s*package:\s*/m.test(source)
+    && !/^\s*ApplicationExitInfo #\d+:/m.test(source)
+    && /^Last Timestamp of Persistence Into Persistent Storage:\s*.+$/m.test(source);
+  if (!headerRecognized || (!historyRecognized && !emptyHistoryRecognized)) {
+    throw new MemoryGateError('exit_info_dump_unrecognized');
+  }
+  try {
+    return parseExitInfoV3(source);
+  } catch {
+    throw new MemoryGateError('exit_info_unavailable');
+  }
 }
 
 export function classifyActiveMapSession({ uiXml = '', serviceDump = '', packageName = 'com.trailhead.app' } = {}) {
@@ -292,10 +500,12 @@ export function classifyActiveMapSession({ uiXml = '', serviceDump = '', package
 }
 
 function activeServiceDump(adb, serial, packageName) {
-  return runAdb(adb, deviceArgs(serial, ['shell', 'dumpsys', 'activity', 'services', packageName]), {
-    allowFailure: true,
+  const dump = runAdb(adb, deviceArgs(serial, ['shell', 'dumpsys', 'activity', 'services', packageName]), {
+    failureCode: 'active_service_query_failed',
     maxBuffer: 16 * 1024 * 1024,
   });
+  inspectRecognizedActiveServiceDump(dump, packageName);
+  return dump;
 }
 
 function assertNoActiveMapSession(adb, serial, packageName, includeUi) {
@@ -352,6 +562,68 @@ async function waitMs(ms, label = null) {
     if (label && remaining > 0) console.log(`  ${Math.ceil(remaining / 1000)}s remaining`);
   }
   assertNotCancelled();
+}
+
+export function inspectAwakePowerDump(text) {
+  const source = String(text ?? '').replace(/\r\n/g, '\n');
+  const headerRecognized = /^POWER MANAGER \(dumpsys power\)\s*$/m.test(source);
+  const wakefulness = source.match(/^\s*mWakefulness=(\S+)\s*$/m)?.[1] ?? null;
+  if (!headerRecognized || !wakefulness) {
+    throw new MemoryGateError('power_dump_unrecognized');
+  }
+  if (wakefulness !== 'Awake') throw new MemoryGateError('device_not_awake');
+  return { recognized: true, awake: true };
+}
+
+export function inspectTopResumedVisibleActivityDump(text, packageName = 'com.trailhead.app') {
+  const source = String(text ?? '').replace(/\r\n/g, '\n');
+  if (!/^ACTIVITY MANAGER ACTIVITIES \(dumpsys activity activities\)\s*$/m.test(source)) {
+    throw new MemoryGateError('activity_dump_unrecognized');
+  }
+  const packageActivity = `${packageName}/`;
+  const topResumed = source.split('\n').some(line => (
+    /(?:topResumedActivity=|m?ResumedActivity:)\s*ActivityRecord\{/.test(line)
+    && line.includes(packageActivity)
+  ));
+  const visible = source.split('\n').some(line => (
+    line.includes(packageName)
+    && /\bvisible=true\b/.test(line)
+    && /\bvisibleRequested=true\b/.test(line)
+  ));
+  if (!topResumed || !visible) {
+    throw new MemoryGateError('app_not_top_resumed_visible');
+  }
+  return { recognized: true, topResumed: true, visible: true };
+}
+
+export async function waitWithContinuousProof({
+  durationMs,
+  prove,
+  intervalMs = FOREGROUND_PROOF_INTERVAL_MS,
+  waitFor = waitMs,
+  label = null,
+}) {
+  if (!Number.isFinite(durationMs) || durationMs < 0
+    || !Number.isFinite(intervalMs) || intervalMs <= 0
+    || typeof prove !== 'function' || typeof waitFor !== 'function') {
+    throw new MemoryGateError('foreground_proof_contract_invalid');
+  }
+  if (label) console.log(`${label} (${Math.ceil(durationMs / 1000)}s)`);
+  let proofCount = 0;
+  await prove();
+  proofCount += 1;
+  let remaining = durationMs;
+  while (remaining > 0) {
+    assertNotCancelled();
+    const step = Math.min(remaining, intervalMs);
+    await waitFor(step);
+    remaining -= step;
+    await prove();
+    proofCount += 1;
+    if (label && remaining > 0) console.log(`  ${Math.ceil(remaining / 1000)}s remaining`);
+  }
+  assertNotCancelled();
+  return proofCount;
 }
 
 async function waitForTestId(adb, serial, packageName, testId, timeoutMs = 30_000) {
@@ -533,8 +805,9 @@ function assertLayerSubsetState(states, keys, expectedState, failurePrefix) {
   return states;
 }
 
-function assertExactLayerState(states, target, failurePrefix) {
+export function assertExactLayerState(states, target, failurePrefix) {
   assertCompleteHeavyLayerState(states);
+  assertCompleteHeavyLayerState(target);
   for (const key of HEAVY_MAP_LAYER_KEYS) {
     if (states[key] !== target[key]) throw new MemoryGateError(`${failurePrefix}_${key}`);
   }
@@ -682,6 +955,19 @@ export function applyLayerRestorationOutcome(report, outcome) {
   report.restoration_failure_code = report.layers.restored
     ? null
     : (outcome?.failureCode || 'layer_restore_failed');
+  const persistedMismatchObserved = String(outcome?.failureCode || '').startsWith(
+    'layer_restore_persisted_mismatch_',
+  );
+  const persistedSuccessObserved = report.layers.restored
+    && outcome?.recovery?.post_restore_relaunch_completed === true
+    && outcome?.recovery?.verified_after_relaunch != null;
+  report.safety.layer_state_retention_check_completed = persistedMismatchObserved
+    || persistedSuccessObserved;
+  report.safety.layer_state_loss_observed = persistedMismatchObserved
+    ? true
+    : persistedSuccessObserved
+      ? false
+      : null;
   if (!report.layers.restored) report.result = 'failed';
   return report;
 }
@@ -707,6 +993,133 @@ async function ensureLayerSheet(adb, serial, packageName) {
     await waitMs(450);
   }
   throw new MemoryGateError('layer_carousel_unavailable');
+}
+
+export function inspectMapRendererReadiness(nodes, packageName) {
+  const rootCount = nodes.filter(node => (
+    nodeMatchesTestId(node, 'map.screen', packageName) && hasPositiveVisibleBounds(node)
+  )).length;
+  const stableControlCount = nodes.filter(node => (
+    nodeMatchesTestId(node, 'map.layers.open', packageName) && hasPositiveVisibleBounds(node)
+  )).length;
+  const rendererLoading = nodes.some(node => (
+    nodeMatchesTestId(node, 'map.renderer-loading', packageName) && hasPositiveVisibleBounds(node)
+  ));
+  const rootReady = rootCount === 1;
+  const stableControlReady = stableControlCount === 1;
+  const duplicateRendererObserved = rootCount > 1 || stableControlCount > 1;
+  return {
+    ready: rootReady && !rendererLoading && stableControlReady && !duplicateRendererObserved,
+    rootReady,
+    rendererLoading,
+    stableControlReady,
+    rootCount,
+    stableControlCount,
+    duplicateRendererObserved,
+  };
+}
+
+export function inspectRetainedTreeReadiness(nodes, packageName, rootTestId) {
+  if (!['explore.screen', 'map.screen'].includes(rootTestId)) {
+    throw new MemoryGateError('retained_tree_contract_invalid');
+  }
+  if (rootTestId === 'map.screen') return inspectMapRendererReadiness(nodes, packageName);
+  const rootCount = nodes.filter(node => (
+    nodeMatchesTestId(node, rootTestId, packageName) && hasPositiveVisibleBounds(node)
+  )).length;
+  return {
+    ready: rootCount === 1,
+    rootReady: rootCount === 1,
+    rendererLoading: false,
+    stableControlReady: true,
+    rootCount,
+    stableControlCount: null,
+    duplicateRendererObserved: false,
+  };
+}
+
+function proveForegroundMeasurementState(adb, serial, packageName, rootTestId) {
+  const powerDump = runAdb(adb, deviceArgs(serial, ['shell', 'dumpsys', 'power']), {
+    failureCode: 'power_query_failed',
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  inspectAwakePowerDump(powerDump);
+  const activityDump = runAdb(adb, deviceArgs(serial, [
+    'shell', 'dumpsys', 'activity', 'activities', packageName,
+  ]), {
+    failureCode: 'activity_query_failed',
+    maxBuffer: 24 * 1024 * 1024,
+  });
+  inspectTopResumedVisibleActivityDump(activityDump, packageName);
+  const readiness = inspectRetainedTreeReadiness(
+    parseUiNodes(captureUiXml(adb, serial)),
+    packageName,
+    rootTestId,
+  );
+  if (readiness.duplicateRendererObserved) {
+    throw new MemoryGateError('duplicate_map_renderer_observed');
+  }
+  if (!readiness.ready) {
+    throw new MemoryGateError(rootTestId === 'map.screen'
+      ? 'map_renderer_not_ready'
+      : 'explore_retained_tree_not_ready');
+  }
+  return readiness;
+}
+
+async function navigateToTab(adb, serial, packageName, routeName) {
+  const testId = `app.tab.${routeName}`;
+  const { node } = await waitForTestId(adb, serial, packageName, testId, 30_000);
+  tapNode(adb, serial, node);
+  const rootTestId = routeName === 'guide'
+    ? 'explore.screen'
+    : routeName === 'map'
+      ? 'map.screen'
+      : null;
+  const deadline = Date.now() + 30_000;
+  let stableReadyReads = 0;
+  while (Date.now() < deadline) {
+    const nodes = parseUiNodes(captureUiXml(adb, serial));
+    const tab = nodeForTestId(nodes, testId, packageName);
+    const rootReady = !rootTestId || nodeForTestId(nodes, rootTestId, packageName, true);
+    const rendererReady = routeName !== 'map'
+      || inspectMapRendererReadiness(nodes, packageName).ready;
+    if (tab?.selected === 'true' && rootReady && rendererReady) {
+      stableReadyReads += 1;
+      if (stableReadyReads >= 2) return;
+    } else {
+      stableReadyReads = 0;
+    }
+    await waitMs(500);
+  }
+  throw new MemoryGateError(routeName === 'map'
+    ? 'map_renderer_not_ready'
+    : `tab_transition_failed_${routeName}`);
+}
+
+export function inspectLayerSheetCloseState(nodes, packageName) {
+  const sheetOpen = [
+    'map.layers.sheet',
+    'map.layers.content',
+    'map.layers.toggle-carousel',
+  ].some(testId => nodeForTestId(nodes, testId, packageName, true));
+  const closeNode = nodeForTestId(nodes, 'map.layers.close', packageName, true);
+  if (sheetOpen && !closeNode) throw new MemoryGateError('layer_close_unavailable');
+  return { sheetOpen, closeNode };
+}
+
+async function closeLayerSheet(adb, serial, packageName) {
+  const nodes = parseUiNodes(captureUiXml(adb, serial));
+  const { sheetOpen, closeNode } = inspectLayerSheetCloseState(nodes, packageName);
+  if (!sheetOpen) return false;
+  tapNode(adb, serial, closeNode);
+  await waitMs(700);
+  await waitForTestId(adb, serial, packageName, 'map.layers.open', 20_000);
+  const afterNodes = parseUiNodes(captureUiXml(adb, serial));
+  if (inspectLayerSheetCloseState(afterNodes, packageName).sheetOpen) {
+    throw new MemoryGateError('layer_close_failed');
+  }
+  return true;
 }
 
 async function seekLayerNode(adb, serial, packageName, key, direction) {
@@ -804,14 +1217,53 @@ async function relaunchForLayerRecovery(adb, serial, packageName, launchComponen
   await waitForTestId(adb, serial, packageName, 'app.tab.map', 30_000);
 }
 
-function sampleTotalPss(adb, serial, packageName) {
+function meminfoProcessId(text, packageName) {
+  const match = String(text).match(/\*\* MEMINFO in pid (\d+) \[([^\]]+)\] \*\*/);
+  if (!match || match[2] !== packageName) return null;
+  const value = Number(match[1]);
+  return Number.isSafeInteger(value) && value > 0 ? value : null;
+}
+
+export function recordAndVerifyProcessIdentity(processState, processId) {
+  if (!processState || typeof processState !== 'object') {
+    throw new MemoryGateError('memory_process_state_unavailable');
+  }
+  if (!Number.isSafeInteger(processId) || processId <= 0) {
+    processState.alive = false;
+    throw new MemoryGateError('memory_process_not_alive');
+  }
+  if (processState.internalProcessId == null) processState.internalProcessId = processId;
+  else if (processState.internalProcessId !== processId) {
+    processState.alive = false;
+    processState.instanceChanged = true;
+    throw new MemoryGateError('memory_process_instance_changed');
+  }
+  processState.alive = true;
+  return true;
+}
+
+function sampleMemoryV3(adb, serial, packageName, processState) {
   const dump = runAdb(adb, deviceArgs(serial, ['shell', 'dumpsys', 'meminfo', packageName]), {
     allowFailure: true,
     maxBuffer: 16 * 1024 * 1024,
   });
-  const totalPssKb = parseMeminfo(dump).totalPssKb;
-  if (!Number.isFinite(totalPssKb) || totalPssKb <= 0) throw new MemoryGateError('memory_sample_unavailable');
-  return totalPssKb;
+  const processId = meminfoProcessId(dump, packageName);
+  recordAndVerifyProcessIdentity(processState, processId);
+  try {
+    return parseAndroidMeminfoV3(dump);
+  } catch {
+    throw new MemoryGateError('memory_sample_unavailable');
+  }
+}
+
+function exitInfoSnapshot(adb, serial, packageName) {
+  const dump = runAdb(adb, deviceArgs(serial, [
+    'shell', 'dumpsys', 'activity', 'exit-info', packageName,
+  ]), {
+    failureCode: 'exit_info_query_failed',
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  return parseRecognizedExitInfoDump(dump, packageName);
 }
 
 export function validatePreviewBuildEvidence(build, expected) {
@@ -900,62 +1352,297 @@ export function validateQaReleaseIdentity(identity, options) {
   return true;
 }
 
-async function collectSamples(adb, serial, packageName, count = 3) {
+async function collectSamples(
+  adb,
+  serial,
+  packageName,
+  processState,
+  count = 3,
+  proveReady = null,
+) {
   const samples = [];
   for (let index = 0; index < count; index += 1) {
-    samples.push(sampleTotalPss(adb, serial, packageName));
+    if (proveReady) await proveReady();
+    samples.push(sampleMemoryV3(adb, serial, packageName, processState));
     if (index < count - 1) await waitMs(SAMPLE_GAP_MS);
   }
   return samples;
 }
 
-export function median(values) {
-  if (!Array.isArray(values) || values.length === 0 || values.some(value => !Number.isFinite(value))) {
-    throw new MemoryGateError('invalid_memory_samples');
+const MEMORY_WINDOW_OPTIONAL_METRICS = Object.freeze([
+  'nativeHeapPssKb', 'nativeHeapRssKb', 'graphicsPssKb', 'graphicsRssKb',
+  'glMtrackPssKb', 'glMtrackRssKb', 'unknownPssKb', 'unknownRssKb',
+]);
+const MEMORY_WINDOW_OBJECT_COUNT_METRICS = Object.freeze([
+  'viewCount', 'activityCount', 'appContextCount', 'webViewCount',
+]);
+
+function summarizedMetric(samples, metric, mode) {
+  const values = samples.map(sample => sample[metric]).filter(Number.isFinite);
+  if (values.length === 0) return null;
+  return mode === 'peak' ? Math.max(...values) : Math.min(...values);
+}
+
+export function summarizeMemoryWindow(samples, budget, mode) {
+  if (!Array.isArray(samples) || samples.length !== 3) {
+    throw new MemoryGateError('memory_window_must_have_three_samples');
   }
-  const sorted = [...values].sort((a, b) => a - b);
-  const middle = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
-}
-
-export function evaluateBaselinePssLimit(baselineSamples) {
-  median(baselineSamples);
-  const maxObservedPssKb = Math.max(...baselineSamples);
-  return {
-    passed: maxObservedPssKb < MAX_TOTAL_PSS_KB,
-    maxObservedPssKb,
-    limit: {
-      maxTotalPssKbExclusive: MAX_TOTAL_PSS_KB,
-    },
+  if (!budget || !Number.isFinite(budget.maxTotalPssKb) || !Number.isFinite(budget.maxTotalRssKb)) {
+    throw new MemoryGateError('memory_window_budget_invalid');
+  }
+  if (mode !== 'peak' && mode !== 'valley') {
+    throw new MemoryGateError('memory_window_mode_invalid');
+  }
+  // Reuse the policy parser so a malformed or incomplete sample cannot take
+  // part in the deterministic summary.
+  evaluatePhaseBudgetV3(samples, budget);
+  const totalPssKb = summarizedMetric(samples, 'totalPssKb', mode);
+  const totalSwapPssKb = summarizedMetric(samples, 'totalSwapPssKb', mode);
+  const summary = {
+    totalPssKb,
+    totalSwapPssKb,
+    pssMinusSwapDiagnosticKb: Math.max(0, totalPssKb - totalSwapPssKb),
+    // PSS and RSS are summarized independently. A high-RSS sample cannot be
+    // hidden merely because another sample had the higher normalized PSS.
+    totalRssKb: summarizedMetric(samples, 'totalRssKb', mode),
   };
+  for (const metric of MEMORY_WINDOW_OPTIONAL_METRICS) {
+    summary[metric] = summarizedMetric(samples, metric, mode);
+  }
+  // Object counts remain conservative in both windows so retained-tree
+  // ratchet detection cannot be weakened by selecting a low-count valley.
+  for (const metric of MEMORY_WINDOW_OBJECT_COUNT_METRICS) {
+    summary[metric] = summarizedMetric(samples, metric, 'peak');
+  }
+  return summary;
 }
 
-export function evaluateMemoryGate({ baselineSamples, cyclePeakSamples, postSamples }) {
-  const baselineMedianKb = median(baselineSamples);
-  const postMedianKb = median(postSamples);
-  const allSamples = [...baselineSamples, ...(cyclePeakSamples || []), ...postSamples];
-  const maxObservedPssKb = Math.max(...allSamples);
-  const growthPercent = ((postMedianKb - baselineMedianKb) / baselineMedianKb) * 100;
-  const pssPassed = maxObservedPssKb < MAX_TOTAL_PSS_KB;
-  const growthPassed = growthPercent < MAX_GROWTH_PERCENT;
-  return {
-    passed: pssPassed && growthPassed,
-    pssPassed,
-    growthPassed,
-    baselineMedianKb,
-    postMedianKb,
-    maxObservedPssKb,
-    growthPercent,
-    limits: {
-      maxTotalPssKbExclusive: MAX_TOTAL_PSS_KB,
-      maxGrowthPercentExclusive: MAX_GROWTH_PERCENT,
-    },
-  };
+export function assertPssAndRssPhaseSafety(samples, safetyBudget, phase) {
+  const evaluation = evaluatePhaseBudgetV3(samples, safetyBudget);
+  if (evaluation.checks.totalPssWithinBudget === false) {
+    throw new MemoryGateError(`${phase}_total_pss_safety_cap_failed`);
+  }
+  if (evaluation.checks.totalRssWithinBudget === false) {
+    throw new MemoryGateError(`${phase}_rss_safety_cap_failed`);
+  }
+  return evaluation;
 }
 
-function writeReport(directory, report) {
-  mkdirSync(directory, { recursive: true });
-  writeFileSync(join(directory, 'report.json'), `${JSON.stringify(report, null, 2)}\n`);
+const MEMORY_GATE_REPORT_TOP_LEVEL_KEYS = Object.freeze([
+  'schema_version', 'started_at', 'completed_at', 'candidate', 'device', 'app', 'safety', 'layers',
+  'memory', 'process', 'result', 'failure_code', 'terminal_evidence_failure_code',
+  'restoration_failure_code', 'privacy',
+]);
+
+const MEMORY_GATE_REPORT_ALLOWED_KEYS = new Set([
+  ...MEMORY_GATE_REPORT_TOP_LEVEL_KEYS,
+  'ota_source_git_sha', 'harness_git_sha', 'binary_build_git_sha', 'runtime', 'build_id', 'update_id',
+  'build_evidence_verified', 'device_identity_verified', 'harness_provenance',
+  'candidate_is_ancestor', 'approved_candidate_delta', 'harness_file_sha256',
+  'role', 'android_sdk', 'android_release_major', 'package_name', 'version_name', 'version_code',
+  'exact_device_required', 'app_data_cleared', 'permissions_changed', 'active_navigation_or_tour',
+  'duplicate_renderer_check_completed', 'duplicate_renderer_observed',
+  'layer_state_retention_check_completed', 'layer_state_loss_observed', 'raw_ui_or_logs_stored',
+  'stress_keys', 'purpose', 'functional_regression_tested', 'initial', 'baseline', 'restored', 'recovery',
+  'explore_idle_settle_ms', 'map_idle_settle_ms', 'cycle_phase_settle_ms', 'post_map_settle_ms',
+  'explore_recovery_settle_ms', 'sample_gap_ms', 'cycle_count', 'explore_idle_samples',
+  'map_idle_samples', 'cycles', 'partial_cycle', 'post_map_recovery_samples', 'explore_recovery_samples',
+  'active_samples', 'active_phase_status', 'object_count_ratchet', 'evaluation', 'policy', 'device_role',
+  'navigation', 'preview3d', 'originals', 'alive', 'instance_changed', 'exit_evidence_checked',
+  'foreground_proof_count', 'foreground_proof_completed',
+  'terminal_identity_checked', 'exit_evidence',
+  'reportVersion', 'requiredCycleCount', 'cycleEdgeWindow', 'phaseBudgetsKb',
+  'exploreIdle', 'exploreRecovery', 'mapIdle', 'heavyPeak', 'activeExperience', 'maxTotalPssKb',
+  'referencePssMinusSwapDiagnosticKb', 'maxTotalRssKb', 'postMapRecovery', 'disabledRecovery',
+  'exploreReturn', 'maxPercentExclusive', 'maxAbsoluteKbExclusive', 'maxPercentInclusive',
+  'maxAbsoluteKbInclusive', 'maxRetainedSlopeKbPerCycleInclusive',
+  'totalPssKb', 'totalSwapPssKb', 'pssMinusSwapDiagnosticKb', 'totalRssKb',
+  'nativeHeapPssKb', 'nativeHeapRssKb', 'graphicsPssKb', 'graphicsRssKb',
+  'glMtrackPssKb', 'glMtrackRssKb', 'unknownPssKb', 'unknownRssKb',
+  'viewCount', 'activityCount', 'appContextCount', 'webViewCount',
+  'cycle', 'heavyPeakWindow', 'disabledRecoveryWindow', 'heavyLayerStateVerified',
+  'disabledLayerStateVerified', 'version', 'budgetPassed', 'growthPassed', 'cycleCountPassed',
+  'observedCycleCount', 'phaseBudgets', 'growth', 'heavyPeaks', 'disabledRecoveries', 'retainedSlope',
+  'stability', 'cycleCurve', 'evaluated', 'required', 'passed', 'sampleCount', 'limits',
+  'checks', 'observed', 'count', 'median', 'maximum', 'totalPss', 'totalRss',
+  'baselineMedianKb', 'comparisonMedianKb', 'deltaKb', 'growthPercent', 'maxPercent',
+  'maxAbsoluteKb', 'percentPassed', 'absolutePassed', 'totalPssKbPerCycle',
+  'totalRssKbPerCycle', 'maxKbPerCycle', 'totalPssPassed', 'totalRssPassed',
+  'processAlive', 'exitEvidenceChecked', 'cancelled', 'layerStateRestored',
+  'duplicateRendererEvidenceComplete', 'stateLossEvidenceComplete',
+  'objectCountEvidenceAvailable', 'objectCountEvidenceComplete', 'objectCountRatchetDetected',
+  'lowMemoryKillCount', 'oomCount', 'anrCount', 'processDeathCount',
+  'duplicateRendererCount', 'stateLossCount', 'notCancelled', 'noObjectCountRatchet',
+  'noLowMemoryKill', 'noOom', 'noAnr', 'noProcessDeath', 'noDuplicateRenderer', 'noStateLoss',
+  'available', 'complete', 'requiredSampleCount', 'observedSampleCount', 'detected', 'metrics',
+  'earlyMedian', 'precedingLateMedian', 'lateMedian', 'earlyFloor', 'lateFloor',
+  'slopePerCycle', 'positiveTransitionCount', 'latePositiveTransitionCount', 'newRecordCount',
+  'failureCount', 'forceStopCount', 'unclassifiedReasonCount', 'failureReasonCounts',
+  'failureRecords', 'timestampKeyMs', 'reason', 'subreason', 'status', 'importance', 'pssKb', 'rssKb',
+  'reason2Count', 'reason3Count', 'reason4Count', 'reason5Count', 'reason6Count', 'reason7Count',
+  'reason9Count', 'reason17Count', 'target', 'attempted', 'target_false_keys', 'target_true_keys',
+  'pre_restore_relaunch_completed', 'relaunch_before_restore_completed', 'persistence_wait_ms',
+  'target_false_observed', 'target_true_observed', 'verified_before_relaunch',
+  'persistence_wait_completed', 'post_restore_relaunch_completed', 'verified_after_relaunch',
+  'failure_observed_state', 'attempt_count', 'max_attempts', 'retry_reason', 'recovered_after_retry',
+  'attempts', 'attempt', 'totalPssWithinBudget', 'totalRssWithinBudget',
+  'pssMinusSwapDiagnosticWithinReference', 'm1Passed',
+  'activeExperienceEvidenceComplete', 'activeExperienceMemoryPassed',
+  'completeMemoryEvidencePassed',
+  ...HEAVY_MAP_LAYER_KEYS,
+]);
+
+const MEMORY_GATE_STRING_IDENTIFIER_KEYS = new Set([
+  'runtime', 'build_id', 'update_id', 'version_name', 'version_code',
+]);
+const MEMORY_GATE_STRING_FAILURE_KEYS = new Set([
+  'failure_code', 'terminal_evidence_failure_code', 'restoration_failure_code', 'retry_reason',
+]);
+const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const SAFE_FAILURE_CODE = /^[a-z][a-z0-9_.-]{0,95}$/;
+const SHA_40 = /^[a-f0-9]{40}$/;
+const SHA_64 = /^[a-f0-9]{64}$/;
+
+function assertExactObjectKeys(value, expected, code) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new MemoryGateError(code);
+  const actual = Object.keys(value).sort();
+  const wanted = [...expected].sort();
+  if (actual.length !== wanted.length || actual.some((key, index) => key !== wanted[index])) {
+    throw new MemoryGateError(code);
+  }
+}
+
+function assertMemoryGateReportString(key, value) {
+  if (key === 'started_at' || key === 'completed_at') {
+    if (!ISO_INSTANT.test(value)) throw new MemoryGateError('report_privacy_invalid_timestamp');
+    return;
+  }
+  if (['ota_source_git_sha', 'harness_git_sha', 'binary_build_git_sha'].includes(key)) {
+    if (!SHA_40.test(value)) throw new MemoryGateError('report_privacy_invalid_hash');
+    return;
+  }
+  if (MEMORY_GATE_STRING_IDENTIFIER_KEYS.has(key)) {
+    if (!SAFE_IDENTIFIER.test(value)) throw new MemoryGateError('report_privacy_invalid_identifier');
+    return;
+  }
+  if (MEMORY_GATE_STRING_FAILURE_KEYS.has(key)) {
+    if (!SAFE_FAILURE_CODE.test(value)) throw new MemoryGateError('report_privacy_invalid_failure_code');
+    return;
+  }
+  if (key === 'package_name' && APPROVED_TRAILHEAD_ANDROID_PACKAGES.includes(value)) return;
+  if (key === 'role' && value === 'stress_reference_4gb') return;
+  if (key === 'active_navigation_or_tour' && ['not_checked', 'absent'].includes(value)) return;
+  if (key === 'purpose' && value === 'deterministic_memory_load') return;
+  if (key === 'device_role' && value === 'stress_reference_4gb') return;
+  if (['navigation', 'preview3d', 'originals'].includes(key)
+    && value === 'not_run_by_non_destructive_map_gate') return;
+  if (key === 'result' && ['running', 'passed', 'failed'].includes(value)) return;
+  if (key === 'privacy' && value === MEMORY_GATE_REPORT_PRIVACY_STATEMENT) return;
+  if (['stress_keys', 'target_false_keys', 'target_true_keys'].includes(key)
+    && HEAVY_MAP_LAYER_KEYS.includes(value)) return;
+  if (key === 'approved_candidate_delta' && MEMORY_GATE_HARNESS_ALLOWED_CHANGED_PATHS.includes(value)) return;
+  throw new MemoryGateError('report_privacy_arbitrary_string');
+}
+
+function assertMemoryGateReportValue(value, key = null, seen = new WeakSet()) {
+  if (value === null || typeof value === 'boolean') return;
+  if (value === undefined) throw new MemoryGateError('report_privacy_invalid_value');
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw new MemoryGateError('report_privacy_non_finite_number');
+    return;
+  }
+  if (typeof value === 'string') {
+    assertMemoryGateReportString(key, value);
+    return;
+  }
+  if (typeof value !== 'object' || seen.has(value)) {
+    throw new MemoryGateError('report_privacy_invalid_value');
+  }
+  seen.add(value);
+  if (Array.isArray(value)) {
+    for (const child of value) assertMemoryGateReportValue(child, key, seen);
+  } else if (key === 'harness_file_sha256') {
+    assertExactObjectKeys(value, MEMORY_GATE_HARNESS_REQUIRED_PATHS, 'report_privacy_invalid_harness_hashes');
+    for (const hash of Object.values(value)) {
+      if (!SHA_64.test(hash)) throw new MemoryGateError('report_privacy_invalid_hash');
+    }
+  } else {
+    for (const [childKey, child] of Object.entries(value)) {
+      if (!MEMORY_GATE_REPORT_ALLOWED_KEYS.has(childKey)) {
+        throw new MemoryGateError('report_privacy_unexpected_key');
+      }
+      assertMemoryGateReportValue(child, childKey, seen);
+    }
+  }
+  seen.delete(value);
+}
+
+export function assertAndroidMemoryGateReportV3Privacy(report) {
+  assertExactObjectKeys(report, MEMORY_GATE_REPORT_TOP_LEVEL_KEYS, 'report_privacy_invalid_schema');
+  if (report.schema_version !== 3) throw new MemoryGateError('report_privacy_invalid_schema');
+  assertExactObjectKeys(report.candidate, [
+    'ota_source_git_sha', 'harness_git_sha', 'binary_build_git_sha', 'runtime', 'build_id', 'update_id',
+    'build_evidence_verified', 'device_identity_verified', 'harness_provenance',
+  ], 'report_privacy_invalid_candidate_schema');
+  if (report.candidate.harness_provenance != null) {
+    assertExactObjectKeys(report.candidate.harness_provenance, [
+      'candidate_is_ancestor', 'approved_candidate_delta', 'harness_file_sha256',
+    ], 'report_privacy_invalid_harness_schema');
+  }
+  if (report.device != null) {
+    assertExactObjectKeys(report.device, ['role', 'android_sdk', 'android_release_major'], 'report_privacy_invalid_device_schema');
+  }
+  assertExactObjectKeys(report.app, ['package_name', 'version_name', 'version_code'], 'report_privacy_invalid_app_schema');
+  assertExactObjectKeys(report.safety, [
+    'exact_device_required', 'app_data_cleared', 'permissions_changed', 'active_navigation_or_tour',
+    'duplicate_renderer_check_completed', 'duplicate_renderer_observed',
+    'layer_state_retention_check_completed', 'layer_state_loss_observed', 'raw_ui_or_logs_stored',
+  ], 'report_privacy_invalid_safety_schema');
+  assertExactObjectKeys(report.layers, [
+    'stress_keys', 'purpose', 'functional_regression_tested', 'initial', 'baseline', 'restored', 'recovery',
+  ], 'report_privacy_invalid_layers_schema');
+  assertExactObjectKeys(report.memory, [
+    'policy', 'device_role', 'explore_idle_settle_ms', 'map_idle_settle_ms', 'cycle_phase_settle_ms',
+    'post_map_settle_ms', 'explore_recovery_settle_ms', 'sample_gap_ms', 'cycle_count',
+    'explore_idle_samples', 'map_idle_samples', 'cycles', 'partial_cycle', 'post_map_recovery_samples',
+    'explore_recovery_samples', 'active_samples', 'active_phase_status', 'object_count_ratchet', 'evaluation',
+  ], 'report_privacy_invalid_memory_schema');
+  assertExactObjectKeys(report.process, [
+    'alive', 'instance_changed', 'foreground_proof_count', 'foreground_proof_completed',
+    'exit_evidence_checked', 'terminal_identity_checked', 'exit_evidence',
+  ], 'report_privacy_invalid_process_schema');
+  assertMemoryGateReportValue(report);
+  return true;
+}
+
+export function writeAndroidMemoryGateReportV3Atomically(directory, report, operations = {}) {
+  assertAndroidMemoryGateReportV3Privacy(report);
+  const makeDirectory = operations.mkdirSync ?? mkdirSync;
+  const writeFile = operations.writeFileSync ?? writeFileSync;
+  const renameFile = operations.renameSync ?? renameSync;
+  const unlinkFile = operations.unlinkSync ?? unlinkSync;
+  makeDirectory(directory, { recursive: true });
+  const finalPath = join(directory, 'report.json');
+  const temporaryPath = join(
+    directory,
+    `.report.json.${process.pid}.${Date.now()}.tmp`,
+  );
+  try {
+    writeFile(temporaryPath, `${JSON.stringify(report, null, 2)}\n`, {
+      flag: 'wx',
+      flush: true,
+    });
+    renameFile(temporaryPath, finalPath);
+  } catch (error) {
+    try {
+      unlinkFile(temporaryPath);
+    } catch {
+      // The primary write/rename error remains authoritative. A missing temp
+      // file is expected when creation itself failed.
+    }
+    throw error;
+  }
+  return finalPath;
 }
 
 function safeFailureCode(error) {
@@ -966,13 +1653,15 @@ function safeFailureCode(error) {
 /**
  * Own the gate's catch/finally contract independently from ADB so failure-path
  * behavior can be proven deterministically. Once layer state has been captured,
- * every measurement failure must attempt restoration and write the completed
- * report while keeping the primary and restoration failures separate.
+ * every measurement failure must collect terminal process evidence before any
+ * restoration force-stop, then restore and write the completed report while
+ * keeping primary, terminal-evidence, and restoration failures separate.
  */
 export async function executeMemoryGateLifecycle({
   report,
   executeGate,
   getInitialStates,
+  collectTerminalEvidence = async () => {},
   restoreLayers,
   finalizeReport,
   completedAt = () => new Date().toISOString(),
@@ -983,6 +1672,12 @@ export async function executeMemoryGateLifecycle({
     report.result = 'failed';
     report.failure_code = safeFailureCode(error);
   } finally {
+    try {
+      await collectTerminalEvidence(report);
+    } catch (error) {
+      report.result = 'failed';
+      report.terminal_evidence_failure_code = safeFailureCode(error);
+    }
     const initialStates = getInitialStates();
     if (initialStates) {
       let restoration;
@@ -1008,11 +1703,13 @@ async function runGate(options) {
   mkdirSync(evidenceRoot, { recursive: true });
   const output = join(evidenceRoot, timestamp());
   const report = {
-    schema_version: 2,
+    schema_version: 3,
     started_at: new Date().toISOString(),
     completed_at: null,
     candidate: {
       ota_source_git_sha: options.expectedCommitSha,
+      harness_git_sha: null,
+      harness_provenance: null,
       binary_build_git_sha: options.expectedBuildCommitSha,
       runtime: options.runtime,
       build_id: options.buildId,
@@ -1031,49 +1728,129 @@ async function runGate(options) {
       app_data_cleared: false,
       permissions_changed: false,
       active_navigation_or_tour: 'not_checked',
+      duplicate_renderer_check_completed: false,
+      duplicate_renderer_observed: null,
+      layer_state_retention_check_completed: false,
+      layer_state_loss_observed: null,
       raw_ui_or_logs_stored: false,
     },
     layers: {
-      tested: [...HEAVY_MAP_LAYER_KEYS],
+      stress_keys: [...HEAVY_MAP_LAYER_KEYS],
+      purpose: 'deterministic_memory_load',
+      functional_regression_tested: false,
       initial: null,
       baseline: null,
       restored: false,
       recovery: null,
     },
     memory: {
-      baseline_settle_ms: BASELINE_SETTLE_MS,
+      policy: ANDROID_MEMORY_GATE_V3_POLICY,
+      device_role: 'stress_reference_4gb',
+      explore_idle_settle_ms: BASELINE_SETTLE_MS,
+      map_idle_settle_ms: BASELINE_SETTLE_MS,
+      cycle_phase_settle_ms: CYCLE_PHASE_SETTLE_MS,
+      post_map_settle_ms: POST_MAP_SETTLE_MS,
+      explore_recovery_settle_ms: EXPLORE_RECOVERY_SETTLE_MS,
       sample_gap_ms: SAMPLE_GAP_MS,
       cycle_count: MAP_LAYER_CYCLE_COUNT,
-      baseline_samples_kb: [],
-      baseline_evaluation: null,
-      cycle_peak_samples_kb: [],
-      post_samples_kb: [],
+      explore_idle_samples: [],
+      map_idle_samples: [],
+      cycles: [],
+      partial_cycle: null,
+      post_map_recovery_samples: [],
+      explore_recovery_samples: [],
+      active_samples: {
+        navigation: [],
+        preview3d: [],
+        originals: [],
+      },
+      active_phase_status: {
+        navigation: 'not_run_by_non_destructive_map_gate',
+        preview3d: 'not_run_by_non_destructive_map_gate',
+        originals: 'not_run_by_non_destructive_map_gate',
+      },
+      object_count_ratchet: null,
       evaluation: null,
+    },
+    process: {
+      alive: true,
+      instance_changed: false,
+      foreground_proof_count: 0,
+      foreground_proof_completed: false,
+      terminal_identity_checked: false,
+      exit_evidence_checked: false,
+      exit_evidence: null,
     },
     result: 'running',
     failure_code: null,
+    terminal_evidence_failure_code: null,
     restoration_failure_code: null,
-    privacy: 'No serial, coordinates, route geometry, search text, account identifiers, screenshots, UI hierarchy, logs, support content, attachments, payout data, or credentials are stored.',
+    privacy: MEMORY_GATE_REPORT_PRIVACY_STATEMENT,
   };
 
   const adb = findAdb(options.adb);
   let initialStates = null;
   let launchComponent = null;
   let serial = options.serial;
+  let exitBaseline = null;
+  const processState = {
+    alive: true,
+    instanceChanged: false,
+    internalProcessId: null,
+  };
+  const phaseSafetyCap = ANDROID_MEMORY_GATE_V3_POLICY.phaseBudgetsKb.activeExperience;
+  let mapForegroundProofCount = 0;
+  const proveMeasurementState = async rootTestId => {
+    try {
+      const readiness = proveForegroundMeasurementState(
+        adb,
+        serial,
+        options.packageName,
+        rootTestId,
+      );
+      report.process.foreground_proof_count += 1;
+      if (rootTestId === 'map.screen') mapForegroundProofCount += 1;
+      return readiness;
+    } catch (error) {
+      if (error instanceof MemoryGateError && error.code === 'duplicate_map_renderer_observed') {
+        report.safety.duplicate_renderer_check_completed = true;
+        report.safety.duplicate_renderer_observed = true;
+      }
+      throw error;
+    }
+  };
+  const settleWithProof = (durationMs, label, rootTestId) => waitWithContinuousProof({
+    durationMs,
+    label,
+    prove: () => proveMeasurementState(rootTestId),
+  });
   await executeMemoryGateLifecycle({
     report,
     executeGate: async () => {
-    if (gitSha() !== options.expectedCommitSha) throw new MemoryGateError('local_commit_mismatch');
+    const harnessProvenance = collectMemoryGateHarnessProvenance(options.expectedCommitSha);
+    report.candidate.harness_git_sha = harnessProvenance.harnessGitSha;
+    report.candidate.harness_provenance = {
+      candidate_is_ancestor: harnessProvenance.candidate_is_ancestor,
+      approved_candidate_delta: harnessProvenance.approved_candidate_delta,
+      harness_file_sha256: harnessProvenance.harness_file_sha256,
+    };
     fetchAndValidatePreviewBuild(options);
     report.candidate.build_evidence_verified = true;
     const devices = parseDevices(runAdb(adb, ['devices', '-l']));
     const target = devices.find(device => device.serial === serial && device.state === 'device');
     if (!target) throw new MemoryGateError('device_not_authorized');
+    const sdk = Number(getProp(adb, serial, 'ro.build.version.sdk'));
+    const androidReleaseMajor = Number(
+      getProp(adb, serial, 'ro.build.version.release').match(/^\d+/)?.[0],
+    );
+    if (!Number.isSafeInteger(sdk) || sdk <= 0
+      || !Number.isSafeInteger(androidReleaseMajor) || androidReleaseMajor <= 0) {
+      throw new MemoryGateError('device_platform_metadata_unavailable');
+    }
     report.device = {
-      manufacturer: getProp(adb, serial, 'ro.product.manufacturer') || null,
-      model: getProp(adb, serial, 'ro.product.model') || null,
-      android_release: getProp(adb, serial, 'ro.build.version.release') || null,
-      sdk: getProp(adb, serial, 'ro.build.version.sdk') || null,
+      role: 'stress_reference_4gb',
+      android_sdk: sdk,
+      android_release_major: androidReleaseMajor,
     };
 
     const app = packageMetadata(adb, serial, options.packageName);
@@ -1102,6 +1879,29 @@ async function runGate(options) {
     launchApp(adb, serial, launchComponent);
     await waitMs(2_000);
     assertNoActiveMapSession(adb, serial, options.packageName, true);
+    await waitForTestId(adb, serial, options.packageName, 'app.tab.map', 30_000);
+    exitBaseline = exitInfoSnapshot(adb, serial, options.packageName);
+    // Pin the process instance before the first long settle. The terminal
+    // sample must observe this exact PID; a transparent restart is a failure.
+    sampleMemoryV3(adb, serial, options.packageName, processState);
+
+    await navigateToTab(adb, serial, options.packageName, 'guide');
+    await settleWithProof(BASELINE_SETTLE_MS, 'Settling signed-in Explore', 'explore.screen');
+    report.memory.explore_idle_samples = await collectSamples(
+      adb,
+      serial,
+      options.packageName,
+      processState,
+      3,
+      () => proveMeasurementState('explore.screen'),
+    );
+    assertPssAndRssPhaseSafety(
+      report.memory.explore_idle_samples,
+      phaseSafetyCap,
+      'explore_idle',
+    );
+
+    await navigateToTab(adb, serial, options.packageName, 'map');
     await ensureLayerSheet(adb, serial, options.packageName);
     await moveCarouselToStart(adb, serial, options.packageName);
     const preparedLayers = await captureAndDisableHeavyLayers({
@@ -1128,40 +1928,194 @@ async function runGate(options) {
         report.layers.initial = states;
       },
     });
-    report.layers.baseline = preparedLayers.baselineStates;
-
-    await waitMs(BASELINE_SETTLE_MS, 'Settling the map with heavy layers disabled');
-    report.memory.baseline_samples_kb = await collectSamples(adb, serial, options.packageName);
-    report.memory.baseline_evaluation = evaluateBaselinePssLimit(
-      report.memory.baseline_samples_kb,
+    report.layers.baseline = {
+      ...assertExactLayerState(
+        await captureCurrentLayerStates(adb, serial, options.packageName),
+        Object.fromEntries(HEAVY_MAP_LAYER_KEYS.map(key => [key, false])),
+        'layer_baseline_not_confirmed',
+      ),
+    };
+    assertExactLayerState(
+      preparedLayers.baselineStates,
+      report.layers.baseline,
+      'layer_baseline_transition_mismatch',
     );
-    if (!report.memory.baseline_evaluation.passed) {
-      throw new MemoryGateError('total_pss_limit_failed');
-    }
+    await closeLayerSheet(adb, serial, options.packageName);
+    await settleWithProof(
+      BASELINE_SETTLE_MS,
+      'Settling the map with heavy layers disabled',
+      'map.screen',
+    );
+    report.memory.map_idle_samples = await collectSamples(
+      adb,
+      serial,
+      options.packageName,
+      processState,
+      3,
+      () => proveMeasurementState('map.screen'),
+    );
+    assertPssAndRssPhaseSafety(
+      report.memory.map_idle_samples,
+      phaseSafetyCap,
+      'map_idle',
+    );
 
-    const reverseOrder = [...HEAVY_MAP_LAYER_KEYS].reverse();
     for (let cycle = 1; cycle <= MAP_LAYER_CYCLE_COUNT; cycle += 1) {
       console.log(`Layer cycle ${cycle}/${MAP_LAYER_CYCLE_COUNT}: enable`);
-      await visitLayerStates(adb, serial, options.packageName, reverseOrder, true);
-      await waitMs(3_000);
-      report.memory.cycle_peak_samples_kb.push(sampleTotalPss(adb, serial, options.packageName));
+      await ensureLayerSheet(adb, serial, options.packageName);
+      await moveCarouselToStart(adb, serial, options.packageName);
+      await visitLayerStates(adb, serial, options.packageName, HEAVY_MAP_LAYER_KEYS, true, 'forward');
+      const heavyEnabledStates = assertExactLayerState(
+        await captureCurrentLayerStates(adb, serial, options.packageName),
+        Object.fromEntries(HEAVY_MAP_LAYER_KEYS.map(key => [key, true])),
+        'layer_cycle_enable_not_confirmed',
+      );
+      await closeLayerSheet(adb, serial, options.packageName);
+      await waitMs(CYCLE_PHASE_SETTLE_MS);
+      const heavyPeakWindow = await collectSamples(
+        adb,
+        serial,
+        options.packageName,
+        processState,
+        3,
+        () => proveMeasurementState('map.screen'),
+      );
+      const heavyPeak = summarizeMemoryWindow(
+        heavyPeakWindow,
+        ANDROID_MEMORY_GATE_V3_POLICY.phaseBudgetsKb.heavyPeak,
+        'peak',
+      );
+      report.memory.partial_cycle = {
+        cycle,
+        heavyPeak,
+        heavyPeakWindow,
+        heavyLayerStateVerified: Object.values(heavyEnabledStates).every(Boolean),
+        disabledRecovery: null,
+        disabledRecoveryWindow: [],
+        disabledLayerStateVerified: false,
+      };
+      assertPssAndRssPhaseSafety(
+        heavyPeakWindow,
+        phaseSafetyCap,
+        'heavy_peak',
+      );
+
       console.log(`Layer cycle ${cycle}/${MAP_LAYER_CYCLE_COUNT}: disable`);
-      await visitLayerStates(adb, serial, options.packageName, HEAVY_MAP_LAYER_KEYS, false);
-      await waitMs(1_200);
+      await ensureLayerSheet(adb, serial, options.packageName);
+      await moveCarouselToStart(adb, serial, options.packageName);
+      await visitLayerStates(adb, serial, options.packageName, HEAVY_MAP_LAYER_KEYS, false, 'forward');
+      const heavyDisabledStates = assertExactLayerState(
+        await captureCurrentLayerStates(adb, serial, options.packageName),
+        Object.fromEntries(HEAVY_MAP_LAYER_KEYS.map(key => [key, false])),
+        'layer_cycle_disable_not_confirmed',
+      );
+      await closeLayerSheet(adb, serial, options.packageName);
+      await waitMs(CYCLE_PHASE_SETTLE_MS);
+      const disabledRecoveryWindow = await collectSamples(
+        adb,
+        serial,
+        options.packageName,
+        processState,
+        3,
+        () => proveMeasurementState('map.screen'),
+      );
+      const disabledRecovery = summarizeMemoryWindow(
+        disabledRecoveryWindow,
+        ANDROID_MEMORY_GATE_V3_POLICY.phaseBudgetsKb.mapIdle,
+        'valley',
+      );
+      report.memory.partial_cycle.disabledRecovery = disabledRecovery;
+      report.memory.partial_cycle.disabledRecoveryWindow = disabledRecoveryWindow;
+      report.memory.partial_cycle.disabledLayerStateVerified = Object.values(heavyDisabledStates)
+        .every(value => value === false);
+      assertPssAndRssPhaseSafety(
+        disabledRecoveryWindow,
+        phaseSafetyCap,
+        'disabled_recovery',
+      );
+      report.memory.cycles.push({
+        cycle,
+        heavyPeak,
+        heavyPeakWindow,
+        heavyLayerStateVerified: true,
+        disabledRecovery,
+        disabledRecoveryWindow,
+        disabledLayerStateVerified: true,
+      });
+      report.memory.partial_cycle = null;
     }
 
-    await waitMs(10_000, 'Settling after layer cycles');
-    report.memory.post_samples_kb = await collectSamples(adb, serial, options.packageName);
-    report.memory.evaluation = evaluateMemoryGate({
-      baselineSamples: report.memory.baseline_samples_kb,
-      cyclePeakSamples: report.memory.cycle_peak_samples_kb,
-      postSamples: report.memory.post_samples_kb,
-    });
-    if (!report.memory.evaluation.pssPassed) throw new MemoryGateError('total_pss_limit_failed');
-    if (!report.memory.evaluation.growthPassed) throw new MemoryGateError('memory_growth_limit_failed');
-    report.result = 'passed';
+    await settleWithProof(
+      POST_MAP_SETTLE_MS,
+      'Settling the map after layer cycles',
+      'map.screen',
+    );
+    report.memory.post_map_recovery_samples = await collectSamples(
+      adb,
+      serial,
+      options.packageName,
+      processState,
+      3,
+      () => proveMeasurementState('map.screen'),
+    );
+    assertPssAndRssPhaseSafety(
+      report.memory.post_map_recovery_samples,
+      phaseSafetyCap,
+      'post_map_recovery',
+    );
+
+    await navigateToTab(adb, serial, options.packageName, 'guide');
+    await settleWithProof(
+      EXPLORE_RECOVERY_SETTLE_MS,
+      'Settling Explore after Map',
+      'explore.screen',
+    );
+    report.memory.explore_recovery_samples = await collectSamples(
+      adb,
+      serial,
+      options.packageName,
+      processState,
+      3,
+      () => proveMeasurementState('explore.screen'),
+    );
+    assertPssAndRssPhaseSafety(
+      report.memory.explore_recovery_samples,
+      phaseSafetyCap,
+      'explore_recovery',
+    );
+    report.process.foreground_proof_completed = true;
+    if (mapForegroundProofCount <= 0) {
+      throw new MemoryGateError('duplicate_renderer_evidence_unavailable');
+    }
+    report.safety.duplicate_renderer_check_completed = true;
+    report.safety.duplicate_renderer_observed = false;
     },
     getInitialStates: () => initialStates,
+    collectTerminalEvidence: () => {
+      let identityFailure = null;
+      if (exitBaseline) {
+        try {
+          sampleMemoryV3(adb, serial, options.packageName, processState);
+          report.process.terminal_identity_checked = true;
+        } catch (error) {
+          identityFailure = error;
+        }
+      }
+      report.process.alive = processState.alive;
+      report.process.instance_changed = processState.instanceChanged;
+      if (!exitBaseline) {
+        if (identityFailure) throw identityFailure;
+        return;
+      }
+      const evaluation = evaluateExitInfoDiffV3(
+        exitBaseline,
+        exitInfoSnapshot(adb, serial, options.packageName),
+      );
+      report.process.exit_evidence_checked = true;
+      report.process.exit_evidence = evaluation;
+      if (!evaluation.passed) throw new MemoryGateError('process_exit_evidence_failed');
+      if (identityFailure) throw identityFailure;
+    },
     restoreLayers: states => {
       cancellationSignal = null;
       return durablyRestoreCapturedHeavyLayers({
@@ -1187,18 +2141,68 @@ async function runGate(options) {
         waitForPersistence: durationMs => waitMs(durationMs),
       });
     },
-    finalizeReport: finalizedReport => writeReport(output, finalizedReport),
+    finalizeReport: finalizedReport => {
+      const disabledRecoverySamples = finalizedReport.memory.cycles
+        .map(cycle => cycle.disabledRecovery);
+      finalizedReport.memory.object_count_ratchet = evaluateObjectCountRatchetV3(
+        disabledRecoverySamples,
+      );
+      const exitEvaluation = finalizedReport.process.exit_evidence;
+      const reasonCounts = exitEvaluation?.failureReasonCounts ?? {};
+      const evaluation = evaluateAndroidMemoryGateV3({
+        exploreIdleSamples: finalizedReport.memory.explore_idle_samples,
+        mapIdleSamples: finalizedReport.memory.map_idle_samples,
+        cycles: finalizedReport.memory.cycles,
+        postMapRecoverySamples: finalizedReport.memory.post_map_recovery_samples,
+        exploreRecoverySamples: finalizedReport.memory.explore_recovery_samples,
+        activeSamples: finalizedReport.memory.active_samples,
+        stability: {
+          processAlive: finalizedReport.process.alive && !finalizedReport.process.instance_changed,
+          exitEvidenceChecked: finalizedReport.process.exit_evidence_checked,
+          cancelled: finalizedReport.failure_code === 'cancelled',
+          layerStateRestored: initialStates == null || finalizedReport.layers.restored,
+          objectCountRatchetDetected: finalizedReport.memory.object_count_ratchet.detected,
+          lowMemoryKillCount: (reasonCounts.reason2Count ?? 0)
+            + (reasonCounts.reason3Count ?? 0)
+            + (reasonCounts.reason17Count ?? 0),
+          oomCount: 0,
+          anrCount: reasonCounts.reason6Count ?? 0,
+          processDeathCount: exitEvaluation?.newRecordCount ?? 0,
+          duplicateRendererEvidenceComplete:
+            finalizedReport.safety.duplicate_renderer_check_completed,
+          duplicateRendererCount:
+            finalizedReport.safety.duplicate_renderer_observed === true ? 1 : 0,
+          stateLossEvidenceComplete:
+            finalizedReport.safety.layer_state_retention_check_completed,
+          stateLossCount:
+            finalizedReport.safety.layer_state_loss_observed === true ? 1 : 0,
+        },
+      });
+      finalizedReport.memory.evaluation = evaluation;
+      if (!evaluation.passed) {
+        finalizedReport.result = 'failed';
+        finalizedReport.failure_code ||= 'memory_gate_v3_failed';
+      } else if (
+        !finalizedReport.failure_code
+        && !finalizedReport.terminal_evidence_failure_code
+        && !finalizedReport.restoration_failure_code
+      ) {
+        finalizedReport.result = 'passed';
+      }
+      writeAndroidMemoryGateReportV3Atomically(output, finalizedReport);
+    },
   });
 
   console.log(`Privacy-minimal evidence: ${output}`);
   if (report.result !== 'passed') {
     throw new MemoryGateError(
       report.failure_code
+      || report.terminal_evidence_failure_code
       || report.restoration_failure_code
       || 'memory_gate_failed',
     );
   }
-  console.log(`PASS: max PSS ${report.memory.evaluation.maxObservedPssKb} KB; growth ${report.memory.evaluation.growthPercent.toFixed(2)}%.`);
+  console.log('PASS: AndroidMemoryGateReportV3 phase budgets, retention, recovery, and process checks satisfied.');
 }
 
 async function main() {

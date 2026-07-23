@@ -36,7 +36,7 @@
     "audit:android-map-memory": "node scripts/android-map-memory-gate.mjs",
     "audit:native-drift": "node scripts/native-drift-check.mjs",
     "test:android-audit": "node scripts/android-audit-lib.test.mjs",
-    "test:android-map-memory": "node scripts/android-map-memory-gate.test.mjs",
+    "test:android-map-memory": "node scripts/android-memory-gate-v3.test.mjs && node scripts/android-map-memory-gate.test.mjs",
     "test:explore-memory-guard": "node scripts/explore-memory-guard.test.mjs && node scripts/explore-image-policy-usage.test.mjs",
     "test:fire-overlay": "node --import tsx lib/__tests__/fireOverlay.test.ts",
     "test:nps-hub-preservation": "node --import tsx lib/__tests__/npsHubPreservation.test.ts && node --import tsx lib/__tests__/exploreDetailNavigation.test.ts",

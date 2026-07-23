@@ -1,17 +1,28 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 import {
   BASELINE_SETTLE_MS,
+  CYCLE_PHASE_SETTLE_MS,
+  EXPLORE_RECOVERY_SETTLE_MS,
   FINAL_LAYER_REPAIR_MAX_ATTEMPTS,
+  FOREGROUND_PROOF_INTERVAL_MS,
   HEAVY_MAP_LAYER_KEYS,
   LAYER_PERSISTENCE_SETTLE_MS,
   LAYER_STATE_CONVERGENCE_TIMEOUT_MS,
   MAP_LAYER_CYCLE_COUNT,
-  MAX_GROWTH_PERCENT,
-  MAX_TOTAL_PSS_KB,
+  MEMORY_GATE_HARNESS_ALLOWED_CHANGED_PATHS,
+  MEMORY_GATE_HARNESS_REQUIRED_PATHS,
+  MEMORY_GATE_REPORT_PRIVACY_STATEMENT,
   MemoryGateError,
+  POST_MAP_SETTLE_MS,
   QA_DIAGNOSTICS_URI,
   applyLayerRestorationOutcome,
+  assertAndroidMemoryGateReportV3Privacy,
+  assertExactLayerState,
+  assertPssAndRssPhaseSafety,
   assertSafeMemoryGateAdbArgs,
   captureAndDisableHeavyLayers,
   checkedStateFromNode,
@@ -19,24 +30,398 @@ import {
   convergeLayerState,
   durablyRestoreCapturedHeavyLayers,
   executeMemoryGateLifecycle,
-  evaluateBaselinePssLimit,
-  evaluateMemoryGate,
   horizontalCarouselSwipePoints,
-  median,
+  hasPositiveVisibleBounds,
+  inspectAwakePowerDump,
+  inspectLayerSheetCloseState,
+  inspectMapRendererReadiness,
+  inspectRecognizedActiveServiceDump,
+  inspectRetainedTreeReadiness,
+  inspectTopResumedVisibleActivityDump,
   parseMemoryGateArgs,
+  parseRecognizedExitInfoDump,
+  recordAndVerifyProcessIdentity,
   restoreCapturedHeavyLayers,
+  summarizeMemoryWindow,
+  validateMemoryGateHarnessProvenance,
   validatePreviewBuildEvidence,
   validateQaReleaseIdentity,
+  waitWithContinuousProof,
+  writeAndroidMemoryGateReportV3Atomically,
 } from './android-map-memory-gate.mjs';
+import {
+  ANDROID_MEMORY_GATE_V3_POLICY,
+  evaluateAndroidMemoryGateV3,
+  evaluateExitInfoDiffV3,
+  evaluateObjectCountRatchetV3,
+} from './android-memory-gate-v3.mjs';
+import { parseUiNodes } from './android-audit-lib.mjs';
 
 assert.equal(BASELINE_SETTLE_MS, 90_000);
+assert.equal(POST_MAP_SETTLE_MS, 90_000);
+assert.equal(EXPLORE_RECOVERY_SETTLE_MS, 90_000);
+assert.equal(CYCLE_PHASE_SETTLE_MS, 5_000);
+assert.equal(FOREGROUND_PROOF_INTERVAL_MS, 10_000);
 assert.equal(LAYER_STATE_CONVERGENCE_TIMEOUT_MS, 5_000);
 assert.equal(LAYER_PERSISTENCE_SETTLE_MS, 2_000);
 assert.equal(FINAL_LAYER_REPAIR_MAX_ATTEMPTS, 2);
 assert.equal(MAP_LAYER_CYCLE_COUNT, 10);
-assert.equal(MAX_TOTAL_PSS_KB, 512_000);
-assert.equal(MAX_GROWTH_PERCENT, 10);
 assert.deepEqual(HEAVY_MAP_LAYER_KEYS, ['3d', 'lands', 'usgs', 'pois', 'trails', 'fire', 'ava', 'radar', 'mvum']);
+
+const harnessHashes = Object.fromEntries(
+  MEMORY_GATE_HARNESS_REQUIRED_PATHS.map((path, index) => [path, String(index).repeat(64)]),
+);
+const validHarnessInput = {
+  candidateGitSha: 'a'.repeat(40),
+  harnessGitSha: 'b'.repeat(40),
+  candidateAncestor: true,
+  changedPaths: [
+    'mobile/scripts/android-map-memory-gate.mjs',
+    'docs/checkpoints/trailhead-1.0.10-active-checkpoint.md',
+  ],
+  trackedPaths: [...MEMORY_GATE_HARNESS_REQUIRED_PATHS],
+  dirtyPaths: [],
+  fileHashes: harnessHashes,
+};
+const harnessProvenance = validateMemoryGateHarnessProvenance(validHarnessInput);
+assert.equal(harnessProvenance.candidate_is_ancestor, true);
+assert.deepEqual(harnessProvenance.approved_candidate_delta, [
+  'docs/checkpoints/trailhead-1.0.10-active-checkpoint.md',
+  'mobile/scripts/android-map-memory-gate.mjs',
+]);
+assert.deepEqual(Object.keys(harnessProvenance.harness_file_sha256), MEMORY_GATE_HARNESS_REQUIRED_PATHS);
+assert.throws(
+  () => validateMemoryGateHarnessProvenance({
+    ...validHarnessInput,
+    changedPaths: [...validHarnessInput.changedPaths, 'mobile/app/(tabs)/map.tsx'],
+  }),
+  error => error instanceof MemoryGateError && error.code === 'harness_candidate_delta_unapproved',
+);
+assert.throws(
+  () => validateMemoryGateHarnessProvenance({ ...validHarnessInput, dirtyPaths: ['harness_dirty'] }),
+  error => error instanceof MemoryGateError && error.code === 'harness_worktree_dirty',
+);
+assert.throws(
+  () => validateMemoryGateHarnessProvenance({
+    ...validHarnessInput,
+    trackedPaths: MEMORY_GATE_HARNESS_REQUIRED_PATHS.slice(1),
+  }),
+  error => error instanceof MemoryGateError && error.code === 'harness_file_untracked',
+);
+assert.throws(
+  () => validateMemoryGateHarnessProvenance({
+    ...validHarnessInput,
+    fileHashes: { ...harnessHashes, [MEMORY_GATE_HARNESS_REQUIRED_PATHS[0]]: 'not-a-hash' },
+  }),
+  error => error instanceof MemoryGateError && error.code === 'harness_file_hash_unavailable',
+);
+assert.throws(
+  () => validateMemoryGateHarnessProvenance({ ...validHarnessInput, candidateAncestor: false }),
+  error => error instanceof MemoryGateError && error.code === 'candidate_not_ancestor_of_harness',
+);
+assert.equal(
+  MEMORY_GATE_HARNESS_ALLOWED_CHANGED_PATHS.includes('dashboard/explore_serving_index_v2.json'),
+  false,
+  'the protected Explore index can never be part of the harness delta',
+);
+
+const privacyMemorySample = (totalPssKb, totalRssKb) => ({
+  totalPssKb,
+  totalSwapPssKb: 100_000,
+  pssMinusSwapDiagnosticKb: totalPssKb - 100_000,
+  totalRssKb,
+  nativeHeapPssKb: 200_000,
+  nativeHeapRssKb: 210_000,
+  graphicsPssKb: 70_000,
+  graphicsRssKb: 75_000,
+  glMtrackPssKb: 65_000,
+  glMtrackRssKb: 70_000,
+  unknownPssKb: 80_000,
+  unknownRssKb: 85_000,
+  viewCount: 100,
+  activityCount: 1,
+  appContextCount: 5,
+  webViewCount: 0,
+});
+const privacyObjectCountRatchet = evaluateObjectCountRatchetV3(
+  Array.from({ length: 10 }, () => privacyMemorySample(700_000, 600_000)),
+);
+assert.equal(privacyObjectCountRatchet.complete, true);
+assert.equal(privacyObjectCountRatchet.detected, false);
+const privacyEvaluation = evaluateAndroidMemoryGateV3({
+  exploreIdleSamples: [privacyMemorySample(400_000, 350_000)],
+  mapIdleSamples: [privacyMemorySample(700_000, 600_000)],
+  cycles: Array.from({ length: 10 }, () => ({
+    heavyPeak: privacyMemorySample(900_000, 800_000),
+    disabledRecovery: privacyMemorySample(700_000, 600_000),
+  })),
+  postMapRecoverySamples: [privacyMemorySample(700_000, 600_000)],
+  exploreRecoverySamples: [privacyMemorySample(400_000, 350_000)],
+  activeSamples: { navigation: [], preview3d: [], originals: [] },
+  stability: {
+    processAlive: true,
+    exitEvidenceChecked: true,
+    cancelled: false,
+    layerStateRestored: true,
+    objectCountRatchetDetected: false,
+    lowMemoryKillCount: 0,
+    oomCount: 0,
+    anrCount: 0,
+    processDeathCount: 0,
+    duplicateRendererEvidenceComplete: true,
+    duplicateRendererCount: 0,
+    stateLossEvidenceComplete: true,
+    stateLossCount: 0,
+  },
+});
+assert.equal(privacyEvaluation.passed, true);
+assert.equal(privacyEvaluation.m1Passed, true);
+assert.equal(privacyEvaluation.activeExperienceEvidenceComplete, false);
+assert.equal(privacyEvaluation.activeExperienceMemoryPassed, true);
+assert.equal(privacyEvaluation.completeMemoryEvidencePassed, false);
+
+const unevaluatedSafety = evaluateAndroidMemoryGateV3({
+  exploreIdleSamples: [privacyMemorySample(400_000, 350_000)],
+  mapIdleSamples: [privacyMemorySample(700_000, 600_000)],
+  cycles: Array.from({ length: 10 }, () => ({
+    heavyPeak: privacyMemorySample(900_000, 800_000),
+    disabledRecovery: privacyMemorySample(700_000, 600_000),
+  })),
+  postMapRecoverySamples: [privacyMemorySample(700_000, 600_000)],
+  exploreRecoverySamples: [privacyMemorySample(400_000, 350_000)],
+  activeSamples: { navigation: [], preview3d: [], originals: [] },
+  stability: {
+    processAlive: true,
+    exitEvidenceChecked: true,
+    cancelled: false,
+    layerStateRestored: true,
+    objectCountRatchetDetected: false,
+    lowMemoryKillCount: 0,
+    oomCount: 0,
+    anrCount: 0,
+    processDeathCount: 0,
+    duplicateRendererEvidenceComplete: false,
+    duplicateRendererCount: 0,
+    stateLossEvidenceComplete: false,
+    stateLossCount: 0,
+  },
+});
+assert.equal(unevaluatedSafety.passed, false);
+assert.equal(unevaluatedSafety.stability.checks.duplicateRendererEvidenceComplete, false);
+assert.equal(unevaluatedSafety.stability.checks.stateLossEvidenceComplete, false);
+
+const privacyReportFixture = () => ({
+  schema_version: 3,
+  started_at: '2026-07-23T12:00:00.000Z',
+  completed_at: '2026-07-23T12:20:00.000Z',
+  candidate: {
+    ota_source_git_sha: 'a'.repeat(40),
+    harness_git_sha: 'b'.repeat(40),
+    harness_provenance: {
+      candidate_is_ancestor: true,
+      approved_candidate_delta: ['mobile/scripts/android-map-memory-gate.mjs'],
+      harness_file_sha256: harnessHashes,
+    },
+    binary_build_git_sha: 'c'.repeat(40),
+    runtime: 'native-1.0.10-android.1',
+    build_id: '06142308-0199-46cc-8a4c-fb9d45bca25e',
+    update_id: '019f8e05-bad8-7925-8d46-54d2627b76b8',
+    build_evidence_verified: true,
+    device_identity_verified: true,
+  },
+  device: { role: 'stress_reference_4gb', android_sdk: 33, android_release_major: 13 },
+  app: { package_name: 'com.trailhead.app', version_name: '1.0.10', version_code: '59' },
+  safety: {
+    exact_device_required: true,
+    app_data_cleared: false,
+    permissions_changed: false,
+    active_navigation_or_tour: 'absent',
+    duplicate_renderer_check_completed: true,
+    duplicate_renderer_observed: false,
+    layer_state_retention_check_completed: true,
+    layer_state_loss_observed: false,
+    raw_ui_or_logs_stored: false,
+  },
+  layers: {
+    stress_keys: [...HEAVY_MAP_LAYER_KEYS],
+    purpose: 'deterministic_memory_load',
+    functional_regression_tested: false,
+    initial: null,
+    baseline: null,
+    restored: true,
+    recovery: null,
+  },
+  memory: {
+    policy: ANDROID_MEMORY_GATE_V3_POLICY,
+    device_role: 'stress_reference_4gb',
+    explore_idle_settle_ms: 90_000,
+    map_idle_settle_ms: 90_000,
+    cycle_phase_settle_ms: 5_000,
+    post_map_settle_ms: 90_000,
+    explore_recovery_settle_ms: 90_000,
+    sample_gap_ms: 3_000,
+    cycle_count: 10,
+    explore_idle_samples: [],
+    map_idle_samples: [],
+    cycles: [],
+    partial_cycle: null,
+    post_map_recovery_samples: [],
+    explore_recovery_samples: [],
+    active_samples: { navigation: [], preview3d: [], originals: [] },
+    active_phase_status: {
+      navigation: 'not_run_by_non_destructive_map_gate',
+      preview3d: 'not_run_by_non_destructive_map_gate',
+      originals: 'not_run_by_non_destructive_map_gate',
+    },
+    object_count_ratchet: privacyObjectCountRatchet,
+    evaluation: privacyEvaluation,
+  },
+  process: {
+    alive: true,
+    instance_changed: false,
+    foreground_proof_count: 42,
+    foreground_proof_completed: true,
+    terminal_identity_checked: true,
+    exit_evidence_checked: true,
+    exit_evidence: null,
+  },
+  result: 'passed',
+  failure_code: null,
+  terminal_evidence_failure_code: null,
+  restoration_failure_code: null,
+  privacy: MEMORY_GATE_REPORT_PRIVACY_STATEMENT,
+});
+assert.equal(assertAndroidMemoryGateReportV3Privacy(privacyReportFixture()), true);
+assert.throws(
+  () => assertAndroidMemoryGateReportV3Privacy({
+    ...privacyReportFixture(),
+    memory: { ...privacyReportFixture().memory, search_text: 'Moab' },
+  }),
+  error => error instanceof MemoryGateError && error.code === 'report_privacy_invalid_memory_schema',
+);
+assert.throws(
+  () => assertAndroidMemoryGateReportV3Privacy({
+    ...privacyReportFixture(),
+    device: { ...privacyReportFixture().device, model: 'personal phone' },
+  }),
+  error => error instanceof MemoryGateError && error.code === 'report_privacy_invalid_device_schema',
+);
+assert.throws(
+  () => assertAndroidMemoryGateReportV3Privacy({
+    ...privacyReportFixture(),
+    privacy: 'user@example.com',
+  }),
+  error => error instanceof MemoryGateError && error.code === 'report_privacy_arbitrary_string',
+);
+assert.throws(
+  () => assertAndroidMemoryGateReportV3Privacy({
+    ...privacyReportFixture(),
+    app: { ...privacyReportFixture().app, version_name: undefined },
+  }),
+  error => error instanceof MemoryGateError && error.code === 'report_privacy_invalid_value',
+  'undefined must not disappear silently during JSON serialization',
+);
+
+const atomicReportDirectory = mkdtempSync(join(tmpdir(), 'trailhead-memory-gate-v3-'));
+try {
+  const atomicReport = privacyReportFixture();
+  const reportPath = writeAndroidMemoryGateReportV3Atomically(
+    atomicReportDirectory,
+    atomicReport,
+  );
+  assert.equal(reportPath, join(atomicReportDirectory, 'report.json'));
+  assert.deepEqual(JSON.parse(readFileSync(reportPath, 'utf8')), atomicReport);
+  assert.deepEqual(readdirSync(atomicReportDirectory), ['report.json']);
+
+  writeFileSync(reportPath, 'previous-complete-report\n');
+  assert.throws(
+    () => writeAndroidMemoryGateReportV3Atomically(
+      atomicReportDirectory,
+      atomicReport,
+      { renameSync: () => { throw new Error('simulated_rename_failure'); } },
+    ),
+    /simulated_rename_failure/,
+  );
+  assert.equal(
+    readFileSync(reportPath, 'utf8'),
+    'previous-complete-report\n',
+    'a failed atomic rename cannot partially replace the last complete report',
+  );
+  assert.deepEqual(
+    readdirSync(atomicReportDirectory),
+    ['report.json'],
+    'temporary evidence is removed after a failed atomic rename',
+  );
+} finally {
+  rmSync(atomicReportDirectory, { recursive: true, force: true });
+}
+
+const swapHeavyExploreSample = {
+  totalPssKb: 700_000,
+  totalSwapPssKb: 400_000,
+  pssMinusSwapDiagnosticKb: 300_000,
+  totalRssKb: 500_000,
+};
+assert.doesNotThrow(() => assertPssAndRssPhaseSafety(
+  [swapHeavyExploreSample],
+  ANDROID_MEMORY_GATE_V3_POLICY.phaseBudgetsKb.activeExperience,
+  'explore_idle',
+), 'a phase-specific failure below the source-controlled safety cap must not stop leak diagnostics');
+assert.throws(
+  () => assertPssAndRssPhaseSafety(
+    [{ ...swapHeavyExploreSample, totalPssKb: 1_375_001, pssMinusSwapDiagnosticKb: 975_001 }],
+    ANDROID_MEMORY_GATE_V3_POLICY.phaseBudgetsKb.activeExperience,
+    'explore_idle',
+  ),
+  error => error instanceof MemoryGateError && error.code === 'explore_idle_total_pss_safety_cap_failed',
+);
+assert.throws(
+  () => assertPssAndRssPhaseSafety(
+    [{ ...swapHeavyExploreSample, totalRssKb: 1_200_001 }],
+    ANDROID_MEMORY_GATE_V3_POLICY.phaseBudgetsKb.activeExperience,
+    'explore_idle',
+  ),
+  error => error instanceof MemoryGateError && error.code === 'explore_idle_rss_safety_cap_failed',
+);
+
+const memoryWindow = [
+  { totalPssKb: 800_000, totalRssKb: 650_000 },
+  { totalPssKb: 900_000, totalRssKb: 620_000 },
+  { totalPssKb: 780_000, totalRssKb: 700_000 },
+].map(sample => ({
+  ...sample,
+  totalSwapPssKb: 100_000,
+  pssMinusSwapDiagnosticKb: sample.totalPssKb - 100_000,
+}));
+const divergentPeakSummary = summarizeMemoryWindow(
+  memoryWindow,
+  ANDROID_MEMORY_GATE_V3_POLICY.phaseBudgetsKb.heavyPeak,
+  'peak',
+);
+assert.equal(divergentPeakSummary.totalPssKb, 900_000);
+assert.equal(divergentPeakSummary.totalRssKb, 700_000);
+assert.equal(divergentPeakSummary.totalSwapPssKb, 100_000);
+assert.equal(divergentPeakSummary.pssMinusSwapDiagnosticKb, 800_000);
+assert.equal(
+  memoryWindow.find(sample => (
+    sample.totalPssKb === divergentPeakSummary.totalPssKb
+    && sample.totalRssKb === divergentPeakSummary.totalRssKb
+  )),
+  undefined,
+  'divergent PSS and RSS peaks must not collapse to one composite-pressure sample',
+);
+const divergentValleySummary = summarizeMemoryWindow(
+  memoryWindow,
+  ANDROID_MEMORY_GATE_V3_POLICY.phaseBudgetsKb.mapIdle,
+  'valley',
+);
+assert.equal(divergentValleySummary.totalPssKb, 780_000);
+assert.equal(divergentValleySummary.totalRssKb, 620_000);
+assert.equal(divergentValleySummary.pssMinusSwapDiagnosticKb, 680_000);
+assert.throws(
+  () => summarizeMemoryWindow(memoryWindow.slice(0, 2), ANDROID_MEMORY_GATE_V3_POLICY.phaseBudgetsKb.mapIdle, 'peak'),
+  error => error instanceof MemoryGateError && error.code === 'memory_window_must_have_three_samples',
+);
 
 const phoneCarouselBounds = { left: 0, top: 1_200, right: 720, bottom: 1_500 };
 assert.deepEqual(
@@ -128,51 +513,210 @@ assert.throws(
   error => error instanceof MemoryGateError && error.code === 'invalid_build_commit_sha',
 );
 
-assert.equal(median([3, 1, 2]), 2);
-assert.equal(median([4, 1, 2, 3]), 2.5);
-
-const baselineUnderLimit = evaluateBaselinePssLimit([420_000, 511_999, 430_000]);
-assert.equal(baselineUnderLimit.passed, true);
-assert.equal(baselineUnderLimit.maxObservedPssKb, 511_999);
-const baselineWithOneBoundarySample = evaluateBaselinePssLimit([400_000, 512_000, 401_000]);
-assert.equal(
-  baselineWithOneBoundarySample.passed,
-  false,
-  'one baseline sample at the strict limit must stop the gate before layer cycles',
-);
-assert.equal(baselineWithOneBoundarySample.maxObservedPssKb, 512_000);
-
-const passing = evaluateMemoryGate({
-  baselineSamples: [420_000, 421_000, 419_000],
-  cyclePeakSamples: [480_000, 490_000],
-  postSamples: [450_000, 451_000, 449_000],
-});
-assert.equal(passing.passed, true);
-assert.equal(passing.maxObservedPssKb, 490_000);
-
-const pssBoundary = evaluateMemoryGate({
-  baselineSamples: [400_000, 400_000, 400_000],
-  cyclePeakSamples: [512_000],
-  postSamples: [400_000, 400_000, 400_000],
-});
-assert.equal(pssBoundary.pssPassed, false, '512000 KB must fail the strict less-than gate');
-assert.equal(pssBoundary.passed, false);
-
-const growthBoundary = evaluateMemoryGate({
-  baselineSamples: [400_000, 400_000, 400_000],
-  cyclePeakSamples: [440_000],
-  postSamples: [440_000, 440_000, 440_000],
-});
-assert.equal(growthBoundary.growthPercent, 10);
-assert.equal(growthBoundary.growthPassed, false, '10% growth must fail the strict less-than gate');
-assert.equal(growthBoundary.passed, false);
-
 const uiNode = (resourceId, extra = '') => `<hierarchy><node resource-id="${resourceId}" content-desc="" checkable="false" checked="false" bounds="[0,0][100,100]" ${extra}/></hierarchy>`;
+const uiNodes = resourceIds => parseUiNodes(
+  `<hierarchy>${resourceIds.map((resourceId, index) => (
+    `<node resource-id="${resourceId}" content-desc="" checkable="false" checked="false" bounds="[0,${index * 100}][100,${(index + 1) * 100}]"/>`
+  )).join('')}</hierarchy>`,
+);
+
+const recognizedServices = `ACTIVITY MANAGER SERVICES (dumpsys activity services)
+  User 0 active services:
+  * ServiceRecord{42 u0 com.trailhead.app/com.mapbox.common.LifecycleService}
+    packageName=com.trailhead.app`;
+assert.deepEqual(inspectRecognizedActiveServiceDump(recognizedServices), { recognized: true });
+assert.deepEqual(inspectRecognizedActiveServiceDump(
+  'ACTIVITY MANAGER SERVICES (dumpsys activity services)\n  User 0 active services:',
+), { recognized: true });
+assert.deepEqual(inspectRecognizedActiveServiceDump(
+  'ACTIVITY MANAGER SERVICES (dumpsys activity services)\n  (nothing)',
+), { recognized: true }, 'the recognized no-active-services form is valid evidence');
+assert.throws(
+  () => inspectRecognizedActiveServiceDump(''),
+  error => error instanceof MemoryGateError && error.code === 'active_service_dump_unrecognized',
+);
+assert.throws(
+  () => inspectRecognizedActiveServiceDump(
+    'ACTIVITY MANAGER SERVICES (dumpsys activity services)\n  User 0 active services:\n  * ServiceRecord{42 u0 com.other/.Service}',
+  ),
+  error => error instanceof MemoryGateError && error.code === 'active_service_dump_unrecognized',
+);
+
+const recognizedExitInfo = `ACTIVITY MANAGER PROCESS EXIT INFO (dumpsys activity exit-info)
+Last Timestamp of Persistence Into Persistent Storage: 2026-07-23 04:23:20.181
+  package: com.trailhead.app
+    Historical Process Exit for uid=10303`;
+assert.deepEqual(parseRecognizedExitInfoDump(recognizedExitInfo), []);
+assert.deepEqual(parseRecognizedExitInfoDump(
+  'ACTIVITY MANAGER PROCESS EXIT INFO (dumpsys activity exit-info)\nLast Timestamp of Persistence Into Persistent Storage: 2026-07-23 04:23:20.181',
+), [], 'a recognized empty exit-history response is valid evidence');
+assert.throws(
+  () => parseRecognizedExitInfoDump(''),
+  error => error instanceof MemoryGateError && error.code === 'exit_info_dump_unrecognized',
+);
+assert.throws(
+  () => parseRecognizedExitInfoDump(recognizedExitInfo.replace('com.trailhead.app', 'com.other')),
+  error => error instanceof MemoryGateError && error.code === 'exit_info_dump_unrecognized',
+);
+
+assert.deepEqual(inspectAwakePowerDump(
+  'POWER MANAGER (dumpsys power)\nPower Manager State:\n  mWakefulness=Awake',
+), { recognized: true, awake: true });
+assert.throws(
+  () => inspectAwakePowerDump('POWER MANAGER (dumpsys power)\n  mWakefulness=Asleep'),
+  error => error instanceof MemoryGateError && error.code === 'device_not_awake',
+);
+assert.throws(
+  () => inspectAwakePowerDump(''),
+  error => error instanceof MemoryGateError && error.code === 'power_dump_unrecognized',
+);
+
+const foregroundActivities = `ACTIVITY MANAGER ACTIVITIES (dumpsys activity activities)
+  * Task{abc A=10303:com.trailhead.app U=0 visible=true visibleRequested=true mode=fullscreen}
+    topResumedActivity=ActivityRecord{def u0 com.trailhead.app/.MainActivity}`;
+assert.deepEqual(inspectTopResumedVisibleActivityDump(foregroundActivities), {
+  recognized: true,
+  topResumed: true,
+  visible: true,
+});
+assert.throws(
+  () => inspectTopResumedVisibleActivityDump(foregroundActivities.replace('visible=true', 'visible=false')),
+  error => error instanceof MemoryGateError && error.code === 'app_not_top_resumed_visible',
+);
+assert.throws(
+  () => inspectTopResumedVisibleActivityDump(''),
+  error => error instanceof MemoryGateError && error.code === 'activity_dump_unrecognized',
+);
+
+const foregroundProofEvents = [];
+let foregroundProofCount = 0;
+assert.equal(await waitWithContinuousProof({
+  durationMs: 30_000,
+  intervalMs: 10_000,
+  prove: async () => {
+    foregroundProofCount += 1;
+    foregroundProofEvents.push(`prove:${foregroundProofCount}`);
+  },
+  waitFor: async durationMs => {
+    foregroundProofEvents.push(`wait:${durationMs}`);
+  },
+}), 4);
+assert.deepEqual(foregroundProofEvents, [
+  'prove:1', 'wait:10000', 'prove:2', 'wait:10000', 'prove:3', 'wait:10000', 'prove:4',
+]);
+let failedProofCount = 0;
+await assert.rejects(
+  waitWithContinuousProof({
+    durationMs: 30_000,
+    intervalMs: 10_000,
+    prove: async () => {
+      failedProofCount += 1;
+      if (failedProofCount === 2) throw new MemoryGateError('device_not_awake');
+    },
+    waitFor: async () => {},
+  }),
+  error => error instanceof MemoryGateError && error.code === 'device_not_awake',
+);
+assert.equal(failedProofCount, 2, 'a failed foreground proof aborts the settle immediately');
+
 assert.equal(classifyActiveMapSession({ uiXml: uiNode('com.trailhead.app:id/map.navigation.end') }), 'active_navigation_ui');
 assert.equal(classifyActiveMapSession({ uiXml: uiNode('originals.player.resume-pill') }), 'active_original_ui');
 assert.equal(classifyActiveMapSession({ serviceDump: 'ServiceRecord{42 com.trailhead.app/.car.TrailheadCarLocationService}' }), 'active_navigation_service');
 assert.equal(classifyActiveMapSession({ serviceDump: 'ServiceRecord{42 expo.modules.location.services.LocationTaskService}' }), 'active_original_service');
 assert.equal(classifyActiveMapSession({ uiXml: uiNode('map.layers.open'), serviceDump: 'No services found' }), null);
+
+assert.deepEqual(inspectMapRendererReadiness(uiNodes([
+  'map.screen',
+  'map.layers.open',
+]), 'com.trailhead.app'), {
+  ready: true,
+  rootReady: true,
+  rendererLoading: false,
+  stableControlReady: true,
+  rootCount: 1,
+  stableControlCount: 1,
+  duplicateRendererObserved: false,
+});
+assert.equal(inspectMapRendererReadiness(uiNodes([
+  'map.screen',
+  'map.renderer-loading',
+  'map.layers.open',
+]), 'com.trailhead.app').ready, false, 'a visible renderer-loading node blocks readiness');
+assert.equal(inspectMapRendererReadiness(uiNodes([
+  'map.screen',
+]), 'com.trailhead.app').ready, false, 'map readiness requires a stable map control');
+assert.equal(hasPositiveVisibleBounds({ bounds: { left: 0, top: 0, right: 100, bottom: 100 } }), true);
+assert.equal(hasPositiveVisibleBounds({ bounds: { left: 0, top: 0, right: 0, bottom: 100 } }), false);
+assert.equal(hasPositiveVisibleBounds({
+  bounds: { left: 0, top: 0, right: 100, bottom: 100 },
+  'visible-to-user': 'false',
+}), false);
+const duplicateMapNodes = parseUiNodes(`<hierarchy>
+  <node resource-id="map.screen" bounds="[0,0][100,100]"/>
+  <node resource-id="map.screen" bounds="[0,0][100,100]"/>
+  <node resource-id="map.layers.open" bounds="[0,0][100,100]"/>
+</hierarchy>`);
+assert.equal(inspectMapRendererReadiness(
+  duplicateMapNodes,
+  'com.trailhead.app',
+).duplicateRendererObserved, true);
+const zeroBoundExplore = parseUiNodes(
+  '<hierarchy><node resource-id="explore.screen" bounds="[0,0][0,100]"/></hierarchy>',
+);
+assert.equal(inspectRetainedTreeReadiness(
+  zeroBoundExplore,
+  'com.trailhead.app',
+  'explore.screen',
+).ready, false, 'retained-tree readiness requires positive visible bounds');
+
+const openLayerSheetNodes = uiNodes([
+  'map.layers.sheet',
+  'map.layers.toggle-carousel',
+  'map.layers.close',
+]);
+assert.equal(inspectLayerSheetCloseState(openLayerSheetNodes, 'com.trailhead.app').sheetOpen, true);
+assert.throws(
+  () => inspectLayerSheetCloseState(uiNodes([
+    'map.layers.sheet',
+    'map.layers.toggle-carousel',
+  ]), 'com.trailhead.app'),
+  error => error instanceof MemoryGateError && error.code === 'layer_close_unavailable',
+  'an open sheet without its close control cannot be silently accepted',
+);
+assert.deepEqual(inspectLayerSheetCloseState(uiNodes([
+  'map.layers.open',
+]), 'com.trailhead.app'), { sheetOpen: false, closeNode: null });
+
+const processIdentity = { alive: true, instanceChanged: false, internalProcessId: null };
+assert.equal(recordAndVerifyProcessIdentity(processIdentity, 4242), true);
+assert.equal(processIdentity.internalProcessId, 4242);
+assert.equal(recordAndVerifyProcessIdentity(processIdentity, 4242), true);
+assert.throws(
+  () => recordAndVerifyProcessIdentity(processIdentity, 4343),
+  error => error instanceof MemoryGateError && error.code === 'memory_process_instance_changed',
+);
+assert.equal(processIdentity.alive, false);
+assert.equal(processIdentity.instanceChanged, true);
+assert.throws(
+  () => recordAndVerifyProcessIdentity({ alive: true, instanceChanged: false, internalProcessId: 4242 }, null),
+  error => error instanceof MemoryGateError && error.code === 'memory_process_not_alive',
+);
+
+const newExitRecord = reason => ({
+  timestampKeyMs: 1_792_640_000_000 + reason,
+  reason,
+  subreason: 0,
+  status: 0,
+  importance: 100,
+  pssKb: 10,
+  rssKb: 20,
+});
+for (const reason of [0, 1, 2, 10, 11, 12, 13, 14]) {
+  const exitEvaluation = evaluateExitInfoDiffV3([], [newExitRecord(reason)]);
+  assert.equal(exitEvaluation.passed, false, `new exit reason ${reason} must fail the gate`);
+  assert.equal(exitEvaluation.newRecordCount, 1);
+  assert.equal(exitEvaluation.processDeathCount, 1);
+}
 
 assert.equal(checkedStateFromNode({ checkable: 'true', checked: 'true' }), true);
 assert.equal(checkedStateFromNode({ checkable: 'true', checked: 'false' }), false);
@@ -234,6 +778,19 @@ const originalLayerStates = Object.fromEntries(
 );
 const disabledLayerStates = Object.fromEntries(
   HEAVY_MAP_LAYER_KEYS.map(key => [key, false]),
+);
+assert.deepEqual(
+  assertExactLayerState({ ...originalLayerStates }, originalLayerStates, 'layer_state_mismatch'),
+  originalLayerStates,
+);
+assert.throws(
+  () => assertExactLayerState(
+    { ...originalLayerStates, fire: !originalLayerStates.fire },
+    originalLayerStates,
+    'layer_state_mismatch',
+  ),
+  error => error instanceof MemoryGateError && error.code === 'layer_state_mismatch_fire',
+  'restoration and cycle verification must compare one capture against the target state',
 );
 const baselineActions = [];
 let capturedBeforeDisable = null;
@@ -376,6 +933,14 @@ assert.deepEqual(durableEvents, [
   'capture',
 ]);
 
+const restoredPrivacyReport = privacyReportFixture();
+restoredPrivacyReport.layers.recovery = durableRestoration.recovery;
+assert.equal(
+  assertAndroidMemoryGateReportV3Privacy(restoredPrivacyReport),
+  true,
+  'the exact successful restoration payload written by the runner must satisfy the full report schema',
+);
+
 let persistedCaptureCount = 0;
 const persistedMismatchModel = { ...originalLayerStates };
 const failedDurableRestoration = await durablyRestoreCapturedHeavyLayers({
@@ -458,21 +1023,49 @@ assert.equal(unsafeRetryGuard.failureCode, 'layer_selector_unavailable_fire');
 assert.equal(unsafeRetryGuard.recovery.attempt_count, 1);
 assert.equal(nonPersistedFailureRelaunches, 1, 'unknown selector state is never blindly retried');
 
+const unavailableRetentionReport = {
+  result: 'failed',
+  failure_code: 'memory_gate_v3_failed',
+  restoration_failure_code: null,
+  safety: {
+    layer_state_retention_check_completed: false,
+    layer_state_loss_observed: null,
+  },
+  layers: { restored: false, recovery: null },
+};
+applyLayerRestorationOutcome(unavailableRetentionReport, unsafeRetryGuard);
+assert.equal(unavailableRetentionReport.safety.layer_state_retention_check_completed, false);
+assert.equal(
+  unavailableRetentionReport.safety.layer_state_loss_observed,
+  null,
+  'an unavailable retained-state check must remain unevaluated, never fabricated as false',
+);
+
 const primaryFailureReport = {
   result: 'failed',
-  failure_code: 'total_pss_limit_failed',
+  failure_code: 'explore_idle_total_pss_safety_cap_failed',
   restoration_failure_code: null,
+  safety: {
+    layer_state_retention_check_completed: false,
+    layer_state_loss_observed: null,
+  },
   layers: { restored: false, recovery: null },
 };
 applyLayerRestorationOutcome(primaryFailureReport, failedDurableRestoration);
-assert.equal(primaryFailureReport.failure_code, 'total_pss_limit_failed');
+assert.equal(primaryFailureReport.failure_code, 'explore_idle_total_pss_safety_cap_failed');
 assert.equal(primaryFailureReport.restoration_failure_code, 'layer_restore_persisted_mismatch_fire');
 assert.deepEqual(primaryFailureReport.layers.recovery, failedDurableRestoration.recovery);
+assert.equal(primaryFailureReport.safety.layer_state_retention_check_completed, true);
+assert.equal(primaryFailureReport.safety.layer_state_loss_observed, true);
 
 const restorationOnlyFailureReport = {
   result: 'passed',
   failure_code: null,
   restoration_failure_code: null,
+  safety: {
+    layer_state_retention_check_completed: false,
+    layer_state_loss_observed: null,
+  },
   layers: { restored: false, recovery: null },
 };
 applyLayerRestorationOutcome(restorationOnlyFailureReport, failedDurableRestoration);
@@ -483,8 +1076,15 @@ assert.equal(restorationOnlyFailureReport.restoration_failure_code, 'layer_resto
 const lifecycleReport = () => ({
   result: 'running',
   failure_code: null,
+  terminal_evidence_failure_code: null,
   restoration_failure_code: null,
   completed_at: null,
+  safety: {
+    duplicate_renderer_check_completed: false,
+    duplicate_renderer_observed: null,
+    layer_state_retention_check_completed: false,
+    layer_state_loss_observed: null,
+  },
   layers: {
     initial: null,
     baseline: null,
@@ -492,8 +1092,7 @@ const lifecycleReport = () => ({
     recovery: null,
   },
   memory: {
-    baseline_samples_kb: [],
-    baseline_evaluation: null,
+    explore_idle_samples: [],
   },
 });
 
@@ -508,15 +1107,12 @@ const completedBaselineFailure = await executeMemoryGateLifecycle({
     baselineInitialStates = { ...originalLayerStates };
     baselineFailureReport.layers.initial = baselineInitialStates;
     baselineFailureReport.layers.baseline = { ...disabledLayerStates };
-    baselineFailureReport.memory.baseline_samples_kb = [520_000, 521_000, 519_000];
-    baselineFailureReport.memory.baseline_evaluation = evaluateBaselinePssLimit(
-      baselineFailureReport.memory.baseline_samples_kb,
-    );
-    if (!baselineFailureReport.memory.baseline_evaluation.passed) {
-      throw new MemoryGateError('total_pss_limit_failed');
-    }
+    throw new MemoryGateError('explore_idle_total_pss_safety_cap_failed');
   },
   getInitialStates: () => baselineInitialStates,
+  collectTerminalEvidence: async () => {
+    baselineFailureEvents.push('terminal');
+  },
   restoreLayers: async states => {
     baselineFailureEvents.push('restore');
     assert.deepEqual(states, originalLayerStates);
@@ -528,11 +1124,13 @@ const completedBaselineFailure = await executeMemoryGateLifecycle({
   },
   completedAt: () => '2026-07-23T00:00:00.000Z',
 });
-assert.deepEqual(baselineFailureEvents, ['execute', 'restore', 'finalize']);
+assert.deepEqual(baselineFailureEvents, ['execute', 'terminal', 'restore', 'finalize']);
 assert.equal(completedBaselineFailure.result, 'failed');
-assert.equal(completedBaselineFailure.failure_code, 'total_pss_limit_failed');
+assert.equal(completedBaselineFailure.failure_code, 'explore_idle_total_pss_safety_cap_failed');
 assert.equal(completedBaselineFailure.layers.restored, true);
 assert.equal(completedBaselineFailure.restoration_failure_code, null);
+assert.equal(completedBaselineFailure.safety.layer_state_retention_check_completed, true);
+assert.equal(completedBaselineFailure.safety.layer_state_loss_observed, false);
 assert.equal(completedBaselineFailure.completed_at, '2026-07-23T00:00:00.000Z');
 assert.deepEqual(finalizedBaselineFailure, completedBaselineFailure);
 
@@ -543,9 +1141,12 @@ const completedDualFailure = await executeMemoryGateLifecycle({
   report: dualFailureReport,
   executeGate: async () => {
     dualFailureInitialStates = { ...originalLayerStates };
-    throw new MemoryGateError('total_pss_limit_failed');
+    throw new MemoryGateError('explore_idle_total_pss_safety_cap_failed');
   },
   getInitialStates: () => dualFailureInitialStates,
+  collectTerminalEvidence: async () => {
+    throw new MemoryGateError('process_exit_evidence_failed');
+  },
   restoreLayers: async () => failedDurableRestoration,
   finalizeReport: async report => {
     finalizedDualFailure = JSON.parse(JSON.stringify(report));
@@ -553,19 +1154,53 @@ const completedDualFailure = await executeMemoryGateLifecycle({
   completedAt: () => '2026-07-23T00:00:01.000Z',
 });
 assert.equal(completedDualFailure.result, 'failed');
-assert.equal(completedDualFailure.failure_code, 'total_pss_limit_failed');
+assert.equal(completedDualFailure.failure_code, 'explore_idle_total_pss_safety_cap_failed');
+assert.equal(completedDualFailure.terminal_evidence_failure_code, 'process_exit_evidence_failed');
 assert.equal(completedDualFailure.restoration_failure_code, 'layer_restore_persisted_mismatch_fire');
 assert.equal(completedDualFailure.layers.restored, false);
 assert.equal(completedDualFailure.layers.recovery.attempt_count, FINAL_LAYER_REPAIR_MAX_ATTEMPTS);
 assert.deepEqual(finalizedDualFailure, completedDualFailure, 'the finalized report retains both independent failures');
 
+const cancellationEvents = [];
+const cancellationReport = lifecycleReport();
+let cancellationInitialStates = null;
+await executeMemoryGateLifecycle({
+  report: cancellationReport,
+  executeGate: async () => {
+    cancellationEvents.push('execute');
+    cancellationInitialStates = { ...originalLayerStates };
+    throw new MemoryGateError('cancelled');
+  },
+  getInitialStates: () => cancellationInitialStates,
+  collectTerminalEvidence: async () => {
+    cancellationEvents.push('terminal');
+  },
+  restoreLayers: async () => {
+    cancellationEvents.push('restore');
+    return durableRestoration;
+  },
+  finalizeReport: async () => {
+    cancellationEvents.push('finalize');
+  },
+});
+assert.deepEqual(
+  cancellationEvents,
+  ['execute', 'terminal', 'restore', 'finalize'],
+  'cancellation still collects terminal evidence before restoring and finalizing',
+);
+assert.equal(cancellationReport.failure_code, 'cancelled');
+assert.equal(cancellationReport.layers.restored, true);
+
 assert.equal(assertSafeMemoryGateAdbArgs(['devices', '-l']), true);
 const remoteUi = '/sdcard/trailhead-memory-gate-123-456.xml';
 const allowedDeviceCommands = [
   ['shell', 'getprop', 'ro.product.model'],
+  ['shell', 'dumpsys', 'power'],
   ['shell', 'dumpsys', 'package', 'com.trailhead.app'],
   ['shell', 'dumpsys', 'meminfo', 'com.trailhead.app'],
   ['shell', 'dumpsys', 'activity', 'services', 'com.trailhead.app'],
+  ['shell', 'dumpsys', 'activity', 'exit-info', 'com.trailhead.app'],
+  ['shell', 'dumpsys', 'activity', 'activities', 'com.trailhead.app'],
   ['shell', 'uiautomator', 'dump', remoteUi],
   ['exec-out', 'cat', remoteUi],
   ['shell', 'rm', '-f', remoteUi],
@@ -582,6 +1217,11 @@ for (const command of allowedDeviceCommands) {
 assert.throws(
   () => assertSafeMemoryGateAdbArgs(['-s', 'RFCR408DA9B', 'shell', 'pm', 'clear', 'com.trailhead.app']),
   error => error instanceof MemoryGateError && error.code === 'unsafe_adb_command',
+);
+assert.throws(
+  () => assertSafeMemoryGateAdbArgs(['-s', 'RFCR408DA9B', 'shell', 'dumpsys', 'activity', 'activities']),
+  error => error instanceof MemoryGateError && error.code === 'unsafe_adb_command',
+  'foreground checks must remain package-scoped',
 );
 assert.throws(
   () => assertSafeMemoryGateAdbArgs(['-s', 'RFCR408DA9B', 'uninstall', 'com.trailhead.app']),

@@ -17,6 +17,10 @@ export const MAX_TOTAL_PSS_KB = 512_000;
 export const MAX_GROWTH_PERCENT = 10;
 export const BASELINE_SETTLE_MS = 90_000;
 export const SAMPLE_GAP_MS = 3_000;
+export const LAYER_STATE_CONVERGENCE_TIMEOUT_MS = 5_000;
+export const LAYER_STATE_POLL_INTERVAL_MS = 350;
+export const LAYER_PERSISTENCE_SETTLE_MS = 2_000;
+export const FINAL_LAYER_REPAIR_MAX_ATTEMPTS = 2;
 export const MAP_LAYER_CYCLE_COUNT = 10;
 export const HEAVY_MAP_LAYER_KEYS = Object.freeze([
   '3d',
@@ -430,6 +434,47 @@ export function checkedStateFromNode(node) {
   return node.checked === 'true';
 }
 
+/**
+ * A layer tap may persist through React state, native map work, and storage
+ * before its accessibility state changes. Tap at most once, then reacquire and
+ * poll the node until it converges. Blindly tapping again can undo a delayed
+ * successful transition and corrupt the user's saved layer choices.
+ */
+export async function convergeLayerState({
+  initialState,
+  desiredState,
+  tapOnce,
+  readState,
+  waitFor = waitMs,
+  now = Date.now,
+  timeoutMs = LAYER_STATE_CONVERGENCE_TIMEOUT_MS,
+  pollIntervalMs = LAYER_STATE_POLL_INTERVAL_MS,
+  failureCode = 'layer_toggle_failed',
+}) {
+  if (typeof initialState !== 'boolean' || typeof desiredState !== 'boolean') {
+    throw new MemoryGateError('layer_state_snapshot_incomplete');
+  }
+  if (initialState === desiredState) return desiredState;
+  if (typeof tapOnce !== 'function' || typeof readState !== 'function' || typeof waitFor !== 'function') {
+    throw new MemoryGateError('layer_convergence_contract_invalid');
+  }
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0 || !Number.isFinite(pollIntervalMs) || pollIntervalMs <= 0) {
+    throw new MemoryGateError('layer_convergence_contract_invalid');
+  }
+
+  await tapOnce();
+  const deadline = now() + timeoutMs;
+  while (true) {
+    const observed = await readState();
+    if (typeof observed !== 'boolean') throw new MemoryGateError('layer_accessibility_state_missing');
+    if (observed === desiredState) return observed;
+    const remaining = deadline - now();
+    if (remaining <= 0) break;
+    await waitFor(Math.min(pollIntervalMs, remaining));
+  }
+  throw new MemoryGateError(failureCode);
+}
+
 function assertCompleteHeavyLayerState(states, expectedState = null) {
   if (!states || typeof states !== 'object') {
     throw new MemoryGateError('layer_state_snapshot_incomplete');
@@ -478,6 +523,167 @@ export async function restoreCapturedHeavyLayers(initialStates, restoreStates) {
   const restored = await restoreStates(restorationTarget);
   if (restored !== true) throw new MemoryGateError('layer_restore_failed');
   return true;
+}
+
+function assertLayerSubsetState(states, keys, expectedState, failurePrefix) {
+  if (!states || typeof states !== 'object') throw new MemoryGateError(`${failurePrefix}_snapshot_incomplete`);
+  for (const key of keys) {
+    if (states[key] !== expectedState) throw new MemoryGateError(`${failurePrefix}_${key}`);
+  }
+  return states;
+}
+
+function assertExactLayerState(states, target, failurePrefix) {
+  assertCompleteHeavyLayerState(states);
+  for (const key of HEAVY_MAP_LAYER_KEYS) {
+    if (states[key] !== target[key]) throw new MemoryGateError(`${failurePrefix}_${key}`);
+  }
+  return states;
+}
+
+/**
+ * Restore in two deterministic phases, then prove persistence across a second
+ * process restart. This function returns a structured outcome instead of
+ * throwing so the report can retain both the gate's primary failure and the
+ * independent restoration failure/recovery evidence.
+ */
+async function attemptDurableLayerRestoration({
+  initialStates,
+  relaunch,
+  setLayers,
+  captureStates,
+  waitForPersistence,
+}) {
+  const target = { ...assertCompleteHeavyLayerState(initialStates) };
+  const targetFalseKeys = HEAVY_MAP_LAYER_KEYS.filter(key => target[key] === false);
+  const targetTrueKeys = HEAVY_MAP_LAYER_KEYS.filter(key => target[key] === true);
+  const recovery = {
+    attempted: true,
+    target_false_keys: targetFalseKeys,
+    target_true_keys: targetTrueKeys,
+    pre_restore_relaunch_completed: false,
+    target_false_observed: null,
+    target_true_observed: null,
+    verified_before_relaunch: null,
+    persistence_wait_ms: LAYER_PERSISTENCE_SETTLE_MS,
+    persistence_wait_completed: false,
+    post_restore_relaunch_completed: false,
+    verified_after_relaunch: null,
+    failure_observed_state: null,
+  };
+
+  try {
+    await relaunch('before_restore');
+    recovery.pre_restore_relaunch_completed = true;
+
+    recovery.target_false_observed = {
+      ...await setLayers(targetFalseKeys, false),
+    };
+    assertLayerSubsetState(
+      recovery.target_false_observed,
+      targetFalseKeys,
+      false,
+      'layer_restore_disable_failed',
+    );
+
+    recovery.target_true_observed = {
+      ...await setLayers(targetTrueKeys, true),
+    };
+    assertLayerSubsetState(
+      recovery.target_true_observed,
+      targetTrueKeys,
+      true,
+      'layer_restore_enable_failed',
+    );
+
+    recovery.verified_before_relaunch = {
+      ...assertExactLayerState(
+        await captureStates(),
+        target,
+        'layer_restore_verification_failed',
+      ),
+    };
+
+    await waitForPersistence(LAYER_PERSISTENCE_SETTLE_MS);
+    recovery.persistence_wait_completed = true;
+    await relaunch('after_restore');
+    recovery.post_restore_relaunch_completed = true;
+    recovery.verified_after_relaunch = {
+      ...assertExactLayerState(
+        await captureStates(),
+        target,
+        'layer_restore_persisted_mismatch',
+      ),
+    };
+    return { restored: true, failureCode: null, recovery };
+  } catch (error) {
+    try {
+      recovery.failure_observed_state = {
+        ...assertCompleteHeavyLayerState(await captureStates()),
+      };
+    } catch {
+      // Best-effort booleans only. The original restoration error remains the
+      // authoritative failure when the UI cannot be captured during recovery.
+    }
+    return {
+      restored: false,
+      failureCode: safeFailureCode(error),
+      recovery,
+    };
+  }
+}
+
+function restorationOutcomeWithAttempts(outcomes) {
+  const finalOutcome = outcomes[outcomes.length - 1];
+  const attempts = outcomes.map((outcome, index) => ({
+    attempt: index + 1,
+    restored: outcome.restored,
+    failure_code: outcome.failureCode,
+    ...outcome.recovery,
+  }));
+  return {
+    restored: finalOutcome.restored,
+    failureCode: finalOutcome.failureCode,
+    recovery: {
+      ...finalOutcome.recovery,
+      attempt_count: attempts.length,
+      max_attempts: FINAL_LAYER_REPAIR_MAX_ATTEMPTS,
+      retry_reason: attempts.length > 1 ? attempts[0].failure_code : null,
+      recovered_after_retry: finalOutcome.restored && attempts.length > 1,
+      attempts,
+    },
+  };
+}
+
+/**
+ * Perform one durable restoration and, only when the post-relaunch persisted
+ * state differs, make one final bounded repair attempt. Selector/access errors
+ * are not blindly retried because another tap could alter an unknown state.
+ */
+export async function durablyRestoreCapturedHeavyLayers(dependencies) {
+  const outcomes = [];
+  for (let attempt = 1; attempt <= FINAL_LAYER_REPAIR_MAX_ATTEMPTS; attempt += 1) {
+    const outcome = await attemptDurableLayerRestoration(dependencies);
+    outcomes.push(outcome);
+    if (outcome.restored) return restorationOutcomeWithAttempts(outcomes);
+    const persistedMismatch = String(outcome.failureCode || '').startsWith(
+      'layer_restore_persisted_mismatch_',
+    );
+    if (!persistedMismatch || attempt >= FINAL_LAYER_REPAIR_MAX_ATTEMPTS) {
+      return restorationOutcomeWithAttempts(outcomes);
+    }
+  }
+  return restorationOutcomeWithAttempts(outcomes);
+}
+
+export function applyLayerRestorationOutcome(report, outcome) {
+  report.layers.restored = outcome?.restored === true;
+  report.layers.recovery = outcome?.recovery ?? null;
+  report.restoration_failure_code = report.layers.restored
+    ? null
+    : (outcome?.failureCode || 'layer_restore_failed');
+  if (!report.layers.restored) report.result = 'failed';
+  return report;
 }
 
 async function ensureLayerSheet(adb, serial, packageName) {
@@ -533,42 +739,69 @@ async function moveCarouselToStart(adb, serial, packageName) {
   throw new MemoryGateError('layer_carousel_start_unavailable');
 }
 
-async function visitLayerStates(adb, serial, packageName, order, desiredState = null) {
+async function visitLayerStates(adb, serial, packageName, order, desiredState = null, directionOverride = null) {
   const result = {};
-  const direction = order[0] === HEAVY_MAP_LAYER_KEYS[0] ? 'forward' : 'reverse';
+  const direction = directionOverride
+    ?? (order[0] === HEAVY_MAP_LAYER_KEYS[0] ? 'forward' : 'reverse');
   for (const key of order) {
     assertNotCancelled();
     let node = await seekLayerNode(adb, serial, packageName, key, direction);
     let checked = checkedStateFromNode(node);
     result[key] = checked;
     if (desiredState != null && checked !== desiredState) {
-      tapNode(adb, serial, node);
-      await waitMs(650);
-      node = await seekLayerNode(adb, serial, packageName, key, direction);
-      checked = checkedStateFromNode(node);
-      if (checked !== desiredState) throw new MemoryGateError(`layer_toggle_failed_${key}`);
+      checked = await convergeLayerState({
+        initialState: checked,
+        desiredState,
+        tapOnce: () => tapNode(adb, serial, node),
+        readState: async () => {
+          node = await seekLayerNode(adb, serial, packageName, key, direction);
+          return checkedStateFromNode(node);
+        },
+        failureCode: `layer_toggle_failed_${key}`,
+      });
       result[key] = checked;
     }
   }
   return result;
 }
 
-async function restoreLayerStates(adb, serial, packageName, initialStates) {
-  if (!initialStates || Object.keys(initialStates).length !== HEAVY_MAP_LAYER_KEYS.length) return false;
+async function setLayerSubsetStates(adb, serial, packageName, keys, desiredState) {
+  if (!Array.isArray(keys) || keys.some(key => !HEAVY_MAP_LAYER_KEYS.includes(key))) {
+    throw new MemoryGateError('layer_restore_subset_invalid');
+  }
+  if (keys.length === 0) return {};
   await ensureLayerSheet(adb, serial, packageName);
   await moveCarouselToStart(adb, serial, packageName);
-  for (const key of HEAVY_MAP_LAYER_KEYS) {
-    let node = await seekLayerNode(adb, serial, packageName, key, 'forward');
-    let checked = checkedStateFromNode(node);
-    if (checked !== initialStates[key]) {
-      tapNode(adb, serial, node);
-      await waitMs(650);
-      node = await seekLayerNode(adb, serial, packageName, key, 'forward');
-      checked = checkedStateFromNode(node);
-      if (checked !== initialStates[key]) throw new MemoryGateError(`layer_restore_failed_${key}`);
-    }
-  }
-  return true;
+  return visitLayerStates(
+    adb,
+    serial,
+    packageName,
+    keys,
+    desiredState,
+    'forward',
+  );
+}
+
+async function captureCurrentLayerStates(adb, serial, packageName) {
+  await ensureLayerSheet(adb, serial, packageName);
+  await moveCarouselToStart(adb, serial, packageName);
+  return visitLayerStates(
+    adb,
+    serial,
+    packageName,
+    HEAVY_MAP_LAYER_KEYS,
+    null,
+    'forward',
+  );
+}
+
+async function relaunchForLayerRecovery(adb, serial, packageName, launchComponent) {
+  forceStopApp(adb, serial, packageName);
+  await waitMs(800);
+  launchApp(adb, serial, launchComponent);
+  // Recovery must tolerate a cold preview launch. A fixed short delay can
+  // inspect the splash screen and falsely report that restoration failed.
+  await waitForTestId(adb, serial, packageName, 'app.tab.map', 30_000);
 }
 
 function sampleTotalPss(adb, serial, packageName) {
@@ -685,6 +918,18 @@ export function median(values) {
   return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
+export function evaluateBaselinePssLimit(baselineSamples) {
+  median(baselineSamples);
+  const maxObservedPssKb = Math.max(...baselineSamples);
+  return {
+    passed: maxObservedPssKb < MAX_TOTAL_PSS_KB,
+    maxObservedPssKb,
+    limit: {
+      maxTotalPssKbExclusive: MAX_TOTAL_PSS_KB,
+    },
+  };
+}
+
 export function evaluateMemoryGate({ baselineSamples, cyclePeakSamples, postSamples }) {
   const baselineMedianKb = median(baselineSamples);
   const postMedianKb = median(postSamples);
@@ -718,12 +963,52 @@ function safeFailureCode(error) {
   return 'unexpected_gate_failure';
 }
 
+/**
+ * Own the gate's catch/finally contract independently from ADB so failure-path
+ * behavior can be proven deterministically. Once layer state has been captured,
+ * every measurement failure must attempt restoration and write the completed
+ * report while keeping the primary and restoration failures separate.
+ */
+export async function executeMemoryGateLifecycle({
+  report,
+  executeGate,
+  getInitialStates,
+  restoreLayers,
+  finalizeReport,
+  completedAt = () => new Date().toISOString(),
+}) {
+  try {
+    await executeGate();
+  } catch (error) {
+    report.result = 'failed';
+    report.failure_code = safeFailureCode(error);
+  } finally {
+    const initialStates = getInitialStates();
+    if (initialStates) {
+      let restoration;
+      try {
+        restoration = await restoreLayers(initialStates);
+      } catch (error) {
+        restoration = {
+          restored: false,
+          failureCode: safeFailureCode(error),
+          recovery: null,
+        };
+      }
+      applyLayerRestorationOutcome(report, restoration);
+    }
+    report.completed_at = completedAt();
+    await finalizeReport(report);
+  }
+  return report;
+}
+
 async function runGate(options) {
   assertEvidenceDirectoryIgnored();
   mkdirSync(evidenceRoot, { recursive: true });
   const output = join(evidenceRoot, timestamp());
   const report = {
-    schema_version: 1,
+    schema_version: 2,
     started_at: new Date().toISOString(),
     completed_at: null,
     candidate: {
@@ -753,18 +1038,21 @@ async function runGate(options) {
       initial: null,
       baseline: null,
       restored: false,
+      recovery: null,
     },
     memory: {
       baseline_settle_ms: BASELINE_SETTLE_MS,
       sample_gap_ms: SAMPLE_GAP_MS,
       cycle_count: MAP_LAYER_CYCLE_COUNT,
       baseline_samples_kb: [],
+      baseline_evaluation: null,
       cycle_peak_samples_kb: [],
       post_samples_kb: [],
       evaluation: null,
     },
     result: 'running',
     failure_code: null,
+    restoration_failure_code: null,
     privacy: 'No serial, coordinates, route geometry, search text, account identifiers, screenshots, UI hierarchy, logs, support content, attachments, payout data, or credentials are stored.',
   };
 
@@ -772,7 +1060,9 @@ async function runGate(options) {
   let initialStates = null;
   let launchComponent = null;
   let serial = options.serial;
-  try {
+  await executeMemoryGateLifecycle({
+    report,
+    executeGate: async () => {
     if (gitSha() !== options.expectedCommitSha) throw new MemoryGateError('local_commit_mismatch');
     fetchAndValidatePreviewBuild(options);
     report.candidate.build_evidence_verified = true;
@@ -842,6 +1132,12 @@ async function runGate(options) {
 
     await waitMs(BASELINE_SETTLE_MS, 'Settling the map with heavy layers disabled');
     report.memory.baseline_samples_kb = await collectSamples(adb, serial, options.packageName);
+    report.memory.baseline_evaluation = evaluateBaselinePssLimit(
+      report.memory.baseline_samples_kb,
+    );
+    if (!report.memory.baseline_evaluation.passed) {
+      throw new MemoryGateError('total_pss_limit_failed');
+    }
 
     const reverseOrder = [...HEAVY_MAP_LAYER_KEYS].reverse();
     for (let cycle = 1; cycle <= MAP_LAYER_CYCLE_COUNT; cycle += 1) {
@@ -864,39 +1160,44 @@ async function runGate(options) {
     if (!report.memory.evaluation.pssPassed) throw new MemoryGateError('total_pss_limit_failed');
     if (!report.memory.evaluation.growthPassed) throw new MemoryGateError('memory_growth_limit_failed');
     report.result = 'passed';
-  } catch (error) {
-    report.result = 'failed';
-    report.failure_code = safeFailureCode(error);
-  } finally {
-    if (initialStates) {
-      try {
-        cancellationSignal = null;
-        // An OOM can terminate the activity mid-cycle. Relaunching here keeps
-        // the promise to restore the user's exact layer state even on failure.
-        if (launchComponent) {
-          launchApp(adb, serial, launchComponent);
-          await waitMs(1_500);
-        }
-        report.layers.restored = await restoreCapturedHeavyLayers(
-          initialStates,
-          states => restoreLayerStates(adb, serial, options.packageName, states),
-        );
-      } catch {
-        report.layers.restored = false;
-        report.result = 'failed';
-        report.failure_code = report.failure_code || 'layer_restore_failed';
-      }
-    }
-    if (initialStates && !report.layers.restored) {
-      report.result = 'failed';
-      report.failure_code = report.failure_code || 'layer_restore_failed';
-    }
-    report.completed_at = new Date().toISOString();
-    writeReport(output, report);
-  }
+    },
+    getInitialStates: () => initialStates,
+    restoreLayers: states => {
+      cancellationSignal = null;
+      return durablyRestoreCapturedHeavyLayers({
+        initialStates: states,
+        relaunch: () => relaunchForLayerRecovery(
+          adb,
+          serial,
+          options.packageName,
+          launchComponent,
+        ),
+        setLayers: (keys, desiredState) => setLayerSubsetStates(
+          adb,
+          serial,
+          options.packageName,
+          keys,
+          desiredState,
+        ),
+        captureStates: () => captureCurrentLayerStates(
+          adb,
+          serial,
+          options.packageName,
+        ),
+        waitForPersistence: durationMs => waitMs(durationMs),
+      });
+    },
+    finalizeReport: finalizedReport => writeReport(output, finalizedReport),
+  });
 
   console.log(`Privacy-minimal evidence: ${output}`);
-  if (report.result !== 'passed') throw new MemoryGateError(report.failure_code || 'memory_gate_failed');
+  if (report.result !== 'passed') {
+    throw new MemoryGateError(
+      report.failure_code
+      || report.restoration_failure_code
+      || 'memory_gate_failed',
+    );
+  }
   console.log(`PASS: max PSS ${report.memory.evaluation.maxObservedPssKb} KB; growth ${report.memory.evaluation.growthPercent.toFixed(2)}%.`);
 }
 

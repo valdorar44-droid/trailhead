@@ -16,12 +16,20 @@ import Constants from 'expo-constants';
 import * as Updates from 'expo-updates';
 import { api } from '@/lib/api';
 import { useTheme } from '@/lib/design';
+import { getOfflinePlacePackDiagnosticsInventory } from '@/lib/offlinePlacePacks';
 import { createExpoOfflineV2Persistence } from '@/lib/offlineV2/expoAdapters';
 import { useOriginalsRuntime } from '@/lib/originals/runtime';
 import {
   buildQaDiagnosticsSnapshotV1,
   type QaDiagnosticsSnapshotV1,
 } from '@/lib/qa/diagnostics';
+import { getActiveTripStateFileBytes } from '@/lib/qa/storageFootprint';
+import {
+  getTripRepositoryOutbox,
+  getTripRepositorySnapshot,
+  tripRepositoryScopeKey,
+} from '@/lib/tripRepository';
+import { getTripRepositoryQaInstrumentation } from '@/lib/tripRepository/qaInstrumentation';
 import {
   runSearchRaceQaCheck,
   type SearchRaceQaEvidence,
@@ -54,6 +62,7 @@ export default function TelemetryQaScreen() {
   const router = useRouter();
   const user = useStore(state => state.user);
   const token = useStore(state => state.token);
+  const activeTrip = useStore(state => state.activeTrip);
   const originals = useOriginalsRuntime();
   const allowed = telemetryQaSurfaceIsAvailable(Boolean(token && user?.is_admin));
   const [snapshot, setSnapshot] = useState<QaDiagnosticsSnapshotV1 | null>(null);
@@ -88,9 +97,16 @@ export default function TelemetryQaScreen() {
     try {
       const ownerScope = `account:${String(user.id)}`;
       const persistence = createExpoOfflineV2Persistence(ownerScope);
-      const [serverDiagnostics, installations] = await Promise.all([
+      const [
+        serverDiagnostics,
+        installations,
+        offlinePlacePacksV1,
+        activeTripStateFileBytes,
+      ] = await Promise.all([
         api.adminQaDiagnostics(),
         persistence.repository.listCurrentInstallations(),
+        getOfflinePlacePackDiagnosticsInventory(),
+        getActiveTripStateFileBytes(),
       ]);
       const offlineBundles = await Promise.all(installations.map(async installation => {
         const manifest = await persistence.repository.getManifest(
@@ -106,6 +122,11 @@ export default function TelemetryQaScreen() {
         };
       }));
       const activeOriginal = originals.session || originals.manifest;
+      const jsMemory = (globalThis as any)?.performance?.memory;
+      const tripRepositorySnapshot = getTripRepositorySnapshot();
+      const tripRepositoryInstrumentation = getTripRepositoryQaInstrumentation(
+        tripRepositoryScopeKey(tripRepositorySnapshot.ownerScope),
+      );
       setSnapshot(buildQaDiagnosticsSnapshotV1({
         release: releaseIdentity,
         accountRole: 'admin',
@@ -124,6 +145,29 @@ export default function TelemetryQaScreen() {
           },
         },
         offlineBundles,
+        offlinePlacePacksV1,
+        runtimeMemory: {
+          jsHeapTotalBytes: jsMemory?.totalJSHeapSize,
+          jsHeapUsedBytes: jsMemory?.usedJSHeapSize,
+        },
+        tripRepository: {
+          stateFileBytes: tripRepositoryInstrumentation.stateFileBytes,
+          tripCount: tripRepositorySnapshot.trips.length,
+          savedEntityCount: tripRepositorySnapshot.savedEntities.length,
+          outboxCount: getTripRepositoryOutbox().length,
+          hydration: tripRepositoryInstrumentation.hydration,
+          persist: tripRepositoryInstrumentation.persist,
+        },
+        activeTrip: activeTrip
+          ? {
+              serializedBytes: activeTripStateFileBytes,
+              audioGuideEntryCount: Object.keys(activeTrip.audio_guide || {}).length,
+              routeCoordinateCount: activeTrip.route_geometry?.coords?.length || 0,
+              routeStepCount: activeTrip.route_geometry?.steps?.length || 0,
+              routeLegCount: activeTrip.route_geometry?.legs?.length || 0,
+              waypointCount: activeTrip.plan?.waypoints?.length || 0,
+            }
+          : null,
         original: activeOriginal
           ? { packId: activeOriginal.pack_id, version: activeOriginal.version }
           : null,
@@ -133,7 +177,7 @@ export default function TelemetryQaScreen() {
       setSnapshot(null);
       setSnapshotState('unavailable');
     }
-  }, [allowed, originals.manifest, originals.session, releaseIdentity, user?.id]);
+  }, [activeTrip, allowed, originals.manifest, originals.session, releaseIdentity, user?.id]);
 
   useEffect(() => {
     void refreshSnapshot();

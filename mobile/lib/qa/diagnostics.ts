@@ -31,6 +31,41 @@ export type QaDiagnosticsSnapshotV1 = {
     state: string;
     trailRecords: number;
   }>;
+  offlinePlacePacksV1: {
+    packCount: number;
+    pointCount: number;
+    pointCountUnknownPackCount: number;
+    storageBytes: number;
+  };
+  runtimeMemory: {
+    jsHeapTotalBytes: number;
+    jsHeapUsedBytes: number;
+  };
+  tripRepository: {
+    stateFileBytes: number;
+    tripCount: number;
+    savedEntityCount: number;
+    outboxCount: number;
+    hydration: {
+      pages: number;
+      items: number;
+      applied: number;
+      skipped: number;
+    };
+    persist: {
+      count: number;
+      totalSerializedBytes: number;
+      maxSerializedBytes: number;
+    };
+  };
+  activeTrip: {
+    serializedBytes: number;
+    audioGuideEntryCount: number;
+    routeCoordinateCount: number;
+    routeStepCount: number;
+    routeLegCount: number;
+    waypointCount: number;
+  } | null;
   original: { packId: string; version: number } | null;
 };
 
@@ -39,6 +74,13 @@ type QaDiagnosticsInputV1 = Omit<QaDiagnosticsSnapshotV1, 'schema'> & Record<str
 function boundedCount(value: unknown): number {
   const count = Number(value);
   return Number.isInteger(count) && count >= 0 ? Math.min(count, 10_000_000) : 0;
+}
+
+function boundedBytes(value: unknown): number {
+  const bytes = Number(value);
+  return Number.isSafeInteger(bytes) && bytes >= 0
+    ? Math.min(bytes, 1_000_000_000_000)
+    : 0;
 }
 
 function machineValue(value: unknown, fallback = 'unknown'): string {
@@ -92,6 +134,45 @@ export function buildQaDiagnosticsSnapshotV1(input: QaDiagnosticsInputV1): QaDia
       state: machineValue(bundle.state),
       trailRecords: boundedCount(bundle.trailRecords),
     })),
+    offlinePlacePacksV1: {
+      packCount: boundedCount(input.offlinePlacePacksV1?.packCount),
+      pointCount: boundedCount(input.offlinePlacePacksV1?.pointCount),
+      pointCountUnknownPackCount: boundedCount(
+        input.offlinePlacePacksV1?.pointCountUnknownPackCount,
+      ),
+      storageBytes: boundedBytes(input.offlinePlacePacksV1?.storageBytes),
+    },
+    runtimeMemory: {
+      jsHeapTotalBytes: boundedBytes(input.runtimeMemory?.jsHeapTotalBytes),
+      jsHeapUsedBytes: boundedBytes(input.runtimeMemory?.jsHeapUsedBytes),
+    },
+    tripRepository: {
+      stateFileBytes: boundedBytes(input.tripRepository?.stateFileBytes),
+      tripCount: boundedCount(input.tripRepository?.tripCount),
+      savedEntityCount: boundedCount(input.tripRepository?.savedEntityCount),
+      outboxCount: boundedCount(input.tripRepository?.outboxCount),
+      hydration: {
+        pages: boundedCount(input.tripRepository?.hydration?.pages),
+        items: boundedCount(input.tripRepository?.hydration?.items),
+        applied: boundedCount(input.tripRepository?.hydration?.applied),
+        skipped: boundedCount(input.tripRepository?.hydration?.skipped),
+      },
+      persist: {
+        count: boundedCount(input.tripRepository?.persist?.count),
+        totalSerializedBytes: boundedBytes(input.tripRepository?.persist?.totalSerializedBytes),
+        maxSerializedBytes: boundedBytes(input.tripRepository?.persist?.maxSerializedBytes),
+      },
+    },
+    activeTrip: input.activeTrip
+      ? {
+          serializedBytes: boundedBytes(input.activeTrip.serializedBytes),
+          audioGuideEntryCount: boundedCount(input.activeTrip.audioGuideEntryCount),
+          routeCoordinateCount: boundedCount(input.activeTrip.routeCoordinateCount),
+          routeStepCount: boundedCount(input.activeTrip.routeStepCount),
+          routeLegCount: boundedCount(input.activeTrip.routeLegCount),
+          waypointCount: boundedCount(input.activeTrip.waypointCount),
+        }
+      : null,
     original: input.original
       ? {
           packId: machineValue(input.original.packId),

@@ -2,16 +2,24 @@ import assert from 'node:assert/strict';
 
 import {
   BASELINE_SETTLE_MS,
+  FINAL_LAYER_REPAIR_MAX_ATTEMPTS,
   HEAVY_MAP_LAYER_KEYS,
+  LAYER_PERSISTENCE_SETTLE_MS,
+  LAYER_STATE_CONVERGENCE_TIMEOUT_MS,
   MAP_LAYER_CYCLE_COUNT,
   MAX_GROWTH_PERCENT,
   MAX_TOTAL_PSS_KB,
   MemoryGateError,
   QA_DIAGNOSTICS_URI,
+  applyLayerRestorationOutcome,
   assertSafeMemoryGateAdbArgs,
   captureAndDisableHeavyLayers,
   checkedStateFromNode,
   classifyActiveMapSession,
+  convergeLayerState,
+  durablyRestoreCapturedHeavyLayers,
+  executeMemoryGateLifecycle,
+  evaluateBaselinePssLimit,
   evaluateMemoryGate,
   horizontalCarouselSwipePoints,
   median,
@@ -22,6 +30,9 @@ import {
 } from './android-map-memory-gate.mjs';
 
 assert.equal(BASELINE_SETTLE_MS, 90_000);
+assert.equal(LAYER_STATE_CONVERGENCE_TIMEOUT_MS, 5_000);
+assert.equal(LAYER_PERSISTENCE_SETTLE_MS, 2_000);
+assert.equal(FINAL_LAYER_REPAIR_MAX_ATTEMPTS, 2);
 assert.equal(MAP_LAYER_CYCLE_COUNT, 10);
 assert.equal(MAX_TOTAL_PSS_KB, 512_000);
 assert.equal(MAX_GROWTH_PERCENT, 10);
@@ -120,6 +131,17 @@ assert.throws(
 assert.equal(median([3, 1, 2]), 2);
 assert.equal(median([4, 1, 2, 3]), 2.5);
 
+const baselineUnderLimit = evaluateBaselinePssLimit([420_000, 511_999, 430_000]);
+assert.equal(baselineUnderLimit.passed, true);
+assert.equal(baselineUnderLimit.maxObservedPssKb, 511_999);
+const baselineWithOneBoundarySample = evaluateBaselinePssLimit([400_000, 512_000, 401_000]);
+assert.equal(
+  baselineWithOneBoundarySample.passed,
+  false,
+  'one baseline sample at the strict limit must stop the gate before layer cycles',
+);
+assert.equal(baselineWithOneBoundarySample.maxObservedPssKb, 512_000);
+
 const passing = evaluateMemoryGate({
   baselineSamples: [420_000, 421_000, 419_000],
   cyclePeakSamples: [480_000, 490_000],
@@ -158,6 +180,54 @@ assert.throws(
   () => checkedStateFromNode({ checkable: 'false', checked: 'false' }),
   error => error instanceof MemoryGateError && error.code === 'layer_accessibility_state_missing',
 );
+
+let convergenceClock = 0;
+let convergenceTaps = 0;
+let convergenceReads = 0;
+const delayedStates = [false, false, true];
+assert.equal(await convergeLayerState({
+  initialState: false,
+  desiredState: true,
+  tapOnce: async () => { convergenceTaps += 1; },
+  readState: async () => {
+    convergenceReads += 1;
+    return delayedStates.shift() ?? true;
+  },
+  waitFor: async durationMs => { convergenceClock += durationMs; },
+  now: () => convergenceClock,
+  timeoutMs: 1_000,
+  pollIntervalMs: 100,
+  failureCode: 'layer_toggle_failed_delayed',
+}), true);
+assert.equal(convergenceTaps, 1, 'a delayed toggle must be tapped exactly once');
+assert.equal(convergenceReads, 3, 'the node must be reacquired until its state converges');
+
+let timeoutClock = 0;
+let timeoutTaps = 0;
+await assert.rejects(
+  convergeLayerState({
+    initialState: false,
+    desiredState: true,
+    tapOnce: async () => { timeoutTaps += 1; },
+    readState: async () => false,
+    waitFor: async durationMs => { timeoutClock += durationMs; },
+    now: () => timeoutClock,
+    timeoutMs: 300,
+    pollIntervalMs: 100,
+    failureCode: 'layer_toggle_failed_timeout_fixture',
+  }),
+  error => error instanceof MemoryGateError && error.code === 'layer_toggle_failed_timeout_fixture',
+);
+assert.equal(timeoutTaps, 1, 'a slow or failed transition must never be blindly re-tapped');
+
+let alreadyConvergedTaps = 0;
+assert.equal(await convergeLayerState({
+  initialState: true,
+  desiredState: true,
+  tapOnce: async () => { alreadyConvergedTaps += 1; },
+  readState: async () => { throw new Error('an already-converged node should not be reacquired'); },
+}), true);
+assert.equal(alreadyConvergedTaps, 0);
 
 const originalLayerStates = Object.fromEntries(
   HEAVY_MAP_LAYER_KEYS.map((key, index) => [key, index % 2 === 0]),
@@ -270,6 +340,224 @@ await assert.rejects(
   restoreCapturedHeavyLayers(originalLayerStates, async () => false),
   error => error instanceof MemoryGateError && error.code === 'layer_restore_failed',
 );
+
+const durableEvents = [];
+const durableModel = { ...disabledLayerStates };
+const durableRestoration = await durablyRestoreCapturedHeavyLayers({
+  initialStates: originalLayerStates,
+  relaunch: async phase => { durableEvents.push(`relaunch:${phase}`); },
+  setLayers: async (keys, desiredState) => {
+    durableEvents.push(`set:${desiredState}:${keys.join(',')}`);
+    for (const key of keys) durableModel[key] = desiredState;
+    return Object.fromEntries(keys.map(key => [key, durableModel[key]]));
+  },
+  captureStates: async () => {
+    durableEvents.push('capture');
+    return { ...durableModel };
+  },
+  waitForPersistence: async durationMs => {
+    durableEvents.push(`persist:${durationMs}`);
+  },
+});
+assert.equal(durableRestoration.restored, true);
+assert.equal(durableRestoration.failureCode, null);
+assert.equal(durableRestoration.recovery.attempt_count, 1);
+assert.equal(durableRestoration.recovery.recovered_after_retry, false);
+assert.deepEqual(durableRestoration.recovery.verified_before_relaunch, originalLayerStates);
+assert.deepEqual(durableRestoration.recovery.verified_after_relaunch, originalLayerStates);
+assert.deepEqual(durableModel, originalLayerStates);
+assert.deepEqual(durableEvents, [
+  'relaunch:before_restore',
+  `set:false:${HEAVY_MAP_LAYER_KEYS.filter(key => originalLayerStates[key] === false).join(',')}`,
+  `set:true:${HEAVY_MAP_LAYER_KEYS.filter(key => originalLayerStates[key] === true).join(',')}`,
+  'capture',
+  `persist:${LAYER_PERSISTENCE_SETTLE_MS}`,
+  'relaunch:after_restore',
+  'capture',
+]);
+
+let persistedCaptureCount = 0;
+const persistedMismatchModel = { ...originalLayerStates };
+const failedDurableRestoration = await durablyRestoreCapturedHeavyLayers({
+  initialStates: originalLayerStates,
+  relaunch: async phase => {
+    if (phase === 'after_restore') persistedMismatchModel.fire = !originalLayerStates.fire;
+  },
+  setLayers: async (keys, desiredState) => {
+    for (const key of keys) persistedMismatchModel[key] = desiredState;
+    return Object.fromEntries(keys.map(key => [key, persistedMismatchModel[key]]));
+  },
+  captureStates: async () => {
+    persistedCaptureCount += 1;
+    return { ...persistedMismatchModel };
+  },
+  waitForPersistence: async () => {},
+});
+assert.equal(failedDurableRestoration.restored, false);
+assert.equal(failedDurableRestoration.failureCode, 'layer_restore_persisted_mismatch_fire');
+assert.equal(failedDurableRestoration.recovery.attempt_count, FINAL_LAYER_REPAIR_MAX_ATTEMPTS);
+assert.equal(failedDurableRestoration.recovery.attempts.length, FINAL_LAYER_REPAIR_MAX_ATTEMPTS);
+assert.equal(failedDurableRestoration.recovery.retry_reason, 'layer_restore_persisted_mismatch_fire');
+assert.equal(failedDurableRestoration.recovery.recovered_after_retry, false);
+assert.equal(failedDurableRestoration.recovery.post_restore_relaunch_completed, true);
+assert.deepEqual(
+  failedDurableRestoration.recovery.failure_observed_state,
+  persistedMismatchModel,
+  'the report must preserve the exact boolean recovery state seen after failure',
+);
+assert.equal(
+  persistedCaptureCount,
+  3 * FINAL_LAYER_REPAIR_MAX_ATTEMPTS,
+  'a persistent mismatch receives one bounded retry and records each verification/failure read',
+);
+
+let transientPostRestoreCount = 0;
+const recoverableMismatchEvents = [];
+const recoverableMismatchModel = { ...disabledLayerStates };
+const recoveredDurableRestoration = await durablyRestoreCapturedHeavyLayers({
+  initialStates: originalLayerStates,
+  relaunch: async phase => {
+    recoverableMismatchEvents.push(`relaunch:${phase}`);
+    if (phase === 'after_restore') {
+      transientPostRestoreCount += 1;
+      if (transientPostRestoreCount === 1) {
+        recoverableMismatchModel.fire = !originalLayerStates.fire;
+      }
+    }
+  },
+  setLayers: async (keys, desiredState) => {
+    recoverableMismatchEvents.push(`set:${desiredState}`);
+    for (const key of keys) recoverableMismatchModel[key] = desiredState;
+    return Object.fromEntries(keys.map(key => [key, recoverableMismatchModel[key]]));
+  },
+  captureStates: async () => ({ ...recoverableMismatchModel }),
+  waitForPersistence: async () => {},
+});
+assert.equal(recoveredDurableRestoration.restored, true);
+assert.equal(recoveredDurableRestoration.failureCode, null);
+assert.equal(recoveredDurableRestoration.recovery.attempt_count, 2);
+assert.equal(recoveredDurableRestoration.recovery.retry_reason, 'layer_restore_persisted_mismatch_fire');
+assert.equal(recoveredDurableRestoration.recovery.recovered_after_retry, true);
+assert.deepEqual(recoverableMismatchModel, originalLayerStates);
+assert.equal(
+  recoverableMismatchEvents.filter(event => event === 'relaunch:after_restore').length,
+  2,
+  'a recoverable persisted mismatch receives exactly one final retry',
+);
+
+let nonPersistedFailureRelaunches = 0;
+const unsafeRetryGuard = await durablyRestoreCapturedHeavyLayers({
+  initialStates: originalLayerStates,
+  relaunch: async () => { nonPersistedFailureRelaunches += 1; },
+  setLayers: async () => { throw new MemoryGateError('layer_selector_unavailable_fire'); },
+  captureStates: async () => ({ ...disabledLayerStates }),
+  waitForPersistence: async () => {},
+});
+assert.equal(unsafeRetryGuard.restored, false);
+assert.equal(unsafeRetryGuard.failureCode, 'layer_selector_unavailable_fire');
+assert.equal(unsafeRetryGuard.recovery.attempt_count, 1);
+assert.equal(nonPersistedFailureRelaunches, 1, 'unknown selector state is never blindly retried');
+
+const primaryFailureReport = {
+  result: 'failed',
+  failure_code: 'total_pss_limit_failed',
+  restoration_failure_code: null,
+  layers: { restored: false, recovery: null },
+};
+applyLayerRestorationOutcome(primaryFailureReport, failedDurableRestoration);
+assert.equal(primaryFailureReport.failure_code, 'total_pss_limit_failed');
+assert.equal(primaryFailureReport.restoration_failure_code, 'layer_restore_persisted_mismatch_fire');
+assert.deepEqual(primaryFailureReport.layers.recovery, failedDurableRestoration.recovery);
+
+const restorationOnlyFailureReport = {
+  result: 'passed',
+  failure_code: null,
+  restoration_failure_code: null,
+  layers: { restored: false, recovery: null },
+};
+applyLayerRestorationOutcome(restorationOnlyFailureReport, failedDurableRestoration);
+assert.equal(restorationOnlyFailureReport.result, 'failed');
+assert.equal(restorationOnlyFailureReport.failure_code, null, 'restoration must not fabricate a primary gate failure');
+assert.equal(restorationOnlyFailureReport.restoration_failure_code, 'layer_restore_persisted_mismatch_fire');
+
+const lifecycleReport = () => ({
+  result: 'running',
+  failure_code: null,
+  restoration_failure_code: null,
+  completed_at: null,
+  layers: {
+    initial: null,
+    baseline: null,
+    restored: false,
+    recovery: null,
+  },
+  memory: {
+    baseline_samples_kb: [],
+    baseline_evaluation: null,
+  },
+});
+
+const baselineFailureEvents = [];
+const baselineFailureReport = lifecycleReport();
+let baselineInitialStates = null;
+let finalizedBaselineFailure = null;
+const completedBaselineFailure = await executeMemoryGateLifecycle({
+  report: baselineFailureReport,
+  executeGate: async () => {
+    baselineFailureEvents.push('execute');
+    baselineInitialStates = { ...originalLayerStates };
+    baselineFailureReport.layers.initial = baselineInitialStates;
+    baselineFailureReport.layers.baseline = { ...disabledLayerStates };
+    baselineFailureReport.memory.baseline_samples_kb = [520_000, 521_000, 519_000];
+    baselineFailureReport.memory.baseline_evaluation = evaluateBaselinePssLimit(
+      baselineFailureReport.memory.baseline_samples_kb,
+    );
+    if (!baselineFailureReport.memory.baseline_evaluation.passed) {
+      throw new MemoryGateError('total_pss_limit_failed');
+    }
+  },
+  getInitialStates: () => baselineInitialStates,
+  restoreLayers: async states => {
+    baselineFailureEvents.push('restore');
+    assert.deepEqual(states, originalLayerStates);
+    return durableRestoration;
+  },
+  finalizeReport: async report => {
+    baselineFailureEvents.push('finalize');
+    finalizedBaselineFailure = JSON.parse(JSON.stringify(report));
+  },
+  completedAt: () => '2026-07-23T00:00:00.000Z',
+});
+assert.deepEqual(baselineFailureEvents, ['execute', 'restore', 'finalize']);
+assert.equal(completedBaselineFailure.result, 'failed');
+assert.equal(completedBaselineFailure.failure_code, 'total_pss_limit_failed');
+assert.equal(completedBaselineFailure.layers.restored, true);
+assert.equal(completedBaselineFailure.restoration_failure_code, null);
+assert.equal(completedBaselineFailure.completed_at, '2026-07-23T00:00:00.000Z');
+assert.deepEqual(finalizedBaselineFailure, completedBaselineFailure);
+
+const dualFailureReport = lifecycleReport();
+let dualFailureInitialStates = null;
+let finalizedDualFailure = null;
+const completedDualFailure = await executeMemoryGateLifecycle({
+  report: dualFailureReport,
+  executeGate: async () => {
+    dualFailureInitialStates = { ...originalLayerStates };
+    throw new MemoryGateError('total_pss_limit_failed');
+  },
+  getInitialStates: () => dualFailureInitialStates,
+  restoreLayers: async () => failedDurableRestoration,
+  finalizeReport: async report => {
+    finalizedDualFailure = JSON.parse(JSON.stringify(report));
+  },
+  completedAt: () => '2026-07-23T00:00:01.000Z',
+});
+assert.equal(completedDualFailure.result, 'failed');
+assert.equal(completedDualFailure.failure_code, 'total_pss_limit_failed');
+assert.equal(completedDualFailure.restoration_failure_code, 'layer_restore_persisted_mismatch_fire');
+assert.equal(completedDualFailure.layers.restored, false);
+assert.equal(completedDualFailure.layers.recovery.attempt_count, FINAL_LAYER_REPAIR_MAX_ATTEMPTS);
+assert.deepEqual(finalizedDualFailure, completedDualFailure, 'the finalized report retains both independent failures');
 
 assert.equal(assertSafeMemoryGateAdbArgs(['devices', '-l']), true);
 const remoteUi = '/sdcard/trailhead-memory-gate-123-456.xml';

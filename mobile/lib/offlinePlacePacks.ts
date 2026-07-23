@@ -2,9 +2,17 @@ import * as FileSystem from 'expo-file-system/legacy';
 import type { PlacePack, PlacePackPoint } from './api';
 import { accountStorage } from './storage';
 import { nextOfflinePlacePackIndex } from './offlinePlacePackIndex';
+import {
+  collectOfflinePlacePackDiagnosticsV1,
+  nextOfflinePlacePackPointMetadataV1,
+  parseOfflinePlacePackPointMetadataV1,
+  type OfflinePlacePackDiagnosticsInventoryV1,
+  type OfflinePlacePackPointMetadataV1,
+} from './offlinePlacePackDiagnostics';
 
 const DIR = FileSystem.documentDirectory + 'offline_place_packs/';
 const INDEX_PATH = DIR + '_index.json';
+const POINT_METADATA_PATH = DIR + '_point_metadata_v1.json';
 
 export interface OfflinePlacePackSummary {
   pack_id: string;
@@ -42,6 +50,23 @@ async function writeIndex(ids: string[]) {
   await FileSystem.writeAsStringAsync(INDEX_PATH, JSON.stringify(ids));
 }
 
+async function getPointMetadata(): Promise<OfflinePlacePackPointMetadataV1[]> {
+  try {
+    const raw = await FileSystem.readAsStringAsync(POINT_METADATA_PATH);
+    return parseOfflinePlacePackPointMetadataV1(JSON.parse(raw));
+  } catch {
+    return [];
+  }
+}
+
+async function writePointMetadata(rows: readonly OfflinePlacePackPointMetadataV1[]) {
+  await ensureDir();
+  await FileSystem.writeAsStringAsync(POINT_METADATA_PATH, JSON.stringify({
+    schema: 'offline_place_pack_point_metadata_v1',
+    packs: rows,
+  }));
+}
+
 export async function saveOfflinePlacePack(pack: PlacePack, preserveIds: string[] = []): Promise<void> {
   const epoch = accountStorage.epoch();
   await accountStorage.run(async () => {
@@ -50,6 +75,12 @@ export async function saveOfflinePlacePack(pack: PlacePack, preserveIds: string[
     const index = await getIndex();
     const updated = nextOfflinePlacePackIndex(index, pack.pack_id, preserveIds);
     await writeIndex(updated);
+    const pointMetadata = await getPointMetadata();
+    await writePointMetadata(nextOfflinePlacePackPointMetadataV1(
+      pointMetadata,
+      pack.pack_id,
+      pack.points?.length ?? 0,
+    )).catch(() => {});
   }, epoch);
 }
 
@@ -92,12 +123,31 @@ export async function getOfflinePlacePackStorageBytes(): Promise<Record<string, 
   }
 }
 
+/**
+ * Lightweight QA inventory. This reads only the small index/metadata sidecars
+ * and file stats; it deliberately never opens or parses a downloaded pack.
+ * Legacy packs created before the metadata sidecar are reported as unknown.
+ */
+export async function getOfflinePlacePackDiagnosticsInventory(): Promise<OfflinePlacePackDiagnosticsInventoryV1> {
+  const [index, pointMetadata] = await Promise.all([getIndex(), getPointMetadata()]);
+  return collectOfflinePlacePackDiagnosticsV1({
+    packIds: index,
+    pointMetadata,
+    getFileSize: async packId => {
+      const info = await FileSystem.getInfoAsync(packPath(packId)).catch(() => null);
+      return info?.exists ? Number((info as any).size ?? 0) : 0;
+    },
+  });
+}
+
 export async function deleteOfflinePlacePack(packId: string): Promise<void> {
   const epoch = accountStorage.epoch();
   await accountStorage.run(async () => {
     await FileSystem.deleteAsync(packPath(packId), { idempotent: true }).catch(() => {});
     const index = await getIndex();
     await writeIndex(index.filter(id => id !== packId));
+    const pointMetadata = await getPointMetadata();
+    await writePointMetadata(pointMetadata.filter(row => row.pack_id !== packId)).catch(() => {});
   }, epoch);
 }
 

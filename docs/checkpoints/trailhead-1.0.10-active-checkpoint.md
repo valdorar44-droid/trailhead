@@ -298,14 +298,39 @@ Read this file before resuming the 1.0.10 overhaul after a restart or context co
 - Rich park data is legitimately sparse: the catalog contains `474` NPS hubs but only five current rich per-park cache packs. Missing modules must not be fabricated.
 - M3 must use one stable typed module registry per detail revision, explicit loading/ready/empty/error states, deterministic richness-preserving merges, virtualized child lists, and a visible unavailable-module reconciliation while preserving real NPS content.
 
+## Checkpoint M2.1 — Instant-search integration and Android proof
+
+- Timestamp: `2026-07-23T12:39:00-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; implementation and paired-preview source HEAD: `2d48de0e86c2a91fcac118b5d37ca5213e955970`. The checkpoint/test commit follows this source SHA.
+- Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. `.cursor/` and `dashboard/explore_serving_index_v2.json` remain excluded and unstaged.
+- M2 now renders server-ranked `SearchResultV2` rows directly in Map, Route Editor, Explore, and the shared search sheet. Legacy conversion or external resolution happens only after an explicit press. Cached/offline rows, server order, route context, pagination, stale-generation rejection, and separate Viator entry behavior remain intact.
+- Map now exposes an explicit `Search this area` action after camera movement. Camera movement alone cannot launch, select, or replace a search result.
+- The approved Figma treatment was implemented from node `516:784`: warm white, near-black text, restrained orange, Barlow Condensed heading, shared result rows, stable keyboard, and no provider/developer filler.
+- Verification passed on the implementation SHA:
+  - Search V2 presentation `9/9`, surface persistence `15/15`, and controller `31/31`.
+  - `npx tsc --noEmit`, route audit (`13` cases), selector audit, copy audit (`160` files), profile-map audit, and `git diff --check`.
+  - Full `npm run audit:prepreview` in `472` seconds, including native/config drift, Android Auto debug tests, Search V2, Offline V1/V2, Originals, Explore/NPS/Viator/copy/privacy checks, TypeScript, and all `774` backend tests.
+- One paired preview OTA was published from the exact immutable implementation SHA after Android/iOS/web Sentry source maps uploaded:
+  - Channel `preview`, channel ID `019dbc97-3cde-795b-a35d-e6aa985060d3`.
+  - Candidate branch `preview-candidate-2d48de0e86c2a91fcac118b5d37ca5213e955970-mrxrlajv-c74b0d6b64372d06abdaf07b`, branch ID `019f8ff6-a8d2-73e3-af55-d32a52ac5925`.
+  - Android build `59`, runtime `native-1.0.10-android.1`, group `5520252e-658e-48c6-aa64-219ae0ca2b77`, update `019f8ff6-ceb9-7eca-879a-b1093e431aca`.
+  - iOS build `54`, runtime `native-1.0.10-ios.1`, group `39c62c33-aad8-4c89-bbff-1a40330fad0b`, update `019f8ff6-ceb9-734c-990d-180930d44941`.
+- The Samsung admin QA screen verified version `1.0.10`, build `59`, channel `preview`, the full implementation SHA, Android runtime, update ID, and `Ready` without clearing account data.
+- Android rapid A→B typing passed in `mobile/.maestro/flows/02-search-rapid-typing.yaml`. A new deterministic flow, `mobile/.maestro/flows/05-search-canonical-result.yaml`, clears prior input and proves the returned canonical NPS row `place:nps:yell`, the results list, and absence of the empty state before capturing evidence.
+- Canonical-result device proof passed on Samsung `RFCR408DA9B`. Evidence is under `output/maestro/m2-canonical-2026-07-23/`; screenshot SHA-256 is `e400fc3e5eb849730c21c962768916203285f50ebb9766c87a23c5f0ed4dff89`.
+- The initial ten-second failure was a test-design error, not missing data: it asserted a park title below earlier Yellowstone trail rows, and a later version accidentally matched input text. UI hierarchy inspection proved real canonical rows; the final test asserts the stable returned result ID. Do not reopen this as a catalog defect without new evidence.
+- Memory decision remains unchanged: the cold-start ANR P1 is closed; the interrupted ten-cycle report is inconclusive and intentionally deferred to the frozen production candidate. It is not claimed as passed and is not rerun during M2.
+- Open P0/P1 defects reproduced on this candidate: none. Remaining release evidence debt: final frozen-candidate Memory Gate V3, Search V2 production-like latency sampling, paired iOS M2 delta, and later full regression.
+- Task-owned background processes: none. Maestro and the Gradle daemon were stopped; only ADB remains intentionally active. The long-lived Codex MCP processes and pre-existing localhost forwarder are not Trailhead test jobs.
+
 ## Next exact actions
 
-1. Diagnose the cold signed-in Explore ANR captured in `output/android-audit/2026-07-23T14-43-52-626Z--m1-explore-anr/`, using bounded log/timestamp reads that do not expose scrubbed metadata.
-2. Add deterministic characterization for the demonstrated startup stall and live-ANR gate detection. Fix only the correlated application hot path; keep phase budgets and Layers behavior unchanged.
-3. Run focused unit/type/copy/privacy tests. If application source changes, run the relevant pre-preview gates, publish one paired preview OTA from one immutable SHA with Sentry source maps, and verify both identities.
-4. Rerun the complete Samsung Memory Gate V3 without clearing the signed-in account. Preserve the atomic report, hashes, ten-cycle curves, recovery, live/exit evidence, and exact saved-layer restoration.
-5. Only after the gate passes, run the affected Android delta and paired iOS M1 spot checks already listed in Checkpoint B scope.
-6. Commit/push Checkpoint B and assemble the M1 review packet. Do not begin M2 while any P0/P1 remains.
+1. Review the M2 device screenshot and interaction packet without repeating the broad crawl or memory run.
+2. Begin M3 with the working Layers implementation preserved behind one exact-key registry/parity test; do not reopen manual layer functionality testing.
+3. Migrate the shared sheet chrome incrementally: generic place, campground, trail/trailhead, report, then Explore hub. Retire no old sheet until its parity test passes.
+4. Repair Explore hub tab/data-state glitches with one stable typed module registry, deterministic richness-preserving merges, explicit loading/ready/empty/error states, virtualized lists, and no fabricated NPS modules.
+5. Preserve campground site types and all existing modules, NPS hub depth, Viator external booking, comments, ratings, edits, reports, Offline, Originals, navigation, and the compass.
+6. After each M3 family, run only its deterministic delta, publish a paired preview from one immutable SHA when warranted, and append the next checkpoint.
 
 ## Checkpoint maintenance
 

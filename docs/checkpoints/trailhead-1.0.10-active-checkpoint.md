@@ -1,6 +1,6 @@
 # Trailhead 1.0.10 Active Checkpoint
 
-Last updated: 2026-07-23 05:19:27 CDT (America/Winnipeg)
+Last updated: 2026-07-23 06:20:05 CDT (America/Winnipeg)
 
 ## Resume protocol
 
@@ -14,7 +14,7 @@ Read this file before resuming the 1.0.10 overhaul after a restart or context co
 ## Source checkpoint
 
 - Branch: `feat/trailhead-1.0.10-overhaul`
-- Current committed Memory Gate V3 implementation baseline and remote branch HEAD: `d5d73924dc5a969a66ac9eba2b85acca5db0cc19`
+- Memory Gate V3 implementation baseline: `d5d73924dc5a969a66ac9eba2b85acca5db0cc19`; current evidence harness/checkpoint HEAD before this documentation-only commit: `65451cf7bab0eed23a1f50c212cb084ff78031f8`.
 - Exact source installed on the paired preview remains `83287394ce41f1100bd980c9249f20d364b51db7`; the gate-only commit is an approved harness delta and is not a new OTA.
 - M1 commit series created from the verified tree:
   - `4fa0379 feat(api): harden fire and explore delivery`
@@ -70,6 +70,27 @@ Read this file before resuming the 1.0.10 overhaul after a restart or context co
 - Do not repeat: Figma/research packets, the 33-run Android crawl, NPS research, broad layer toggling, the already-passed cold QA proof, or the full pre-preview suite before the exact Samsung run unless source changes invalidate it.
 - Task-owned background processes at Checkpoint A: none; the Gradle daemon was explicitly stopped after verification.
 
+## Interim device evidence — first V3 run
+
+- Evidence subject/harness HEAD: `65451cf7bab0eed23a1f50c212cb084ff78031f8`; installed OTA source remained `83287394ce41f1100bd980c9249f20d364b51db7` with the Android build/runtime/update identity recorded above.
+- Atomic report: `output/android-map-memory-gate/2026-07-23T10-21-20-418Z/report.json`.
+- Report SHA-256: `f2140b20b8a0ae3d3297a4f41052e9bad694c87f9826b4c27469be9ec408867a`.
+- Run window: `2026-07-23T10:21:20.419Z` through `2026-07-23T11:14:19.694Z` (about 53 minutes). The external 30-minute command wrapper expired, but the original bounded runner continued to finalization; no second run was started.
+- Result: failed with `layer_toggle_failed_ava` while disabling the Avalanche layer in cycle 5. Four complete peak/recovery cycles and the fifth heavy peak were captured before the interruption. This is an automation/workload interruption, not a reopened Layers product defect: the user had already verified Layers on Android and iPhone, the app stayed alive, and exact saved layer choices were restored and verified across relaunch.
+- Safety evidence: zero new exit records, OOMs, LMKs, ANRs, process deaths, or state loss; process identity remained stable. Restoration returned exactly to `3d=true`, `lands=true`, `pois=true`, `trails=true`, with `usgs`, `fire`, `ava`, `radar`, and `mvum` false.
+- Explore idle failed the light-screen budget:
+  - Total PSS samples: `835357`, `662421`, `662344` KB; median `662421` KB versus `650000` KB budget.
+  - RSS samples: `768080`, `595792`, `595748` KB; median `595792` KB versus `550000` KB budget.
+  - The first sample's native-heap PSS was `237466` KB and then settled near `73` MB, while Unknown PSS stayed near `226` MB. This is evidence for profiling, not permission to weaken the source-controlled budget.
+- Ordinary Map idle passed: median/max total PSS `637924`/`652941` KB and median/max RSS `597388`/`612820` KB.
+- The four complete heavy peaks passed their phase cap: median/max total PSS `1138611.5`/`1194264` KB and median/max RSS `936788`/`964052` KB.
+- The four complete disabled valleys passed the ordinary Map cap: median/max total PSS `671825.5`/`680068` KB and median/max RSS `631776`/`638332` KB.
+- The partial curve showed no demonstrated ratchet: disabled PSS growth `0%`, heavy PSS growth about `0.60%`, heavy RSS growth about `5.71%`, and retained total-PSS slope about `1771` KB/cycle. These four cycles are useful diagnostic evidence but cannot satisfy the required ten-cycle acceptance or post-Map/Explore recovery checks.
+- Open P1s: Explore idle over budget; complete-cycle evidence unavailable because the layer-workload automation aborted. No Map phase budget, app-lifecycle, saved-layer, OOM, ANR, or process-death P1 was demonstrated.
+- Exact next action: make a bounded retry/continuation change that records workload-integrity failures but does not end diagnostic cycling unless the app dies or crosses the phase safety cap; profile the Explore idle allocation/retention path; rerun the full exact-candidate gate afterward.
+- Do not repeat: the 33-run crawl, NPS research, Figma packets, broad manual layer audit, cold QA proof, or first V3 run without the continuation/profile fix.
+- Task-owned background processes after report finalization: none.
+
 ## Verified completed work
 
 - The final frozen source tree passed `npm run audit:prepreview`:
@@ -116,8 +137,9 @@ Read this file before resuming the 1.0.10 overhaul after a restart or context co
 ## Known unresolved blockers
 
 - The cold direct QA deep-link crash fix is verified on `8328739`; retain its regression test but do not reopen it without new evidence.
-- Memory Gate V3 is committed, pushed, and ready. The exact `8328739` Samsung device run is now the next blocking evidence.
-- Signed-in Explore/Plan idle remains blocking if it exceeds the light-phase budget. Heavy Map/navigation allowances cannot excuse idle account-hydration retention.
+- Memory Gate V3 is committed and pushed; its first exact `8328739` Samsung run is preserved in **Interim device evidence** and identified the two blockers below.
+- The first exact-device run proved Map idle and the observed heavy/disabled phases stayed inside their phase budgets, but it captured only four complete cycles before `layer_toggle_failed_ava`. The runner must finish all ten attempts and recovery phases without weakening exact state/restoration checks.
+- Signed-in Explore/Plan idle is blocking: median total PSS was `662421` KB and median RSS was `595792` KB. Heavy Map/navigation allowances cannot excuse idle account-hydration retention.
 - Navigation, 3D, and Originals are recorded as separate active-experience phases; missing active-phase evidence does not fail ordinary M1 Map acceptance, but those experiences still require their own later acceptance runs.
 - Only after that pass should the affected Android delta crawl and iOS shared spot-check run. Do not repeat the 33 baseline crawls.
 - EAS preview credentials for Branch, Sentry, Google Maps, and RNMapbox were verified without exposing their values before publication.
@@ -131,10 +153,10 @@ Read this file before resuming the 1.0.10 overhaul after a restart or context co
 
 ## Next exact actions
 
-1. Run the exact command in **Checkpoint A** against the installed `8328739` Samsung preview without clearing the signed-in account.
-2. Preserve the atomic report, SHA-256, phase table, recovery curves, process/exit evidence, and exact layer-restoration result.
-3. If Explore idle fails, profile signed-in hydration and retained repository state; add the backward-compatible compact trip-list contract only if evidence still identifies legacy trip documents as the cause.
-4. If Map phases fail, profile renderer duplication, retained sources, images, GeoJSON, subscriptions, and inactive visual work. Fix only demonstrated causes, then rerun the complete gate.
+1. Fix the bounded layer workload so a transient toggle failure is recorded/retried and cannot terminate the ten diagnostic cycles unless the app dies or crosses a phase safety cap. Keep exact verification and final restoration fail-closed.
+2. Profile signed-in Explore hydration and retained repository state using the captured phase breakdown; add the backward-compatible compact trip-list contract only if evidence still identifies legacy trip documents as the cause.
+3. Commit/push the evidence-backed fixes, update the gate checkpoint, and rerun the exact **Checkpoint A** command without clearing the signed-in account.
+4. Preserve the new atomic report, SHA-256, full ten-cycle curves, post-Map/Explore recovery, process/exit evidence, and exact layer restoration.
 5. After memory passes, run only the affected Android delta and iOS shared spot-check, then assemble Checkpoint B and the M1 review packet. Do not begin M2 with an unresolved P0/P1.
 
 ## Checkpoint maintenance

@@ -12,8 +12,10 @@ import {
 import {
   HttpSearchV2Client,
   SearchV2FeatureDisabledError,
+  SearchV2HttpError,
   SearchV2TimeoutError,
   normalizeRequest,
+  searchV2DiagnosticCode,
   type SearchV2Client,
 } from '../client';
 import {
@@ -202,6 +204,47 @@ test('HTTP client bounds a stalled request and aborts its transport', async () =
     (error: unknown) => error instanceof SearchV2TimeoutError && error.timeoutMs === 20,
   );
   assert.equal((transportSignal as AbortSignal | null)?.aborted, true);
+});
+
+test('canonical suggestions keep a resilient ceiling while provider enrichment stays bounded', async () => {
+  const abortedAt: number[] = [];
+  const client = new HttpSearchV2Client({
+    baseUrl: 'https://api.example.test',
+    isEnabled: () => true,
+    deadlinesMs: { canonicalSuggest: 35, suggest: 10 },
+    fetchImpl: (async (_url: string | URL | Request, init?: RequestInit) => (
+      await new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => {
+          abortedAt.push(Date.now());
+          reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }));
+        }, { once: true });
+      })
+    )) as typeof fetch,
+  });
+
+  const canonicalStartedAt = Date.now();
+  await assert.rejects(
+    client.suggest({ query: 'Yellowstone', session_id: 'session-test', include_external: false }),
+    (error: unknown) => error instanceof SearchV2TimeoutError && error.timeoutMs === 35,
+  );
+  const canonicalDuration = abortedAt[0] - canonicalStartedAt;
+
+  const providerStartedAt = Date.now();
+  await assert.rejects(
+    client.suggest({ query: 'Yellowstone', session_id: 'session-test', include_external: true }),
+    (error: unknown) => error instanceof SearchV2TimeoutError && error.timeoutMs === 10,
+  );
+  const providerDuration = abortedAt[1] - providerStartedAt;
+
+  assert.ok(canonicalDuration >= providerDuration + 15);
+});
+
+test('search diagnostics expose only fixed error classes and HTTP status', () => {
+  assert.equal(searchV2DiagnosticCode(new SearchV2TimeoutError(1_500)), 'timeout');
+  assert.equal(searchV2DiagnosticCode(new SearchV2FeatureDisabledError()), 'disabled');
+  assert.equal(searchV2DiagnosticCode(new SearchV2HttpError('private response', 422)), 'http_422');
+  assert.equal(searchV2DiagnosticCode(new TypeError('private URL failed')), 'network');
+  assert.equal(searchV2DiagnosticCode(new Error('private message')), 'unknown');
 });
 
 test('HTTP client deadline covers a response body that stalls after headers', async () => {

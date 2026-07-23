@@ -225,6 +225,7 @@ import {
   normalizeSearchV2Query,
   productFeaturesAllowSearchV2,
   searchPlaceIsTemporary,
+  searchV2DiagnosticCode,
   searchResultV2ToDisplayPlace,
   searchResultV2ToLegacyPlace,
   type SearchBoundsV2,
@@ -24781,7 +24782,12 @@ function MapScreen() {
                   <Text style={[s.inlineMapSearchStateText, { color: mapChrome.textMuted }]}>Searching</Text>
                 </View>
               ) : searchV2Enabled && mapSearchV2.state.status === 'error' && mapSearchV2RenderResults.length === 0 ? (
-                <Text style={[s.inlineMapSearchStateText, { color: mapChrome.textMuted }]}>Search unavailable</Text>
+                <Text
+                  style={[s.inlineMapSearchStateText, { color: mapChrome.textMuted }]}
+                  testID={`map.search.inline.error.${searchV2DiagnosticCode(mapSearchV2.state.error)}`}
+                >
+                  Search unavailable
+                </Text>
               ) : !searchV2Enabled && mapSearchDisplayResults.some(place => place.name === '__error__') ? (
                 <Text style={[s.inlineMapSearchStateText, { color: mapChrome.textMuted }]}>Search unavailable</Text>
               ) : searchV2Enabled ? (

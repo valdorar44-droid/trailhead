@@ -179,7 +179,9 @@ class SearchRequestV2(BaseModel):
     bounds: SearchBoundsV2 | None = None
     route_ref: str | None = Field(default=None, max_length=128)
     radius_meters: int | None = Field(default=None, ge=100, le=250_000)
-    categories: list[str] = Field(default_factory=list, max_length=12)
+    # Map's camp scope intentionally carries the full supported camp taxonomy.
+    # Keep a bounded contract, but do not silently drop legitimate categories.
+    categories: list[str] = Field(default_factory=list, max_length=24)
     filters: dict[str, Any] = Field(default_factory=dict)
     cursor: str | None = Field(default=None, max_length=512)
     limit: int = Field(default=20, ge=1, le=30)

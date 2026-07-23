@@ -20,10 +20,14 @@ export type HttpSearchV2ClientOptions = {
   isEnabled: SearchV2FeatureGate;
   fetchImpl?: typeof fetch;
   getHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
-  deadlinesMs?: Partial<Record<'suggest' | 'results' | 'resolve', number>>;
+  deadlinesMs?: Partial<Record<'canonicalSuggest' | 'suggest' | 'results' | 'resolve', number>>;
 };
 
 const DEFAULT_SEARCH_DEADLINES_MS = Object.freeze({
+  // This is a resilience ceiling, not the performance target. Canonical
+  // results are still expected in under 400 ms, but a slow radio should not
+  // turn an otherwise useful Trailhead match into an empty error state.
+  canonicalSuggest: 20_000,
   suggest: 1_500,
   results: 1_500,
   resolve: 4_000,
@@ -66,7 +70,7 @@ export class HttpSearchV2Client implements SearchV2Client {
   private readonly isEnabled: SearchV2FeatureGate;
   private readonly fetchImpl: typeof fetch;
   private readonly getHeaders: () => Record<string, string> | Promise<Record<string, string>>;
-  private readonly deadlinesMs: Record<'suggest' | 'results' | 'resolve', number>;
+  private readonly deadlinesMs: Record<'canonicalSuggest' | 'suggest' | 'results' | 'resolve', number>;
 
   constructor(options: HttpSearchV2ClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, '');
@@ -74,6 +78,12 @@ export class HttpSearchV2Client implements SearchV2Client {
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.getHeaders = options.getHeaders ?? (() => ({}));
     this.deadlinesMs = {
+      canonicalSuggest: normalizedDeadline(
+        options.deadlinesMs?.canonicalSuggest,
+        options.deadlinesMs?.suggest == null
+          ? DEFAULT_SEARCH_DEADLINES_MS.canonicalSuggest
+          : normalizedDeadline(options.deadlinesMs.suggest, DEFAULT_SEARCH_DEADLINES_MS.suggest),
+      ),
       suggest: normalizedDeadline(options.deadlinesMs?.suggest, DEFAULT_SEARCH_DEADLINES_MS.suggest),
       results: normalizedDeadline(options.deadlinesMs?.results, DEFAULT_SEARCH_DEADLINES_MS.results),
       resolve: normalizedDeadline(options.deadlinesMs?.resolve, DEFAULT_SEARCH_DEADLINES_MS.resolve),
@@ -112,7 +122,9 @@ export class HttpSearchV2Client implements SearchV2Client {
     const payload = await this.requestJson(`/api/search/v2/${mode}?${query}`, {
       method: 'GET',
       signal: options.signal,
-    }, this.deadlinesMs[mode]);
+    }, mode === 'suggest' && normalized.include_external === false
+      ? this.deadlinesMs.canonicalSuggest
+      : this.deadlinesMs[mode]);
     if (!isSearchPage(payload)) throw new SearchV2HttpError('Search returned an invalid response.', 502, payload);
     return payload;
   }
@@ -146,6 +158,16 @@ export class HttpSearchV2Client implements SearchV2Client {
       return payload;
     });
   }
+}
+
+/** A fixed, privacy-safe value suitable for QA selectors and diagnostics. */
+export function searchV2DiagnosticCode(error: unknown): string {
+  if (error instanceof SearchV2TimeoutError) return 'timeout';
+  if (error instanceof SearchV2FeatureDisabledError) return 'disabled';
+  if (error instanceof SearchV2HttpError) return `http_${error.status}`;
+  if (error instanceof TypeError) return 'network';
+  if (error instanceof Error && error.name === 'AbortError') return 'aborted';
+  return 'unknown';
 }
 
 async function runWithSearchDeadline<T>(

@@ -98,6 +98,17 @@ def _fixture_service(*, external_provider=None, timeout: float = 0.2) -> SearchV
 
 
 class SearchV2ServiceTests(unittest.IsolatedAsyncioTestCase):
+    def test_request_accepts_the_complete_bounded_category_taxonomy(self):
+        categories = [f"camp_type_{index}" for index in range(16)]
+        request = SearchRequestV2(query="camps", categories=categories)
+
+        self.assertEqual(request.categories, categories)
+        with self.assertRaises(ValidationError):
+            SearchRequestV2(
+                query="camps",
+                categories=[f"category_{index}" for index in range(25)],
+            )
+
     async def test_moab_destination_exact_identity_wins(self):
         service = _fixture_service()
         response = await service.resolve(SearchRequestV2(

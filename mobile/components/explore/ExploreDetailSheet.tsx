@@ -17,6 +17,11 @@ import {
   type ExploreDetailNavigationState,
   type ExploreDetailTab,
 } from '@/lib/exploreDetailNavigation';
+import {
+  exploreDetailDataRevision,
+  mergeExploreDetailModuleRegistry,
+  type ExploreDetailModuleRegistrySnapshot,
+} from '@/lib/exploreDetailModuleRegistry';
 import { ExploreTrailArea } from './ExploreTrailArea';
 import { StaticMapboxPreview, type StaticMapboxPin } from './StaticMapboxPreview';
 import {
@@ -514,7 +519,7 @@ export function ExploreDetailSheet({
     .map(item => [item.title, item.description, item.kind, item.source_label, item.source].filter(Boolean).join(' '))
     .join(' ');
 
-  const detailModules = useMemo<ExploreDetailModule[]>(() => {
+  const rawDetailModules = useMemo<ExploreDetailModule[]>(() => {
     const modules: ExploreDetailModule[] = [];
     const usedTileImages = new Set<string>();
     const add = (module: ExploreDetailModule | null | false | undefined) => {
@@ -692,11 +697,23 @@ export function ExploreDetailSheet({
     weather?.loading,
   ]);
 
+  const moduleRegistryRef = useRef<ExploreDetailModuleRegistrySnapshot<ExploreDetailModule> | null>(null);
+  const detailDataRevision = exploreDetailDataRevision(place);
+  const detailModules = useMemo(() => {
+    const registry = mergeExploreDetailModuleRegistry(moduleRegistryRef.current, {
+      placeId: place.id,
+      dataRevision: detailDataRevision,
+      modules: rawDetailModules,
+    });
+    moduleRegistryRef.current = registry;
+    return registry.modules;
+  }, [detailDataRevision, place.id, rawDetailModules]);
   const visibleModules = detailModules.filter(module => {
     if (!searchNeedle) return true;
     return `${module.label} ${module.detail} ${module.searchText}`.toLowerCase().includes(searchNeedle);
   });
   const activeModuleDef = detailModules.find(module => module.key === activeModule) ?? null;
+  const activeModuleUnavailable = activeModule != null && activeModuleDef == null;
   const heroWeather = weather ?? (place.summary.lat != null && place.summary.lng != null
     ? { icon: 'partly-sunny-outline' as const, temp: 'Weather', detail: 'Forecast' }
     : null);
@@ -1491,7 +1508,27 @@ export function ExploreDetailSheet({
         </ScrollView>
         )}
 
-        {activeModuleDef ? (
+        {activeModuleUnavailable ? (
+          <View style={styles.moduleDetailScreen} testID="explore.detail.module-unavailable">
+            <View style={[styles.emptyModule, { borderColor: C.border, backgroundColor: C.s1 }]}>
+              <Ionicons name="information-circle-outline" size={24} color={C.text2} />
+              <Text style={[styles.moduleDetailTitle, { color: C.text }]}>Section unavailable</Text>
+              <Text style={[styles.emptyModuleText, { color: C.text2 }]}>This place no longer lists that section.</Text>
+              <TouchableOpacity
+                style={[styles.sourceButton, { borderColor: C.border }]}
+                onPress={() => {
+                  dispatchDetailNavigation({ type: 'open_module', module: null });
+                  onTabChange('summary');
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Back to place overview"
+              >
+                <Ionicons name="arrow-back-outline" size={16} color={C.text2} />
+                <Text style={[styles.sourceButtonText, { color: C.text }]}>Back to overview</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        ) : activeModuleDef ? (
           <View style={styles.moduleDetailScreen}>
             <View style={styles.moduleDetailHeader}>
               <View style={[styles.moduleDetailIcon, { backgroundColor: activeModuleDef.tone + '18' }]}>

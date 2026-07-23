@@ -131,6 +131,12 @@ const checks = [
     args: ['--import', 'tsx', 'lib/__tests__/mapLayersFiltersController.test.ts'],
   },
   {
+    label: 'Map layer registry parity tests',
+    cwd: mobileRoot,
+    cmd: 'node',
+    args: ['--import', 'tsx', 'lib/__tests__/mapLayerRegistry.test.ts'],
+  },
+  {
     label: 'Viewport-bounded wildfire overlay tests',
     cwd: mobileRoot,
     cmd: 'npm',
@@ -177,6 +183,12 @@ const checks = [
     cwd: mobileRoot,
     cmd: 'node',
     args: ['scripts/explore-feed-audit.mjs'],
+  },
+  {
+    label: 'Explore detail module registry tests',
+    cwd: mobileRoot,
+    cmd: 'node',
+    args: ['--import', 'tsx', 'lib/__tests__/exploreDetailModuleRegistry.test.ts'],
   },
   {
     label: 'Explore source-level image and pagination guard',

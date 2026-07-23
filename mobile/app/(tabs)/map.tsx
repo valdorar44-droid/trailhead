@@ -199,6 +199,14 @@ import {
   type LayersFiltersReturnContext,
 } from '@/lib/mapLayersFiltersController';
 import {
+  MAP_BASE_STYLE_REGISTRY,
+  MAP_OVERLAY_REGISTRY,
+  MAP_TOOL_REGISTRY,
+  MAPBOX_STYLE_REGISTRY,
+  type MapOverlayKey,
+  type MapToolKey,
+} from '@/lib/mapLayerRegistry';
+import {
   adaptCampgroundSheet,
   adaptCommunityReportSheet,
   adaptGenericPlaceSheet,
@@ -22745,42 +22753,97 @@ function MapScreen() {
     red: 'Red',
     extreme: 'EXTREME',
   };
-  const mapStyleOptions: Array<{ id: MapLayer; title: string; sub: string; colors: [string, string, string] }> = [
-    { id: 'topo', title: 'Topo', sub: 'Trails, terrain, public land', colors: ['#182118', '#25633a', '#061a2f'] },
-    { id: 'satellite', title: 'Satellite', sub: 'Imagery first', colors: ['#111827', '#4b5563', '#1f2937'] },
-    { id: 'hybrid', title: 'Hybrid', sub: 'Imagery with labels', colors: ['#101827', '#6b7280', '#f59e0b'] },
-    { id: 'light', title: 'Light', sub: 'Bright road view', colors: ['#f8fafc', '#dbeafe', '#2563eb'] },
-    { id: 'city', title: 'City', sub: 'Clear streets and places', colors: ['#f3f4f6', '#cbd5e1', '#0284c7'] },
-    { id: 'contrast', title: 'High Contrast', sub: 'Maximum line clarity', colors: ['#020617', '#f8fafc', '#f97316'] },
-    { id: 'desert', title: 'Desert', sub: 'Dry terrain and washes', colors: ['#2a2418', '#9a6a32', '#0e7490'] },
-    { id: 'snow', title: 'Snow', sub: 'Winter terrain view', colors: ['#e5edf4', '#94a3b8', '#2563eb'] },
-    { id: 'dark', title: 'Dark Road', sub: 'Low-glare roads', colors: ['#0b1020', '#334155', '#fbbf24'] },
-    { id: 'red', title: 'Red / Night', sub: 'Night-friendly contrast', colors: ['#12090b', '#7f1d1d', '#ef4444'] },
-  ];
-  const mapboxStyleOptions: Array<{ id: PremiumMapStyle; label: string; sub: string; icon: keyof typeof Ionicons.glyphMap; color: string }> = [
-    { id: 'outdoors', label: 'Outdoors', sub: 'Trails and terrain', icon: 'trail-sign-outline', color: '#84cc16' },
-    { id: 'standard', label: 'Standard', sub: 'Clear day view', icon: 'map-outline', color: '#38bdf8' },
-    { id: 'standard_satellite', label: 'Satellite Plus', sub: 'Imagery with labels', icon: 'earth-outline', color: '#22c55e' },
-    { id: 'streets', label: 'Streets', sub: 'Roads and places', icon: 'navigate-outline', color: '#60a5fa' },
-    { id: 'navigation_day', label: 'Traffic Day', sub: 'Road guidance', icon: 'git-merge-outline', color: '#f97316' },
-    { id: 'navigation_night', label: 'Traffic Night', sub: 'Low-glare guidance', icon: 'moon-outline', color: '#ef4444' },
-    { id: 'dawn', label: 'Dawn', sub: 'Low sun lighting', icon: 'partly-sunny-outline', color: '#f59e0b' },
-    { id: 'dusk', label: 'Dusk', sub: 'Evening lighting', icon: 'cloudy-night-outline', color: '#a855f7' },
-    { id: 'night', label: 'Night', sub: 'Low-glare standard', icon: 'moon-outline', color: '#818cf8' },
-    { id: 'satellite_streets', label: 'Satellite Streets', sub: 'Imagery with roads', icon: 'image-outline', color: '#14b8a6' },
-  ];
-  const layerSheetItems = [
-    { key: '3d', label: map3dEnabled ? '2D View' : '3D Terrain', sub: map3dEnabled ? 'Return to flat view' : 'Tilted terrain and buildings', icon: map3dEnabled ? 'map-outline' : 'cube-outline', val: map3dEnabled, color: '#a3e635', onPress: () => toggleMap3d() },
-    { key: 'lands', label: 'Public Land', sub: 'BLM, USFS and park boundaries', icon: 'layers-outline', val: showLands, color: '#D97745', onPress: () => toggleLandOverlay(!showLands) },
-    { key: 'usgs', label: 'Topo Lines', sub: 'Contours and trail context', icon: 'trail-sign-outline', val: showUsgs, color: '#0ea5e9', onPress: () => toggleUsgsOverlay(!showUsgs) },
-    { key: 'pois', label: 'Places', sub: 'Fuel, water, services', icon: 'location-outline', val: showPois, color: '#3b82f6', onPress: () => togglePoiOverlay(!showPois) },
-    { key: 'trails', label: 'Trails & Dirt', sub: 'Tracks and paths', icon: 'trail-sign-outline', val: layerTrails, color: '#22c55e', onPress: () => setLayerTrails(!layerTrails) },
-    { key: 'nautical', label: 'Water Safety', sub: 'Markers and hazards', icon: 'boat-outline', val: layerNautical, color: '#0891b2', onPress: () => { if (layerNautical) { closeSafeWaterMode(); return; } setLayerNautical(true); toggleDataLayer('nautical', true); setActivePlaceFilters(prev => Array.from(new Set([...prev, ...WATER_NAV_PLACE_FILTER_IDS]))); } },
-    { key: 'fire', label: 'Wildfire', sub: fireOverlayStatusLabel(layerFire ? fireOverlayStatus : FIRE_OVERLAY_IDLE_STATUS), icon: 'flame-outline', val: layerFire, color: fireOverlayStatusColor(fireOverlayStatus), onPress: () => { const next = !layerFire; setLayerFire(next); toggleDataLayer('fire', next); } },
-    { key: 'ava', label: 'Avalanche', sub: 'Snow danger areas', icon: 'snow-outline', val: layerAva, color: '#3b82f6', onPress: () => { const next = !layerAva; setLayerAva(next); toggleDataLayer('ava', next); } },
-    { key: 'radar', label: 'Radar', sub: 'Rain and storms', icon: 'rainy-outline', val: layerRadar, color: '#06b6d4', onPress: () => { const next = !layerRadar; setLayerRadar(next); toggleDataLayer('radar', next); } },
-    { key: 'mvum', label: 'Motor Access', sub: 'Seasonal roads', icon: 'car-outline', val: layerMvum, color: '#22c55e', onPress: () => { const next = !layerMvum; setLayerMvum(next); toggleDataLayer('mvum', next); } },
-  ] as const;
+  const mapStyleOptions: Array<{ id: MapLayer; title: string; sub: string; colors: [string, string, string] }> = MAP_BASE_STYLE_REGISTRY.map(option => ({
+    id: option.key,
+    title: option.title,
+    sub: option.sub,
+    colors: [...option.colors],
+  }));
+  const mapboxStyleOptions: Array<{ id: PremiumMapStyle; label: string; sub: string; icon: keyof typeof Ionicons.glyphMap; color: string }> = MAPBOX_STYLE_REGISTRY.map(option => ({
+    id: option.key,
+    label: option.label,
+    sub: option.sub,
+    icon: option.icon as keyof typeof Ionicons.glyphMap,
+    color: option.color,
+  }));
+  const layerBindings: Record<MapOverlayKey, {
+    val: boolean;
+    onPress: () => void;
+    label?: string;
+    sub?: string;
+    icon?: keyof typeof Ionicons.glyphMap;
+    color?: string;
+  }> = {
+    '3d': {
+      val: map3dEnabled,
+      label: map3dEnabled ? '2D View' : undefined,
+      sub: map3dEnabled ? 'Return to flat view' : undefined,
+      icon: map3dEnabled ? 'map-outline' : undefined,
+      onPress: () => toggleMap3d(),
+    },
+    lands: { val: showLands, onPress: () => toggleLandOverlay(!showLands) },
+    usgs: { val: showUsgs, onPress: () => toggleUsgsOverlay(!showUsgs) },
+    pois: { val: showPois, onPress: () => togglePoiOverlay(!showPois) },
+    trails: { val: layerTrails, onPress: () => setLayerTrails(!layerTrails) },
+    nautical: {
+      val: layerNautical,
+      onPress: () => {
+        if (layerNautical) {
+          closeSafeWaterMode();
+          return;
+        }
+        setLayerNautical(true);
+        toggleDataLayer('nautical', true);
+        setActivePlaceFilters(prev => Array.from(new Set([...prev, ...WATER_NAV_PLACE_FILTER_IDS])));
+      },
+    },
+    fire: {
+      val: layerFire,
+      sub: fireOverlayStatusLabel(layerFire ? fireOverlayStatus : FIRE_OVERLAY_IDLE_STATUS),
+      color: fireOverlayStatusColor(fireOverlayStatus),
+      onPress: () => {
+        const next = !layerFire;
+        setLayerFire(next);
+        toggleDataLayer('fire', next);
+      },
+    },
+    ava: {
+      val: layerAva,
+      onPress: () => {
+        const next = !layerAva;
+        setLayerAva(next);
+        toggleDataLayer('ava', next);
+      },
+    },
+    radar: {
+      val: layerRadar,
+      onPress: () => {
+        const next = !layerRadar;
+        setLayerRadar(next);
+        toggleDataLayer('radar', next);
+      },
+    },
+    mvum: {
+      val: layerMvum,
+      onPress: () => {
+        const next = !layerMvum;
+        setLayerMvum(next);
+        toggleDataLayer('mvum', next);
+      },
+    },
+  };
+  const layerSheetItems = MAP_OVERLAY_REGISTRY.map(layer => {
+    const binding = layerBindings[layer.key];
+    return {
+      key: layer.key,
+      label: binding.label ?? layer.label,
+      sub: binding.sub ?? layer.sub,
+      icon: binding.icon ?? layer.icon as keyof typeof Ionicons.glyphMap,
+      val: binding.val,
+      color: binding.color ?? layer.color,
+      onPress: binding.onPress,
+    };
+  });
   const mapboxStyleItems = mapboxStyleOptions.map(option => ({
     ...option,
     active: option.id === premiumMapStyle && mapLayer === 'extreme',
@@ -22796,13 +22859,85 @@ function MapScreen() {
       }
     },
   }));
-  const extremeFeatureItems = [
-    { key: 'globe_terrain', label: map3dEnabled ? '2D Terrain' : 'Globe / 3D', sub: map3dEnabled ? 'Flatten camera' : 'Terrain view', icon: 'planet-outline', val: map3dEnabled, color: '#a3e635', enabled: true, onPress: () => toggleMap3d() },
-    { key: 'search_box', label: 'Search', sub: 'Find places', icon: 'search-outline', val: inlineSearchOpen, color: '#38bdf8', enabled: !!extremeConfig?.enabled, onPress: () => { if (extremeConfig?.enabled) { setShowLayerSheet(false); openInlineMapSearch(); return; } setQuickToast('Search is not available on this account yet.'); setTimeout(() => setQuickToast(''), 2400); } },
-    { key: 'directions', label: 'Directions', sub: searchRouteCard ? 'Preview selected route' : 'Choose destination', icon: 'navigate-outline', val: !!searchRouteCard, color: '#f97316', enabled: !!extremeConfig?.feature_flags?.navigation, onPress: () => { if (extremeConfig?.feature_flags?.navigation) { openExtremeDirections(); return; } setQuickToast('Directions are not available on this account yet.'); setTimeout(() => setQuickToast(''), 2400); } },
-    { key: 'traffic', label: 'Traffic', sub: 'Congestion style', icon: 'git-merge-outline', val: extremeTrafficEnabled, color: '#ef4444', enabled: !!extremeConfig?.feature_flags?.navigation, onPress: () => { if (extremeConfig?.feature_flags?.navigation) { toggleExtremeTraffic(); return; } setQuickToast('Traffic is not available on this account yet.'); setTimeout(() => setQuickToast(''), 2400); } },
-    { key: 'weather', label: 'Weather', sub: extremeConfig?.weather?.mapbox_conditions_enabled ? 'Radar and route weather' : 'Radar view', icon: 'rainy-outline', val: layerRadar, color: '#06b6d4', enabled: !!extremeConfig?.feature_flags?.weather, onPress: () => { if (extremeConfig?.feature_flags?.weather) { openExtremeWeather(); return; } setQuickToast('Weather layers are not available on this account yet.'); setTimeout(() => setQuickToast(''), 2400); } },
-  ] as const;
+  const toolBindings: Record<MapToolKey, {
+    val: boolean;
+    enabled: boolean;
+    onPress: () => void;
+    label?: string;
+    sub?: string;
+  }> = {
+    globe_terrain: {
+      val: map3dEnabled,
+      enabled: true,
+      label: map3dEnabled ? '2D Terrain' : undefined,
+      sub: map3dEnabled ? 'Flatten camera' : undefined,
+      onPress: () => toggleMap3d(),
+    },
+    search_box: {
+      val: inlineSearchOpen,
+      enabled: !!extremeConfig?.enabled,
+      onPress: () => {
+        if (extremeConfig?.enabled) {
+          setShowLayerSheet(false);
+          openInlineMapSearch();
+          return;
+        }
+        setQuickToast('Search is not available on this account yet.');
+        setTimeout(() => setQuickToast(''), 2400);
+      },
+    },
+    directions: {
+      val: !!searchRouteCard,
+      enabled: !!extremeConfig?.feature_flags?.navigation,
+      sub: searchRouteCard ? 'Preview selected route' : undefined,
+      onPress: () => {
+        if (extremeConfig?.feature_flags?.navigation) {
+          openExtremeDirections();
+          return;
+        }
+        setQuickToast('Directions are not available on this account yet.');
+        setTimeout(() => setQuickToast(''), 2400);
+      },
+    },
+    traffic: {
+      val: extremeTrafficEnabled,
+      enabled: !!extremeConfig?.feature_flags?.navigation,
+      onPress: () => {
+        if (extremeConfig?.feature_flags?.navigation) {
+          toggleExtremeTraffic();
+          return;
+        }
+        setQuickToast('Traffic is not available on this account yet.');
+        setTimeout(() => setQuickToast(''), 2400);
+      },
+    },
+    weather: {
+      val: layerRadar,
+      enabled: !!extremeConfig?.feature_flags?.weather,
+      sub: extremeConfig?.weather?.mapbox_conditions_enabled ? 'Radar and route weather' : undefined,
+      onPress: () => {
+        if (extremeConfig?.feature_flags?.weather) {
+          openExtremeWeather();
+          return;
+        }
+        setQuickToast('Weather layers are not available on this account yet.');
+        setTimeout(() => setQuickToast(''), 2400);
+      },
+    },
+  };
+  const extremeFeatureItems = MAP_TOOL_REGISTRY.map(tool => {
+    const binding = toolBindings[tool.key];
+    return {
+      key: tool.key,
+      label: binding.label ?? tool.label,
+      sub: binding.sub ?? tool.sub,
+      icon: tool.icon as keyof typeof Ionicons.glyphMap,
+      val: binding.val,
+      color: tool.color,
+      enabled: binding.enabled,
+      onPress: binding.onPress,
+    };
+  });
   const safeWaterLegendItems = [
     { color: '#f97316', label: '0-5 ft shallow structure' },
     { color: '#facc15', label: '5-10 ft shallow zone' },

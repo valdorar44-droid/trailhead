@@ -3258,6 +3258,26 @@ def _json_object(value: dict, label: str, max_bytes: int) -> tuple[dict, str]:
     return json.loads(encoded), encoded
 
 
+_TRUSTED_TRIP_DOCUMENT_MAX_BYTES = 8 * 1024 * 1024
+
+
+def _trusted_server_json_object(value: dict, label: str) -> tuple[dict, str]:
+    """Serialize data only after the inbound client object passed its size gate.
+
+    Server-owned legacy payloads can predate the V2 client limit and must not
+    make an otherwise small compact update impossible.
+    """
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must be an object")
+    try:
+        encoded = json.dumps(value, separators=(",", ":"), sort_keys=True, allow_nan=False)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} must contain valid JSON") from exc
+    if len(encoded.encode("utf-8")) > _TRUSTED_TRIP_DOCUMENT_MAX_BYTES:
+        raise ValueError(f"{label} exceeds the server storage limit")
+    return json.loads(encoded), encoded
+
+
 def _encode_account_cursor(updated_at: int, item_id: str) -> str:
     raw = json.dumps({"t": int(updated_at), "id": item_id}, separators=(",", ":")).encode("utf-8")
     return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
@@ -3488,7 +3508,387 @@ def list_saved_entities(
     return {"items": items, "next_cursor": next_cursor}
 
 
-def _legacy_trip_document(row: sqlite3.Row | dict) -> dict:
+def _unwrapped_legacy_v1(value) -> dict:
+    current = value if isinstance(value, dict) else {}
+    for _ in range(8):
+        payload = current.get("payload")
+        if (
+            isinstance(payload, dict)
+            and current
+            and set(current).issubset({"source", "payload"})
+        ):
+            current = payload
+            continue
+        break
+    return current
+
+
+def _legacy_trip_and_plan(legacy_v1) -> tuple[dict, dict]:
+    legacy = _unwrapped_legacy_v1(legacy_v1)
+    trip = legacy.get("trip") if isinstance(legacy.get("trip"), dict) else legacy
+    plan = trip.get("plan") if isinstance(trip.get("plan"), dict) else trip
+    return trip if isinstance(trip, dict) else {}, plan if isinstance(plan, dict) else {}
+
+
+def _legacy_waypoint_from_v2_item(item: dict) -> dict:
+    source_waypoint = _legacy_source_waypoint(item)
+    waypoint = dict(
+        source_waypoint
+        if source_waypoint
+        else item if item.get("name") and not item.get("title") else {}
+    )
+    waypoint["id"] = item.get("entity_id") or item.get("id") or waypoint.get("id")
+    waypoint["name"] = item.get("title") or item.get("name") or waypoint.get("name") or "Stop"
+    waypoint["type"] = item.get("kind") or item.get("type") or waypoint.get("type") or "place"
+    canonical_day = item.get("day") or waypoint.get("day") or waypoint.get("recommended_day") or 1
+    waypoint["day"] = canonical_day
+    waypoint["recommended_day"] = canonical_day
+    if item.get("summary") is not None:
+        waypoint["description"] = item.get("summary")
+    if item.get("note") is not None:
+        waypoint["notes"] = item.get("note")
+    coordinates = item.get("coordinates") if isinstance(item.get("coordinates"), dict) else {}
+    latitude = coordinates.get("lat") if coordinates.get("lat") is not None else item.get("lat")
+    longitude = coordinates.get("lng") if coordinates.get("lng") is not None else item.get("lng")
+    if latitude is not None:
+        waypoint["lat"] = latitude
+    if longitude is not None:
+        waypoint["lng"] = longitude
+    if item.get("source") is not None:
+        waypoint["verified_source"] = item.get("source")
+    source_reference = item.get("source_url") or item.get("booking_url")
+    if source_reference is not None:
+        waypoint["verification_note"] = source_reference
+    return waypoint
+
+
+def _legacy_miles_from_v2_route(route: dict) -> float | None:
+    for key in ("totalDistanceMi", "distance_mi", "miles"):
+        try:
+            value = float(route.get(key))
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(value) and value >= 0:
+            return value
+    for key in ("totalDistance", "total_distance", "distance_m"):
+        try:
+            value = float(route.get(key))
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(value) and value >= 0:
+            return value / 1609.344
+    return None
+
+
+def _aligned_legacy_waypoint_collection(
+    existing_collections: list[list[dict]],
+    route_items: list[dict],
+    kind: str,
+) -> list[dict]:
+    candidates = [
+        waypoint for waypoint in route_items
+        if _legacy_waypoint_item_kind(waypoint) == kind
+    ]
+    used_by_collection: list[set[int]] = [set() for _ in existing_collections]
+
+    def stable_id(value: dict) -> str:
+        return str(value.get("id") or value.get("entity_id") or "").strip()
+
+    def find_occurrence(
+        collection: list[dict],
+        used: set[int],
+        waypoint: dict,
+    ) -> int | None:
+        waypoint_id = stable_id(waypoint)
+        if waypoint_id:
+            for index, current in enumerate(collection):
+                if index in used or not isinstance(current, dict):
+                    continue
+                if stable_id(current) == waypoint_id:
+                    return index
+        waypoint_key = _legacy_waypoint_match_key(waypoint)
+        for index, current in enumerate(collection):
+            if index in used or not isinstance(current, dict):
+                continue
+            current_id = stable_id(current)
+            # Two different stable identities are never the same occurrence,
+            # even when providers gave them identical names and coordinates.
+            if waypoint_id and current_id and current_id != waypoint_id:
+                continue
+            if _legacy_waypoint_match_key(current) == waypoint_key:
+                return index
+        return None
+
+    def merge_non_sparse(target: dict, source: dict) -> None:
+        for key, value in source.items():
+            if value not in (None, "", [], {}):
+                target[key] = value
+            elif key not in target:
+                target[key] = value
+
+    aligned = []
+    for waypoint in candidates:
+        rich = {}
+        for collection_index, collection in enumerate(existing_collections):
+            match_index = find_occurrence(
+                collection,
+                used_by_collection[collection_index],
+                waypoint,
+            )
+            if match_index is None:
+                continue
+            merge_non_sparse(rich, collection[match_index])
+            used_by_collection[collection_index].add(match_index)
+        rich.update(waypoint)
+        aligned.append(rich)
+    return aligned
+
+
+def _merge_canonical_v2_into_legacy_v1(legacy_v1, document: dict) -> dict:
+    legacy = dict(_unwrapped_legacy_v1(legacy_v1))
+    has_trip_envelope = isinstance(legacy.get("trip"), dict)
+    trip = dict(legacy.get("trip")) if has_trip_envelope else dict(legacy)
+    trip["trip_id"] = document.get("trip_id") or trip.get("trip_id")
+    plan = dict(trip.get("plan")) if isinstance(trip.get("plan"), dict) else {}
+    plan["trip_name"] = document.get("title") or plan.get("trip_name") or "Untitled route"
+    if "summary" in document:
+        plan["overview"] = document.get("summary")
+    if isinstance(document.get("regions"), list):
+        plan["states"] = list(document.get("regions"))
+    raw_legacy_projection = any(
+        isinstance(item, dict) and item.get("name") and not item.get("title")
+        for item in (document.get("items") or [])
+    ) or any(
+        isinstance(day, dict)
+        and "summary" not in day
+        and any(key in day for key in ("description", "weather", "est_miles", "route_segment"))
+        for day in (document.get("days") or [])
+    )
+
+    merged_days = None
+    if isinstance(document.get("days"), list):
+        legacy_days_by_number = {
+            int(day.get("day")): day
+            for day in plan.get("daily_itinerary", [])
+            if isinstance(day, dict) and str(day.get("day") or "").isdigit()
+        }
+        merged_days = []
+        for index, day in enumerate(document.get("days"), start=1):
+            if not isinstance(day, dict):
+                continue
+            try:
+                day_number = max(1, int(day.get("day") or index))
+            except (TypeError, ValueError):
+                day_number = index
+            merged_day = dict(legacy_days_by_number.get(day_number, {}))
+            merged_day.update({
+                "day": day_number,
+                "title": day.get("title") or merged_day.get("title") or f"Day {day_number}",
+            })
+            if "summary" in day:
+                merged_day["description"] = day.get("summary")
+            if "date" in day:
+                merged_day["date"] = day.get("date")
+            merged_days.append(merged_day)
+        # Membership is canonical while matching rows retain rich legacy-only
+        # fields such as weather, driving notes, and reservations.
+        plan["daily_itinerary"] = merged_days
+
+    route_items = None
+    if isinstance(document.get("items"), list):
+        route_items = [
+            _legacy_waypoint_from_v2_item(item)
+            for item in document.get("items")
+            if isinstance(item, dict) and str(item.get("kind") or "") != "note"
+        ]
+        plan["waypoints"] = route_items
+        # Some older route-builder clients read these denormalized collections.
+        # Materialize both historical locations even when one was absent, and
+        # pool their rich fields before applying the canonical stop identity.
+        plan_campsites = plan.get("campsites") if isinstance(plan.get("campsites"), list) else []
+        trip_campsites = trip.get("campsites") if isinstance(trip.get("campsites"), list) else []
+        plan_gas_stations = plan.get("gas_stations") if isinstance(plan.get("gas_stations"), list) else []
+        trip_gas_stations = trip.get("gas_stations") if isinstance(trip.get("gas_stations"), list) else []
+        aligned_campsites = _aligned_legacy_waypoint_collection(
+            [trip_campsites, plan_campsites], route_items, "camp",
+        )
+        aligned_gas_stations = _aligned_legacy_waypoint_collection(
+            [trip_gas_stations, plan_gas_stations], route_items, "fuel",
+        )
+        plan["campsites"] = [dict(value) for value in aligned_campsites]
+        plan["gas_stations"] = [dict(value) for value in aligned_gas_stations]
+        trip["campsites"] = [dict(value) for value in aligned_campsites]
+        trip["gas_stations"] = [dict(value) for value in aligned_gas_stations]
+
+    if (merged_days is not None or route_items is not None) and not raw_legacy_projection:
+        day_numbers = [
+            int(day.get("day"))
+            for day in (merged_days or [])
+            if str(day.get("day") or "").isdigit()
+        ] + [
+            int(item.get("day"))
+            for item in (document.get("items") or [])
+            if isinstance(item, dict) and str(item.get("day") or "").isdigit()
+        ]
+        plan["duration_days"] = max(day_numbers, default=1)
+
+    if isinstance(document.get("route"), dict):
+        route = dict(document.get("route"))
+        miles = _legacy_miles_from_v2_route(route)
+        if miles is not None:
+            plan["total_est_miles"] = miles
+        elif not route:
+            plan.pop("total_est_miles", None)
+    trip["plan"] = plan
+    if has_trip_envelope:
+        legacy["trip"] = trip
+    else:
+        legacy = trip
+    if isinstance(document.get("route"), dict):
+        legacy["route_geometry"] = dict(document.get("route"))
+    return legacy
+
+
+def _compact_v2_days(
+    plan: dict,
+    existing_days: list[dict],
+    needs_legacy_projection: bool = False,
+) -> list[dict]:
+    if not needs_legacy_projection:
+        return [dict(day) for day in existing_days if isinstance(day, dict)]
+    legacy_days = (
+        plan.get("daily_itinerary")
+        if isinstance(plan.get("daily_itinerary"), list)
+        else existing_days
+    )
+    days = _canonical_v2_days_from_legacy(legacy_days, existing_days)
+    try:
+        duration_days = min(366, max(0, int(plan.get("duration_days") or 0)))
+    except (TypeError, ValueError):
+        duration_days = 0
+    by_day = {
+        int(day.get("day")): day
+        for day in days
+        if str(day.get("day") or "").isdigit() and int(day.get("day")) > 0
+    }
+    for day_number in range(1, duration_days + 1):
+        by_day.setdefault(day_number, {
+            "day": day_number,
+            "title": f"Day {day_number}",
+            "summary": None,
+            "date": None,
+        })
+    return [by_day[key] for key in sorted(by_day)]
+
+
+def _compact_v2_route(
+    route,
+    plan: dict,
+    needs_legacy_projection: bool = False,
+) -> dict:
+    compact_route = dict(route) if isinstance(route, dict) else {}
+    if not needs_legacy_projection:
+        return compact_route
+    try:
+        miles = float(plan.get("total_est_miles"))
+    except (TypeError, ValueError):
+        miles = -1
+    positive_route_distance = False
+    for key in (
+        "totalDistanceMi", "distance_mi", "miles",
+        "totalDistance", "total_distance", "distance_m",
+    ):
+        try:
+            positive_route_distance = positive_route_distance or float(compact_route.get(key)) > 0
+        except (TypeError, ValueError):
+            continue
+    if math.isfinite(miles) and miles > 0 and not positive_route_distance:
+        compact_route["totalDistanceMi"] = miles
+    return compact_route
+
+
+def _canonical_compact_v2_document(
+    document: dict,
+    project_legacy_shape: bool = False,
+) -> dict:
+    compact = dict(document)
+    legacy = _unwrapped_legacy_v1(compact.get("legacy_v1"))
+    _, plan = _legacy_trip_and_plan(legacy)
+    existing_items = compact.get("items") if isinstance(compact.get("items"), list) else []
+    raw_items = [
+        item for item in existing_items
+        if isinstance(item, dict) and item.get("name") and not item.get("title")
+    ]
+    existing_days = compact.get("days") if isinstance(compact.get("days"), list) else []
+    legacy_days = plan.get("daily_itinerary") if isinstance(plan.get("daily_itinerary"), list) else []
+    raw_days = [
+        day for day in existing_days
+        if isinstance(day, dict) and (
+            any(key in day for key in (
+                "description", "est_miles", "driving_notes", "route_segment",
+                "weather", "highlights",
+            ))
+            or (day in legacy_days and "summary" not in day)
+        )
+    ]
+    legacy_waypoints = plan.get("waypoints") if isinstance(plan.get("waypoints"), list) else None
+    legacy_route = legacy.get("route_geometry") if isinstance(legacy.get("route_geometry"), dict) else None
+    needs_legacy_projection = (
+        project_legacy_shape
+        or bool(raw_items)
+        or bool(raw_days)
+        or ("items" not in compact and legacy_waypoints is not None)
+        or ("days" not in compact and isinstance(plan.get("daily_itinerary"), list))
+        or ("regions" not in compact and isinstance(plan.get("states"), list))
+        or ("route" not in compact and legacy_route is not None)
+    )
+
+    needs_item_projection = (
+        project_legacy_shape
+        or bool(raw_items)
+        or ("items" not in compact and legacy_waypoints is not None)
+    )
+    if needs_item_projection:
+        compact["items"] = _canonical_v2_items_from_legacy_waypoints(
+            str(compact.get("trip_id") or "trip"),
+            legacy_waypoints if legacy_waypoints is not None else raw_items,
+            existing_items,
+            int(compact.get("updated_at") or compact.get("created_at") or 0),
+        )
+    needs_day_projection = (
+        project_legacy_shape
+        or bool(raw_days)
+        or ("days" not in compact and isinstance(plan.get("daily_itinerary"), list))
+    )
+    compact["days"] = _compact_v2_days(
+        plan,
+        existing_days,
+        needs_legacy_projection=needs_day_projection,
+    )
+    if project_legacy_shape or ("regions" not in compact and needs_legacy_projection):
+        compact["regions"] = (
+            list(plan.get("states"))
+            if isinstance(plan.get("states"), list)
+            else []
+        )
+
+    route = compact.get("route") if isinstance(compact.get("route"), dict) else {}
+    if "route" not in compact and legacy_route is not None:
+        route = dict(legacy_route)
+    compact["route"] = _compact_v2_route(
+        route,
+        plan,
+        needs_legacy_projection=(
+            project_legacy_shape or (needs_legacy_projection and bool(route))
+        ),
+    )
+    return compact
+
+
+def _legacy_trip_document(
+    row: sqlite3.Row | dict,
+    canonical_v2_projection: bool = False,
+) -> dict:
     raw = dict(row)
     try:
         saved_trip = json.loads(raw.get("document_json") or raw.get("plan") or "{}")
@@ -3518,8 +3918,19 @@ def _legacy_trip_document(row: sqlite3.Row | dict) -> dict:
         or saved_trip.get("end_date") or ""
     ).strip() or None
     route = _legacy_json("route_geometry", {})
+    updated_at = int(raw.get("updated_at") or raw.get("created_at") or 0)
+    legacy_days = (
+        plan.get("daily_itinerary")
+        if isinstance(plan.get("daily_itinerary"), list)
+        else []
+    )
+    legacy_waypoints = (
+        plan.get("waypoints")
+        if isinstance(plan.get("waypoints"), list)
+        else []
+    )
 
-    return {
+    document = {
         "schema_version": 2,
         "trip_id": raw["id"],
         "revision": int(raw.get("revision") or raw.get("version") or 1),
@@ -3532,8 +3943,14 @@ def _legacy_trip_document(row: sqlite3.Row | dict) -> dict:
         "dates": {"starts_on": starts_on, "ends_on": ends_on},
         "rig_snapshot": {},
         "route": route,
-        "days": plan.get("daily_itinerary") if isinstance(plan.get("daily_itinerary"), list) else [],
-        "items": plan.get("waypoints") if isinstance(plan.get("waypoints"), list) else [],
+        "days": legacy_days,
+        "items": (
+            _canonical_v2_items_from_legacy_waypoints(
+                raw["id"], legacy_waypoints, [], updated_at,
+            )
+            if canonical_v2_projection
+            else legacy_waypoints
+        ),
         "notes": [],
         "readiness": {},
         "bookings": [],
@@ -3542,7 +3959,7 @@ def _legacy_trip_document(row: sqlite3.Row | dict) -> dict:
         "visibility": "private",
         "source": raw.get("source") or "legacy_v1",
         "created_at": int(raw.get("created_at") or 0),
-        "updated_at": int(raw.get("updated_at") or raw.get("created_at") or 0),
+        "updated_at": updated_at,
         "archived_at": None,
         "deleted_at": None,
         "legacy_v1": {
@@ -3552,12 +3969,22 @@ def _legacy_trip_document(row: sqlite3.Row | dict) -> dict:
             "builder_state": _legacy_json("builder_state", None),
         },
     }
+    return _canonical_compact_v2_document(
+        document,
+        project_legacy_shape=True,
+    ) if canonical_v2_projection else document
 
 
-def _trip_document_from_row(row: sqlite3.Row | dict) -> dict:
+def _trip_document_from_row(
+    row: sqlite3.Row | dict,
+    canonical_legacy_items: bool = False,
+) -> dict:
     raw = dict(row)
     if raw.get("origin") == "v1" or ("document_json" not in raw and "plan" in raw):
-        return _legacy_trip_document(raw)
+        return _legacy_trip_document(
+            raw,
+            canonical_v2_projection=canonical_legacy_items,
+        )
     try:
         document = json.loads(raw.get("document_json") or "{}")
     except Exception:
@@ -3573,7 +4000,7 @@ def _trip_document_from_row(row: sqlite3.Row | dict) -> dict:
         "archived_at": raw.get("archived_at"),
         "deleted_at": raw.get("deleted_at"),
     })
-    return document
+    return _canonical_compact_v2_document(document) if canonical_legacy_items else document
 
 
 def get_trip_document_v2(user_id: int, trip_id: str, include_deleted: bool = False) -> dict | None:
@@ -3673,20 +4100,48 @@ def upsert_trip_document_v2(
         current = db.execute(
             "SELECT * FROM trip_documents_v2 WHERE user_id=? AND id=?", (user_id, trip_id),
         ).fetchone()
-        if current:
-            existing_document = _decode_pack_json(current["document_json"], {})
-            existing_experience_ref = existing_document.get("experience_ref")
-            if isinstance(existing_experience_ref, dict):
-                normalized["experience_ref"] = existing_experience_ref
-                normalized, document_json = _json_object(
-                    normalized, "Trip document", 2 * 1024 * 1024,
-                )
         legacy = db.execute(
             """SELECT id,user_id,created_at,COALESCE(updated_at,created_at) AS updated_at,
                       request,plan,route_geometry,builder_state,source,version AS revision
                FROM trips WHERE id=? AND user_id=?""",
             (trip_id, user_id),
         ).fetchone()
+        document_changed = False
+        if current:
+            existing_document = _decode_pack_json(current["document_json"], {})
+            existing_experience_ref = existing_document.get("experience_ref")
+            if isinstance(existing_experience_ref, dict):
+                normalized["experience_ref"] = existing_experience_ref
+                document_changed = True
+
+        # Compact list clients intentionally do not receive legacy_v1. Preserve
+        # the server's authoritative copy when those clients later write an
+        # otherwise complete V2 document. Full clients may still update rich
+        # legacy-only fields, but canonical V2 route/timeline fields win so old
+        # readers cannot resurrect stale data.
+        preserved_legacy_v1 = (
+            normalized.get("legacy_v1")
+            if isinstance(normalized.get("legacy_v1"), dict) and normalized.get("legacy_v1")
+            else None
+        )
+        if preserved_legacy_v1 is None:
+            if current:
+                existing_document = _decode_pack_json(current["document_json"], {})
+                if "legacy_v1" in existing_document:
+                    preserved_legacy_v1 = existing_document.get("legacy_v1")
+            if preserved_legacy_v1 is None and legacy:
+                preserved_legacy_v1 = _legacy_trip_document(legacy).get("legacy_v1")
+        if preserved_legacy_v1 is not None:
+            normalized["legacy_v1"] = _merge_canonical_v2_into_legacy_v1(
+                preserved_legacy_v1,
+                normalized,
+            )
+            document_changed = True
+
+        if document_changed:
+            normalized, document_json = _trusted_server_json_object(
+                normalized, "Trip document",
+            )
         current_revision = max(
             int(current["revision"] or 1) if current else 0,
             int(legacy["revision"] or 1) if legacy else 0,
@@ -3716,10 +4171,40 @@ def upsert_trip_document_v2(
         if status == "deleted":
             db.execute("DELETE FROM trips WHERE id=? AND user_id=?", (trip_id, user_id))
         elif legacy:
+            authoritative_legacy = _unwrapped_legacy_v1(normalized.get("legacy_v1"))
+            legacy_trip = (
+                authoritative_legacy.get("trip")
+                if isinstance(authoritative_legacy.get("trip"), dict)
+                else authoritative_legacy
+            )
+            route_present = "route_geometry" in authoritative_legacy
+            builder_present = "builder_state" in authoritative_legacy
             db.execute(
-                """UPDATE trips SET version=?,updated_at=?
+                """UPDATE trips SET request=?,plan=?,
+                          route_geometry=CASE WHEN ? THEN ? ELSE route_geometry END,
+                          builder_state=CASE WHEN ? THEN ? ELSE builder_state END,
+                          version=?,updated_at=?
                    WHERE id=? AND user_id=?""",
-                (revision, now, trip_id, user_id),
+                (
+                    str(authoritative_legacy.get("request") or legacy["request"] or ""),
+                    json.dumps(legacy_trip, separators=(",", ":")),
+                    route_present,
+                    (
+                        json.dumps(authoritative_legacy.get("route_geometry"), separators=(",", ":"))
+                        if route_present and authoritative_legacy.get("route_geometry") is not None
+                        else None
+                    ),
+                    builder_present,
+                    (
+                        json.dumps(authoritative_legacy.get("builder_state"), separators=(",", ":"))
+                        if builder_present and authoritative_legacy.get("builder_state") is not None
+                        else None
+                    ),
+                    revision,
+                    now,
+                    trip_id,
+                    user_id,
+                ),
             )
         saved = db.execute(
             "SELECT * FROM trip_documents_v2 WHERE user_id=? AND id=?", (user_id, trip_id),
@@ -3747,6 +4232,7 @@ def list_trip_documents_v2(
     status: str | None = None,
     include_archived: bool = False,
     include_deleted: bool = False,
+    include_legacy_v1: bool = True,
 ) -> dict:
     if not isinstance(limit, int) or limit < 1 or limit > 100:
         raise ValueError("Limit must be between 1 and 100")
@@ -3800,7 +4286,48 @@ def list_trip_documents_v2(
     db.close()
     has_more = len(rows) > limit
     page = rows[:limit]
-    items = [_trip_document_from_row(row) for row in page]
+    items = []
+    for row in page:
+        if not include_legacy_v1 and row["status"] == "deleted":
+            items.append({
+                "schema_version": 2,
+                "trip_id": row["id"],
+                "status": "deleted",
+                "revision": int(row["revision"] or 1),
+                "created_at": int(row["created_at"] or 0),
+                "updated_at": int(row["updated_at"] or row["created_at"] or 0),
+                "archived_at": row["archived_at"],
+                "deleted_at": row["deleted_at"],
+            })
+            continue
+        items.append(_trip_document_from_row(
+            row,
+            canonical_legacy_items=not include_legacy_v1,
+        ))
+    if not include_legacy_v1:
+        compact_items = []
+        for item in items:
+            if item.get("status") == "deleted":
+                compact_items.append({
+                    key: item.get(key)
+                    for key in (
+                        "schema_version",
+                        "trip_id",
+                        "status",
+                        "revision",
+                        "created_at",
+                        "updated_at",
+                        "archived_at",
+                        "deleted_at",
+                    )
+                })
+                continue
+            legacy_v1_available = isinstance(item.get("legacy_v1"), dict)
+            item.pop("legacy_v1", None)
+            if legacy_v1_available:
+                item["legacy_v1_available"] = True
+            compact_items.append(item)
+        items = compact_items
     next_cursor = _encode_account_cursor(page[-1]["updated_at"], page[-1]["id"]) if has_more else None
     return {"items": items, "next_cursor": next_cursor}
 

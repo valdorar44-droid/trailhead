@@ -14802,6 +14802,7 @@ async def api_trip_documents_v2(
     status: str = "",
     include_archived: bool = False,
     include_deleted: bool = False,
+    include_legacy_v1: bool = True,
     user: dict = Depends(_current_user),
 ):
     try:
@@ -14812,6 +14813,7 @@ async def api_trip_documents_v2(
             status=status or None,
             include_archived=include_archived,
             include_deleted=include_deleted,
+            include_legacy_v1=include_legacy_v1,
         )
     except Exception as exc:
         _raise_account_store_error(exc)

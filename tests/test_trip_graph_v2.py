@@ -13,6 +13,8 @@ from fastapi import HTTPException
 from dashboard.server import (
     AccountTripRequest,
     TripDocumentPayload,
+    api_trip_document_v2,
+    api_trip_documents_v2,
     create_account_trip,
     product_features,
     update_account_trip,
@@ -164,7 +166,10 @@ class TripGraphV2StoreTests(unittest.TestCase):
         cursor = None
         while True:
             page = store.list_trip_documents_v2(
-                self.user_one, limit=17, cursor=cursor
+                self.user_one,
+                limit=17,
+                cursor=cursor,
+                include_legacy_v1=False,
             )
             found_ids.extend(item["trip_id"] for item in page["items"])
             cursor = page["next_cursor"]
@@ -173,6 +178,703 @@ class TripGraphV2StoreTests(unittest.TestCase):
 
         self.assertEqual(len(found_ids), 121)
         self.assertEqual(len(set(found_ids)), 121)
+
+    def test_compact_trip_list_omits_only_legacy_payload(self):
+        store.save_account_trip(
+            "legacy_compact_trip",
+            {
+                "trip_id": "legacy_compact_trip",
+                "plan": {
+                    "trip_name": "Legacy compact route",
+                    "overview": "Keep the useful summary.",
+                    "duration_days": 4,
+                    "total_est_miles": 321,
+                    "daily_itinerary": [{"day": 1, "title": "Moab arrival"}],
+                    "waypoints": [{
+                        "id": "thp_dead_horse_camp",
+                        "name": "Dead Horse Point Campground",
+                        "type": "camp",
+                        "lat": 38.4869,
+                        "lng": -109.7396,
+                        "photo_url": "https://images.example.test/dead-horse.jpg",
+                        "site_types": ["RV", "Tent"],
+                    }],
+                },
+            },
+            self.user_one,
+            route_geometry={"coordinates": [[-109.5, 38.5], [-108.5, 39.0]]},
+            builder_state={"mode": "manual"},
+            source="mobile",
+        )
+
+        default_item = store.list_trip_documents_v2(self.user_one)["items"][0]
+        compact_item = store.list_trip_documents_v2(
+            self.user_one, include_legacy_v1=False,
+        )["items"][0]
+
+        self.assertIn("legacy_v1", default_item)
+        self.assertNotIn("legacy_v1", compact_item)
+        self.assertEqual(
+            default_item["items"][0]["name"],
+            "Dead Horse Point Campground",
+        )
+        for key in set(default_item) - {"days", "items", "route", "legacy_v1"}:
+            self.assertEqual(compact_item[key], default_item[key])
+        self.assertIs(compact_item["legacy_v1_available"], True)
+        self.assertEqual(compact_item["days"][0]["title"], "Moab arrival")
+        self.assertEqual(len(compact_item["days"]), 4)
+        self.assertEqual(compact_item["route"]["totalDistanceMi"], 321)
+        self.assertEqual(compact_item["items"][0]["kind"], "camp")
+        self.assertEqual(
+            compact_item["items"][0]["entity_id"], "thp_dead_horse_camp",
+        )
+        self.assertEqual(
+            compact_item["items"][0]["coordinates"],
+            {"lat": 38.4869, "lng": -109.7396},
+        )
+        projected_waypoint = compact_item["items"][0]["facts"]["legacy_waypoint"]
+        self.assertEqual(
+            projected_waypoint["photo_url"],
+            "https://images.example.test/dead-horse.jpg",
+        )
+        self.assertEqual(projected_waypoint["site_types"], ["RV", "Tent"])
+
+        individual = store.get_trip_document_v2(
+            self.user_one, "legacy_compact_trip",
+        )
+        self.assertEqual(individual["legacy_v1"], default_item["legacy_v1"])
+
+        api_default_page = asyncio.run(api_trip_documents_v2(
+            user={"id": self.user_one},
+        ))
+        self.assertIn("legacy_v1", api_default_page["items"][0])
+        api_compact_page = asyncio.run(api_trip_documents_v2(
+            include_legacy_v1=False,
+            user={"id": self.user_one},
+        ))
+        self.assertNotIn("legacy_v1", api_compact_page["items"][0])
+        api_individual = asyncio.run(api_trip_document_v2(
+            "legacy_compact_trip",
+            user={"id": self.user_one},
+        ))
+        self.assertEqual(api_individual["legacy_v1"], default_item["legacy_v1"])
+
+    def test_compact_list_repairs_preexisting_raw_migrated_v2_items(self):
+        store.save_account_trip(
+            "legacy_migrated_compact",
+            {
+                "trip_id": "legacy_migrated_compact",
+                "plan": {
+                    "trip_name": "Migrated compact route",
+                    "duration_days": 3,
+                    "total_est_miles": 88,
+                    "daily_itinerary": [{"day": 1, "title": "Arrival"}],
+                    "waypoints": [{
+                        "id": "legacy-stop",
+                        "name": "Scenic overlook",
+                        "type": "place",
+                        "lat": 38.5,
+                        "lng": -109.5,
+                        "photo_url": "https://images.example.test/overlook.jpg",
+                    }],
+                },
+            },
+            self.user_one,
+            route_geometry={"coordinates": [[-109.5, 38.5], [-109.4, 38.6]]},
+            source="mobile",
+        )
+        projected = store.get_trip_document_v2(
+            self.user_one, "legacy_migrated_compact",
+        )
+        self.assertIn("name", projected["items"][0])
+        migrated = store.upsert_trip_document_v2(
+            self.user_one,
+            "legacy_migrated_compact",
+            projected,
+            projected["revision"],
+            "migrate-before-compact",
+        )
+        self.assertIn("name", migrated["items"][0])
+
+        compact = store.list_trip_documents_v2(
+            self.user_one, include_legacy_v1=False,
+        )["items"][0]
+        self.assertNotIn("name", compact["items"][0])
+        self.assertEqual(compact["items"][0]["title"], "Scenic overlook")
+        self.assertEqual(compact["items"][0]["coordinates"], {"lat": 38.5, "lng": -109.5})
+        self.assertEqual(
+            compact["items"][0]["facts"]["legacy_waypoint"]["photo_url"],
+            "https://images.example.test/overlook.jpg",
+        )
+        self.assertEqual(len(compact["days"]), 3)
+        self.assertEqual(compact["route"]["totalDistanceMi"], 88)
+
+    def test_compact_list_keeps_newer_canonical_v2_content(self):
+        created = store.upsert_trip_document_v2(
+            self.user_one,
+            "canonical_wins_compact",
+            {
+                **_trip_document("canonical_wins_compact", "Canonical route"),
+                "route": {"totalDistance": 0},
+                "days": [{"day": 1, "title": "New day title", "summary": "Current"}],
+                "items": [{
+                    "schema_version": 1,
+                    "id": "canonical-stop",
+                    "kind": "camp",
+                    "title": "Current campground",
+                    "summary": "Current details",
+                    "day": 1,
+                    "order": 0,
+                    "coordinates": {"lat": 38.6, "lng": -109.6},
+                }],
+                "legacy_v1": {
+                    "trip": {
+                        "plan": {
+                            "trip_name": "Stale legacy route",
+                            "duration_days": 4,
+                            "total_est_miles": 321,
+                            "daily_itinerary": [{"day": 1, "title": "Old day title"}],
+                            "waypoints": [{
+                                "id": "canonical-stop",
+                                "name": "Old campground",
+                                "type": "place",
+                                "lat": 38.5,
+                                "lng": -109.5,
+                            }],
+                        },
+                    },
+                },
+            },
+            0,
+            "canonical-compact-create",
+        )
+        self.assertEqual(created["revision"], 1)
+
+        compact = store.list_trip_documents_v2(
+            self.user_one, include_legacy_v1=False,
+        )["items"][0]
+        self.assertEqual(compact["items"][0]["title"], "Current campground")
+        self.assertEqual(compact["items"][0]["kind"], "camp")
+        self.assertEqual(compact["items"][0]["coordinates"], {"lat": 38.6, "lng": -109.6})
+        self.assertEqual(compact["days"][0]["title"], "New day title")
+        self.assertEqual(compact["days"][0]["summary"], "Current")
+        self.assertEqual(
+            len(compact["days"]),
+            1,
+            "stale legacy duration cannot re-add days removed from a canonical V2 trip",
+        )
+        self.assertEqual(compact["route"], {"totalDistance": 0})
+        self.assertNotIn(
+            "totalDistanceMi",
+            compact["route"],
+            "an explicit canonical V2 route remains authoritative",
+        )
+
+        positive_meter_document = {
+            **_trip_document("canonical_meter_distance", "Canonical meter route"),
+            "route": {"totalDistance": 1609.344},
+            "legacy_v1": {
+                "trip": {
+                    "plan": {
+                        "trip_name": "Stale long route",
+                        "total_est_miles": 321,
+                    },
+                },
+            },
+        }
+        store.upsert_trip_document_v2(
+            self.user_one,
+            "canonical_meter_distance",
+            positive_meter_document,
+            0,
+            "canonical-meter-create",
+        )
+        meter_compact = next(
+            item for item in store.list_trip_documents_v2(
+                self.user_one, include_legacy_v1=False,
+            )["items"]
+            if item["trip_id"] == "canonical_meter_distance"
+        )
+        self.assertEqual(meter_compact["route"]["totalDistance"], 1609.344)
+        self.assertNotIn(
+            "totalDistanceMi",
+            meter_compact["route"],
+            "a positive canonical meter distance is not replaced by stale legacy miles",
+        )
+
+    def test_compact_list_and_write_keep_explicit_empty_v2_fields_authoritative(self):
+        created = store.upsert_trip_document_v2(
+            self.user_one,
+            "canonical_empty_compact",
+            {
+                **_trip_document("canonical_empty_compact", "Canonical empty route"),
+                "regions": [],
+                "route": {},
+                "legacy_v1": {
+                    "request": "Keep this original request",
+                    "trip": {
+                        "plan": {
+                            "trip_name": "Stale legacy route",
+                            "states": ["UT"],
+                            "duration_days": 3,
+                            "total_est_miles": 88,
+                            "daily_itinerary": [
+                                {"day": 1, "title": "Old day", "weather": "Clear"},
+                            ],
+                            "waypoints": [
+                                {"id": "old-stop", "name": "Old stop", "type": "camp"},
+                            ],
+                            "campsites": [
+                                {"id": "old-stop", "name": "Old stop", "type": "camp"},
+                            ],
+                            "gas_stations": [
+                                {"id": "old-fuel", "name": "Old fuel", "type": "fuel"},
+                            ],
+                            "legacy_only": "preserve me",
+                        },
+                        "campsites": [
+                            {"id": "old-stop", "name": "Old stop", "type": "camp"},
+                        ],
+                        "gas_stations": [
+                            {"id": "old-fuel", "name": "Old fuel", "type": "fuel"},
+                        ],
+                    },
+                    "route_geometry": {"coordinates": [[-109.5, 38.5], [-109.4, 38.6]]},
+                    "builder_state": {"mode": "manual", "bookings": [{"id": "booking-1"}]},
+                },
+            },
+            0,
+            "canonical-empty-create",
+        )
+
+        compact = store.list_trip_documents_v2(
+            self.user_one, include_legacy_v1=False,
+        )["items"][0]
+        self.assertEqual(compact["regions"], [])
+        self.assertEqual(compact["days"], [])
+        self.assertEqual(compact["items"], [])
+        self.assertEqual(compact["route"], {})
+
+        compact.pop("legacy_v1_available", None)
+        compact["title"] = "Canonical empty route updated"
+        updated = store.upsert_trip_document_v2(
+            self.user_one,
+            "canonical_empty_compact",
+            compact,
+            created["revision"],
+            "canonical-empty-update",
+        )
+        legacy = updated["legacy_v1"]
+        plan = legacy["trip"]["plan"]
+        self.assertEqual(plan["trip_name"], "Canonical empty route updated")
+        self.assertEqual(plan["states"], [])
+        self.assertEqual(plan["daily_itinerary"], [])
+        self.assertEqual(plan["waypoints"], [])
+        self.assertEqual(plan["campsites"], [])
+        self.assertEqual(plan["gas_stations"], [])
+        self.assertEqual(legacy["trip"]["campsites"], [])
+        self.assertEqual(legacy["trip"]["gas_stations"], [])
+        self.assertNotIn("total_est_miles", plan)
+        self.assertEqual(plan["legacy_only"], "preserve me")
+        self.assertEqual(legacy["route_geometry"], {})
+        self.assertEqual(legacy["request"], "Keep this original request")
+        self.assertEqual(
+            legacy["builder_state"],
+            {"mode": "manual", "bookings": [{"id": "booking-1"}]},
+        )
+
+    def test_compact_mobile_empty_route_clears_existing_legacy_route(self):
+        store.save_account_trip(
+            "legacy_route_clear",
+            {
+                "trip_id": "legacy_route_clear",
+                "plan": {
+                    "trip_name": "Route to clear",
+                    "total_est_miles": 44,
+                    "waypoints": [
+                        {"id": "start", "name": "Start", "type": "start"},
+                        {"id": "finish", "name": "Finish", "type": "destination"},
+                    ],
+                },
+            },
+            self.user_one,
+            route_geometry={"coordinates": [[-109.5, 38.5], [-109.4, 38.6]]},
+            builder_state={"mode": "manual"},
+            source="mobile-route-builder",
+        )
+        compact = store.list_trip_documents_v2(
+            self.user_one, include_legacy_v1=False,
+        )["items"][0]
+        self.assertTrue(compact["route"]["coordinates"])
+        compact.pop("legacy_v1_available", None)
+        compact["route"] = {}
+
+        updated = store.upsert_trip_document_v2(
+            self.user_one,
+            "legacy_route_clear",
+            compact,
+            compact["revision"],
+            "mobile-empty-route",
+        )
+
+        self.assertEqual(updated["route"], {})
+        self.assertEqual(updated["legacy_v1"]["route_geometry"], {})
+        self.assertNotIn(
+            "total_est_miles",
+            updated["legacy_v1"]["trip"]["plan"],
+        )
+        old_client = store.get_trip("legacy_route_clear")
+        self.assertEqual(old_client["route_geometry"], {})
+        self.assertNotIn("total_est_miles", old_client["plan"])
+        compact_after = store.list_trip_documents_v2(
+            self.user_one, include_legacy_v1=False,
+        )["items"][0]
+        self.assertEqual(compact_after["route"], {})
+
+    def test_compact_update_preserves_server_owned_legacy_over_two_megabytes(self):
+        large_legacy_notes = "L" * 2_150_000
+        store.save_account_trip(
+            "large_authoritative_legacy",
+            {
+                "trip_id": "large_authoritative_legacy",
+                "plan": {
+                    "trip_name": "Large legacy route",
+                    "legacy_notes": large_legacy_notes,
+                    "waypoints": [{
+                        "id": "large-camp",
+                        "name": "Large legacy camp",
+                        "type": "camp",
+                    }],
+                },
+            },
+            self.user_one,
+            source="mobile-route-builder",
+        )
+        compact = store.list_trip_documents_v2(
+            self.user_one, include_legacy_v1=False,
+        )["items"][0]
+        compact.pop("legacy_v1_available", None)
+        compact["title"] = "Large legacy route updated"
+
+        updated = store.upsert_trip_document_v2(
+            self.user_one,
+            "large_authoritative_legacy",
+            compact,
+            compact["revision"],
+            "large-authoritative-update",
+        )
+        self.assertEqual(
+            updated["legacy_v1"]["trip"]["plan"]["legacy_notes"],
+            large_legacy_notes,
+        )
+        self.assertGreater(
+            len(json.dumps(updated, separators=(",", ":")).encode("utf-8")),
+            2 * 1024 * 1024,
+        )
+        self.assertEqual(
+            store.get_trip("large_authoritative_legacy")["plan"]["legacy_notes"],
+            large_legacy_notes,
+        )
+
+        oversized_client = _trip_document("oversized_client_trip", "Too large")
+        oversized_client["notes"] = [{"text": "C" * 2_150_000}]
+        with self.assertRaisesRegex(ValueError, "Trip document is too large"):
+            store.upsert_trip_document_v2(
+                self.user_one,
+                "oversized_client_trip",
+                oversized_client,
+                0,
+                "oversized-client-create",
+            )
+        self.assertIsNone(
+            store.get_trip_document_v2(self.user_one, "oversized_client_trip"),
+        )
+
+        over_cap_notes = "S" * (store._TRUSTED_TRIP_DOCUMENT_MAX_BYTES + 1)
+        store.save_account_trip(
+            "legacy_over_server_cap",
+            {
+                "trip_id": "legacy_over_server_cap",
+                "plan": {
+                    "trip_name": "Over server cap",
+                    "legacy_notes": over_cap_notes,
+                },
+            },
+            self.user_one,
+            source="legacy-import",
+        )
+        over_cap_compact = next(
+            item for item in store.list_trip_documents_v2(
+                self.user_one, include_legacy_v1=False,
+            )["items"]
+            if item["trip_id"] == "legacy_over_server_cap"
+        )
+        over_cap_compact.pop("legacy_v1_available", None)
+        over_cap_compact["title"] = "Must roll back"
+        with self.assertRaisesRegex(ValueError, "server storage limit"):
+            store.upsert_trip_document_v2(
+                self.user_one,
+                "legacy_over_server_cap",
+                over_cap_compact,
+                over_cap_compact["revision"],
+                "legacy-over-server-cap",
+            )
+        unchanged = store.get_trip("legacy_over_server_cap")
+        self.assertEqual(unchanged["plan"]["trip_name"], "Over server cap")
+        self.assertEqual(unchanged["version"], 1)
+
+    def test_canonical_camp_day_updates_legacy_recommended_day(self):
+        legacy_waypoint = {
+            "id": "camp-day",
+            "name": "Day camp",
+            "type": "camp",
+            "day": 1,
+            "recommended_day": 1,
+        }
+        merged = store._merge_canonical_v2_into_legacy_v1(
+            {
+                "trip": {
+                    "plan": {
+                        "trip_name": "Camp days",
+                        "waypoints": [dict(legacy_waypoint)],
+                        "campsites": [dict(legacy_waypoint)],
+                    },
+                    "campsites": [dict(legacy_waypoint)],
+                },
+            },
+            {
+                **_trip_document("camp-day-trip", "Camp days"),
+                "items": [{
+                    "id": "camp-day-occurrence",
+                    "entity_id": "camp-day",
+                    "kind": "camp",
+                    "title": "Day camp",
+                    "day": 3,
+                    "order": 0,
+                    "facts": {"legacy_waypoint": dict(legacy_waypoint)},
+                }],
+            },
+        )
+        trip = merged["trip"]
+        self.assertEqual(trip["plan"]["waypoints"][0]["recommended_day"], 3)
+        self.assertEqual(trip["plan"]["campsites"][0]["recommended_day"], 3)
+        self.assertEqual(trip["campsites"][0]["recommended_day"], 3)
+
+    def test_camp_alignment_never_matches_different_stable_ids_by_place_key(self):
+        aligned = store._aligned_legacy_waypoint_collection(
+            [[
+                {
+                    "id": "camp-b",
+                    "name": "Shared camp",
+                    "type": "camp",
+                    "lat": 38.5,
+                    "lng": -109.5,
+                    "reservation": "wrong",
+                },
+            ]],
+            [{
+                "id": "camp-a",
+                "name": "Shared camp",
+                "type": "camp",
+                "lat": 38.5,
+                "lng": -109.5,
+            }],
+            "camp",
+        )
+        self.assertNotIn("reservation", aligned[0])
+
+    def test_repeated_camp_id_matches_rich_occurrences_in_order(self):
+        aligned = store._aligned_legacy_waypoint_collection(
+            [
+                [
+                    {"id": "repeat-camp", "name": "Repeat", "type": "camp"},
+                    {"id": "repeat-camp", "name": "Repeat", "type": "camp"},
+                ],
+                [
+                    {
+                        "id": "repeat-camp",
+                        "name": "Repeat",
+                        "type": "camp",
+                        "reservation": "first",
+                    },
+                    {
+                        "id": "repeat-camp",
+                        "name": "Repeat",
+                        "type": "camp",
+                        "reservation": "second",
+                    },
+                ],
+            ],
+            [
+                {"id": "repeat-camp", "name": "Repeat", "type": "camp", "day": 1},
+                {"id": "repeat-camp", "name": "Repeat", "type": "camp", "day": 3},
+            ],
+            "camp",
+        )
+        self.assertEqual(
+            [value["reservation"] for value in aligned],
+            ["first", "second"],
+        )
+
+    def test_sparse_trip_mirror_does_not_erase_rich_plan_camp_fields(self):
+        aligned = store._aligned_legacy_waypoint_collection(
+            [
+                [{
+                    "id": "rich-camp",
+                    "name": "Rich camp",
+                    "type": "camp",
+                    "site_types": [],
+                    "notes": "",
+                    "rating": None,
+                }],
+                [{
+                    "id": "rich-camp",
+                    "name": "Rich camp",
+                    "type": "camp",
+                    "site_types": ["RV", "Tent"],
+                    "notes": "Reservations required",
+                    "rating": 4.8,
+                }],
+            ],
+            [{"id": "rich-camp", "name": "Rich camp", "type": "camp"}],
+            "camp",
+        )
+        self.assertEqual(aligned[0]["site_types"], ["RV", "Tent"])
+        self.assertEqual(aligned[0]["notes"], "Reservations required")
+        self.assertEqual(aligned[0]["rating"], 4.8)
+
+    def test_compact_update_preserves_existing_v2_legacy_payload(self):
+        legacy_payload = {
+            "request": "Build the original route",
+            "trip": {"plan": {"trip_name": "Authoritative legacy route"}},
+            "route_geometry": {"coordinates": [[-109.5, 38.5], [-108.5, 39.0]]},
+            "builder_state": {"mode": "assisted"},
+        }
+        created = store.upsert_trip_document_v2(
+            self.user_one,
+            "trip_v2_compact_write",
+            {
+                **_trip_document("trip_v2_compact_write", "Before compact write"),
+                "legacy_v1": legacy_payload,
+            },
+            0,
+            "compact-v2-create",
+        )
+        compact_document = store.list_trip_documents_v2(
+            self.user_one, include_legacy_v1=False,
+        )["items"][0]
+        compact_document.pop("legacy_v1_available", None)
+        compact_document["title"] = "After compact write"
+
+        updated = store.upsert_trip_document_v2(
+            self.user_one,
+            "trip_v2_compact_write",
+            compact_document,
+            created["revision"],
+            "compact-v2-update",
+        )
+
+        self.assertEqual(updated["title"], "After compact write")
+        merged_legacy = updated["legacy_v1"]
+        self.assertEqual(merged_legacy["request"], legacy_payload["request"])
+        self.assertEqual(merged_legacy["builder_state"], legacy_payload["builder_state"])
+        self.assertEqual(merged_legacy["route_geometry"], legacy_payload["route_geometry"])
+        self.assertEqual(
+            merged_legacy["trip"]["plan"]["trip_name"],
+            "After compact write",
+        )
+        self.assertEqual(
+            store.get_trip_document_v2(
+                self.user_one, "trip_v2_compact_write",
+            )["legacy_v1"],
+            merged_legacy,
+        )
+
+    def test_compact_update_preserves_legacy_only_authoritative_payload(self):
+        store.save_account_trip(
+            "trip_legacy_compact_write",
+            {
+                "trip_id": "trip_legacy_compact_write",
+                "plan": {
+                    "trip_name": "Legacy-only route",
+                    "waypoints": [{
+                        "id": "dead-horse-camp",
+                        "name": "Dead Horse Point",
+                        "type": "camp",
+                    }],
+                },
+                "campsites": [{
+                    "id": "dead-horse-camp",
+                    "name": "Dead Horse Point",
+                    "type": "camp",
+                    "site_types": ["RV", "Tent"],
+                }],
+                "gas_stations": [{
+                    "id": "stale-fuel",
+                    "name": "Removed fuel stop",
+                    "type": "fuel",
+                }],
+            },
+            self.user_one,
+            route_geometry={"coordinates": [[-109.7, 38.5], [-109.9, 38.4]]},
+            builder_state={"mode": "manual", "snap": True},
+            source="mobile-route-builder",
+        )
+        authoritative = store.get_trip_document_v2(
+            self.user_one, "trip_legacy_compact_write",
+        )["legacy_v1"]
+        compact_document = store.list_trip_documents_v2(
+            self.user_one, include_legacy_v1=False,
+        )["items"][0]
+        compact_document.pop("legacy_v1_available", None)
+        compact_document["title"] = "Migrated by compact client"
+
+        updated = store.upsert_trip_document_v2(
+            self.user_one,
+            "trip_legacy_compact_write",
+            compact_document,
+            compact_document["revision"],
+            "compact-legacy-update",
+        )
+
+        self.assertEqual(
+            updated["legacy_v1"]["trip"]["plan"]["trip_name"],
+            "Migrated by compact client",
+        )
+        self.assertEqual(
+            updated["legacy_v1"]["builder_state"],
+            authoritative["builder_state"],
+        )
+        self.assertEqual(
+            updated["legacy_v1"]["trip"]["campsites"][0]["site_types"],
+            ["RV", "Tent"],
+        )
+        self.assertEqual(
+            updated["legacy_v1"]["trip"]["plan"]["campsites"][0]["site_types"],
+            ["RV", "Tent"],
+        )
+        self.assertEqual(updated["legacy_v1"]["trip"]["gas_stations"], [])
+        self.assertEqual(updated["legacy_v1"]["trip"]["plan"]["gas_stations"], [])
+        self.assertNotIn("legacy_v1", updated["legacy_v1"])
+        self.assertNotIn("payload", updated["legacy_v1"])
+        self.assertIn("trip", updated["legacy_v1"])
+        self.assertEqual(
+            store.get_trip_document_v2(
+                self.user_one, "trip_legacy_compact_write",
+            )["legacy_v1"],
+            updated["legacy_v1"],
+        )
+        old_client_trip = store.get_trip("trip_legacy_compact_write")
+        self.assertEqual(
+            old_client_trip["plan"]["trip_name"],
+            "Migrated by compact client",
+        )
+        self.assertEqual(
+            old_client_trip["builder_state"],
+            authoritative["builder_state"],
+        )
+        old_client_card = store.list_user_trips(self.user_one)[0]
+        self.assertEqual(old_client_card["trip_name"], "Migrated by compact client")
 
     def test_trip_upsert_is_idempotent_and_rejects_key_reuse(self):
         document = _trip_document("trip_retry")
@@ -246,7 +948,9 @@ class TripGraphV2StoreTests(unittest.TestCase):
         self.assertEqual(store.list_trip_documents_v2(self.user_one)["items"], [])
         self.assertEqual(
             store.list_trip_documents_v2(
-                self.user_one, include_archived=True
+                self.user_one,
+                include_archived=True,
+                include_legacy_v1=False,
             )["items"][0]["trip_id"],
             "trip_lifecycle",
         )
@@ -304,12 +1008,36 @@ class TripGraphV2StoreTests(unittest.TestCase):
         self.assertEqual(restored["status"], "active")
         self.assertEqual(restored["revision"], item["revision"] + 1)
 
+        default_deleted_item = store.list_trip_documents_v2(
+            self.user_one,
+            include_deleted=True,
+            include_archived=True,
+        )["items"][0]
+        compact_deleted_item = store.list_trip_documents_v2(
+            self.user_one,
+            include_deleted=True,
+            include_archived=True,
+            include_legacy_v1=False,
+        )["items"][0]
+        self.assertEqual(default_deleted_item["status"], "deleted")
+        self.assertIn("title", default_deleted_item)
+        self.assertEqual(compact_deleted_item["status"], "deleted")
         self.assertEqual(
-            store.list_trip_documents_v2(
-                self.user_one, include_deleted=True, include_archived=True
-            )["items"][0]["status"],
-            "deleted",
+            set(compact_deleted_item),
+            {
+                "schema_version",
+                "trip_id",
+                "status",
+                "revision",
+                "created_at",
+                "updated_at",
+                "archived_at",
+                "deleted_at",
+            },
         )
+        self.assertNotIn("route", compact_deleted_item)
+        self.assertNotIn("items", compact_deleted_item)
+        self.assertNotIn("legacy_v1", compact_deleted_item)
 
     def test_legacy_trip_projects_into_v2_and_migrates_on_write(self):
         store.save_account_trip(

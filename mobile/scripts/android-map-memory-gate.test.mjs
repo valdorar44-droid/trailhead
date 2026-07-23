@@ -1349,6 +1349,116 @@ const lifecycleReport = () => ({
   },
 });
 
+// End-to-end failure-path regression: an enable transition can fail in a
+// recoverable way without turning that attempt into a valid heavy-layer
+// sample. The runner must still disable the layers, finish all ten diagnostic
+// attempts, and execute the lifecycle restoration in finally.
+const recoverableEnableFailureReport = lifecycleReport();
+recoverableEnableFailureReport.memory = emptyLayerCycleMemory();
+const recoverableEnableFailureEvents = [];
+const recoverableEnableFailures = [];
+let recoverableEnableInitialStates = null;
+let recoverableEnableEvaluation = null;
+const completedRecoverableEnableFailure = await executeMemoryGateLifecycle({
+  report: recoverableEnableFailureReport,
+  executeGate: async () => {
+    recoverableEnableInitialStates = { ...originalLayerStates };
+    recoverableEnableFailureReport.layers.initial = recoverableEnableInitialStates;
+    recoverableEnableFailureReport.layers.baseline = { ...disabledLayerStates };
+    await executeLayerDiagnosticCycles({
+      cycleCount: MAP_LAYER_CYCLE_COUNT,
+      memory: recoverableEnableFailureReport.memory,
+      enableTransition: async (cycle, attempt) => {
+        recoverableEnableFailureEvents.push(`enable:${cycle}`);
+        if (cycle === 4) throw new MemoryGateError('layer_toggle_failed_fire');
+        await populateVerifiedHeavyPhase(cycle, attempt);
+      },
+      measureHeavyPeak: async (cycle, attempt) => {
+        recoverableEnableFailureEvents.push(`heavy:${cycle}`);
+        await populateHeavyMeasurement(cycle, attempt);
+      },
+      disableTransition: async (cycle, attempt) => {
+        recoverableEnableFailureEvents.push(`disable:${cycle}`);
+        await populateVerifiedDisabledPhase(cycle, attempt);
+      },
+      measureDisabledRecovery: async (cycle, attempt) => {
+        recoverableEnableFailureEvents.push(`valley:${cycle}`);
+        await populateDisabledMeasurement(cycle, attempt);
+      },
+      assertContinuationSafe: async ({ cycle, phase }) => {
+        recoverableEnableFailureEvents.push(`safe:${cycle}:${phase}`);
+      },
+      recordWorkloadFailure: async failure => {
+        recoverableEnableFailures.push(failure);
+        recoverableEnableFailureReport.result = 'failed';
+        recoverableEnableFailureReport.failure_code ??= failure.failureCode;
+      },
+      requirePostCycleBaseline: async () => {
+        recoverableEnableFailureEvents.push('post-cycle-baseline');
+      },
+    });
+  },
+  getInitialStates: () => recoverableEnableInitialStates,
+  collectTerminalEvidence: async () => {
+    recoverableEnableFailureEvents.push('terminal');
+  },
+  restoreLayers: async states => {
+    recoverableEnableFailureEvents.push('restore');
+    assert.deepEqual(states, originalLayerStates);
+    return durableRestoration;
+  },
+  finalizeReport: async finalizedReport => {
+    recoverableEnableFailureEvents.push('finalize');
+    recoverableEnableEvaluation = evaluateAndroidMemoryGateV3({
+      exploreIdleSamples: [privacyMemorySample(400_000, 350_000)],
+      mapIdleSamples: [privacyMemorySample(700_000, 600_000)],
+      cycles: finalizedReport.memory.cycles,
+      postMapRecoverySamples: [privacyMemorySample(700_000, 600_000)],
+      exploreRecoverySamples: [privacyMemorySample(400_000, 350_000)],
+      activeSamples: { navigation: [], preview3d: [], originals: [] },
+      stability: {
+        processAlive: true,
+        exitEvidenceChecked: true,
+        cancelled: false,
+        layerStateRestored: finalizedReport.layers.restored,
+        objectCountRatchetDetected: false,
+        lowMemoryKillCount: 0,
+        oomCount: 0,
+        anrCount: 0,
+        processDeathCount: 0,
+        duplicateRendererEvidenceComplete: true,
+        duplicateRendererCount: 0,
+        stateLossEvidenceComplete: true,
+        stateLossCount: 0,
+      },
+    });
+  },
+  completedAt: () => '2026-07-23T00:00:00.000Z',
+});
+assert.equal(recoverableEnableFailureEvents.includes('heavy:4'), false, 'failed enable skips heavy sampling');
+assert.equal(recoverableEnableFailureEvents.includes('disable:4'), true, 'disable still runs after enable failure');
+assert.equal(recoverableEnableFailureEvents.includes('valley:4'), true, 'the recovered disabled state remains measurable');
+assert.equal(recoverableEnableFailureEvents.indexOf('terminal') < recoverableEnableFailureEvents.indexOf('restore'), true);
+assert.equal(recoverableEnableFailureEvents.at(-1), 'finalize');
+assert.deepEqual(recoverableEnableFailures, [{
+  cycle: 4,
+  phase: 'enable',
+  failureCode: 'layer_toggle_failed_fire',
+}]);
+assert.equal(completedRecoverableEnableFailure.memory.cycle_attempt_count, MAP_LAYER_CYCLE_COUNT);
+assert.equal(completedRecoverableEnableFailure.memory.cycles.length, MAP_LAYER_CYCLE_COUNT - 1);
+assert.equal(completedRecoverableEnableFailure.memory.incomplete_cycles.length, 1);
+assert.equal(completedRecoverableEnableFailure.memory.incomplete_cycles[0].cycle, 4);
+assert.equal(completedRecoverableEnableFailure.memory.incomplete_cycles[0].heavyPeak, null);
+assert.equal(completedRecoverableEnableFailure.memory.incomplete_cycles[0].disabledLayerStateVerified, true);
+assert.equal(completedRecoverableEnableFailure.memory.incomplete_cycles[0].disabledRecovery != null, true);
+assert.equal(recoverableEnableEvaluation.observedCycleCount, MAP_LAYER_CYCLE_COUNT - 1);
+assert.equal(recoverableEnableEvaluation.cycleCountPassed, false);
+assert.equal(recoverableEnableEvaluation.m1Passed, false, 'the incomplete attempt cannot count toward ten valid cycles');
+assert.equal(completedRecoverableEnableFailure.result, 'failed');
+assert.equal(completedRecoverableEnableFailure.failure_code, 'layer_toggle_failed_fire');
+assert.equal(completedRecoverableEnableFailure.layers.restored, true, 'lifecycle restoration still completes');
+
 const baselineFailureEvents = [];
 const baselineFailureReport = lifecycleReport();
 let baselineInitialStates = null;

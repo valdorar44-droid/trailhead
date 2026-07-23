@@ -1,6 +1,6 @@
 # Trailhead 1.0.10 Active Checkpoint
 
-Last updated: 2026-07-23 08:00:30 CDT (America/Winnipeg)
+Last updated: 2026-07-23 08:50:00 CDT (America/Winnipeg)
 
 ## Resume protocol
 
@@ -14,8 +14,10 @@ Read this file before resuming the 1.0.10 overhaul after a restart or context co
 ## Source checkpoint
 
 - Branch: `feat/trailhead-1.0.10-overhaul`
+- Current implementation/release HEAD before this checkpoint-only commit: `62e40b1519e7a53061dd4cac02a2db96edf0be0a`.
+- Exact source now published to the paired preview: `62e40b1519e7a53061dd4cac02a2db96edf0be0a`. The checkpoint commit that records this evidence is documentation/test-only and does not require another OTA.
 - Memory Gate V3 implementation baseline: `d5d73924dc5a969a66ac9eba2b85acca5db0cc19`; current evidence harness/checkpoint HEAD before this documentation-only commit: `65451cf7bab0eed23a1f50c212cb084ff78031f8`.
-- Exact source installed on the paired preview remains `83287394ce41f1100bd980c9249f20d364b51db7`; the gate-only commit is an approved harness delta and is not a new OTA.
+- Previous installed-preview source `83287394ce41f1100bd980c9249f20d364b51db7` is superseded by the paired `62e40b1` preview below; device installation/identity proof for the new update is pending.
 - M1 commit series created from the verified tree:
   - `4fa0379 feat(api): harden fire and explore delivery`
   - `d44618b feat(mobile): preserve explore context and map state`
@@ -124,6 +126,30 @@ Read this file before resuming the 1.0.10 overhaul after a restart or context co
 - Do not repeat: Figma packets, NPS research, the 33-run Android crawl, broad manual Layers testing, the first incomplete V3 run, or the just-passed full pre-preview suite unless source changes invalidate it.
 - Task-owned background processes: none. The Gradle daemon was explicitly stopped after the successful pre-preview run; no Metro, Expo, Maestro, memory-gate, or test process remains.
 
+## Checkpoint A.2 — Production compatibility and paired preview published
+
+- Timestamp: `2026-07-23T08:50:00-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; implementation/release HEAD: `62e40b1519e7a53061dd4cac02a2db96edf0be0a`.
+- Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. `.cursor/` and `dashboard/explore_serving_index_v2.json` remain unstaged and untouched.
+- The aggregate-only production preflight passed against `/data/trailhead.db`: 47 authoritative legacy documents, zero documents over the 8 MiB trusted-preservation limit, zero invalid legacy or V2 JSON documents, and maximum serialized size `6001565` bytes. No IDs, titles, or contents were logged.
+- Backend compatibility was deployed from the immutable source. The first deployment, `14dd0c37-3f94-4782-8035-01cfb9d5da62`, exposed an ignored legacy Railway health configuration and was superseded without changing application behavior.
+- `62e40b1` moves Railway's health gate to the supported `[deploy]` keys and adds `tests/test_railway_config.py`. `python3 -m unittest tests.test_railway_config` and `git diff --check` passed.
+- Replacement deployment `a124975b-cd66-44b6-b730-5aa5943cdd70` succeeded. Railway probed `/api/health` with `200`; `https://api.gettrailhead.app/api/health` returned `200`; the deployed image digest is `sha256:cd74175fd117b3b5748f2557fc4b947a8e5fb2b3d4e319806a0a401c764ef992`; sanitized startup/runtime logs contained no warnings or errors. Both default and compact trip-list routes are live and auth-protected; signed-in semantics remain a device check.
+- The first guarded preview publish attempt failed before Sentry upload, EAS publication, or channel movement because a clean-worktree `node_modules` symlink caused local `file:` Expo modules to resolve outside Metro's project root. Installing the lockfile into the clean worktree fixed release setup without a source or dependency-graph change.
+- One paired preview OTA then published from exact SHA `62e40b1519e7a53061dd4cac02a2db96edf0be0a`, with Android/iOS/web Sentry bundles and source maps uploaded before channel movement:
+  - Channel `preview`, channel ID `019dbc97-3cde-795b-a35d-e6aa985060d3`.
+  - Candidate branch `preview-candidate-62e40b1519e7a53061dd4cac02a2db96edf0be0a-mrxk3nu2-d964f9e0b33abcd4487720c8`, branch ID `019f8f37-588f-7a4c-85d9-bfd49db43c1f`.
+  - Android build `59`, runtime `native-1.0.10-android.1`, group `341d8a01-ffb5-4782-9e95-8388af2cd150`, update `019f8f37-81ed-7366-86bc-59e977335e08`.
+  - iOS build `54`, runtime `native-1.0.10-ios.1`, group `dfbb32a2-d69b-4f8c-82b7-f74dfa26c890`, update `019f8f37-81ed-71a8-886f-6f4768560f4e`.
+- The known `react-native-webrtc` export fallback, Sentry URL/token-format warning, and EAS CLI patch-version notice were non-blocking; no native dependency or runtime change was made.
+- Memory Gate V3 gained a deterministic coverage case for a recoverable heavy-layer enable failure: heavy sampling is skipped, disable/recovery still run, all attempts finish, only complete attempts enter the curve, and nine valid cycles cannot pass. `npm run test:android-map-memory` and `git diff --check` passed; production gate semantics did not change.
+- Layers remain user-confirmed working on Android and iPhone. Their toggles are only a deterministic memory workload and must not be reopened without new evidence.
+- Current device evidence still points to `/home/sean/.openclaw/workspace/trailhead/output/android-map-memory-gate/2026-07-23T10-21-20-418Z/report.json`, SHA-256 `f2140b20b8a0ae3d3297a4f41052e9bad694c87f9826b4c27469be9ec408867a`; no `62e40b1` Memory Gate V3 report exists yet.
+- Open P0 defects: none. Open/pending P1 acceptance: prove the Samsung loaded the new update, rerun all ten Memory Gate V3 attempts, verify Explore recovery and signed-in compact hydration, then run only the affected Android/iOS delta. M1 is not accepted yet.
+- Exact next action: cold-load the paired update on Samsung without clearing the account; verify version/build/channel/source/runtime/update and the QA deep-link; then run the exact candidate-bound Memory Gate V3 command recorded below.
+- Do not repeat: Figma/research packets, the 33-run Android crawl, NPS research, a broad manual Layers audit, the first incomplete V3 run, production preflight, backend deployment, paired OTA, or the full pre-preview suite unless a relevant source change invalidates them.
+- Task-owned process state: no WSL Gradle, Metro, Expo, EAS, Railway, Maestro, test, or memory-gate process remains. The obsolete Windows Trailhead Originals static preview server that had listened on port `8085` since July 16 was stopped. The ADB daemon remains intentionally active for the connected Samsung and emulator.
+
 ## Verified completed work
 
 - The final frozen source tree passed `npm run audit:prepreview`:
@@ -186,12 +212,24 @@ Read this file before resuming the 1.0.10 overhaul after a restart or context co
 
 ## Next exact actions
 
-1. Push the intentional implementation commits plus this checkpoint; keep `.cursor/` and the Explore index unstaged.
-2. Run a count/max-size-only production preflight for authoritative legacy trip documents above 8 MiB. Do not log document contents.
-3. Deploy backend compatibility first and verify health, default full-list compatibility, compact-list redaction/projection, individual full detail, and a non-destructive compact update fixture.
-4. Publish one paired preview OTA from the same clean immutable SHA with Sentry source maps and verify Android/iOS source, runtime, and update identities.
-5. Rerun the exact **Checkpoint A** Samsung command without clearing the signed-in account. Preserve the atomic report, SHA-256, ten-cycle curves, recovery, exit evidence, QA counts, and exact layer restoration.
-6. After memory passes, run only the affected Android delta and iOS shared spot-check, then assemble Checkpoint B and the M1 review packet. Do not begin M2 with an unresolved P0/P1.
+1. Install/load update `019f8f37-81ed-7366-86bc-59e977335e08` on Samsung without clearing the signed-in account. Cold-open the QA deep link and verify version `1.0.10`, build `59`, channel `preview`, source `62e40b1519e7a53061dd4cac02a2db96edf0be0a`, runtime `native-1.0.10-android.1`, update ID, and compact repository count/byte diagnostics.
+2. Run from `mobile/` with a wrapper timeout above 70 minutes and never start a second copy while the original process is alive:
+
+   ```powershell
+   npm run audit:android-map-memory -- --serial RFCR408DA9B `
+     --expected-version-name 1.0.10 `
+     --expected-version-code 59 `
+     --expected-commit-sha 62e40b1519e7a53061dd4cac02a2db96edf0be0a `
+     --expected-build-commit-sha cd61f6c3dbf9d176bc49b2d96a2c13fc9470dcaf `
+     --runtime native-1.0.10-android.1 `
+     --build-id 06142308-0199-46cc-8a4c-fb9d45bca25e `
+     --update-id 019f8f37-81ed-7366-86bc-59e977335e08
+   ```
+
+3. Preserve the atomic report, report SHA-256, ten-cycle phase table/curves, recovery, process/exit evidence, compact hydration diagnostics, and exact saved-layer restoration.
+4. If the gate passes, run only the affected Android delta: warm Map/Explore returns, search/keyboard retention, fire/style/filter/legend presence, NPS list → detail → map → back, exact-place imagery, and stable sheet identity/frames.
+5. Apply the paired iOS update `019f8f37-81ed-71a8-886f-6f4768560f4e`; after the launch-wait procedure, verify the iOS identity and repeat only shared M1 delta checks.
+6. Commit/push Checkpoint B and assemble the M1 review packet. Do not begin M2 while any P0/P1 remains.
 
 ## Checkpoint maintenance
 

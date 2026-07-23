@@ -31,6 +31,15 @@ const map = requireSelectors('app/(tabs)/map.tsx', [
 assert.match(map, /testID=\{`map\.trip-overview\.day\.\$\{day\.day\}`\}/);
 assert.match(map, /testID=\{`map\.trip-overview\.day\.\$\{day\.day\}\.start`\}/);
 
+const mapLayers = requireSelectors('components/map/MapLayerSheetContent.tsx', [
+  'map.layers.style-carousel',
+  'map.layers.toggle-carousel',
+  'map.layers.tool-carousel',
+]);
+assert.match(mapLayers, /testID=\{`map\.layers\.toggle\.\$\{layer\.key\}`\}/);
+assert.match(mapLayers, /accessibilityRole="switch"/);
+assert.match(mapLayers, /accessibilityState=\{\{ checked: layer\.val \}\}/);
+
 requireSelectors('app/(tabs)/guide.tsx', ['explore.screen', 'explore.scroll']);
 const exploreHero = requireSelectors('components/explore/ExploreHero.tsx', [
   'explore.hero',
@@ -97,7 +106,9 @@ requireSelectors('app/qa/telemetry.tsx', [
   'qa.telemetry.javascript-exception',
   'qa.telemetry.performance-span',
   'qa.telemetry.native-crash.state',
+  'qa.telemetry.native-crash.acknowledgement',
   'qa.telemetry.native-crash',
+  'qa.telemetry.release-identity',
   'qa.telemetry.snapshot.refresh',
   'qa.telemetry.snapshot',
   'qa.search-race.status',

@@ -45,6 +45,21 @@ const otaWorkflow = repoSource('.github/workflows/mobile-ota.yml');
 const ciWorkflow = repoSource('.github/workflows/ci.yml');
 const easConfig = JSON.parse(source('eas.json'));
 
+function workflowJobSource(workflow, jobName) {
+  const escapedJobName = jobName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = workflow.match(
+    new RegExp(
+      `^  ${escapedJobName}:\\s*\\r?\\n[\\s\\S]*?(?=^  [A-Za-z0-9_-]+:\\s*\\r?\\n|(?![\\s\\S]))`,
+      'm',
+    ),
+  );
+  return match?.[0] ?? '';
+}
+
+const ciTriggerSource = ciWorkflow.slice(0, ciWorkflow.indexOf('\npermissions:'));
+const mobileCiJob = workflowJobSource(ciWorkflow, 'mobile');
+const androidNativeCiJob = workflowJobSource(ciWorkflow, 'android-native');
+
 expect(pkg.version === '1.0.10', 'package.json must use marketing version 1.0.10.');
 expect(lockRoot?.version === '1.0.10', 'package-lock.json root version must use 1.0.10.');
 expect(config.version === '1.0.10', 'app.config.js must use marketing version 1.0.10.');
@@ -278,14 +293,51 @@ expect(
   'Production OTA must require successful CI for the exact release SHA.',
 );
 expect(
-  ciWorkflow.includes(':app:testDebugUnitTest')
-    && ciWorkflow.includes("github.event_name == 'push'")
-    && ciWorkflow.includes("github.ref == 'refs/heads/main'")
-    && ciWorkflow.includes('npm run test:telemetry')
-    && ciWorkflow.includes('npm run test:referrals')
-    && ciWorkflow.includes('npm run test:app-links')
-    && ciWorkflow.includes('npm run audit:native-drift'),
-  'Normal CI must cover Android Auto, telemetry, referrals, app links, and native drift.',
+  /^  pull_request:\s*$/m.test(ciTriggerSource),
+  'Normal CI must run for pull requests.',
+);
+expect(
+  mobileCiJob.includes('npm run test:telemetry')
+    && mobileCiJob.includes('npm run test:referrals')
+    && mobileCiJob.includes('npm run test:app-links')
+    && mobileCiJob.includes('npm run audit:native-drift'),
+  'The normal mobile CI job must cover telemetry, referrals, app links, and native drift.',
+);
+expect(
+  androidNativeCiJob.includes('./gradlew :app:testDebugUnitTest --no-daemon'),
+  'The normal Android native CI job must run Android and Android Auto unit tests.',
+);
+expect(
+  !/^    if:.*(?:github\.event_name|github\.ref|push)/m.test(androidNativeCiJob),
+  'Android and Android Auto unit tests must not be restricted to push-only CI.',
+);
+expect(
+  !ciTriggerSource.includes('pull_request_target:'),
+  'CI must not expose repository secrets to fork code through pull_request_target.',
+);
+expect(
+  androidNativeCiJob.includes(
+    'RNMAPBOX_MAPS_DOWNLOAD_TOKEN: ${{ secrets.RNMAPBOX_MAPS_DOWNLOAD_TOKEN || secrets.MAPBOX_DOWNLOADS_TOKEN }}',
+  )
+    && !mobileCiJob.includes('RNMAPBOX_MAPS_DOWNLOAD_TOKEN:'),
+  'The read-only Mapbox Maven credential must be scoped to the Android native job.',
+);
+const forkNativeBlock = androidNativeCiJob.indexOf('Enforce trusted-branch native test policy');
+const nativeCheckout = androidNativeCiJob.indexOf('actions/checkout@v4');
+expect(
+  forkNativeBlock >= 0
+    && androidNativeCiJob.includes("github.event_name == 'pull_request'")
+    && androidNativeCiJob.includes('github.event.pull_request.head.repo.full_name != github.repository')
+    && androidNativeCiJob.includes('Fork pull requests cannot receive repository secrets')
+    && androidNativeCiJob.includes('exit 1')
+    && forkNativeBlock < nativeCheckout,
+  'Fork pull requests must fail explicitly before checkout and require a trusted-branch rerun.',
+);
+expect(
+  androidNativeCiJob.includes('Validate Mapbox Maven credential')
+    && androidNativeCiJob.includes('Configure RNMAPBOX_MAPS_DOWNLOAD_TOKEN or MAPBOX_DOWNLOADS_TOKEN')
+    && androidNativeCiJob.includes('DOWNLOADS:READ'),
+  'Trusted native CI must fail clearly when its read-only Mapbox Maven credential is missing.',
 );
 expect(
   source('app.config.js').includes('EXPO_PUBLIC_BRANCH_CONFIGURED'),

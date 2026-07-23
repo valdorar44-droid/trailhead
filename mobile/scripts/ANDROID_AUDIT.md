@@ -64,6 +64,52 @@ Pass `--record-seconds 1..30` for a bounded MP4. Recording is disabled by defaul
 npm run test:android-audit
 ```
 
+## Deterministic Map memory gate
+
+Run the physical-device memory gate only after installing the exact candidate.
+It requires one explicit device, verifies the EAS preview build and the
+admin-only on-device release identity, and refuses to proceed while navigation
+or a Trailhead Original is active.
+
+```powershell
+npm run audit:android-map-memory -- --serial RFCR408DA9B `
+  --expected-version-name 1.0.10 `
+  --expected-version-code 59 `
+  --expected-commit-sha <ota-source-sha> `
+  --expected-build-commit-sha <binary-build-sha> `
+  --runtime native-1.0.10-android.1 `
+  --build-id 06142308-0199-46cc-8a4c-fb9d45bca25e `
+  --update-id 019f8c00-d492-71f0-8ea8-5214fb196a3c
+```
+
+The OTA/source SHA must match the current repository HEAD and the identity
+reported by the running update. The binary-build SHA may be older for a
+compatible JS-only OTA; it must match the server-owned EAS build identified by
+`--build-id`. Both identities are recorded separately in the evidence report.
+
+The gate never installs, uninstalls, clears app data, changes permissions, or
+changes account state. It brings the current app to the foreground for a safety
+check, force-stops and cold-launches it, opens the existing Map layer controls,
+settles for 90 seconds, and collects three baseline samples. It then enables
+and disables the heavy layer set for ten complete cycles, samples each enabled
+peak, collects three final samples, and restores every layer to its exact
+starting value even when a check fails or the run is interrupted.
+
+Acceptance is intentionally fixed at total PSS strictly below 512000 KB for
+every sample and median baseline-to-final growth strictly below 10%. Those
+limits cannot be weakened with command-line flags. The command writes only a
+small JSON report below ignored `output/android-map-memory-gate/`: candidate
+identity, non-unique device class/version, layer booleans, PSS samples, and gate
+result. It does not store the serial, screenshots, UI hierarchy, logs,
+coordinates, routes, search text, account identifiers, or support/payout data.
+
+The pre-preview and CI suites run only the pure gate contract test; they never
+connect to a device or execute the physical memory gate:
+
+```powershell
+npm run test:android-map-memory
+```
+
 ## Pinned Maestro smoke flows
 
 The checked-in workspace uses Maestro CLI `2.4.0`; the runner refuses another

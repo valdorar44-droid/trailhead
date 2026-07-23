@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  Alert,
   Platform,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -30,7 +32,10 @@ import {
   telemetryQaNativeCrashState,
   telemetryQaSurfaceIsAvailable,
 } from '@/lib/telemetry/qa';
-import { type TelemetryQaCheck } from '@/lib/telemetry/qaPolicy';
+import {
+  NATIVE_CRASH_ACKNOWLEDGEMENT,
+  type TelemetryQaCheck,
+} from '@/lib/telemetry/qaPolicy';
 
 type ProbeStatus = 'idle' | 'running' | 'delivered' | 'blocked';
 type SearchRaceStatus = 'idle' | 'running' | 'passed' | 'failed';
@@ -54,9 +59,24 @@ export default function TelemetryQaScreen() {
   const [snapshot, setSnapshot] = useState<QaDiagnosticsSnapshotV1 | null>(null);
   const [snapshotState, setSnapshotState] = useState<'loading' | 'ready' | 'unavailable'>('loading');
   const [probeStatus, setProbeStatus] = useState<ProbeStatus>('idle');
+  const [nativeCrashAcknowledgement, setNativeCrashAcknowledgement] = useState('');
   const [searchRaceStatus, setSearchRaceStatus] = useState<SearchRaceStatus>('idle');
   const [searchRaceEvidence, setSearchRaceEvidence] = useState<SearchRaceQaEvidence | null>(null);
   const nativeCrashState = telemetryQaNativeCrashState();
+  const releaseIdentity = useMemo(() => {
+    const extra = (Constants.expoConfig?.extra || {}) as Record<string, unknown>;
+    return {
+      schema: 'qa_release_identity_v1',
+      appVersion: Application.nativeApplicationVersion || Constants.expoConfig?.version || 'unknown',
+      buildNumber: Application.nativeBuildVersion || 'unknown',
+      channel: Updates.channel || 'embedded',
+      commitSha: String(extra.releaseCommitSha || 'unknown'),
+      platform: Platform.OS === 'ios' ? 'ios' as const : 'android' as const,
+      runtimeVersion: String(Updates.runtimeVersion || Constants.expoConfig?.runtimeVersion || 'unknown'),
+      updateId: Updates.updateId || 'embedded',
+    };
+  }, []);
+  const releaseIdentityText = useMemo(() => JSON.stringify(releaseIdentity), [releaseIdentity]);
 
   useEffect(() => {
     if (!allowed) router.replace('/(tabs)/profile' as any);
@@ -85,18 +105,9 @@ export default function TelemetryQaScreen() {
           trailRecords: manifest ? artifactCount(manifest.artifacts, 'trails') : 0,
         };
       }));
-      const extra = (Constants.expoConfig?.extra || {}) as Record<string, unknown>;
       const activeOriginal = originals.session || originals.manifest;
       setSnapshot(buildQaDiagnosticsSnapshotV1({
-        release: {
-          appVersion: Application.nativeApplicationVersion || Constants.expoConfig?.version || 'unknown',
-          buildNumber: Application.nativeBuildVersion || 'unknown',
-          channel: Updates.channel || 'embedded',
-          commitSha: String(extra.releaseCommitSha || 'unknown'),
-          platform: Platform.OS === 'ios' ? 'ios' : 'android',
-          runtimeVersion: String(Updates.runtimeVersion || Constants.expoConfig?.runtimeVersion || 'unknown'),
-          updateId: Updates.updateId || 'embedded',
-        },
+        release: releaseIdentity,
         accountRole: 'admin',
         features: {
           configured: {
@@ -122,7 +133,7 @@ export default function TelemetryQaScreen() {
       setSnapshot(null);
       setSnapshotState('unavailable');
     }
-  }, [allowed, originals.manifest, originals.session, user?.id]);
+  }, [allowed, originals.manifest, originals.session, releaseIdentity, user?.id]);
 
   useEffect(() => {
     void refreshSnapshot();
@@ -138,6 +149,31 @@ export default function TelemetryQaScreen() {
       setProbeStatus('blocked');
     }
   }, [probeStatus]);
+
+  const requestNativeCrash = useCallback(() => {
+    if (
+      probeStatus === 'running'
+      || nativeCrashState !== 'ready'
+      || nativeCrashAcknowledgement !== NATIVE_CRASH_ACKNOWLEDGEMENT
+    ) return;
+    Alert.alert(
+      'Crash this Android emulator?',
+      'Trailhead will send one fixed, scrubbed QA marker, then close. Reopen the preview to continue.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Crash emulator',
+          style: 'destructive',
+          onPress: () => {
+            setProbeStatus('running');
+            void runTelemetryQaCheck('native_crash', { nativeCrashAcknowledgement })
+              .then(() => setProbeStatus('delivered'))
+              .catch(() => setProbeStatus('blocked'));
+          },
+        },
+      ],
+    );
+  }, [nativeCrashAcknowledgement, nativeCrashState, probeStatus]);
 
   const runSearchRace = useCallback(async () => {
     if (searchRaceStatus === 'running') return;
@@ -179,6 +215,12 @@ export default function TelemetryQaScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
+        <View style={[styles.identityCard, { backgroundColor: C.s1, borderColor: C.border }]}>
+          <Text style={[styles.identityLabel, { color: C.text }]}>Build identity</Text>
+          <Text testID="qa.telemetry.release-identity" selectable style={[styles.identityValue, { color: C.text2 }]}>
+            {releaseIdentityText}
+          </Text>
+        </View>
         <View style={[styles.card, { backgroundColor: C.s1, borderColor: C.border }]}>
           <Text style={[styles.cardTitle, { color: C.text }]}>Delivery</Text>
           <Text testID="qa.telemetry.status" style={[styles.status, { color: C.text2 }]}>
@@ -213,19 +255,43 @@ export default function TelemetryQaScreen() {
             <Text style={[styles.body, { color: C.text2 }]}>
               {nativeCrashState === 'emulator_required'
                 ? 'Available only on an Android emulator.'
-                : 'Unavailable until crash data is filtered before upload.'}
+                : nativeCrashState === 'privacy_boundary_unverified'
+                  ? 'Unavailable because private native context could be attached.'
+                  : nativeCrashState === 'native_module_unavailable'
+                    ? 'Unavailable in this build.'
+                    : `Type ${NATIVE_CRASH_ACKNOWLEDGEMENT} to enable this one-time check.`}
             </Text>
+            <TextInput
+              testID="qa.telemetry.native-crash.acknowledgement"
+              accessibilityLabel="Native crash acknowledgement"
+              autoCapitalize="characters"
+              autoCorrect={false}
+              editable={nativeCrashState === 'ready' && probeStatus !== 'running'}
+              value={nativeCrashAcknowledgement}
+              onChangeText={setNativeCrashAcknowledgement}
+              placeholder={NATIVE_CRASH_ACKNOWLEDGEMENT}
+              placeholderTextColor={C.text3}
+              style={[styles.acknowledgement, { borderColor: C.border, color: C.text }]}
+            />
             <TouchableOpacity
               testID="qa.telemetry.native-crash"
               accessibilityRole="button"
-              disabled
+              accessibilityLabel="Crash Android emulator for telemetry check"
+              onPress={requestNativeCrash}
+              disabled={
+                nativeCrashState !== 'ready'
+                || nativeCrashAcknowledgement !== NATIVE_CRASH_ACKNOWLEDGEMENT
+                || probeStatus === 'running'
+              }
               style={[
                 styles.danger,
                 { borderColor: C.red },
-                styles.disabled,
+                (nativeCrashState !== 'ready'
+                  || nativeCrashAcknowledgement !== NATIVE_CRASH_ACKNOWLEDGEMENT
+                  || probeStatus === 'running') && styles.disabled,
               ]}
             >
-              <Text style={[styles.dangerText, { color: C.red }]}>Native crash check unavailable</Text>
+              <Text style={[styles.dangerText, { color: C.red }]}>Crash emulator</Text>
             </TouchableOpacity>
           </View>
         ) : null}
@@ -288,6 +354,9 @@ const styles = StyleSheet.create({
   title: { fontSize: 25, lineHeight: 30, fontWeight: '900' },
   subtitle: { marginTop: 2, fontSize: 13, lineHeight: 18 },
   content: { padding: 16, paddingBottom: 48, gap: 14 },
+  identityCard: { borderWidth: 1, borderRadius: 12, padding: 12, gap: 6 },
+  identityLabel: { fontSize: 15, lineHeight: 20, fontWeight: '800' },
+  identityValue: { fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontSize: 12, lineHeight: 18 },
   card: { borderWidth: 1, borderRadius: 20, padding: 16, gap: 12 },
   cardTitle: { fontSize: 19, lineHeight: 24, fontWeight: '800' },
   status: { fontSize: 14, lineHeight: 20 },
@@ -299,6 +368,7 @@ const styles = StyleSheet.create({
   secondaryText: { fontSize: 15, fontWeight: '800' },
   danger: { minHeight: 48, borderWidth: 1, borderRadius: 12, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 },
   dangerText: { fontSize: 15, fontWeight: '800' },
+  acknowledgement: { minHeight: 48, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, fontSize: 15 },
   disabled: { opacity: 0.4 },
   snapshotHeading: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 12 },
   refresh: { minHeight: 44, paddingHorizontal: 8, textAlignVertical: 'center', fontSize: 14, fontWeight: '800' },

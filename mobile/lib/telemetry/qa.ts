@@ -1,6 +1,6 @@
 import * as Sentry from '@sentry/react-native';
 import * as Updates from 'expo-updates';
-import { Platform } from 'react-native';
+import { NativeModules, Platform, TurboModuleRegistry, type TurboModule } from 'react-native';
 import { useStore } from '../store';
 import {
   requireTelemetryDelivery,
@@ -13,6 +13,23 @@ import { QA_PERFORMANCE_TRANSACTION, spanWasSampled } from './sampling';
 type TelemetryQaAuthorization = {
   nativeCrashAcknowledgement?: string;
 };
+
+type NativeCrashModule = TurboModule & {
+  crash: () => void;
+};
+
+type NativeCrashPrivacyOptions = {
+  enableNative?: boolean;
+  enableNativeCrashHandling?: boolean;
+  maxBreadcrumbs?: number;
+  sendDefaultPii?: boolean;
+};
+
+export type TelemetryQaNativeCrashState =
+  | 'ready'
+  | 'emulator_required'
+  | 'native_module_unavailable'
+  | 'privacy_boundary_unverified';
 
 const QA_ERROR_CODE: Record<TelemetryQaCheck, string> = {
   javascript_exception: 'qa_js_nonfatal',
@@ -29,11 +46,38 @@ function isAndroidEmulator(): boolean {
   const constants = (Platform.constants || {}) as Record<string, unknown>;
   const signature = [
     constants.Brand,
+    constants.Device,
     constants.Fingerprint,
+    constants.Hardware,
     constants.Manufacturer,
     constants.Model,
+    constants.Product,
   ].map(value => String(value || '').toLowerCase()).join(' ');
   return /(generic|emulator|sdk_gphone|goldfish|ranchu|android sdk built for)/.test(signature);
+}
+
+function nativeCrashModule(): NativeCrashModule | null {
+  const legacy = (NativeModules as Record<string, unknown>).RNSentry as NativeCrashModule | undefined;
+  if (legacy && typeof legacy.crash === 'function') return legacy;
+  const turbo = TurboModuleRegistry.get<NativeCrashModule>('RNSentry');
+  return turbo && typeof turbo.crash === 'function' ? turbo : null;
+}
+
+/**
+ * The intentional crash is never uploaded as a native envelope. Instead, a
+ * fixed marker goes through Trailhead's JavaScript allowlist and is flushed
+ * before the native bridge terminates the emulator process. This keeps the QA
+ * proof useful without allowing native SDK defaults to attach device context.
+ */
+export function nativeCrashPrivacyBoundaryVerified(): boolean {
+  const options = Sentry.getClient()?.getOptions() as NativeCrashPrivacyOptions | undefined;
+  return Boolean(
+    options
+    && options.enableNative === false
+    && options.enableNativeCrashHandling === false
+    && options.sendDefaultPii === false
+    && options.maxBreadcrumbs === 0,
+  );
 }
 
 export function telemetryQaSurfaceIsAvailable(isAdmin: boolean): boolean {
@@ -46,8 +90,10 @@ export function telemetryQaSurfaceIsAvailable(isAdmin: boolean): boolean {
   }).allowed;
 }
 
-export function telemetryQaNativeCrashState(): 'emulator_required' | 'native_privacy_unverified' {
-  return isAndroidEmulator() ? 'native_privacy_unverified' : 'emulator_required';
+export function telemetryQaNativeCrashState(): TelemetryQaNativeCrashState {
+  if (!isAndroidEmulator()) return 'emulator_required';
+  if (!nativeCrashPrivacyBoundaryVerified()) return 'privacy_boundary_unverified';
+  return nativeCrashModule() ? 'ready' : 'native_module_unavailable';
 }
 
 /**
@@ -60,19 +106,22 @@ export async function runTelemetryQaCheck(
   authorization: TelemetryQaAuthorization = {},
 ): Promise<{ delivered: true; eventId?: string }> {
   const auth = useStore.getState();
+  const crashModule = check === 'native_crash' ? nativeCrashModule() : null;
   const decision = telemetryQaDecision(check, {
     channel: Updates.channel,
     enabled: explicitQaFlagEnabled(),
     isAdmin: Boolean(auth.token && auth.user?.is_admin),
     isAndroidEmulator: isAndroidEmulator(),
-    // Native crashes leave JavaScript before beforeSend can apply Trailhead's
-    // privacy allowlist. Keep this false until equivalent native filtering is
-    // implemented and verified on both platforms.
-    nativePrivacySanitizerVerified: false,
+    // Native delivery remains disabled. The fixed marker is allowlisted and
+    // flushed before the emulator-only bridge crash is triggered.
+    nativePrivacySanitizerVerified: nativeCrashPrivacyBoundaryVerified(),
     nativeCrashAcknowledgement: authorization.nativeCrashAcknowledgement,
   });
   if (!decision.allowed) {
     throw new Error(`Telemetry QA check blocked: ${decision.reason}`);
+  }
+  if (check === 'native_crash' && !crashModule) {
+    throw new Error('Telemetry QA check blocked: native_module_unavailable');
   }
 
   let eventId: string | undefined;
@@ -86,9 +135,11 @@ export async function runTelemetryQaCheck(
     capture: () => {
       Sentry.withScope(scope => {
         scope.setTags({ error_code: QA_ERROR_CODE[check], qa_check: 'true' });
-        if (check === 'javascript_exception') {
-          const error = new Error('trailhead.qa.nonfatal');
-          error.name = 'TrailheadQaError';
+        if (check === 'javascript_exception' || check === 'native_crash') {
+          const error = new Error(
+            check === 'native_crash' ? 'trailhead.qa.native_crash' : 'trailhead.qa.nonfatal',
+          );
+          error.name = check === 'native_crash' ? 'TrailheadQaNativeCrashMarker' : 'TrailheadQaError';
           eventId = Sentry.captureException(error);
           return;
         }
@@ -101,5 +152,12 @@ export async function runTelemetryQaCheck(
     },
     flush: () => Sentry.flush(),
   });
+
+  if (check === 'native_crash') {
+    // The decision above has already verified preview channel, admin auth,
+    // emulator identity, the exact acknowledgement, and the privacy boundary.
+    // Do not expose this native bridge anywhere else in the application.
+    crashModule?.crash();
+  }
   return { delivered: true, ...(eventId ? { eventId } : {}) };
 }

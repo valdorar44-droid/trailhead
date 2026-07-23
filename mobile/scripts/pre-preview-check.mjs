@@ -46,6 +46,12 @@ const checks = [
     args: ['scripts/automation-selector-contract.test.mjs'],
   },
   {
+    label: 'Android map-memory gate contract',
+    cwd: mobileRoot,
+    cmd: 'node',
+    args: ['scripts/android-map-memory-gate.test.mjs'],
+  },
+  {
     label: 'Release worktree publication guard',
     cwd: mobileRoot,
     cmd: 'node',
@@ -119,6 +125,12 @@ const checks = [
     args: ['--import', 'tsx', 'lib/__tests__/mapLayersFiltersController.test.ts'],
   },
   {
+    label: 'Viewport-bounded wildfire overlay tests',
+    cwd: mobileRoot,
+    cmd: 'npm',
+    args: ['run', 'test:fire-overlay'],
+  },
+  {
     label: 'Sentry privacy, QA guard, and diagnostics tests',
     cwd: mobileRoot,
     cmd: 'npm',
@@ -163,8 +175,14 @@ const checks = [
   {
     label: 'Explore source-level image and pagination guard',
     cwd: mobileRoot,
-    cmd: 'node',
-    args: ['scripts/explore-memory-guard.test.mjs'],
+    cmd: 'npm',
+    args: ['run', 'test:explore-memory-guard'],
+  },
+  {
+    label: 'NPS adaptive hub preservation tests',
+    cwd: mobileRoot,
+    cmd: 'npm',
+    args: ['run', 'test:nps-hub-preservation'],
   },
   {
     label: 'Explore live API audit',

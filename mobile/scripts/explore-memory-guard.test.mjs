@@ -14,7 +14,7 @@ const sources = {
 function remoteImageTags(source) {
   return [...source.matchAll(/<Image\b[\s\S]*?\/>/g)]
     .map(match => match[0])
-    .filter(tag => /source=\{\{\s*uri\s*:/.test(tag));
+    .filter(tag => /source=(?:\{\{\s*uri\s*:|\{exploreImageSource\()/.test(tag));
 }
 
 function assertRemoteImagesResize(source, label) {

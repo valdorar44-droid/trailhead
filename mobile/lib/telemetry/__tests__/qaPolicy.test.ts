@@ -66,7 +66,35 @@ assert.deepEqual(
 );
 
 const runtimeSource = readFileSync('lib/telemetry/qa.ts', 'utf8');
-assert.doesNotMatch(runtimeSource, /Sentry\.nativeCrash\s*\(/, 'native crash must remain fail-closed');
+const sentrySource = readFileSync('lib/telemetry/sentry.ts', 'utf8');
+const screenSource = readFileSync('app/qa/telemetry.tsx', 'utf8');
+assert.doesNotMatch(
+  runtimeSource,
+  /Sentry\.nativeCrash\s*\(/,
+  'QA must not enable the native Sentry envelope path',
+);
+assert.match(
+  runtimeSource,
+  /options\.enableNative === false[\s\S]*?options\.enableNativeCrashHandling === false[\s\S]*?options\.sendDefaultPii === false[\s\S]*?options\.maxBreadcrumbs === 0/,
+  'native crash QA must verify the privacy boundary at runtime',
+);
+assert.match(
+  runtimeSource,
+  /NativeModules[\s\S]*?RNSentry[\s\S]*?\.crash\(\)/,
+  'the acknowledged QA action must terminate through the native bridge',
+);
+assert.match(sentrySource, /enableNative:\s*false/, 'native envelopes must remain disabled');
+assert.match(sentrySource, /enableNativeCrashHandling:\s*false/, 'native crash upload must remain disabled');
+assert.match(
+  screenSource,
+  /qa\.telemetry\.native-crash\.acknowledgement[\s\S]*?NATIVE_CRASH_ACKNOWLEDGEMENT/,
+  'the QA screen must require the exact typed acknowledgement',
+);
+assert.match(
+  screenSource,
+  /Alert\.alert\([\s\S]*?Crash emulator/,
+  'the QA screen must require a second destructive confirmation',
+);
 
 void (async () => {
   let captures = 0;

@@ -109,9 +109,12 @@ assert(
     && guidedBrowser.includes('Photo: {destination.imageCredit}')
     && guidedBrowser.includes('cardCopyBackdrop')
     && guidedBrowser.includes('adjustsFontSizeToFit')
-    && mapPreview.includes('[imageUrl, mapUrl]')
+    && mapPreview.includes('boundedExploreImageUrl(imageUrl, EXPLORE_IMAGE_BOUNDS.mapPreview)')
+    && mapPreview.includes('[safeImageUrl, mapUrl]')
+    && mapPreview.includes('source={exploreImageSource(url)}')
+    && mapPreview.includes('resizeMethod="resize"')
     && mapPreview.includes("window.addEventListener('online', retryMedia)"),
-  'Preloaded Guided destinations must render destination media, attribution, and a map fallback.',
+  'Preloaded Guided destinations must render bounded destination media, attribution, and a map fallback.',
 );
 assert(
   guide.includes('setGuidedTourSelectedDestinationKey(destination?.id ?? null)'),

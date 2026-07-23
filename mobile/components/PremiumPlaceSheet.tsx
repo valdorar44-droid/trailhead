@@ -926,20 +926,20 @@ export default function PremiumPlaceSheet({
                   )}
                   {broadDestination ? (
                     <>
-                      <RelatedRail title="Things to see" items={relatedThingsToSee.slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
-                      <RelatedRail title="Visitor centers" items={relatedVisitorCenters.slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
-                      <RelatedRail title="Things to do" items={relatedThingsToDo.slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
+                      <RelatedRail testIDPrefix={sheetModel.testID} title="Things to see" items={relatedThingsToSee.slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
+                      <RelatedRail testIDPrefix={sheetModel.testID} title="Visitor centers" items={relatedVisitorCenters.slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
+                      <RelatedRail testIDPrefix={sheetModel.testID} title="Things to do" items={relatedThingsToDo.slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
                     </>
                   ) : (
                     <>
-                      <RelatedRail title="Things to do" items={relatedThingsToDo.slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
-                      <RelatedRail title="Things to see" items={relatedThingsToSee.slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
-                      <RelatedRail title="Visitor centers" items={relatedVisitorCenters.slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
+                      <RelatedRail testIDPrefix={sheetModel.testID} title="Things to do" items={relatedThingsToDo.slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
+                      <RelatedRail testIDPrefix={sheetModel.testID} title="Things to see" items={relatedThingsToSee.slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
+                      <RelatedRail testIDPrefix={sheetModel.testID} title="Visitor centers" items={relatedVisitorCenters.slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
                     </>
                   )}
-                  <RelatedRail title="Campgrounds nearby" items={relatedCampgrounds.slice(0, 8)} onPress={onOpenRelatedCamp} C={C} styles={s} />
-                  <RelatedRail title="Trails" items={relatedTrails.slice(0, 8)} onPress={onOpenRelatedTrail} C={C} styles={s} />
-                  <RelatedRail title="Trip services" items={relatedTripServices.slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
+                  <RelatedRail testIDPrefix={sheetModel.testID} title="Campgrounds nearby" items={relatedCampgrounds.slice(0, 8)} onPress={onOpenRelatedCamp} C={C} styles={s} />
+                  <RelatedRail testIDPrefix={sheetModel.testID} title="Trails" items={relatedTrails.slice(0, 8)} onPress={onOpenRelatedTrail} C={C} styles={s} />
+                  <RelatedRail testIDPrefix={sheetModel.testID} title="Trip services" items={relatedTripServices.slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
                 </View>
               ) : null}
               {stage === 'full' && !!hours.length && (
@@ -1266,12 +1266,14 @@ export default function PremiumPlaceSheet({
 }
 
 function RelatedRail({
+  testIDPrefix,
   title,
   items,
   onPress,
   C,
   styles,
 }: {
+  testIDPrefix: string;
   title: string;
   items: RelatedItem[];
   onPress?: (item: RelatedItem) => void;
@@ -1279,13 +1281,16 @@ function RelatedRail({
   styles: ReturnType<typeof makeStyles>;
 }) {
   if (!items.length) return null;
+  const railTestID = `${testIDPrefix}-related.${relatedTestIDPart(title)}`;
   return (
-    <View style={styles.relatedSection}>
+    <View style={styles.relatedSection} testID={railTestID}>
       <Text style={styles.relatedTitle}>{title}</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.relatedRail}>
         {items.map((item, idx) => (
           <TouchableOpacity
             key={`${item.id || item.name || title}-${idx}`}
+            testID={`${railTestID}.item.${relatedTestIDPart(item.id || item.name || idx)}`}
+            accessibilityLabel={item.name || titleCase(item.type)}
             style={styles.relatedCard}
             activeOpacity={0.86}
             onPress={() => onPress?.(item)}
@@ -1304,6 +1309,15 @@ function RelatedRail({
       </ScrollView>
     </View>
   );
+}
+
+function relatedTestIDPart(value: unknown) {
+  return String(value || 'item')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 96) || 'item';
 }
 
 const makeStyles = (C: ColorPalette) => StyleSheet.create({

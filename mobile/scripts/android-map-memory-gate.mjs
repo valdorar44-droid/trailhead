@@ -36,6 +36,10 @@ export const SAMPLE_GAP_MS = 3_000;
 export const FOREGROUND_PROOF_INTERVAL_MS = 10_000;
 export const LAYER_STATE_CONVERGENCE_TIMEOUT_MS = 15_000;
 export const LAYER_STATE_POLL_INTERVAL_MS = 350;
+export const LAYER_SHEET_READY_TIMEOUT_MS = 60_000;
+export const LAYER_SHEET_PASSIVE_GRACE_MS = 30_000;
+export const LAYER_SHEET_REVEAL_INTERVAL_MS = 5_000;
+export const LAYER_SHEET_POLL_INTERVAL_MS = 500;
 export const LAYER_PERSISTENCE_SETTLE_MS = 2_000;
 export const FINAL_LAYER_REPAIR_MAX_ATTEMPTS = 2;
 export const MAP_LAYER_CYCLE_COUNT = 10;
@@ -972,27 +976,131 @@ export function applyLayerRestorationOutcome(report, outcome) {
   return report;
 }
 
-async function ensureLayerSheet(adb, serial, packageName) {
-  let nodes = parseUiNodes(captureUiXml(adb, serial));
-  if (nodeForTestId(nodes, 'map.layers.toggle-carousel', packageName, true)) return;
+export async function awaitLayerCarouselReady({
+  readState,
+  revealContent,
+  waitFor = waitMs,
+  now = Date.now,
+  timeoutMs = LAYER_SHEET_READY_TIMEOUT_MS,
+  passiveGraceMs = LAYER_SHEET_PASSIVE_GRACE_MS,
+  revealIntervalMs = LAYER_SHEET_REVEAL_INTERVAL_MS,
+  pollIntervalMs = LAYER_SHEET_POLL_INTERVAL_MS,
+}) {
+  if (typeof readState !== 'function'
+    || typeof revealContent !== 'function'
+    || typeof waitFor !== 'function'
+    || typeof now !== 'function'
+    || !Number.isFinite(timeoutMs)
+    || !Number.isFinite(passiveGraceMs)
+    || !Number.isFinite(revealIntervalMs)
+    || !Number.isFinite(pollIntervalMs)
+    || timeoutMs <= 0
+    || passiveGraceMs < 0
+    || passiveGraceMs >= timeoutMs
+    || revealIntervalMs <= 0
+    || pollIntervalMs <= 0) {
+    throw new MemoryGateError('layer_sheet_readiness_contract_invalid');
+  }
 
-  const mapTab = nodeForTestId(nodes, 'app.tab.map', packageName, true);
-  if (!mapTab) throw new MemoryGateError('map_tab_unavailable');
-  tapNode(adb, serial, mapTab);
-  await waitMs(900);
-  const { node: openLayers } = await waitForTestId(adb, serial, packageName, 'map.layers.open');
-  tapNode(adb, serial, openLayers);
-  await waitMs(700);
+  const startedAt = now();
+  const deadline = startedAt + timeoutMs;
+  let nextRevealAt = startedAt + passiveGraceMs;
+  let revealCount = 0;
+  while (true) {
+    assertNotCancelled();
+    const state = await readState();
+    if (!state
+      || typeof state.carouselReady !== 'boolean'
+      || typeof state.sheetOpen !== 'boolean') {
+      throw new MemoryGateError('layer_sheet_readiness_contract_invalid');
+    }
+    if (state.carouselReady) {
+      return {
+        revealCount,
+        waitedMs: Math.max(0, now() - startedAt),
+      };
+    }
 
-  const deadline = Date.now() + 20_000;
-  while (Date.now() < deadline) {
-    nodes = parseUiNodes(captureUiXml(adb, serial));
-    if (nodeForTestId(nodes, 'map.layers.toggle-carousel', packageName, true)) return;
-    const outer = nodeForTestId(nodes, 'map.layers.content', packageName, true);
-    if (outer?.bounds) swipeVerticallyWithin(adb, serial, outer.bounds, 'forward', 300);
-    await waitMs(450);
+    const current = now();
+    if (current >= deadline) break;
+    if (current >= nextRevealAt && state.sheetOpen && state.contentBounds) {
+      await revealContent(state.contentBounds);
+      revealCount += 1;
+      nextRevealAt = current + revealIntervalMs;
+    }
+    const remaining = deadline - now();
+    if (remaining > 0) await waitFor(Math.min(pollIntervalMs, remaining));
   }
   throw new MemoryGateError('layer_carousel_unavailable');
+}
+
+export async function ensureLayerSheetReady({
+  readState,
+  openSheet,
+  revealContent,
+  waitFor = waitMs,
+  now = Date.now,
+  timeoutMs = LAYER_SHEET_READY_TIMEOUT_MS,
+  passiveGraceMs = LAYER_SHEET_PASSIVE_GRACE_MS,
+  revealIntervalMs = LAYER_SHEET_REVEAL_INTERVAL_MS,
+  pollIntervalMs = LAYER_SHEET_POLL_INTERVAL_MS,
+}) {
+  if (typeof readState !== 'function' || typeof openSheet !== 'function') {
+    throw new MemoryGateError('layer_sheet_readiness_contract_invalid');
+  }
+  const initial = await readState();
+  if (!initial
+    || typeof initial.carouselReady !== 'boolean'
+    || typeof initial.sheetOpen !== 'boolean') {
+    throw new MemoryGateError('layer_sheet_readiness_contract_invalid');
+  }
+  if (initial.carouselReady) return { revealCount: 0, waitedMs: 0 };
+  if (!initial.sheetOpen) await openSheet();
+  return awaitLayerCarouselReady({
+    readState,
+    revealContent,
+    waitFor,
+    now,
+    timeoutMs,
+    passiveGraceMs,
+    revealIntervalMs,
+    pollIntervalMs,
+  });
+}
+
+async function ensureLayerSheet(adb, serial, packageName) {
+  const readState = async () => {
+    const nodes = parseUiNodes(captureUiXml(adb, serial));
+    const carousel = nodeForTestId(nodes, 'map.layers.toggle-carousel', packageName, true);
+    const sheet = nodeForTestId(nodes, 'map.layers.sheet', packageName, true);
+    const content = nodeForTestId(nodes, 'map.layers.content', packageName, true);
+    return {
+      carouselReady: Boolean(carousel),
+      sheetOpen: Boolean(carousel || sheet || content),
+      contentBounds: content?.bounds ?? null,
+    };
+  };
+  await ensureLayerSheetReady({
+    readState,
+    openSheet: async () => {
+      const nodes = parseUiNodes(captureUiXml(adb, serial));
+      const mapTab = nodeForTestId(nodes, 'app.tab.map', packageName, true);
+      if (!mapTab) throw new MemoryGateError('map_tab_unavailable');
+      tapNode(adb, serial, mapTab);
+      await waitMs(900);
+      const { node: openLayers } = await waitForTestId(
+        adb,
+        serial,
+        packageName,
+        'map.layers.open',
+      );
+      tapNode(adb, serial, openLayers);
+      await waitMs(700);
+    },
+    revealContent: async bounds => {
+      swipeVerticallyWithin(adb, serial, bounds, 'forward', 300);
+    },
+  });
 }
 
 export function inspectMapRendererReadiness(nodes, packageName) {

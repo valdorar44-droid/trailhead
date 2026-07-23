@@ -11,6 +11,10 @@ import {
   FOREGROUND_PROOF_INTERVAL_MS,
   HEAVY_MAP_LAYER_KEYS,
   LAYER_PERSISTENCE_SETTLE_MS,
+  LAYER_SHEET_PASSIVE_GRACE_MS,
+  LAYER_SHEET_POLL_INTERVAL_MS,
+  LAYER_SHEET_READY_TIMEOUT_MS,
+  LAYER_SHEET_REVEAL_INTERVAL_MS,
   LAYER_STATE_CONVERGENCE_TIMEOUT_MS,
   MAP_LAYER_CYCLE_COUNT,
   MEMORY_GATE_HARNESS_ALLOWED_CHANGED_PATHS,
@@ -20,6 +24,7 @@ import {
   POST_MAP_SETTLE_MS,
   QA_DIAGNOSTICS_URI,
   applyLayerRestorationOutcome,
+  awaitLayerCarouselReady,
   assertAndroidMemoryGateReportV3Privacy,
   assertExactLayerState,
   assertPssAndRssPhaseSafety,
@@ -29,6 +34,7 @@ import {
   classifyActiveMapSession,
   convergeLayerState,
   durablyRestoreCapturedHeavyLayers,
+  ensureLayerSheetReady,
   executeLayerDiagnosticCycles,
   executeMemoryGateLifecycle,
   horizontalCarouselSwipePoints,
@@ -65,10 +71,83 @@ assert.equal(EXPLORE_RECOVERY_SETTLE_MS, 90_000);
 assert.equal(CYCLE_PHASE_SETTLE_MS, 5_000);
 assert.equal(FOREGROUND_PROOF_INTERVAL_MS, 10_000);
 assert.equal(LAYER_STATE_CONVERGENCE_TIMEOUT_MS, 15_000);
+assert.equal(LAYER_SHEET_READY_TIMEOUT_MS, 60_000);
+assert.equal(LAYER_SHEET_PASSIVE_GRACE_MS, 30_000);
+assert.equal(LAYER_SHEET_REVEAL_INTERVAL_MS, 5_000);
+assert.equal(LAYER_SHEET_POLL_INTERVAL_MS, 500);
 assert.equal(LAYER_PERSISTENCE_SETTLE_MS, 2_000);
 assert.equal(FINAL_LAYER_REPAIR_MAX_ATTEMPTS, 2);
 assert.equal(MAP_LAYER_CYCLE_COUNT, 10);
 assert.deepEqual(HEAVY_MAP_LAYER_KEYS, ['3d', 'lands', 'usgs', 'pois', 'trails', 'fire', 'ava', 'radar', 'mvum']);
+
+let delayedSheetClock = 0;
+let delayedSheetOpenCount = 0;
+let delayedSheetRevealCount = 0;
+const delayedSheetResult = await ensureLayerSheetReady({
+  readState: async () => ({
+    carouselReady: delayedSheetClock >= 25_000,
+    sheetOpen: true,
+    contentBounds: { left: 0, top: 0, right: 720, bottom: 1200 },
+  }),
+  openSheet: async () => {
+    delayedSheetOpenCount += 1;
+  },
+  revealContent: async () => {
+    delayedSheetRevealCount += 1;
+  },
+  waitFor: async durationMs => {
+    delayedSheetClock += durationMs;
+  },
+  now: () => delayedSheetClock,
+});
+assert.equal(delayedSheetResult.waitedMs, 25_000);
+assert.equal(delayedSheetOpenCount, 0, 'an already-open delayed sheet is never opened a second time');
+assert.equal(delayedSheetRevealCount, 0, 'the passive grace period does not interact with the sheet');
+
+let timedOutSheetClock = 0;
+let timedOutSheetRevealCount = 0;
+await assert.rejects(
+  ensureLayerSheetReady({
+    readState: async () => ({
+      carouselReady: false,
+      sheetOpen: true,
+      contentBounds: { left: 0, top: 0, right: 720, bottom: 1200 },
+    }),
+    openSheet: async () => {
+      throw new Error('an open sheet must not be tapped again');
+    },
+    revealContent: async () => {
+      timedOutSheetRevealCount += 1;
+    },
+    waitFor: async durationMs => {
+      timedOutSheetClock += durationMs;
+    },
+    now: () => timedOutSheetClock,
+  }),
+  error => error instanceof MemoryGateError && error.code === 'layer_carousel_unavailable',
+);
+assert.equal(timedOutSheetClock, LAYER_SHEET_READY_TIMEOUT_MS);
+assert.equal(timedOutSheetRevealCount, 6, 'reveal swipes are bounded to one every five seconds after grace');
+
+await assert.rejects(
+  awaitLayerCarouselReady({
+    readState: async () => ({ carouselReady: false, sheetOpen: true, contentBounds: null }),
+    revealContent: async () => {},
+    waitFor: async () => {},
+    now: () => 0,
+    timeoutMs: 30_000,
+    passiveGraceMs: 30_000,
+  }),
+  error => error instanceof MemoryGateError && error.code === 'layer_sheet_readiness_contract_invalid',
+);
+await assert.rejects(
+  ensureLayerSheetReady({
+    readState: async () => null,
+    openSheet: async () => {},
+    revealContent: async () => {},
+  }),
+  error => error instanceof MemoryGateError && error.code === 'layer_sheet_readiness_contract_invalid',
+);
 
 const harnessHashes = Object.fromEntries(
   MEMORY_GATE_HARNESS_REQUIRED_PATHS.map((path, index) => [path, String(index).repeat(64)]),

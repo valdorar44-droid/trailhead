@@ -77,6 +77,8 @@ test('Map and Route Editor render server-ranked Search V2 rows until an explicit
 
 test('Map routes durable search results to complete type-specific sheets', () => {
   assert.match(mapSource, /else if \(!searchPlaceIsTemporary\(basePlace\)\) \{[\s\S]{0,700}openPoiFeature\(/);
+  assert.match(mapSource, /as unknown as OsmPoi, undefined, 'search'\);/);
+  assert.match(mapSource, /mapTapToolOwnsFeatureSelection && selectionOrigin === 'map'/);
   assert.match(mapSource, /const canonicalTrail = poi\.type === 'trailhead'[\s\S]{0,320}poiSource === 'trailhead_search'/);
   assert.match(mapSource, /featureFromPoi\(poi, support, canonicalTrail \? 'trailhead' : 'osm'\)/);
   assert.match(premiumPlaceSheetSource, /isTransientMapboxPlace\(place\)/);

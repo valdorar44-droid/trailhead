@@ -11044,7 +11044,7 @@ function MapScreen() {
         ...basePlace,
         summary,
         source_label: basePlace.source_label || 'Place',
-      } as unknown as OsmPoi);
+      } as unknown as OsmPoi, undefined, 'search');
     } else {
       selectedCampRef.current = null;
       setSearchRouteCard(null);
@@ -21206,8 +21206,15 @@ function MapScreen() {
     }, 700);
   }
 
-  function openPoiFeature(poi: OsmPoi, day?: number | null) {
-    if (mapTapToolOwnsFeatureSelection) return;
+  function openPoiFeature(
+    poi: OsmPoi,
+    day?: number | null,
+    selectionOrigin: 'map' | 'search' = 'map',
+  ) {
+    // Search rows are an explicit selection, not a map tap. The search surface
+    // itself owns map taps while it is open, but it must not block its own row
+    // from entering the same complete camp/trail/place sheet router.
+    if (mapTapToolOwnsFeatureSelection && selectionOrigin === 'map') return;
     if (poi.type === 'trail' || poi.type === 'trailhead') {
       const support = buildTrailSupport(
         { lat: poi.lat, lng: poi.lng },

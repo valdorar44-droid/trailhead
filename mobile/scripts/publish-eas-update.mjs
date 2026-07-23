@@ -172,7 +172,7 @@ function assertProductionApproval() {
 }
 
 if (!dryRun) assertCommittedReleaseSource();
-if (!dryRun) validateReleaseEnvironment(process.env);
+if (!dryRun) validateReleaseEnvironment(process.env, { requirePreviewQa: target === 'preview' });
 if (target === 'production' && !dryRun) assertProductionApproval();
 
 const updateArgs = [

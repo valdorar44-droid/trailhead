@@ -7,7 +7,7 @@ const REQUIRED_RELEASE_VALUES = [
 
 export function validateReleaseEnvironment(
   environment = process.env,
-  { requireNativeDownloadsToken = false } = {},
+  { requireNativeDownloadsToken = false, requirePreviewQa = false } = {},
 ) {
   const required = requireNativeDownloadsToken
     ? [...REQUIRED_RELEASE_VALUES, 'RNMAPBOX_MAPS_DOWNLOAD_TOKEN']
@@ -23,6 +23,12 @@ export function validateReleaseEnvironment(
   }
   if (dsn.protocol !== 'https:' || !dsn.username || !dsn.hostname || dsn.pathname === '/') {
     throw new Error('EXPO_PUBLIC_SENTRY_DSN is not a valid HTTPS project DSN.');
+  }
+  if (
+    requirePreviewQa
+    && !/^(1|true|yes|on)$/i.test(String(environment.EXPO_PUBLIC_TELEMETRY_QA_ENABLED || ''))
+  ) {
+    throw new Error('Preview release environment must enable EXPO_PUBLIC_TELEMETRY_QA_ENABLED.');
   }
   return { ready: true };
 }

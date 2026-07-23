@@ -157,7 +157,13 @@ export function parseUiNodes(xml) {
   const nodes = [];
   for (const match of String(xml).matchAll(/<node\s+([^>]*?)(?:\/>|>)/g)) {
     const attrs = {};
-    for (const attr of match[1].matchAll(/([\w-]+)="([^"]*)"/g)) attrs[attr[1]] = decodeXml(attr[2]);
+    // Android's UI Automator normally emits double-quoted attributes, but it
+    // switches an individual attribute to single quotes when the value itself
+    // contains JSON's double quotes. Release identity nodes intentionally carry
+    // compact JSON, so the audit parser must accept both valid forms.
+    for (const attr of match[1].matchAll(/([\w-]+)=(?:"([^"]*)"|'([^']*)')/g)) {
+      attrs[attr[1]] = decodeXml(attr[2] ?? attr[3] ?? '');
+    }
     const boundsMatch = attrs.bounds?.match(/^\[(\d+),(\d+)]\[(\d+),(\d+)]$/);
     nodes.push({
       ...attrs,

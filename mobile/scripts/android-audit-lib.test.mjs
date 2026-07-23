@@ -35,6 +35,14 @@ assert.equal(summary.nodeCount, 3);
 assert.ok(summary.suspiciousCopy.some((hit) => hit.code === 'raw_slug' && hit.text === 'north_america'));
 assert.equal(summary.likelyTestIds.length, 2);
 
+const releaseIdentityText = '{"schema":"qa_release_identity_v1","updateId":"019f8d29-38a2-7de7-8935-7797f993dd0c"}';
+const releaseIdentityNodes = parseUiNodes(
+  `<hierarchy><node index="0" text='${releaseIdentityText}' resource-id="qa.telemetry.release-identity" content-desc="" bounds="[20,40][200,120]"/></hierarchy>`,
+);
+assert.equal(releaseIdentityNodes.length, 1);
+assert.equal(releaseIdentityNodes[0].text, releaseIdentityText);
+assert.equal(JSON.parse(releaseIdentityNodes[0].text).schema, 'qa_release_identity_v1');
+
 assert.deepEqual(parseMeminfo('TOTAL PSS:   633774  TOTAL RSS:   145128  TOTAL SWAP PSS:   550082\nViews: 427 Activities: 1 WebViews: 0'), {
   totalPssKb: 633774,
   totalRssKb: 145128,

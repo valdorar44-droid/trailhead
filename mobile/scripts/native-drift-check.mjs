@@ -257,7 +257,8 @@ contains('scripts/publish-eas-update.mjs', 'queryJsonWithRetry', 'OTA evidence r
 contains('scripts/publish-eas-update.mjs', 'record?.group === group', 'OTA group views must bind records to the selected candidate groups.');
 contains('scripts/publish-eas-update.mjs', "'channel:edit', target", 'OTA publication must promote only after paired validation.');
 contains('scripts/eas-update-evidence.mjs', "relevant.length !== 2", 'Paired OTA evidence must require Android and iOS records.');
-contains('scripts/publish-eas-update.mjs', 'validateReleaseEnvironment(process.env)', 'OTA publication must require the complete release environment.');
+contains('scripts/publish-eas-update.mjs', 'validateReleaseEnvironment(process.env,', 'OTA publication must require the complete release environment.');
+contains('scripts/publish-eas-update.mjs', "requirePreviewQa: target === 'preview'", 'Preview OTA publication must require protected QA diagnostics.');
 contains('scripts/upload-sentry-update-sourcemaps.mjs', 'EXPO_PUBLIC_SENTRY_DSN', 'Sentry delivery must require an application DSN.');
 expect(!otaWorkflow.includes('- both'), 'OTA workflow must not offer a combined preview/production target.');
 expect(

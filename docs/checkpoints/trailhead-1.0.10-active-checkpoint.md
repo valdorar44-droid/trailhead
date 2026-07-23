@@ -203,6 +203,41 @@ Read this file before resuming the 1.0.10 overhaul after a restart or context co
 - Do not repeat: Figma/NPS research, the 33-run crawl, broad Layers testing, the two carousel-only reports, backend deployment, or the paired OTA before the ANR cause is fixed.
 - Task-owned process state: no Gradle, Metro, Expo, EAS, Railway, Maestro, Trailhead test, or memory-gate process remains. ADB remains intentionally active for the Samsung and emulator.
 
+## Checkpoint A.6 — Cold-start P1 closed; memory-cycle debt deferred
+
+- Timestamp: `2026-07-23T11:39:45-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; implementation and paired-preview source HEAD: `81e182ea677941a2582e087b89bb28bc3ab1bda1`. This documentation-only checkpoint is committed afterward and therefore has a different SHA.
+- Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. `.cursor/` and `dashboard/explore_serving_index_v2.json` remained excluded, unstaged, and untouched.
+- Intentional application/harness commits:
+  - `9731d2c fix: make trip hydration idempotent and durable`
+  - `81e182e test: fail memory gate on live app anr`
+- Trip hydration no longer rewrites or emits unchanged compact trips, saved entities, or already-migrated legacy payloads. Legacy migration now stages trips, entities, outbox entries, receipts, and migration keys; a failed storage write exposes nothing and remains retryable after restart.
+- Memory Gate V3 now supplements `ApplicationExitInfo` with a bounded pre-launch versus live `dumpsys activity lastanr` comparison. Reports retain only aggregate counters, a surviving live-process ANR fails stability, and raw ANR reasons/timestamps never enter the privacy-minimal report.
+- Verification passed on `81e182e`:
+  - `npm run test:trip-repository`
+  - `npm run test:android-map-memory`
+  - `npx tsc --noEmit`
+  - `git diff --check`
+  - `npm run audit:prepreview` in `547.2` seconds, including Android Auto debug tests, Search V2, Offline V1/V2, Originals, Explore/NPS/Viator/copy/privacy checks, TypeScript, and all `774` backend tests.
+- One guarded paired preview OTA published from the exact immutable SHA after Android/iOS/web source maps uploaded to Sentry:
+  - Channel `preview`, channel ID `019dbc97-3cde-795b-a35d-e6aa985060d3`.
+  - Candidate branch `preview-candidate-81e182ea677941a2582e087b89bb28bc3ab1bda1-mrxofq1y-a6b668f764ac0688c5e426e9`, branch ID `019f8fa6-2e84-7e11-b7d1-f6ba71e934b6`.
+  - Android runtime `native-1.0.10-android.1`, group `0fb48e0b-dddb-4952-8685-dd06c732257b`, update `019f8fa6-56c7-7ce2-bc93-8c621f873155`.
+  - iOS runtime `native-1.0.10-ios.1`, group `cae4e106-ed5f-4c22-bc9a-9159123c7ca4`, update `019f8fa6-56c7-7195-8e83-514da9b39880`.
+- Android build `59` loaded the update without clearing the signed-in account. The admin QA screen verified version `1.0.10`, channel `preview`, full source SHA, runtime, update ID, admin role, and `Ready`; no ANR dialog appeared.
+- Three isolated cold launches then ran with one user input and 45 seconds without UI-automation polling. Evidence: `output/android-audit/2026-07-23T10-50-00-0500--m1-cold-start-fix/`; manifest SHA-256 `823cade316441d803269a022c52813ed8ba5930d2d56f6b1248d2b087786d97d`.
+  - Maximum cold launch: `422` ms.
+  - Maximum observed GC/allocation pause: `0.291` seconds, down from the prior `10–20` second stalls.
+  - Zero new ANRs, ANR dialogs, fatal/OOM logs, process changes, skipped-frame events, or pauses of at least ten seconds.
+- The earlier ANR bundle was re-scrubbed after adding DropBox and screenshot evidence. Sensitive client metadata was removed; the 28-file manifest is `e6259c63814865d6c331a1513f2885d11db2014d0f193171c9bd5bc348926781` and a follow-up token-pattern scan returned zero matches.
+- A final exact-candidate Memory Gate V3 attempt ran for about 32 minutes, but the intentionally aborted parent task removed its output consumer. The detached Node process later terminated without writing the atomic report, so the attempt is **inconclusive** and supplies no pass/fail or phase numbers. It is not counted as an app failure and is not repeated now.
+- Because the interrupted runner could not prove its own `finally` restoration, a bounded cleanup restored the last verified user choices and a separate read-only post-relaunch capture proved persistence: `3d=true`, `lands=true`, `pois=true`, `trails=true`; `usgs=false`, `fire=false`, `ava=false`, `radar=false`, `mvum=false`.
+- M1 decision: the demonstrated cold-start ANR P1 is closed and no current-source P0/P1 is reproduced. M1 may move forward to M2 by explicit user direction. The complete ten-cycle phase/recovery report remains a final pre-production acceptance debt; it does not authorize production and must not be represented as passed.
+- Open P0 defects: none. Open P1 defects reproduced on `81e182e`: none. Release-gate debt: current-source ten-cycle memory/recovery evidence and paired iOS device identity/delta remain pending.
+- Exact next action: begin M2 Instant Search on the approved Figma treatment, preserving explicit selection, server order, cached/offline immediacy, keyboard state, route context, and Viator separation. Run only M2-specific tests and device deltas.
+- Do not repeat: the full pre-preview suite, paired `81e182e` OTA, three cold-start runs, the interrupted long memory attempt, broad layer testing, 33-run Android crawl, NPS research, or completed Figma packets. Schedule one fresh full Memory Gate V3 only against the eventual frozen production candidate.
+- Task-owned background processes: none. The interrupted memory process, bounded layer-restoration helper, Gradle daemon, Metro/Expo/EAS publishers, Maestro, and temporary credential/helper files were all stopped or removed. ADB remains available for the connected Samsung and emulator.
+
 ## Verified completed work
 
 - The final frozen source tree passed `npm run audit:prepreview`:

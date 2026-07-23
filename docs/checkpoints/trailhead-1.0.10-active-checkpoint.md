@@ -1,6 +1,6 @@
 # Trailhead 1.0.10 Active Checkpoint
 
-Last updated: 2026-07-22 (America/Winnipeg)
+Last updated: 2026-07-22 22:41 (America/Winnipeg)
 
 ## Resume protocol
 
@@ -19,6 +19,8 @@ Read this file before resuming the 1.0.10 overhaul after a restart or context co
   - `4fa0379 feat(api): harden fire and explore delivery`
   - `d44618b feat(mobile): preserve explore context and map state`
   - `e6f5811 test(release): gate preview memory and telemetry`
+  - `0b14624 docs: checkpoint 1.0.10 stability work`
+- Immutable preview/deploy source: `0b146242bfbed7fad8310beefc26b6a4e61eeeb0`.
 - Nothing has been published to production from these commits.
 - Production OTA, AAB/IPA submission, public Originals rollout, advertising, and store screenshot replacement remain blocked.
 
@@ -32,6 +34,12 @@ Read this file before resuming the 1.0.10 overhaul after a restart or context co
 - Mobile changes now cover bounded wildfire loading, consistent map/fire status styling, exact-place media fallbacks, adaptive NPS hub navigation/return state, and image downsampling.
 - Figma NPS contract: `https://www.figma.com/design/FJUcMWAfsNyjsguCEp2dBe?node-id=757-2406`.
 - NPS reference evidence is under `output/nps-reference-audit/2026-07-22/`.
+- Backend compatibility deployment `99dbcd8f-f0ca-417d-9123-fd812d5ae384` succeeded on Railway from the immutable source above. `https://api.gettrailhead.app/api/health` returned `200`, and the bounded fire query plus Explore catalog/home endpoints were verified live.
+- Paired preview OTA published successfully from the same immutable source with Sentry source maps:
+  - Preview channel ID: `019dbc97-3cde-795b-a35d-e6aa985060d3`.
+  - Candidate branch: `preview-candidate-0b146242bfbed7fad8310beefc26b6a4e61eeeb0-mrwylb7f-ea5a0195e25ed95d0ed9b9c7`.
+  - Android runtime `native-1.0.10-android.1`, group `db674e38-39ec-4a84-918a-5da5457c0587`, update `019f8d10-53f3-7635-932f-93b042500bad`.
+  - iOS runtime `native-1.0.10-ios.1`, group `20cf645a-890f-4834-b813-949268db5c97`, update `019f8d10-53f3-7978-b181-53a8350ab8e8`.
 
 ## Existing crawl evidence — do not repeat as baseline work
 
@@ -45,22 +53,18 @@ Read this file before resuming the 1.0.10 overhaul after a restart or context co
 
 ## Known unresolved blockers
 
-- The current fire/media/NPS/layers changes have not yet been delivered to the devices as one exact clean SHA.
+- The current fire/media/NPS/layers changes are on the preview channel as one exact clean SHA, but the installed update identity still needs to be confirmed on the Samsung and emulator.
 - A prior uncontrolled Samsung Explore snapshot reached `1,014,606 KB` total PSS. It is evidence of a memory problem, but it is not the corrected controlled gate for the new candidate.
 - The corrected Samsung memory gate must prove total PSS below 500 MB and less than 10% growth over ten heavy-layer cycles.
-- External preview credentials/build values for Branch, Sentry, and Google Maps must be verified before publishing the paired preview.
+- EAS preview credentials for Branch, Sentry, Google Maps, and RNMapbox were verified without exposing their values before publication.
 - Branch deferred handoff stays disabled until branded-domain TLS and fresh-install attribution pass.
 
 ## Next exact actions
 
-1. Recheck `git diff --check`, protected hash, staged files, branch ahead/behind, and absence of orphaned test processes.
-2. Push the clean branch checkpoint.
-3. Deploy backend compatibility/internal behavior and verify health plus the new fire/media endpoints.
-4. Publish one paired **preview-only** OTA from the same immutable SHA with Sentry source maps.
-5. Verify exact build/runtime/update identity on Samsung and emulator.
-6. Run the corrected controlled Samsung memory gate first.
-7. If memory passes, run only the affected delta crawl: Map, Explore, layers/fire, NPS return state, and exact-place media. Reuse prior evidence for unchanged areas.
-8. Continue Map-first redesign implementation only after the stability delta passes.
+1. Verify exact build/runtime/update identity on Samsung and emulator.
+2. Run the corrected controlled Samsung memory gate first.
+3. If memory passes, run only the affected delta crawl: Map, Explore, layers/fire, NPS return state, and exact-place media. Reuse prior evidence for unchanged areas.
+4. Continue Map-first redesign implementation only after the stability delta passes.
 
 ## Checkpoint maintenance
 

@@ -18893,7 +18893,11 @@ from collections import OrderedDict
 
 # Search V2 is additive and rollout-gated. Its serving index is generated in
 # memory from immutable canonical artifacts; it never modifies the catalog DB.
-_search_v2_source_cache: dict[str, Any] = {"revision": "", "documents": []}
+_search_v2_source_cache: dict[str, Any] = {
+    "source_signature": "",
+    "revision": "",
+    "documents": [],
+}
 _search_v2_source_lock = threading.RLock()
 
 
@@ -18905,39 +18909,85 @@ def _search_v2_file_revision(path: Path) -> tuple[str, int, int]:
         return str(path), 0, 0
 
 
+def _search_v2_fallback_catalog_snapshot() -> tuple[dict, tuple[object, ...]]:
+    """Return the Explore catalog with the exact source key that produced it."""
+    catalog: dict = {}
+    for _attempt in range(3):
+        catalog = _load_explore_catalog()
+        source_key = _EXPLORE_CATALOG_CACHE.get("key")
+        if (
+            _EXPLORE_CATALOG_CACHE.get("catalog") is catalog
+            and isinstance(source_key, tuple)
+        ):
+            return catalog, source_key
+    # A source changed repeatedly while it was being loaded. Use a deliberately
+    # unstable key so this request remains correct without caching an old
+    # catalog under a newer file revision; the next request will retry.
+    return catalog, (("unstable-explore-catalog", time.time_ns(), 0),)
+
+
 def _search_v2_source_loader() -> tuple[list[SearchDocumentV2], str]:
     explore_items, explore_generated_at = _load_canonical_explore_index()
     trail_items, trail_generated_at = _load_canonical_trail_index()
+    fallback_places: list[dict] = []
+    fallback_revision: dict[str, Any] | None = None
     if not explore_items:
-        explore_items = [
-            _explore_place_index_item(place)
-            for place in (_load_explore_catalog().get("places") or [])
+        catalog, catalog_source_key = _search_v2_fallback_catalog_snapshot()
+        fallback_places = [
+            place for place in (catalog.get("places") or [])
             if isinstance(place, dict)
         ]
+        # Production intentionally falls back to the rich Explore catalog when
+        # a generated canonical candidate is not mounted. Projecting that
+        # catalog into public index records is expensive, so fingerprint its
+        # immutable inputs before doing the projection. Count alone is not
+        # sufficient: an edit can replace a place without changing cardinality.
+        fallback_revision = {
+            "source_key": _explore_catalog_cache_key_json(
+                catalog_source_key
+            ),
+            "catalog_id": str(catalog.get("catalog_id") or ""),
+            "schema_version": catalog.get("schema_version"),
+            "generated_at": str(catalog.get("generated_at") or ""),
+            "place_count": len(fallback_places),
+        }
     revision_payload = {
         # Bump whenever index/filter semantics change so cursors issued by an
         # older backend fail closed instead of paging through a new ordering.
-        "v": 3,
+        "v": 4,
+        "explore_source": "canonical" if explore_items else "catalog_fallback",
         "explore_generated_at": int(explore_generated_at or 0),
         "trail_generated_at": int(trail_generated_at or 0),
-        "explore_count": len(explore_items),
+        "explore_count": len(explore_items) if explore_items else len(fallback_places),
         "trail_count": len(trail_items),
+        "fallback_revision": fallback_revision,
         "files": [
             _search_v2_file_revision(CANONICAL_EXPLORE_INDEX_PATH),
             _search_v2_file_revision(CANONICAL_TRAIL_INDEX_PATH),
             _search_v2_file_revision(CANONICAL_TRAIL_INDEX_BUNDLED_PATH),
         ],
     }
-    revision = hashlib.sha256(
+    source_signature = hashlib.sha256(
         json.dumps(revision_payload, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()[:20]
     with _search_v2_source_lock:
-        if _search_v2_source_cache.get("revision") == revision:
-            return list(_search_v2_source_cache.get("documents") or []), revision
+        if _search_v2_source_cache.get("source_signature") == source_signature:
+            return (
+                list(_search_v2_source_cache.get("documents") or []),
+                str(_search_v2_source_cache.get("revision") or source_signature),
+            )
+    if not explore_items:
+        explore_items = [
+            _explore_place_index_item(place) for place in fallback_places
+        ]
     documents = documents_from_canonical(explore_items, trail_items)
     with _search_v2_source_lock:
-        _search_v2_source_cache.update({"revision": revision, "documents": documents})
-    return list(documents), revision
+        _search_v2_source_cache.update({
+            "source_signature": source_signature,
+            "revision": source_signature,
+            "documents": documents,
+        })
+    return list(documents), source_signature
 
 
 def _search_v2_external_kind(value: object) -> str:

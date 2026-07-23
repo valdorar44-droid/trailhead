@@ -8,7 +8,7 @@ import re
 import threading
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -96,6 +96,90 @@ def _fixture_service(*, external_provider=None, timeout: float = 0.2) -> SearchV
         external_provider,
         external_timeout_seconds=timeout,
     )
+
+
+class SearchV2SourceLoaderTests(unittest.TestCase):
+    def test_fallback_projection_is_reused_while_source_revision_is_unchanged(self):
+        fallback_places = [{"id": "one"}, {"id": "two"}]
+        catalog = {
+            "catalog_id": "fallback-v1",
+            "schema_version": 3,
+            "generated_at": "2026-07-23T00:00:00Z",
+            "places": fallback_places,
+        }
+        converter = Mock(side_effect=lambda place: {
+            "id": place["id"],
+            "title": place["id"].title(),
+        })
+        document_builder = Mock(return_value=[_document("place:one", "One")])
+        source_key = (("explore.json", 100, 200),)
+
+        with (
+            patch.dict(server._search_v2_source_cache, {
+                "source_signature": "", "revision": "", "documents": [],
+            }, clear=True),
+            patch.object(server, "_load_canonical_explore_index", return_value=([], 0)),
+            patch.object(server, "_load_canonical_trail_index", return_value=([], 0)),
+            patch.object(
+                server, "_search_v2_fallback_catalog_snapshot",
+                return_value=(catalog, source_key),
+            ),
+            patch.object(server, "_explore_place_index_item", side_effect=converter),
+            patch.object(server, "documents_from_canonical", document_builder),
+        ):
+            first_documents, first_revision = server._search_v2_source_loader()
+            second_documents, second_revision = server._search_v2_source_loader()
+
+        self.assertEqual(first_revision, second_revision)
+        self.assertEqual(first_documents, second_documents)
+        self.assertEqual(converter.call_count, len(fallback_places))
+        document_builder.assert_called_once()
+
+    def test_same_count_fallback_edit_invalidates_projection_and_revision(self):
+        catalogs = [
+            {
+                "catalog_id": "fallback-v1", "schema_version": 3,
+                "places": [{"id": "one"}],
+            },
+            {
+                "catalog_id": "fallback-v1", "schema_version": 3,
+                "places": [{"id": "replacement"}],
+            },
+        ]
+        source_keys = [
+            (("explore.json", 100, 200),),
+            (("explore.json", 101, 200),),
+        ]
+        converter = Mock(side_effect=lambda place: {
+            "id": place["id"],
+            "title": place["id"].title(),
+        })
+
+        def build_documents(explore_items, _trail_items):
+            item = explore_items[0]
+            return [_document(f"place:{item['id']}", item["title"])]
+
+        with (
+            patch.dict(server._search_v2_source_cache, {
+                "source_signature": "", "revision": "", "documents": [],
+            }, clear=True),
+            patch.object(server, "_load_canonical_explore_index", return_value=([], 0)),
+            patch.object(server, "_load_canonical_trail_index", return_value=([], 0)),
+            patch.object(
+                server, "_search_v2_fallback_catalog_snapshot",
+                side_effect=list(zip(catalogs, source_keys)),
+            ),
+            patch.object(server, "_explore_place_index_item", side_effect=converter),
+            patch.object(server, "documents_from_canonical", side_effect=build_documents) as builder,
+        ):
+            first_documents, first_revision = server._search_v2_source_loader()
+            second_documents, second_revision = server._search_v2_source_loader()
+
+        self.assertNotEqual(first_revision, second_revision)
+        self.assertEqual(first_documents[0].result_id, "place:one")
+        self.assertEqual(second_documents[0].result_id, "place:replacement")
+        self.assertEqual(converter.call_count, 2)
+        self.assertEqual(builder.call_count, 2)
 
 
 class SearchV2ServiceTests(unittest.IsolatedAsyncioTestCase):

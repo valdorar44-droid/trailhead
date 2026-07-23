@@ -29,6 +29,7 @@ tags:
       id: "place-sheet-place-place-place-nps-yell-content"
     timeout: 10000
 - assertVisible: "Navigate"
+- assertVisible: "Park"
 - assertVisible:
     id: "place-sheet-place-place-place-nps-yell-content"
 - takeScreenshot: map-search-complete-place-sheet

@@ -189,6 +189,26 @@ class OfficialPlaceEnrichmentTests(unittest.TestCase):
 
 
 class OfficialPlaceEndpointTests(unittest.IsolatedAsyncioTestCase):
+    async def test_canonical_ridb_camp_detail_preserves_the_full_facility_payload(self):
+        facility = {
+            "id": "234059",
+            "name": "Devils Garden Campground",
+            "site_types": ["Tent", "RV"],
+            "campsites": [{"id": "site-1", "name": "Site 1"}],
+            "amenities": ["Potable water"],
+        }
+        get_detail = AsyncMock(return_value=facility)
+        with (
+            patch.object(server, "get_facility_detail", new=get_detail),
+            patch.object(server, "get_camp_profile_override", return_value=None),
+        ):
+            result = await server.campsite_detail("place:ridb:234059", user=None)
+
+        get_detail.assert_awaited_once_with("234059")
+        self.assertEqual(result["site_types"], facility["site_types"])
+        self.assertEqual(result["campsites"], facility["campsites"])
+        self.assertEqual(result["amenities"], facility["amenities"])
+
     async def test_nearby_places_returns_official_explore_category_without_unlock(self):
         nps_place = {
             "id": "nps_thing_1",
@@ -326,6 +346,64 @@ class OfficialPlaceEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("northern Arizona", result["card"]["summary"])
         self.assertEqual(result["related"]["things_to_do"][0]["name"], "Volleyball Camp")
         self.assertEqual(result["related"]["context_status"]["rail_counts"]["things_to_do"], 1)
+
+    async def test_canonical_search_park_keeps_exact_catalog_classification_and_media(self):
+        catalog_place = {
+            "id": "place:nps:yell",
+            "summary": {
+                "title": "Yellowstone National Park",
+                "lat": 44.5982442,
+                "lng": -110.5471695,
+                "category": "Park",
+            },
+        }
+        catalog_card = {
+            "id": "explore:place:nps:yell",
+            "name": "Yellowstone National Park",
+            "lat": 44.5982442,
+            "lng": -110.5471695,
+            "type": "park",
+            "subtype": "Park",
+            "source": "trailhead_explore",
+            "source_label": "National Park Service",
+            "summary": "The world's first national park protects hydrothermal features and wildlife habitat.",
+            "photo_url": "https://www.nps.gov/yell/learn/photosmultimedia/images/yellowstone.jpg",
+            "photos": ["https://www.nps.gov/yell/learn/photosmultimedia/images/yellowstone.jpg"],
+            "official_url": "https://www.nps.gov/yell/",
+        }
+        town_profile = AsyncMock(return_value=None)
+
+        with (
+            patch.object(server, "get_cached", return_value=None),
+            patch.object(server, "set_cached", return_value=None),
+            patch.object(server, "_find_explore_place", return_value=catalog_place),
+            patch.object(server, "_explore_place_to_nearby_place", return_value=catalog_card),
+            patch.object(server, "_discovery_context_smart_places", new=AsyncMock(return_value={"places": []})),
+            patch.object(server, "trails_discover", new=AsyncMock(return_value={"trails": []})),
+            patch.object(server, "_open_town_profile", new=town_profile),
+        ):
+            body = server.MapCardResolveRequest(
+                kind="place",
+                id="place:nps:yell",
+                place_id="place:nps:yell",
+                source="trailhead_search",
+                source_label="National Park Service",
+                name="Yellowstone National Park",
+                lat=44.5982442,
+                lng=-110.5471695,
+                type="park",
+                subtype="park",
+            )
+            result = await server.resolve_map_card(body, user=None)
+
+        self.assertEqual(result["card"]["id"], "place:nps:yell")
+        self.assertEqual(result["card"]["type"], "park")
+        self.assertEqual(result["card"]["display_type"], "Park")
+        self.assertEqual(result["card"]["photo_url"], catalog_card["photo_url"])
+        self.assertEqual(result["card"]["official_url"], catalog_card["official_url"])
+        self.assertNotIn("town_profile", result["card"])
+        town_profile.assert_not_awaited()
+        self.assertTrue(server._map_card_cache_key(body).startswith("map_card_v12:"))
 
     def test_legacy_provider_card_fields_are_scrubbed(self):
         stale = {

@@ -38,6 +38,9 @@ assert.deepEqual(flowNames, [
   '04-search-race-qa.yaml',
   '05-search-canonical-result.yaml',
   '06-map-search-opens-complete-sheet.yaml',
+  '07-map-search-opens-complete-camp-sheet.yaml',
+  '08-map-search-opens-complete-trail-sheet.yaml',
+  '09-map-search-opens-trailhead-sheet.yaml',
 ]);
 for (const name of flowNames) {
   const source = readFileSync(join(workspace, 'flows', name), 'utf8');
@@ -64,6 +67,20 @@ const completeMapSheetFlow = readFileSync(join(workspace, 'flows', '06-map-searc
 assert.match(completeMapSheetFlow, /id:\s*"map\.search\.inline\.result\.place:nps:yell"/);
 assert.match(completeMapSheetFlow, /id:\s*"place-sheet-place-place-place-nps-yell-content"/);
 assert.match(completeMapSheetFlow, /assertVisible:\s*"Navigate"/);
+assert.match(completeMapSheetFlow, /assertVisible:\s*"Park"/);
+
+const completeCampSheetFlow = readFileSync(join(workspace, 'flows', '07-map-search-opens-complete-camp-sheet.yaml'), 'utf8');
+assert.match(completeCampSheetFlow, /map\.search\.inline\.result\.place:ridb:251841/);
+assert.match(completeCampSheetFlow, /place-sheet-camp-camp-place-ridb-251841/);
+assert.match(completeCampSheetFlow, /text:\s*"Site types"/);
+
+const completeTrailSheetFlow = readFileSync(join(workspace, 'flows', '08-map-search-opens-complete-trail-sheet.yaml'), 'utf8');
+assert.match(completeTrailSheetFlow, /map\.search\.inline\.result\.place:ridb:270422/);
+assert.match(completeTrailSheetFlow, /place-sheet-trail-trail-place-ridb-270422/);
+
+const trailheadSheetFlow = readFileSync(join(workspace, 'flows', '09-map-search-opens-trailhead-sheet.yaml'), 'utf8');
+assert.match(trailheadSheetFlow, /map\.search\.inline\.result\.place:nps-child:grca:places:bright-angel-trailhead/);
+assert.match(trailheadSheetFlow, /place-sheet-trailhead-trailhead-place-nps-child-grca-places-bright-angel-trailhead/);
 
 const parsed = parseMaestroArgs([
   '--device', 'emulator-5554',

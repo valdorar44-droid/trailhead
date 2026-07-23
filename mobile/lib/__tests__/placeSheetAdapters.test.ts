@@ -10,6 +10,7 @@ import {
   CAMPGROUND_SHEET_PARITY_MODULES,
   COMMUNITY_REPORT_SHEET_PARITY_MODULES,
   EXPLORE_HUB_SHEET_PARITY_MODULES,
+  isCanonicalSearchPlaceSheetSource,
   stablePlaceSheetEntityId,
   TRAIL_SHEET_PARITY_MODULES,
 } from '../placeSheetAdapters';
@@ -49,6 +50,22 @@ test('coordinate fallback is deterministic and separates entity kinds', () => {
   const source = { name: 'Mesa View', lat: 38.123456, lng: -109.654321 };
   assert.equal(stablePlaceSheetEntityId('place', source), 'place:mesa-view:38.12346:-109.65432');
   assert.equal(stablePlaceSheetEntityId('camp', source), 'camp:mesa-view:38.12346:-109.65432');
+});
+
+test('canonical Search V2 place identity is protected during sheet enrichment', () => {
+  assert.equal(isCanonicalSearchPlaceSheetSource({
+    id: 'place:nps:yell',
+    place_id: 'place:nps:yell',
+    source: 'trailhead_search',
+    persistence_policy: 'canonical',
+    type: 'park',
+  }), true);
+  assert.equal(isCanonicalSearchPlaceSheetSource({
+    id: 'provider:mapbox:place.yellowstone',
+    source: 'mapbox',
+    persistence_policy: 'temporary',
+    type: 'place',
+  }), false);
 });
 
 test('campground adapter preserves the full release-gate module contract', () => {

@@ -22,6 +22,7 @@ import {
   reconcileLegacyTripSaveResponse,
   resolveLegacyTripSaveToken,
 } from './legacyTripSaveContext';
+import { ridbFacilityIdFromCanonicalCampId } from './campDetailIdentity';
 
 const BASE = TRAILHEAD_API_BASE;
 export type WeatherUnitMode = 'auto' | 'imperial' | 'metric';
@@ -926,7 +927,8 @@ export const api = {
         return req<CampsiteDetail>(`/api/campsites/${encodeURIComponent(facilityId)}/sites/${encodeURIComponent(campsiteId)}/detail`);
       }
     }
-    return req<CampsiteDetail>(`/api/campsites/${encodeURIComponent(id)}/detail`);
+    const canonicalRidbId = ridbFacilityIdFromCanonicalCampId(raw);
+    return req<CampsiteDetail>(`/api/campsites/${encodeURIComponent(canonicalRidbId || raw)}/detail`);
   },
   suggestCampsiteEdit: (id: string, data: CampEditSuggestionPayload) =>
     req<{ id: number; status: string; credits_earned: number; new_balance: number }>(`/api/campsites/${encodeURIComponent(id)}/suggest-edit`, {

@@ -1,0 +1,35 @@
+appId: ${APP_ID}
+name: Map search opens a complete trail sheet
+tags:
+  - search
+  - map
+  - sheets
+  - trail
+  - current-selectors
+---
+- launchApp:
+    clearState: false
+    stopApp: true
+- tapOn: "Map tab"
+- extendedWaitUntil:
+    visible:
+      id: "map.search.inline.input"
+    timeout: 20000
+- tapOn:
+    id: "map.search.inline.input"
+- eraseText: 80
+- inputText: "Corona Arch Trail"
+- extendedWaitUntil:
+    visible:
+      id: "map.search.inline.result.place:ridb:270422"
+    timeout: 30000
+- tapOn:
+    id: "map.search.inline.result.place:ridb:270422"
+- extendedWaitUntil:
+    visible:
+      id: "place-sheet-trail-trail-place-ridb-270422"
+    timeout: 15000
+- assertVisible: "Corona Arch Trail"
+- assertVisible: "Build route"
+- assertVisible: "Report"
+- takeScreenshot: map-search-complete-trail-sheet

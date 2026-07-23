@@ -20873,6 +20873,10 @@ async def campsites_search(
 
 @app.get("/api/campsites/{facility_id}/detail")
 async def campsite_detail(facility_id: str, user: dict | None = Depends(_optional_user)):
+    requested_facility_id = facility_id
+    canonical_ridb = re.fullmatch(r"(?:place:)?ridb:([^:]+)", facility_id, re.I)
+    if canonical_ridb:
+        facility_id = canonical_ridb.group(1)
     lead_key = ""
     if facility_id.startswith("dispersed_lead:"):
         lead_key = facility_id.split(":", 1)[1]
@@ -20905,7 +20909,9 @@ async def campsite_detail(facility_id: str, user: dict | None = Depends(_optiona
             detail = _merge_context_rails_into_detail(detail, related, status)
         except Exception:
             detail = _merge_context_rails_into_detail(detail, {}, None)
-    override = get_camp_profile_override(facility_id)
+    override = get_camp_profile_override(requested_facility_id) or (
+        get_camp_profile_override(facility_id) if requested_facility_id != facility_id else None
+    )
     if override:
         detail = {**detail, **override, "admin_edited": True}
     return detail
@@ -29249,6 +29255,12 @@ def _is_broad_map_place(body: MapCardResolveRequest | None = None, card: dict | 
         (card or {}).get("source_label"),
     ))
     name = str((card or {}).get("name") or getattr(body, "name", "") or "")
+    # A generic request kind (``place``) must not turn an explicitly typed
+    # canonical result such as a park into a city/locality card. Mapbox city
+    # results still carry only broad types and continue through this branch.
+    concrete_types = typed.difference(BROAD_MAP_PLACE_TYPES).difference({"poi", "unknown", "search", "map"})
+    if concrete_types:
+        return False
     if typed.intersection(BROAD_MAP_PLACE_TYPES) and any(token in source for token in ("search", "mapbox", "map search", "geocode", "nominatim")):
         return True
     return any(token in source for token in ("search", "mapbox", "geocode", "nominatim")) and _query_looks_like_locality(name)
@@ -29655,6 +29667,36 @@ def _map_card_base_from_request(body: MapCardResolveRequest) -> dict:
         "bbox": body.bbox,
         "photo_status": "open_photo" if body.photo_url else "placeholder",
     }
+
+
+def _canonical_search_explore_card(body: MapCardResolveRequest) -> dict | None:
+    """Return the exact Explore record behind a canonical Search V2 row.
+
+    Search rows intentionally keep a stable ``place:*`` identity. Hydrating
+    that identity here prevents generic nearby/town enrichment from replacing
+    authoritative type, photo, description, and official-link fields.
+    """
+    if str(body.source or "").strip().lower() != "trailhead_search":
+        return None
+    candidates: list[str] = []
+    for value in (body.place_id, body.provider_place_id, body.id):
+        candidate = str(value or "").strip()
+        if candidate.startswith("explore:"):
+            candidate = candidate[len("explore:"):]
+        if candidate and candidate not in candidates:
+            candidates.append(candidate)
+    for candidate in candidates:
+        place = _find_explore_place(candidate)
+        if not place:
+            continue
+        card = _explore_place_to_nearby_place(place, float(body.lat), float(body.lng))
+        if not card:
+            continue
+        card["id"] = body.id or candidate
+        card["place_id"] = candidate
+        card["provider_place_id"] = body.provider_place_id or candidate
+        return card
+    return None
 
 
 def _map_card_merge(primary: dict, secondary: dict | None) -> dict:
@@ -30317,7 +30359,7 @@ def _map_card_cache_key(body: MapCardResolveRequest) -> str:
         f"{float(body.lat):.4f}",
         f"{float(body.lng):.4f}",
     ])
-    return f"map_card_v11:{hashlib.sha1(base.encode()).hexdigest()[:24]}"
+    return f"map_card_v12:{hashlib.sha1(base.encode()).hexdigest()[:24]}"
 
 
 def _contains_restricted_provider(value: object) -> bool:
@@ -30362,6 +30404,14 @@ async def resolve_map_card(body: MapCardResolveRequest, user: dict | None = Depe
     center_lat = float(body.lat)
     center_lng = float(body.lng)
     base = _map_card_base_from_request(body)
+    canonical_explore_card = _canonical_search_explore_card(body)
+    if canonical_explore_card:
+        request_identity = {
+            "id": base.get("id"),
+            "lat": base.get("lat"),
+            "lng": base.get("lng"),
+        }
+        base = {**base, **canonical_explore_card, **request_identity}
     errors: dict[str, str] = {}
     cache_key = _map_card_cache_key(body)
     cached = get_cached("campsite_cache", cache_key, ttl_seconds=MAP_CARD_SAFE_TTL_SECONDS)

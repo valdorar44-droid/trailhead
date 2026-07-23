@@ -1,0 +1,40 @@
+appId: ${APP_ID}
+name: Map search opens a complete campground sheet
+tags:
+  - search
+  - map
+  - sheets
+  - camp
+  - current-selectors
+---
+- launchApp:
+    clearState: false
+    stopApp: true
+- tapOn: "Map tab"
+- extendedWaitUntil:
+    visible:
+      id: "map.search.inline.input"
+    timeout: 20000
+- tapOn:
+    id: "map.search.inline.input"
+- eraseText: 80
+- inputText: "Goose Island Group Sites"
+- extendedWaitUntil:
+    visible:
+      id: "map.search.inline.result.place:ridb:251841"
+    timeout: 30000
+- tapOn:
+    id: "map.search.inline.result.place:ridb:251841"
+- extendedWaitUntil:
+    visible:
+      id: "place-sheet-camp-camp-place-ridb-251841"
+    timeout: 15000
+- assertVisible: "Goose Island Group Sites"
+- scrollUntilVisible:
+    element:
+      text: "Site types"
+    direction: DOWN
+    timeout: 30000
+    speed: 65
+- assertVisible: "Site types"
+- takeScreenshot: map-search-complete-camp-sheet

@@ -1,0 +1,34 @@
+appId: ${APP_ID}
+name: Map search opens the trailhead sheet family
+tags:
+  - search
+  - map
+  - sheets
+  - trailhead
+  - current-selectors
+---
+- launchApp:
+    clearState: false
+    stopApp: true
+- tapOn: "Map tab"
+- extendedWaitUntil:
+    visible:
+      id: "map.search.inline.input"
+    timeout: 20000
+- tapOn:
+    id: "map.search.inline.input"
+- eraseText: 80
+- inputText: "Bright Angel Trailhead"
+- extendedWaitUntil:
+    visible:
+      id: "map.search.inline.result.place:nps-child:grca:places:bright-angel-trailhead"
+    timeout: 30000
+- tapOn:
+    id: "map.search.inline.result.place:nps-child:grca:places:bright-angel-trailhead"
+- extendedWaitUntil:
+    visible:
+      id: "place-sheet-trailhead-trailhead-place-nps-child-grca-places-bright-angel-trailhead"
+    timeout: 15000
+- assertVisible: "Bright Angel Trailhead"
+- assertVisible: "Build route"
+- takeScreenshot: map-search-trailhead-sheet

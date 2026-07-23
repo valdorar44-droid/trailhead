@@ -84,6 +84,7 @@ export type PlaceSheetSource = {
   source_label?: string | null;
   source_badge?: string | null;
   verified_source?: string | null;
+  persistence_policy?: string | null;
 };
 
 export type PlaceSheetModel<T extends PlaceSheetSource = PlaceSheetSource> = {
@@ -125,6 +126,14 @@ export function stablePlaceSheetEntityId(kind: CoordinatedSheetKind, source: Pla
     ? `${lat.toFixed(5)}:${lng.toFixed(5)}`
     : 'unknown';
   return `${kind}:${slug(source.name || kind)}:${coordinateKey}`;
+}
+
+export function isCanonicalSearchPlaceSheetSource(source: PlaceSheetSource | null | undefined): boolean {
+  if (!source) return false;
+  if (String(source.source || '').toLowerCase() !== 'trailhead_search') return false;
+  if (String(source.persistence_policy || '').toLowerCase() !== 'canonical') return false;
+  return [source.id, source.place_id, source.provider_place_id]
+    .some(value => /^(place|trail|trailhead|camp):/i.test(String(value || '').trim()));
 }
 
 function makeModel<T extends PlaceSheetSource>(

@@ -191,6 +191,7 @@ import {
   type FireOverlayStatus,
 } from '@/lib/fireOverlay';
 import { communityRatingTarget } from '@/lib/communityRatingEligibility';
+import { campDetailFetchId } from '@/lib/campDetailIdentity';
 import {
   initialMapLayersFiltersState,
   mapLayersFiltersReducer,
@@ -211,6 +212,7 @@ import {
   adaptCommunityReportSheet,
   adaptGenericPlaceSheet,
   adaptTrailSheet,
+  isCanonicalSearchPlaceSheetSource,
   type PlaceSheetModel,
 } from '@/lib/placeSheetAdapters';
 import {
@@ -5967,14 +5969,7 @@ function campSourceDisplayLabel(text?: string | null, fallback = 'Details') {
 }
 
 function shouldFetchCampDetail(camp?: Pick<CampsitePin, 'id' | 'source' | 'source_badge' | 'verified_source'> | null) {
-  const id = String(camp?.id || '').trim();
-  if (!id) return false;
-  if (id.startsWith('ridb_site:')) return true;
-  if (/^(blm_|thp_|dsl_|dispersed_lead:)/i.test(id)) return true;
-  const source = `${camp?.source || ''} ${camp?.source_badge || ''} ${camp?.verified_source || ''}`.toLowerCase();
-  if (/geoapify|mapbox|osm|openstreetmap/.test(source)) return false;
-  if (/^(geoapify:|mapbox:|osm_)/i.test(id)) return false;
-  return false;
+  return campDetailFetchId(camp) != null;
 }
 
 function campBadgeLabel(text?: string | null, fallback = 'Camp') {
@@ -8821,6 +8816,7 @@ function MapScreen() {
     selectedPlaceResolveKeyRef.current = resolveKey;
     const selectedPlaceSource = String(selectedPlace.source || selectedPlace.selection_source || '').toLowerCase();
     const selectedPlaceIsExplore = isTrailheadExploreSelection(selectedPlace);
+    const selectedPlaceIsCanonicalSearch = isCanonicalSearchPlaceSheetSource(selectedPlace);
     let cancelled = false;
     const mergeResolvedCard = (resolved: MapCardResolveResponse) => {
       if (cancelled || !placeSheetRequestIsCurrent(sheetRequest)) return;
@@ -8854,12 +8850,28 @@ function MapScreen() {
             type: selectedPlace.type,
             subtype: selectedPlace.subtype,
           }
+        : selectedPlaceIsCanonicalSearch
+          ? {
+              ...selectedPlace,
+              ...resolvedCard,
+              photo_url: resolvedCard.photo_url || selectedPlace.photo_url,
+              photos: resolvedPhotos,
+              summary: resolvedCard.summary || selectedPlace.summary,
+              id: selectedPlace.id,
+              place_id: selectedPlace.place_id,
+              provider_place_id: selectedPlace.provider_place_id,
+              name: selectedPlace.name,
+              type: selectedPlace.type,
+              subtype: selectedPlace.subtype,
+              source: selectedPlace.source,
+              source_label: selectedPlace.source_label || resolved.display_source_label,
+            }
         : {
             ...selectedPlace,
             ...resolvedCard,
             photos: resolvedPhotos,
           } as SearchPlace;
-      if (resolved.display_source_label && !selectedPlaceIsExplore) {
+      if (resolved.display_source_label && !selectedPlaceIsExplore && !selectedPlaceIsCanonicalSearch) {
         nextCard.source_label = resolved.display_source_label;
       }
       setSelectedPlace(current => {
@@ -9321,7 +9333,7 @@ function MapScreen() {
     ].filter(Boolean)));
     const landType = source.land_type || source.subtype || (privateStay ? 'Private Stay' : lodging ? 'Lodging' : rv ? 'RV Park' : 'Campground');
     const photoUrl = firstMapCardPhotoUrl(source, resolved);
-    const selectedOfficialId = String(place.id || '').startsWith('ridb') || /ridb|recreation\.gov/i.test(String(place.source || place.source_label || source.source || source.source_badge || ''));
+    const selectedOfficialId = /^(?:place:)?ridb(?::|_)/i.test(String(place.id || '')) || /ridb|recreation\.gov/i.test(String(place.source || place.source_label || source.source || source.source_badge || ''));
     const stableId = selectedOfficialId && place.id ? String(place.id) : String(source.id || place.id || `mapcard:camp:${lat.toFixed(5)}:${lng.toFixed(5)}`);
     const stableName = selectedOfficialId && place.name ? String(place.name) : String(source.name || place.name || (lodging ? 'Stay option' : 'Campground'));
     return {
@@ -19259,9 +19271,10 @@ function MapScreen() {
     if (opts.showModal) setShowCampDetail(true);
     setLoadingDetail(false);
     let detail: CampsiteDetail = minimal;
-    if (shouldFetchCampDetail(camp)) {
+    const detailFetchId = campDetailFetchId(camp);
+    if (detailFetchId) {
       try {
-        detail = await api.getCampsiteDetail(camp.id);
+        detail = await api.getCampsiteDetail(detailFetchId);
       } catch {
         detail = minimal;
       }

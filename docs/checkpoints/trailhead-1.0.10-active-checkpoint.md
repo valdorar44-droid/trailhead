@@ -816,3 +816,34 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Exact next action: in the next map-stability packet, characterize and order `restoreRecentViewportIfNeeded` versus experience-owned camera commands, then give Originals/route review/navigation a single post-restore camera-ownership contract. Do not solve it with repeated arbitrary timers. Rerun only Start → settled main map framing.
 - Do not repeat: Moab download, Plan/Downloads, Minimize/Resume/End teardown, broad crawls, full pre-preview, Memory Gate V3, or completed Figma/Mobbin work.
 - Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; `.cursor/` and `dashboard/explore_serving_index_v2.json` remain excluded and unstaged.
+
+## Checkpoint 1 — shared camera ownership accepted
+
+- Timestamp: `2026-07-24T11:42:02-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; exact implementation and paired-preview source HEAD: `2207b122076f94afc5b2ed26269680a77e669f82`, pushed to origin.
+- Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. `.cursor/` and `dashboard/explore_serving_index_v2.json` remain excluded, unstaged, and untouched.
+- Replaced the competing browse, route-builder, and Originals viewport paths with one camera-ownership controller. Priority is `navigation` → `originals` → `route_review`/`preview3d` → `route_build`/`trace` → `browse`.
+- Recent viewport persistence and restoration now run only for browse ownership. An active experience gets one idempotent camera claim keyed by experience identity, route revision/content, map-surface generation, and style generation. A real user gesture cancels additional automatic claims for that experience without removing its route.
+- Ending an experience releases camera ownership and restores the retained browse camera. The existing compass, manual Fit Route recovery, Android Auto synchronization, route geometry, renderer, and one-main-map architecture are unchanged.
+- Focused verification passed:
+  - Camera priority, idempotency, style-generation reapplication, gesture cancellation, and ownership release tests.
+  - Originals renderer binding and complete Originals suite.
+  - Search V2 regression, route-mode contract, copy audit across `163` files, telemetry privacy allowlist, native/config drift, TypeScript, and whitespace checks.
+  - The live multi-route network audit was intentionally stopped because it is outside this narrow checkpoint and belongs to the Route Editor packet; it is not recorded as a failure.
+- Paired preview publication completed with Sentry source maps:
+  - Channel `preview`, channel ID `019dbc97-3cde-795b-a35d-e6aa985060d3`.
+  - Candidate branch `preview-candidate-2207b122076f94afc5b2ed26269680a77e669f82-mrz5n1mo-dbccc99586c536509df16aa6`, branch ID `019f94f9-749d-7014-9e89-a5d759a5b216`.
+  - Android build `59`, runtime `native-1.0.10-android.1`, group `1eac3136-fb31-454d-9657-09c06b724931`, update `019f94f9-981c-78bb-962f-eb5af5a88160`.
+  - iOS build `54`, runtime `native-1.0.10-ios.1`, group `a273a2f3-f35e-4d97-93f8-05b4a018d4d7`, update `019f94f9-981c-7bf8-9d38-4d4258418c8f`.
+- Samsung `RFCR408DA9B` verified version `1.0.10`, build `59`, preview channel, full source SHA, runtime, update ID, and `Ready` delivery. Evidence: `output/qa-RFCR408DA9B-2207.xml`, SHA-256 `4412a9eb795943291cf4e999d0b9769a1ce36a67a4a984deba580e1828e89898`.
+- The exact previously downloaded Moab Original opened from Plan → Trips. Start Tour settled on the complete Moab/Canyonlands route with all authored cue markers. Minimize retained that camera and route without using the manual Fit Route control. Evidence:
+  - `output/m4-plan-originals/orig-auto-fit-2207.png`, SHA-256 `2d85985f8e1fee04d95ed1a6c5a3151b3fcaa13bf744b8ba41ab5cffecac9897`.
+  - `output/m4-plan-originals/orig-auto-fit-2207.xml`, SHA-256 `fdaedf791d7143762f913fbb8c7d9a5885168c1fff5f580d1801bd9981a4bc1a`.
+- End Tour removed the player and Original route, released ownership, and restored the prior broad browse viewport. Evidence:
+  - `output/m4-plan-originals/orig-ended-restored-2207.png`, SHA-256 `83ef0980b077a8f958370cd965bf567a31c3633f313b51d82908bedfb544dac3`.
+  - `output/m4-plan-originals/orig-ended-restored-2207.xml`, SHA-256 `0143663ce66153236e63c2353fb3e59577d7929623d48923d92448d423ebd915`.
+- Android result: accepted. iOS update identity is published and verified in EAS; the shared camera contract is covered by pure tests, while the next physical-iOS delta remains part of the Route Editor/Trip Overview paired review.
+- Open P0/P1 for camera ownership: none. The prior automatic Original route-framing P1 is closed.
+- Exact next action: implement the approved Route Editor and Trip Overview packet: durable route-ready actions, timeline, departure-aware weather, editable packing, sourced Brief & Backup, full-screen 3D return state, and navigation framing/compass proof.
+- Do not repeat: Moab acquisition/download, Plan/Downloads, Minimize/Resume lifecycle, Layers, NPS/Explore crawls, broad Map crawls, completed Figma/Mobbin research, or Memory Gate V3 before the frozen candidate.
+- Task-owned background processes: none. Publisher, Expo export, Sentry upload, EAS, Gradle, Metro, Maestro, memory-gate, and Trailhead test processes have exited. ADB remains intentionally available for the connected Samsung and emulator.

@@ -9,6 +9,11 @@ export const PROFILE_SECTIONS = [
 
 export type ProfileSectionId = typeof PROFILE_SECTIONS[number]['id'];
 
+export function profileSectionScrollOffset(sectionId: ProfileSectionId): number {
+  const index = PROFILE_SECTIONS.findIndex(section => section.id === sectionId);
+  return Math.max(0, index * 104 - 40);
+}
+
 export type ContestAwardPresentation = {
   label: string;
   detail: string;

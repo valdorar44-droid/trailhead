@@ -80,6 +80,7 @@ import {
   contestAwardPeriodLabel,
   contestAwardPresentation,
   PROFILE_SECTIONS,
+  profileSectionScrollOffset,
   supportThreadIdForContestAward,
   type ProfileSectionId,
 } from '@/lib/profilePresentation';
@@ -301,6 +302,7 @@ export default function ProfileScreen() {
   const setPendingMapSelection = useStore(st => st.setPendingMapSelection);
   const setPendingSavedTrailId = useStore(st => st.setPendingSavedTrailId);
   const [profileSection, setProfileSection] = useState<ProfileSectionId>('account');
+  const profileSectionNavRef = useRef<ScrollView>(null);
   const [view, setView] = useState<'main' | 'login' | 'register' | 'forgot'>('main');
   const [authSuccess, setAuthSuccess] = useState('');  // brief success message before switching to main
   const authFade = useRef(new Animated.Value(1)).current;
@@ -642,6 +644,16 @@ export default function ProfileScreen() {
   useEffect(() => {
     if (user && view !== 'main') setView('main');
   }, [user]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      profileSectionNavRef.current?.scrollTo({
+        x: profileSectionScrollOffset(profileSection),
+        animated: true,
+      });
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [profileSection]);
 
   useEffect(() => {
     const authTarget = Array.isArray(params.auth) ? params.auth[0] : params.auth;
@@ -2199,6 +2211,7 @@ export default function ProfileScreen() {
         </TourTarget>
 
         <ScrollView
+          ref={profileSectionNavRef}
           horizontal
           showsHorizontalScrollIndicator={false}
           style={s.profileSectionNav}
@@ -2287,7 +2300,7 @@ export default function ProfileScreen() {
                   <View style={[s.quickActionIcon, { borderColor: color + '44', backgroundColor: color + '18' }]}>
                     <Ionicons name={icon as any} size={22} color={color} />
                   </View>
-                  <Text style={s.quickActionLabel}>{label}</Text>
+                  <Text style={s.quickActionLabel} numberOfLines={1}>{label}</Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -3858,7 +3871,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     backgroundColor: C.s2,
   },
   profileSectionChipActive: { backgroundColor: C.orange, borderColor: C.orange },
-  profileSectionChipText: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '800', letterSpacing: 0 },
+  profileSectionChipText: { color: C.text3, fontSize: 11, fontWeight: '800', letterSpacing: 0 },
   profileSectionChipTextActive: { color: '#fff' },
   emptySectionText: { color: C.text3, fontSize: 12.5, lineHeight: 18 },
   tripSummaryCard: {
@@ -3887,7 +3900,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   // Quick actions
   quickActionsRow: { marginHorizontal: -14 },
   quickActionsContent: { flexDirection: 'row', paddingHorizontal: 14, gap: 10 },
-  quickAction: { alignItems: 'center', gap: 6, width: 68 },
+  quickAction: { alignItems: 'center', gap: 6, width: 84 },
   quickActionIcon: {
     width: 50, height: 50, borderRadius: 16,
     borderWidth: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: C.s2,

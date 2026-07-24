@@ -5,6 +5,7 @@ import {
   contestAwardPeriodLabel,
   contestAwardPresentation,
   PROFILE_SECTIONS,
+  profileSectionScrollOffset,
   supportThreadIdForContestAward,
 } from '../profilePresentation';
 
@@ -13,6 +14,12 @@ test('Profile keeps each real feature family in a stable destination', () => {
     PROFILE_SECTIONS.map(section => section.id),
     ['account', 'trips', 'rig', 'community', 'support', 'settings'],
   );
+});
+
+test('Profile keeps the selected horizontal section away from clipped edges', () => {
+  assert.equal(profileSectionScrollOffset('account'), 0);
+  assert.ok(profileSectionScrollOffset('community') > 0);
+  assert.ok(profileSectionScrollOffset('settings') > profileSectionScrollOffset('support'));
 });
 
 test('contest awards use human status copy without exposing payout credentials', () => {

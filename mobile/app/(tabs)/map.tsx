@@ -198,6 +198,13 @@ import {
 import { useKeyboardInset } from '@/lib/keyboardInset';
 import { mapModeOwnsRoutePreview, resolveMapExperienceMode } from '@/lib/mapExperienceMode';
 import {
+  cancelMapCameraClaimForGesture,
+  consumeMapCameraClaim,
+  createMapCameraOwnership,
+  initialMapCameraClaimState,
+  mapCameraOwnershipKey,
+} from '@/lib/mapCameraOwnership';
+import {
   FIRE_OVERLAY_IDLE_STATUS,
   FIRE_OVERLAY_LOADING_STATUS,
   FIRE_OVERLAY_UNAVAILABLE_STATUS,
@@ -7463,9 +7470,9 @@ function MapScreen() {
   const [searchResult, setSearchResult] = useState<{ count: number } | null>(null);
   const [mapSurfaceReady, setMapSurfaceReady] = useState(false);
   const [mapSurfaceGeneration, setMapSurfaceGeneration] = useState(0);
-  const [originalsStyleGeneration, setOriginalsStyleGeneration] = useState(0);
+  const [mapStyleGeneration, setMapStyleGeneration] = useState(0);
   const [mapLoadFailed, setMapLoadFailed] = useState(false);
-  const originalsAutoFitRef = useRef('');
+  const mapCameraClaimStateRef = useRef(initialMapCameraClaimState());
   const activeRouteRestoreSeqRef = useRef(0);
   const lastAppliedRouteRestoreRef = useRef('');
   const persistedRouteIdentityRef = useRef(new Set<string>());
@@ -7509,6 +7516,21 @@ function MapScreen() {
     traceActive: trailTraceMode || trailPinCaptureMode,
     routeBuildStatus: routeBuildSession?.status ?? null,
   });
+  const mapCameraExperienceKey = mapExperienceMode === 'originals'
+    ? `originals:${originalsMapExperience.packId}:${originalsMapExperience.version}`
+    : mapExperienceMode === 'route_build' || mapExperienceMode === 'route_review'
+      ? `route:${routeBuildSession?.requestId ?? 'pending'}:${mapExperienceMode}`
+      : mapExperienceMode === 'navigation'
+        ? `navigation:${activeTrip?.trip_id ?? navDest?.name ?? 'active'}`
+        : mapExperienceMode === 'preview3d'
+          ? `preview3d:${activeTrip?.trip_id ?? 'active'}`
+          : mapExperienceMode === 'trace'
+            ? 'trace:active'
+            : null;
+  const mapCameraOwnership = useMemo(
+    () => createMapCameraOwnership(mapExperienceMode, mapCameraExperienceKey),
+    [mapCameraExperienceKey, mapExperienceMode],
+  );
   const routeBuildMapActive = mapModeOwnsRoutePreview(mapExperienceMode);
   const mapVisualWorkActive = mapVisualWorkShouldRun(
     screenActivity.isActive,
@@ -7548,43 +7570,78 @@ function MapScreen() {
     );
   }, [insets.top, originalsMapExperience.active, originalsMapExperience.routeCoords, windowHeight]);
 
-  useEffect(() => {
-    if (!mapSurfaceReady || !originalsMapExperience.active) return;
-    if (navMode) {
-      originalsAutoFitRef.current = '';
-      return;
+  const mapCameraClaim = useMemo(() => {
+    if (!mapSurfaceReady || !useNativeMapSurface) return null;
+    if (
+      mapCameraOwnership.owner === 'originals'
+      && originalsMapExperience.active
+      && originalsMapExperience.routeCoords.length >= 2
+    ) {
+      const geometrySignature = routeGeometryContentSignature(originalsMapExperience.routeCoords);
+      return {
+        applicationKey: [
+          mapCameraOwnershipKey(mapCameraOwnership),
+          mapSurfaceGeneration,
+          mapStyleGeneration,
+          geometrySignature,
+          windowHeight,
+          insets.top,
+        ].join(':'),
+        coords: originalsMapExperience.routeCoords,
+        padding: [Math.max(insets.top + 72, 96), 36, Math.min(Math.round(windowHeight * 0.43), 360), 36] as [number, number, number, number],
+        duration: 650,
+      };
     }
-    const first = originalsMapExperience.routeCoords[0];
-    const last = originalsMapExperience.routeCoords.at(-1);
-    const signature = [
-      mapSurfaceGeneration,
-      originalsStyleGeneration,
-      originalsMapExperience.packId,
-      originalsMapExperience.version,
-      originalsMapExperience.routeCoords.length,
-      first?.join(','),
-      last?.join(','),
-      windowHeight,
-      insets.top,
-      navMode,
-    ].join(':');
-    if (originalsAutoFitRef.current === signature) return;
-    originalsAutoFitRef.current = signature;
-    const timer = setTimeout(fitOriginalsRoute, 180);
-    return () => clearTimeout(timer);
+    if (
+      (mapCameraOwnership.owner === 'route_build' || mapCameraOwnership.owner === 'route_review')
+      && routeBuildSession
+      && routeBuildSession.routeCoords.length >= 2
+    ) {
+      const geometrySignature = routeGeometryContentSignature(routeBuildSession.routeCoords);
+      return {
+        applicationKey: [
+          mapCameraOwnershipKey(mapCameraOwnership),
+          mapSurfaceGeneration,
+          mapStyleGeneration,
+          geometrySignature,
+        ].join(':'),
+        coords: routeBuildSession.routeCoords,
+        padding: [96, 42, 260, 42] as [number, number, number, number],
+        duration: 900,
+      };
+    }
+    return null;
   }, [
-    fitOriginalsRoute,
     insets.top,
+    mapCameraOwnership,
+    mapStyleGeneration,
     mapSurfaceGeneration,
     mapSurfaceReady,
-    navMode,
-    originalsStyleGeneration,
     originalsMapExperience.active,
-    originalsMapExperience.packId,
     originalsMapExperience.routeCoords,
-    originalsMapExperience.version,
+    routeBuildSession,
+    useNativeMapSurface,
     windowHeight,
   ]);
+
+  useEffect(() => {
+    if (!mapCameraClaim) return;
+    const fitCoordinates = nativeMapRef.current?.fitCoordinates;
+    if (typeof fitCoordinates !== 'function') return;
+    const decision = consumeMapCameraClaim(
+      mapCameraClaimStateRef.current,
+      mapCameraOwnership,
+      mapCameraClaim.applicationKey,
+    );
+    mapCameraClaimStateRef.current = decision.state;
+    if (!decision.apply) return;
+    fitCoordinates.call(
+      nativeMapRef.current,
+      mapCameraClaim.coords,
+      mapCameraClaim.padding,
+      mapCameraClaim.duration,
+    );
+  }, [mapCameraClaim, mapCameraOwnership]);
 
   const clearRouteBuildMapTimers = useCallback(() => {
     routeBuildTimersRef.current.forEach(timer => clearTimeout(timer));
@@ -7637,14 +7694,7 @@ function MapScreen() {
     routeBuildRevealRef.current = 0;
     setRouteBuildReveal(0);
 
-    if (useNativeMapSurface) {
-      requestAnimationFrame(() => {
-        const fitCoordinates = nativeMapRef.current?.fitCoordinates;
-        if (typeof fitCoordinates === 'function') {
-          fitCoordinates.call(nativeMapRef.current, coords, [96, 42, 260, 42], 900);
-        }
-      });
-    } else {
+    if (!useNativeMapSurface) {
       postWebMessage(JSON.stringify({
         type: 'route_scout_preview_update',
         coords: [],
@@ -24214,10 +24264,9 @@ function MapScreen() {
         <NativeMapSurface
           ref={nativeMapRef}
           visualWorkActive={mapVisualWorkActive}
+          cameraOwnership={mapCameraOwnership}
           onMapStyleLoaded={() => {
-            if (!originalsMapExperience.active || navMode) return;
-            originalsAutoFitRef.current = '';
-            setOriginalsStyleGeneration(generation => generation + 1);
+            setMapStyleGeneration(generation => generation + 1);
           }}
           waypoints={waypoints}
           camps={mapMissionVisible || routeBuildMapActive || scopedMapSearchActive || waterFollowActive ? [] : nativeMapCampPins as any}
@@ -24330,6 +24379,10 @@ function MapScreen() {
           }}
           onMapGesture={() => {
             const now = Date.now();
+            mapCameraClaimStateRef.current = cancelMapCameraClaimForGesture(
+              mapCameraClaimStateRef.current,
+              mapCameraOwnership,
+            );
             if (searchV2Enabled
               && normalizeSearchV2Query(searchQueryRef.current).length >= 2
               && (inlineSearchOpen || showFullMapSearch)) {

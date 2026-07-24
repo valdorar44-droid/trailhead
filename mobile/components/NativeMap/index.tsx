@@ -20,6 +20,11 @@ import {
   createMapVisualRefreshCoordinator,
   visualWorkRequestIsCurrent,
 } from '@/lib/screenActivityState';
+import {
+  BROWSE_MAP_CAMERA_OWNERSHIP,
+  mapCameraOwnershipKey,
+  type MapCameraOwnership,
+} from '@/lib/mapCameraOwnership';
 
 import { buildMapStyle, MapMode } from './mapStyle';
 import type { ContourSourceMode, PremiumMapStyle, TrailSourceMode } from './mapStyle';
@@ -260,6 +265,8 @@ export interface NativeMapHandle {
 export interface NativeMapProps {
   /** The Map remains mounted while hidden, but renderer-owned visual work pauses. */
   visualWorkActive?: boolean;
+  /** The active experience owns camera initialization without replacing the map. */
+  cameraOwnership?: MapCameraOwnership;
 
   // Data
   waypoints:     WP[];
@@ -856,6 +863,7 @@ async function probeTileCdn(timeoutMs = 1500): Promise<boolean> {
 const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const {
     visualWorkActive = true,
+    cameraOwnership = BROWSE_MAP_CAMERA_OWNERSHIP,
     waypoints, camps, gas, pois, offlineTrailFeatures = emptyFC(), waterNavLines, waterSpotCards = [], waterCorridor = null, waterFollowRoute = null, reports, communityPins, searchMarker,
     userLoc, navMode, navCameraFollow = false, nativeNavEngineActive = false, navIdx, navHeading, navSpeed,
     mapLayer, routeProviderMode = 'trailhead', routeOpts, rendererMode,
@@ -882,6 +890,9 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const onDebugEventRef = useRef(onDebugEvent);
   const visualWorkActiveRef = useRef(visualWorkActive);
   const previousVisualWorkActiveRef = useRef(visualWorkActive);
+  const cameraOwnershipRef = useRef(cameraOwnership);
+  const previousCameraOwnershipRef = useRef(cameraOwnership);
+  const pendingBrowseCameraRestoreRef = useRef(false);
   const visualWorkGenerationRef = useRef(0);
   const visualRefreshCoordinatorRef = useRef(
     createMapVisualRefreshCoordinator(visualWorkActive, visualWorkGenerationRef.current),
@@ -894,6 +905,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       visualWorkGenerationRef.current,
     );
   }
+  cameraOwnershipRef.current = cameraOwnership;
   const visualRequestIsCurrent = useCallback((requestGeneration: number) => (
     visualWorkRequestIsCurrent(
       visualWorkActiveRef.current,
@@ -1229,7 +1241,13 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   }, [navCameraFollow, navMode]);
 
   const persistRecentViewport = useCallback((lat: number, lng: number, zoomLevel: number, pitch: number) => {
-    if (navMode || !Number.isFinite(lat) || !Number.isFinite(lng) || !Number.isFinite(zoomLevel)) return;
+    if (
+      navMode
+      || cameraOwnershipRef.current.blocksRecentViewport
+      || !Number.isFinite(lat)
+      || !Number.isFinite(lng)
+      || !Number.isFinite(zoomLevel)
+    ) return;
     const now = Date.now();
     if (now - lastViewportCacheWriteRef.current < RECENT_MAP_VIEWPORT_WRITE_MS) return;
     lastViewportCacheWriteRef.current = now;
@@ -1245,8 +1263,9 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   }, [mapLayer, navMode, props.premiumMapStyle]);
 
   const restoreRecentViewportIfNeeded = useCallback(async () => {
-    if (!visualWorkActiveRef.current || recentViewportRestoredRef.current || navMode || waypoints.length > 0 || searchMarker) return;
-    recentViewportRestoredRef.current = true;
+    if (!visualWorkActiveRef.current || recentViewportRestoredRef.current) return;
+    const experienceOwnsCamera = cameraOwnershipRef.current.blocksRecentViewport;
+    if (!experienceOwnsCamera && (navMode || waypoints.length > 0 || searchMarker)) return;
     const cached = parseCachedMapViewport(await accountStorage.get(RECENT_MAP_VIEWPORT_KEY).catch(() => null));
     if (!cached || Date.now() - cached.at > RECENT_MAP_VIEWPORT_TTL_MS) return;
     freeCameraDefaultRef.current = {
@@ -1255,6 +1274,14 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       pitch: cached.pitch,
       animationDuration: 0,
     };
+    if (cameraOwnershipRef.current.blocksRecentViewport) {
+      emitDebugEvent('camera:prime-recent-viewport', {
+        owner: cameraOwnershipRef.current.owner,
+        age_ms: Date.now() - cached.at,
+      });
+      return;
+    }
+    recentViewportRestoredRef.current = true;
     emitDebugEvent('camera:restore-recent-viewport', {
       age_ms: Date.now() - cached.at,
       center: cached.centerCoordinate,
@@ -1272,12 +1299,66 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     } as any);
   }, [emitDebugEvent, navMode, searchMarker, waypoints.length]);
 
+  const applyRetainedBrowseCamera = useCallback((source: string) => {
+    if (cameraOwnershipRef.current.owner !== 'browse') return false;
+    const target = freeCameraDefaultRef.current;
+    const center = target.centerCoordinate;
+    if (
+      !Array.isArray(center)
+      || center.length !== 2
+      || !center.every(value => Number.isFinite(Number(value)))
+    ) return false;
+    lastCamRef.current = Date.now();
+    programmaticCameraUntilRef.current = Date.now() + 1100;
+    recentViewportRestoredRef.current = true;
+    emitDebugEvent('camera:restore-browse-owner', {
+      source,
+      center,
+      zoom: target.zoomLevel,
+      pitch: target.pitch,
+    });
+    camRef.current?.setCamera({
+      centerCoordinate: center,
+      zoomLevel: target.zoomLevel,
+      pitch: target.pitch,
+      animationDuration: 0,
+      animationMode: 'none',
+    } as any);
+    return true;
+  }, [emitDebugEvent]);
+
+  useEffect(() => {
+    const previous = previousCameraOwnershipRef.current;
+    const current = cameraOwnership;
+    const previousKey = mapCameraOwnershipKey(previous);
+    const currentKey = mapCameraOwnershipKey(current);
+    if (previousKey === currentKey) return;
+    previousCameraOwnershipRef.current = current;
+    emitDebugEvent('camera:ownership-changed', {
+      previous: previous.owner,
+      current: current.owner,
+      previous_key: previousKey,
+      current_key: currentKey,
+    });
+    if (current.owner !== 'browse' || !previous.restoreBrowseCameraOnRelease) {
+      pendingBrowseCameraRestoreRef.current = false;
+      return;
+    }
+    pendingBrowseCameraRestoreRef.current = true;
+    applyRetainedBrowseCamera('ownership-release');
+  }, [
+    applyRetainedBrowseCamera,
+    cameraOwnership,
+    emitDebugEvent,
+  ]);
+
   const markUserCameraGesture = useCallback((source: string, details: Record<string, unknown> = {}, notifyParent = true) => {
     const now = Date.now();
     userCameraGestureUntilRef.current = now + NAV_GESTURE_HOLD_MS;
     // A real touch should win over any in-flight locate/flyTo animation.
     programmaticCameraUntilRef.current = 0;
     pendingFreeCameraRef.current = null;
+    pendingBrowseCameraRestoreRef.current = false;
     locateSettleTimersRef.current.forEach(timer => clearTimeout(timer));
     locateSettleTimersRef.current = [];
     const alreadyBreakingAway = navMode && navGestureBreakawayRef.current;
@@ -3198,6 +3279,13 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         onDidFailLoadingMap={handleMapLoadFail}
         onDidFinishLoadingStyle={() => {
           if (visualWorkActiveRef.current) emitDebugEvent('map:style-loaded', { tileSession, effectiveMapLayer, contourMode, trailMode });
+          if (
+            pendingBrowseCameraRestoreRef.current
+            && cameraOwnershipRef.current.owner === 'browse'
+          ) {
+            pendingBrowseCameraRestoreRef.current = false;
+            applyRetainedBrowseCamera('style-loaded-after-release');
+          }
           onMapStyleLoaded?.();
         }}
         compassEnabled={false}

@@ -67,13 +67,18 @@ async function main() {
   assert.match(map, /mapLayer=\{originalMapPresentation\.mapLayer\}/);
   assert.match(map, /premiumMapStyle=\{originalMapPresentation\.premiumMapStyle\}/);
   assert.match(map, /rendererMode=\{originalMapPresentation\.rendererMode \?\? 'maplibre'\}/);
-  assert.match(map, /onMapStyleLoaded=\{\(\) => \{/);
-  assert.match(map, /originalsAutoFitRef\.current = ''/);
-  assert.match(map, /setOriginalsStyleGeneration\(generation => generation \+ 1\)/);
-  assert.match(map, /originalsStyleGeneration,[\s\S]*originalsMapExperience\.packId/);
+  assert.match(map, /cameraOwnership=\{mapCameraOwnership\}/);
+  assert.match(map, /consumeMapCameraClaim\(/);
+  assert.match(map, /setMapStyleGeneration\(generation => generation \+ 1\)/);
+  assert.match(map, /mapCameraOwnership\.owner === 'originals'/);
+  assert.doesNotMatch(map, /setTimeout\(fitOriginalsRoute,\s*180\)/);
 
   const nativeMap = readFileSync('components/NativeMap/index.tsx', 'utf8');
   assert.match(nativeMap, /onMapStyleLoaded\?: \(\) => void/);
+  assert.match(nativeMap, /cameraOwnership\?: MapCameraOwnership/);
+  assert.match(nativeMap, /cameraOwnershipRef\.current\.blocksRecentViewport/);
+  assert.match(nativeMap, /camera:restore-browse-owner/);
+  assert.match(nativeMap, /pendingBrowseCameraRestoreRef\.current/);
   assert.match(nativeMap, /onDidFinishLoadingStyle=\{\(\) => \{[\s\S]*onMapStyleLoaded\?\.\(\)/);
 
   console.log('Originals/main-map renderer binding tests passed.');

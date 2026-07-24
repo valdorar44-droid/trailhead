@@ -387,3 +387,25 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Exact next action: add one deterministic actual-map-pin path for campground → campsite details and one safe community-report pin → Suggest Update → Cancel path; then continue the characterized trail/trailhead, report, and Explore-hub sheet families without revisiting the completed NPS child chains.
 - Do not repeat: the three exact-candidate flows above, broad Layers testing, the 33-run crawl, NPS reference research, Figma packets, the paired `8083f6f` OTA, or the interrupted long memory run.
 - Task-owned background processes: none. The paired publisher, Metro, EAS, Maestro, and test processes completed. ADB remains intentionally active for the connected Samsung and emulator.
+
+## Checkpoint M3.3 — Camp peek/full and Explore scroll stability
+
+- Timestamp: `2026-07-23T21:45:58-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; implementation HEAD: `3e8dddca9ffa5e40f8c2864ef5a6c32417012864`. No preview OTA has been published from this source yet.
+- Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. `.cursor/` and `dashboard/explore_serving_index_v2.json` remained excluded, unstaged, and untouched.
+- The approved Figma Camp Peek and Camp Full frames (`407:158` and `407:159`) now drive the campground interaction. A map selection opens a compact identity-safe sheet with existing listing essentials, `View sites`, Save, and Close while full detail/photos preload in the background.
+- Expanding through the card, primary action, drag, or handle reveals one coherent full-sheet state. If core detail is still loading, the expanded layout remains a full skeleton instead of rendering partially enriched modules. After six seconds it falls back to verified listing data with a concise unavailable state and Retry.
+- Enrichment commits only for the current sheet identity and request generation. A new coordinate/name guard rejects a distant response such as the reproduced Yosemite selection resolving to a Michigan campsite.
+- Campground → campsite now stays in the shared main-map sheet stack. Back restores the parent campground, its loaded modules, and its previous scroll position instead of exiting to Explore.
+- Explore child and main lists no longer use render-controlled `contentOffset`. Scroll positions are recorded in refs and restored imperatively only on real place/module/child navigation transitions, preventing async enrichment from snapping a user back upward mid-scroll.
+- Existing campground modules remain intact: exact photos, booking, site types/counts, rig fit, coverage, weather, activities, comments, ratings, source reviews, field reports, edits, reporting, coordinates, official links, and downloaded data. No NPS, Viator, Offline, report, or community capability was removed.
+- Focused verification passed:
+  - TypeScript and `git diff --check`.
+  - Camp identity `5/5` and camp peek/loading/nested-Back contract `3/3`.
+  - Place-sheet adapters `8/8` and coordinator `2/2`.
+  - NPS preservation `14/14`, Explore navigation `3/3`, and Explore scroll contract `2/2`.
+  - Search V2 `68/68` and Map copy audit.
+- Open P0: none. Device-proof P1 acceptance remains pending for the new source: camp pin → peek → early full skeleton → full detail → campsite → Back, plus a slow-enrichment child-hub scroll with no snap.
+- Exact next action: publish one guarded paired preview OTA from an immutable checkpointed SHA, verify Android/iOS identity, then run only the narrow campground and Explore-scroll device delta. Continue trail/trailhead, report, and Explore-hub sheet families only after that packet passes.
+- Do not repeat: broad Layers testing, the completed NPS child chains, the 33-run crawl, Figma/Mobbin research, Search V2 baseline crawl, or the long Memory Gate V3. Layers remain working and memory remains frozen-candidate evidence debt.
+- Task-owned background processes: none. No Gradle, Metro, Expo/EAS, Maestro, memory gate, or Trailhead test process remains; ADB is intentionally available. The visible Node processes belong to Codex/MCP infrastructure, not Trailhead work.

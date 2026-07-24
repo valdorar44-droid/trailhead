@@ -732,3 +732,19 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Do not repeat: the M4 Plan/Downloads delta, the Moab retry on `c989d8f`, complete pre-preview suite, broad crawls, Figma/Mobbin research, Layers, NPS, Search V2 baseline, or Memory Gate V3.
 - Production remains blocked. This packet has an unresolved P1 and therefore does not satisfy the user's recorded production authorization.
 - Task-owned background processes: none. Publisher, Expo export, Sentry upload, EAS, Gradle, Metro, Maestro, and test processes have exited; ADB remains intentionally available.
+
+## Checkpoint M4.C baseline — Originals native offline-region diagnosis
+
+- Timestamp: `2026-07-24T06:23:46-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; baseline HEAD: `3c634f066faebfbe458fabc83a9a2dec6d0754c0`.
+- Current paired preview source remains `c989d8f89adb45c321411da3c496b1977dbbcadf`.
+  - Android build `59`, runtime `native-1.0.10-android.1`, update `019f9368-f847-73d3-88f3-5ca97d14a945`.
+  - iOS build `54`, runtime `native-1.0.10-ios.1`, update `019f9368-f847-783b-a3a5-aaa05fc8d3b9`.
+- Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. `.cursor/` and `dashboard/explore_serving_index_v2.json` remain excluded and unstaged.
+- Narrow scope: diagnose the confirmed Android RNMapbox zero-progress region at the Moab bundle's `54%` boundary; preserve the verified watchdog, all Offline V1/V2 stores, the one-main-map contract, user map preferences, and End Tour behavior.
+- Evidence-backed working hypothesis: the RNMapbox v11 offline path is receiving Trailhead's custom HTTPS vector style through its style-pack/tile-region wrapper and produces no downloadable resources. The correction will bind the Original RNMapbox region to one approved Mapbox style URI and temporarily present that same style through the existing main `NativeMap` while an Original is active. MapLibre/custom Trailhead coverage behavior remains unchanged.
+- Planned proof: focused style-selection, renderer-binding, main-map presentation, Originals, Offline V2, copy/privacy, TypeScript, and whitespace tests; then one paired preview OTA and one Android Moab retry. A remaining failure is checkpointed as blocked rather than looped.
+- Open P0: none. Open P1: Android Moab required map region cannot complete.
+- Exact next action: commit this baseline checkpoint separately, implement the shared Original map-style contract, and add deterministic tests before device delivery.
+- Do not repeat: Plan/Downloads deltas, prior Moab retries, broad Map/Explore/NPS/Layer crawls, full pre-preview, Memory Gate V3, or Figma/Mobbin research.
+- Task-owned background processes: none. ADB remains intentionally available.

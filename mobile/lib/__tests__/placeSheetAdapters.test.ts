@@ -12,6 +12,7 @@ import {
   COMMUNITY_REPORT_SHEET_PARITY_MODULES,
   EXPLORE_HUB_SHEET_PARITY_MODULES,
   isCanonicalSearchPlaceSheetSource,
+  isPlaceSheetSummaryRedundant,
   stablePlaceSheetEntityId,
   TRAIL_SHEET_PARITY_MODULES,
 } from '../placeSheetAdapters';
@@ -43,6 +44,18 @@ test('official display types keep their authored sentence case', () => {
   assert.equal(sight.subtitle, 'Place to see');
   assert.equal(visitorCenter.subtitle, 'Visitor Center');
   assert.equal(cleanPlaceSheetDisplayText('place_to_see'), 'Place To See');
+});
+
+test('a summary is redundant only when full details extend the same text', () => {
+  assert.equal(isPlaceSheetSummaryRedundant(
+    'The information station has a wilderness permit desk.',
+    'The information station has a wilderness permit desk. It is wheelchair accessible.',
+  ), true);
+  assert.equal(isPlaceSheetSummaryRedundant(
+    'Winter activities include skiing and snowshoeing.',
+    'Open December through March.',
+  ), false);
+  assert.equal(isPlaceSheetSummaryRedundant('Same useful text.', 'Same useful text.'), false);
 });
 
 test('trail adapter preserves trailhead identity instead of switching shells after enrichment', () => {

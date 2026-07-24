@@ -35,7 +35,11 @@ import { TrailheadButton, TrailheadButtonDock, TrailheadLoadingRow, TrailheadRai
 import TrailheadPhotoGallery, { type TrailheadGalleryPhoto } from '@/components/TrailheadPhotoGallery';
 import PlaceSheetShell, { PlaceSheetHeroChrome, PlaceSheetShellHeader } from '@/components/map/PlaceSheetShell';
 import FirstPartyRatingSection from '@/components/map/FirstPartyRatingSection';
-import { adaptGenericPlaceSheet, cleanPlaceSheetDisplayText } from '@/lib/placeSheetAdapters';
+import {
+  adaptGenericPlaceSheet,
+  cleanPlaceSheetDisplayText,
+  isPlaceSheetSummaryRedundant,
+} from '@/lib/placeSheetAdapters';
 import { communityRatingTarget } from '@/lib/communityRatingEligibility';
 import { boundedExploreImageUrl, EXPLORE_IMAGE_BOUNDS, exploreImageSource } from '@/lib/mediaPolicy';
 
@@ -636,6 +640,7 @@ export default function PremiumPlaceSheet({
   const providerDetails = cleanDetailText(data.description || data.details);
   const summaryText = cleanDetailText(data.summary);
   const showProviderDetails = providerDetails && providerDetails !== summaryText;
+  const showSummaryText = summaryText && (stage !== 'full' || !isPlaceSheetSummaryRedundant(summaryText, providerDetails));
   const eventFacts = [
     data.start_date ? ['Date', data.end_date && data.end_date !== data.start_date ? `${data.start_date} to ${data.end_date}` : data.start_date] : null,
     data.price ? ['Price', String(data.price)] : null,
@@ -811,7 +816,6 @@ export default function PremiumPlaceSheet({
             ) : null}
 
             <View style={s.body}>
-              {!!subtitle && <Text style={s.meta}>{subtitle}</Text>}
               {!!routeContextLabel && (
                 <View style={s.routeContextPill}>
                   <Ionicons name="git-branch-outline" size={13} color={C.orange} />
@@ -824,7 +828,7 @@ export default function PremiumPlaceSheet({
                   <Text style={s.infoText}>{data.address}</Text>
                 </View>
               )}
-              {!!summaryText && (
+              {!!showSummaryText && (
                 <ExpandableText
                   text={summaryText}
                   style={s.summaryText}

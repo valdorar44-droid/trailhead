@@ -80,7 +80,7 @@ export function PlaceSheetShellHeader({
           </TouchableOpacity>
         ) : null}
         <View style={s.titleCopy}>
-          <Text style={s.title} numberOfLines={1}>{model.title}</Text>
+          <Text style={s.title} numberOfLines={2}>{model.title}</Text>
           <Text style={s.subtitle} numberOfLines={1}>{model.subtitle}</Text>
         </View>
         {loading ? <ActivityIndicator testID={`${model.testID}-loading`} color={C.orange} size="small" /> : null}

@@ -194,6 +194,21 @@ export function cleanPlaceSheetDisplayText(value: unknown): string {
   return /[_-]/.test(raw) ? cleanText(raw) : clean;
 }
 
+export function isPlaceSheetSummaryRedundant(summary: unknown, details: unknown): boolean {
+  const normalizedSummary = normalizeComparableText(summary);
+  const normalizedDetails = normalizeComparableText(details);
+  return normalizedSummary.length > 0
+    && normalizedDetails.length > normalizedSummary.length
+    && normalizedDetails.startsWith(normalizedSummary);
+}
+
+function normalizeComparableText(value: unknown): string {
+  return String(value || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLocaleLowerCase();
+}
+
 function slug(value: unknown): string {
   return String(value || 'entity')
     .trim()

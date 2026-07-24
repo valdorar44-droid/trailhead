@@ -18,6 +18,15 @@ type Props = {
   onClose: () => void;
 };
 
+export function cleanCampPeekMeta(value: string): string {
+  return value
+    .replace(/\u00c3\u201a\u00c2\u00b7/g, ' · ')
+    .replace(/\u00c3\u201a\u00b7/g, ' · ')
+    .replace(/\u00c2\u00b7/g, ' · ')
+    .replace(/\s+·\s+/g, ' · ')
+    .trim();
+}
+
 export default function CampPlaceSheetPeek({
   model,
   meta,
@@ -43,7 +52,7 @@ export default function CampPlaceSheetPeek({
         >
           <Text style={s.kicker}>CAMPGROUND</Text>
           <Text style={s.title} numberOfLines={2}>{model.title}</Text>
-          <Text style={s.meta} numberOfLines={1}>{meta}</Text>
+          <Text style={s.meta} numberOfLines={1}>{cleanCampPeekMeta(meta)}</Text>
         </TouchableOpacity>
         <TouchableOpacity
           testID={`${model.testID}-peek-close`}

@@ -1250,12 +1250,11 @@ function campSummaryText(camp?: CampsitePin | null, detail?: CampsiteDetail | nu
     .map(value => userFacingCampNote(cleanCampDescriptionText(value)))
     .filter(Boolean)
     .filter(text => !addressKey || text.toLowerCase() !== addressKey)
+    .filter(text => !/check current access,\s*rules,\s*(?:fees,\s*)?road conditions(?:,\s*and stay limits)?/i.test(text))
     .filter(text => !/^[-\d.,\s]+$/.test(text));
   const useful = candidates.find(text => text.length >= 26) ?? candidates[0] ?? '';
   if (useful) return useful;
-  const type = cleanDisplayLabel(camp?.land_type || camp?.tags?.[0] || 'campground') || 'Campground';
-  const where = (detail?.address || camp?.address) ? ` near ${detail?.address || camp?.address}` : '';
-  return `${type}${where}. Check current access, rules, fees, road conditions, and availability before you go.`;
+  return '';
 }
 
 function uniqueCleanLabels(values: Array<string | undefined | null>): string[] {
@@ -7211,10 +7210,15 @@ function MapScreen() {
     const opensAtPeek = activePlaceSheetModel.identity.kind === 'camp'
       || activePlaceSheetModel.identity.kind === 'trail'
       || activePlaceSheetModel.identity.kind === 'trailhead';
+    const opensAtHalf = activePlaceSheetModel.identity.kind === 'community_report';
     dispatchPlaceSheet({
       type: 'open',
       identity: activePlaceSheetModel.identity,
-      presentation: opensAtPeek && !restoreCampFull && !restoreTrailFull ? 'peek' : 'full',
+      presentation: opensAtPeek && !restoreCampFull && !restoreTrailFull
+        ? 'peek'
+        : opensAtHalf
+          ? 'half'
+          : 'full',
       returnContext: { surface: 'map' },
     });
   }, [activePlaceSheetIdentityKey]);
@@ -21610,6 +21614,30 @@ function MapScreen() {
     return () => subscription.remove();
   }, [selectedTrail?.id, placeSheetCoordinator.presentation, relatedPlaceReturnStack.length]);
 
+  useEffect(() => {
+    if (!selectedCommunityPin) return;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (communityUpdatePin?.id === selectedCommunityPin.id) {
+        setCommunityUpdatePin(null);
+        setCommunityUpdateNote('');
+        return true;
+      }
+      if (placeSheetCoordinator.presentation === 'full') {
+        dispatchPlaceSheet({ type: 'set_presentation', presentation: 'half' });
+        return true;
+      }
+      setSelectedCommunityPin(null);
+      setCommunityUpdatePin(null);
+      setCommunityUpdateNote('');
+      return true;
+    });
+    return () => subscription.remove();
+  }, [
+    communityUpdatePin?.id,
+    placeSheetCoordinator.presentation,
+    selectedCommunityPin?.id,
+  ]);
+
   function openNearbyPlace(place: OsmPoi, day?: number | null) {
     setSelectedCamp(null);
     setShowCampDetail(false);
@@ -27719,12 +27747,15 @@ function MapScreen() {
                 <TrailheadCardSkeleton lines={2} style={s.detailSkeletonCard} />
               </View>
             ) : null}
-            {!loadingDetail && !campDetail && String(selectedCamp.description || '').trim() ? (
-              <View style={s.detailSection} testID={`${selectedCampSheetModel!.testID}-summary`}>
-                <Text style={s.detailSectionTitle}>Summary</Text>
-                <ExpandableDetailText text={String(selectedCamp.description)} style={s.detailDesc} linkColor={C.orange} />
-              </View>
-            ) : null}
+            {!loadingDetail && !campDetail ? (() => {
+              const summaryText = campSummaryText(selectedCamp, null);
+              return summaryText ? (
+                <View style={s.detailSection} testID={`${selectedCampSheetModel!.testID}-summary`}>
+                  <Text style={s.detailSectionTitle}>Summary</Text>
+                  <ExpandableDetailText text={summaryText} style={s.detailDesc} linkColor={C.orange} />
+                </View>
+              ) : null;
+            })() : null}
             {campDetail ? (() => {
               const summaryText = campSummaryText(selectedCamp, campDetail);
               const featureItems = derivedCampFeatures(selectedCamp, campDetail);
@@ -30217,65 +30248,71 @@ function MapScreen() {
                       <Ionicons name={meta.icon as any} size={18} color="#fff" />
                     </View>
                     <View style={s.communityHeroText}>
-                      <Text style={s.communityHeroKicker}>{privateLead ? 'DISPERSED' : meta.label.toUpperCase()}</Text>
+                      <Text style={s.communityHeroKicker}>{privateLead ? 'Dispersed lead' : 'Community report'}</Text>
                       <Text style={s.wpSheetName} numberOfLines={2}>{selectedCommunityPin.name || meta.label}</Text>
                     </View>
-                    <TouchableOpacity style={s.communityHeroClose} onPress={closeCommunityPin} activeOpacity={0.8}>
+                    <TouchableOpacity
+                      testID={`${selectedReportSheetModel!.testID}-close`}
+                      accessibilityRole="button"
+                      accessibilityLabel="Close community report"
+                      style={s.communityHeroClose}
+                      onPress={closeCommunityPin}
+                      activeOpacity={0.8}
+                    >
                       <Ionicons name="close" size={16} color={OVR.text2} />
                     </TouchableOpacity>
                   </View>
                   <View style={s.pinTrustRow}>
                     <View style={s.pinTrustChip}>
                       <Ionicons name={privateLead ? 'shield-checkmark-outline' : 'people-outline'} size={12} color={OVR.text2} />
-                      <Text style={s.pinTrustText}>{privateLead ? 'NEEDS CHECK' : 'COMMUNITY PLACE'}</Text>
+                      <Text style={s.pinTrustText}>{privateLead ? 'Needs field check' : 'Community report'}</Text>
                     </View>
                     {selectedCommunityPin.submitted_at ? (
                       <Text style={s.pinAgeText}>{ageLabel(selectedCommunityPin.submitted_at)}</Text>
                     ) : null}
                   </View>
-                  <Text style={s.wpSheetMeta}>
-                    {privateLead
-                      ? 'Check access, rules, and current condition.'
-                      : `${selectedCommunityPin.upvotes ?? 0} up · ${selectedCommunityPin.downvotes ?? 0} down · verify before relying on access or legality`}
-                  </Text>
-                  <View style={s.communitySection}>
-                    <Text style={s.communitySectionLabel}>NOTES</Text>
-                    {!!selectedCommunityPin.description && (
+                  {!privateLead && (
+                    <Text style={s.wpSheetMeta}>
+                      {`${selectedCommunityPin.upvotes ?? 0} helpful · ${selectedCommunityPin.downvotes ?? 0} marked inaccurate`}
+                    </Text>
+                  )}
+                  {!!selectedCommunityPin.description && (
+                    <View style={s.communitySection}>
+                      <Text style={s.communitySectionLabel}>NOTES</Text>
                       <Text style={s.pinDescription}>{selectedCommunityPin.description}</Text>
-                    )}
-                    {!selectedCommunityPin.description && (
-                      <Text style={s.pinDescription}>{privateLead ? 'Add what you can confirm.' : 'Add access, hours, condition, or verification details.'}</Text>
-                    )}
-                  </View>
+                    </View>
+                  )}
                   <View style={s.communitySection}>
                     <View style={s.communitySectionHeader}>
                       <Text style={s.communitySectionLabel}>NEARBY</Text>
-                      {liveContext?.loading && (
-                        <View style={s.contextSearchingPill}>
-                          <Ionicons name="search" size={11} color={C.orange} />
-                          <Text style={s.contextSearchingText}>SEARCHING</Text>
+                    </View>
+                    <View style={s.communityNearbyBody}>
+                      {liveContext?.loading ? (
+                        <View testID={`${selectedReportSheetModel!.testID}-nearby-loading`} style={s.communityNearbyLoading}>
+                          <ActivityIndicator size="small" color={C.orange} />
+                          <Text style={s.communityNearbyLoadingText}>Loading…</Text>
                         </View>
+                      ) : (
+                        <>
+                          {contextTiles.length > 0 && (
+                            <View testID={`${selectedReportSheetModel!.testID}-nearby-ready`} style={s.communityContextGrid}>
+                              {contextTiles.map(tile => (
+                                <View key={tile.key} style={s.communityContextTile}>
+                                  <Ionicons name={tile.icon as any} size={14} color={tile.color} />
+                                  <Text style={s.communityContextValue}>{tile.value}</Text>
+                                  <Text style={s.communityContextLabel}>{tile.label}</Text>
+                                </View>
+                              ))}
+                            </View>
+                          )}
+                          {!!nearestCampText && (
+                            <Text style={s.communityContextNote}>
+                              {nearestCampText}
+                            </Text>
+                          )}
+                        </>
                       )}
                     </View>
-                    {liveContext?.loading && (
-                      <Text style={s.communityContextNote}>Checking nearby area...</Text>
-                    )}
-                    {contextTiles.length > 0 && (
-                      <View style={s.communityContextGrid}>
-                        {contextTiles.map(tile => (
-                          <View key={tile.key} style={s.communityContextTile}>
-                            <Ionicons name={tile.icon as any} size={14} color={tile.color} />
-                            <Text style={s.communityContextValue}>{tile.value}</Text>
-                            <Text style={s.communityContextLabel}>{tile.label}</Text>
-                          </View>
-                        ))}
-                      </View>
-                    )}
-                    {!!nearestCampText && (
-                      <Text style={s.communityContextNote}>
-                        {nearestCampText}
-                      </Text>
-                    )}
                   </View>
                   {detailRows.length > 0 && (
                     <View style={s.pinDetailGrid}>
@@ -30295,121 +30332,130 @@ function MapScreen() {
                     <View style={s.communitySection}>
                       <Text style={s.communitySectionLabel}>SUGGEST UPDATE</Text>
                       <TextInput
+                        testID={`${selectedReportSheetModel!.testID}-suggest-update-input`}
                         value={communityUpdateNote}
                         onChangeText={setCommunityUpdateNote}
-                        placeholder="What changed? Add access, hours, condition, duplicate note, better name, or verification details..."
+                        placeholder="What changed?"
                         placeholderTextColor={OVR.text3}
                         style={[s.pinInput, s.pinTextArea, { minHeight: 118 }]}
                         maxLength={700}
                         multiline
                       />
                       <Text style={s.communityContextNote}>
-                        Suggestions do not overwrite the original community place until reviewed.
+                        Trailhead reviews suggestions before publishing.
                       </Text>
                       <View style={s.wpSheetActions}>
-                        <TouchableOpacity style={s.wpSheetNavBtn} onPress={submitCommunityUpdate} disabled={communityUpdateSubmitting}>
+                        <TouchableOpacity
+                          testID={`${selectedReportSheetModel!.testID}-suggest-update-submit`}
+                          style={s.wpSheetNavBtn}
+                          onPress={submitCommunityUpdate}
+                          disabled={communityUpdateSubmitting}
+                        >
                           {communityUpdateSubmitting ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="checkmark" size={14} color="#fff" />}
                           <Text style={s.wpSheetNavText}>Submit update</Text>
                         </TouchableOpacity>
-                        <TouchableOpacity style={s.wpSheetDayBtn} onPress={() => { setCommunityUpdatePin(null); setCommunityUpdateNote(''); }}>
+                        <TouchableOpacity
+                          testID={`${selectedReportSheetModel!.testID}-suggest-update-cancel`}
+                          style={s.wpSheetDayBtn}
+                          onPress={() => { setCommunityUpdatePin(null); setCommunityUpdateNote(''); }}
+                        >
                           <Text style={s.wpSheetDayText}>Cancel</Text>
                         </TouchableOpacity>
                       </View>
                     </View>
                   )}
                   {!updateOpen && privateLead && <View style={s.communityActionsGrid}>
-                    <TouchableOpacity style={s.communityPrimaryAction} onPress={() => { setSelectedCommunityPin(null); navigateToCamp(selectedCommunityPin); }}>
+                    <TouchableOpacity testID={`${selectedReportSheetModel!.testID}-navigate`} style={s.communityPrimaryAction} onPress={() => { setSelectedCommunityPin(null); navigateToCamp(selectedCommunityPin); }}>
                       <Ionicons name="navigate" size={14} color="#fff" />
                       <Text style={s.communityPrimaryActionText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>Navigate</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={s.communityActionBtn} onPress={() => openDispersedLeadEdit(selectedCommunityPin)}>
+                    <TouchableOpacity testID={`${selectedReportSheetModel!.testID}-edit`} style={s.communityActionBtn} onPress={() => openDispersedLeadEdit(selectedCommunityPin)}>
                       <Ionicons name="create-outline" size={14} color={OVR.text2} />
                       <Text style={s.communityActionText} numberOfLines={1}>Edit</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={s.communityActionBtn} onPress={() => addDispersedLeadPhoto(selectedCommunityPin)}>
+                    <TouchableOpacity testID={`${selectedReportSheetModel!.testID}-photo`} style={s.communityActionBtn} onPress={() => addDispersedLeadPhoto(selectedCommunityPin)}>
                       <Ionicons name="camera-outline" size={14} color={OVR.text2} />
                       <Text style={s.communityActionText} numberOfLines={1}>Photo</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={s.communityActionBtn} onPress={() => reviewDispersedLeadPin(selectedCommunityPin, 'community_verified')}>
+                    <TouchableOpacity testID={`${selectedReportSheetModel!.testID}-checked`} style={s.communityActionBtn} onPress={() => reviewDispersedLeadPin(selectedCommunityPin, 'community_verified')}>
                       <Ionicons name="checkmark-circle-outline" size={14} color={OVR.text2} />
                       <Text style={s.communityActionText} numberOfLines={1}>Checked</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={[s.communityActionBtn, { borderColor: '#ef4444' + '44' }]} onPress={() => reviewDispersedLeadPin(selectedCommunityPin, 'rejected', 'Not found during field check')}>
+                    <TouchableOpacity testID={`${selectedReportSheetModel!.testID}-not-found`} style={[s.communityActionBtn, { borderColor: '#ef4444' + '44' }]} onPress={() => reviewDispersedLeadPin(selectedCommunityPin, 'rejected', 'Not found during field check')}>
                       <Ionicons name="close-circle-outline" size={14} color="#ef4444" />
                       <Text style={[s.communityActionText, { color: '#ef4444' }]} numberOfLines={1}>Not found</Text>
                     </TouchableOpacity>
                     {dispersedLeadAccess === 'admin' && (
-                      <TouchableOpacity style={[s.communityActionBtn, { borderColor: C.orange + '44' }]} onPress={() => publishDispersedLeadPin(selectedCommunityPin)}>
+                      <TouchableOpacity testID={`${selectedReportSheetModel!.testID}-publish`} style={[s.communityActionBtn, { borderColor: C.orange + '44' }]} onPress={() => publishDispersedLeadPin(selectedCommunityPin)}>
                         <Ionicons name="shield-checkmark-outline" size={14} color={C.orange} />
                         <Text style={[s.communityActionText, { color: C.orange }]} numberOfLines={1}>Publish</Text>
                       </TouchableOpacity>
                     )}
                   </View>}
                   {!updateOpen && !privateLead && <View style={s.communityActionsGrid}>
-                    <TouchableOpacity style={s.communityPrimaryAction} onPress={() => { setSelectedCommunityPin(null); navigateToCamp(selectedCommunityPin); }}>
+                    <TouchableOpacity testID={`${selectedReportSheetModel!.testID}-navigate`} style={s.communityPrimaryAction} onPress={() => { setSelectedCommunityPin(null); navigateToCamp(selectedCommunityPin); }}>
                       <Ionicons name="navigate" size={14} color="#fff" />
                       <Text style={s.communityPrimaryActionText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>Navigate</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={s.communityActionBtn} onPress={saveCommunityPlace}>
+                    <TouchableOpacity testID={`${selectedReportSheetModel!.testID}-save`} style={s.communityActionBtn} onPress={saveCommunityPlace}>
                       <Ionicons name="bookmark-outline" size={14} color={OVR.text2} />
-                      <Text style={s.communityActionText} numberOfLines={1}>SAVE</Text>
+                      <Text style={s.communityActionText} numberOfLines={1}>Save</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={s.communityActionBtn} onPress={() => voteCommunityPin(selectedCommunityPin, 'upvote')}>
+                    <TouchableOpacity testID={`${selectedReportSheetModel!.testID}-helpful`} style={s.communityActionBtn} onPress={() => voteCommunityPin(selectedCommunityPin, 'upvote')}>
                       <Ionicons name="thumbs-up-outline" size={14} color={OVR.text2} />
-                      <Text style={s.communityActionText} numberOfLines={1}>GOOD</Text>
+                      <Text style={s.communityActionText} numberOfLines={1}>Helpful</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={[s.communityActionBtn, { borderColor: '#ef4444' + '44' }]} onPress={() => voteCommunityPin(selectedCommunityPin, 'downvote')}>
+                    <TouchableOpacity testID={`${selectedReportSheetModel!.testID}-not-accurate`} style={[s.communityActionBtn, { borderColor: '#ef4444' + '44' }]} onPress={() => voteCommunityPin(selectedCommunityPin, 'downvote')}>
                       <Ionicons name="thumbs-down-outline" size={14} color="#ef4444" />
-                      <Text style={[s.communityActionText, { color: '#ef4444' }]} numberOfLines={1}>BAD</Text>
+                      <Text style={[s.communityActionText, { color: '#ef4444' }]} numberOfLines={1}>Not accurate</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={s.communityActionBtn} onPress={suggestCommunityUpdate}>
+                    <TouchableOpacity testID={`${selectedReportSheetModel!.testID}-suggest-update`} style={s.communityActionBtn} onPress={suggestCommunityUpdate}>
                       <Ionicons name="create-outline" size={14} color={OVR.text2} />
-                      <Text style={s.communityActionText} numberOfLines={1}>UPDATE</Text>
+                      <Text style={s.communityActionText} numberOfLines={1}>Suggest update</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={[s.communityActionBtn, { borderColor: C.orange + '44' }]} onPress={() => { setSelectedCommunityPin(null); setQuickReport(true); }}>
+                    <TouchableOpacity testID={`${selectedReportSheetModel!.testID}-report`} style={[s.communityActionBtn, { borderColor: C.orange + '44' }]} onPress={() => { setSelectedCommunityPin(null); setQuickReport(true); }}>
                       <Ionicons name="warning-outline" size={14} color={C.orange} />
-                      <Text style={[s.communityActionText, { color: C.orange }]} numberOfLines={1}>REPORT</Text>
+                      <Text style={[s.communityActionText, { color: C.orange }]} numberOfLines={1}>Report</Text>
                     </TouchableOpacity>
                   </View>}
           </PlaceSheetShell>
         );
-        if (privateLead) {
-          return (
-            <TrailheadSnapSheet
-              initialStage="half"
-              maxFullRatio={0.82}
-              halfRatio={0.5}
-              style={s.privateLeadSnapSheet}
-              contentStyle={s.privateLeadSnapContent}
-              scrollContentStyle={s.communityCardScroll}
-              peekHeader={(
-                <View style={s.privateLeadPeekHeader}>
-                  <View style={s.privateLeadPeekCopy}>
-                    <Text style={s.privateLeadPeekTitle} numberOfLines={1}>{selectedCommunityPin.name || 'Dispersed tent site'}</Text>
-                    <Text style={s.privateLeadPeekMeta} numberOfLines={1}>Needs field check</Text>
-                  </View>
-                  <TouchableOpacity style={s.privateLeadPeekClose} onPress={closeCommunityPin} activeOpacity={0.8}>
-                    <Ionicons name="close" size={16} color={OVR.text2} />
-                  </TouchableOpacity>
-                </View>
-              )}
-            >
-              {communityCard}
-            </TrailheadSnapSheet>
-          );
-        }
         return (
-          <Modal visible transparent animationType="slide" onRequestClose={closeCommunityPin}>
-            <View style={s.modalOverlay}>
-              <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={closeCommunityPin} />
-              <TrailheadSheet handle={false} style={[s.wpSheet, modalSheetPad]} contentStyle={{ padding: 0 }}>
-                <View style={s.daySheetHandle} />
-                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.communityCardScroll}>
-                  {communityCard}
-                </ScrollView>
-              </TrailheadSheet>
-            </View>
-          </Modal>
+          <TrailheadSnapSheet
+            key={`community-report-sheet:${selectedReportSheetModel!.identity.entityId}`}
+            testID={selectedReportSheetModel!.testID}
+            initialStage="half"
+            stage={placeSheetCoordinator.current?.kind === 'community_report'
+              ? placeSheetCoordinator.presentation
+              : 'half'}
+            onStageChange={presentation => dispatchPlaceSheet({ type: 'set_presentation', presentation })}
+            maxFullRatio={0.82}
+            halfRatio={0.56}
+            hidePeekHeaderWhenExpanded
+            style={s.communitySnapSheet}
+            contentStyle={s.communitySnapContent}
+            scrollContentStyle={s.communityCardScroll}
+            peekHeader={(
+              <View style={s.privateLeadPeekHeader}>
+                <View style={s.privateLeadPeekCopy}>
+                  <Text style={s.privateLeadPeekTitle} numberOfLines={1}>{selectedCommunityPin.name || meta.label}</Text>
+                  <Text style={s.privateLeadPeekMeta} numberOfLines={1}>{privateLead ? 'Needs field check' : 'Community report'}</Text>
+                </View>
+                <TouchableOpacity
+                  testID={`${selectedReportSheetModel!.testID}-peek-close`}
+                  accessibilityRole="button"
+                  accessibilityLabel="Close community report"
+                  style={s.privateLeadPeekClose}
+                  onPress={closeCommunityPin}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="close" size={16} color={OVR.text2} />
+                </TouchableOpacity>
+              </View>
+            )}
+          >
+            {communityCard}
+          </TrailheadSnapSheet>
         );
       })()}
 
@@ -34064,8 +34110,8 @@ const makeStyles = (C: ColorPalette) => {
     borderColor: OVR.border,
   },
   communityHeroKicker: { color: OVR.text3, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8, marginBottom: 4 },
-  privateLeadSnapSheet: { zIndex: 80 },
-  privateLeadSnapContent: { backgroundColor: OVR.bg },
+  communitySnapSheet: { zIndex: 80 },
+  communitySnapContent: { backgroundColor: OVR.bg },
   privateLeadPeekHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -34089,6 +34135,9 @@ const makeStyles = (C: ColorPalette) => {
   communitySection: { marginTop: 14 },
   communitySectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 8 },
   communitySectionLabel: { color: OVR.text3, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8, marginBottom: 7 },
+  communityNearbyBody: { minHeight: 76, justifyContent: 'center' },
+  communityNearbyLoading: { minHeight: 76, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  communityNearbyLoadingText: { color: OVR.text3, fontSize: 11, fontWeight: '700' },
   contextSearchingPill: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -19,6 +19,7 @@ import { TrailheadSheet } from '@/components/TrailheadUI';
 export type TrailheadSnapStage = 'peek' | 'half' | 'full';
 
 type Props = {
+  testID?: string;
   visible?: boolean;
   initialStage?: TrailheadSnapStage;
   stage?: TrailheadSnapStage;
@@ -43,6 +44,7 @@ type Props = {
 };
 
 export default function TrailheadSnapSheet({
+  testID,
   visible = true,
   initialStage = 'half',
   stage: controlledStage,
@@ -143,6 +145,7 @@ export default function TrailheadSnapSheet({
 
   return (
     <Animated.View
+      testID={testID}
       pointerEvents="box-none"
       style={[
         s.wrap,

@@ -7,6 +7,7 @@ import test from 'node:test';
 const mobileRoot = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const mapSource = readFileSync(join(mobileRoot, 'app/(tabs)/map.tsx'), 'utf8');
 const snapSheetSource = readFileSync(join(mobileRoot, 'components/map/TrailheadSnapSheet.tsx'), 'utf8');
+const campPeekSource = readFileSync(join(mobileRoot, 'components/map/CampPlaceSheetPeek.tsx'), 'utf8');
 
 test('campground selection opens an identity-stable peek before the full sheet', () => {
   assert.match(mapSource, /<CampPlaceSheetPeek/);
@@ -39,4 +40,12 @@ test('campsite Back restores the parent campground and its scroll position', () 
   assert.match(mapSource, /campSitesReturnTargetRef\.current = null/);
   assert.match(mapSource, /setCampSheetScrollRestore\(current => \(\{ key: current\.key \+ 1, y: sitesReturnY \}\)\)/);
   assert.match(mapSource, /campParentSnapshotRef\.current\s*\? restoreCampgroundParent/);
+});
+
+test('campground sheets clean metadata and omit invented summary fallbacks', () => {
+  assert.match(campPeekSource, /cleanCampPeekMeta\(meta\)/);
+  assert.match(campPeekSource, /replace\(\/\\u00c2\\u00b7\/g, ' · '\)/);
+  assert.match(mapSource, /check current access,\\s\*rules/);
+  assert.match(mapSource, /if \(useful\) return useful;\s+return '';/);
+  assert.match(mapSource, /const summaryText = campSummaryText\(selectedCamp, null\)/);
 });

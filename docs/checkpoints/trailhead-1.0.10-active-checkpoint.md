@@ -977,3 +977,20 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Exact next action: confirm the Android Auto Head Unit Server is active and run one DHU route/maneuver/reconnect session, then connect and unlock the iPhone for the shared Map/Search/sheets/Plan/Downloads/Originals delta plus Universal Links, background audio/location, Now Playing, interruptions, and durable resume. Run the complete pre-preview suite once at the final freeze, not after every device assertion.
 - Do not repeat: Memory Gate V3, canonical Search V2 performance, Moab download/acquisition, the first-story background trigger, Plan/Downloads, Route Editor/Trip Overview, Profile, Layers, NPS/Explore, or completed Figma/Mobbin research.
 - Task-owned background processes: none. Publisher, Expo export, Sentry upload, Metro, Maestro, Gradle, memory-gate, and Trailhead test processes have exited. The temporary export worktrees and pulled preview environment file were removed. ADB and the Codex-owned browser runtime remain intentionally available.
+
+## Frozen-candidate Android closeout — DHU transport isolated
+
+- Timestamp: `2026-07-24T15:29:00-05:00`.
+- Repository checkpoint base: `41a2fbb`; exact paired mobile source remains `c33ac03d23aadf34164f94f2125e5da3b97abe32`.
+- The Samsung remained on the exact Android candidate: version `1.0.10`, build `59`, runtime `native-1.0.10-android.1`, update `019f95b0-2327-7120-90f1-bde72768af6d`.
+- Exact-package Android Auto preflight still passes. The phone developer menu reported `Stop head unit server`, and the forwarded Windows port `127.0.0.1:5277` accepted TCP connections.
+- The earlier Linux DHU attempts were invalid for this USB layout because the Windows ADB forward and WSL loopback were different hosts. The installed Windows DHU corrected that transport mismatch and logged `[I]: connected.` against the active phone server.
+- The phone projection then disconnected before Trailhead's `androidx.car.app` service bound, and the Windows DHU returned to `Waiting for phone`. A clean phone-server reset and a single post-reset attempt reproduced the same host-level handshake result. There was no Trailhead crash, ANR, process death, route-state loss, or car-service exception.
+- Evidence:
+  - Windows DHU connection log: `output/frozen-candidate/android-auto-windows-dhu-20260724.out.log`, SHA-256 `ae04548587f2d83b79a54ac2d6c3c8154bfee019125aaa52ed93998cae3f0d71`.
+  - Windows DHU stderr: `output/frozen-candidate/android-auto-windows-dhu-20260724.err.log`, SHA-256 `31f3f1fac8d2f73ece24ba3ddb94caf5048a5fb4ad0beb1ef4b64338b0a297fe`.
+  - Active phone-server UI state: `output/android-auto/aa-state.xml`, SHA-256 `19e3be96699b363f97483132db605f86c15157f05203d7a5d1009a726f8a8787`.
+- Android app-code P0/P1 remains none. Android Auto compile/unit/native-drift checks remain green, and no Android Auto or native code changed between the checked build and `c33ac03`.
+- The live DHU route/maneuver session is not claimed as passed. It is checkpointed as an external projection-host block and will not be retried in a loop. If release evidence still requires it after the iOS delta, use one actual vehicle/head-unit session or a freshly reset Android Auto host rather than repeating this desktop setup.
+- Exact next action: disconnect the Android device, connect and unlock the iPhone preview, then run only the frozen-candidate iOS shared/native delta. Do not repeat Search V2 performance, Memory Gate V3, Moab acquisition/background triggering, broad Android crawls, or this DHU handshake sequence.
+- Task-owned DHU, WSL DHU, Metro, Gradle, Maestro, EAS, Expo, publisher, and test processes: none.

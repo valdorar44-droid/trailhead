@@ -22,6 +22,7 @@ import { api, PaywallError, type PlaceComment, type PlaceDetail, type PlaceReser
 import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
 import { useTheme, mono, type ColorPalette } from '@/lib/design';
 import {
+  classifyRelatedPlaceSheetKind,
   cleanExploreSourceLabel,
   relatedPlaceCanShow,
   relatedPlaceNameKey,
@@ -486,9 +487,7 @@ export default function PremiumPlaceSheet({
         if (canonicalCancelled) return;
         setCanonical(canonicalPlace);
         setComments(canonicalPlace.comments ?? []);
-        const type = String(place.type || canonicalPlace.category || '').toLowerCase();
-        const reservable = Boolean((place as any).reservable || (canonicalPlace.display_metadata as any)?.reservable);
-        if (type === 'camp' || type === 'camping' || reservable) {
+        if (classifyRelatedPlaceSheetKind(place) === 'camp') {
           api.getPlaceReservationStatus(canonicalPlace.trailhead_place_id)
             .then(status => { if (!canonicalCancelled) setReservation(status); })
             .catch(() => {});

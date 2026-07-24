@@ -195,6 +195,13 @@ test('changing sheet identity resets the shared place sheet to the top', () => {
   assert.match(sheetSource, /<ScrollView\s+ref=\{contentScrollRef\}/s);
 });
 
+test('generic NPS sights do not inherit campground reservation treatment', () => {
+  const testDirectory = dirname(fileURLToPath(import.meta.url));
+  const sheetSource = readFileSync(resolve(testDirectory, '../../components/PremiumPlaceSheet.tsx'), 'utf8');
+  assert.match(sheetSource, /if \(classifyRelatedPlaceSheetKind\(place\) === 'camp'\)/);
+  assert.doesNotMatch(sheetSource, /type === 'camp' \|\| type === 'camping' \|\| reservable/);
+});
+
 for (const fixture of NPS_HUB_PRESERVATION_FIXTURES) {
   test(`${fixture.name} preserves adaptive depth and exact main-map return context`, () => {
     const unchangedInput = JSON.parse(JSON.stringify(fixture.input));

@@ -24,6 +24,25 @@ test('generic place identity remains stable across enrichment updates', () => {
   assert.match(after.testID, /^place-sheet-place-/);
 });
 
+test('official display types keep their authored sentence case', () => {
+  const sight = adaptGenericPlaceSheet({
+    id: 'explore:place:nps-child:yose:places:anderson-cabin',
+    name: 'Anderson Cabin',
+    type: 'attraction',
+    display_type: 'Place to see',
+    source_label: 'National Park Service',
+  });
+  const visitorCenter = adaptGenericPlaceSheet({
+    id: 'explore:place:nps-child:yose:visitorcenters:big-oak-flat-information-station',
+    name: 'Big Oak Flat Information Station',
+    type: 'visitor_center',
+    display_type: 'Visitor Center',
+    source_label: 'National Park Service',
+  });
+  assert.equal(sight.subtitle, 'Place to see');
+  assert.equal(visitorCenter.subtitle, 'Visitor Center');
+});
+
 test('trail adapter preserves trailhead identity instead of switching shells after enrichment', () => {
   const trailhead = { id: 'th-12', name: 'Devils Garden Trailhead', type: 'trailhead', source_label: 'National Park Service' };
   const before = adaptTrailSheet(trailhead);

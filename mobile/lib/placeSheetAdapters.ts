@@ -79,6 +79,7 @@ export type PlaceSheetSource = {
   lng?: number | null;
   type?: string | null;
   subtype?: string | null;
+  display_type?: string | null;
   land_type?: string | null;
   source?: string | null;
   source_label?: string | null;
@@ -154,7 +155,7 @@ function makeModel<T extends PlaceSheetSource>(
             ? 'Explore'
             : 'Place';
   const title = cleanText(source.name) || fallbackTitle;
-  const subtitle = cleanText(
+  const subtitle = cleanDisplayText(source.display_type) || cleanText(
     source.source_label
       || source.source_badge
       || source.verified_source
@@ -184,6 +185,13 @@ function cleanText(value: unknown): string {
   const text = String(value || '').trim().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ');
   if (!text) return '';
   return text.replace(/\b\w/g, character => character.toUpperCase());
+}
+
+function cleanDisplayText(value: unknown): string {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const clean = raw.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ');
+  return /[_-]/.test(raw) ? cleanText(raw) : clean;
 }
 
 function slug(value: unknown): string {

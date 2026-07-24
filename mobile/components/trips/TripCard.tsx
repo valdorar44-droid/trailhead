@@ -63,6 +63,7 @@ export default function TripCard({
     return (
       <View style={[styles.activeBlock, { borderBottomColor: C.border }]}>
         <TouchableOpacity
+          testID={`plan.trip.${trip.id}`}
           accessibilityRole="button"
           accessibilityLabel={`Open ${trip.name}. ${tripMeta(trip)}`}
           activeOpacity={0.82}
@@ -81,6 +82,7 @@ export default function TripCard({
           </View>
         </TouchableOpacity>
         <TouchableOpacity
+          testID={`plan.trip.${trip.id}.more`}
           accessibilityRole="button"
           accessibilityLabel={`More actions for ${trip.name}`}
           activeOpacity={0.76}
@@ -96,6 +98,7 @@ export default function TripCard({
   return (
     <View style={[styles.row, { borderBottomColor: C.border }]}>
       <TouchableOpacity
+        testID={`plan.trip.${trip.id}`}
         accessibilityRole="button"
         accessibilityLabel={`Open ${trip.name}. ${tripMeta(trip)}`}
         activeOpacity={0.72}
@@ -114,6 +117,7 @@ export default function TripCard({
         <Ionicons name="chevron-forward" size={18} color={C.text3} />
       </TouchableOpacity>
       <TouchableOpacity
+        testID={`plan.trip.${trip.id}.more`}
         accessibilityRole="button"
         accessibilityLabel={`More actions for ${trip.name}`}
         hitSlop={6}

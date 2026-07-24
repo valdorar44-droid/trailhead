@@ -613,3 +613,26 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Open P0/P1 at baseline: none reproduced. Loop guard: one deterministic reproduction and one evidence-backed correction for a new P0/P1, then checkpoint it instead of repeating broad crawls or speculative OTAs.
 - Do not repeat: completed Map/Search/sheet/NPS/Explore/report crawls, Layers testing, Figma/Mobbin research already saved for these surfaces, campground/trail deltas, or Memory Gate V3 before the frozen production candidate.
 - Task-owned background processes: none. No Trailhead Gradle, Metro, Expo/EAS, Maestro, audit, publisher, or memory-gate process is running; ADB remains intentionally available.
+
+## Checkpoint M4.A implementation — Plan and Downloads
+
+- Timestamp: `2026-07-24T03:00:22-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; baseline checkpoint HEAD: `6ea32a7a4f2548f8535d7c3e87087904aecceb74`. The implementation commit follows this entry; device review and paired OTA remain pending.
+- Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. `.cursor/`, `dashboard/explore_serving_index_v2.json`, and unrelated executable-bit-only changes in Valhalla, Gradle, Android Auto, Maestro, NPS enrichment, and routing scripts remain excluded and unstaged.
+- Plan library refreshes are now owner-scoped and request-generation-bound. The first load or a real account change may show loading; warm Plan returns keep the existing trips, active filter, expanded count, scroll, selected context, watches, Saved items, and Originals visible while refreshing silently.
+- A stale load from an earlier account or request cannot replace the current library. Account-scope changes invalidate pending work and reset presentation state only for the new scope.
+- Plan now exposes stable automation selectors for workspaces, Draft/Saved/Archived filters, trip rows and actions, Downloads, availability watches, Saved items, and section anchors.
+- `Manage offline downloads` still opens the one existing renderer-aware `OfflineModal` over the main map. Plan-origin dismissal returns to Plan at the exact captured scroll offset. Opening a downloaded map intentionally stays on Map; cancelling selected-area setup returns to the manager.
+- The existing offline inventory is preserved and contract-tested: MapLibre/RNMapbox packs, regions, selected areas, trips/corridors, offline trip documents, routing graphs, trails, contours, Saved routes, Offline V2 jobs/artifacts/search, and the exact six place families `essentials`, `services`, `outdoors`, `camps`, `water`, and `trek_places`. No V1 store is migrated or deleted.
+- Focused verification passed:
+  - Plan deep-link authorization and presentation-state tests.
+  - Automation selector contract.
+  - Offline V2 pretests/runtime/catalog/active-style/account-scope and modal parity.
+  - Plan workspace regression audit.
+  - Account-storage lifecycle and old-owner isolation.
+  - User-facing copy audit across `163` files.
+  - TypeScript and `git diff --check`.
+- Open P0/P1 from implementation tests: none.
+- Exact next action: commit this named-file implementation scope, then run only the Android Checkpoint-A delta: warm Plan/filter/scroll retention, trip actions, watches/Saved items, Plan → Downloads nested views, dismiss return, Open Map behavior, selected-area cancel, and one airplane-mode inventory check. Do not begin Originals until that review is recorded.
+- Do not repeat: broad Map/Explore/Layer/NPS crawls, prior campground/trail/report deltas, Figma/Mobbin research, Search V2 baseline, or Memory Gate V3.
+- Task-owned background processes: none. Node processes belong to Codex/MCP infrastructure; ADB remains intentionally available for the Samsung and emulator.

@@ -58,8 +58,9 @@ export default function TripActionSheet({
       onRequestClose={onClose}
       accessibilityViewIsModal
     >
-      <View style={styles.modalRoot}>
+      <View testID="plan.trip-actions.sheet" style={styles.modalRoot}>
         <Pressable
+          testID="plan.trip-actions.backdrop"
           accessibilityRole="button"
           accessibilityLabel="Close trip actions"
           onPress={onClose}
@@ -90,6 +91,7 @@ export default function TripActionSheet({
               return (
                 <TouchableOpacity
                   key={action.id}
+                  testID={`plan.trip-actions.${action.id}`}
                   accessibilityRole="button"
                   accessibilityLabel={`${action.label} ${trip.name}`}
                   activeOpacity={0.76}
@@ -104,6 +106,7 @@ export default function TripActionSheet({
               );
             })}
             <TouchableOpacity
+              testID="plan.trip-actions.cancel"
               accessibilityRole="button"
               accessibilityLabel="Cancel trip actions"
               activeOpacity={0.78}

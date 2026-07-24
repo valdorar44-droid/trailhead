@@ -52,6 +52,7 @@ export default function PlanWorkspaceSwitcher({ active, style, onSelect }: PlanW
           return (
             <TouchableOpacity
               key={workspace.id}
+              testID={`plan.workspace.${workspace.id}`}
               accessibilityRole="tab"
               accessibilityLabel={workspace.accessibilityLabel}
               accessibilityState={{ selected }}

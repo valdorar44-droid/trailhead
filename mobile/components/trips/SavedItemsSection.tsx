@@ -55,6 +55,7 @@ export default function SavedItemsSection({
           <Text style={[styles.subheading, { color: C.text2 }]}>{items.length} ready for future trips</Text>
         </View>
         <TouchableOpacity
+          testID="plan.saved.browse"
           accessibilityRole="button"
           accessibilityLabel="Browse places in Explore"
           hitSlop={8}
@@ -71,6 +72,7 @@ export default function SavedItemsSection({
         {items.length > 0 ? visibleItems.map(item => (
           <TouchableOpacity
             key={item.id}
+            testID={`plan.saved.item.${item.id}`}
             accessibilityRole="button"
             accessibilityLabel={`Open saved ${placeType(item).toLowerCase()} ${item.title}`}
             activeOpacity={0.72}
@@ -93,6 +95,7 @@ export default function SavedItemsSection({
           </TouchableOpacity>
         )) : (
           <TouchableOpacity
+            testID="plan.saved.empty.browse"
             accessibilityRole="button"
             accessibilityLabel="Browse places to save"
             activeOpacity={0.72}
@@ -109,6 +112,7 @@ export default function SavedItemsSection({
         )}
         {visibleItems.length < items.length ? (
           <TouchableOpacity
+            testID="plan.saved.show-more"
             accessibilityRole="button"
             accessibilityLabel="Show more saved items"
             activeOpacity={0.74}

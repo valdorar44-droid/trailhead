@@ -93,7 +93,41 @@ const downloads = requireSelectors('components/NativeMap/OfflineModal.tsx', [
 assert.match(downloads, /testID=\{`offline\.downloads\.item\.\$\{safePackId\(item\.id\)\}`\}/);
 assert.match(downloads, /testID=\{testID\}/, 'Offline action helpers must forward their selector');
 
-requireSelectors('app/(tabs)/trips.tsx', ['plan.originals.anchor', 'plan.downloads.anchor', 'plan.downloads.manage']);
+requireSelectors('app/(tabs)/trips.tsx', [
+  'plan.trips.screen',
+  'plan.trips.scroll',
+  'plan.trips.anchor',
+  'plan.originals.anchor',
+  'plan.downloads.anchor',
+  'plan.downloads.manage',
+  'plan.saved.anchor',
+]);
+const planSwitcher = source('components/plan/PlanWorkspaceSwitcher.tsx');
+assert.match(planSwitcher, /testID=\{`plan\.workspace\.\$\{workspace\.id\}`\}/);
+const tripFilters = source('components/trips/TripFilterSegment.tsx');
+assert.match(tripFilters, /testID=\{`plan\.trip-filter\.\$\{filter\.id\}`\}/);
+assert.match(tripFilters, /testID="plan\.trip-filter\.select-drafts"/);
+const tripCards = source('components/trips/TripCard.tsx');
+assert.match(tripCards, /testID=\{`plan\.trip\.\$\{trip\.id\}`\}/);
+assert.match(tripCards, /testID=\{`plan\.trip\.\$\{trip\.id\}\.more`\}/);
+const tripActions = requireSelectors('components/trips/TripActionSheet.tsx', [
+  'plan.trip-actions.sheet',
+  'plan.trip-actions.backdrop',
+  'plan.trip-actions.cancel',
+]);
+assert.match(tripActions, /testID=\{`plan\.trip-actions\.\$\{action\.id\}`\}/);
+const savedItems = source('components/trips/SavedItemsSection.tsx');
+assert.match(savedItems, /testID=\{`plan\.saved\.item\.\$\{item\.id\}`\}/);
+for (const selector of ['plan.saved.browse', 'plan.saved.empty.browse', 'plan.saved.show-more']) {
+  assert.ok(savedItems.includes(`testID="${selector}"`), `Saved items expose stable selector ${selector}`);
+}
+requireSelectors('components/trips/AvailabilityWatchManager.tsx', [
+  'plan.watches.manage',
+  'plan.watches.open',
+  'plan.watches.sheet',
+  'plan.watches.close',
+  'plan.watches.retry',
+]);
 requireSelectors('components/originals/OwnedOriginalsSection.tsx', ['plan.originals.section', 'plan.originals.restore']);
 requireSelectors('components/offline/OfflineDownloadsSection.tsx', ['offline.v2-downloads.section', 'offline.v2-downloads.list']);
 

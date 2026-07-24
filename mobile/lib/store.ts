@@ -57,6 +57,7 @@ import {
   updateTabBarHiddenReasons,
   type TabBarHiddenReasons,
 } from './tabBarVisibilityState';
+import type { OfflineManagerReturnContext } from './planLibraryPresentation';
 
 let accountLocalWriteBlockDepth = 0;
 let accountLocalWriteTail: Promise<unknown> = Promise.resolve();
@@ -784,6 +785,7 @@ interface AppState {
   pendingStartCopilotVoice: boolean;
   pendingOpenOfflineModal: boolean;
   pendingOfflineTrip: TripResult | null;
+  pendingOfflineReturnContext: OfflineManagerReturnContext;
   pendingRouteActivityOffer: PendingRouteActivityOffer | null;
   routeBuildSession: RouteBuildSession | null;
   tabBarHidden: boolean;
@@ -840,6 +842,7 @@ interface AppState {
   setPendingStartCopilotVoice: (start: boolean) => void;
   setPendingOpenOfflineModal: (open: boolean) => void;
   setPendingOfflineTrip: (trip: TripResult | null) => void;
+  setPendingOfflineReturnContext: (context: OfflineManagerReturnContext) => void;
   setPendingRouteActivityOffer: (offer: PendingRouteActivityOffer | null) => void;
   startRouteBuildSession: (input: StartRouteBuildSessionInput) => void;
   updateRouteBuildSession: (requestId: string, patch: RouteBuildSessionPatch) => void;
@@ -885,6 +888,7 @@ export const useStore = create<AppState>((set) => ({
   pendingStartCopilotVoice: false,
   pendingOpenOfflineModal: false,
   pendingOfflineTrip: null,
+  pendingOfflineReturnContext: null,
   pendingRouteActivityOffer: null,
   routeBuildSession: null,
   tabBarHidden: false,
@@ -954,6 +958,7 @@ export const useStore = create<AppState>((set) => ({
       pendingStartCopilotVoice: false,
       pendingOpenOfflineModal: false,
       pendingOfflineTrip: null,
+      pendingOfflineReturnContext: null,
       pendingRouteActivityOffer: null,
       routeBuildSession: null,
       tabBarHidden: false,
@@ -1011,6 +1016,7 @@ export const useStore = create<AppState>((set) => ({
       pendingStartCopilotVoice: false,
       pendingOpenOfflineModal: false,
       pendingOfflineTrip: null,
+      pendingOfflineReturnContext: null,
       pendingRouteActivityOffer: null,
       routeBuildSession: null,
       tabBarHidden: false,
@@ -1173,6 +1179,7 @@ export const useStore = create<AppState>((set) => ({
   setPendingStartCopilotVoice: (start) => { if (accountLocalMutationAllowed()) set({ pendingStartCopilotVoice: start }); },
   setPendingOpenOfflineModal: (open) => { if (accountLocalMutationAllowed()) set({ pendingOpenOfflineModal: open }); },
   setPendingOfflineTrip: (trip) => { if (accountLocalMutationAllowed()) set({ pendingOfflineTrip: trip }); },
+  setPendingOfflineReturnContext: (context) => { if (accountLocalMutationAllowed()) set({ pendingOfflineReturnContext: context }); },
   setPendingRouteActivityOffer: (offer) => {
     if (!accountLocalMutationAllowed()) return;
     set(state => {
@@ -1501,6 +1508,7 @@ function clearLegacyAccountStateFromMemory() {
     pendingStartCopilotVoice: false,
     pendingOpenOfflineModal: false,
     pendingOfflineTrip: null,
+    pendingOfflineReturnContext: null,
     pendingRouteActivityOffer: null,
     routeBuildSession: null,
     userLoc: null,

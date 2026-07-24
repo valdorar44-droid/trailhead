@@ -29,6 +29,7 @@ export default function TripFilterSegment({
           return (
             <TouchableOpacity
               key={filter.id}
+              testID={`plan.trip-filter.${filter.id}`}
               accessibilityRole="tab"
               accessibilityLabel={`${filter.label}, ${count} trips`}
               accessibilityState={{ selected }}
@@ -46,6 +47,7 @@ export default function TripFilterSegment({
       </View>
       {value === 'draft' && counts.draft > 0 && onSelectDrafts ? (
         <TouchableOpacity
+          testID="plan.trip-filter.select-drafts"
           accessibilityRole="button"
           accessibilityLabel="Select drafts"
           activeOpacity={0.7}

@@ -85,6 +85,10 @@ import {
 import { api, ApiError, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, CampComment, Waypoint, TripResult, TrailProfile, MapCardResolveResponse, WaterNavigationLinesResponse, WaterConditionsResponse, WaterSpotCard, WaterSpotCardsResponse, FishingConditionsResponse, SuggestedWaterCorridorResponse, type BookableExperience, type BriefAndBackupV1, type GasStation, type GeocodePlace, type ExtremeConfig, type CopilotContext, type MapActionRequest, type MapSelectableFeature, type RouteCampWindowInput, type RouteCampWindowResult, type RouteScoutDayPlan, type RouteScoutState, type TrailPreviewManifest, type DispersedLead, type MissionControlBrief, type SavedRouteGeometryPayload } from '@/lib/api';
 import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
 import { trackPhase0Event, trackPhase0Once } from '@/lib/telemetry';
+import {
+  planDownloadsReturnRequest,
+  type OfflineManagerCloseReason,
+} from '@/lib/planLibraryPresentation';
 import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 import { deleteRouteGeometry, loadRouteGeometry, saveRouteGeometry } from '@/lib/offlineRoutes';
 import {
@@ -6086,6 +6090,8 @@ function MapScreen() {
   const setPendingOpenOfflineModal = useStore(st => st.setPendingOpenOfflineModal);
   const pendingOfflineTrip = useStore(st => st.pendingOfflineTrip);
   const setPendingOfflineTrip = useStore(st => st.setPendingOfflineTrip);
+  const pendingOfflineReturnContext = useStore(st => st.pendingOfflineReturnContext);
+  const setPendingOfflineReturnContext = useStore(st => st.setPendingOfflineReturnContext);
   const pendingRouteActivityOffer = useStore(st => st.pendingRouteActivityOffer);
   const setPendingRouteActivityOffer = useStore(st => st.setPendingRouteActivityOffer);
   const routeBuildSession = useStore(st => st.routeBuildSession);
@@ -6916,6 +6922,21 @@ function MapScreen() {
   const [offlineTripContext, setOfflineTripContext] = useState<TripResult | null>(null);
   const [offlineWarning,    setOfflineWarning]    = useState(false);
   const [isActuallyOffline, setIsActuallyOffline] = useState(false);
+  const closeOfflineManager = useCallback((reason: OfflineManagerCloseReason = 'dismiss') => {
+    setShowOfflineModal(false);
+    setOfflineTripContext(null);
+    const destination = planDownloadsReturnRequest(pendingOfflineReturnContext, reason);
+    setPendingOfflineReturnContext(null);
+    if (destination) {
+      router.replace({
+        pathname: destination.pathname,
+        params: {
+          section: destination.section,
+          return_scroll_y: String(destination.scrollY),
+        },
+      } as any);
+    }
+  }, [pendingOfflineReturnContext, router, setPendingOfflineReturnContext]);
 
   // AI & Wikipedia in campsite detail
   const [campInsight,    setCampInsight]    = useState<CampsiteInsight | null>(null);
@@ -7837,6 +7858,11 @@ function MapScreen() {
     setQuickToast(areaToEdit ? 'Adjust the saved offline area.' : 'Resize the box around the area you want offline.');
     setTimeout(() => setQuickToast(''), 3600);
   }, [boxForSavedOfflineArea, clampOfflineAreaBox]);
+
+  const cancelOfflineAreaPicker = useCallback(() => {
+    setOfflineAreaPicker(false);
+    setShowOfflineModal(true);
+  }, []);
 
   const selectSavedOfflineArea = useCallback((area: OfflineAreaSelection) => {
     setSelectedOfflineArea(area);
@@ -24683,7 +24709,7 @@ function MapScreen() {
                   : 'Move the map, then resize the box.'}
               </Text>
             </View>
-            <TouchableOpacity style={s.offlineAreaClose} onPress={() => setOfflineAreaPicker(false)}>
+            <TouchableOpacity testID="offline.downloads.area-picker.close" style={s.offlineAreaClose} onPress={cancelOfflineAreaPicker}>
               <Ionicons name="close" size={15} color={OVR.text2} />
             </TouchableOpacity>
           </View>
@@ -24724,7 +24750,7 @@ function MapScreen() {
               <Text style={s.offlineAreaWarning}>Shrink the box or use Standard detail for a faster download.</Text>
             )}
             <View style={s.offlineAreaActions}>
-              <TouchableOpacity style={s.offlineAreaSecondaryBtn} onPress={() => setOfflineAreaPicker(false)}>
+              <TouchableOpacity testID="offline.downloads.area-picker.cancel" style={s.offlineAreaSecondaryBtn} onPress={cancelOfflineAreaPicker}>
                 <Text style={s.offlineAreaSecondaryText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
@@ -28632,10 +28658,7 @@ function MapScreen() {
           && !map3dEnabled
         }
         activeRendererStyleId={activeOfflineRendererStyleId}
-        onClose={() => {
-          setShowOfflineModal(false);
-          setOfflineTripContext(null);
-        }}
+        onClose={closeOfflineManager}
         waypoints={waypoints}
         routeCoords={lastRouteCoords}
         requestedTrip={offlineTripContext}
@@ -28653,6 +28676,7 @@ function MapScreen() {
         onOpenRegion={target => {
           setShowOfflineModal(false);
           setOfflineTripContext(null);
+          setPendingOfflineReturnContext(null);
           viewportRef.current = {
             n: target.lat + 1,
             s: target.lat - 1,

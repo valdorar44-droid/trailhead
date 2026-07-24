@@ -21,6 +21,10 @@ import { useStore, type SavedPlace } from '@/lib/store';
 import { useProductFeatures } from '@/lib/useProductFeatures';
 import { useScreenActivity } from '@/lib/screenActivity';
 import { useTabBarVisibility } from '@/lib/tabBarVisibility';
+import {
+  planLibraryRefreshMode,
+  planLibraryRequestIsCurrent,
+} from '@/lib/planLibraryPresentation';
 import PlanWorkspaceSwitcher from '@/components/plan/PlanWorkspaceSwitcher';
 import {
   useTripRepositorySnapshot,
@@ -74,6 +78,7 @@ export default function TripsScreen() {
     section?: string | string[];
     trip_id?: string | string[];
     original_id?: string | string[];
+    return_scroll_y?: string | string[];
   }>();
   const screenActivity = useScreenActivity();
   const insets = useSafeAreaInsets();
@@ -83,6 +88,7 @@ export default function TripsScreen() {
   const setPendingMapSelection = useStore(state => state.setPendingMapSelection);
   const setPendingOpenOfflineModal = useStore(state => state.setPendingOpenOfflineModal);
   const setPendingOfflineTrip = useStore(state => state.setPendingOfflineTrip);
+  const setPendingOfflineReturnContext = useStore(state => state.setPendingOfflineReturnContext);
 
   const [snapshot, setSnapshot] = useState<TripLibrarySnapshot>(EMPTY_SNAPSHOT);
   const [filter, setFilter] = useState<TripLibraryFilter>('draft');
@@ -98,12 +104,17 @@ export default function TripsScreen() {
   const [selectedDraftIds, setSelectedDraftIds] = useState<Set<string>>(() => new Set());
   const [deleteConfirmationVisible, setDeleteConfirmationVisible] = useState(false);
   const [deletingDrafts, setDeletingDrafts] = useState(false);
+  const [sectionLayoutRevision, setSectionLayoutRevision] = useState(0);
   const requestSequence = useRef(0);
   const planScrollRef = useRef<ScrollView>(null);
+  const planScrollYRef = useRef(0);
   const sectionOffsets = useRef<Partial<Record<PlanDeepLinkSection, number>>>({});
   const handledTripRequestRef = useRef('');
   const handledSectionRequestRef = useRef('');
   const expectedOwnerScope = userId ? `account:${String(userId)}` : 'anonymous';
+  const currentOwnerScopeRef = useRef(expectedOwnerScope);
+  currentOwnerScopeRef.current = expectedOwnerScope;
+  const loadedOwnerScopeRef = useRef('');
   const repositoryReady = repository.initialized && repository.ownerScope === expectedOwnerScope;
   const { features } = useProductFeatures();
   const publicationEnabled = Boolean(userId && features?.community_publications);
@@ -113,8 +124,19 @@ export default function TripsScreen() {
     params.section,
     params.trip_id,
   ]);
+  const requestedReturnScrollY = useMemo(() => {
+    const raw = Array.isArray(params.return_scroll_y)
+      ? params.return_scroll_y[0]
+      : params.return_scroll_y;
+    if (!raw) return null;
+    const value = Number(raw);
+    return Number.isFinite(value) && value >= 0 ? value : null;
+  }, [params.return_scroll_y]);
 
-  const refresh = useCallback(async (mode: 'loading' | 'refreshing' | 'silent' = 'loading') => {
+  const refresh = useCallback(async (
+    mode: 'loading' | 'refreshing' | 'silent' = 'loading',
+    requestOwnerScope = currentOwnerScopeRef.current,
+  ) => {
     const request = ++requestSequence.current;
     if (mode === 'refreshing') setRefreshing(true);
     else if (mode === 'loading') setLoading(true);
@@ -123,11 +145,29 @@ export default function TripsScreen() {
       const next = await loadTripLibrarySnapshot({
         activeTrip: state.activeTrip,
       });
-      if (request === requestSequence.current) setSnapshot(next);
+      if (planLibraryRequestIsCurrent({
+        requestSequence: request,
+        currentSequence: requestSequence.current,
+        requestOwnerScope,
+        currentOwnerScope: currentOwnerScopeRef.current,
+      })) {
+        loadedOwnerScopeRef.current = requestOwnerScope;
+        setSnapshot(next);
+      }
     } catch {
-      if (request === requestSequence.current) setSnapshot(previous => previous);
+      if (planLibraryRequestIsCurrent({
+        requestSequence: request,
+        currentSequence: requestSequence.current,
+        requestOwnerScope,
+        currentOwnerScope: currentOwnerScopeRef.current,
+      })) setSnapshot(previous => previous);
     } finally {
-      if (request === requestSequence.current) {
+      if (planLibraryRequestIsCurrent({
+        requestSequence: request,
+        currentSequence: requestSequence.current,
+        requestOwnerScope,
+        currentOwnerScope: currentOwnerScopeRef.current,
+      })) {
         setLoading(false);
         setRefreshing(false);
       }
@@ -136,6 +176,8 @@ export default function TripsScreen() {
 
   useFocusEffect(useCallback(() => {
     let cancelled = false;
+    const focusOwnerScope = expectedOwnerScope;
+    const refreshMode = planLibraryRefreshMode(loadedOwnerScopeRef.current, focusOwnerScope);
     void (async () => {
       try {
         const ready = await initializeTripLibrary(userId || null);
@@ -144,16 +186,18 @@ export default function TripsScreen() {
           return;
         }
         await refreshTripLibraryFromSource();
-        await refresh('loading');
+        await refresh(refreshMode, focusOwnerScope);
       } catch {
-        if (!cancelled) await refresh('loading');
+        if (!cancelled) await refresh(refreshMode, focusOwnerScope);
       }
     })();
     return () => { cancelled = true; };
-  }, [refresh, userId]));
+  }, [expectedOwnerScope, refresh, userId]));
 
   useEffect(() => {
     if (!repositoryReady) {
+      requestSequence.current += 1;
+      if (loadedOwnerScopeRef.current !== expectedOwnerScope) loadedOwnerScopeRef.current = '';
       setLoading(true);
       setSnapshot(EMPTY_SNAPSHOT);
       setActionSheetVisible(false);
@@ -169,7 +213,7 @@ export default function TripsScreen() {
         .then(() => refresh('silent'));
     }, 60);
     return () => clearTimeout(timer);
-  }, [activeTripId, refresh, repository.ownerScope, repository.revision, repositoryReady]);
+  }, [activeTripId, expectedOwnerScope, refresh, repository.ownerScope, repository.revision, repositoryReady]);
 
   const pullToRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -222,8 +266,16 @@ export default function TripsScreen() {
 
   const scrollToSection = useCallback((section: PlanDeepLinkSection) => {
     const y = sectionOffsets.current[section];
-    if (y == null) return;
+    if (y == null) return false;
     requestAnimationFrame(() => planScrollRef.current?.scrollTo({ y: Math.max(0, y - 12), animated: true }));
+    return true;
+  }, []);
+  const recordSectionOffset = useCallback((section: PlanDeepLinkSection, y: number) => {
+    const previous = sectionOffsets.current[section];
+    sectionOffsets.current[section] = y;
+    if (previous == null || Math.abs(previous - y) > 1) {
+      setSectionLayoutRevision(revision => revision + 1);
+    }
   }, []);
 
   useEffect(() => {
@@ -235,12 +287,26 @@ export default function TripsScreen() {
     if (!repositoryReady) return;
     const key = `${expectedOwnerScope}:${requestedPlanDestination.section}:${requestedPlanDestination.item_id || ''}`;
     if (handledSectionRequestRef.current === key) return;
+    if (requestedPlanDestination.section === 'downloads' && requestedReturnScrollY != null) {
+      if (sectionOffsets.current.downloads == null) return;
+      requestAnimationFrame(() => planScrollRef.current?.scrollTo({
+        y: requestedReturnScrollY,
+        animated: false,
+      }));
+    } else if (!scrollToSection(requestedPlanDestination.section)) return;
     handledSectionRequestRef.current = key;
-    scrollToSection(requestedPlanDestination.section);
     if (!requestedPlanDestination.item_id) {
-      router.setParams({ section: undefined } as any);
+      router.setParams({ section: undefined, return_scroll_y: undefined } as any);
     }
-  }, [expectedOwnerScope, repositoryReady, requestedPlanDestination, router, scrollToSection]);
+  }, [
+    expectedOwnerScope,
+    repositoryReady,
+    requestedPlanDestination,
+    requestedReturnScrollY,
+    router,
+    scrollToSection,
+    sectionLayoutRevision,
+  ]);
 
   useEffect(() => {
     if (loading
@@ -303,6 +369,11 @@ export default function TripsScreen() {
       const resolved = await resolveLibraryTrip(trip);
       setActionSheetVisible(false);
       setPendingOfflineTrip(resolved);
+      setPendingOfflineReturnContext({
+        source: 'plan',
+        section: 'downloads',
+        scrollY: planScrollYRef.current,
+      });
       setPendingOpenOfflineModal(true);
       router.push('/(tabs)/map');
     } catch (error: any) {
@@ -310,7 +381,7 @@ export default function TripsScreen() {
     } finally {
       setBusy(false);
     }
-  }, [router, setPendingOfflineTrip, setPendingOpenOfflineModal]);
+  }, [router, setPendingOfflineReturnContext, setPendingOfflineTrip, setPendingOpenOfflineModal]);
 
   const performAction = useCallback(async (action: TripAction, trip: TripLibraryItem) => {
     if (action === 'open') {
@@ -433,9 +504,14 @@ export default function TripsScreen() {
   const browseExplore = useCallback(() => router.push('/(tabs)/guide'), [router]);
 
   const openDownloads = useCallback(() => {
+    setPendingOfflineReturnContext({
+      source: 'plan',
+      section: 'downloads',
+      scrollY: planScrollYRef.current,
+    });
     setPendingOpenOfflineModal(true);
     router.push('/(tabs)/map');
-  }, [router, setPendingOpenOfflineModal]);
+  }, [router, setPendingOfflineReturnContext, setPendingOpenOfflineModal]);
 
   const beginDraftSelection = useCallback(() => {
     setFilter('draft');
@@ -586,12 +662,17 @@ export default function TripsScreen() {
   }
 
   return (
-    <SafeAreaView edges={['top']} style={[styles.screen, { backgroundColor: C.bg }]}>
+    <SafeAreaView testID="plan.trips.screen" edges={['top']} style={[styles.screen, { backgroundColor: C.bg }]}>
       <ScrollView
+        testID="plan.trips.scroll"
         ref={planScrollRef}
         style={styles.screen}
         contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}
+        scrollEventThrottle={16}
+        onScroll={event => {
+          planScrollYRef.current = event.nativeEvent.contentOffset.y;
+        }}
         refreshControl={(
           <RefreshControl
             refreshing={refreshing}
@@ -640,8 +721,9 @@ export default function TripsScreen() {
           ) : null}
 
           <View
+            testID="plan.trips.anchor"
             style={styles.section}
-            onLayout={event => { sectionOffsets.current.trips = event.nativeEvent.layout.y; }}
+            onLayout={event => recordSectionOffset('trips', event.nativeEvent.layout.y)}
           >
             <TripFilterSegment
               value={filter}
@@ -674,7 +756,7 @@ export default function TripsScreen() {
 
           {repositoryReady ? (
             <>
-            <View testID="plan.originals.anchor" onLayout={event => { sectionOffsets.current.originals = event.nativeEvent.layout.y; }}>
+            <View testID="plan.originals.anchor" onLayout={event => recordSectionOffset('originals', event.nativeEvent.layout.y)}>
                 <OwnedOriginalsSection
                   requestedOriginalId={requestedPlanDestination?.section === 'originals'
                     ? requestedPlanDestination.item_id
@@ -682,7 +764,7 @@ export default function TripsScreen() {
                   onRequestedOriginalHandled={handleRequestedOriginal}
                 />
               </View>
-            <View testID="plan.downloads.anchor" onLayout={event => { sectionOffsets.current.downloads = event.nativeEvent.layout.y; }}>
+            <View testID="plan.downloads.anchor" onLayout={event => recordSectionOffset('downloads', event.nativeEvent.layout.y)}>
                 <View style={styles.section}>
                   <Text style={[styles.sectionTitle, { color: C.text }]}>Downloads</Text>
               <TouchableOpacity
@@ -704,7 +786,7 @@ export default function TripsScreen() {
                 <AvailabilityWatchManager signedIn={Boolean(userId)} knownActiveCount={knownActiveWatchCount} />
               ) : null}
               {snapshot.savedItems.length > 0 ? (
-                <View onLayout={event => { sectionOffsets.current.saved = event.nativeEvent.layout.y; }}>
+                <View testID="plan.saved.anchor" onLayout={event => recordSectionOffset('saved', event.nativeEvent.layout.y)}>
                   <SavedItemsSection items={snapshot.savedItems} onOpen={openSavedItem} onBrowse={browseExplore} />
                 </View>
               ) : null}

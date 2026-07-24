@@ -5,6 +5,7 @@ import path from 'node:path';
 const source = fs.readFileSync(path.resolve('components/NativeMap/OfflineModal.tsx'), 'utf8');
 const mapSource = fs.readFileSync(path.resolve('app/(tabs)/map.tsx'), 'utf8');
 const nativeManagerSource = fs.readFileSync(path.resolve('components/NativeMap/offlineManager.ts'), 'utf8');
+const tripsSource = fs.readFileSync(path.resolve('app/(tabs)/trips.tsx'), 'utf8');
 
 const tripV2Start = source.indexOf('if (v2BoundsSupported) {');
 const tripV2End = source.indexOf('const key = tripPackKey(target);', tripV2Start);
@@ -55,6 +56,27 @@ assert.doesNotMatch(
   'V2 routing is not advertised until navigation has a real artifact consumer',
 );
 assert.doesNotMatch(source, /C\.green/, 'offline success and selection treatments use Trailhead orange');
+assert.match(
+  source,
+  /const PLACE_PACK_ORDER = \['essentials', 'services', 'outdoors', 'camps', 'water', 'trek_places'\];/,
+  'all six existing place-pack families remain in the offline inventory',
+);
+for (const existingArtifact of [
+  'getInstalledPacks',
+  'getOfflineTripSummaries',
+  'getRoutingState',
+  'getTrailState',
+  'getContourState',
+  'listOfflinePlacePacks',
+  'offlineV2Jobs',
+]) {
+  assert.match(source, new RegExp(`\\b${existingArtifact}\\b`), `offline manager preserves ${existingArtifact}`);
+}
+assert.match(tripsSource, /setPendingOfflineReturnContext\(\{[\s\S]*source: 'plan',[\s\S]*section: 'downloads',[\s\S]*scrollY: planScrollYRef\.current,/);
+assert.match(mapSource, /planDownloadsReturnRequest\(pendingOfflineReturnContext, reason\)/);
+assert.match(mapSource, /return_scroll_y: String\(destination\.scrollY\)/);
+assert.match(source, /onClose\('dismiss'\)/, 'dismissing the manager can restore its Plan origin');
+assert.match(source, /onClose\('open_map'\)/, 'opening downloaded content intentionally remains on Map');
 
 const selectedAreaStart = source.indexOf('const downloadSelectedArea = useCallback');
 const selectedAreaEnd = source.indexOf('const downloadRegionPlaces = useCallback', selectedAreaStart);

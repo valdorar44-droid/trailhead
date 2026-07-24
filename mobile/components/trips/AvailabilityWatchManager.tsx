@@ -191,6 +191,7 @@ export default function AvailabilityWatchManager({
           <Text style={[styles.subheading, { color: C.text2 }]}>Account activity</Text>
         </View>
         <TouchableOpacity
+          testID="plan.watches.manage"
           accessibilityRole="button"
           accessibilityLabel="Manage availability watches"
           activeOpacity={0.74}
@@ -202,6 +203,7 @@ export default function AvailabilityWatchManager({
         </TouchableOpacity>
       </View>
       <TouchableOpacity
+        testID="plan.watches.open"
         accessibilityRole="button"
         accessibilityLabel={`Open availability watches${knownActiveCount > 0 ? `, ${knownActiveCount} active in trip plans` : ''}`}
         activeOpacity={0.72}
@@ -236,6 +238,7 @@ export default function AvailabilityWatchManager({
             style={styles.backdrop}
           />
           <View
+            testID="plan.watches.sheet"
             style={[
               styles.sheet,
               {
@@ -252,6 +255,7 @@ export default function AvailabilityWatchManager({
                 <Text style={[styles.sheetSubtitle, { color: C.text2 }]}>Your account</Text>
               </View>
               <TouchableOpacity
+                testID="plan.watches.close"
                 accessibilityRole="button"
                 accessibilityLabel="Close availability watches"
                 activeOpacity={0.72}
@@ -294,6 +298,7 @@ export default function AvailabilityWatchManager({
                   <Ionicons name="alert-circle-outline" size={18} color={C.yellow} />
                   <Text style={[styles.errorText, { color: C.text2 }]}>{error}</Text>
                   <TouchableOpacity
+                    testID="plan.watches.retry"
                     accessibilityRole="button"
                     accessibilityLabel="Try loading availability watches again"
                     activeOpacity={0.74}

@@ -70,6 +70,7 @@ import {
   summarizeOfflineRegion,
   type OfflineRegionSummary,
 } from './offlineHubModel';
+import type { OfflineManagerCloseReason } from '@/lib/planLibraryPresentation';
 
 interface WebDownloadOpts {
   bufferKm?: number;
@@ -123,7 +124,7 @@ export interface OfflineAreaSelection {
 
 interface Props {
   visible: boolean;
-  onClose: () => void;
+  onClose: (reason?: OfflineManagerCloseReason) => void;
   waypoints: WP[];
   routeCoords?: [number, number][];
   requestedTrip?: TripResult | null;
@@ -1559,7 +1560,7 @@ export default function OfflineModal({
 
   const openOfflineTrip = useCallback(async (target: TripTarget) => {
     if (activeTrip?.trip_id === target.id) {
-      onClose();
+      onClose('open_map');
       return;
     }
     const scope = currentOfflineAccountScope();
@@ -1571,7 +1572,7 @@ export default function OfflineModal({
       return;
     }
     setActiveTrip({ ...trip, updated_at: Date.now() }, true);
-    onClose();
+    onClose('open_map');
   }, [activeTrip?.trip_id, onClose, reloadOfflineTrips, setActiveTrip]);
 
   const openRegion = useCallback((id: string) => {
@@ -1583,7 +1584,7 @@ export default function OfflineModal({
       zoom: id === 'conus' || id.length > 2 ? 4 : 6,
       label: region.name,
     });
-    onClose();
+    onClose('open_map');
   }, [onClose, onOpenRegion]);
 
   const artifactAction = useCallback((state: FileDownloadState, actions: {
@@ -1758,7 +1759,7 @@ export default function OfflineModal({
       {view === 'home' ? (
         <IconButton testID="offline.downloads.add-area" icon="add" label="Download an area" onPress={() => onStartAreaSelect?.(null)} />
       ) : <View style={shared.iconButtonSpacer} />}
-      <IconButton testID="offline.downloads.close" icon="close" label="Close" onPress={onClose} />
+      <IconButton testID="offline.downloads.close" icon="close" label="Close" onPress={() => onClose('dismiss')} />
     </View>
   );
 
@@ -2159,9 +2160,9 @@ export default function OfflineModal({
           ) : null}
           <View style={s.detailActions}>
             {isReady ? (
-              <PrimaryButton testID="offline.downloads.area.open" label="Open map" icon="map-outline" onPress={() => { onSelectArea?.(selectedArea); onClose(); }} />
+              <PrimaryButton testID="offline.downloads.area.open" label="Open map" icon="map-outline" onPress={() => { onSelectArea?.(selectedArea); onClose('open_map'); }} />
             ) : isMapReady && !offlineV2DownloadEnabled ? (
-              <PrimaryButton testID="offline.downloads.area.open" label="Open map" icon="map-outline" onPress={() => { onSelectArea?.(selectedArea); onClose(); }} />
+              <PrimaryButton testID="offline.downloads.area.open" label="Open map" icon="map-outline" onPress={() => { onSelectArea?.(selectedArea); onClose('open_map'); }} />
             ) : (
               <PrimaryButton
                 testID="offline.downloads.area.download"
@@ -2172,7 +2173,7 @@ export default function OfflineModal({
               />
             )}
             {!isReady && isMapReady && offlineV2DownloadEnabled ? (
-              <SecondaryButton testID="offline.downloads.area.open-partial" label="Open downloaded map" onPress={() => { onSelectArea?.(selectedArea); onClose(); }} />
+              <SecondaryButton testID="offline.downloads.area.open-partial" label="Open downloaded map" onPress={() => { onSelectArea?.(selectedArea); onClose('open_map'); }} />
             ) : null}
             {isReady || isMapReady ? (
               <SecondaryButton testID="offline.downloads.area.remove" label="Remove download" danger onPress={() => {
@@ -2333,9 +2334,9 @@ export default function OfflineModal({
   };
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={() => onClose('dismiss')}>
       <View style={s.overlay} testID="offline.downloads.modal">
-        <TouchableOpacity testID="offline.downloads.backdrop" accessibilityRole="button" accessibilityLabel="Close offline downloads" style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={onClose} />
+        <TouchableOpacity testID="offline.downloads.backdrop" accessibilityRole="button" accessibilityLabel="Close offline downloads" style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => onClose('dismiss')} />
         <View style={[s.sheet, { maxHeight: sheetMaxHeight, paddingBottom: bottomPad }]} testID={`offline.downloads.view.${view}`}>
           {renderHeader()}
           <ScrollView

@@ -6911,6 +6911,7 @@ function MapScreen() {
   // Camp card extras
   const [campWeather,    setCampWeather]    = useState<WeatherForecast | null>(null);
   const campSheetScrollYRef = useRef(0);
+  const campSitesSectionYRef = useRef(0);
   const [campSheetScrollRestore, setCampSheetScrollRestore] = useState({ key: 0, y: 0 });
   const skipCampDetailReloadRef = useRef<string | null>(null);
   const campPresentationRestoreRef = useRef<string | null>(null);
@@ -6918,6 +6919,7 @@ function MapScreen() {
     camp: CampsitePin;
     detail: CampsiteDetail;
     scrollY: number;
+    sitesSectionY: number;
     insight: CampsiteInsight | null;
     wikiArticles: WikiArticle[];
     fullness: CampFullness | null;
@@ -19413,6 +19415,7 @@ function MapScreen() {
       camp: parentCamp,
       detail: parentDetail,
       scrollY: campSheetScrollYRef.current,
+      sitesSectionY: campSitesSectionYRef.current,
       insight: campInsight,
       wikiArticles,
       fullness: campFullness,
@@ -21468,7 +21471,10 @@ function MapScreen() {
     setFieldReportSummary(parent.fieldReportSummary);
     setCampComments(parent.comments);
     setCampCanonicalId(parent.canonicalId);
-    setCampSheetScrollRestore(current => ({ key: current.key + 1, y: parent.scrollY }));
+    const sitesReturnY = parent.sitesSectionY > 0
+      ? Math.max(0, parent.sitesSectionY - 180)
+      : parent.scrollY;
+    setCampSheetScrollRestore(current => ({ key: current.key + 1, y: sitesReturnY }));
     nativeMapRef.current?.flyTo(parent.camp.lat, parent.camp.lng, 11, parent.camp.name);
   }
 
@@ -27545,7 +27551,10 @@ function MapScreen() {
                 ) : null}
 
 	                {(campDetail.campsites ?? []).some(site => site.name || site.photo_url || site.photos?.length) ? (
-	                  <View style={s.detailSection}>
+	                  <View
+	                    style={s.detailSection}
+	                    onLayout={event => { campSitesSectionYRef.current = event.nativeEvent.layout.y; }}
+	                  >
 	                    <Text style={s.detailSectionTitle}>Sites</Text>
 	                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.siteRail}>
                       {(campDetail.campsites ?? []).slice(0, 12).map((site, idx) => {

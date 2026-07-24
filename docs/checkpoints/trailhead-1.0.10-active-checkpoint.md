@@ -391,7 +391,7 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 ## Checkpoint M3.3 — Camp peek/full and Explore scroll stability
 
 - Timestamp: `2026-07-23T21:45:58-05:00`.
-- Branch: `feat/trailhead-1.0.10-overhaul`; implementation HEAD: `3e8dddca9ffa5e40f8c2864ef5a6c32417012864`. No preview OTA has been published from this source yet.
+- Branch: `feat/trailhead-1.0.10-overhaul`; implementation HEAD: `3e8dddca9ffa5e40f8c2864ef5a6c32417012864`; paired-preview source and checkpoint HEAD: `1b9c01076e0768d430da2ff831f773a233d04fc0`.
 - Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. `.cursor/` and `dashboard/explore_serving_index_v2.json` remained excluded, unstaged, and untouched.
 - The approved Figma Camp Peek and Camp Full frames (`407:158` and `407:159`) now drive the campground interaction. A map selection opens a compact identity-safe sheet with existing listing essentials, `View sites`, Save, and Close while full detail/photos preload in the background.
 - Expanding through the card, primary action, drag, or handle reveals one coherent full-sheet state. If core detail is still loading, the expanded layout remains a full skeleton instead of rendering partially enriched modules. After six seconds it falls back to verified listing data with a concise unavailable state and Retry.
@@ -405,7 +405,16 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
   - Place-sheet adapters `8/8` and coordinator `2/2`.
   - NPS preservation `14/14`, Explore navigation `3/3`, and Explore scroll contract `2/2`.
   - Search V2 `68/68` and Map copy audit.
-- Open P0: none. Device-proof P1 acceptance remains pending for the new source: camp pin → peek → early full skeleton → full detail → campsite → Back, plus a slow-enrichment child-hub scroll with no snap.
-- Exact next action: publish one guarded paired preview OTA from an immutable checkpointed SHA, verify Android/iOS identity, then run only the narrow campground and Explore-scroll device delta. Continue trail/trailhead, report, and Explore-hub sheet families only after that packet passes.
+- One guarded paired preview OTA was published from exact immutable source `1b9c01076e0768d430da2ff831f773a233d04fc0`, with Android, iOS, and web Sentry source maps uploaded:
+  - Channel `preview`, channel ID `019dbc97-3cde-795b-a35d-e6aa985060d3`.
+  - Candidate branch `preview-candidate-1b9c01076e0768d430da2ff831f773a233d04fc0-mrycbigw-30a79fc944ad35c6d0cc70f7`, branch ID `019f920a-4e17-73a3-b6aa-cc450c55275a`.
+  - Android group `e320fc80-c7c2-4322-be6a-5821ffbe31da`, update `019f920a-7868-79cc-b416-3c3d0e4040dc`, runtime `native-1.0.10-android.1`.
+  - iOS group `115d5647-1689-4e50-8618-ae5c096e1fc4`, update `019f920a-7868-7fb1-9968-f72bd7874caa`, runtime `native-1.0.10-ios.1`.
+- Samsung `RFCR408DA9B` completed the two-launch update handoff without clearing account data. The admin QA screen proved Android `1.0.10`, build `59`, channel `preview`, full source SHA `1b9c01076e0768d430da2ff831f773a233d04fc0`, runtime `native-1.0.10-android.1`, update `019f920a-7868-79cc-b416-3c3d0e4040dc`, and delivery status `Ready`.
+- The exact-candidate mini-sheet deltas passed on Samsung: direct search → Camp Peek → View sites → Camp Full, and NPS hub → related campground Peek → Full → Back to the correct NPS parent. Evidence is under `output/maestro/2026-07-24T02-59-52-685Z--RFCR408DA9B` and `output/maestro/2026-07-24T03-01-44-445Z--RFCR408DA9B`.
+- The deeper campsite delta then reproduced a real return-state defect: the code stored a raw campsite/campground ID while the coordinator compares the namespaced stable sheet entity ID. Commit `c17e8aa` now stores `adaptCampgroundSheet(...).identity.entityId` for both the campsite and parent restoration, with focused contract coverage. TypeScript, `git diff --check`, and the camp identity/flow tests (`8/8`) pass; paired preview and device confirmation remain pending for this two-line behavior correction.
+- Maestro also exhausted the Windows host drive with repeated temporary APK copies. Only task-generated `tmp*.apk` payloads in the verified Windows Temp root were truncated, recovering approximately `6.4 GB`; named preview APKs, app data, downloads, builds, and user files were not changed.
+- Open P0: none. The campsite restoration P1 has a focused fix and regression test but remains open until the new paired preview proves Camp Full → campsite Full → Back to the same Camp Full scroll position. Slow-enrichment child-hub scroll proof also remains pending.
+- Exact next action: publish the guarded paired preview from the checkpointed campsite-restoration source, prove its identity, and rerun only campground nested Back plus slow-enrichment Explore scroll. Continue trail/trailhead, report, and Explore-hub sheet families after that packet passes.
 - Do not repeat: broad Layers testing, the completed NPS child chains, the 33-run crawl, Figma/Mobbin research, Search V2 baseline crawl, or the long Memory Gate V3. Layers remain working and memory remains frozen-candidate evidence debt.
 - Task-owned background processes: none. No Gradle, Metro, Expo/EAS, Maestro, memory gate, or Trailhead test process remains; ADB is intentionally available. The visible Node processes belong to Codex/MCP infrastructure, not Trailhead work.

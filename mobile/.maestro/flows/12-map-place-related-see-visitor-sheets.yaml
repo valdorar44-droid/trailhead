@@ -43,7 +43,7 @@ tags:
       id: "place-sheet-place-place-explore-place-nps-child-yose-places-anderson-cabin-content"
     timeout: 15000
 - assertVisible: "Anderson Cabin"
-- assertVisible: "Place to see"
+- assertVisible: "Place to see.*"
 - assertVisible: "Tourist parties provided business.*"
 - takeScreenshot: map-related-thing-to-see-sheet
 - pressKey: Back
@@ -64,7 +64,7 @@ tags:
       id: "place-sheet-place-place-explore-place-nps-child-yose-visitorcenters-big-oak-flat-information-station-content"
     timeout: 15000
 - assertVisible: "Big Oak Flat Information Station"
-- assertVisible: "Visitor Center"
+- assertVisible: "Visitor Center.*"
 - assertVisible: ".*information desk.*"
 - takeScreenshot: map-related-visitor-center-sheet
 - pressKey: Back

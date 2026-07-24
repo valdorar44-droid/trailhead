@@ -1602,6 +1602,7 @@ export interface SupportDiagnosticAllowlist {
 export interface SupportThread {
   id: number;
   user_id: number;
+  contest_award_id?: number | null;
   username?: string;
   email?: string;
   category: string;

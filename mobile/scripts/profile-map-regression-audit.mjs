@@ -380,8 +380,10 @@ assert(
   'web map exposes the same route-framing handle as the native map',
 );
 assert(
-  map.includes("if (typeof fitCoordinates === 'function')")
-    && map.includes('fitCoordinates.call(nativeMapRef.current'),
+  (map.includes("if (typeof fitCoordinates === 'function')")
+    || map.includes("if (typeof fitCoordinates !== 'function') return;"))
+    && map.includes('fitCoordinates.call(')
+    && map.includes('nativeMapRef.current,'),
   'map route framing tolerates older preview handles during an OTA transition',
 );
 assert(

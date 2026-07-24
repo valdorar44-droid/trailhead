@@ -26352,8 +26352,8 @@ function MapScreen() {
                     subtitle={trailFieldReportSummary?.count
                       ? `${trailFieldReportSummary.count} recent ${trailFieldReportSummary.count === 1 ? 'report' : 'reports'}`
                       : 'No recent reports'}
-                    actionLabel={user ? 'Report' : undefined}
-                    onPress={user ? openTrailFieldReportComposer : undefined}
+                    actionLabel="Report"
+                    onPress={openTrailFieldReportComposer}
                   />
                   <TrailSheetLinkRow
                     title="Preview route"

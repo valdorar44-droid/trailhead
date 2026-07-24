@@ -76,6 +76,14 @@ import {
   resolveUnitMode,
 } from '@/lib/routeBuilder';
 import { telemetryQaSurfaceIsAvailable } from '@/lib/telemetry/qa';
+import {
+  contestAwardPeriodLabel,
+  contestAwardPresentation,
+  PROFILE_SECTIONS,
+  supportThreadIdForContestAward,
+  type ProfileSectionId,
+} from '@/lib/profilePresentation';
+import { trailheadFonts } from '@/lib/typography';
 
 type AppleAuthModule = typeof import('expo-apple-authentication');
 WebBrowser.maybeCompleteAuthSession();
@@ -267,15 +275,6 @@ function supportAttachmentContentType(mimeType: string | null | undefined, name:
   if (extension === 'heif') return 'image/heif';
   return null;
 }
-
-const PROFILE_SECTIONS = [
-  { id: 'account', label: 'Account', icon: 'person-circle-outline' },
-  { id: 'trips', label: 'Trips & Saved', icon: 'albums-outline' },
-  { id: 'rig', label: 'Rig', icon: 'car-sport-outline' },
-  { id: 'settings', label: 'Settings', icon: 'settings-outline' },
-] as const;
-
-type ProfileSectionId = typeof PROFILE_SECTIONS[number]['id'];
 
 export default function ProfileScreen() {
   const C = useTheme();
@@ -721,6 +720,7 @@ export default function ProfileScreen() {
 
   useEffect(() => {
     if (!user || params.support !== '1') return;
+    setProfileSection('support');
     const threadIdRaw = Array.isArray(params.support_thread_id) ? params.support_thread_id[0] : params.support_thread_id;
     const threadId = threadIdRaw ? parseInt(String(threadIdRaw), 10) : NaN;
     openSupportInbox(Number.isFinite(threadId) ? threadId : null).catch(() => {});
@@ -728,7 +728,8 @@ export default function ProfileScreen() {
 
   useEffect(() => {
     if (!user || params.prizes !== '1') return;
-    setShowContest(true);
+    setProfileSection('community');
+    void openContest();
   }, [params.prizes, user?.id]);
 
   const selectedSupportThread = supportThreads.find(thread => thread.id === supportSelectedThreadId) ?? null;
@@ -1054,14 +1055,43 @@ export default function ProfileScreen() {
     const requestAccountId = user?.id;
     setShowContest(true);
     setContestLoading(true);
+    const [contestResult, contributionsResult] = await Promise.allSettled([
+      api.getContestStatus(),
+      contributions ? Promise.resolve(contributions) : api.getMyContributions(),
+    ]);
+    if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
+    if (contestResult.status === 'fulfilled') setContest(contestResult.value);
+    else Alert.alert(
+      'Contest unavailable',
+      (contestResult.reason as any)?.message ?? 'Could not load contest standings.',
+    );
+    if (contributionsResult.status === 'fulfilled') setContributions(contributionsResult.value);
+    setContestLoading(false);
+  }
+
+  async function openPrizeMessage(awardId: number) {
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = user?.id;
+    setSupportLoading(true);
     try {
-      const nextContest = await api.getContestStatus();
+      const inbox = await api.getSupportInbox();
       if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
-      setContest(nextContest);
-    } catch (e: any) {
-      Alert.alert('Contest unavailable', e?.message ?? 'Could not load contest standings.');
+      setSupportThreads(inbox.threads || []);
+      setSupportUnreadCount(inbox.unread_count || 0);
+      const threadId = supportThreadIdForContestAward(inbox.threads || [], awardId);
+      if (!threadId) {
+        Alert.alert('Prize message pending', 'Trailhead will send a private message when payout coordination is ready.');
+        return;
+      }
+      setShowContest(false);
+      setProfileSection('support');
+      await openSupportInbox(threadId);
+    } catch (error: any) {
+      if (accountRequestIsCurrent(requestEpoch, requestAccountId)) {
+        Alert.alert('Inbox unavailable', error?.message ?? 'Could not open the prize message.');
+      }
     } finally {
-      if (accountRequestIsCurrent(requestEpoch, requestAccountId)) setContestLoading(false);
+      if (accountRequestIsCurrent(requestEpoch, requestAccountId)) setSupportLoading(false);
     }
   }
 
@@ -2136,7 +2166,7 @@ export default function ProfileScreen() {
 
   return (
     <SafeAreaView style={s.container}>
-      <ScrollView contentContainerStyle={s.scroll}>
+      <ScrollView contentContainerStyle={s.scroll} testID="profile.screen">
 
         {/* Profile */}
         <TourTarget id="profile.main">
@@ -2181,8 +2211,11 @@ export default function ProfileScreen() {
                 key={section.id}
                 style={[s.profileSectionChip, active && s.profileSectionChipActive]}
                 onPress={() => setProfileSection(section.id)}
+                testID={`profile.section.${section.id}`}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: active }}
               >
-                <Ionicons name={section.icon} size={15} color={active ? '#fff' : C.text3} />
+                <Ionicons name={section.icon as keyof typeof Ionicons.glyphMap} size={15} color={active ? '#fff' : C.text3} />
                 <Text style={[s.profileSectionChipText, active && s.profileSectionChipTextActive]}>{section.label}</Text>
               </TouchableOpacity>
             );
@@ -2192,24 +2225,24 @@ export default function ProfileScreen() {
         {(() => {
           const actions = profileSection === 'account'
             ? [
-                { icon: 'compass', label: 'PLAN TRIP', color: C.orange, onPress: () => router.push({ pathname: '/(tabs)/route-builder', params: { intent: 'new', request: String(Date.now()) } } as any) },
-                { icon: 'mail-outline', label: 'INBOX', color: '#3b82f6', onPress: () => openSupportInbox() },
-                { icon: 'help-buoy-outline', label: 'CONTACT', color: '#3b82f6', onPress: () => contactSupport('Trailhead question') },
-                { icon: 'people', label: 'REFER', color: C.orange, onPress: shareReferral },
+                { id: 'plan', icon: 'compass', label: 'Plan trip', color: C.orange, onPress: () => router.push({ pathname: '/(tabs)/route-builder', params: { intent: 'new', request: String(Date.now()) } } as any) },
+                { id: 'refer', icon: 'people', label: 'Refer', color: C.orange, onPress: shareReferral },
+                { id: 'credits', icon: 'wallet-outline', label: 'Credits', color: C.orange, onPress: loadHistory },
               ]
             : profileSection === 'trips'
               ? [
-                  { icon: 'compass', label: 'PLAN TRIP', color: C.orange, onPress: () => router.push({ pathname: '/(tabs)/route-builder', params: { intent: 'new', request: String(Date.now()) } } as any) },
-                  { icon: 'map-outline', label: 'OPEN MAP', color: C.orange, onPress: () => router.push('/(tabs)/map') },
-                  { icon: 'cloud-download-outline', label: 'OFFLINE', color: C.orange, onPress: openOfflineMapsManager },
-                  { icon: 'ticket-outline', label: 'TOURS', color: '#0f766e', onPress: () => router.push('/(tabs)/guide?view=explore' as any) },
-                  ...(upcomingBookedTour ? [{ icon: 'calendar-outline', label: 'CALENDAR', color: '#3b82f6', onPress: () => addBookedTourToCalendar(upcomingBookedTour) }] : []),
+                  { id: 'plan', icon: 'compass', label: 'Plan trip', color: C.orange, onPress: () => router.push({ pathname: '/(tabs)/route-builder', params: { intent: 'new', request: String(Date.now()) } } as any) },
+                  { id: 'map', icon: 'map-outline', label: 'Open map', color: C.orange, onPress: () => router.push('/(tabs)/map') },
+                  { id: 'offline', icon: 'cloud-download-outline', label: 'Offline', color: C.orange, onPress: openOfflineMapsManager },
+                  { id: 'tours', icon: 'ticket-outline', label: 'Tours', color: C.orange, onPress: () => router.push('/(tabs)/guide?view=explore' as any) },
+                  ...(upcomingBookedTour ? [{ id: 'calendar', icon: 'calendar-outline', label: 'Calendar', color: C.orange, onPress: () => addBookedTourToCalendar(upcomingBookedTour) }] : []),
                 ]
             : profileSection === 'rig'
               ? [
                   {
+                    id: 'rig',
                     icon: 'car-sport-outline',
-                    label: editingRig ? 'SAVE RIG' : rigProfile ? 'EDIT RIG' : 'ADD RIG',
+                    label: editingRig ? 'Save rig' : rigProfile ? 'Edit rig' : 'Add rig',
                     color: C.orange,
                     onPress: () => {
                       if (editingRig) saveRig();
@@ -2220,16 +2253,28 @@ export default function ProfileScreen() {
                       }
                     },
                   },
-                  { icon: 'checkmark-circle', label: 'TRIP PREP', color: C.orange, onPress: () => setShowChecklist(true) },
+                  { id: 'trip-prep', icon: 'checkmark-circle', label: 'Trip prep', color: C.orange, onPress: () => setShowChecklist(true) },
                 ]
-              : [
-                        { icon: 'options-outline', label: 'TRIP SETUP', color: C.orange, onPress: startWelcomeSetup },
-                        { icon: 'trail-sign-outline', label: 'WALKTHROUGH', color: C.orange, onPress: startWelcomePrompt },
-                        { icon: 'mic-outline', label: 'TRIP AUDIO', color: '#3b82f6', onPress: () => router.push('/(tabs)/guide?view=narrations' as any) },
-                        { icon: 'partly-sunny-outline', label: 'WEATHER', color: '#0ea5e9', onPress: () => router.push('/(tabs)/guide?view=weather' as any) },
-                        { icon: 'alert-circle-outline', label: 'REPORT', color: C.red, onPress: () => setShowBugModal(true) },
-                        ...(user?.is_admin ? [{ icon: 'refresh-circle-outline', label: adminClearingCampCache ? 'CLEARING' : 'CAMP CACHE', color: C.yellow, onPress: clearCampCacheAdmin }] : []),
-                      ];
+              : profileSection === 'community'
+                ? [
+                    { id: 'contributions', icon: 'ribbon-outline', label: 'Contributions', color: C.orange, onPress: openContributions },
+                    { id: 'prizes', icon: 'trophy-outline', label: 'Prizes', color: C.orange, onPress: openContest },
+                    { id: 'reports', icon: 'alert-circle-outline', label: 'Reports', color: C.orange, onPress: () => router.push('/(tabs)/report') },
+                  ]
+                : profileSection === 'support'
+                  ? [
+                      { id: 'inbox', icon: 'mail-outline', label: 'Messages', color: C.orange, onPress: () => openSupportInbox() },
+                      { id: 'new-message', icon: 'create-outline', label: 'New message', color: C.orange, onPress: () => { setSupportSelectedThreadId(null); setSupportDraft(''); void openSupportInbox(); } },
+                      { id: 'report-problem', icon: 'alert-circle-outline', label: 'Report issue', color: C.red, onPress: () => setShowBugModal(true) },
+                      { id: 'email', icon: 'at-outline', label: 'Email', color: C.orange, onPress: () => contactSupport('Trailhead question') },
+                    ]
+                  : [
+                      { id: 'trip-setup', icon: 'options-outline', label: 'Trip setup', color: C.orange, onPress: startWelcomeSetup },
+                      { id: 'walkthrough', icon: 'trail-sign-outline', label: 'Walkthrough', color: C.orange, onPress: startWelcomePrompt },
+                      { id: 'trip-audio', icon: 'mic-outline', label: 'Trip audio', color: C.orange, onPress: () => router.push('/(tabs)/guide?view=narrations' as any) },
+                      { id: 'weather', icon: 'partly-sunny-outline', label: 'Weather', color: C.orange, onPress: () => router.push('/(tabs)/guide?view=weather' as any) },
+                      ...(user?.is_admin ? [{ id: 'camp-cache', icon: 'refresh-circle-outline', label: adminClearingCampCache ? 'Clearing' : 'Camp cache', color: C.orange, onPress: clearCampCacheAdmin }] : []),
+                    ];
           return (
             <ScrollView
               horizontal
@@ -2237,8 +2282,8 @@ export default function ProfileScreen() {
               style={s.quickActionsRow}
               contentContainerStyle={s.quickActionsContent}
             >
-              {actions.map(({ icon, label, color, onPress }) => (
-                <TouchableOpacity key={label} style={s.quickAction} onPress={onPress}>
+              {actions.map(({ id, icon, label, color, onPress }) => (
+                <TouchableOpacity key={id} style={s.quickAction} onPress={onPress} testID={`profile.quick.${id}`}>
                   <View style={[s.quickActionIcon, { borderColor: color + '44', backgroundColor: color + '18' }]}>
                     <Ionicons name={icon as any} size={22} color={color} />
                   </View>
@@ -2328,15 +2373,20 @@ export default function ProfileScreen() {
           </>
         )}
 
-        {profileSection === 'account' && (
-        <TouchableOpacity style={s.supportCard} onPress={() => openSupportInbox()} activeOpacity={0.9}>
+        {profileSection === 'support' && (
+        <TouchableOpacity
+          style={s.supportCard}
+          onPress={() => openSupportInbox()}
+          activeOpacity={0.9}
+          testID="profile.support.inbox"
+        >
           <View style={s.supportCardTop}>
             <View style={s.supportCardIcon}>
               <Ionicons name="notifications-outline" size={18} color={C.orange} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={s.supportCardKicker}>INBOX</Text>
-              <Text style={s.supportCardTitle}>Support & Trailhead</Text>
+              <Text style={s.supportCardTitle}>Messages</Text>
             </View>
             {supportUnreadCount > 0 ? (
               <View style={s.supportUnreadBadge}>
@@ -2347,7 +2397,7 @@ export default function ProfileScreen() {
           <Text style={s.supportCardBody}>
             {supportThreads[0]?.last_message_body
               ? supportThreads[0].last_message_body
-              : 'Replies, contest updates, and account messages appear here.'}
+              : 'No messages yet.'}
           </Text>
           <View style={s.supportMetaRow}>
             <Text style={s.supportMetaText}>
@@ -2775,7 +2825,7 @@ export default function ProfileScreen() {
 
         {/* Plan + Credits */}
         {profileSection === 'account' && (
-        <View style={s.creditsCard}>
+        <View style={s.creditsCard} testID="profile.account.membership">
           <View style={s.planSignupHeader}>
             <View style={[s.planSignupIcon, hasPlan && s.planSignupIconActive]}>
               <Ionicons name={hasPlan ? 'shield-checkmark' : 'compass-outline'} size={21} color={C.orange} />
@@ -2961,7 +3011,7 @@ export default function ProfileScreen() {
           <SafeAreaView style={s.contestModal} testID="profile.support.modal">
             <TrailheadTopBar
               title="INBOX"
-              subtitle="Support and Trailhead messages"
+              subtitle="Support and account messages"
               icon="mail-outline"
               style={s.contestModalHeader}
               right={(
@@ -3166,8 +3216,8 @@ export default function ProfileScreen() {
         </Modal>
 
         {/* Bug Report */}
-        {profileSection === 'settings' && (
-        <TouchableOpacity style={s.bugCard} onPress={() => setShowBugModal(true)}>
+        {profileSection === 'support' && (
+        <TouchableOpacity style={s.bugCard} onPress={() => setShowBugModal(true)} testID="profile.support.reportProblem">
           <View style={s.bugCardLeft}>
             <Ionicons name="alert-circle-outline" size={20} color={C.red} />
             <View style={{ flex: 1 }}>
@@ -3231,7 +3281,7 @@ export default function ProfileScreen() {
         </Modal>
 
         <Modal visible={showContributions} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowContributions(false)}>
-          <SafeAreaView style={s.contestModal}>
+          <SafeAreaView style={s.contestModal} testID="profile.contributions.modal">
             <TrailheadTopBar
               title="PROFILE"
               subtitle="Contributions"
@@ -3340,14 +3390,14 @@ export default function ProfileScreen() {
         </Modal>
 
         <Modal visible={showContest} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowContest(false)}>
-          <SafeAreaView style={s.contestModal}>
+          <SafeAreaView style={s.contestModal} testID="profile.prizes.modal">
             <TrailheadTopBar
               title="TRAILHEAD"
-              subtitle="Contributor Contest"
+              subtitle="Contributor prizes"
               icon="trophy-outline"
               style={s.contestModalHeader}
               right={(
-                <TouchableOpacity style={s.contestClose} onPress={() => setShowContest(false)}>
+                <TouchableOpacity style={s.contestClose} onPress={() => setShowContest(false)} testID="profile.prizes.close">
                   <Ionicons name="close" size={20} color={C.text} />
                 </TouchableOpacity>
               )}
@@ -3405,10 +3455,45 @@ export default function ProfileScreen() {
                     style={[s.contestEntryBtn, contest?.drawing_entered && s.contestEntryBtnDone]}
                     onPress={enterContestDrawing}
                     disabled={contestEntering || contest?.drawing_entered}
+                    testID="profile.prizes.enter"
                   >
                     <Text style={s.contestEntryBtnText}>{contestEntering ? 'SAVING' : contest?.drawing_entered ? 'ENTERED' : 'ENTER FREE'}</Text>
                   </TouchableOpacity>
                 </TrailheadCard>
+
+                {!!contributions?.awards?.length && (
+                  <View testID="profile.prizes.history">
+                    <TrailheadCard style={s.contestBoardCard}>
+                      <Text style={s.sectionLabel}>YOUR PRIZES</Text>
+                      {contributions.awards.map(award => {
+                        const status = contestAwardPresentation(award.status);
+                        const period = contestAwardPeriodLabel(award.period_month, award.period_year);
+                        return (
+                          <View key={award.id} style={s.prizeStatusRow} testID={`profile.prizes.award.${award.id}`}>
+                            <View style={s.prizeStatusCopy}>
+                              <Text style={s.prizeStatusTitle}>{award.prize_label}</Text>
+                              {!!period && <Text style={s.prizeStatusPeriod}>{period}</Text>}
+                              <Text style={s.prizeStatusLabel}>{status.label}</Text>
+                              <Text style={s.prizeStatusDetail}>{status.detail}</Text>
+                            </View>
+                            {status.canOpenMessage ? (
+                              <TouchableOpacity
+                                style={s.prizeMessageButton}
+                                onPress={() => void openPrizeMessage(award.id)}
+                                testID={`profile.prizes.message.${award.id}`}
+                                accessibilityRole="button"
+                                accessibilityLabel={`Open private prize message for ${award.prize_label}`}
+                              >
+                                <Ionicons name="mail-outline" size={17} color={C.orange} />
+                                <Text style={s.prizeMessageButtonText}>Message</Text>
+                              </TouchableOpacity>
+                            ) : null}
+                          </View>
+                        );
+                      })}
+                    </TrailheadCard>
+                  </View>
+                )}
 
                 <TrailheadCard style={s.contestBoardCard}>
                   <Text style={s.sectionLabel}>MONTHLY LEADERS</Text>
@@ -3453,16 +3538,21 @@ export default function ProfileScreen() {
         </Modal>
 
         {/* Contributions */}
-        {profileSection === 'account' && (
-        <TouchableOpacity style={s.contributionCard} onPress={openContributions} activeOpacity={0.9}>
+        {profileSection === 'community' && (
+        <TouchableOpacity
+          style={s.contributionCard}
+          onPress={openContributions}
+          activeOpacity={0.9}
+          testID="profile.community.contributions"
+        >
           <View style={s.contributionGlow} />
           <View style={s.contestHeader}>
             <View style={s.contributionIcon}>
-              <Ionicons name="ribbon-outline" size={20} color="#7dd3fc" />
+              <Ionicons name="ribbon-outline" size={20} color={C.orange} />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={s.contributionKicker}>CONTRIBUTIONS</Text>
-              <Text style={s.contestTitle}>Badges, streaks, and public profile.</Text>
+              <Text style={s.contestTitle}>Your field contributions</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={C.text3} />
           </View>
@@ -3484,16 +3574,21 @@ export default function ProfileScreen() {
         )}
 
         {/* Contest */}
-        {profileSection === 'account' && (
-        <TouchableOpacity style={s.contestCard} onPress={openContest} activeOpacity={0.9}>
+        {profileSection === 'community' && (
+        <TouchableOpacity
+          style={s.contestCard}
+          onPress={openContest}
+          activeOpacity={0.9}
+          testID="profile.community.prizes"
+        >
           <View style={s.contestGlow} />
           <View style={s.contestHeader}>
             <View style={s.contestIcon}>
-              <Ionicons name="trophy-outline" size={20} color="#f8d77a" />
+              <Ionicons name="trophy-outline" size={20} color={C.orange} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={s.contestKicker}>CONTRIBUTOR CONTEST</Text>
-              <Text style={s.contestTitle}>Earn points. Win Trailhead prizes.</Text>
+              <Text style={s.contestKicker}>TRAILHEAD PRIZES</Text>
+              <Text style={s.contestTitle}>Contributor prizes</Text>
             </View>
             <Ionicons name="chevron-forward" size={18} color={C.text3} />
           </View>
@@ -3517,7 +3612,7 @@ export default function ProfileScreen() {
 
         {/* Referral */}
         {profileSection === 'account' && (
-        <View style={s.referralCard}>
+        <View style={s.referralCard} testID="profile.account.referral">
           <View style={s.referralHeader}>
             <Ionicons name="people-outline" size={18} color={C.orange} />
             <Text style={s.referralTitle}>Refer Friends</Text>
@@ -3528,7 +3623,7 @@ export default function ProfileScreen() {
           <View style={s.codeBox}>
             <Text style={s.codeText}>{user?.referral_code ?? 'Generating...'}</Text>
           </View>
-          <TouchableOpacity style={s.shareBtn} onPress={shareReferral}>
+          <TouchableOpacity style={s.shareBtn} onPress={shareReferral} testID="profile.account.referral.share">
             <Ionicons name="share-outline" size={16} color="#fff" />
             <Text style={s.shareBtnText}>SHARE REFERRAL CODE</Text>
           </TouchableOpacity>
@@ -3566,6 +3661,7 @@ export default function ProfileScreen() {
           style={[s.deleteAccountBtn, accountLifecycleBusy && s.actionDisabled]}
           onPress={confirmAccountDeletion}
           disabled={accountLifecycleBusy}
+          testID="profile.settings.deleteAccount"
         >
           {accountLifecycleBusy
             ? <ActivityIndicator size="small" color="#ef4444" />
@@ -3720,10 +3816,16 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   avatarText: { color: C.text, fontSize: 20, fontWeight: '800' },
   profileInfo: { flex: 1 },
-  profileName: { color: C.text, fontSize: 17, lineHeight: 22, fontWeight: '800', letterSpacing: 0 },
+  profileName: {
+    color: C.text,
+    fontSize: 21,
+    lineHeight: 23,
+    fontFamily: trailheadFonts.displayBold,
+    letterSpacing: 0,
+  },
   profileEmail: { color: C.text3, fontSize: 12, marginTop: 1 },
   streakText: { color: C.orange, fontSize: 11, fontFamily: mono, marginTop: 4 },
-  logoutBtn: { padding: 6 },
+  logoutBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   actionDisabled: { opacity: 0.55 },
   deleteAccountBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
@@ -3745,7 +3847,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   profileSectionNav: { marginHorizontal: -14 },
   profileSectionNavContent: { paddingHorizontal: 14, gap: 8 },
   profileSectionChip: {
-    height: 36,
+    minHeight: Platform.OS === 'android' ? 48 : 44,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
@@ -3790,7 +3892,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     width: 50, height: 50, borderRadius: 16,
     borderWidth: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: C.s2,
   },
-  quickActionLabel: { color: C.text3, fontSize: 8.5, fontFamily: mono, letterSpacing: 0, textAlign: 'center' },
+  quickActionLabel: { color: C.text2, fontSize: 11, lineHeight: 14, fontWeight: '700', letterSpacing: 0, textAlign: 'center' },
   bookedScreen: { gap: 12 },
   sectionHeaderCompact: { gap: 2, marginTop: 2 },
   sectionEyebrow: { color: C.orange, fontSize: 9, lineHeight: 12, fontFamily: mono, fontWeight: '900', letterSpacing: 0 },
@@ -3877,7 +3979,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   supportCardTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   supportCardIcon: { width: 38, height: 38, borderRadius: 14, backgroundColor: C.orangeGlow, borderWidth: 1, borderColor: C.orange + '44', alignItems: 'center', justifyContent: 'center' },
   supportCardKicker: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.9 },
-  supportCardTitle: { color: C.text, fontSize: 16, fontWeight: '900', marginTop: 2 },
+  supportCardTitle: { color: C.text, fontSize: 20, lineHeight: 22, fontFamily: trailheadFonts.displayBold, marginTop: 2 },
   supportCardBody: { color: C.text2, fontSize: 12.5, lineHeight: 18 },
   supportMetaRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   supportMetaText: { color: C.text3, fontSize: 11, fontFamily: mono },
@@ -3926,7 +4028,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   contributionHero: { backgroundColor: C.s2, borderRadius: 20, borderWidth: 1, borderColor: C.border, padding: 18, gap: 12, alignItems: 'center' },
   contributionAvatar: { width: 76, height: 76, borderRadius: 26, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#ffffff44' },
   contributionAvatarText: { color: '#fff', fontSize: 32, fontWeight: '900' },
-  contributionName: { color: C.text, fontSize: 25, fontWeight: '900', letterSpacing: 0 },
+  contributionName: { color: C.text, fontSize: 29, lineHeight: 31, fontFamily: trailheadFonts.displayBold, letterSpacing: 0 },
   contributionTitle: { color: C.orange, fontSize: 12, fontFamily: mono, fontWeight: '900' },
   contributionProgress: { width: '100%', height: 9, borderRadius: 999, backgroundColor: C.s3, borderWidth: 1, borderColor: C.border, overflow: 'hidden' },
   contributionProgressFill: { height: '100%', borderRadius: 999, backgroundColor: C.orange },
@@ -3946,7 +4048,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   contestHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   contestIcon: { width: 42, height: 42, borderRadius: 12, backgroundColor: C.orangeGlow, borderWidth: 1, borderColor: C.orange + '44', alignItems: 'center', justifyContent: 'center' },
   contestKicker: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
-  contestTitle: { color: C.text, fontSize: 18, fontWeight: '900', marginTop: 3, letterSpacing: 0 },
+  contestTitle: { color: C.text, fontSize: 22, lineHeight: 24, fontFamily: trailheadFonts.displayBold, marginTop: 3, letterSpacing: 0 },
   contestPrizeRow: { flexDirection: 'row', gap: 8 },
   contestPrize: { flex: 1, borderRadius: 16, backgroundColor: C.s3, borderWidth: 1, borderColor: C.border, padding: 10, minHeight: 76, justifyContent: 'center' },
   contestPrizeAmount: { color: C.text, fontSize: 19, fontFamily: mono, fontWeight: '900' },
@@ -3954,7 +4056,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   contestFinePrint: { color: C.text3, fontSize: 10.5, lineHeight: 15 },
   contestModal: { flex: 1, backgroundColor: C.bg },
   contestModalHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 16, borderBottomWidth: 1, borderBottomColor: C.border, backgroundColor: C.s2 },
-  contestClose: { width: 38, height: 38, borderRadius: 14, backgroundColor: C.s3, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center' },
+  contestClose: { width: 44, height: 44, borderRadius: 14, backgroundColor: C.s3, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center' },
   contestModalKicker: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 1.2 },
   contestModalTitle: { color: C.text, fontSize: 22, fontWeight: '900', letterSpacing: 0 },
   betaBadge: { borderRadius: 999, borderWidth: 1, borderColor: C.orange + '55', backgroundColor: C.orangeGlow, paddingHorizontal: 10, paddingVertical: 5 },
@@ -3962,7 +4064,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   contestScroll: { padding: 16, gap: 14, paddingBottom: 40 },
   contestLoading: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
   contestHero: { backgroundColor: C.s2, borderRadius: 26, borderWidth: 1, borderColor: C.border, padding: 18, gap: 14 },
-  contestHeroTitle: { color: C.text, fontSize: 27, lineHeight: 31, fontWeight: '900', letterSpacing: 0 },
+  contestHeroTitle: { color: C.text, fontSize: 31, lineHeight: 33, fontFamily: trailheadFonts.displayBold, letterSpacing: 0 },
   contestHeroText: { color: C.text2, fontSize: 14, lineHeight: 21 },
   contestHeroStats: { flexDirection: 'row', gap: 8 },
   contestHeroStat: { flex: 1, borderRadius: 16, backgroundColor: C.s3, borderWidth: 1, borderColor: C.border, padding: 10, alignItems: 'center' },
@@ -3970,14 +4072,14 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   contestHeroLabel: { color: C.text3, fontSize: 8, fontFamily: mono, marginTop: 4, textAlign: 'center' },
   contestPrizeGrid: { gap: 10 },
   contestPrizeCard: { backgroundColor: C.s2, borderRadius: 20, borderWidth: 1, borderColor: C.border, padding: 15 },
-  contestPrizeCardAmount: { color: '#d4af37', fontSize: 28, fontFamily: mono, fontWeight: '900' },
+  contestPrizeCardAmount: { color: C.orange, fontSize: 28, fontFamily: trailheadFonts.displayBold },
   contestPrizeCardTitle: { color: C.text, fontSize: 15, fontWeight: '900', marginTop: 3 },
   contestPrizeCardDesc: { color: C.text3, fontSize: 12.5, lineHeight: 18, marginTop: 5 },
   contestEntryCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.s2, borderRadius: 20, borderWidth: 1, borderColor: '#d4af3744', padding: 14 },
   contestEntryTitle: { color: C.text, fontSize: 15, fontWeight: '900' },
   contestEntryText: { color: C.text3, fontSize: 12, lineHeight: 17, marginTop: 3 },
   contestEntryBtn: { borderRadius: 14, backgroundColor: C.orange, paddingHorizontal: 14, paddingVertical: 11, minWidth: 98, alignItems: 'center' },
-  contestEntryBtnDone: { backgroundColor: C.green },
+  contestEntryBtnDone: { backgroundColor: C.orange2 },
   contestEntryBtnText: { color: '#fff', fontSize: 10, fontFamily: mono, fontWeight: '900' },
   contestBoardCard: { backgroundColor: C.s2, borderRadius: 20, borderWidth: 1, borderColor: C.border, padding: 14 },
   contestLeaderRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: C.border },
@@ -3985,6 +4087,34 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   contestLeaderName: { color: C.text, flex: 1, fontSize: 14, fontWeight: '700' },
   contestLeaderPoints: { color: C.text, fontSize: 14, fontFamily: mono, fontWeight: '900' },
   contestMuted: { color: C.text3, fontSize: 12, lineHeight: 18 },
+  prizeStatusRow: {
+    minHeight: 94,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: C.border,
+  },
+  prizeStatusCopy: { flex: 1, minWidth: 0 },
+  prizeStatusTitle: { color: C.text, fontSize: 16, lineHeight: 20, fontWeight: '900' },
+  prizeStatusPeriod: { color: C.text3, fontSize: 11, lineHeight: 15, marginTop: 2 },
+  prizeStatusLabel: { color: C.orange, fontSize: 12, lineHeight: 16, fontWeight: '900', marginTop: 7 },
+  prizeStatusDetail: { color: C.text3, fontSize: 11.5, lineHeight: 16, marginTop: 2 },
+  prizeMessageButton: {
+    minHeight: 44,
+    minWidth: 88,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: C.orange + '55',
+    backgroundColor: C.orangeGlow,
+    paddingHorizontal: 11,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  prizeMessageButtonText: { color: C.orange, fontSize: 12, fontWeight: '900' },
   contestRulesCard: { backgroundColor: C.s2, borderRadius: 20, borderWidth: 1, borderColor: C.border, padding: 14, gap: 8 },
   contestRulesTitle: { color: C.text, fontSize: 16, fontWeight: '900' },
   contestRuleLine: { color: C.text3, fontSize: 12, lineHeight: 18 },

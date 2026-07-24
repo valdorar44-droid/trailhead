@@ -10,6 +10,7 @@ export type MapExperienceMode =
 export type MapExperienceSignals = {
   navigationActive?: boolean;
   originalsActive?: boolean;
+  routeReviewActive?: boolean;
   preview3dActive?: boolean;
   traceActive?: boolean;
   routeBuildStatus?: 'running' | 'complete' | 'failed' | 'cancelled' | null;
@@ -22,10 +23,11 @@ export type MapExperienceSignals = {
 export function resolveMapExperienceMode(signals: MapExperienceSignals): MapExperienceMode {
   if (signals.navigationActive) return 'navigation';
   if (signals.originalsActive) return 'originals';
+  if (signals.routeReviewActive) return 'route_review';
   if (signals.preview3dActive) return 'preview3d';
-  if (signals.traceActive) return 'trace';
   if (signals.routeBuildStatus === 'running' || signals.routeBuildStatus === 'failed') return 'route_build';
   if (signals.routeBuildStatus === 'complete') return 'route_review';
+  if (signals.traceActive) return 'trace';
   return 'browse';
 }
 

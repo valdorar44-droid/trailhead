@@ -40,6 +40,7 @@ import RouteAlertsPanel from '@/components/map/RouteAlertsPanel';
 import RouteBuildProgressSheet from '@/components/map/RouteBuildProgressSheet';
 import RouteScoutPanel, { type RouteScoutDayActionItem, type RouteScoutDayActionKind, type RouteScoutDayActionState } from '@/components/map/RouteScoutPanel';
 import RouteActivityOfferSheet from '@/components/routeBuilder/RouteActivityOfferSheet';
+import PackingListSheet from '@/components/trip/PackingListSheet';
 import TripNotesSheet from '@/components/trips/TripNotesSheet';
 import TrailPreviewPlayer from '@/components/trails/TrailPreviewPlayer';
 import TourTarget from '@/components/TourTarget';
@@ -111,11 +112,26 @@ import {
 } from '@/lib/routeWeather';
 import {
   briefAvailabilityLabel,
+  briefEvidenceTimeLabel,
   briefEvidenceStatusLabel,
   briefRouteProgressLabel,
   createBriefAndBackupIdempotencyKey,
   exactSavedTripRevision,
 } from '@/lib/briefAndBackup';
+import {
+  dayDriveMinutes,
+  driveTimeLabel,
+  forecastDateLabel,
+  forecastIndexForTripDay,
+  tripDepartureDate,
+  tripRouteDurationSeconds,
+} from '@/lib/tripTimelinePresentation';
+import { mergePackingProgress } from '@/lib/tripPacking';
+import {
+  tripOverviewReturnState,
+  type TripOverviewReturnState,
+} from '@/lib/tripOverviewReturnState';
+import { trustedTripTimelinePhotoUrl } from '@/lib/tripTimelineMedia';
 import { routeUnitsParam } from '@/lib/routeBuilder/units';
 import { shouldPersistTripRoute, type RoutePersistenceScope } from '@/lib/routePersistencePolicy';
 import type { RouteBuildPreviewStop } from '@/lib/routeBuildSession';
@@ -203,6 +219,7 @@ import {
   createMapCameraOwnership,
   initialMapCameraClaimState,
   mapCameraOwnershipKey,
+  synchronizeMapCameraClaimOwnership,
 } from '@/lib/mapCameraOwnership';
 import {
   FIRE_OVERLAY_IDLE_STATUS,
@@ -1450,10 +1467,20 @@ function tripOverviewSummary(stats: { days: number; miles: number; camps: number
   ].filter(Boolean).join(' · ');
 }
 
-function tripTimelineMetaLabel(input: { legMiles: number; fuelCount: number; placeCount: number; stopCount: number; weatherLabel?: string }) {
+function tripTimelineMetaLabel(input: {
+  legMiles: number;
+  fuelCount: number;
+  placeCount: number;
+  stopCount: number;
+  driveLabel?: string;
+  forecastLabel?: string;
+  weatherLabel?: string;
+}) {
   return [
     `${Math.round(input.legMiles).toLocaleString()} mi`,
+    input.driveLabel,
     input.fuelCount ? `${input.fuelCount} fuel` : '',
+    input.forecastLabel,
     input.weatherLabel,
   ].filter(Boolean).join(' · ');
 }
@@ -1465,6 +1492,19 @@ function cleanTripTimelineSummary(value?: string | null) {
     .replace(/\bmanually built Trailhead route\b/gi, 'Trailhead route')
     .trim();
   return /^Drive day(?: with \d+ planned stops?)?\.?$/i.test(clean) ? '' : clean;
+}
+
+function tripTimelineLicensedPhoto(item?: Partial<CampsitePin> | null): string {
+  return mediaUrl(trustedTripTimelinePhotoUrl(item));
+}
+
+function tripOfflineReadinessLabel(value: unknown): string {
+  const normalized = String(value ?? '').trim().toLowerCase().replace(/[_-]+/g, ' ');
+  if (['ready', 'downloaded', 'available offline', 'verified'].includes(normalized)) return 'Ready';
+  if (['partial', 'partially downloaded', 'needs update', 'repair required'].includes(normalized)) {
+    return normalized.replace(/\b\w/g, character => character.toUpperCase());
+  }
+  return 'Not checked';
 }
 
 function cleanTripTimelineEventSource(value?: string | null) {
@@ -6458,6 +6498,9 @@ function MapScreen() {
   const [showPanel,   setShowPanel]    = useState(true);
   const [panelCollapsed, setPanelCollapsed] = useState(false);
   const [selectedDay, setSelectedDay]  = useState<number | null>(null);
+  const tripOverviewScrollRef = useRef<ScrollView | null>(null);
+  const tripOverviewScrollOffsetRef = useRef(0);
+  const tripOverviewReturnRef = useRef<TripOverviewReturnState | null>(null);
   const [routeAlerts, setRouteAlerts]  = useState<Report[]>([]);
   const [routeClosing, setRouteClosing] = useState(false);
   const [showAlerts,  setShowAlerts]   = useState(false);
@@ -7064,7 +7107,7 @@ function MapScreen() {
   const [packingList,   setPackingList]   = useState<PackingList | null>(null);
   const [showPacking,   setShowPacking]   = useState(false);
   const [loadingPacking,setLoadingPacking]= useState(false);
-  const [packingListSaved, setPackingListSaved] = useState(false);
+  const packingWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   // Cached route weather (loaded from FileSystem)
   const [cachedWeather, setCachedWeather] = useState<RouteWeatherResult | null>(null);
@@ -7410,7 +7453,6 @@ function MapScreen() {
       setBriefAndBackup(null);
       setPackingList(null);
       briefRequestRef.current = null;
-      setPackingListSaved(false);
       return;
     }
     let cancelled = false;
@@ -7419,7 +7461,6 @@ function MapScreen() {
     loadSavedTripAi<PackingList>(activeTrip, 'packing_list').then(saved => {
       if (cancelled) return;
       setPackingList(saved);
-      setPackingListSaved(!!saved);
     });
     return () => { cancelled = true; };
   }, [activeTrip?.trip_id, activeTrip?.version]);
@@ -7512,6 +7553,13 @@ function MapScreen() {
   const mapExperienceMode = resolveMapExperienceMode({
     navigationActive: navMode,
     originalsActive: originalsMapExperience.active,
+    routeReviewActive: Boolean(
+      activeTrip
+      && showPanel
+      && !panelCollapsed
+      && !routeBuildSession
+      && !mapMissionVisible
+    ),
     preview3dActive: mapMissionVisible,
     traceActive: trailTraceMode || trailPinCaptureMode,
     routeBuildStatus: routeBuildSession?.status ?? null,
@@ -7519,7 +7567,7 @@ function MapScreen() {
   const mapCameraExperienceKey = mapExperienceMode === 'originals'
     ? `originals:${originalsMapExperience.packId}:${originalsMapExperience.version}`
     : mapExperienceMode === 'route_build' || mapExperienceMode === 'route_review'
-      ? `route:${routeBuildSession?.requestId ?? 'pending'}:${mapExperienceMode}`
+      ? `route:${routeBuildSession?.requestId ?? `${activeTrip?.trip_id ?? 'pending'}:${activeTrip?.version ?? 0}`}:${mapExperienceMode}`
       : mapExperienceMode === 'navigation'
         ? `navigation:${activeTrip?.trip_id ?? navDest?.name ?? 'active'}`
         : mapExperienceMode === 'preview3d'
@@ -7531,6 +7579,12 @@ function MapScreen() {
     () => createMapCameraOwnership(mapExperienceMode, mapCameraExperienceKey),
     [mapCameraExperienceKey, mapExperienceMode],
   );
+  useEffect(() => {
+    mapCameraClaimStateRef.current = synchronizeMapCameraClaimOwnership(
+      mapCameraClaimStateRef.current,
+      mapCameraOwnership,
+    );
+  }, [mapCameraOwnership]);
   const routeBuildMapActive = mapModeOwnsRoutePreview(mapExperienceMode);
   const mapVisualWorkActive = mapVisualWorkShouldRun(
     screenActivity.isActive,
@@ -7569,6 +7623,10 @@ function MapScreen() {
       650,
     );
   }, [insets.top, originalsMapExperience.active, originalsMapExperience.routeCoords, windowHeight]);
+  const routeSessionCameraCoords = routeBuildSession?.routeCoords ?? [];
+  const routeReviewCameraCoords = routeSessionCameraCoords.length >= 2
+    ? routeSessionCameraCoords
+    : lastRouteCoords;
 
   const mapCameraClaim = useMemo(() => {
     if (!mapSurfaceReady || !useNativeMapSurface) return null;
@@ -7594,10 +7652,9 @@ function MapScreen() {
     }
     if (
       (mapCameraOwnership.owner === 'route_build' || mapCameraOwnership.owner === 'route_review')
-      && routeBuildSession
-      && routeBuildSession.routeCoords.length >= 2
+      && routeReviewCameraCoords.length >= 2
     ) {
-      const geometrySignature = routeGeometryContentSignature(routeBuildSession.routeCoords);
+      const geometrySignature = routeGeometryContentSignature(routeReviewCameraCoords);
       return {
         applicationKey: [
           mapCameraOwnershipKey(mapCameraOwnership),
@@ -7605,7 +7662,7 @@ function MapScreen() {
           mapStyleGeneration,
           geometrySignature,
         ].join(':'),
-        coords: routeBuildSession.routeCoords,
+        coords: routeReviewCameraCoords,
         padding: [96, 42, 260, 42] as [number, number, number, number],
         duration: 900,
       };
@@ -7619,6 +7676,7 @@ function MapScreen() {
     mapSurfaceReady,
     originalsMapExperience.active,
     originalsMapExperience.routeCoords,
+    routeReviewCameraCoords,
     routeBuildSession,
     useNativeMapSurface,
     windowHeight,
@@ -16188,6 +16246,13 @@ function MapScreen() {
 
   async function startMapMissionBrief(options: { source?: 'manual' | 'auto_scout' | 'trail_builder'; skipDirected?: boolean; routeName?: string; flyoverMode?: MapMissionFlyoverMode } = {}) {
     if (missionRunningRef.current || mapMissionVisible) return true;
+    if (options.source === 'trail_builder' && activeTrip) {
+      tripOverviewReturnRef.current = tripOverviewReturnState({
+        panelCollapsed,
+        selectedDay,
+        scrollOffset: tripOverviewScrollOffsetRef.current,
+      });
+    }
     const missionOperation = ++mapMissionOperationRef.current;
     const requestEpoch = accountStorage.epoch();
     const requestAccountId = useStore.getState().user?.id;
@@ -18216,7 +18281,6 @@ function MapScreen() {
       if (!requestIsCurrent()) return;
       if (saved) {
         setPackingList(saved);
-        setPackingListSaved(true);
         setShowPacking(true);
         return;
       }
@@ -18231,12 +18295,24 @@ function MapScreen() {
         states: requestTrip.plan.states,
       });
       if (!requestIsCurrent()) return;
-      setPackingList(list);
-      setPackingListSaved(true);
-      saveTripAi(requestTrip, 'packing_list', list, requestEpoch).catch(() => {});
+      const nextList = mergePackingProgress(packingList, list);
+      setPackingList(nextList);
+      packingWriteQueueRef.current = packingWriteQueueRef.current
+        .catch(() => {})
+        .then(() => saveTripAi(requestTrip, 'packing_list', nextList, requestEpoch));
       setShowPacking(true);
     } catch {}
     if (requestIsCurrent()) setLoadingPacking(false);
+  }
+
+  function updatePackingList(nextList: PackingList) {
+    if (!activeTrip) return;
+    const requestTrip = activeTrip;
+    const requestEpoch = accountStorage.epoch();
+    setPackingList(nextList);
+    packingWriteQueueRef.current = packingWriteQueueRef.current
+      .catch(() => {})
+      .then(() => saveTripAi(requestTrip, 'packing_list', nextList, requestEpoch));
   }
 
   function tripDayAnchors(day: number) {
@@ -20184,6 +20260,12 @@ function MapScreen() {
   );
   const tripOverviewDays = useMemo(() => {
     if (!activeTrip) return [];
+    const departureDate = tripDepartureDate(activeTrip);
+    const routeDurationSeconds = tripRouteDurationSeconds(activeTrip);
+    const tripMiles = Number(
+      activeTrip.plan.total_est_miles
+      ?? activeTrip.plan.daily_itinerary.reduce((sum, item) => sum + Number(item.est_miles ?? 0), 0),
+    );
     return activeTrip.plan.daily_itinerary.map((day, idx, arr) => {
       const dayWps = waypoints.filter(w => w.day === day.day);
       const prevDay = idx > 0 ? arr[idx - 1] : null;
@@ -20203,6 +20285,8 @@ function MapScreen() {
       const forecast = campWp
         ? routeWeatherForecastForWaypoint(cachedWeather, campWp)
         : null;
+      const legMiles = dayMileageFromWaypoints(waypoints, day.day);
+      const forecastIndex = forecastIndexForTripDay(forecast?.daily?.time, day.day, departureDate);
       return {
         day,
         waypoints: dayWps,
@@ -20215,7 +20299,14 @@ function MapScreen() {
         poiStops,
         timelineDay,
         forecast,
-        legMiles: dayMileageFromWaypoints(waypoints, day.day),
+        forecastIndex,
+        forecastDate: forecastDateLabel(forecast?.daily?.time?.[forecastIndex]),
+        legMiles,
+        driveMinutes: dayDriveMinutes({
+          dayMiles: legMiles,
+          tripMiles,
+          routeDurationSeconds,
+        }),
       };
     });
   }, [activeTrip, waypoints, cachedWeather]);
@@ -20237,6 +20328,32 @@ function MapScreen() {
     ));
     return missing?.day.day ?? null;
   }, [tripOverviewDays]);
+  const tripDepartureReadiness = useMemo(() => {
+    const rawOffline = (activeTrip?.timeline as any)?.offline_readiness
+      ?? (activeTrip?.plan?.timeline as any)?.offline_readiness;
+    return [
+      {
+        label: 'Route',
+        value: lastRouteCoords.length >= 2 ? 'Ready' : 'Not checked',
+        ready: lastRouteCoords.length >= 2,
+      },
+      {
+        label: 'Overnights',
+        value: firstMissingOvernightDay == null ? 'Ready' : `Day ${firstMissingOvernightDay} needed`,
+        ready: firstMissingOvernightDay == null,
+      },
+      {
+        label: 'Packing',
+        value: packingList ? 'Ready to review' : 'Not checked',
+        ready: Boolean(packingList),
+      },
+      {
+        label: 'Offline',
+        value: tripOfflineReadinessLabel(rawOffline),
+        ready: tripOfflineReadinessLabel(rawOffline) === 'Ready',
+      },
+    ];
+  }, [activeTrip?.trip_id, activeTrip?.version, firstMissingOvernightDay, lastRouteCoords.length, packingList]);
 
   function compactRouteForPlaces(maxPoints = 96): [number, number][] {
     return compactCoords(lastRouteCoords, maxPoints);
@@ -20851,35 +20968,23 @@ function MapScreen() {
     setPanelCollapsed(!expanded);
     Haptics.selectionAsync().catch(() => {});
   }, [activeTrip?.trip_id, navMode]);
-  const focusTripOverviewCamera = useCallback(() => {
-    if (!activeTrip || navMode) return;
-    const route = lastRouteCoordsRef.current.length >= 2 ? lastRouteCoordsRef.current : lastRouteCoords;
-    const extraPoints = [
-      ...(activeTrip?.campsites ?? []),
-      ...(activeTrip?.gas_stations ?? []),
-      ...(activeTrip?.route_pois ?? []),
-    ];
-    const camera = missionOverviewCamera(route, extraPoints);
-    if (camera) {
-      nativeMapRef.current?.flyToCamera?.(camera);
-      return;
-    }
-    const camp = activeTrip?.campsites?.find(item => Number.isFinite(Number(item.lat)) && Number.isFinite(Number(item.lng)));
-    if (camp) nativeMapRef.current?.flyTo(Number(camp.lat), Number(camp.lng), 10.5, camp.name);
-  }, [
-    activeTrip?.trip_id,
-    activeTrip?.version,
-    activeTrip?.campsites,
-    activeTrip?.gas_stations,
-    activeTrip?.route_pois,
-    lastRouteCoords,
-    navMode,
-  ]);
   const returnFromMissionToTripOverview = useCallback(() => {
+    const snapshot = tripOverviewReturnRef.current ?? tripOverviewReturnState({
+      panelCollapsed: false,
+      selectedDay,
+      scrollOffset: tripOverviewScrollOffsetRef.current,
+    });
     stopMapMissionBriefRef.current();
-    restoreTripOverview(true);
-    setTimeout(() => focusTripOverviewCamera(), 180);
-  }, [focusTripOverviewCamera, restoreTripOverview]);
+    restoreTripOverview(snapshot.expanded);
+    setSelectedDay(snapshot.selectedDay);
+    tripOverviewReturnRef.current = null;
+    requestAnimationFrame(() => {
+      tripOverviewScrollRef.current?.scrollTo({
+        y: snapshot.scrollOffset,
+        animated: false,
+      });
+    });
+  }, [restoreTripOverview, selectedDay]);
   const canOpenMapDrawer = !navMode && !waterFollowActive && !showSearch && !inlineSearchOpen && !mapSearchSession;
   const openMapDrawer = useCallback(() => {
     if (!canOpenMapDrawer) return;
@@ -24670,7 +24775,6 @@ function MapScreen() {
           onReviewTrip={() => {
             clearRouteBuildSession(routeBuildSession.requestId);
             restoreTripOverview(true);
-            requestAnimationFrame(() => focusTripOverviewCamera());
           }}
           onEditRoute={() => {
             clearRouteBuildSession(routeBuildSession.requestId);
@@ -28831,6 +28935,20 @@ function MapScreen() {
                 <Text style={s.readinessLabel}>ROUTE EVIDENCE</Text>
               </View>
               <Text style={s.briefSummary}>{briefAndBackup.note || 'Not checked'}</Text>
+              <View style={s.detailSection}>
+                <Text style={s.detailSectionTitle}>Before departure</Text>
+                {tripDepartureReadiness.map(item => (
+                  <View key={item.label} style={s.briefItem}>
+                    <Ionicons
+                      name={item.ready ? 'checkmark-circle-outline' : item.value === 'Not checked' ? 'ellipse-outline' : 'alert-circle-outline'}
+                      size={16}
+                      color={item.ready ? C.orange : item.value === 'Not checked' ? C.text3 : C.yellow}
+                    />
+                    <Text style={s.briefItemText}>{item.label}</Text>
+                    <Text style={s.savedAiMeta}>{item.value}</Text>
+                  </View>
+                ))}
+              </View>
               <View style={s.briefStats}>
                 <View style={s.briefStat}><Text style={s.briefStatusValue}>{briefEvidenceStatusLabel(briefAndBackup.checks.mobile_service)}</Text><Text style={s.briefStatLabel}>MOBILE SERVICE</Text></View>
                 <View style={s.briefStat}><Text style={s.briefStatusValue}>{briefEvidenceStatusLabel(briefAndBackup.checks.exits)}</Text><Text style={s.briefStatLabel}>EXITS</Text></View>
@@ -28851,6 +28969,9 @@ function MapScreen() {
                       <View style={{ flex: 1 }}>
                         <Text style={s.briefItemText}>{briefAvailabilityLabel(segment.availability)}</Text>
                         <Text style={s.savedAiMeta}>{briefRouteProgressLabel(segment.start_progress)}–{briefRouteProgressLabel(segment.end_progress)}{segment.source_label ? ` · ${segment.source_label}` : ''}</Text>
+                        {briefEvidenceTimeLabel(segment.observed_at, segment.updated_at) ? (
+                          <Text style={s.savedAiMeta}>{briefEvidenceTimeLabel(segment.observed_at, segment.updated_at)}</Text>
+                        ) : null}
                       </View>
                     </View>
                   ))}
@@ -28868,6 +28989,9 @@ function MapScreen() {
                       <View style={{ flex: 1 }}>
                         <Text style={s.briefItemText}>{exit.label || 'Exit reference'}</Text>
                         <Text style={s.savedAiMeta}>{briefAvailabilityLabel(exit.availability)} · {briefRouteProgressLabel(exit.route_progress)}{exit.source_label ? ` · ${exit.source_label}` : ''}</Text>
+                        {briefEvidenceTimeLabel(exit.observed_at, exit.updated_at) ? (
+                          <Text style={s.savedAiMeta}>{briefEvidenceTimeLabel(exit.observed_at, exit.updated_at)}</Text>
+                        ) : null}
                       </View>
                     </View>
                   ))}
@@ -28891,7 +29015,12 @@ function MapScreen() {
                 {briefAndBackup.sources.length > 0 ? briefAndBackup.sources.map((source, index) => (
                   <TouchableOpacity key={`${source.label}-${index}`} style={s.briefItem} disabled={!source.url} onPress={() => source.url && Linking.openURL(source.url)}>
                     <Ionicons name="document-text-outline" size={14} color={C.orange} />
-                    <Text style={s.briefItemText}>{source.label}</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={s.briefItemText}>{source.label}</Text>
+                      {briefEvidenceTimeLabel(source.observed_at, source.updated_at) ? (
+                        <Text style={s.savedAiMeta}>{briefEvidenceTimeLabel(source.observed_at, source.updated_at)}</Text>
+                      ) : null}
+                    </View>
                   </TouchableOpacity>
                 )) : <Text style={s.briefSummary}>Not checked</Text>}
               </View>
@@ -28901,53 +29030,14 @@ function MapScreen() {
       </Modal>
 
       {/* ── Packing List Modal ── */}
-      <Modal visible={showPacking} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowPacking(false)}>
-        <View style={s.detailModal}>
-          {packingList && (
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 20 }}>
-              <View style={s.detailHeader}>
-                <View style={{ flex: 1 }}>
-                  <Text style={s.detailName}>Packing List</Text>
-                  {packingListSaved ? <Text style={s.savedAiMeta}>SAVED TO THIS TRIP</Text> : null}
-                </View>
-                <TouchableOpacity style={s.detailClose} onPress={() => fetchPackingList(true)} disabled={loadingPacking}>
-                  {loadingPacking ? <ActivityIndicator size="small" color={C.orange} /> : <Ionicons name="refresh" size={18} color={C.orange} />}
-                </TouchableOpacity>
-                <TouchableOpacity style={s.detailClose} onPress={() => setShowPacking(false)}>
-                  <Ionicons name="close" size={22} color={C.text} />
-                </TouchableOpacity>
-              </View>
-              {([
-                { key: 'essentials',           label: 'Essentials',     icon: 'star-outline' },
-                { key: 'recovery_gear',        label: 'Recovery Gear',  icon: 'construct-outline' },
-                { key: 'water_food',           label: 'Water & Food',   icon: 'water-outline' },
-                { key: 'navigation',           label: 'Navigation',     icon: 'map-outline' },
-                { key: 'shelter',              label: 'Shelter',        icon: 'home-outline' },
-                { key: 'tools_spares',         label: 'Tools & Spares', icon: 'hardware-chip-outline' },
-                { key: 'optional_nice_to_have',label:'Nice to Have',    icon: 'sparkles-outline' },
-                { key: 'leave_at_home',        label: 'Leave at Home',  icon: 'ban-outline' },
-              ] as const).map(section => {
-                const items = (packingList as any)[section.key] as string[];
-                if (!items?.length) return null;
-                return (
-                  <View key={section.key} style={s.detailSection}>
-                    <View style={s.detailSectionTitleRow}>
-                      <Ionicons name={section.icon as any} size={14} color={C.orange} />
-                      <Text style={s.detailSectionTitleInline}>{section.label}</Text>
-                    </View>
-                    {items.map((item, i) => (
-                      <View key={i} style={s.briefItem}>
-                        <View style={s.packDot} />
-                        <Text style={s.briefItemText}>{item}</Text>
-                      </View>
-                    ))}
-                  </View>
-                );
-              })}
-            </ScrollView>
-          )}
-        </View>
-      </Modal>
+      <PackingListSheet
+        visible={showPacking}
+        list={packingList}
+        loading={loadingPacking}
+        onClose={() => setShowPacking(false)}
+        onRefresh={() => fetchPackingList(true)}
+        onChange={updatePackingList}
+      />
 
       {/* ── Layer Sheet ── */}
       <Modal
@@ -29672,20 +29762,21 @@ function MapScreen() {
             </View>
           </View>
           <ScrollView
+            ref={tripOverviewScrollRef}
             testID="map.trip-overview.scroll"
             style={s.tripPanelScroller}
             showsVerticalScrollIndicator={false}
             nestedScrollEnabled
+            scrollEventThrottle={16}
+            onScroll={event => {
+              tripOverviewScrollOffsetRef.current = event.nativeEvent.contentOffset.y;
+            }}
             contentContainerStyle={s.tripPanelScroll}
           >
             <View style={s.tripTimeline} testID="map.trip-overview.timeline">
-              {tripOverviewDays.map(({ day, previousCamp, first, last, camp, campWp, gasStops, poiStops, timelineDay, waypoints: dayWps, forecast, legMiles }) => {
+              {tripOverviewDays.map(({ day, previousCamp, first, last, camp, campWp, gasStops, poiStops, timelineDay, waypoints: dayWps, forecast, forecastIndex, forecastDate, legMiles, driveMinutes }) => {
                 const pin = camp as CampsitePin | null;
                 const forecastDay = forecast?.daily;
-                const forecastIndex = Math.min(
-                  Math.max(0, day.day - 1),
-                  Math.max(0, (forecastDay?.time?.length ?? 1) - 1),
-                );
                 const hi = forecastDay?.temperature_2m_max?.[forecastIndex];
                 const lo = forecastDay?.temperature_2m_min?.[forecastIndex];
                 const start = previousCamp ?? first;
@@ -29694,7 +29785,7 @@ function MapScreen() {
                 const isFinalDay = day.day === tripOverviewDays.length;
                 const hasOvernight = !!pin || !!campWp;
                 const complete = hasOvernight || isFinalDay;
-                const statusColor = timelineWarning ? C.yellow : complete ? C.green : C.orange;
+                const statusColor = timelineWarning ? C.yellow : C.orange;
                 const statusText = timelineWarning ? 'review' : complete ? (isFinalDay ? 'finish day' : 'overnight set') : 'overnight needed';
                 const stops = [
                   ...gasStops.map(stop => ({
@@ -29725,8 +29816,11 @@ function MapScreen() {
                   fuelCount: gasStops.length,
                   placeCount: visiblePlaceCount,
                   stopCount: dayWps.length,
+                  driveLabel: driveTimeLabel(driveMinutes),
+                  forecastLabel: forecastDate,
                   weatherLabel,
                 });
+                const timelinePhoto = tripTimelineLicensedPhoto(pin);
                 const startMeta = day.day === 1
                   ? ''
                   : start?.type === 'camp' || start?.type === 'motel'
@@ -29748,7 +29842,7 @@ function MapScreen() {
                   >
                     <View style={s.tripTimelineHead}>
                       <View style={s.tripTimelineRail}>
-                        <View style={[s.tripTimelineDotLarge, { borderColor: statusColor }, complete && { backgroundColor: C.green, borderColor: C.green }]} />
+                        <View style={[s.tripTimelineDotLarge, { borderColor: statusColor }, complete && { backgroundColor: C.orange, borderColor: C.orange }]} />
                         <View style={s.tripTimelineStemLarge} />
                       </View>
                       <View style={s.tripTimelineContent}>
@@ -29846,11 +29940,11 @@ function MapScreen() {
                             );
                           })()}
                           <View style={s.tripTimelineCamp}>
-                            {pin?.photo_url ? (
-                              <Image source={{ uri: pin.photo_url }} style={s.tripTimelineCampPhoto} resizeMode="cover" resizeMethod="resize" />
+                            {timelinePhoto ? (
+                              <Image source={{ uri: timelinePhoto }} style={s.tripTimelineCampPhoto} resizeMode="cover" resizeMethod="resize" />
                             ) : (
                               <View style={s.tripTimelineCampPlaceholder}>
-                                <Ionicons name={isFinalDay && !hasOvernight ? 'flag-outline' : 'bonfire-outline'} size={30} color={C.green} />
+                                <Ionicons name={isFinalDay && !hasOvernight ? 'flag-outline' : 'bonfire-outline'} size={30} color={C.orange} />
                               </View>
                             )}
                             <View style={s.tripTimelineCampBody}>
@@ -29916,7 +30010,7 @@ function MapScreen() {
                     const forecast = routeWeatherForecastForWaypoint(cachedWeather, wp);
                     if (!forecast?.daily) return null;
                     const { time, temperature_2m_max, temperature_2m_min, precipitation_sum, windspeed_10m_max, weathercode } = forecast.daily;
-                    const idx = Math.min(Math.max(0, wp.day - 1), Math.max(0, time.length - 1));
+                    const idx = forecastIndexForTripDay(time, wp.day, tripDepartureDate(activeTrip));
                     const hi   = temperature_2m_max?.[idx];
                     const lo   = temperature_2m_min?.[idx];
                     const precip = precipitation_sum?.[idx] ?? 0;
@@ -29928,6 +30022,9 @@ function MapScreen() {
                     return (
                       <View key={wp.day} style={s.weatherDayCard}>
                         <Text style={s.weatherDayNum}>DAY {wp.day}</Text>
+                        {forecastDateLabel(time[idx]) ? (
+                          <Text style={s.weatherWind}>{forecastDateLabel(time[idx])}</Text>
+                        ) : null}
                         <View style={s.weatherDayIconRow}>
                           <Ionicons name={weatherIonIcon(code)} size={18} color={C.orange} />
                           {precip > 2 && <Ionicons name="rainy-outline" size={13} color="#38bdf8" />}
@@ -30038,10 +30135,11 @@ function MapScreen() {
               {tripOverviewDays.map(({ day, previousCamp, first, last, camp, campWp, gasStops, waypoints: dayWps }) => {
                 const start = previousCamp ?? first;
                 const finish = campWp ?? camp ?? last;
+                const dayPhoto = tripTimelineLicensedPhoto(camp);
                 return (
                   <TouchableOpacity key={day.day} testID={`map.trip-overview.day-picker.${day.day}`} accessibilityRole="button" accessibilityLabel={`Start navigation for day ${day.day}`} style={s.dayBtn} onPress={() => startDayNav(day.day)}>
-                    {(camp as any)?.photo_url ? (
-                      <Image source={{ uri: (camp as any).photo_url }} style={s.dayBtnPhoto} resizeMode="cover" resizeMethod="resize" />
+                    {dayPhoto ? (
+                      <Image source={{ uri: dayPhoto }} style={s.dayBtnPhoto} resizeMode="cover" resizeMethod="resize" />
                     ) : (
                       <View style={s.dayBtnDayBadge}>
                         <Text style={s.dayBtnDayNum}>{day.day}</Text>

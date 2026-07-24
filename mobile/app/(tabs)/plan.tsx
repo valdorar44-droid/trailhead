@@ -31,6 +31,11 @@ import {
   routeWeatherEligibleWaypoints,
   routeWeatherWaypointSignature,
 } from '@/lib/routeWeather';
+import {
+  createRouteBuildRequestId,
+  routeBuildCoordsFromTrip,
+  routeBuildPreviewStopsFromTrip,
+} from '@/lib/routeBuildSession';
 
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
 const TRAILHEAD_LOGO = require('../../assets/icon.png');
@@ -478,6 +483,41 @@ function PlanScreenContent() {
       }).catch(() => {});
       maybeShowReviewPrompt().catch(() => {});
       setPlanPhase('active');
+      const routeRequestId = createRouteBuildRequestId();
+      const routeCoords = routeBuildCoordsFromTrip(result);
+      const routeDistanceM = Number(
+        result.route_geometry?.totalDistance
+        ?? result.route_geometry?.total_distance,
+      );
+      const routeDurationS = Number(
+        result.route_geometry?.totalDuration
+        ?? result.route_geometry?.total_duration,
+      );
+      useStore.getState().startRouteBuildSession({
+        requestId: routeRequestId,
+        tripId: result.trip_id,
+        routeName: result.plan.trip_name || 'New trip',
+        tripShape: 'one_way',
+        source: 'assisted_trip_planner',
+        previewStops: routeBuildPreviewStopsFromTrip(result),
+      });
+      useStore.getState().updateRouteBuildSession(routeRequestId, {
+        phase: 'complete',
+        status: 'complete',
+        message: 'Trip ready',
+        routeCoords,
+        totalDistanceMi: Number.isFinite(routeDistanceM) && routeDistanceM > 0
+          ? routeDistanceM / 1609.344
+          : result.plan.total_est_miles || null,
+        totalDurationHours: Number.isFinite(routeDurationS) && routeDurationS > 0
+          ? routeDurationS / 3600
+          : null,
+        previewStops: routeBuildPreviewStopsFromTrip(result),
+        activityChoice: 'skip',
+        finalTripId: result.trip_id,
+        errorMessage: null,
+      });
+      router.replace('/(tabs)/map');
       // Download route weather for offline use (fail silently)
       const weatherWaypoints = routeWeatherEligibleWaypoints(result.plan.waypoints);
       if (!weatherWaypoints.length) return;

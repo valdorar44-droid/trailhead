@@ -7,6 +7,7 @@ import {
   createMapCameraOwnership,
   initialMapCameraClaimState,
   mapCameraOwnerPriority,
+  synchronizeMapCameraClaimOwnership,
 } from '../mapCameraOwnership';
 
 test('camera owner priority keeps safety-sensitive experiences in front', () => {
@@ -65,4 +66,14 @@ test('browse never consumes an automatic camera claim', () => {
     'browse:ignored',
   );
   assert.equal(decision.apply, false);
+});
+
+test('ownership transitions reset a previous application before returning from 3D', () => {
+  const review = createMapCameraOwnership('route_review', 'trip:7');
+  const preview = createMapCameraOwnership('preview3d', 'trip:7');
+  const applied = consumeMapCameraClaim(initialMapCameraClaimState(), review, 'style:1:route:7').state;
+  const previewState = synchronizeMapCameraClaimOwnership(applied, preview);
+  const returnedState = synchronizeMapCameraClaimOwnership(previewState, review);
+  assert.equal(returnedState.appliedApplicationKey, null);
+  assert.equal(consumeMapCameraClaim(returnedState, review, 'style:1:route:7').apply, true);
 });

@@ -1,4 +1,4 @@
-import type { TripShapeMode } from './api';
+import type { TripResult, TripShapeMode } from './api';
 
 export type RouteBuildSessionPhase =
   | 'routing'
@@ -12,6 +12,7 @@ export type RouteBuildSessionPhase =
 
 export type RouteBuildSessionStatus = 'running' | 'complete' | 'failed' | 'cancelled';
 export type RouteBuildActivityChoice = 'pending' | 'browse' | 'skip';
+export type RouteBuildSessionSource = 'manual_route_builder' | 'assisted_trip_planner';
 
 export type RouteBuildPreviewStopType =
   | 'start'
@@ -38,7 +39,7 @@ export interface RouteBuildSessionProgress {
 export interface RouteBuildSession {
   requestId: string;
   tripId: string;
-  source: 'manual_route_builder';
+  source: RouteBuildSessionSource;
   phase: RouteBuildSessionPhase;
   status: RouteBuildSessionStatus;
   message: string;
@@ -63,6 +64,7 @@ export type StartRouteBuildSessionInput = Pick<
   RouteBuildSession,
   'requestId' | 'tripId' | 'routeName' | 'tripShape'
 > & {
+  source?: RouteBuildSessionSource;
   previewStops?: RouteBuildPreviewStop[];
 };
 
@@ -86,7 +88,7 @@ export function createRouteBuildSession(
   return {
     requestId: input.requestId,
     tripId: input.tripId,
-    source: 'manual_route_builder',
+    source: input.source ?? 'manual_route_builder',
     phase: 'routing',
     status: 'running',
     message: 'Finding your route',
@@ -106,6 +108,51 @@ export function createRouteBuildSession(
     activityOfferCreatedAt: null,
     errorMessage: null,
   };
+}
+
+export function routeBuildPreviewStopsFromTrip(trip: TripResult): RouteBuildPreviewStop[] {
+  const coordinates = (trip.plan?.waypoints ?? [])
+    .map((waypoint, index) => {
+      const lat = Number(waypoint.lat);
+      const lng = Number(waypoint.lng);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+      return { waypoint, index, lat, lng };
+    })
+    .filter((value): value is NonNullable<typeof value> => value !== null);
+
+  return coordinates.map((entry, position) => {
+    const type: RouteBuildPreviewStopType = position === 0
+      ? 'start'
+      : position === coordinates.length - 1
+        ? 'destination'
+        : entry.waypoint.type === 'camp' || entry.waypoint.type === 'motel'
+          ? 'camp'
+          : entry.waypoint.type === 'fuel'
+            ? 'fuel'
+            : 'destination';
+    return {
+      id: `assisted-${entry.index}-${entry.waypoint.day}-${type}`,
+      lat: entry.lat,
+      lng: entry.lng,
+      day: Math.max(1, Number(entry.waypoint.day) || 1),
+      type,
+      name: String(entry.waypoint.name || `Stop ${position + 1}`).trim() || `Stop ${position + 1}`,
+      needsReview: entry.waypoint.needs_review === true,
+    };
+  });
+}
+
+export function routeBuildCoordsFromTrip(trip: TripResult): [number, number][] {
+  const saved = trip.route_geometry?.coords;
+  if (Array.isArray(saved) && saved.length >= 2) {
+    const coordinates = saved
+      .map(point => Array.isArray(point) ? [Number(point[0]), Number(point[1])] as [number, number] : null)
+      .filter((point): point is [number, number] => (
+        point !== null && Number.isFinite(point[0]) && Number.isFinite(point[1])
+      ));
+    if (coordinates.length >= 2) return coordinates;
+  }
+  return routeBuildPreviewStopsFromTrip(trip).map(stop => [stop.lng, stop.lat]);
 }
 
 export function updateRouteBuildSessionState(

@@ -4655,6 +4655,7 @@ export interface PackingList {
   essentials: string[]; recovery_gear: string[]; water_food: string[];
   navigation: string[]; shelter: string[]; tools_spares: string[];
   optional_nice_to_have: string[]; leave_at_home: string[];
+  checked_items?: string[];
 }
 export interface WeatherForecast {
   available?: boolean;

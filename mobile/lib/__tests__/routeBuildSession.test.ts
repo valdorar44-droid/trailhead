@@ -7,6 +7,8 @@ import {
   openRouteBuildRequest,
   openRouteBuildActivitySearch,
   resolveRouteBuildActivityChoice,
+  routeBuildCoordsFromTrip,
+  routeBuildPreviewStopsFromTrip,
   routeBuildSessionIsRunning,
   updateRouteBuildSessionState,
   waitForRouteBuildActivityChoice,
@@ -24,6 +26,52 @@ assert.equal(session.status, 'running');
 assert.deepEqual(session.camps, { completed: 0, total: 0 });
 assert.deepEqual(session.routeCoords, []);
 assert.equal(session.activityChoice, 'pending');
+assert.equal(session.source, 'manual_route_builder');
+
+const assisted = createRouteBuildSession({
+  requestId: 'request-assisted',
+  tripId: 'trip-assisted',
+  routeName: 'Moab to Canyonlands',
+  tripShape: 'one_way',
+  source: 'assisted_trip_planner',
+}, 101);
+assert.equal(assisted.source, 'assisted_trip_planner');
+
+const assistedTrip = {
+  trip_id: 'trip-assisted',
+  plan: {
+    trip_name: 'Moab to Canyonlands',
+    overview: '',
+    duration_days: 2,
+    states: ['UT'],
+    total_est_miles: 42,
+    waypoints: [
+      { day: 1, name: 'Moab', type: 'start', description: '', land_type: 'town', lat: 38.5733, lng: -109.5498 },
+      { day: 1, name: 'Camp', type: 'camp', description: '', land_type: 'camp', lat: 38.61, lng: -109.7 },
+      { day: 2, name: 'Island in the Sky', type: 'waypoint', description: '', land_type: 'park', lat: 38.459, lng: -109.821 },
+    ],
+    daily_itinerary: [],
+    logistics: {
+      vehicle_recommendation: '',
+      fuel_strategy: '',
+      water_strategy: '',
+      permits_needed: '',
+      best_season: '',
+    },
+  },
+  campsites: [],
+  gas_stations: [],
+  route_geometry: {
+    coords: [[-109.5498, 38.5733], [-109.65, 38.6], [-109.821, 38.459]],
+  },
+} as any;
+const assistedStops = routeBuildPreviewStopsFromTrip(assistedTrip);
+assert.deepEqual(assistedStops.map(stop => stop.type), ['start', 'camp', 'destination']);
+assert.deepEqual(routeBuildCoordsFromTrip(assistedTrip), assistedTrip.route_geometry.coords);
+assert.deepEqual(
+  routeBuildCoordsFromTrip({ ...assistedTrip, route_geometry: undefined }),
+  assistedStops.map(stop => [stop.lng, stop.lat]),
+);
 
 const routed = updateRouteBuildSessionState(session, 'request-1', {
   phase: 'camps',

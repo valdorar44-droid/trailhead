@@ -241,8 +241,13 @@ assert(controlsSource.includes('onExitToOverview') && controlsSource.includes('B
 // --- Map-first layout wiring ---
 assert(mapSource.includes('initialSpeed: mapMissionSpeedRef.current'), 'map passes playback speed into the player');
 assert(mapSource.includes('applyMapMissionSpeed'), 'map wires preset and custom speed changes');
-assert(mapSource.includes('returnFromMissionToTripOverview') && mapSource.includes('focusTripOverviewCamera'),
-  'map can leave flyover and reframe the trip overview camera');
+assert(
+  mapSource.includes('returnFromMissionToTripOverview')
+    && mapSource.includes('tripOverviewReturnRef')
+    && mapSource.includes('synchronizeMapCameraClaimOwnership')
+    && !mapSource.includes('focusTripOverviewCamera'),
+  'map can leave flyover, restore timeline state, and reframe through shared camera ownership',
+);
 assert(mapSource.includes("flyoverMode === 'copilot'") && mapSource.includes("mapMissionFlyoverModeRef.current === 'trail_builder'"),
   'Trail Builder flyover stays visual-only');
 assert(mapSource.includes("callouts: mode === 'trail_builder' ? [] : scene.callouts") &&

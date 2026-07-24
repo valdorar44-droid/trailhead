@@ -61,7 +61,7 @@ export function initialMapCameraClaimState(): MapCameraClaimState {
   };
 }
 
-function synchronizeClaimState(
+export function synchronizeMapCameraClaimOwnership(
   state: MapCameraClaimState,
   ownership: MapCameraOwnership,
 ): MapCameraClaimState {
@@ -79,7 +79,7 @@ export function consumeMapCameraClaim(
   ownership: MapCameraOwnership,
   applicationKey: string,
 ): { state: MapCameraClaimState; apply: boolean } {
-  const synchronized = synchronizeClaimState(state, ownership);
+  const synchronized = synchronizeMapCameraClaimOwnership(state, ownership);
   if (
     ownership.owner === 'browse'
     || synchronized.cancelledOwnershipKey === synchronized.ownershipKey
@@ -100,7 +100,7 @@ export function cancelMapCameraClaimForGesture(
   state: MapCameraClaimState,
   ownership: MapCameraOwnership,
 ): MapCameraClaimState {
-  const synchronized = synchronizeClaimState(state, ownership);
+  const synchronized = synchronizeMapCameraClaimOwnership(state, ownership);
   if (ownership.owner === 'browse') return synchronized;
   return {
     ...synchronized,

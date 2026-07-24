@@ -39,6 +39,30 @@ export function briefRouteProgressLabel(value: unknown): string {
   return `${Math.round(Math.max(0, Math.min(1, fraction)) * 100)}% of route`;
 }
 
+export function briefEvidenceTimeLabel(observedAt: unknown, updatedAt: unknown): string {
+  const candidates: Array<{ value: unknown; prefix: 'Observed' | 'Updated' }> = [
+    { value: observedAt, prefix: 'Observed' },
+    { value: updatedAt, prefix: 'Updated' },
+  ];
+  for (const candidate of candidates) {
+    const raw = String(candidate.value ?? '').trim();
+    if (!raw) continue;
+    const numeric = Number(candidate.value);
+    const parsed = Number.isFinite(numeric) && numeric > 0
+      ? new Date(numeric < 1_000_000_000_000 ? numeric * 1000 : numeric)
+      : new Date(raw);
+    if (Number.isNaN(parsed.getTime())) continue;
+    const label = parsed.toLocaleDateString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      year: parsed.getUTCFullYear() === new Date().getUTCFullYear() ? undefined : 'numeric',
+      timeZone: 'UTC',
+    });
+    return `${candidate.prefix} ${label}`;
+  }
+  return '';
+}
+
 function fnv1a(value: string): string {
   let hash = 2166136261;
   for (let index = 0; index < value.length; index += 1) {

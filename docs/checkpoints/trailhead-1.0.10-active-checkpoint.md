@@ -791,3 +791,28 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Do not repeat: the download retry, Plan/Downloads, trigger/audio simulation, broad crawls, full pre-preview, Memory Gate V3, or design research.
 - Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; protected files remain excluded and unstaged.
 - Task-owned background processes: none. The publisher and focused tests have exited; ADB remains intentionally available.
+
+## Checkpoint M4.C final — offline map accepted, automatic fit blocked
+
+- Timestamp: `2026-07-24T06:58:51-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; exact replacement source HEAD: `26a14ffa99739eb8456901c2bb6a5ba153d4dc3f`, pushed to origin.
+- Replacement paired preview:
+  - Android build `59`, runtime `native-1.0.10-android.1`, group `6c6aeb02-a236-4161-9612-a2ea4fc36ae4`, update `019f93f8-6356-7adb-a69e-79216177da16`.
+  - iOS build `54`, runtime `native-1.0.10-ios.1`, group `0f269b32-338f-4df3-bd0f-ce5ba2243f2c`, update `019f93f8-6356-7560-99f0-b588e789462c`.
+  - Channel `preview`; candidate branch `preview-candidate-26a14ffa99739eb8456901c2bb6a5ba153d4dc3f-mryvm5z5-385e85757f0ee85aa525c714`.
+- Samsung `RFCR408DA9B` verified exact source/runtime/update and `Ready` delivery. Evidence: `output/qa-RFCR408DA9B-26a1.xml`, SHA-256 `76058cbaf0249e89192ac75bdeef3e8cbc271a07622d55cad727db65a99ed93f`.
+- The required RNMapbox region remains installed and Ready; Start Tour opens the one main Trailhead map using the same Outdoors style. No bundle redownload was needed.
+- The style-loaded callback correction did not make automatic route framing deterministic. After Start and style settlement, the camera still showed a broad North American viewport. Evidence: `output/m4-plan-originals/orig-route-fit-26a1.png`, SHA-256 `d14504a879c846e37b91f374fd1e2b7ee4a8fcf5f3519cdde9ba2dda75f925a6`.
+- Pressing the existing Fit Route control immediately framed the exact Moab route and all 11 authored cue markers on the same Outdoors map, proving route geometry, cue rendering, and the imperative fit operation are valid. Evidence: `output/m4-plan-originals/orig-manual-fit-26a1.png`, SHA-256 `e5590688c3998d415fcba828aa05de1e5dbe3b089b4b61c7e1c3f83c95babaa4`.
+- The remaining cause is a later viewport-restoration race after style load, not the Original bundle, renderer, geometry, or fit API. The agreed single evidence-backed route-fit correction was attempted and its exact assertion rerun. It remains blocked rather than entering another OTA loop.
+- The active test tour was ended after evidence capture; the player is absent and no task-owned EAS, Expo, Metro, Maestro, Gradle, publisher, or test process remains.
+- Accepted in this packet:
+  - Plan and Downloads.
+  - Moab dedicated bundle download/verification, including its required map region.
+  - One-main-map Start, Outdoors presentation, Minimize, Resume, End Tour, and no restart after relaunch.
+  - User map presentation restoration after End Tour.
+- Open P0: none.
+- Open P1: consumer Start does not automatically frame the Original route after final map viewport restoration. The visible Fit Route recovery works, but production remains blocked until Start frames the route without user intervention.
+- Exact next action: in the next map-stability packet, characterize and order `restoreRecentViewportIfNeeded` versus experience-owned camera commands, then give Originals/route review/navigation a single post-restore camera-ownership contract. Do not solve it with repeated arbitrary timers. Rerun only Start → settled main map framing.
+- Do not repeat: Moab download, Plan/Downloads, Minimize/Resume/End teardown, broad crawls, full pre-preview, Memory Gate V3, or completed Figma/Mobbin work.
+- Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; `.cursor/` and `dashboard/explore_serving_index_v2.json` remain excluded and unstaged.

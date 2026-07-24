@@ -128,6 +128,7 @@ import {
   normalizeCampDetailArrays,
 } from '@/lib/campNearby';
 import {
+  classifyRelatedPlaceSheetKind,
   cleanExploreSourceLabel,
   relatedPlaceCanShow,
   relatedPlaceNameKey,
@@ -21241,7 +21242,8 @@ function MapScreen() {
     // itself owns map taps while it is open, but it must not block its own row
     // from entering the same complete camp/trail/place sheet router.
     if (mapTapToolOwnsFeatureSelection && selectionOrigin === 'map') return;
-    if (poi.type === 'trail' || poi.type === 'trailhead') {
+    const relatedSheetKind = classifyRelatedPlaceSheetKind(poi);
+    if (relatedSheetKind === 'trail') {
       const support = buildTrailSupport(
         { lat: poi.lat, lng: poi.lng },
         trailSupportCamps,
@@ -21266,7 +21268,7 @@ function MapScreen() {
     // icons already carry an overnight-place type from classification, so we
     // can open the camp sheet directly instead of flashing a generic place
     // sheet first and swapping to camp once async enrichment resolves.
-    if (isOvernightPlaceLike(poi)) {
+    if (relatedSheetKind === 'camp') {
       const camp = smartPlaceToCampPin(poi);
       if (camp) {
         cancelRenderedMapboxEnrichment();

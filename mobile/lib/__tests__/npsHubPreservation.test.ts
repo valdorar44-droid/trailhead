@@ -12,7 +12,11 @@ import {
   resolveNpsHubLevel,
   restoreNpsHubListFromMap,
 } from './support/npsHubPreservation';
-import { relatedThingToDoCanShow, relatedThingToSeeCanShow } from '../exploreContextFilters';
+import {
+  classifyRelatedPlaceSheetKind,
+  relatedThingToDoCanShow,
+  relatedThingToSeeCanShow,
+} from '../exploreContextFilters';
 
 test('NPS hub evidence covers direct, one-group, and two-group hierarchies', () => {
   assert.deepEqual(
@@ -102,6 +106,85 @@ test('official canonical rail labels survive client filtering without keyword gu
     source: 'trailhead_explore',
     summary: 'A documented historic place in Yosemite.',
   }), true);
+});
+
+test('official semantic types select the right related-place sheet before name heuristics', () => {
+  assert.equal(classifyRelatedPlaceSheetKind({
+    id: 'explore:place:nps-child:yose:places:anderson-cabin',
+    name: 'Anderson Cabin',
+    lat: 37.8,
+    lng: -119.5,
+    type: 'attraction',
+    display_type: 'Place to see',
+    source: 'trailhead_explore',
+  }), 'place');
+  assert.equal(classifyRelatedPlaceSheetKind({
+    id: 'explore:place:nps-child:yose:thingstodo:campground-evening-program',
+    name: 'Campground Evening Program',
+    lat: 37.8,
+    lng: -119.5,
+    type: 'attraction',
+    display_type: 'Activity',
+    source: 'trailhead_explore',
+  }), 'place');
+  assert.equal(classifyRelatedPlaceSheetKind({
+    id: 'explore:place:nps-child:yose:campgrounds:bridalveil-creek',
+    name: 'Bridalveil Creek Campground',
+    lat: 37.8,
+    lng: -119.5,
+    type: 'camp',
+    display_type: 'Campground',
+    source: 'trailhead_explore',
+  }), 'camp');
+  assert.equal(classifyRelatedPlaceSheetKind({
+    id: 'explore:place:nps-child:grca:trails:bright-angel-trailhead',
+    name: 'Bright Angel Trailhead',
+    lat: 36.06,
+    lng: -112.14,
+    type: 'trailhead',
+    display_type: 'Trailhead',
+    source: 'trailhead_explore',
+  }), 'trail');
+  assert.equal(classifyRelatedPlaceSheetKind({
+    id: 'explore:place:nps-child:yose:visitorcenters:yosemite-valley',
+    name: 'Yosemite Valley Visitor Center',
+    lat: 37.75,
+    lng: -119.59,
+    type: 'visitor_center',
+    display_type: 'Visitor Center',
+    source: 'trailhead_explore',
+  }), 'place');
+});
+
+test('legacy related places retain safe sheet-name fallbacks', () => {
+  assert.equal(classifyRelatedPlaceSheetKind({
+    name: 'Goose Island Campground',
+    lat: 38.61,
+    lng: -109.54,
+  }), 'camp');
+  assert.equal(classifyRelatedPlaceSheetKind({
+    name: 'Bright Angel Trailhead',
+    lat: 36.06,
+    lng: -112.14,
+  }), 'trail');
+  assert.equal(classifyRelatedPlaceSheetKind({
+    name: 'Anderson View',
+    lat: 37.8,
+    lng: -119.5,
+  }), 'place');
+});
+
+test('the main-map related router uses semantic sheet classification before camp fallback', () => {
+  const testDirectory = dirname(fileURLToPath(import.meta.url));
+  const mapSource = readFileSync(resolve(testDirectory, '../../app/(tabs)/map.tsx'), 'utf8');
+  const router = mapSource.match(
+    /function openPoiFeature\([\s\S]*?\n  \}\n\n  function openTripPlacesSearch/,
+  )?.[0];
+  assert.ok(router, 'openPoiFeature must remain present in the main map');
+  assert.match(router, /const relatedSheetKind = classifyRelatedPlaceSheetKind\(poi\)/);
+  assert.match(router, /if \(relatedSheetKind === 'trail'\)/);
+  assert.match(router, /if \(relatedSheetKind === 'camp'\)/);
+  assert.doesNotMatch(router, /if \(isOvernightPlaceLike\(poi\)\)/);
 });
 
 test('changing sheet identity resets the shared place sheet to the top', () => {

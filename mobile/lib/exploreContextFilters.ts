@@ -32,8 +32,80 @@ export type RelatedContextPlace = {
   details?: string;
 };
 
+export type RelatedPlaceSheetKind = 'place' | 'camp' | 'trail';
+
+const RELATED_CAMP_SHEET_TYPES = new Set([
+  'camp',
+  'camping',
+  'campground',
+  'campsite',
+  'dispersed_camp',
+  'glamping',
+  'hotel',
+  'informal_camp',
+  'lodging',
+  'motel',
+  'overnight_parking',
+  'private_camp',
+  'private_stay',
+  'rv',
+  'rv_park',
+  'stay',
+  'wild_camp',
+]);
+
+const RELATED_TRAIL_SHEET_TYPES = new Set([
+  'bike_trail',
+  'hiking_trail',
+  'trail',
+  'trailhead',
+  'walking_trail',
+]);
+
+const RELATED_GENERIC_SHEET_TYPES = new Set([
+  '',
+  'feature',
+  'location',
+  'map_feature',
+  'place',
+  'poi',
+  'point',
+  'result',
+  'search_result',
+]);
+
+const RELATED_LEGACY_TRAIL_NAME_RE = /\b(?:trailhead|trail)\b/i;
+const RELATED_LEGACY_CAMP_NAME_RE = /\b(?:campgrounds?|camp\s*sites?|campsites?|rv\s*(?:park|resort|camp)?|caravan|overnight|places?\s+to\s+stay|lodg(?:e|ing)|hotel|motel|hostel|inn|cabin|glamping|hipcamp|farm\s*stay|ranch\s*stay|winery\s*stay|private\s*(?:camp|stay))\b/i;
+const RELATED_NON_CAMP_NAME_RE = /\b(?:campus|summer camp|boot camp|training camp|campbell)\b/i;
+
 function compactText(value?: string | number | null) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function semanticType(value?: string | null) {
+  return compactText(value).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
+
+/**
+ * Chooses the sheet family for a related place. Server-owned semantic fields
+ * win over legacy name matching so a historic cabin labelled "Place to see"
+ * cannot be mistaken for lodging. Name matching remains only for old records
+ * whose type information is absent or generic.
+ */
+export function classifyRelatedPlaceSheetKind(item?: RelatedContextPlace | null): RelatedPlaceSheetKind {
+  if (!item) return 'place';
+
+  const semanticTypes = [item.display_type, item.type, item.subtype]
+    .map(semanticType)
+    .filter(Boolean);
+  if (semanticTypes.some(type => RELATED_CAMP_SHEET_TYPES.has(type))) return 'camp';
+  if (semanticTypes.some(type => RELATED_TRAIL_SHEET_TYPES.has(type))) return 'trail';
+  if (semanticTypes.some(type => !RELATED_GENERIC_SHEET_TYPES.has(type))) return 'place';
+
+  const name = compactText(item.name);
+  if (RELATED_LEGACY_TRAIL_NAME_RE.test(name)) return 'trail';
+  if (!RELATED_NON_CAMP_NAME_RE.test(name) && RELATED_LEGACY_CAMP_NAME_RE.test(name)) return 'camp';
+  return 'place';
 }
 
 function sourceText(item?: SourcePackLike | null) {

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   ORIGINALS_MAPBOX_STYLE_URI,
+  originalOwnsMapContext,
   originalOfflineStyleURI,
   resolveOriginalMainMapPresentation,
 } from '../mapPresentation';
@@ -46,6 +47,30 @@ assert.equal(
   }),
   current,
   'MapLibre-only installations keep the working Trailhead renderer',
+);
+
+assert.equal(
+  originalOwnsMapContext({
+    originalActive: true,
+    navigationActive: false,
+  }),
+  true,
+  'an active Original must suppress stale browse and trip context',
+);
+assert.equal(
+  originalOwnsMapContext({
+    originalActive: true,
+    navigationActive: true,
+  }),
+  false,
+  'navigation retains the higher-priority driving context',
+);
+assert.equal(
+  originalOwnsMapContext({
+    originalActive: false,
+    navigationActive: false,
+  }),
+  false,
 );
 
 console.log('Originals main-map presentation tests passed.');

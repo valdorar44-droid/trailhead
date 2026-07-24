@@ -13,6 +13,13 @@ export type OriginalMainMapPresentation = {
   rendererMode: OriginalMapRendererMode | null;
 };
 
+export function originalOwnsMapContext(options: {
+  originalActive: boolean;
+  navigationActive: boolean;
+}) {
+  return options.originalActive && !options.navigationActive;
+}
+
 export function originalOfflineStyleURI(renderer: 'maplibre' | 'rnmapbox') {
   return renderer === 'rnmapbox' ? ORIGINALS_MAPBOX_STYLE_URI : undefined;
 }

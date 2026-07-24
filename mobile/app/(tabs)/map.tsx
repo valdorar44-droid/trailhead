@@ -154,7 +154,10 @@ import {
 } from '@/lib/offlineV2/campDetail';
 import { resolveActiveOfflineRendererStyleId } from '@/lib/offlineV2/activeStyle';
 import { setActiveNativeMapRenderer } from '@/lib/nativeMapRendererState';
-import { resolveOriginalMainMapPresentation } from '@/lib/originals/mapPresentation';
+import {
+  originalOwnsMapContext,
+  resolveOriginalMainMapPresentation,
+} from '@/lib/originals/mapPresentation';
 import {
   buildCampNearbyGroups,
   isLowValueGenericBlmPlace,
@@ -6609,6 +6612,10 @@ function MapScreen() {
       premiumMapStyle,
     ],
   );
+  const originalsOwnMapContext = originalOwnsMapContext({
+    originalActive: originalsMapExperience.active,
+    navigationActive: navMode,
+  });
   useEffect(() => {
     if (originalMapPresentation.rendererMode) {
       setActiveNativeMapRenderer(
@@ -24070,6 +24077,7 @@ function MapScreen() {
   );
   const showMapStatusBar = Boolean(
     !navMode &&
+    !originalsOwnMapContext &&
     !waterFollowActive &&
     !showSearch &&
     !showFullMapSearch &&
@@ -24392,16 +24400,16 @@ function MapScreen() {
             setMapStyleGeneration(generation => generation + 1);
           }}
           waypoints={waypoints}
-          camps={mapMissionVisible || routeBuildMapActive || scopedMapSearchActive || waterFollowActive ? [] : nativeMapCampPins as any}
-          gas={mapMissionVisible || routeBuildMapActive || scopedMapSearchActive ? [] : routeSearchGas as any}
-          pois={mapMissionVisible || routeBuildMapActive ? [] : scopedMapSearchPois}
+          camps={mapMissionVisible || routeBuildMapActive || scopedMapSearchActive || waterFollowActive || originalsOwnMapContext ? [] : nativeMapCampPins as any}
+          gas={mapMissionVisible || routeBuildMapActive || scopedMapSearchActive || originalsOwnMapContext ? [] : routeSearchGas as any}
+          pois={mapMissionVisible || routeBuildMapActive || originalsOwnMapContext ? [] : scopedMapSearchPois}
           offlineTrailFeatures={layerTrails ? offlineV2Catalog.trail_features : undefined}
           waterNavLines={mapMissionVisible || scopedMapSearchActive ? null : waterNavLines}
           waterSpotCards={mapMissionVisible || scopedMapSearchActive ? [] : allWaterSpotCards}
           waterCorridor={mapMissionVisible ? null : waterCorridor}
           waterFollowRoute={mapMissionVisible ? null : waterFollowRoute}
-          reports={mapMissionVisible || scopedMapSearchActive || safeWaterPlanningActive || waterFollowActive ? [] : mapReports}
-          communityPins={mapMissionVisible || scopedMapSearchActive || safeWaterPlanningActive || waterFollowActive ? [] : displayCommunityPins}
+          reports={mapMissionVisible || scopedMapSearchActive || safeWaterPlanningActive || waterFollowActive || originalsOwnMapContext ? [] : mapReports}
+          communityPins={mapMissionVisible || scopedMapSearchActive || safeWaterPlanningActive || waterFollowActive || originalsOwnMapContext ? [] : displayCommunityPins}
           searchMarker={!mapMissionVisible && searchRouteCard ? { lat: searchRouteCard.lat, lng: searchRouteCard.lng, name: searchRouteCard.name } : null}
           userLoc={userLoc}
           navMode={navMode}
@@ -26822,7 +26830,7 @@ function MapScreen() {
 
       {/* Route alerts */}
       <RouteAlertsPanel
-        visible={showAlerts}
+        visible={showAlerts && !originalsOwnMapContext}
         count={routeAlerts.length}
         alerts={routeAlerts.map(r => ({
           id: String(r.id),

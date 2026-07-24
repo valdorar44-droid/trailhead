@@ -516,3 +516,18 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Exact next action after opening the new account: read this section first, confirm HEAD and protected-file hash, then begin the approved report/Explore-hub sheet packet. Preserve comments, ratings, edits, reports, campground modules, NPS depth, Viator, Offline, navigation compass, and the current Map renderer. Apply the two narrow campground copy cleanups with that next compatible JS wave rather than publishing a standalone OTA.
 - Do not repeat: the two campground diversity flows, Trail/Trailhead flows, campground Sites-anchor run, full crawl, Layers audit, NPS reference research, Search V2 baseline, Memory Gate V3, Figma/Mobbin research, or either `220f1fd` paired OTA.
 - Task-owned background processes: none after checkpoint finalization. Gradle, Maestro, EAS, Metro, and test processes are stopped; ADB may remain available for the connected Samsung and emulator.
+
+## Checkpoint M3.5 baseline — community reports and Explore hubs
+
+- Timestamp: `2026-07-24T01:23:03-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; exact pre-change HEAD: `2bc2b810e9b933de0546d74283312f8cbf2c91a1`, matching `origin/feat/trailhead-1.0.10-overhaul`.
+- Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. `.cursor/` and `dashboard/explore_serving_index_v2.json` remain user-owned and must not be staged, overwritten, or discarded.
+- The installed paired preview source remains `220f1fd14da652f879503a63d29e926184c62f9e`: Android build `59`, runtime `native-1.0.10-android.1`, update `019f929a-3980-7f45-a1f4-3c040d9c68c9`; iOS build `54`, runtime `native-1.0.10-ios.1`, update `019f929a-3980-7818-b72c-de3a8bd99520`.
+- The two intended uncommitted campground P2 cleanups are isolated to `mobile/app/(tabs)/map.tsx`, `mobile/components/map/CampPlaceSheetPeek.tsx`, and `mobile/lib/__tests__/campSheetFlowContract.test.ts`: normalize corrupted middle-dot separators and omit unsourced generic Summary prose.
+- Existing executable-bit changes in Valhalla, Gradle, Android Auto, Maestro, NPS enrichment, and routing helper scripts are Windows/WSL mode-only worktree noise. They are not part of this packet and must remain unstaged.
+- Approved report behavior is locked: a community pin opens a shared half sheet; Android Back follows Full → Half → dismiss; trust actions are `Helpful` and `Not accurate`. The existing Trailhead Report/Mission Control Figma checkpoint and saved Waze/Mobbin report references are sufficient; no new visual direction is authorized.
+- Explore work is limited to deterministic enrichment/navigation stability and concise empty/error copy. Preserve the existing per-revision module registry, NPS module depth, campground drilldowns, exact-place imagery, main-map returns, and the separate Viator lane.
+- Narrow verification only: report identity/generation, half/full/Back, Suggest Update cancellation, private field-check permissions, Explore same-revision enrichment, child-scroll retention, new-revision unavailable recovery, campground/trail/sheet/Search V2/Offline/NPS/Viator/copy/privacy/TypeScript gates, then one Android and shared iOS delta.
+- Open P0/P1 at baseline: none. Stop after one deterministic reproduction and one evidence-backed correction if a new P0/P1 appears.
+- Do not repeat: broad Android crawls, Layers testing, NPS research, Figma/Mobbin research, Search V2 baseline, Memory Gate V3, campground diversity flows, Trail/Trailhead flows, or the accepted campground Sites-anchor run.
+- Task-owned background processes: none. No Trailhead Gradle, Metro, Expo/EAS, Maestro, publisher, or memory-gate process is running; ADB and the Android emulator remain intentionally available.

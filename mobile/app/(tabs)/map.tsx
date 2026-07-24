@@ -7463,6 +7463,7 @@ function MapScreen() {
   const [searchResult, setSearchResult] = useState<{ count: number } | null>(null);
   const [mapSurfaceReady, setMapSurfaceReady] = useState(false);
   const [mapSurfaceGeneration, setMapSurfaceGeneration] = useState(0);
+  const [originalsStyleGeneration, setOriginalsStyleGeneration] = useState(0);
   const [mapLoadFailed, setMapLoadFailed] = useState(false);
   const originalsAutoFitRef = useRef('');
   const activeRouteRestoreSeqRef = useRef(0);
@@ -7557,6 +7558,7 @@ function MapScreen() {
     const last = originalsMapExperience.routeCoords.at(-1);
     const signature = [
       mapSurfaceGeneration,
+      originalsStyleGeneration,
       originalsMapExperience.packId,
       originalsMapExperience.version,
       originalsMapExperience.routeCoords.length,
@@ -7576,6 +7578,7 @@ function MapScreen() {
     mapSurfaceGeneration,
     mapSurfaceReady,
     navMode,
+    originalsStyleGeneration,
     originalsMapExperience.active,
     originalsMapExperience.packId,
     originalsMapExperience.routeCoords,
@@ -24211,6 +24214,11 @@ function MapScreen() {
         <NativeMapSurface
           ref={nativeMapRef}
           visualWorkActive={mapVisualWorkActive}
+          onMapStyleLoaded={() => {
+            if (!originalsMapExperience.active || navMode) return;
+            originalsAutoFitRef.current = '';
+            setOriginalsStyleGeneration(generation => generation + 1);
+          }}
           waypoints={waypoints}
           camps={mapMissionVisible || routeBuildMapActive || scopedMapSearchActive || waterFollowActive ? [] : nativeMapCampPins as any}
           gas={mapMissionVisible || routeBuildMapActive || scopedMapSearchActive ? [] : routeSearchGas as any}

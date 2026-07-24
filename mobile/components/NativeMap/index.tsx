@@ -346,6 +346,7 @@ export interface NativeMapProps {
 
   // Callbacks → replaces onWebMessage
   onMapReady:       () => void;
+  onMapStyleLoaded?: () => void;
   onBoundsChange:   (bounds: MapBounds) => void;
   onMapGesture?:    () => void;
   onMapTap:         (lat?: number, lng?: number) => void;
@@ -866,7 +867,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     showLandOverlay = false, showUsgsOverlay, showTerrain, showFire, showAva, showRadar, showTrailOverlay = true, showMvum, showNautical = false, hideMapStatusBadge = false,
     missionBriefActive = false, missionBriefFullRoute = [], missionBriefProgressRoute = [],
     missionBriefMarker = null, missionBriefCallouts = [], missionBriefWarning = false,
-    onMapReady, onBoundsChange, onMapGesture, onMapTap,
+    onMapReady, onMapStyleLoaded, onBoundsChange, onMapGesture, onMapTap,
     onCampTap, onGasTap, onPoiTap, onWaterSpotTap, onCommunityPinTap, onTileCampTap, onBaseCampTap, onTrailTap, onWaypointTap,
     onRouteReady, onRoutePersist, onOffRoute, onOffRouteWarn, onBackOnRoute, onRouteProgress,
     onTraceStart, onTraceMove, onTraceEnd, onDebugEvent, onError, onFireOverlayStatusChange,
@@ -3197,6 +3198,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         onDidFailLoadingMap={handleMapLoadFail}
         onDidFinishLoadingStyle={() => {
           if (visualWorkActiveRef.current) emitDebugEvent('map:style-loaded', { tileSession, effectiveMapLayer, contourMode, trailMode });
+          onMapStyleLoaded?.();
         }}
         compassEnabled={false}
         attributionEnabled={false}

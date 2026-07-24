@@ -768,3 +768,26 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Exact next action: commit and push this named implementation scope, publish one paired preview OTA with Sentry source maps, verify update identities, then retry Moab once on Samsung. On success, test Start → main map → Minimize → Resume → End → relaunch and map-style restoration. On failure, checkpoint the P1 as blocked without another speculative OTA.
 - Do not repeat: full pre-preview, Plan/Downloads deltas, previous Moab retries, broad crawls, Memory Gate V3, or completed design research.
 - Task-owned background processes: none. Focused tests have exited; ADB remains intentionally available.
+
+## Checkpoint M4.C Android proof and route-fit correction
+
+- Timestamp: `2026-07-24T06:47:22-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; exact first correction/paired-preview source HEAD: `3dce05337d720c46b1c6f3dc7cc4fadc73a9735a`, pushed to origin.
+- Paired preview:
+  - Android build `59`, runtime `native-1.0.10-android.1`, group `c652e3b9-8098-4cf9-8ba5-058e66814cda`, update `019f93e9-888e-7cff-9c96-9afcfd35fc55`.
+  - iOS build `54`, runtime `native-1.0.10-ios.1`, group `1d689b52-3acb-4af5-8d86-9b128b89c93b`, update `019f93e9-888e-7d50-9a21-bd3cf4d98477`.
+  - Channel `preview`; candidate branch `preview-candidate-3dce05337d720c46b1c6f3dc7cc4fadc73a9735a-mryv1bkv-fbf6ba1ef62558e002b10f8f`.
+- Samsung `RFCR408DA9B` verified the exact Android source/runtime/update and `Ready` delivery state. Evidence: `output/qa-RFCR408DA9B-3dce.xml`, SHA-256 `ca4e07f8686e7b618728e11ae97ffd74ad2c3e0c6bcf9ab282eb864a386178ea`.
+- The previously blocked owned Moab bundle crossed its old `54%` RNMapbox boundary and reported `READY OFFLINE` within 16 seconds. Evidence: `output/m4-plan-originals/orig-ready-3dce.xml`, SHA-256 `399f744e5345b38015cae8efd69ee19c14d8acde9760376fba1b3d4f44019b8a`.
+- Start Tour opened the one main Trailhead map and its consumer player. Minimize produced the durable resume pill; reopening it restored the full player; End Tour stopped and removed the player; force-stop/relaunch did not restart it. Evidence:
+  - `output/m4-plan-originals/orig-minimized-3dce.png`, SHA-256 `d0437a768f06b22ad8f1ae18c2be7e9527b1205b6dc27cb09e69d30a7ae47d96`.
+  - `output/m4-plan-originals/orig-ended-3dce.xml`, SHA-256 `f074291df6543c3333ee7395a5051e0e79b748ecb6f48d24e3227595eb909355`.
+  - `output/m4-plan-originals/orig-relaunch-no-resume-3dce.xml`, SHA-256 `7b9b97ab4bbdf99744218a80de7d8efa96e3e28f1117ad9858d80042333accf6`.
+- One deterministic correction-related P1 was found: the active Outdoors style finished loading after the existing automatic route fit and reset the camera to the user's location. The route remained available through the Fit Route action, but Start must present it automatically.
+- Narrow evidence-backed correction: `NativeMap` now exposes its existing style-loaded event to the Map screen. Only while an Original owns the non-navigation main map, that event invalidates the previous fit signature and schedules the existing route fit again. Ordinary map/style behavior is unchanged.
+- Focused renderer, main-map experience, presentation, TypeScript, and whitespace tests pass.
+- Open P0: none. Open P1: the post-style-load route fit is fixed in code and pending one replacement-candidate visual proof.
+- Exact next action: commit/push this narrow route-fit correction, publish one paired replacement preview, verify Android identity, Start the already-downloaded Moab Original once, and confirm its route is framed after the Outdoors style loads. Reconfirm End Tour/relaunch only if the route-fit path changes session state.
+- Do not repeat: the download retry, Plan/Downloads, trigger/audio simulation, broad crawls, full pre-preview, Memory Gate V3, or design research.
+- Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; protected files remain excluded and unstaged.
+- Task-owned background processes: none. The publisher and focused tests have exited; ADB remains intentionally available.

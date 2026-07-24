@@ -19459,7 +19459,7 @@ function MapScreen() {
         },
       } as CampsitePin;
       campParentSnapshotRef.current = parentSnapshot;
-      campPresentationRestoreRef.current = sitePin.id;
+      campPresentationRestoreRef.current = adaptCampgroundSheet(sitePin).identity.entityId;
       campSheetScrollYRef.current = 0;
       setCampSheetScrollRestore(current => ({ key: current.key + 1, y: 0 }));
       setFieldReports([]);
@@ -21454,7 +21454,7 @@ function MapScreen() {
     if (!parent) return;
     campParentSnapshotRef.current = null;
     skipCampDetailReloadRef.current = parent.camp.id;
-    campPresentationRestoreRef.current = parent.camp.id;
+    campPresentationRestoreRef.current = adaptCampgroundSheet(parent.camp).identity.entityId;
     selectedCampRef.current = parent.camp;
     setSelectedCamp(parent.camp);
     setCampDetail(parent.detail);

@@ -25,7 +25,9 @@ test('the shared snap sheet supports controlled peek-to-full loading without par
 
 test('campsite Back restores the parent campground and its scroll position', () => {
   assert.match(mapSource, /campParentSnapshotRef\.current = parentSnapshot/);
+  assert.match(mapSource, /campPresentationRestoreRef\.current = adaptCampgroundSheet\(sitePin\)\.identity\.entityId/);
   assert.match(mapSource, /function restoreCampgroundParent\(\)/);
+  assert.match(mapSource, /campPresentationRestoreRef\.current = adaptCampgroundSheet\(parent\.camp\)\.identity\.entityId/);
   assert.match(mapSource, /setCampSheetScrollRestore\(current => \(\{ key: current\.key \+ 1, y: parent\.scrollY \}\)\)/);
   assert.match(mapSource, /campParentSnapshotRef\.current\s*\? restoreCampgroundParent/);
 });

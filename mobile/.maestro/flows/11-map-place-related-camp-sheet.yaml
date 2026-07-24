@@ -40,9 +40,16 @@ tags:
     id: "place-sheet-place-place-place-nps-yose-related.campgrounds-nearby.item.explore-place-nps-child-yose-campgrounds-bridalveil-creek-campground"
 - extendedWaitUntil:
     visible:
-      id: "place-sheet-camp-camp-explore-place-nps-child-yose-campgrounds-bridalveil-creek-campground"
+      id: "place-sheet-camp-camp-explore-place-nps-child-yose-campgrounds-bridalveil-creek-campground-peek"
     timeout: 20000
 - assertVisible: "Bridalveil Creek Campground"
+- takeScreenshot: map-related-camp-sheet-peek
+- tapOn:
+    id: "place-sheet-camp-camp-explore-place-nps-child-yose-campgrounds-bridalveil-creek-campground-view-sites"
+- extendedWaitUntil:
+    visible:
+      id: "place-sheet-camp-camp-explore-place-nps-child-yose-campgrounds-bridalveil-creek-campground"
+    timeout: 20000
 - extendedWaitUntil:
     visible:
       id: "place-sheet-camp-camp-explore-place-nps-child-yose-campgrounds-bridalveil-creek-campground-summary"

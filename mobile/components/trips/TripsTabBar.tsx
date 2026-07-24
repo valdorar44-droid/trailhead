@@ -1,9 +1,14 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Keyboard, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/lib/design';
+import {
+  isPlanTabRouteName,
+  resolvePlanTabPress,
+  type PlanTabRouteName,
+} from '@/lib/planTabNavigation';
 import { useStore } from '@/lib/store';
 
 const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
@@ -28,6 +33,8 @@ export default function TripsTabBar({ state, descriptors, navigation }: BottomTa
   const hidden = useStore(store => store.tabBarHidden);
   const insets = useSafeAreaInsets();
   const [keyboardOpen, setKeyboardOpen] = useState(false);
+  const activeRoute = state.routes[state.index];
+  const lastPlanRouteRef = useRef<PlanTabRouteName>('plan');
 
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
@@ -40,8 +47,13 @@ export default function TripsTabBar({ state, descriptors, navigation }: BottomTa
     };
   }, []);
 
+  useEffect(() => {
+    if (isPlanTabRouteName(activeRoute?.name)) {
+      lastPlanRouteRef.current = activeRoute.name;
+    }
+  }, [activeRoute?.name]);
+
   if (hidden || keyboardOpen) return null;
-  const activeRoute = state.routes[state.index];
   const visibleRoutes = VISIBLE_ROUTE_NAMES
     .map(name => state.routes.find(route => route.name === name))
     .filter((route): route is NonNullable<typeof route> => Boolean(route));
@@ -80,7 +92,13 @@ export default function TripsTabBar({ state, descriptors, navigation }: BottomTa
               activeOpacity={0.78}
               onPress={() => {
                 const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
-                if (!isCurrentRoute && !event.defaultPrevented) navigation.navigate(route.name);
+                if (event.defaultPrevented) return;
+                if (route.name === 'plan') {
+                  const destination = resolvePlanTabPress(activeRoute?.name, lastPlanRouteRef.current);
+                  if (destination) navigation.navigate(destination);
+                  return;
+                }
+                if (!isCurrentRoute) navigation.navigate(route.name);
               }}
               onLongPress={() => navigation.emit({ type: 'tabLongPress', target: route.key })}
               style={styles.item}

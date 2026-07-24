@@ -658,3 +658,20 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Exact next action: commit this Originals scope, run the remaining focused Plan/TripRepository/Offline/telemetry/privacy/native-drift gates and the complete pre-preview suite once, then publish one paired preview OTA from one immutable SHA with Sentry source maps. Verify update identities before running the combined Android Plan/Downloads/Originals delta and shared iOS proof.
 - Do not repeat: the failed local debug build, completed Originals characterization suite, broad Map/Explore/Layer/NPS crawls, prior sheet deltas, Figma/Mobbin research, Search V2 baseline, or Memory Gate V3.
 - Task-owned background processes: none. The bounded Gradle and Metro processes are stopped; no EAS, Maestro, audit, or Trailhead test job remains. ADB remains intentionally available.
+
+## Checkpoint M4 device correction — retain the active Plan workspace
+
+- Timestamp: `2026-07-24T03:42:23-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; exact tested implementation and first paired-preview source: `41bfb9ee0dbaaee0f8581459f68be8f4801af8bb`.
+- Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. `.cursor/` and `dashboard/explore_serving_index_v2.json` remain unstaged and untouched.
+- The complete guarded pre-preview suite passed once, including Android compile/unit checks, native/config drift, Android Auto, Originals fixtures, Map/Explore/NPS/Viator/copy/TypeScript checks, all `784` backend tests, and whitespace validation.
+- The first paired preview published successfully with Sentry source maps:
+  - Android build `59`, runtime `native-1.0.10-android.1`, group `e5c83ced-6d88-4652-9475-dbe70e9c93ea`, update `019f9341-c3b7-7590-8ba2-276b67d6b52e`.
+  - iOS build `54`, runtime `native-1.0.10-ios.1`, group `c81fae56-e0fc-42d6-8d9c-696e6e70f95e`, update `019f9341-c3b7-7117-96f4-e9fc95814140`.
+- Samsung `RFCR408DA9B` verified version `1.0.10`, build `59`, preview channel, full source SHA, matching Android runtime/update, and delivery status `Ready`.
+- Downloads manager delta passed before the correction: Plan opened the one main-map manager; Storage Back worked; selected-area Cancel restored the manager; closing restored the exact Plan Downloads scroll anchor. Trip action parity exposed Open, Offline, notes, duplicate, save, archive, GPX export, and delete without performing a destructive action.
+- One deterministic P1 was reproduced: after viewing the `Trips` workspace, Map → Plan opened `Trip Planner` instead of restoring `Trips`. The cause was the bottom tab navigating to the visible `plan` route rather than the last active Plan child route.
+- One evidence-backed correction now remembers `plan`, `route-builder`, or `trips` while the JS runtime is active. Pressing Plan from another tab returns to that workspace; pressing the already-focused Plan family is a no-op. Pure route-resolution tests, Plan deep-link tests, TypeScript, and whitespace checks pass.
+- Exact next action: commit this narrow correction, publish one replacement paired preview from its immutable SHA, apply the Android update, and rerun only Trips → Map → Plan with scroll retention. If it passes, continue the remaining owned-Original delta; do not repeat the complete pre-preview suite or broad device crawls.
+- Open P0: none. Open P1: active Plan workspace retention is fixed in code but remains pending exact-candidate device proof.
+- Task-owned background processes: none. The first paired publisher and Gradle daemon are stopped; ADB remains intentionally available.

@@ -42,7 +42,16 @@ import {
   type ExploreDisplayContext,
 } from './exploreDisplay';
 
-const EMPTY_DETAIL_MESSAGE = 'Check closer to your trip.';
+const EMPTY_DETAIL_MESSAGE = 'No details listed.';
+
+function exploreDetailTestIdToken(value: unknown): string {
+  return String(value ?? 'item')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 72) || 'item';
+}
 
 type ExploreDetailModule = {
   key: ExploreDetailModuleKey;
@@ -847,6 +856,7 @@ export function ExploreDetailSheet({
           return (
             <TouchableOpacity
               key={`${item.title}-${idx}`}
+              testID={`explore.detail.item-${exploreDetailTestIdToken(item.source_id || item.title || idx)}`}
               style={[styles.detailItem, { borderColor: C.border, backgroundColor: C.s1 }]}
               activeOpacity={0.88}
               disabled={!canOpen}
@@ -1125,7 +1135,11 @@ export function ExploreDetailSheet({
             />
           ) : renderMapPreview({ items: siblingItems, activeItem: item, title: item.title || 'Place', height: 340 })}
           {hasExactChildImage && <View style={styles.heroShade} />}
-          <TouchableOpacity style={[styles.roundButton, styles.backButton, { top: Math.max(topInset + 10, 22) }]} onPress={() => dispatchDetailNavigation({ type: 'select_item', item: null })}>
+          <TouchableOpacity
+            testID="explore.detail.child-back"
+            style={[styles.roundButton, styles.backButton, { top: Math.max(topInset + 10, 22) }]}
+            onPress={() => dispatchDetailNavigation({ type: 'select_item', item: null })}
+          >
             <Ionicons name="arrow-back" size={25} color="#fff" />
           </TouchableOpacity>
           <View style={[styles.heroRight, { top: Math.max(topInset + 10, 22) }]}>
@@ -1206,7 +1220,7 @@ export function ExploreDetailSheet({
               <ExpandableText value={place.profile.why_it_matters} textStyle={[styles.copyBody, { color: C.text2 }]} previewChars={420} />
             </View>
           )}
-          {seeItems.length === 0 && !place.profile?.why_it_matters ? renderItemList([], 'No sights listed yet. Check back closer to your trip.') : null}
+          {seeItems.length === 0 && !place.profile?.why_it_matters ? renderItemList([], 'No sights listed.') : null}
         </>
       );
     }
@@ -1215,7 +1229,7 @@ export function ExploreDetailSheet({
       return (
         <>
           {doItems.length > 0 ? renderItemList(doItems, EMPTY_DETAIL_MESSAGE) : null}
-          {doItems.length === 0 ? renderItemList([], 'No activities listed yet for this area.') : null}
+          {doItems.length === 0 ? renderItemList([], 'No activities listed.') : null}
         </>
       );
     }
@@ -1225,7 +1239,7 @@ export function ExploreDetailSheet({
         <>
           {stayItems.length > 0 ? renderItemList(stayItems, EMPTY_DETAIL_MESSAGE) : null}
           {stayItems.length === 0 ? campgroundsSlot : null}
-          {stayItems.length === 0 && !campgroundsSlot ? renderItemList([], 'No stays listed yet for this area.') : null}
+          {stayItems.length === 0 && !campgroundsSlot ? renderItemList([], 'No stays listed.') : null}
         </>
       );
     }
@@ -1301,7 +1315,7 @@ export function ExploreDetailSheet({
       return weatherSlot ?? (
         <View style={[styles.emptyModule, { borderColor: C.border, backgroundColor: C.s1 }]}>
           <Ionicons name="partly-sunny-outline" size={24} color={accent} />
-          <Text style={[styles.emptyModuleText, { color: C.text2 }]}>No weather forecast available for this area yet.</Text>
+          <Text style={[styles.emptyModuleText, { color: C.text2 }]}>Weather unavailable.</Text>
         </View>
       );
     }
@@ -1328,7 +1342,7 @@ export function ExploreDetailSheet({
       return (
         <View style={[styles.panel, { borderColor: C.border, backgroundColor: C.s1 }]}>
           <ScrollView ref={storyScrollRef} style={styles.storyBox} nestedScrollEnabled showsVerticalScrollIndicator>
-            {(cleanStorySentences.length ? cleanStorySentences : ['Check closer to your trip.']).map((sentence, idx) => (
+            {(cleanStorySentences.length ? cleanStorySentences : ['Story unavailable.']).map((sentence, idx) => (
               <Text
                 key={`${idx}-${sentence.slice(0, 24)}`}
                 style={[
@@ -1382,6 +1396,7 @@ export function ExploreDetailSheet({
             return (
               <TouchableOpacity
                 key={module.key}
+                testID={`explore.detail.module-${module.key}`}
                 style={[styles.moduleTile, { borderColor: C.border, backgroundColor: C.s1 }, hasImage && styles.moduleImageTile]}
                 activeOpacity={0.88}
                 onPress={() => openModule(module.key)}
@@ -1410,7 +1425,7 @@ export function ExploreDetailSheet({
         {visibleModules.length === 0 && (
           <View style={[styles.emptyModule, { borderColor: C.border, backgroundColor: C.s1 }]}>
             <Ionicons name="search-outline" size={22} color={C.text3} />
-            <Text style={[styles.emptyModuleText, { color: C.text2 }]}>Try a different section.</Text>
+            <Text style={[styles.emptyModuleText, { color: C.text2 }]}>No matching sections.</Text>
           </View>
         )}
         <SourceFreshnessPanel place={place} />
@@ -1509,8 +1524,9 @@ export function ExploreDetailSheet({
             <View style={[styles.emptyModule, { borderColor: C.border, backgroundColor: C.s1 }]}>
               <Ionicons name="information-circle-outline" size={24} color={C.text2} />
               <Text style={[styles.moduleDetailTitle, { color: C.text }]}>Section unavailable</Text>
-              <Text style={[styles.emptyModuleText, { color: C.text2 }]}>This place no longer lists that section.</Text>
+              <Text style={[styles.emptyModuleText, { color: C.text2 }]}>This section is no longer listed.</Text>
               <TouchableOpacity
+                testID="explore.detail.module-unavailable-back"
                 style={[styles.sourceButton, { borderColor: C.border }]}
                 onPress={() => {
                   dispatchDetailNavigation({ type: 'open_module', module: null });

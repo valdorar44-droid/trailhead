@@ -18,4 +18,23 @@ test('Explore child and main lists do not receive controlled content offsets', (
 test('Explore scroll restoration runs on navigation transitions instead of async enrichment renders', () => {
   assert.match(source, /\[activeModule, place\.id, selectedItemKey\]/);
   assert.doesNotMatch(source, /\[activeModule,[^\]]*detailNavigation\.(?:child|main)ScrollY/);
+  assert.doesNotMatch(source, /\[activeModule,[^\]]*detailDataRevision/);
+});
+
+test('Explore module and child navigation expose stable automation paths', () => {
+  assert.match(source, /testID=\{`explore\.detail\.module-\$\{module\.key\}`\}/);
+  assert.match(source, /testID=\{`explore\.detail\.item-\$\{exploreDetailTestIdToken/);
+  assert.match(source, /testID="explore\.detail\.child-back"/);
+});
+
+test('Explore uses explicit source-driven empty and unavailable states without filler', () => {
+  assert.match(source, /testID="explore\.detail\.module-unavailable"/);
+  assert.match(source, /testID="explore\.detail\.module-unavailable-back"/);
+  assert.match(source, />This section is no longer listed\.</);
+  assert.match(source, /'No sights listed\.'/);
+  assert.match(source, /'No activities listed\.'/);
+  assert.match(source, /'No stays listed\.'/);
+  assert.match(source, />Weather unavailable\.</);
+  assert.doesNotMatch(source, /Check closer to your trip/);
+  assert.doesNotMatch(source, /Check back closer to your trip/);
 });

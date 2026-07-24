@@ -877,3 +877,16 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Exact next action: implement Checkpoint 3 for Profile and the existing commercial/community features: membership/preferences/vehicle/privacy, referral fallback and Branch guard, prizes/winner inbox/payout workflow, support history/attachments/diagnostic consent, and global Co-Pilot/copy parity.
 - Do not repeat: Route Editor or Trip Overview broad crawling, camera/Original download and lifecycle tests, Plan/Downloads, Layers, NPS/Explore research, completed Figma/Mobbin work, the complete pre-preview suite, or Memory Gate V3 before the frozen candidate.
 - Task-owned background processes: none. Publisher, Expo export, Sentry upload, Gradle daemon, Metro, Maestro, audits, and tests have exited. The temporary `trailhead-preview-7e10a01` worktree was removed. ADB remains intentionally available.
+
+## Checkpoint 3 baseline — Profile and commercial/community features
+
+- Timestamp: `2026-07-24T12:58:01-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; baseline HEAD `92b695262dadfaa1ca65e87e2376a21d5a2d51e4`.
+- Current paired preview remains source `f7c156018239f894df21a486bf7445b994b6dcc1`: Android build `59`, runtime `native-1.0.10-android.1`, update `019f953f-f207-7ee6-bd6e-d142826db46a`; iOS build `54`, runtime `native-1.0.10-ios.1`, update `019f953f-f207-7e22-9059-34fcc9496e07`.
+- Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. `.cursor/` and `dashboard/explore_serving_index_v2.json` remain excluded and unstaged.
+- Existing real capabilities are the implementation boundary: account/Explorer, credits, Plan links, vehicle/rig, contributor profile, contest entry/rules/leaderboards, private winner support threads, referral share/manual fallback/privacy control, support history, sanitized attachments, diagnostics opt-in, appearance/units/communication preferences, privacy/legal, and reauthenticated account deletion.
+- The approved refinement will organize these real capabilities into clearer Account, Trips & Saved, Rig, Community, Support, and Settings destinations; remove duplicate Account-level Support shortcuts; expose a user's existing prize history/status and winner thread without adding a payout-credential form; and add stable selectors and concise copy. No capability, prize amount, contest rule, Viator booking, referral credit, support privacy guard, or account safeguard may be removed.
+- Branch deferred handoff remains server-disabled until branded-domain TLS, fresh-install attribution, opt-out, fallback, and exactly-once credit proof pass. The visible manual referral code remains available regardless of attribution preference.
+- Narrow verification only: Profile presentation/state helpers, referrals, contest/prize/support backend tests, attachments/diagnostics privacy, subscription links, account deletion, copy/TypeScript/whitespace, then one Android Profile delta and paired preview. No broad Map, Route, Explore, Layers, NPS, Originals, or Offline crawl.
+- Open P0/P1 at baseline: none reproduced. Exact next action: implement the six-section Profile hierarchy and real prize/support presentation, then run the focused gates.
+- Task-owned background processes: none. ADB remains intentionally available.

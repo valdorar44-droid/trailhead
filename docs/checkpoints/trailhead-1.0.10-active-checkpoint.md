@@ -552,3 +552,49 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Paired preview OTA has not been published yet. Exact next action: commit this implementation checkpoint, push the three commits, run the guarded preview publisher from one immutable SHA with Sentry source maps, verify both update records, and run only the narrow Android/shared-iOS report and Explore deltas.
 - Do not repeat: completed unit baselines, broad crawls, Layers, NPS research, Figma/Mobbin research, Search V2 baseline, Memory Gate V3, camp/trail device flows, or the accepted campground Sites anchor.
 - Task-owned background processes: none. ADB and the Android emulator remain intentionally available.
+
+## Checkpoint M3.5 final evidence — paired preview and Android delta
+
+- Timestamp: `2026-07-24T02:31:59-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; exact application and paired-preview source HEAD: `c1b575d476b14eaa20b05b217a9b388e9589f3a1`. This documentation-only checkpoint commit follows that immutable source SHA.
+- Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. `.cursor/`, `dashboard/explore_serving_index_v2.json`, and unrelated mode-only script changes remained unstaged and untouched.
+- The final source includes one device-evidence correction after the implementation checkpoint: imported GPX report filenames are removed from public Notes while authored notes remain. Focused report presentation/contract tests (`8/8`), TypeScript, and whitespace checks passed before publication.
+
+### Paired preview identity
+
+- Channel `preview`, channel ID `019dbc97-3cde-795b-a35d-e6aa985060d3`.
+- Candidate branch `preview-candidate-c1b575d476b14eaa20b05b217a9b388e9589f3a1-mrylvizr-eb4f1ec7f96c5541b3c12168`, branch ID `019f92fe-e3a2-79bd-9fef-af327eaf8232`.
+- Android build `59`, runtime `native-1.0.10-android.1`, group `b7477352-457a-456e-8156-e8506f0fc77f`, update `019f92ff-093c-74ee-aee6-9566e6a1c01c`.
+- iOS build `54`, runtime `native-1.0.10-ios.1`, group `419682a1-b03c-4722-9694-9cacc7a2b096`, update `019f92ff-093c-74fb-8823-a419cd82305f`.
+- Android, iOS, and web Sentry source-map uploads completed successfully. Samsung `RFCR408DA9B` verified version `1.0.10`, build `59`, preview channel, the full source SHA, Android runtime/update above, and delivery status `Ready`. Identity evidence: `output/qa-RFCR408DA9B-c1b575d.xml`, SHA-256 `536d1e29f99d043574f9eaea8364f725ec3de77ec382856cb2ff0779206cac87`.
+- The matching iOS EAS update record is verified. Physical iOS report/Explore interaction evidence is not claimed from this Windows session and remains part of the paired-device acceptance pass.
+
+### Android report delta
+
+- A real existing Moab GPX community pin opened directly at Half with stable identity, vote actions, coordinates, reserved nearby loading, and the cleaned public note. The private import filename was absent while the authored note remained.
+- `Suggest Update` opened inline and `Cancel` restored the original action without changing the pin. Full expanded correctly; Android Back followed Full → Half → dismiss.
+- Evidence:
+  - Half/content: `output/report-c1b.xml`, SHA-256 `d3d3cf62d17e8e7a6308ef093bbf984c6d8baa3dee44388a2087e119a5a7f591`; screenshot `output/report-c1b.png`, SHA-256 `4fe021fc53bbcb92783d780b5b77ddb4650d1a75cf91bb1759b572cb48c31b5b`.
+  - Update/Cancel: `output/report-update3-c1b.xml`, SHA-256 `1e9d83bafd6b6585527f12e0ec1b5f125bd29afd3d5d0af236c34bfe28b310ef`; `output/report-cancelled-c1b.xml`, SHA-256 `ba97c7d9e94e34245f46ebc360d42c2ec448bc8cef1b259532e836edb737c4a9`.
+  - Full/Back: `output/report-stage-c1b.xml`, SHA-256 `f6091bf4bddb5d7df89066309161487e33f1095b0dc0d0f7650afc3c23779d5e`; `output/report-back-half-c1b.xml`, SHA-256 `6b98e9bb052f67d999dbe9bf6ef71825d71e4eef0c380bb9c2186baf4f675f8f`; `output/report-back-dismiss-c1b.xml`, SHA-256 `406c957f610aa5e0f94d566f8414cfd94720ade35cbc8e2d7ed3442ab574d5a3`.
+- The current signed-in map exposed only one usable overlapping report and no private field-check fixture. A physical rapid A→B or private-admin mutation was not fabricated. Identity/generation rejection and capability-gated private actions remain covered by the passing characterization suite.
+
+### Android Explore-hub delta
+
+- Yosemite hub → `What to See` rendered a stable three-child list. After scrolling and six seconds of delayed enrichment, all child bounds were byte-for-byte identical in the two hierarchy dumps; no snap or enrichment-driven reset occurred.
+- Glacier Point opened as the exact child detail. Back restored the same module list and scroll position within two layout pixels. The deliberate child → module list → module hero → Overview chain kept the Yosemite hub selected and returned to its real-data overview rather than dismissing or switching entities.
+- Evidence:
+  - Hub/list: `output/yosemite-hub-c1b.xml`, SHA-256 `96e8c7a3a177e475338a6d2a84b066bfd7fe574b11a874ecd4bb0ddc78e790c9`; `output/yosemite-see-c1b.xml`, SHA-256 `e53f4c75982d9a55679ac0e843387ac81f52bfb1e5a7ad608b4246f701459b55`.
+  - Stable scroll: `output/yosemite-see-scroll1.xml` and `output/yosemite-see-scroll2.xml`, matching SHA-256 `43e6ddcb227cfb7263671e335e360cfef6110b5fff635d1755e445ff99818a08`.
+  - Child/return: `output/yosemite-glacier-c1b.xml`, SHA-256 `26db89dd0260544157cc5115211c7dbfa0a602c692fa672bd33f43dc21986b33`; `output/yosemite-see-return-c1b.xml`, SHA-256 `945fcd99e99df0b7f264966eb3ce34a5af9eef30904bef316f9d2a7c547f9b9c`.
+  - Module/Overview return: `output/yosemite-module-back-c1b.xml`, SHA-256 `0100464fdb61cef14ada67d411020542531e3278988b8b9fd7798040a5e62e10`; `output/yosemite-module-top-c1b.xml`, SHA-256 `e05dd482d611be71190d225ff8501b921d3810f298106b139efa43d4e272381d`; `output/yosemite-overview-c1b.xml`, SHA-256 `f63a29b5cf6d69ae3f060d9f9a7623dfe9688e4343bcf02c882a811cb8e210b4`.
+- Existing See/Do/Stay/Visitor Information/map/Viator preservation remains covered by the previously accepted NPS device evidence plus focused NPS (`14/14`) and Viator (`29/29`) tests. It was intentionally not recrawled.
+
+### Disposition and continuation
+
+- Open P0: none. Open P1 reproduced by this packet: none.
+- Community reports and Explore-hub stability are accepted for this JS-only packet. The two unavailable physical fixtures are transparent evidence limitations, not passing-device claims.
+- Exact next approved packet: Plan, Trips, Downloads, and Originals. Preserve the current Map renderer, all Offline V1/V2 capabilities, route-ready flow, complete End Tour behavior, campground/NPS/Viator/community modules, and the approved Figma system. Use Mobbin only as a behavior reference where the approved Figma packet needs a minor refinement; major visual changes return for user approval.
+- Do not repeat: this report/Explore delta, broad Android crawls, Layers testing, NPS research, Search V2 baseline, Memory Gate V3, campground diversity, Trail/Trailhead flows, Figma/Mobbin research already recorded for completed packets, or any paired OTA in this section.
+- Release authorization update: the user authorized paired production builds/OTA once the complete 1.0.10 candidate and remaining waves pass. This partial M3.5 packet does not satisfy that gate; production, public-stage changes, advertising, and store assets remain unchanged.
+- Task-owned background processes at evidence capture: none. The paired publisher exited successfully; no Gradle, Metro, Expo export, Maestro, audit, or Trailhead test job remains. ADB is intentionally available for the connected Samsung and emulator.

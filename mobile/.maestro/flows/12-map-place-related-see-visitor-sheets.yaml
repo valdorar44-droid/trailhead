@@ -61,7 +61,7 @@ tags:
     id: "place-sheet-place-place-place-nps-yose-related.visitor-centers.item.explore-place-nps-child-yose-visitorcenters-big-oak-flat-information-station"
 - extendedWaitUntil:
     visible:
-      id: "place-sheet-place-place-explore-place-nps-child-yose-visitorcenters-big-oak-flat-information-station-content"
+      id: "place-sheet-place-place-explore-place-nps-child-yose-visitorcenters-big-oak-flat-information-stati-content"
     timeout: 15000
 - assertVisible: "Big Oak Flat Information Station"
 - assertVisible: "Visitor Center.*"

@@ -101,7 +101,7 @@ const relatedNpsFlow = readFileSync(join(workspace, 'flows', '12-map-place-relat
 assert.match(relatedNpsFlow, /related\.things-to-see/);
 assert.match(relatedNpsFlow, /anderson-cabin-content/);
 assert.match(relatedNpsFlow, /related\.visitor-centers/);
-assert.match(relatedNpsFlow, /big-oak-flat-information-station-content/);
+assert.match(relatedNpsFlow, /big-oak-flat-information-stati-content/);
 assert.match(relatedNpsFlow, /pressKey: Back/);
 
 const parsed = parseMaestroArgs([

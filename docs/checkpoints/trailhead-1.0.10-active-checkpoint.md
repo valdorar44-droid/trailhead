@@ -847,3 +847,33 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Exact next action: implement the approved Route Editor and Trip Overview packet: durable route-ready actions, timeline, departure-aware weather, editable packing, sourced Brief & Backup, full-screen 3D return state, and navigation framing/compass proof.
 - Do not repeat: Moab acquisition/download, Plan/Downloads, Minimize/Resume lifecycle, Layers, NPS/Explore crawls, broad Map crawls, completed Figma/Mobbin research, or Memory Gate V3 before the frozen candidate.
 - Task-owned background processes: none. Publisher, Expo export, Sentry upload, EAS, Gradle, Metro, Maestro, memory-gate, and Trailhead test processes have exited. ADB remains intentionally available for the connected Samsung and emulator.
+
+## Checkpoint 2 — Route Editor and Trip Overview accepted on Android
+
+- Timestamp: `2026-07-24T12:54:03-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; route implementation commit `7e10a0149f48dc68393d7f53c6ff86bbcfdb132c`; exact corrected paired-preview source HEAD `f7c156018239f894df21a486bf7445b994b6dcc1`, pushed to origin.
+- Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. `.cursor/` and `dashboard/explore_serving_index_v2.json` remain excluded, unstaged, and untouched.
+- Assisted and manual route completion now share one durable main-map route-review session. The route-ready state is retained until an explicit Review trip, Edit route, Offline, Options, dismiss, or replacement action. Existing route persistence, keyboard/day context, Viator insertion, navigation, compass, and camera ownership remain unchanged.
+- Trip Overview now presents route-weighted drive-time segments, departure-aware forecast dates, exact-place attributed media only, and a clean fallback when no trustworthy image exists. Packing is an editable durable checklist with retained progress; the existing notes and trip actions remain.
+- Brief & Backup remains bound to the exact saved trip revision and server-owned evidence. It shows sourced service intervals, exits, backup/hazard availability, evidence times, and `Not checked` when unavailable. The Samsung's selected legacy trip correctly returned the existing revision guard, `This trip changed. Review the latest route before running Brief & Backup.`, instead of generating evidence for stale geometry.
+- The full-screen 3D route preview retains play/pause, scrub, speed, recenter, and the one main map. A deterministic Android defect was found during the narrow delta: hardware Back left the Map tab instead of restoring the timeline. One evidence-backed fix now intercepts Back only for an active `trail_builder` flyover and restores the exact expanded/collapsed state, selected day, and scroll offset. Co-Pilot flyovers retain their separate behavior.
+- The route timeline's overnight label and missing-photo fallback now use the approved orange/neutral treatment rather than decorative green.
+- Focused and guarded verification passed:
+  - Route-build session/source, route-ready contract, timeline presentation, packing, exact-media trust, 3D return state, Brief timestamps, route weather, persistence/write barriers, camera ownership/mode transitions, mission briefing smoke, Plan workspace, user-facing copy, TypeScript, and whitespace.
+  - One complete `audit:prepreview` run on the implementation SHA, including Android native checks, Explore/NPS/Viator preservation, all `784` backend tests, copy/privacy, TypeScript, and whitespace.
+- Final paired preview publication completed with Sentry source maps:
+  - Channel `preview`, channel ID `019dbc97-3cde-795b-a35d-e6aa985060d3`.
+  - Candidate branch `preview-candidate-f7c156018239f894df21a486bf7445b994b6dcc1-mrz8dp8x-cea19f3b33191f9bab3289ef`, branch ID `019f953f-cfb9-754e-b9bd-8116c597282b`.
+  - Android build `59`, runtime `native-1.0.10-android.1`, group `b0416155-3a87-4bd2-a361-24122db387f9`, update `019f953f-f207-7ee6-bd6e-d142826db46a`.
+  - iOS build `54`, runtime `native-1.0.10-ios.1`, group `f6fa5689-0b00-48cb-8691-5d6323158eec`, update `019f953f-f207-7e22-9059-34fcc9496e07`.
+- Samsung `RFCR408DA9B` verified version `1.0.10`, build `59`, preview channel, full source SHA, matching runtime/update, and delivery state `Ready`.
+- Narrow Android evidence:
+  - QA identity: `output/checkpoint-2-route-overview/qa-f7c.xml`, SHA-256 `5ebea854d94376d0768747fe7ad548a83197db27d8f4d6f1ba1835788a560fd5`.
+  - Main-map timeline: `output/checkpoint-2-route-overview/route-overview-f7c.png`, SHA-256 `df4531fd34fd1a981ff2f8ac799442dbfd818cbdf4170d6c635347eb8aebfc72`.
+  - 3D preview: `output/checkpoint-2-route-overview/route-preview-3d-f7c.png`, SHA-256 `2e7e8fe749464b9a95bca81ae4891dbab846027aa9859df8d8325a6f04b8c5f6`.
+  - Exact Back restoration: `output/checkpoint-2-route-overview/route-overview-after-3d-f7c.xml`, SHA-256 `d0e8f760092b7b51aca185b3f213222f6d1b5d54f159fa19db252fe231009f66`.
+  - Editable packing/progress: `output/checkpoint-2-route-overview/packing-edit-7e10.xml`, SHA-256 `7e23ce6eb2f1a4430b0dab840d6723b42fe47ee7b147c47546d5feb40b37f1c7`; `output/checkpoint-2-route-overview/packing-progress-7e10.xml`, SHA-256 `edc0f1b66dd67874b208887b17adb9f8cf07ce96ad952d3f281c14b68660c779`.
+- Android result: accepted. Open P0/P1 for this packet: none. The iOS update identity and shared pure contracts are verified; physical iOS interaction remains intentionally deferred to the frozen-candidate iOS pass and is not claimed here.
+- Exact next action: implement Checkpoint 3 for Profile and the existing commercial/community features: membership/preferences/vehicle/privacy, referral fallback and Branch guard, prizes/winner inbox/payout workflow, support history/attachments/diagnostic consent, and global Co-Pilot/copy parity.
+- Do not repeat: Route Editor or Trip Overview broad crawling, camera/Original download and lifecycle tests, Plan/Downloads, Layers, NPS/Explore research, completed Figma/Mobbin work, the complete pre-preview suite, or Memory Gate V3 before the frozen candidate.
+- Task-owned background processes: none. Publisher, Expo export, Sentry upload, Gradle daemon, Metro, Maestro, audits, and tests have exited. The temporary `trailhead-preview-7e10a01` worktree was removed. ADB remains intentionally available.

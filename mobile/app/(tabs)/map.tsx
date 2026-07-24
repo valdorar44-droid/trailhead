@@ -128,6 +128,7 @@ import {
 } from '@/lib/tripTimelinePresentation';
 import { mergePackingProgress } from '@/lib/tripPacking';
 import {
+  shouldRestoreTripOverviewFromMission,
   tripOverviewReturnState,
   type TripOverviewReturnState,
 } from '@/lib/tripOverviewReturnState';
@@ -20985,6 +20986,23 @@ function MapScreen() {
       });
     });
   }, [restoreTripOverview, selectedDay]);
+  useEffect(() => {
+    if (!shouldRestoreTripOverviewFromMission({
+      missionVisible: mapMissionVisible,
+      flyoverMode: mapMissionFlyoverMode,
+      hasActiveTrip: Boolean(activeTrip),
+    })) return;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      returnFromMissionToTripOverview();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [
+    activeTrip?.trip_id,
+    mapMissionFlyoverMode,
+    mapMissionVisible,
+    returnFromMissionToTripOverview,
+  ]);
   const canOpenMapDrawer = !navMode && !waterFollowActive && !showSearch && !inlineSearchOpen && !mapSearchSession;
   const openMapDrawer = useCallback(() => {
     if (!canOpenMapDrawer) return;
@@ -32440,9 +32458,9 @@ const makeStyles = (C: ColorPalette) => {
   tripTimelineLegText: { color: C.text3, fontSize: 10, fontFamily: mono },
   tripTimelineCamp: { flexDirection: 'row', gap: 10, paddingTop: 3 },
   tripTimelineCampPhoto: { width: 96, height: 84, borderRadius: 8, backgroundColor: C.s3 },
-  tripTimelineCampPlaceholder: { width: 96, height: 84, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: C.green + '14' },
+  tripTimelineCampPlaceholder: { width: 96, height: 84, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: C.orange + '14' },
   tripTimelineCampBody: { flex: 1, minWidth: 0, justifyContent: 'center' },
-  tripTimelineCampLabel: { color: C.green, fontSize: 9, fontWeight: '900' },
+  tripTimelineCampLabel: { color: C.orange, fontSize: 9, fontWeight: '900' },
   tripTimelineCampName: { color: C.text, fontSize: 15, lineHeight: 19, fontWeight: '900', marginTop: 3 },
   tripTimelineCampMeta: { color: C.text3, fontSize: 11, lineHeight: 15, marginTop: 4 },
   tripDayOverviewCard: {

@@ -4,6 +4,16 @@ export type TripOverviewReturnState = {
   scrollOffset: number;
 };
 
+export function shouldRestoreTripOverviewFromMission(input: {
+  missionVisible: boolean;
+  flyoverMode: string | null | undefined;
+  hasActiveTrip: boolean;
+}): boolean {
+  return input.missionVisible
+    && input.flyoverMode === 'trail_builder'
+    && input.hasActiveTrip;
+}
+
 export function tripOverviewReturnState(input: {
   panelCollapsed: boolean;
   selectedDay: number | null;

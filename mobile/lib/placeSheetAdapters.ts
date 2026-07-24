@@ -23,14 +23,20 @@ export type CampgroundSheetParityModule = typeof CAMPGROUND_SHEET_PARITY_MODULES
 export const TRAIL_SHEET_PARITY_MODULES = [
   'photos',
   'route_facts',
+  'surface_access',
   'weather',
   'nearby',
   'community_reports',
+  'ratings',
   'downloads',
   'preview_3d',
   'route_builder',
   'edits',
   'reporting',
+  'official_sources',
+  'linked_trails',
+  'coordinates',
+  'navigation',
 ] as const;
 
 export const COMMUNITY_REPORT_SHEET_PARITY_MODULES = [

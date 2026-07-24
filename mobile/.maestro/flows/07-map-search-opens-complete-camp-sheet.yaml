@@ -51,11 +51,12 @@ tags:
     direction: DOWN
     timeout: 30000
     speed: 65
-- assertVisible: "Site types"
+- assertVisible:
+    text: "Site types"
 - assertVisible: "^Sites$"
 - takeScreenshot: map-search-camp-full
 - tapOn:
-    point: "27%, 56%"
+    id: "place-sheet-camp-camp-place-ridb-251841-site-0"
 - extendedWaitUntil:
     notVisible: "^Sites$"
     timeout: 20000
@@ -64,6 +65,7 @@ tags:
 - extendedWaitUntil:
     visible: "^Sites$"
     timeout: 15000
-- assertVisible: "Site types"
+- assertVisible:
+    text: "Site types"
 - assertVisible: "^Sites$"
 - takeScreenshot: map-search-camp-restored-scroll

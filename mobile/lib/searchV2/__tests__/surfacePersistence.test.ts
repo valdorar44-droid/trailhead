@@ -224,12 +224,12 @@ test('Map, Search V2, Route Editor, and route-ready actions expose stable automa
   assert.match(routeReadySource, /testID=\{`map\.route-ready\.\$\{action\.id\}`\}/);
 });
 
-test('Map downsamples every remote place, camp, trail, site, and gallery image before decode', () => {
+test('Map downsamples every remote place, camp, optional trail photo, site, and gallery image before decode', () => {
   const imageTags = mapSource.match(/<Image\b[\s\S]*?\/>/g) || [];
   const remoteImageTags = imageTags.filter(tag => /source=\{\{\s*uri:/.test(tag));
   assert.ok(remoteImageTags.length >= 10, 'the Map surface still has representative remote image coverage');
   for (const tag of remoteImageTags) assert.match(tag, /resizeMethod="resize"/);
-  assert.match(mapSource, /resizeMethod=\{heroUri \? 'resize' : undefined\}/);
+  assert.match(mapSource, /source=\{\{ uri: profilePhoto\.url \}\}[\s\S]*?resizeMethod="resize"/);
 });
 
 test('Map drawer, filters, layers, styles, and legend expose stable automation IDs', () => {

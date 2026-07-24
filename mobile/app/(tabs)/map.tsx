@@ -7,6 +7,16 @@ import RouteSearchModal from '@/components/RouteSearchModal';
 import type { OfflineAreaSelection } from '@/components/NativeMap/OfflineModal';
 import CampCommentsSection from '@/components/map/CampCommentsSection';
 import CampPlaceSheetPeek from '@/components/map/CampPlaceSheetPeek';
+import TrailEditSuggestionSheet from '@/components/map/TrailEditSuggestionSheet';
+import {
+  TrailPlaceSheetPeek,
+  TrailSheetActionRow,
+  TrailSheetIdentityCard,
+  TrailSheetLinkRow,
+  TrailSheetMetricGrid,
+  TrailSheetSectionTitle,
+  type TrailSheetMetric,
+} from '@/components/map/TrailPlaceSheet';
 import CampCoordinatesSection from '@/components/map/CampCoordinatesSection';
 import CampFieldReportsSection from '@/components/map/CampFieldReportsSection';
 import FieldReportComposer from '@/components/reports/FieldReportComposer';
@@ -223,6 +233,13 @@ import {
   sheetRequestIsCurrent,
   type SheetIdentity,
 } from '@/lib/sheetCoordinator';
+import {
+  beginTrailSheetHydration,
+  completeTrailSheetHydration,
+  EMPTY_TRAIL_SHEET_HYDRATION,
+  timeoutTrailSheetHydration,
+  trailSheetExpandedIsLoading,
+} from '@/lib/trailSheetHydration';
 import { useProductFeatures } from '@/lib/useProductFeatures';
 import {
   offlineSearchResultsV2,
@@ -6679,6 +6696,8 @@ function MapScreen() {
   const [trailFieldReportSummary, setTrailFieldReportSummary] = useState<FieldReportSummary | null>(null);
   const [showFieldReportForm, setShowFieldReportForm] = useState(false);
   const [showTrailFieldReportForm, setShowTrailFieldReportForm] = useState(false);
+  const [showTrailEditForm, setShowTrailEditForm] = useState(false);
+  const [trailEditSubmitting, setTrailEditSubmitting] = useState(false);
   const [frSentiment,  setFrSentiment]  = useState<FieldReportSentiment | null>(null);
   const [frAccess,     setFrAccess]     = useState<FieldReportAccess | null>(null);
   const [frCrowd,      setFrCrowd]      = useState<FieldReportCrowd | null>(null);
@@ -7080,6 +7099,21 @@ function MapScreen() {
   const selectedTrailRef = useRef<TrailFeature | null>(null);
   selectedTrailRef.current = selectedTrail;
   const [selectedTrailProfile, setSelectedTrailProfile] = useState<TrailProfile | null>(null);
+  const [trailWeather, setTrailWeather] = useState<WeatherForecast | null>(null);
+  const [trailHydrationAttempt, setTrailHydrationAttempt] = useState(0);
+  const [trailSheetHydration, setTrailSheetHydration] = useState(EMPTY_TRAIL_SHEET_HYDRATION);
+  const trailSheetScrollYRef = useRef(0);
+  const [trailSheetScrollRestore, setTrailSheetScrollRestore] = useState({ key: 0, y: 0 });
+  const skipTrailDetailReloadRef = useRef<string | null>(null);
+  const trailPresentationRestoreRef = useRef<string | null>(null);
+  const trailParentSnapshotRef = useRef<{
+    trail: TrailFeature;
+    profile: TrailProfile | null;
+    weather: WeatherForecast | null;
+    fieldReports: CampFieldReport[];
+    fieldReportSummary: FieldReportSummary | null;
+    scrollY: number;
+  } | null>(null);
   useEffect(() => {
     if (!selectedPlace && !selectedCamp && !selectedTrail) {
       setRelatedPlaceReturnStack(current => current.length ? [] : current);
@@ -7165,15 +7199,21 @@ function MapScreen() {
     }
     const restoreCampFull = activePlaceSheetModel.identity.kind === 'camp'
       && campPresentationRestoreRef.current === activePlaceSheetModel.identity.entityId;
+    const restoreTrailFull = (activePlaceSheetModel.identity.kind === 'trail' || activePlaceSheetModel.identity.kind === 'trailhead')
+      && trailPresentationRestoreRef.current === activePlaceSheetModel.identity.entityId;
     if (restoreCampFull) campPresentationRestoreRef.current = null;
+    if (restoreTrailFull) trailPresentationRestoreRef.current = null;
     if (activePlaceSheetModel.identity.kind === 'camp' && !restoreCampFull) {
       campSheetScrollYRef.current = 0;
       setCampSheetScrollRestore(current => ({ key: current.key + 1, y: 0 }));
     }
+    const opensAtPeek = activePlaceSheetModel.identity.kind === 'camp'
+      || activePlaceSheetModel.identity.kind === 'trail'
+      || activePlaceSheetModel.identity.kind === 'trailhead';
     dispatchPlaceSheet({
       type: 'open',
       identity: activePlaceSheetModel.identity,
-      presentation: activePlaceSheetModel.identity.kind === 'camp' && !restoreCampFull ? 'peek' : 'full',
+      presentation: opensAtPeek && !restoreCampFull && !restoreTrailFull ? 'peek' : 'full',
       returnContext: { surface: 'map' },
     });
   }, [activePlaceSheetIdentityKey]);
@@ -7189,47 +7229,74 @@ function MapScreen() {
   useEffect(() => {
     const trail = selectedTrail;
     const model = selectedTrailSheetModel;
-    if (!trail || !model) return;
-    const request = currentPlaceSheetRequest(model);
-    if (!request) return;
+    if (!trail || !model) {
+      setTrailSheetHydration(EMPTY_TRAIL_SHEET_HYDRATION);
+      return;
+    }
+    const request = {
+      identity: model.identity,
+      requestGeneration: placeSheetCoordinator.requestGeneration,
+    };
+    if (!sheetRequestIsCurrent(placeSheetCoordinatorRef.current, request.identity, request.requestGeneration)) return;
+    const key = `${model.identity.kind}:${model.identity.entityId}:${request.requestGeneration}`;
+    const attempt = trailHydrationAttempt;
+    if (skipTrailDetailReloadRef.current === model.identity.entityId) {
+      skipTrailDetailReloadRef.current = null;
+      setTrailSheetHydration(completeTrailSheetHydration(beginTrailSheetHydration(key, attempt), key, attempt));
+      return;
+    }
+    setTrailSheetHydration(beginTrailSheetHydration(key, attempt));
+    setTrailWeather(null);
+
+    const current = () => placeSheetRequestIsCurrent(request) && selectedTrailRef.current?.id === trail.id;
     const reportId = trailReportId(trail);
-    api.getTrailFieldReports(reportId)
-      .then(reports => {
-        if (placeSheetRequestIsCurrent(request) && selectedTrailRef.current?.id === trail.id) {
-          setTrailFieldReports(reports);
-        }
-      })
-      .catch(() => {});
-    api.getTrailFieldReportSummary(reportId)
-      .then(summary => {
-        if (placeSheetRequestIsCurrent(request) && selectedTrailRef.current?.id === trail.id) {
-          setTrailFieldReportSummary(summary);
-        }
-      })
-      .catch(() => {});
-    if (!trail.profile_id) return;
-    api.getTrailProfile(trail.profile_id)
-      .then(profile => {
-        if (!placeSheetRequestIsCurrent(request) || selectedTrailRef.current?.id !== trail.id) return;
+    const tasks: Promise<unknown>[] = [
+      api.getTrailFieldReports(reportId)
+        .then(reports => { if (current()) setTrailFieldReports(reports); }),
+      api.getTrailFieldReportSummary(reportId)
+        .then(summary => { if (current()) setTrailFieldReportSummary(summary); }),
+    ];
+    if (trail.profile_id) {
+      tasks.push(api.getTrailProfile(trail.profile_id).then(profile => {
+        if (!current()) return;
         setSelectedTrailProfile(profile);
-        setSelectedTrail(current => {
-          if (!current || current.id !== trail.id || current.profile_id !== trail.profile_id) return current;
+        setSelectedTrail(value => {
+          if (!value || value.id !== trail.id || value.profile_id !== trail.profile_id) return value;
           return {
-            ...current,
-            name: profile.name || current.name,
-            summary: profile.summary || current.summary,
-            photo_url: profile.photos?.[0]?.url || current.photo_url,
+            ...value,
+            name: profile.name || value.name,
+            summary: profile.summary || value.summary,
+            photo_url: profile.photos?.[0]?.url || value.photo_url,
           };
         });
         if (profile.field_report_summary) setTrailFieldReportSummary(profile.field_report_summary);
-      })
-      .catch(() => {});
+      }));
+    }
+    if (Number.isFinite(trail.lat) && Number.isFinite(trail.lng)) {
+      tasks.push(api.getWeather(trail.lat, trail.lng, 3, weatherUnitMode)
+        .then(result => { if (current()) setTrailWeather(result); }));
+    }
+
+    const timeout = setTimeout(() => {
+      if (!current()) return;
+      setTrailSheetHydration(value => timeoutTrailSheetHydration(value, key, attempt));
+    }, 3000);
+    Promise.allSettled(tasks).then(() => {
+      if (!current()) return;
+      clearTimeout(timeout);
+      setTrailSheetHydration(value => completeTrailSheetHydration(value, key, attempt));
+    });
+    return () => clearTimeout(timeout);
   }, [
-    currentPlaceSheetRequest,
     placeSheetRequestIsCurrent,
+    placeSheetCoordinator.requestGeneration,
     selectedTrail?.id,
     selectedTrail?.profile_id,
-    selectedTrailSheetModel,
+    selectedTrail?.lat,
+    selectedTrail?.lng,
+    selectedTrailSheetModel?.identity.entityId,
+    trailHydrationAttempt,
+    weatherUnitMode,
   ]);
 
   useEffect(() => {
@@ -7249,8 +7316,6 @@ function MapScreen() {
     selectedCamp?.lng,
     selectedCampSheetModel,
   ]);
-  const [trailWeather, setTrailWeather] = useState<WeatherForecast | null>(null);
-  const trailWeatherSeqRef = useRef(0);
   const [trailPreviewOpen, setTrailPreviewOpen] = useState(false);
   const [trailPreviewLoading, setTrailPreviewLoading] = useState(false);
   const [trailSourceRefreshing, setTrailSourceRefreshing] = useState(false);
@@ -7258,22 +7323,6 @@ function MapScreen() {
   const [trailPreviewProgress, setTrailPreviewProgress] = useState(0);
   const [trailPreviewPauseSignal, setTrailPreviewPauseSignal] = useState(0);
   const trailPreviewTone = useMemo<'cyan' | 'gold'>(() => 'cyan', []);
-  useEffect(() => {
-    const trail = selectedTrail;
-    const model = selectedTrailSheetModel;
-    const seq = ++trailWeatherSeqRef.current;
-    setTrailWeather(null);
-    if (!trail || !model || !Number.isFinite(trail.lat) || !Number.isFinite(trail.lng)) return;
-    const request = currentPlaceSheetRequest(model);
-    if (!request) return;
-    api.getWeather(trail.lat, trail.lng, 3, weatherUnitMode)
-      .then(result => {
-        if (trailWeatherSeqRef.current === seq && placeSheetRequestIsCurrent(request) && selectedTrailRef.current?.id === trail.id) {
-          setTrailWeather(result);
-        }
-      })
-      .catch(() => {});
-  }, [currentPlaceSheetRequest, placeSheetRequestIsCurrent, selectedTrail?.id, selectedTrail?.lat, selectedTrail?.lng, selectedTrailSheetModel, weatherUnitMode]);
   const [trailCardCollapsed, setTrailCardCollapsed] = useState(false);
   const [showTrailList, setShowTrailList] = useState(false);
   const [trailRouteBuilderOpen, setTrailRouteBuilderOpen] = useState(false);
@@ -21160,6 +21209,7 @@ function MapScreen() {
     setTrailSourceRefreshing(false);
     setFrSubmitting(false);
     setShowTrailFieldReportForm(false);
+    setShowTrailEditForm(false);
     resetFieldReportForm();
     setTrailCardCollapsed(false);
     setSelectedTrail(feature);
@@ -21478,6 +21528,45 @@ function MapScreen() {
     nativeMapRef.current?.flyTo(parent.camp.lat, parent.camp.lng, 11, parent.camp.name);
   }
 
+  function rememberTrailSheetParent() {
+    if (!selectedTrail) return;
+    trailParentSnapshotRef.current = {
+      trail: selectedTrail,
+      profile: selectedTrailProfile,
+      weather: trailWeather,
+      fieldReports: trailFieldReports,
+      fieldReportSummary: trailFieldReportSummary,
+      scrollY: trailSheetScrollYRef.current,
+    };
+  }
+
+  function restoreTrailSheetParent() {
+    const parent = trailParentSnapshotRef.current;
+    if (!parent) return;
+    trailParentSnapshotRef.current = null;
+    trailPresentationRestoreRef.current = adaptTrailSheet(parent.trail).identity.entityId;
+    skipTrailDetailReloadRef.current = adaptTrailSheet(parent.trail).identity.entityId;
+    setSelectedTrail(parent.trail);
+    selectedTrailRef.current = parent.trail;
+    setSelectedTrailProfile(parent.profile);
+    setTrailWeather(parent.weather);
+    setTrailFieldReports(parent.fieldReports);
+    setTrailFieldReportSummary(parent.fieldReportSummary);
+    setTrailSheetScrollRestore(value => ({ key: value.key + 1, y: parent.scrollY }));
+    nativeMapRef.current?.flyTo(parent.trail.lat, parent.trail.lng, 12, parent.trail.name);
+  }
+
+  function closeSelectedTrailSheet() {
+    trailParentSnapshotRef.current = null;
+    setRelatedPlaceReturnStack([]);
+    clearTrailMapOverlays();
+    setTrailCardCollapsed(false);
+    setSelectedTrail(null);
+    setShowTrailFieldReportForm(false);
+    setShowTrailEditForm(false);
+    resetFieldReportForm();
+  }
+
   useEffect(() => {
     if (!relatedPlaceReturnStack.length) return;
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -21495,6 +21584,27 @@ function MapScreen() {
     });
     return () => subscription.remove();
   }, [selectedCamp?.id]);
+
+  useEffect(() => {
+    if (!selectedTrail) return;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (trailParentSnapshotRef.current) {
+        restoreTrailSheetParent();
+        return true;
+      }
+      if (placeSheetCoordinator.presentation === 'full' || placeSheetCoordinator.presentation === 'half') {
+        dispatchPlaceSheet({ type: 'set_presentation', presentation: 'peek' });
+        return true;
+      }
+      if (relatedPlaceReturnStack.length) {
+        restoreRelatedPlaceParent();
+        return true;
+      }
+      closeSelectedTrailSheet();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [selectedTrail?.id, placeSheetCoordinator.presentation, relatedPlaceReturnStack.length]);
 
   function openNearbyPlace(place: OsmPoi, day?: number | null) {
     setSelectedCamp(null);
@@ -22253,6 +22363,108 @@ function MapScreen() {
       : prev);
     setQuickToast(coords.length >= 2 ? 'Trail saved for offline follow' : 'Trail saved. Download this region for full offline routing.');
     setTimeout(() => setQuickToast(''), 2600);
+  }
+
+  function saveSelectedTrailPlace(trail: TrailFeature) {
+    addSavedPlace({
+      id: `trail:${trail.id}`,
+      name: trail.name,
+      lat: trail.lat,
+      lng: trail.lng,
+      icon: trail.type === 'trailhead' ? 'pin' : 'flag',
+      note: trail.type === 'trailhead' ? 'Saved trailhead' : 'Saved trail',
+      createdAt: Date.now(),
+    });
+    setQuickToast(`${trail.type === 'trailhead' ? 'Trailhead' : 'Trail'} saved`);
+    setTimeout(() => setQuickToast(''), 2200);
+  }
+
+  function shareSelectedTrail(trail: TrailFeature) {
+    Share.share({
+      message: `${trail.name}\n${trail.lat.toFixed(5)}, ${trail.lng.toFixed(5)}`,
+    }).catch(() => {});
+  }
+
+  function openSelectedTrailEdit(trail: TrailFeature) {
+    if (!user) {
+      router.push('/(tabs)/profile');
+      return;
+    }
+    if (!(selectedTrailProfile?.id || trail.profile_id)) return;
+    setShowTrailEditForm(true);
+  }
+
+  async function submitSelectedTrailEdit(field: string, value: string) {
+    const trail = selectedTrail;
+    const trailId = selectedTrailProfile?.id || trail?.profile_id;
+    if (!trail || !trailId || trailEditSubmitting) return;
+    setTrailEditSubmitting(true);
+    try {
+      const result = await api.suggestTrailEdit(trailId, {
+        trail_name: trail.name,
+        field,
+        value,
+      });
+      setShowTrailEditForm(false);
+      setQuickToast(result.credits_earned ? `Edit sent · +${result.credits_earned} credits` : 'Edit sent');
+      setTimeout(() => setQuickToast(''), 2400);
+    } catch (error: any) {
+      Alert.alert('Could not send edit', error?.message || 'Try again in a moment.');
+    } finally {
+      setTrailEditSubmitting(false);
+    }
+  }
+
+  function openSelectedTrailMoreActions(trail: TrailFeature, canPreview: boolean) {
+    const actions: any[] = [];
+    if (canPreview) actions.push({ text: 'Preview in 3D', onPress: () => openTrailPreview(trail) });
+    actions.push(
+      { text: trail.support.offlineReady ? 'Refresh offline trail' : 'Download for offline', onPress: () => downloadSelectedTrail(trail) },
+      { text: 'Build route', onPress: () => seedTrailPinCaptureFromTrail(trail) },
+      { text: 'Report conditions', onPress: openTrailFieldReportComposer },
+      ...((selectedTrailProfile?.id || trail.profile_id) ? [{ text: 'Suggest edit', onPress: () => openSelectedTrailEdit(trail) }] : []),
+      { text: 'Share', onPress: () => shareSelectedTrail(trail) },
+      { text: 'Refresh details', onPress: refreshSelectedTrailSource },
+      { text: 'Cancel', style: 'cancel' },
+    );
+    Alert.alert(trail.name, undefined, actions);
+  }
+
+  function openLinkedTrailhead(trailhead: { name?: string; lat: number; lng: number }) {
+    rememberTrailSheetParent();
+    openTrailFromPoint(trailhead.name || 'Trailhead', trailhead.lat, trailhead.lng, 'trailhead');
+  }
+
+  function openLinkedTrailProfile(profile: TrailProfile) {
+    rememberTrailSheetParent();
+    const support = buildTrailSupport(
+      { lat: profile.lat, lng: profile.lng },
+      trailSupportCamps,
+      trailSupportFuel,
+      allMapPois,
+      mapReports,
+      offlineSaved,
+    );
+    openTrailFeature({
+      id: profile.id,
+      profile_id: profile.id,
+      name: profile.name,
+      lat: profile.lat,
+      lng: profile.lng,
+      type: 'trail',
+      source: 'trailhead',
+      source_label: profile.source_label,
+      subtitle: profile.area_name || profile.feature_label || 'Trail',
+      score: 100,
+      support,
+      length_mi: profile.length_mi,
+      activities: profile.activities,
+      last_checked: profile.last_checked,
+      summary: profile.summary || profile.description,
+      difficulty: profile.difficulty,
+      managing_agency: profile.land_manager,
+      photo_url: profile.photos?.[0]?.url,
+    });
   }
 
   async function isTrailRouteGraphReady(trail: TrailFeature) {
@@ -25687,12 +25899,7 @@ function MapScreen() {
           <TouchableOpacity
             style={s.trailMapCloseBtn}
             activeOpacity={0.82}
-            onPress={() => {
-              setRelatedPlaceReturnStack([]);
-              clearTrailMapOverlays();
-              setTrailCardCollapsed(false);
-              setSelectedTrail(null);
-            }}
+            onPress={closeSelectedTrailSheet}
           >
             <Ionicons name="close" size={15} color={OVR.text2} />
           </TouchableOpacity>
@@ -25701,17 +25908,47 @@ function MapScreen() {
 
       {selectedTrail && !navMode && !trailPinCaptureMode && !trailCardCollapsed && !trailRouteBuilderOpen && (() => {
         const model = normalizeTrailheadTrailProfile(selectedTrailProfile, selectedTrail);
-        const heroUri = selectedTrailProfile?.photos?.[0]?.url || selectedTrail.photo_url || '';
-        const photoCredit = selectedTrailProfile?.photos?.[0]?.credit || selectedTrailProfile?.photos?.[0]?.source || '';
+        const isTrailhead = selectedTrail.type === 'trailhead';
         const elevation = trailElevationDisplay(selectedTrailProfile, selectedTrail);
         const distanceLabel = trailDistanceLabel(selectedTrailProfile, selectedTrail);
-        const hasMeasuredRoute = distanceLabel !== '--' || elevation.value !== '--';
-        const weather = trailWeatherDisplay(trailWeather);
+        const routeType = trailRouteTypeLabel(selectedTrailProfile, selectedTrail);
         const difficulty = model.difficulty_label && model.difficulty_label !== 'Unrated'
           ? model.difficulty_label
           : trailDifficultyText(selectedTrail);
         const summary = String(selectedTrailProfile?.summary || selectedTrailProfile?.description || selectedTrail.summary || '').trim();
         const canPreviewTrail = Boolean(buildLocalTrailPreviewManifest(selectedTrail, selectedTrailProfile) || selectedTrailProfile?.preview_available);
+        const sourceName = cleanExploreSourceLabel(
+          selectedTrailProfile?.source_pack?.primary
+            || selectedTrailProfile?.source_label
+            || selectedTrail.source_label
+            || trailSourceLabel(selectedTrail),
+          isTrailhead ? 'Trailhead source' : 'Trail source',
+        );
+        const checkedAt = selectedTrailProfile?.last_checked || selectedTrail.last_checked;
+        const checkedLabel = checkedAt
+          ? new Date(checkedAt * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+          : '';
+        const trustLabel = [sourceName, checkedLabel ? `updated ${checkedLabel}` : ''].filter(Boolean).join(' · ');
+        const areaLabel = selectedTrailProfile?.area_name || selectedTrail.subtitle || '';
+        const identityMeta = [areaLabel, distanceLabel !== '--' ? distanceLabel : ''].filter(Boolean).join(' · ');
+        const peekMetrics = [
+          isTrailhead ? { label: 'TYPE', value: 'Trail access' } : { label: 'ROUTE', value: routeType },
+          distanceLabel !== '--' ? { label: 'DISTANCE', value: distanceLabel } : null,
+          selectedTrail.surface
+            ? { label: 'SURFACE', value: cleanDisplayLabel(selectedTrail.surface) }
+            : difficulty && difficulty !== 'Unrated' ? { label: 'DIFFICULTY', value: difficulty } : null,
+        ].filter(Boolean) as TrailSheetMetric[];
+        const fullMetrics = (isTrailhead ? [
+          selectedTrail.managing_agency ? { label: 'MANAGER', value: selectedTrail.managing_agency } : null,
+          selectedTrail.surface ? { label: 'SURFACE', value: cleanDisplayLabel(selectedTrail.surface) } : null,
+          selectedTrail.open_status && selectedTrail.open_status !== 'unknown'
+            ? { label: 'STATUS', value: cleanDisplayLabel(selectedTrail.open_status) }
+            : null,
+        ] : [
+          distanceLabel !== '--' ? { label: 'DISTANCE', value: distanceLabel } : null,
+          elevation.value !== '--' ? { label: elevation.label.toUpperCase(), value: elevation.value } : null,
+          routeType !== 'Trail' ? { label: 'ROUTE', value: routeType } : null,
+        ]).filter(Boolean) as TrailSheetMetric[];
         const nearbyRows = [
           selectedTrail.support.nearestCampDistanceMi != null
             ? { icon: 'bonfire-outline', color: C.orange, text: `${selectedTrail.support.nearestCampName || 'Nearest camp'} · ${selectedTrail.support.nearestCampDistanceMi.toFixed(1)} mi` }
@@ -25724,151 +25961,221 @@ function MapScreen() {
             : null,
         ].filter(Boolean) as Array<{ icon: keyof typeof Ionicons.glyphMap; color: string; text: string }>;
         const reportPhotoRows = trailFieldReports.filter(fr => fr.has_photo);
+        const profilePhoto = selectedTrailProfile?.photos?.[0];
+        const hydrationKey = `${selectedTrailSheetModel!.identity.kind}:${selectedTrailSheetModel!.identity.entityId}:${placeSheetCoordinator.requestGeneration}`;
+        const fullLoading = trailSheetExpandedIsLoading(trailSheetHydration, hydrationKey, trailHydrationAttempt);
+        const partial = trailSheetHydration.key === hydrationKey && trailSheetHydration.status === 'partial';
+        const linkedTrailheads = (selectedTrailProfile?.trailheads ?? [])
+          .filter(item => Number.isFinite(item.lat) && Number.isFinite(item.lng))
+          .slice(0, 3);
+        const linkedProfile = isTrailhead && selectedTrailProfile?.feature_type !== 'trailhead'
+          ? selectedTrailProfile
+          : null;
         return (
-          <PlaceSheetShell model={selectedTrailSheetModel!} fill={false} style={s.trailOverlayCard}>
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.trailOverlayContent}>
-              <View style={s.trailHeroPanel}>
-                <Image
-                  source={heroUri ? { uri: heroUri } : TRAIL_FALLBACK_IMAGE}
-                  style={s.trailHeroPhoto}
-                  resizeMode="cover"
-                  resizeMethod={heroUri ? 'resize' : undefined}
-                />
-                <View style={s.trailHeroShade} />
-                <View style={s.trailHeroTopBar}>
-                  {relatedPlaceReturnStack.length ? (
-                    <TouchableOpacity
-                      testID={`${selectedTrailSheetModel!.testID}-back`}
-                      accessibilityRole="button"
-                      accessibilityLabel="Back to previous place"
-                      style={s.trailHeroCircleBtn}
-                      onPress={restoreRelatedPlaceParent}
-                    >
-                      <Ionicons name="arrow-back" size={18} color="#fff" />
-                    </TouchableOpacity>
-                  ) : (
-                    <TouchableOpacity style={s.trailHeroCircleBtn} onPress={() => setTrailCardCollapsed(true)}>
-                      <Ionicons name="chevron-down" size={18} color="#fff" />
-                    </TouchableOpacity>
-                  )}
-                  <View style={s.trailHeroTopActions}>
-                    {canPreviewTrail && (
-                      <TouchableOpacity
-                        style={s.trailHeroCircleBtn}
-                        activeOpacity={0.86}
-                        disabled={trailPreviewLoading}
-                        onPress={() => openTrailPreview(selectedTrail)}
-                      >
-                        {trailPreviewLoading ? (
-                          <ActivityIndicator size="small" color="#fff" />
-                        ) : (
-                          <Ionicons name="play" size={16} color="#fff" />
-                        )}
-                      </TouchableOpacity>
-                    )}
-                    <TouchableOpacity style={s.trailHeroCircleBtn} activeOpacity={0.86} onPress={() => downloadSelectedTrail(selectedTrail)}>
-                      <Ionicons name={selectedTrail.support.offlineReady ? 'cloud-done-outline' : 'cloud-download-outline'} size={17} color="#fff" />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={s.trailHeroCircleBtn}
-                      onPress={() => {
-                        setRelatedPlaceReturnStack([]);
-                        clearTrailMapOverlays();
-                        setTrailCardCollapsed(false);
-                        setSelectedTrail(null);
-                        setShowTrailFieldReportForm(false);
-                        resetFieldReportForm();
-                      }}
-                    >
-                      <Ionicons name="close" size={18} color="#fff" />
-                    </TouchableOpacity>
-                  </View>
-                </View>
-                <View style={s.trailHeroTitleBlock}>
-                  <Text style={s.trailHeroTitle} numberOfLines={3}>{selectedTrail.name}</Text>
-                  <View style={s.trailHeroMetaLine}>
-                    <Ionicons name="star" size={12} color={trailPreviewTone === 'gold' ? '#f5c84b' : '#23d2c3'} />
-                    <Text style={s.trailHeroMetaText} numberOfLines={1}>
-                      {difficulty}{selectedTrail.subtitle ? ` · ${selectedTrail.subtitle}` : ''}
-                    </Text>
-                  </View>
-                </View>
-                {!!photoCredit && (
-                  <View style={s.trailHeroCredit}>
-                    <Ionicons name="image-outline" size={12} color="#fff" />
-                    <Text style={s.trailHeroCreditText} numberOfLines={1}>{photoCredit}</Text>
-                  </View>
-                )}
+          <TrailheadSnapSheet
+            key={`trail-sheet:${selectedTrailSheetModel!.identity.entityId}`}
+            initialStage="peek"
+            stage={(placeSheetCoordinator.current?.kind === 'trail' || placeSheetCoordinator.current?.kind === 'trailhead')
+              ? placeSheetCoordinator.presentation
+              : 'peek'}
+            onStageChange={presentation => dispatchPlaceSheet({ type: 'set_presentation', presentation })}
+            peekHeight={Math.min(370, Math.max(338, windowHeight * 0.42))}
+            peekExpandsToFull
+            hidePeekHeaderWhenExpanded
+            maxFullRatio={0.8}
+            halfRatio={0.58}
+            style={s.quickSnapCard}
+            contentStyle={s.quickSnapShell}
+            scrollContentStyle={s.trailSheetContent}
+            expandedLoading={fullLoading}
+            expandedLoadingContent={(
+              <View testID={`${selectedTrailSheetModel!.testID}-full-skeleton`} style={s.inlineLoadingDetail}>
+                <TrailheadCardSkeleton lines={3} style={s.detailSkeletonCard} />
+                <TrailheadCardSkeleton lines={1} style={s.detailSkeletonCard} />
+                <TrailheadCardSkeleton lines={3} style={s.detailSkeletonCard} />
+              </View>
+            )}
+            initialScrollY={trailSheetScrollRestore.y}
+            scrollRestoreKey={trailSheetScrollRestore.key}
+            onScrollYChange={value => { trailSheetScrollYRef.current = value; }}
+            peekHeader={(
+              <TrailPlaceSheetPeek
+                model={selectedTrailSheetModel!}
+                meta={identityMeta || sourceName}
+                metrics={peekMetrics}
+                primaryLabel={canPreviewTrail ? 'Preview route' : 'View details'}
+                saved={selectedTrail.support.offlineReady}
+                onOpenDetails={() => dispatchPlaceSheet({ type: 'set_presentation', presentation: 'full' })}
+                onPrimary={() => canPreviewTrail
+                  ? openTrailPreview(selectedTrail)
+                  : dispatchPlaceSheet({ type: 'set_presentation', presentation: 'full' })}
+                onSave={() => saveSelectedTrailPlace(selectedTrail)}
+                onClose={closeSelectedTrailSheet}
+              />
+            )}
+          >
+            <PlaceSheetShell model={selectedTrailSheetModel!} fill={false}>
+              <View style={s.trailFullChromeRow}>
+                <TouchableOpacity
+                  testID={`${selectedTrailSheetModel!.testID}-back`}
+                  accessibilityRole="button"
+                  accessibilityLabel={trailParentSnapshotRef.current || relatedPlaceReturnStack.length ? 'Back to previous place' : 'Show map'}
+                  style={s.trailFullChromeButton}
+                  onPress={trailParentSnapshotRef.current
+                    ? restoreTrailSheetParent
+                    : relatedPlaceReturnStack.length
+                      ? restoreRelatedPlaceParent
+                      : () => dispatchPlaceSheet({ type: 'set_presentation', presentation: 'peek' })}
+                >
+                  <Ionicons name={trailParentSnapshotRef.current || relatedPlaceReturnStack.length ? 'arrow-back' : 'chevron-down'} size={19} color={C.text2} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  testID={`${selectedTrailSheetModel!.testID}-close`}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Close ${selectedTrail.name}`}
+                  style={s.trailFullChromeButton}
+                  onPress={closeSelectedTrailSheet}
+                >
+                  <Ionicons name="close" size={19} color={C.text2} />
+                </TouchableOpacity>
               </View>
 
-              <View style={s.trailDetailBody}>
-                <View style={s.trailFactGrid}>
-                  {hasMeasuredRoute && (
-                    <View style={s.trailFactItem}>
-                      <Text style={s.trailFactValue}>{distanceLabel}</Text>
-                      <Text style={s.trailFactLabel}>Length</Text>
-                    </View>
-                  )}
-                  {hasMeasuredRoute && (
-                    <View style={s.trailFactItem}>
-                      <Text style={s.trailFactValue}>{elevation.value}</Text>
-                      <Text style={s.trailFactLabel}>{elevation.label}</Text>
-                    </View>
-                  )}
-                  <View style={s.trailFactItem}>
-                    <Text style={s.trailFactValue}>{weather.temp}</Text>
-                    <View style={s.trailFactIconLabel}>
-                      <Ionicons name={weather.icon as any} size={11} color={C.text3} />
-                      <Text style={s.trailFactLabel}>{weather.label}</Text>
-                    </View>
-                  </View>
-                  <View style={s.trailFactItem}>
-                    <Text style={s.trailFactValue}>{hasMeasuredRoute ? trailRouteTypeLabel(selectedTrailProfile, selectedTrail) : 'Access point'}</Text>
-                    <Text style={s.trailFactLabel}>{hasMeasuredRoute ? 'Route type' : 'Place type'}</Text>
-                  </View>
-                </View>
+              <TrailSheetIdentityCard
+                model={selectedTrailSheetModel!}
+                meta={identityMeta}
+                trust={trustLabel}
+              />
+              <TrailSheetActionRow
+                model={selectedTrailSheetModel!}
+                primaryLabel={isTrailhead ? 'Directions' : 'Navigate'}
+                saved={selectedTrail.support.offlineReady}
+                onPrimary={() => navigateToCamp(selectedTrail)}
+                onSave={() => saveSelectedTrailPlace(selectedTrail)}
+                onMore={() => openSelectedTrailMoreActions(selectedTrail, canPreviewTrail)}
+              />
 
-                {!!summary && (
-                  <View style={s.trailCleanSection}>
-                    <Text style={s.trailCleanCopy}>{summary}</Text>
-                  </View>
-                )}
-
-                <FirstPartyRatingSection
-                  target={selectedTrailRatingTarget}
-                  testID={`${selectedTrailSheetModel!.testID}-rating`}
+              {partial ? (
+                <TrailSheetLinkRow
+                  testID={`${selectedTrailSheetModel!.testID}-retry`}
+                  title="Some details could not load"
+                  subtitle="Available facts are shown below."
+                  actionLabel="Retry"
+                  onPress={() => setTrailHydrationAttempt(value => value + 1)}
                 />
+              ) : null}
 
-                {nearbyRows.length > 0 && (
-                  <View style={s.trailCleanSection}>
-                    <Text style={s.trailCleanTitle}>Nearby</Text>
-                    {nearbyRows.map(row => (
-                      <View key={row.text} style={s.trailCleanRow}>
-                        <Ionicons name={row.icon as any} size={16} color={row.color} />
-                        <Text style={s.trailCleanRowText} numberOfLines={1}>{row.text}</Text>
-                      </View>
-                    ))}
-                  </View>
-                )}
+              <TrailSheetSectionTitle>{isTrailhead ? 'Access' : 'Route facts'}</TrailSheetSectionTitle>
+              <TrailSheetMetricGrid metrics={fullMetrics} />
+              {!isTrailhead && (routeType !== 'Trail' || difficulty) ? (
+                <Text style={s.trailSheetSummaryLine}>
+                  {[routeType !== 'Trail' ? routeType : '', difficulty && difficulty !== 'Unrated' ? difficulty : ''].filter(Boolean).join(' · ')}
+                </Text>
+              ) : null}
 
-                {reportPhotoRows.length > 0 && (
-                  <View style={s.trailCleanSection}>
-                    <View style={s.trailCleanHeaderRow}>
-                      <Text style={s.trailCleanTitle}>Photos</Text>
-                      <Text style={s.trailCleanMeta}>{reportPhotoRows.length} from reports</Text>
-                    </View>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.trailPhotoStrip}>
-                      {reportPhotoRows.slice(0, 10).map(fr => (
-                        <Image key={fr.id} source={{ uri: trailReportPhotoUrl(selectedTrail, fr.id) }} style={s.trailReportPhoto} resizeMode="cover" resizeMethod="resize" />
+              {!!summary && (
+                <View style={s.trailCleanSection}>
+                  <Text style={s.trailCleanCopy}>{summary}</Text>
+                </View>
+              )}
+
+              {!isTrailhead ? (
+                <>
+                  <TrailSheetSectionTitle>Surface &amp; access</TrailSheetSectionTitle>
+                  {selectedTrail.surface ? (
+                    <TrailSheetLinkRow title="Trail surface" subtitle={cleanDisplayLabel(selectedTrail.surface)} />
+                  ) : null}
+                  <TrailSheetLinkRow
+                    title="Current conditions"
+                    subtitle={trailFieldReportSummary?.count
+                      ? `${trailFieldReportSummary.count} recent ${trailFieldReportSummary.count === 1 ? 'report' : 'reports'}`
+                      : 'No recent reports'}
+                    actionLabel={user ? 'Report' : undefined}
+                    onPress={user ? openTrailFieldReportComposer : undefined}
+                  />
+                  <TrailSheetLinkRow
+                    title="Preview route"
+                    subtitle={canPreviewTrail ? 'Map, elevation and turns' : 'Preview is not available for this trail'}
+                    actionLabel={canPreviewTrail ? 'Open' : undefined}
+                    onPress={canPreviewTrail ? () => openTrailPreview(selectedTrail) : undefined}
+                  />
+                  {linkedTrailheads.length ? (
+                    <>
+                      <TrailSheetSectionTitle>Trailheads</TrailSheetSectionTitle>
+                      {linkedTrailheads.map((item, index) => (
+                        <TrailSheetLinkRow
+                          key={`${item.name || 'trailhead'}:${item.lat}:${item.lng}`}
+                          testID={`${selectedTrailSheetModel!.testID}-trailhead-${index}`}
+                          title={item.name || 'Trailhead'}
+                          subtitle="Parking and access details"
+                          actionLabel="Open"
+                          onPress={() => openLinkedTrailhead(item)}
+                        />
                       ))}
-                    </ScrollView>
-                  </View>
-                )}
+                    </>
+                  ) : null}
+                </>
+              ) : (
+                linkedProfile ? (
+                  <>
+                    <TrailSheetSectionTitle>Starts here</TrailSheetSectionTitle>
+                    <TrailSheetLinkRow
+                      testID={`${selectedTrailSheetModel!.testID}-linked-trail`}
+                      title={linkedProfile.name}
+                      subtitle={[
+                        linkedProfile.length_mi ? `${linkedProfile.length_mi.toFixed(1)} mi` : '',
+                        linkedProfile.difficulty || '',
+                      ].filter(Boolean).join(' · ')}
+                      onPress={() => openLinkedTrailProfile(linkedProfile)}
+                    />
+                  </>
+                ) : null
+              )}
 
-                {(trailFieldReports.length > 0 || Boolean(user)) && (
-                  <View style={s.trailCleanSection}>
+              <FirstPartyRatingSection
+                target={selectedTrailRatingTarget}
+                testID={`${selectedTrailSheetModel!.testID}-rating`}
+              />
+
+              {nearbyRows.length > 0 && (
+                <View style={s.trailCleanSection}>
+                  <TrailSheetSectionTitle>Nearby</TrailSheetSectionTitle>
+                  {nearbyRows.map(row => (
+                    <View key={row.text} style={s.trailCleanRow}>
+                      <Ionicons name={row.icon as any} size={16} color={row.color} />
+                      <Text style={s.trailCleanRowText} numberOfLines={1}>{row.text}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {profilePhoto?.url ? (
+                <View style={s.trailCleanSection}>
+                  <TrailSheetSectionTitle>Photo</TrailSheetSectionTitle>
+                  <Image source={{ uri: profilePhoto.url }} style={s.trailProfilePhoto} resizeMode="cover" resizeMethod="resize" />
+                  {!!(profilePhoto.credit || profilePhoto.source) && (
+                    <Text style={s.trailCleanMeta}>{profilePhoto.credit || profilePhoto.source}</Text>
+                  )}
+                </View>
+              ) : null}
+
+              {reportPhotoRows.length > 0 && (
+                <View style={s.trailCleanSection}>
                   <View style={s.trailCleanHeaderRow}>
-                    <Text style={s.trailCleanTitle}>Recent reports</Text>
+                    <TrailSheetSectionTitle>Community photos</TrailSheetSectionTitle>
+                    <Text style={s.trailCleanMeta}>{reportPhotoRows.length} from reports</Text>
+                  </View>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.trailPhotoStrip}>
+                    {reportPhotoRows.slice(0, 10).map(fr => (
+                      <Image key={fr.id} source={{ uri: trailReportPhotoUrl(selectedTrail, fr.id) }} style={s.trailReportPhoto} resizeMode="cover" resizeMethod="resize" />
+                    ))}
+                  </ScrollView>
+                </View>
+              )}
+
+              {(trailFieldReports.length > 0 || Boolean(user)) && (
+                <View style={s.trailCleanSection}>
+                  <View style={s.trailCleanHeaderRow}>
+                    <TrailSheetSectionTitle>Recent conditions</TrailSheetSectionTitle>
                     {!!trailFieldReportSummary?.count && (
                       <Text style={s.trailCleanMeta}>
                         {trailFieldReportSummary.count}{trailFieldReportSummary.last_visited ? ` · ${trailFieldReportSummary.last_visited}` : ''}
@@ -25927,42 +26234,30 @@ function MapScreen() {
                       </TouchableOpacity>
                     )
                   )}
-                  </View>
-                )}
-
-                <TouchableOpacity
-                  style={s.trailTextAction}
-                  activeOpacity={0.84}
-                  disabled={trailSourceRefreshing}
-                  onPress={refreshSelectedTrailSource}
-                >
-                  <Ionicons name={trailSourceRefreshing ? 'sync' : 'refresh-outline'} size={16} color={trailPreviewTone === 'gold' ? '#f5c84b' : '#23d2c3'} />
-                  <Text style={s.trailTextActionText}>
-                    {trailSourceRefreshing ? 'Refreshing details' : 'Refresh details'}
-                  </Text>
-                </TouchableOpacity>
-
-                <View style={s.trailDetailActions}>
-                  <TouchableOpacity
-                    style={s.trailPrimaryAction}
-                    onPress={() => seedTrailPinCaptureFromTrail(selectedTrail)}
-                  >
-                    <Ionicons name="git-branch-outline" size={16} color="#061018" />
-                    <Text style={s.trailPrimaryActionText}>Build route</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={s.trailSecondaryAction}
-                    onPress={openTrailFieldReportComposer}
-                  >
-                    <Ionicons name="camera-outline" size={16} color={C.text2} />
-                    <Text style={s.trailSecondaryActionText}>Report</Text>
-                  </TouchableOpacity>
                 </View>
-              </View>
-            </ScrollView>
-          </PlaceSheetShell>
+              )}
+
+              <TrailSheetSectionTitle>Source</TrailSheetSectionTitle>
+              <TrailSheetLinkRow
+                title={sourceName}
+                subtitle={checkedLabel ? `Updated ${checkedLabel}` : undefined}
+                actionLabel={selectedTrailProfile?.official_url || selectedTrailProfile?.source_pack?.official_url ? 'Open' : undefined}
+                onPress={selectedTrailProfile?.official_url || selectedTrailProfile?.source_pack?.official_url
+                  ? () => Linking.openURL(selectedTrailProfile?.official_url || selectedTrailProfile?.source_pack?.official_url || '').catch(() => {})
+                  : undefined}
+              />
+            </PlaceSheetShell>
+          </TrailheadSnapSheet>
         );
       })()}
+
+      <TrailEditSuggestionSheet
+        visible={showTrailEditForm}
+        trailName={selectedTrail?.name || 'Trail'}
+        submitting={trailEditSubmitting}
+        onClose={() => { if (!trailEditSubmitting) setShowTrailEditForm(false); }}
+        onSubmit={submitSelectedTrailEdit}
+      />
 
       {selectedTrail && !navMode && !trailPinCaptureMode && trailRouteBuilderOpen && !mapMissionVisible && (
         <View style={s.trailRouteBuilderWrap}>
@@ -27570,6 +27865,7 @@ function MapScreen() {
 	                        return (
 		                          <TouchableOpacity
 		                            key={site.id || `${site.name}-${idx}`}
+		                            testID={`${selectedCampSheetModel!.testID}-site-${idx}`}
 		                            style={s.sitePhotoCard}
 		                            activeOpacity={0.86}
 		                            onPress={() => openCampSiteCard(site, campDetail, selectedCamp)}
@@ -33075,6 +33371,42 @@ const makeStyles = (C: ColorPalette) => {
     paddingTop: 18,
     paddingBottom: 6,
     backgroundColor: C.s1,
+  },
+  trailSheetContent: {
+    paddingHorizontal: 10,
+    paddingTop: 8,
+    paddingBottom: 36,
+    gap: 10,
+  },
+  trailFullChromeRow: {
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  trailFullChromeButton: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.bg,
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+  trailSheetSummaryLine: {
+    color: C.text,
+    fontSize: 14,
+    lineHeight: 20,
+    fontWeight: '700',
+  },
+  trailProfilePhoto: {
+    width: '100%' as any,
+    height: 184,
+    borderRadius: 12,
+    backgroundColor: C.s2,
+    marginTop: 10,
+    marginBottom: 6,
   },
   trailFactGrid: {
     flexDirection: 'row',

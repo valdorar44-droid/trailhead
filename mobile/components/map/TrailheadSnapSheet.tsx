@@ -73,6 +73,7 @@ export default function TrailheadSnapSheet({
   const stage = controlledStage ?? internalStage;
   const dragY = useRef(new Animated.Value(0)).current;
   const scrollRef = useRef<ScrollView>(null);
+  const pendingScrollRestoreRef = useRef<{ key: string; y: number } | null>(null);
 
   const updateStage = useCallback((next: TrailheadSnapStage) => {
     if (controlledStage == null) setInternalStage(next);
@@ -81,11 +82,33 @@ export default function TrailheadSnapSheet({
 
   useEffect(() => {
     if (stage === 'peek') return;
+    const restore = {
+      key: String(scrollRestoreKey ?? ''),
+      y: Math.max(0, initialScrollY),
+    };
+    pendingScrollRestoreRef.current = restore;
     const frame = requestAnimationFrame(() => {
-      scrollRef.current?.scrollTo({ y: Math.max(0, initialScrollY), animated: false });
+      scrollRef.current?.scrollTo({ y: restore.y, animated: false });
     });
-    return () => cancelAnimationFrame(frame);
+    const expiry = setTimeout(() => {
+      if (pendingScrollRestoreRef.current?.key === restore.key) {
+        pendingScrollRestoreRef.current = null;
+      }
+    }, 750);
+    return () => {
+      cancelAnimationFrame(frame);
+      clearTimeout(expiry);
+    };
   }, [initialScrollY, scrollRestoreKey, stage]);
+
+  const restoreScrollAfterLayout = useCallback(() => {
+    const pending = pendingScrollRestoreRef.current;
+    if (!pending || stage === 'peek') return;
+    pendingScrollRestoreRef.current = null;
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollTo({ y: pending.y, animated: false });
+    });
+  }, [stage]);
 
   const maxFull = fullScreen ? height : Math.min(height * maxFullRatio, height - Math.max(insets.top + 22, 54));
   const stageHeight = stage === 'full'
@@ -161,6 +184,7 @@ export default function TrailheadSnapSheet({
               keyboardShouldPersistTaps="handled"
               scrollEventThrottle={32}
               onScroll={onScrollYChange ? event => onScrollYChange(event.nativeEvent.contentOffset.y) : undefined}
+              onContentSizeChange={restoreScrollAfterLayout}
               contentContainerStyle={[s.scrollContent, actionDock ? s.scrollWithDock : null, scrollContentStyle]}
             >
               {children}

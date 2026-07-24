@@ -21,6 +21,8 @@ test('the shared snap sheet supports controlled peek-to-full loading without par
   assert.match(snapSheetSource, /expandedLoading \? \(/);
   assert.match(snapSheetSource, /hidePeekHeaderWhenExpanded/);
   assert.match(snapSheetSource, /peekExpandsToFull/);
+  assert.match(snapSheetSource, /onContentSizeChange=\{restoreScrollAfterLayout\}/);
+  assert.match(snapSheetSource, /pendingScrollRestoreRef\.current = null/);
 });
 
 test('campsite Back restores the parent campground and its scroll position', () => {

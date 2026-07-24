@@ -57,6 +57,9 @@ test('report trust actions and update cancellation preserve the approved capabil
 });
 
 test('report sheet copy omits prior filler and raw all-caps actions', () => {
+  assert.match(mapSource, /const reportNotes = communityReportNotes\(selectedCommunityPin\)/);
+  assert.match(mapSource, /\{!!reportNotes && \(/);
+  assert.match(mapSource, /\{reportNotes\}<\/Text>/);
   assert.doesNotMatch(mapSource, /verify before relying on access or legality/);
   assert.doesNotMatch(mapSource, /Checking nearby area/);
   assert.doesNotMatch(mapSource, />SEARCHING</);

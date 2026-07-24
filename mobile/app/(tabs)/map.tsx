@@ -62,6 +62,7 @@ const USE_NATIVE_MAP = true;
 const ENABLE_REALTIME_NARRATOR = true;
 import * as Location from 'expo-location';
 import { accountStorage, storage } from '@/lib/storage';
+import { communityReportNotes } from '@/lib/communityReportPresentation';
 import {
   accountInventoryIsVisible,
   accountInventoryRequestIsCurrent,
@@ -30206,6 +30207,7 @@ function MapScreen() {
         const contextPois = liveContext?.loadedAt ? liveContext.pois : trailSourcePois;
         const nearbyTrails = contextPois.filter(p => p.type !== 'water' && haversineKm(selectedCommunityPin.lat, selectedCommunityPin.lng, p.lat, p.lng) * 0.621371 <= 8).length;
         const updateOpen = !privateLead && communityUpdatePin?.id === selectedCommunityPin.id;
+        const reportNotes = communityReportNotes(selectedCommunityPin);
         const saveCommunityPlace = () => {
           addSavedPlace({
             id: `community-pin-${selectedCommunityPin.id}`,
@@ -30213,7 +30215,7 @@ function MapScreen() {
             lat: selectedCommunityPin.lat,
             lng: selectedCommunityPin.lng,
             icon: meta.id === 'water' ? 'water' : meta.id === 'fuel' ? 'fuel' : meta.id.includes('camp') ? 'camp' : 'pin',
-            note: selectedCommunityPin.description || meta.label,
+            note: reportNotes || meta.label,
             createdAt: Date.now(),
           });
           setQuickToast('Community place saved');
@@ -30276,10 +30278,10 @@ function MapScreen() {
                       {`${selectedCommunityPin.upvotes ?? 0} helpful · ${selectedCommunityPin.downvotes ?? 0} marked inaccurate`}
                     </Text>
                   )}
-                  {!!selectedCommunityPin.description && (
+                  {!!reportNotes && (
                     <View style={s.communitySection}>
                       <Text style={s.communitySectionLabel}>NOTES</Text>
-                      <Text style={s.pinDescription}>{selectedCommunityPin.description}</Text>
+                      <Text style={s.pinDescription}>{reportNotes}</Text>
                     </View>
                   )}
                   <View style={s.communitySection}>

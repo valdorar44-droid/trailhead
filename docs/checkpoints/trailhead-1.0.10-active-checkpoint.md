@@ -707,3 +707,28 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Exact next action: commit and push this named scope, publish one paired preview OTA from that immutable SHA with Sentry source maps, verify both update records and Android device identity, then retry the owned Moab download once. If it completes, exercise Start → main map → Minimize → Resume → End and relaunch. If it does not, record the P1 as blocked without another speculative OTA.
 - Do not repeat: the complete pre-preview suite, Plan/Downloads device checks, broad crawls, previous Originals retry, Figma/Mobbin research, or prior paired updates.
 - Task-owned background processes: none. Tests have exited; ADB remains intentionally available.
+
+## Checkpoint M4 final device evidence — Plan accepted, Originals native map blocked
+
+- Timestamp: `2026-07-24T04:22:29-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; exact application and paired-preview source HEAD: `c989d8f89adb45c321411da3c496b1977dbbcadf`, pushed to origin.
+- Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. `.cursor/` and `dashboard/explore_serving_index_v2.json` remained unstaged and untouched.
+- Paired preview publication completed with Sentry source maps:
+  - Channel `preview`, channel ID `019dbc97-3cde-795b-a35d-e6aa985060d3`.
+  - Candidate branch `preview-candidate-c989d8f89adb45c321411da3c496b1977dbbcadf-mryq0nlh-7c4c33d38e189c2f82f35c17`, branch ID `019f9368-d1e4-728c-bc1b-002677f470b8`.
+  - Android build `59`, runtime `native-1.0.10-android.1`, group `38fa493e-b5fd-4815-98e2-e4e8682d5f2c`, update `019f9368-f847-73d3-88f3-5ca97d14a945`.
+  - iOS build `54`, runtime `native-1.0.10-ios.1`, group `b7de5426-15bc-42b6-9fab-bb4a05e5cf21`, update `019f9368-f847-783b-a3a5-aaa05fc8d3b9`.
+- Samsung `RFCR408DA9B` verified exact version, build, channel, full SHA, runtime, update ID, and `Ready` delivery state. Evidence: `output/qa-RFCR408DA9B-c989.xml`, SHA-256 `4d7d021c608bbee7b706920131a2a04dae9378dd409446931ce20c7f6c6960fd`.
+- Plan/Downloads Checkpoint A remains accepted on the exact paired candidate. The route-family retention correction, exact Plan scroll return, one main-map Offline manager, nested Back, selected-area Cancel, and preserved inventory were not recrawled.
+- The one authorized Moab retry reproduced the underlying native-map failure:
+  - The exact owned Original and correct detail/artwork loaded.
+  - The dedicated bundle reached `54%` at the native-map phase and remained unchanged. Eight-second and thirty-three-second hierarchy captures are byte-identical at SHA-256 `5e6f6323187391c179a330a6e63a45d01f7f8344223e794d1e1f2f955145485e`.
+  - At the fixed 60-second no-progress boundary, the adapter paused the native pack and returned `Download interrupted` plus `Offline map download paused. Check your connection and retry.` Evidence: `output/orig-progress68-c989.xml`, SHA-256 `6689558516331d8a80469d05e199c5acf5ab91f96b30714d1b7d46f557f021c2`; screenshot `output/m4-plan-originals/orig-stall-bounded-c989.png`, SHA-256 `fbd03ad139f966ddf6211ba152ad9d34fa9250e619ed44d9ca2f81df964ae958`.
+  - Force-stop/relaunch showed no active Original player or automatic restart. The dedicated download and verified story progress remain preserved.
+- Correction acceptance: the UI no longer hangs indefinitely, a lost callback cannot falsely mark a bundle ready, installed-pack completion can recover a lost callback, and the error is retryable. The device test proves the native RNMapbox pack itself never begins or reports progress on this candidate.
+- Open P0: none. Open P1: Android cannot complete the Moab required map region, so Start → main map → Minimize → Resume → End cannot be truthfully accepted in this packet. The agreed one-correction loop is exhausted; no further speculative OTA was published.
+- Physical iOS Plan/Downloads/Originals interaction and locked-screen evidence remain pending. The exact iOS EAS update record is verified, but this Windows session does not claim physical iOS proof.
+- Exact next action: begin a dedicated native offline-region diagnosis from this checkpoint. Instrument the RNMapbox pack creation/status boundary on a development candidate, compare it with the working renderer-aware Offline manager, and decide whether Originals should use the modern style-pack/tile-region path already represented by Offline V2. Any native correction must advance and rebuild both platform runtimes; a JS-only correction may use one paired preview after deterministic proof.
+- Do not repeat: the M4 Plan/Downloads delta, the Moab retry on `c989d8f`, complete pre-preview suite, broad crawls, Figma/Mobbin research, Layers, NPS, Search V2 baseline, or Memory Gate V3.
+- Production remains blocked. This packet has an unresolved P1 and therefore does not satisfy the user's recorded production authorization.
+- Task-owned background processes: none. Publisher, Expo export, Sentry upload, EAS, Gradle, Metro, Maestro, and test processes have exited; ADB remains intentionally available.

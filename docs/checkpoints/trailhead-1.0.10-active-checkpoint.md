@@ -357,6 +357,19 @@ Update this file after each implementation checkpoint, deployment, preview publi
 
 Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, EAS, Maestro, Trailhead test, or audit process was found running in WSL.
 
+## Checkpoint M3.4 baseline — Trail and trailhead sheets
+
+- Timestamp: `2026-07-23T23:55:00-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; exact pre-change HEAD: `9cf5c50c01f0099d36db43319fb7055f70c904c1`.
+- Protected Explore index SHA-256: `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. `.cursor/` and `dashboard/explore_serving_index_v2.json` remain user-owned, unstaged, and excluded from every implementation commit.
+- Current installed paired preview source remains `6bdb6ad4f4c62e531c7c62fb11eec6de7627a7ab`: Android update `019f9243-f451-7919-a1cf-593ffc596034`; iOS update `019f9243-f451-7ab2-a175-b28a4b8b9176`; runtimes remain `native-1.0.10-android.1` and `native-1.0.10-ios.1`.
+- Commit `2244401` contains the pending measured campground Sites-section return anchor. It is included in the current branch history and must ride with the next trail/trailhead paired preview; do not publish another camp-only update.
+- Approved implementation anchors were re-read before code: Trail Peek `407:162`, Trail Full `520:782`, Trailhead Full `520:872`, and behavior contract `407:174`. Mobbin AllTrails references remain behavior references only; no third-party imagery or branding ships.
+- Narrow scope: replace the immediate photo-heavy trail card with identity-safe Peek/Full sheets, atomic enrichment readiness, stable linked trail/trailhead return, and preserved route/offline/report/ratings actions. No API, native dependency, Layers, NPS hub, Viator, campground module, navigation-compass, Offline, or Originals rewrite is authorized.
+- Focused verification only: adapters/coordinator, new trail sheet characterization, camp return contract, Search V2 sheet selection, Offline preservation, copy/privacy, TypeScript, one paired preview, Android trail/trailhead delta, the pending measured campground anchor assertion, and shared iOS spot checks.
+- Loop guard: one deterministic reproduction and one evidence-backed correction per P0/P1. If the same assertion still fails, record it as blocked and stop instead of repeating broad crawls or publishing successive speculative updates.
+- Open P0/P1 at baseline: none reproduced. Task-owned background processes: none; ADB remains intentionally available.
+
 ## Checkpoint M3.2 — Quick search and multi-sheet drilldown proof
 
 - Timestamp: `2026-07-23T20:22:24-05:00`.

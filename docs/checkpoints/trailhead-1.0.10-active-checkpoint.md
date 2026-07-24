@@ -890,3 +890,40 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Narrow verification only: Profile presentation/state helpers, referrals, contest/prize/support backend tests, attachments/diagnostics privacy, subscription links, account deletion, copy/TypeScript/whitespace, then one Android Profile delta and paired preview. No broad Map, Route, Explore, Layers, NPS, Originals, or Offline crawl.
 - Open P0/P1 at baseline: none reproduced. Exact next action: implement the six-section Profile hierarchy and real prize/support presentation, then run the focused gates.
 - Task-owned background processes: none. ADB remains intentionally available.
+
+## Checkpoint 3 final — Profile and commercial/community features accepted on Android
+
+- Timestamp: `2026-07-24T13:28:24-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; implementation commit `ac70cab67cf7ff60ec78f45d50387f86c488d607`; exact corrected paired-preview source HEAD `e44b62c85e07867a4dacac03873b511c797f9b7a`, pushed to origin.
+- Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. `.cursor/` and `dashboard/explore_serving_index_v2.json` remain excluded, unstaged, and untouched.
+- Profile now has six stable destinations backed by existing capabilities: Account, Trips & Saved, Rig, Community, Support, and Settings. Account keeps Explorer membership, credits, subscription management, referral share/manual code, and attribution privacy. Community keeps contributions, the real contest, entry/rules, prize amounts, user award history when present, and the private winner-message handoff. Support keeps ticket history, sanitized attachments, Report issue, and diagnostics consent off by default.
+- No payout credential form was added. Award statuses are limited to `Winner selected`, `Payout coordination`, `Paid`, and `Closed`, and payout coordination opens the exact private support thread when one exists. The connected account has no award record, so the user-award module was correctly omitted instead of fabricating an empty state.
+- Co-Pilot is labelled `Co-Pilot voice assistant` with Explorer context and no AI badge. Profile body/control copy uses the system face while Barlow remains limited to editorial headings.
+- A narrow Android visual delta found two P2 issues: the selected horizontal section could remain against a clipped edge and the `Contributions` quick action wrapped awkwardly. The one evidence-backed correction now scrolls the active section into view and keeps quick-action labels on one line. No feature ownership or data flow changed.
+- Focused verification passed:
+  - TypeScript.
+  - Profile presentation and selected-section tests.
+  - Referral link/native lifecycle tests.
+  - Account deletion and support tests.
+  - Contest/referral/support backend tests (`12` tests).
+  - Telemetry privacy allowlist.
+  - Profile/map regression audit.
+  - User-facing copy audit across `164` files.
+  - Whitespace checks.
+- Final paired preview publication completed with Sentry source maps:
+  - Channel `preview`, channel ID `019dbc97-3cde-795b-a35d-e6aa985060d3`.
+  - Candidate branch `preview-candidate-e44b62c85e07867a4dacac03873b511c797f9b7a-mrz9np9h-4fc8711516117f164207ff64`, branch ID `019f9560-4337-7c12-89ef-46190879e3bb`.
+  - Android build `59`, runtime `native-1.0.10-android.1`, group `91be4aa7-483d-4d39-a4f6-4dfa41f63053`, update `019f9560-68cb-72d3-a477-b02d24dc9771`.
+  - iOS build `54`, runtime `native-1.0.10-ios.1`, group `0315b612-f984-436c-99e4-0caa9177d233`, update `019f9560-68cb-7f15-b86d-4f283363cccd`.
+- Samsung `RFCR408DA9B` verified version `1.0.10`, build `59`, preview channel, full source SHA, matching runtime/update, and delivery state `Ready`.
+- Narrow Android evidence:
+  - QA identity: `output/checkpoint-3-profile/qa-e44b.xml`, SHA-256 `013f6a37920840081ba6ecca7e1f31a507305bc679c3fe845fd4e548961256a9`.
+  - Community selected-section and single-line action: `output/checkpoint-3-profile/community-e44b.png`, SHA-256 `34a3ea530d731d2d6c0272109e8a6bd1e23a2d799366414a91f6e88d3d2d0679`; hierarchy SHA-256 `c7504aeeaaf6bf496a9f644df94c7055c2b9081bb68f207f890bad366d6a86ba`.
+  - Support selected-section and real support surface: `output/checkpoint-3-profile/support-e44b.png`, SHA-256 `e5ecc46a2e9de4d9ba8d61c751c7863af0b83269bbb2a75790544869eedd00c3`; hierarchy SHA-256 `3255163e1b5553ab5aa694b8c02641951a32a75c5e42bf1b03b12e2aa8c21863`.
+  - Support attachment/diagnostic modal: `output/checkpoint-3-profile/support-modal-ac70.xml`, SHA-256 `b57a03ec93f815a1e83bacf516cb85efbf6d4d024018d927fef5bde237b7c240`.
+  - Prize presentation and official rules: `output/checkpoint-3-profile/prizes-ac70.png`, SHA-256 `7f13884319e6125dd43b893462e0090c532e90b51320b2fc7eab8154642c7f4c`; official-rule hierarchy SHA-256 `27521fca43cfb9361145c7aa2c2543f007ff3b75c27733693f45e778e843a5d4`.
+- Android result: accepted. Open P0/P1 for this packet: none. The iOS paired update is published; physical iOS interaction remains part of the frozen-candidate pass and is not claimed here.
+- Branch deferred handoff remains disabled until branded-domain TLS, fresh-install attribution, opt-out, manual fallback, and exactly-once crediting are proven. The visible manual referral code remains available.
+- Exact next action: freeze the current feature-complete preview candidate and run the remaining acceptance deltas: Search V2 performance, Memory Gate V3, Android Auto/DHU, Android Originals background/mock-route policy evidence, then the shared and platform-specific physical-iOS checks. Resolve only deterministic P0/P1 defects before producing paired production binaries.
+- Do not repeat: broad Profile, Map, Plan, Downloads, Route Editor, Trip Overview, Layers, NPS/Explore, campground/sheet, or Original acquisition/download crawls; completed Figma/Mobbin research; or earlier memory runs.
+- Task-owned background processes: none. The publisher, Expo export, Sentry upload, Metro, Maestro, Gradle, and focused tests have exited. ADB remains intentionally available for the Samsung and emulator.

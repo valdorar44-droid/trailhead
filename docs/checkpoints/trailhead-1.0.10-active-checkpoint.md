@@ -357,6 +357,44 @@ Update this file after each implementation checkpoint, deployment, preview publi
 
 Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, EAS, Maestro, Trailhead test, or audit process was found running in WSL.
 
+## Checkpoint M3.4 device evidence — Trail/trailhead accepted, campground anchor reviewed
+
+- Timestamp: `2026-07-24T00:37:33-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; Trail/Trailhead implementation commit `595cbdaab803766f0495f6e0dd34f75617f44504`; implementation checkpoint/first-preview source `d576c998d698a2166d8897f2dc246472c821bb67`; campground return correction and current exact HEAD `220f1fd14da652f879503a63d29e926184c62f9e`.
+- Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. `.cursor/` and `dashboard/explore_serving_index_v2.json` remain user-owned, unstaged, and untouched.
+- Approved Figma anchors `407:162`, `520:782`, `520:872`, and `407:174` remain the source of truth. Mobbin AllTrails screens were used only as interaction references; no third-party branding or imagery ships.
+
+### Paired preview evidence
+
+- First Trail/Trailhead paired preview from exact source `d576c998d698a2166d8897f2dc246472c821bb67`:
+  - Android runtime `native-1.0.10-android.1`, group `072c60ae-e9f4-4f55-a1c2-6efeec6a039d`, update `019f9287-09db-78b4-bceb-15cf2d7c27dd`.
+  - iOS runtime `native-1.0.10-ios.1`, group `74fc1abe-ffe8-4698-becb-85fcd742e97f`, update `019f9287-09db-770b-aa48-82146183739e`.
+- The one evidence-backed campground Sites-return correction was committed as `220f1fd` and published once as a new guarded pair:
+  - Candidate branch `preview-candidate-220f1fd14da652f879503a63d29e926184c62f9e-mryhxeku-e1848c8344274af58867ef62`.
+  - Android group `7da4d7be-e634-4ca0-9b00-efa6e4fa6586`, update `019f929a-3980-7f45-a1f4-3c040d9c68c9`, runtime `native-1.0.10-android.1`.
+  - iOS group `8dfe89e7-5d79-474c-bf00-2852d2801747`, update `019f929a-3980-7818-b72c-de3a8bd99520`, runtime `native-1.0.10-ios.1`.
+- Samsung `RFCR408DA9B` completed the two-launch OTA handoff without clearing account data. The admin QA screen verified version `1.0.10`, build `59`, channel `preview`, full source SHA `220f1fd14da652f879503a63d29e926184c62f9e`, Android runtime/update above, and delivery status `Ready`.
+- The EAS channel points to the exact `220f1fd` candidate for both platforms. A physical iOS sheet interaction delta is not claimed in this Windows session; the matching iOS update record is verified.
+
+### Verification and device results
+
+- Automated characterization remains green: Trail flow `5/5`, hydration `4/4`, place adapters `8/8`, coordinator `2/2`, campground flow `3/3`, Search V2 `68/68`, Offline V2 preservation/runtime, telemetry/privacy, QA diagnostics, copy audit across `162` files, TypeScript, and whitespace.
+- Search result → Trail Peek → Full passed on Samsung with the approved Peek-first behavior and Navigate action. Evidence: `output/maestro/2026-07-24T05-14-39-084Z--RFCR408DA9B/run.json`, SHA-256 `135446ef0f490c200cabb80f12dd69985af07ed739c5e600b103882de985278f`.
+- Search result → Trailhead Peek → Full passed on Samsung with the approved Directions action. Evidence: `output/maestro/2026-07-24T05-16-14-717Z--RFCR408DA9B/run.json`, SHA-256 `c56727563c80dbe091be0725bd10053914ccdf6ce5d3a2d39ff938530e4e0dc2`.
+- The stable device fixture did not expose a source-backed linked trail row, so physical Trailhead → linked trail → Back is not claimed. Its identity/generation and parent-snapshot restoration contracts pass in characterization tests. An actual map-pin path also remains an accessibility-assisted later delta; no random coordinate tapping was introduced.
+- The sole allowed rerun of campground → Site A → Back on exact source `220f1fd` failed `^Sites$ is visible`. The app restored the correct Goose Island Group Sites parent and its complete content, but remained at the hero/summary instead of the Sites rail. This is a deterministic return-anchor defect, not an entity swap or blank sheet.
+- Failure evidence: `output/maestro/2026-07-24T05-33-57-861Z--RFCR408DA9B/run.json`, SHA-256 `d4d15a0c770847b790eb61f4fb8f743d13cec2383bed9d9eee51aa3011e3b027`; screenshot `output/maestro/2026-07-24T05-33-57-861Z--RFCR408DA9B/artifacts/2026-07-24_003410/screenshot-❌-1784871404912-(Map search opens a complete campground sheet).png`, SHA-256 `27d4c2d5bf4e0c60812dc439124fedd2879dd71d09dc13e538956fdf3d14a906`.
+
+### Disposition
+
+- Trail and Trailhead Peek/Full implementation is accepted by focused automated coverage and the two deterministic Android device paths. No Trail/Trailhead P0/P1 was reproduced.
+- Open P0: none.
+- User review accepted the campground sheet behavior as visually adequate on `2026-07-24`; the Sites-anchor assertion is no longer a release-blocking P1. Retain its evidence as scroll-polish context and do not reopen it without a new user-visible failure.
+- Open P1: none for this Trail/Trailhead packet. Devils Garden's missing rich detail is a catalog coverage gap recorded below, not a sheet identity, navigation, or rendering failure.
+- Exact next action: continue with the approved report/Explore-hub sheet packet. Carry the narrow campground visual findings below as copy/data cleanup, not as a reason to repeat this sheet crawl.
+- Do not repeat: the broad Android crawl, Layers/NPS research, completed Figma/Mobbin packet, Search V2 baseline, Memory Gate V3, the successful Trail/Trailhead and campground flows, either paired OTA, or the accepted campground anchor assertion.
+- Task-owned background processes: none. Maestro and both EAS publishers completed; the Gradle daemon is stopped. ADB remains intentionally available for the connected Samsung and emulator.
+
 ## Checkpoint M3.4 baseline — Trail and trailhead sheets
 
 - Timestamp: `2026-07-23T23:55:00-05:00`.
@@ -454,3 +492,27 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Exact next action: publish one guarded paired preview from a clean immutable checkpoint SHA, verify Android/iOS update records, then run only Search → Trail Peek → Full, map pin → Trail Peek → Full, Trailhead → linked trail → Back, failure/Retry/actions/close, and the campground Sites-anchor assertion once.
 - Do not repeat: Figma/Mobbin research, broad Layers/NPS/Explore crawls, the 33-run Android crawl, Search V2 baseline crawl, or Memory Gate V3. Do not publish iterative OTAs for a failed device assertion.
 - Task-owned background processes: none. The pre-preview process and Gradle daemon are stopped; no Metro, Maestro, Expo/EAS publisher, or Trailhead test job remains. ADB remains intentionally available.
+
+## Continuation handoff — campground diversity delta and next packet
+
+- Timestamp: `2026-07-24T00:52:00-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; app source and installed paired preview remain exact SHA `220f1fd14da652f879503a63d29e926184c62f9e`. The checkpoint commit containing only tests/docs follows this SHA and requires no OTA.
+- Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; `.cursor/` and `dashboard/explore_serving_index_v2.json` remain excluded and unstaged.
+- Current preview identities remain Android update `019f929a-3980-7f45-a1f4-3c040d9c68c9` and iOS update `019f929a-3980-7818-b72c-de3a8bd99520`, with their matching `native-1.0.10-android.1` and `native-1.0.10-ios.1` runtimes.
+- Added two pinned, non-destructive canonical-result flows and extended the Maestro config contract from 12 to 14 flows:
+  - Developed campground: canonical `place:ridb:234059`, Devils Garden Campground.
+  - Dispersed campground: canonical `place:blm:ut-moab-camp-001`, Willow Springs Dispersed Camping.
+- Both exact-device flows passed Peek identity, essentials, Full identity, hydration/recovery handling, and clean dismissal on Samsung `RFCR408DA9B` without clearing account data:
+  - `output/maestro/2026-07-24T05-46-45-671Z--RFCR408DA9B/run.json`, SHA-256 `eb3601a58c8f9ab3cd903712af96e2418f9e405544ea49404ffcff86f04c8587`.
+  - `output/maestro/2026-07-24T05-49-01-410Z--RFCR408DA9B/run.json`, SHA-256 `e445016c5adb0a8ade8fb504b5fe14c3ca884e4e9a2f5f08468e16f7d850d268`.
+- Visual evidence hashes:
+  - Developed Peek `defd912fde5ee1f5245416ac7e94ee37b25f9441753e84f6fed92ae163e403fa`; Full `a8d822ac226bf35d9fff0929aa1a7898bc7ac99ec7db3d35ef4a594776ef70fb`.
+  - Dispersed Peek `f0e5af27eb25869611af02d7fb34469b2785b74b411a3bc30d179b7bb03e2e26`; Full `6bc282945091057e5d574396adb005e697ec6ab6c97237c7118fc08bb91d8282`.
+- Visual review found two non-blocking cleanup items that automation did not prove:
+  - Devils Garden lacks a rich detail record and reaches the designed stable partial state (`Some details are unavailable`) with verified listing data. Record this for the canonical camp-detail coverage pass; do not treat it as a sheet flash or identity swap.
+  - Willow Springs Peek exposes a mojibake separator (`UT Â· BLM`), and its sparse Summary uses generic fallback prose. The next copy-cleanup change should replace the corrupted separator and omit unsourced generic Summary text when no real summary exists. No app-code change for these two items is included in this checkpoint.
+- Maestro config contract passes: `PASS: 14 pinned Maestro flows at CLI 2.4.0`.
+- Open P0/P1: none for the accepted Trail/Trailhead/camp sheet checkpoint. The two cleanup items above remain visible P2/data-quality work.
+- Exact next action after opening the new account: read this section first, confirm HEAD and protected-file hash, then begin the approved report/Explore-hub sheet packet. Preserve comments, ratings, edits, reports, campground modules, NPS depth, Viator, Offline, navigation compass, and the current Map renderer. Apply the two narrow campground copy cleanups with that next compatible JS wave rather than publishing a standalone OTA.
+- Do not repeat: the two campground diversity flows, Trail/Trailhead flows, campground Sites-anchor run, full crawl, Layers audit, NPS reference research, Search V2 baseline, Memory Gate V3, Figma/Mobbin research, or either `220f1fd` paired OTA.
+- Task-owned background processes: none after checkpoint finalization. Gradle, Maestro, EAS, Metro, and test processes are stopped; ADB may remain available for the connected Samsung and emulator.

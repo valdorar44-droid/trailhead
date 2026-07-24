@@ -1,0 +1,59 @@
+appId: ${APP_ID}
+name: Developed campground opens stable Peek and Full sheets
+tags:
+  - search
+  - map
+  - sheets
+  - camp
+  - delta
+---
+- launchApp:
+    clearState: false
+    stopApp: true
+- tapOn: "Map tab"
+- extendedWaitUntil:
+    visible:
+      id: "map.search.inline.input"
+    timeout: 20000
+- tapOn:
+    id: "map.search.inline.input"
+- eraseText: 80
+- inputText: "Devils Garden Campground"
+- extendedWaitUntil:
+    visible:
+      id: "map.search.inline.result.place:ridb:234059"
+    timeout: 30000
+- tapOn:
+    id: "map.search.inline.result.place:ridb:234059"
+- extendedWaitUntil:
+    visible:
+      id: "place-sheet-camp-camp-place-ridb-234059-peek"
+    timeout: 15000
+- assertVisible: "Devils Garden Campground"
+- assertVisible: "SITE TYPE"
+- assertVisible: "INVENTORY"
+- assertVisible: "FEE"
+- takeScreenshot: developed-camp-peek
+- tapOn:
+    id: "place-sheet-camp-camp-place-ridb-234059-view-sites"
+- extendedWaitUntil:
+    visible:
+      id: "place-sheet-camp-camp-place-ridb-234059"
+    timeout: 20000
+- runFlow:
+    when:
+      visible: "Some details are unavailable"
+    commands:
+      - tapOn: "Retry"
+      - extendedWaitUntil:
+          notVisible: "Some details are unavailable"
+          timeout: 30000
+- assertNotVisible: "Some details are unavailable"
+- assertVisible: "Devils Garden Campground"
+- takeScreenshot: developed-camp-full
+- tapOn:
+    id: "place-sheet-camp-camp-place-ridb-234059-close"
+- extendedWaitUntil:
+    notVisible:
+      id: "place-sheet-camp-camp-place-ridb-234059"
+    timeout: 15000

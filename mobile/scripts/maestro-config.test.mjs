@@ -44,6 +44,8 @@ assert.deepEqual(flowNames, [
   '10-map-place-related-sheet-drilldown.yaml',
   '11-map-place-related-camp-sheet.yaml',
   '12-map-place-related-see-visitor-sheets.yaml',
+  '13-map-search-developed-camp-sheet.yaml',
+  '14-map-search-dispersed-camp-sheet.yaml',
 ]);
 for (const name of flowNames) {
   const source = readFileSync(join(workspace, 'flows', name), 'utf8');
@@ -103,6 +105,16 @@ assert.match(relatedNpsFlow, /anderson-cabin-content/);
 assert.match(relatedNpsFlow, /related\.visitor-centers/);
 assert.match(relatedNpsFlow, /big-oak-flat-information-stati-content/);
 assert.match(relatedNpsFlow, /pressKey: Back/);
+
+const developedCampFlow = readFileSync(join(workspace, 'flows', '13-map-search-developed-camp-sheet.yaml'), 'utf8');
+assert.match(developedCampFlow, /map\.search\.inline\.result\.place:ridb:234059/);
+assert.match(developedCampFlow, /place-sheet-camp-camp-place-ridb-234059-peek/);
+assert.match(developedCampFlow, /Some details are unavailable/);
+
+const dispersedCampFlow = readFileSync(join(workspace, 'flows', '14-map-search-dispersed-camp-sheet.yaml'), 'utf8');
+assert.match(dispersedCampFlow, /map\.search\.inline\.result\.place:blm:ut-moab-camp-001/);
+assert.match(dispersedCampFlow, /place-sheet-camp-camp-place-blm-ut-moab-camp-001-peek/);
+assert.match(dispersedCampFlow, /Some details are unavailable/);
 
 const parsed = parseMaestroArgs([
   '--device', 'emulator-5554',

@@ -675,3 +675,35 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Exact next action: commit this narrow correction, publish one replacement paired preview from its immutable SHA, apply the Android update, and rerun only Trips → Map → Plan with scroll retention. If it passes, continue the remaining owned-Original delta; do not repeat the complete pre-preview suite or broad device crawls.
 - Open P0: none. Open P1: active Plan workspace retention is fixed in code but remains pending exact-candidate device proof.
 - Task-owned background processes: none. The first paired publisher and Gradle daemon are stopped; ADB remains intentionally available.
+
+## Checkpoint M4 device evidence — Plan accepted, Originals map handoff blocked
+
+- Timestamp: `2026-07-24T04:04:04-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; exact application and replacement paired-preview source HEAD: `4f372bb885c050768a1bac1f7e4cb8b5a52af1cf`, pushed to origin.
+- Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. `.cursor/` and `dashboard/explore_serving_index_v2.json` remain unstaged and untouched.
+- Replacement paired preview identity:
+  - Android build `59`, runtime `native-1.0.10-android.1`, group `56863c2f-fd67-4c3f-a2f7-f0f105d7ffff`, update `019f9350-223f-71f6-98cc-8986ac687fee`.
+  - iOS build `54`, runtime `native-1.0.10-ios.1`, group `0e8d32bc-7510-4091-8d63-b214ce0f4598`, update `019f9350-223f-7b0b-805f-76401d7d1a66`.
+  - Sentry source-map uploads completed and Samsung `RFCR408DA9B` verified the exact Android source/runtime/update identity.
+- Checkpoint A is accepted on the exact corrected candidate. Trips → Map → Plan restored Trips, and the Plan Trips screen plus Downloads anchor retained identical bounds before and after the return. The previously completed manager, nested Back, selected-area Cancel, exact scroll return, and trip-action checks were not repeated.
+- Owned Moab opened from Plan → Trips with the approved exact artwork and detail presentation. Evidence: `output/m4-plan-originals/original-detail-4f.png`, SHA-256 `f34cf9ba2fb9c9bde707dcb94da0be73aeb18c4bffcc452aedeBC3696b48dcb1` (case-insensitive digest).
+- One deterministic Originals P1 is open. Retrying the interrupted dedicated bundle reached `54%` and remained there for multiple minutes. A 30-second UID network sample recorded `RX_DELTA=0`. Force-stop/relaunch did not automatically restart the Original, confirming the durable stopped/recovery boundary remains intact.
+- The evidence isolates the failure to the native offline-map handoff after the immutable narration/assets phase. `expoOriginalOfflineMapAdapter.prepare` currently depends on a native completion callback and has neither installed-pack polling nor a stall bound. A missing callback can strand the detail UI indefinitely even if the pack completes, while a genuinely stalled native pack cannot return a retryable error.
+- Authorized one-correction scope: require verified installed-pack completion, poll the exact renderer/name to recover a lost callback, and reject with a bounded retryable map error when no native progress occurs. Do not mark a bundle ready from the callback alone.
+- Exact next action: implement the pure watchdog/status contract and the narrow adapter correction, run focused Offline/Originals/TypeScript tests, publish one paired replacement preview from one immutable SHA, and retry Moab once. If download/start still fails, checkpoint the P1 as blocked without another speculative OTA.
+- Do not repeat: the complete pre-preview suite, Plan/Downloads device delta, Trips workspace correction, broad Map/Explore/Layer/NPS crawls, Search V2 baseline, Memory Gate V3, or Figma/Mobbin research.
+- Task-owned background processes: none. EAS/Expo, Gradle, Metro, Maestro, and audit processes are stopped; ADB remains intentionally available.
+
+## Checkpoint M4 Originals correction — verified native-map completion
+
+- Timestamp: `2026-07-24T04:06:41-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; correction baseline HEAD: `4f372bb885c050768a1bac1f7e4cb8b5a52af1cf`. The implementation commit follows this entry.
+- Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. `.cursor/` and `dashboard/explore_serving_index_v2.json` remain excluded and unstaged.
+- Added a pure, fixed-threshold offline-map watchdog. It records only percentage, byte count, and last-progress time; repeated identical callbacks cannot keep a stalled download alive.
+- The Originals map adapter now polls the exact logical pack name on the active renderer every two seconds. A native callback at `100%` records progress but cannot mark the dedicated bundle ready. Readiness requires the installed native pack to report complete.
+- A missing completion callback is recovered when installed-pack polling observes completion. No progress for 60 seconds pauses the native pack and returns the retryable message `Offline map download paused. Check your connection and retry.` Abort, error, completion, and timeout all clear the polling timer.
+- Focused verification passed: renderer binding, watchdog phase boundaries and duplicate/regressed observations, native offline-pack status, the complete Originals suite, Offline V2 preservation/runtime, telemetry privacy allowlists, user-facing copy audit across `163` files, TypeScript, and whitespace checks.
+- Open P0: none. The device P1 is corrected in code and remains pending the one authorized exact-candidate Moab retry.
+- Exact next action: commit and push this named scope, publish one paired preview OTA from that immutable SHA with Sentry source maps, verify both update records and Android device identity, then retry the owned Moab download once. If it completes, exercise Start → main map → Minimize → Resume → End and relaunch. If it does not, record the P1 as blocked without another speculative OTA.
+- Do not repeat: the complete pre-preview suite, Plan/Downloads device checks, broad crawls, previous Originals retry, Figma/Mobbin research, or prior paired updates.
+- Task-owned background processes: none. Tests have exited; ADB remains intentionally available.

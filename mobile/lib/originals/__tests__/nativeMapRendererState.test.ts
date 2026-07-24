@@ -40,6 +40,14 @@ async function main() {
 
   const adapter = readFileSync('lib/originals/mapAdapter.ts', 'utf8');
   assert.match(adapter, /getInstalledPacks\(renderer\)/);
+  assert.match(adapter, /scheduleVerification\(\)/);
+  assert.match(adapter, /observation\.complete && pack/);
+  assert.match(adapter, /Offline map download paused\. Check your connection and retry\./);
+  assert.doesNotMatch(
+    adapter,
+    /onComplete[\s\S]{0,160}ready:\s*true/,
+    'a native completion callback alone must not mark an Original map ready',
+  );
   assert.match(adapter, /pausePack\(name, renderer\)/);
   assert.match(adapter, /message => finish[\s\S]*renderer,\s*\n\s*\)/);
   assert.match(adapter, /pack_id: mapPackReference\(renderer, name\)/);

@@ -1,4 +1,9 @@
 import type { OriginalOfflineMapV1 } from './types';
+import {
+  ORIGINAL_MAP_STATUS_POLL_MS,
+  createOriginalMapDownloadWatchdog,
+  observeOriginalMapDownload,
+} from './mapDownloadWatchdog';
 
 export type OriginalMapDownloadProgress = {
   percentage: number;
@@ -79,12 +84,92 @@ export const expoOriginalOfflineMapAdapter: OriginalOfflineMapAdapter = {
     }
     let settled = false;
     let abortHandler: (() => void) | null = null;
+    let pollTimer: ReturnType<typeof setTimeout> | null = null;
+    let pollInFlight = false;
+    let watchdog = createOriginalMapDownloadWatchdog(Date.now());
     try {
       return await new Promise<OriginalPreparedMap>((resolve, reject) => {
         const finish = (operation: () => void) => {
           if (settled) return;
           settled = true;
+          if (pollTimer) clearTimeout(pollTimer);
+          pollTimer = null;
           operation();
+        };
+        const reportProgress = (percentage: number, receivedBytes: number) => {
+          if (settled) return;
+          const observation = observeOriginalMapDownload(watchdog, {
+            percentage,
+            receivedBytes,
+            complete: false,
+          }, Date.now());
+          watchdog = observation.state;
+          if (observation.advanced) {
+            options.onProgress?.({
+              percentage: watchdog.lastPercentage,
+              received_bytes: watchdog.lastReceivedBytes,
+              expected_bytes: map.estimated_bytes,
+            });
+          }
+        };
+        const scheduleVerification = (delayMs = ORIGINAL_MAP_STATUS_POLL_MS) => {
+          if (settled || pollTimer) return;
+          pollTimer = setTimeout(() => {
+            pollTimer = null;
+            void verifyInstalledPack();
+          }, delayMs);
+        };
+        const verifyInstalledPack = async () => {
+          if (settled || pollInFlight) return;
+          pollInFlight = true;
+          try {
+            const packs = await manager.getInstalledPacks(renderer);
+            if (settled) return;
+            const pack = packs.find(candidate => candidate.name === name);
+            const observation = observeOriginalMapDownload(
+              watchdog,
+              pack ? {
+                percentage: pack.percentage,
+                receivedBytes: Math.round(pack.sizeMb * 1_048_576),
+                complete: pack.complete,
+              } : null,
+              Date.now(),
+            );
+            watchdog = observation.state;
+            if (observation.advanced) {
+              options.onProgress?.({
+                percentage: watchdog.lastPercentage,
+                received_bytes: watchdog.lastReceivedBytes,
+                expected_bytes: map.estimated_bytes,
+              });
+            }
+            if (observation.complete && pack) {
+              finish(() => resolve({
+                pack_id: mapPackReference(renderer, name),
+                ready: true,
+                bytes: Math.round(pack.sizeMb * 1_048_576),
+              }));
+              return;
+            }
+            if (observation.stalled) {
+              void manager.pausePack(name, renderer);
+              finish(() => reject(new Error(
+                'Offline map download paused. Check your connection and retry.',
+              )));
+            }
+          } catch {
+            const observation = observeOriginalMapDownload(watchdog, null, Date.now());
+            watchdog = observation.state;
+            if (observation.stalled) {
+              void manager.pausePack(name, renderer);
+              finish(() => reject(new Error(
+                'Offline map download paused. Check your connection and retry.',
+              )));
+            }
+          } finally {
+            pollInFlight = false;
+            scheduleVerification();
+          }
         };
         abortHandler = () => {
           void manager.pausePack(name, renderer);
@@ -103,19 +188,18 @@ export const expoOriginalOfflineMapAdapter: OriginalOfflineMapAdapter = {
           map.min_zoom,
           map.max_zoom,
           config.mapbox_token,
-          progress => options.onProgress?.({
-            percentage: progress.percentage,
-            received_bytes: Math.round(progress.sizeMb * 1_048_576),
-            expected_bytes: map.estimated_bytes,
-          }),
-          () => finish(() => resolve({
-            pack_id: mapPackReference(renderer, name),
-            ready: true,
-            bytes: map.estimated_bytes,
-          })),
+          progress => reportProgress(
+            progress.percentage,
+            Math.round(progress.sizeMb * 1_048_576),
+          ),
+          () => {
+            reportProgress(100, map.estimated_bytes);
+            void verifyInstalledPack();
+          },
           message => finish(() => reject(new Error(message))),
           renderer,
         ).catch(error => finish(() => reject(error)));
+        scheduleVerification();
       });
     } finally {
       if (abortHandler) options.signal?.removeEventListener('abort', abortHandler);

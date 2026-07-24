@@ -636,3 +636,25 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Exact next action: commit this named-file implementation scope, then run only the Android Checkpoint-A delta: warm Plan/filter/scroll retention, trip actions, watches/Saved items, Plan → Downloads nested views, dismiss return, Open Map behavior, selected-area cancel, and one airplane-mode inventory check. Do not begin Originals until that review is recorded.
 - Do not repeat: broad Map/Explore/Layer/NPS crawls, prior campground/trail/report deltas, Figma/Mobbin research, Search V2 baseline, or Memory Gate V3.
 - Task-owned background processes: none. Node processes belong to Codex/MCP infrastructure; ADB remains intentionally available for the Samsung and emulator.
+
+## Checkpoint M4.A review and M4.B implementation — Originals
+
+- Timestamp: `2026-07-24T03:17:47-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; Plan/Downloads implementation HEAD: `24b79a74d181f90c519bb434b1233bcfb3a05f9b`, pushed to origin. The Originals implementation commit follows this entry.
+- Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. Protected files and unrelated executable-bit-only worktree changes remain excluded and unstaged.
+- Checkpoint A code-contract review is accepted with no reproduced P0/P1. Its physical delta is intentionally bundled with the single paired candidate: the emulator's installed debug package is stale `1.0.9`, and one bounded local `installDebug` attempt exceeded ten minutes without installing a new binary. The build and Metro processes were stopped; no repeated local-build loop was started.
+- Originals retains the approved Moab artwork/detail, permanent version-pinned ownership, dedicated immutable bundle, local/offline artwork, Explore-only acquisition, Plan ownership-only listing, and the one main Trailhead map for route display, cues, progress, and playback.
+- Owner/account presentation is request-generation-bound. Owned-list, detail, restore, entitlement, manifest, and bundle reads already reject stale account epochs. This packet also binds every detail download progress/result to the exact owner scope, pack, version, and UI request generation, preventing an old account or another Original's download from changing the current detail.
+- The download service now suppresses progress after account scope changes. Detail presentation no longer consumes unscoped global runtime progress; its local dedicated-bundle progress remains authoritative.
+- Stable selectors now cover owned rows, Retry/Restore, detail/back/share/primary, download sheet/progress/retry/update/start, Start disclosure/confirmation/recovery, main-map Minimize/Resume, captions/replay/skip/mute, feedback, and End Tour.
+- Existing End Tour behavior remains unchanged and contract-proven: it invalidates trigger work, stops the cold/headless runtime and native location foreground service, clears Android Auto context and the durable active pointer, stops/unloads audio twice after queue drain, releases the audio session, removes the main-map player, preserves the downloaded bundle and completed/skipped/missed story history, and leaves a stopped restore barrier so relaunch cannot restart the tour.
+- The background-location disclosure still appears only at Start/recovery. Routine detail, owned rows, resume, and playback do not repeat it. Admin simulation remains isolated from consumer progress, location services, and analytics.
+- Focused verification passed:
+  - Full Originals suite, including main-map renderer, continuous 46-fix route fixture, bundle/store corruption and scope isolation, download interruption, audio priority, headless runtime, feedback, and stop-race/relaunch teardown.
+  - New old-owner progress suppression assertion.
+  - Automation selector and user-facing copy audits.
+  - TypeScript and whitespace checks.
+- Open P0/P1 from implementation tests: none.
+- Exact next action: commit this Originals scope, run the remaining focused Plan/TripRepository/Offline/telemetry/privacy/native-drift gates and the complete pre-preview suite once, then publish one paired preview OTA from one immutable SHA with Sentry source maps. Verify update identities before running the combined Android Plan/Downloads/Originals delta and shared iOS proof.
+- Do not repeat: the failed local debug build, completed Originals characterization suite, broad Map/Explore/Layer/NPS crawls, prior sheet deltas, Figma/Mobbin research, Search V2 baseline, or Memory Gate V3.
+- Task-owned background processes: none. The bounded Gradle and Metro processes are stopped; no EAS, Maestro, audit, or Trailhead test job remains. ADB remains intentionally available.

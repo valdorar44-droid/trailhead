@@ -852,7 +852,9 @@ export async function downloadOriginalBundle(
           ...(previewToken ? { 'X-Trailhead-Originals-Preview': previewToken } : {}),
         },
         signal: controller.signal,
-        onProgress: value => onProgress?.(progressState(value)),
+        onProgress: value => {
+          if (scopeIsCurrent()) onProgress?.(progressState(value));
+        },
       });
     } finally {
       unsubscribe();

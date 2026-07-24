@@ -307,9 +307,32 @@ async function main() {
   await assert.rejects(staleDownload, /account changed/i);
   assert.equal(bundleDownloads, 0, 'an account switch during manifest fetch never starts a bundle download');
 
+  const staleProgress: unknown[] = [];
+  globals.__ownedOriginalsState = { user: { id: 'A' }, token: 'token-a' };
+  globals.__ownedOriginalsEpoch = 6;
+  globals.__ownedOriginalsAccess = { 'account:A': [accountAccess] };
+  globals.__ownedOriginalsManifest = async () => manifest;
+  globals.__ownedOriginalsBundleDownload = async (_manifest, options: any) => {
+    globals.__ownedOriginalsState = { user: { id: 'B' }, token: 'token-b' };
+    globals.__ownedOriginalsEpoch = 7;
+    options.onProgress?.({
+      percentage: 50,
+      completed_bytes: 5,
+      total_bytes: 10,
+    });
+    const error = new Error('aborted');
+    error.name = 'AbortError';
+    throw error;
+  };
+  await assert.rejects(
+    service.downloadOriginalBundle('moab-original', 1, progress => staleProgress.push(progress)),
+    /aborted/i,
+  );
+  assert.equal(staleProgress.length, 0, 'an old-owner download cannot publish progress into the next account');
+
   let previewDownloadArgs: unknown[] = [];
   globals.__ownedOriginalsState = { user: null, token: null };
-  globals.__ownedOriginalsEpoch = 6;
+  globals.__ownedOriginalsEpoch = 8;
   globals.__ownedOriginalsAccess = { guest: [guestAccess] };
   globals.__ownedOriginalsPreviewToken = 'internal-preview-token';
   globals.__ownedOriginalsManifest = async () => manifest;

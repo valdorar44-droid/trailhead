@@ -131,6 +131,43 @@ assert.doesNotMatch(
   /\/originals\/player/,
   'consumer Start must never open the standalone Originals map',
 );
+for (const selector of [
+  'original.detail.screen',
+  'original.detail.scroll',
+  'original.detail.back',
+  'original.detail.share',
+  'original.detail.primary',
+  'original.download.overlay',
+  'original.download.sheet',
+  'original.download.close',
+  'original.download.progress',
+  'original.download.action',
+  'original.start.overlay',
+  'original.start.sheet',
+  'original.start.close',
+]) {
+  assert.match(detailScreenSource, new RegExp(`testID="${selector.replaceAll('.', '\\.')}"`));
+}
+assert.match(
+  detailScreenSource,
+  /const downloadRequestRef = useRef\(0\)/,
+  'detail download presentation has an independent request generation',
+);
+assert.match(
+  detailScreenSource,
+  /request === downloadRequestRef\.current[\s\S]*currentScopeRef\.current === requestScope[\s\S]*loadedDetail\?\.id === requestPackId[\s\S]*loadedDetail\.version === requestVersion/,
+  'late download progress is bound to owner scope, pack, version, and request generation',
+);
+assert.doesNotMatch(
+  detailScreenSource,
+  /if \(progress && detail\)/,
+  'an unrelated runtime download cannot replace this detail download state',
+);
+assert.equal(
+  detailScreenSource.match(/Trailhead uses location in the background/g)?.length,
+  1,
+  'the policy disclosure appears only in the Start/recovery flow',
+);
 
 const standalonePlayerSource = readFileSync(
   fileURLToPath(new NodeURL('../../../app/originals/player.tsx', import.meta.url)),

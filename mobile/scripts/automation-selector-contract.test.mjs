@@ -67,8 +67,19 @@ requireSelectors('app/originals/player.tsx', [
 ]);
 
 requireSelectors('app/originals/[id].tsx', [
+  'original.detail.screen',
+  'original.detail.scroll',
+  'original.detail.back',
+  'original.detail.share',
+  'original.detail.primary',
+  'original.download.overlay',
+  'original.download.sheet',
+  'original.download.close',
+  'original.download.progress',
+  'original.download.action',
   'original.start.overlay',
   'original.start.sheet',
+  'original.start.close',
   'original.start.disclosure',
   'original.start.confirm',
   'original.start.continue',
@@ -128,7 +139,12 @@ requireSelectors('components/trips/AvailabilityWatchManager.tsx', [
   'plan.watches.close',
   'plan.watches.retry',
 ]);
-requireSelectors('components/originals/OwnedOriginalsSection.tsx', ['plan.originals.section', 'plan.originals.restore']);
+const ownedOriginals = requireSelectors('components/originals/OwnedOriginalsSection.tsx', [
+  'plan.originals.section',
+  'plan.originals.retry',
+  'plan.originals.restore',
+]);
+assert.match(ownedOriginals, /testID=\{`plan\.originals\.item\.\$\{item\.id\}\.\$\{item\.version\}`\}/);
 requireSelectors('components/offline/OfflineDownloadsSection.tsx', ['offline.v2-downloads.section', 'offline.v2-downloads.list']);
 
 requireSelectors('app/(tabs)/profile.tsx', ['profile.qa.telemetry.open']);

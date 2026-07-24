@@ -57,6 +57,7 @@ export default function OriginalDetailScreen() {
   const currentScopeRef = useRef(accountScope);
   currentScopeRef.current = accountScope;
   const loadRequestRef = useRef(0);
+  const downloadRequestRef = useRef(0);
   const hasPlan = useStore(state => state.hasPlan);
   const originalsRuntime = useOriginalsRuntime();
   const originalsAdminRuntime = useOriginalsAdminRuntime();
@@ -99,16 +100,13 @@ export default function OriginalDetailScreen() {
   }, [load]);
 
   useEffect(() => {
-    const progress = originalsRuntime.downloadProgress;
-    if (progress && detail) {
-      setBundle({
-        state: 'downloading',
-        progress: progress.percentage / 100,
-        downloadedBytes: progress.completed_bytes,
-        totalBytes: progress.total_bytes,
-      });
-      return;
-    }
+    downloadRequestRef.current += 1;
+    setBundle(EMPTY_BUNDLE);
+    setReadinessVisible(false);
+    setStartVisible(false);
+  }, [accountScope]);
+
+  useEffect(() => {
     const activeScope = user?.id == null ? 'guest' : `account:${String(user.id)}`;
     if (
       detail
@@ -123,7 +121,7 @@ export default function OriginalDetailScreen() {
         totalBytes: originalsRuntime.bundle.total_bytes,
       });
     }
-  }, [detail, originalsRuntime.bundle, originalsRuntime.downloadProgress, originalsRuntime.manifest?.pack_id, user?.id]);
+  }, [detail, originalsRuntime.bundle, user?.id]);
 
   const price = useMemo(() => {
     if (!detail || detail.priceCredits === 0) return 0;
@@ -175,22 +173,36 @@ export default function OriginalDetailScreen() {
 
   const startDownload = useCallback(async () => {
     if (!detail || bundle.state === 'downloading') return;
+    const request = ++downloadRequestRef.current;
+    const requestScope = accountScope;
+    const requestPackId = detail.id;
+    const requestVersion = detail.version;
+    const requestIsCurrent = () => (
+      request === downloadRequestRef.current
+      && currentScopeRef.current === requestScope
+      && detailScope === requestScope
+      && loadedDetail?.id === requestPackId
+      && loadedDetail.version === requestVersion
+    );
     setBundle(current => ({ ...current, state: 'downloading', error: undefined }));
     try {
       const next = await downloadOriginalBundle(
-        detail.id,
-        detail.version,
-        progress => setBundle(progress),
+        requestPackId,
+        requestVersion,
+        progress => {
+          if (requestIsCurrent()) setBundle(progress);
+        },
       );
-      setBundle(next);
+      if (requestIsCurrent()) setBundle(next);
     } catch (downloadError: any) {
+      if (!requestIsCurrent()) return;
       setBundle(current => ({
         ...current,
         state: 'error',
         error: downloadError?.message || 'The offline package was not saved. Try again on a stable connection.',
       }));
     }
-  }, [bundle.state, detail]);
+  }, [accountScope, bundle.state, detail, detailScope, loadedDetail]);
 
   const beginStart = useCallback(async () => {
     if (!detail) return;
@@ -305,15 +317,15 @@ export default function OriginalDetailScreen() {
       : () => { void openStart(); };
 
   return (
-    <View style={[styles.screen, { backgroundColor: C.bg }] }>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: Math.max(insets.bottom + 112, 132) }}>
+    <View testID="original.detail.screen" style={[styles.screen, { backgroundColor: C.bg }] }>
+      <ScrollView testID="original.detail.scroll" showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: Math.max(insets.bottom + 112, 132) }}>
         <OriginalArtwork imageUrl={detail.heroImageUrl} region={detail.region} />
         <SafeAreaView edges={['top']} style={styles.floatingTop}>
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={styles.floatingButton}>
+          <TouchableOpacity testID="original.detail.back" accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={styles.floatingButton}>
             <Ionicons name="chevron-back" size={20} color="#FFFFFF" />
           </TouchableOpacity>
           {!adminPreview ? (
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Share this Original" onPress={() => Alert.alert('Share', 'Original sharing will use the published Trailhead link.')} style={styles.floatingButton}>
+            <TouchableOpacity testID="original.detail.share" accessibilityRole="button" accessibilityLabel="Share this Original" onPress={() => Alert.alert('Share', 'Original sharing will use the published Trailhead link.')} style={styles.floatingButton}>
               <Ionicons name="share-outline" size={19} color="#FFFFFF" />
             </TouchableOpacity>
           ) : <View style={styles.floatingButtonSpacer} />}
@@ -456,7 +468,7 @@ export default function OriginalDetailScreen() {
           <Text style={[styles.dockPrice, { color: owned || canClaimFeatured ? C.orange : C.text }]}>{adminPreview ? 'Admin device preview' : owned ? 'Yours permanently' : canClaimFeatured ? 'Included this month' : detail.priceCredits === 0 ? 'Free' : `${price} credits`}</Text>
           <Text style={[styles.dockMeta, { color: C.text3 }]}>{adminPreview ? 'Not published · synthetic GPS only' : owned ? bundleLabel(bundle) : canClaimFeatured ? 'Explorer monthly claim' : detail.priceCredits === 0 ? 'No account required' : user ? `${user.credits} credits available` : 'Account required'}</Text>
         </View>
-        <TrailheadButton label={primaryLabel} icon={ready ? 'play' : !owned ? detail.priceCredits === 0 ? 'gift-outline' : 'ticket-outline' : 'cloud-download'} variant="primary" loading={busy} onPress={() => void primaryAction()} style={styles.primary} />
+        <TrailheadButton testID="original.detail.primary" label={primaryLabel} icon={ready ? 'play' : !owned ? detail.priceCredits === 0 ? 'gift-outline' : 'ticket-outline' : 'cloud-download'} variant="primary" loading={busy} onPress={() => void primaryAction()} style={styles.primary} />
       </View>
 
       <ReadinessModal
@@ -516,10 +528,10 @@ function ReadinessModal({
   const ready = bundle.state === 'ready';
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.modalOverlay} testID="original.start.overlay">
+      <View style={styles.modalOverlay} testID="original.download.overlay">
         <View
           style={[styles.sheet, { backgroundColor: C.s1, borderColor: C.border }]}
-          testID="original.start.sheet"
+          testID="original.download.sheet"
         >
           <ScrollView
             style={styles.sheetScroll}
@@ -535,7 +547,7 @@ function ReadinessModal({
               <Text style={[styles.sheetKicker, { color: C.orange }]}>{ready ? 'READY OFFLINE' : bundle.state === 'update_available' ? 'UPDATE REQUIRED' : 'OFFLINE PACKAGE'}</Text>
               <Text style={[styles.sheetTitle, { color: C.text }]}>{ready ? 'Everything is on this device' : bundle.state === 'update_available' ? `Download version ${detail.version}` : `Download ${detail.offlineSizeLabel}`}</Text>
             </View>
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close" disabled={bundle.state === 'downloading'} onPress={onClose} style={styles.sheetClose}>
+            <TouchableOpacity testID="original.download.close" accessibilityRole="button" accessibilityLabel="Close" disabled={bundle.state === 'downloading'} onPress={onClose} style={styles.sheetClose}>
               <Ionicons name="close" size={20} color={C.text2} />
             </TouchableOpacity>
           </View>
@@ -548,7 +560,7 @@ function ReadinessModal({
 
           {bundle.state === 'downloading' ? (
             <View style={styles.progressBlock}>
-              <View style={[styles.progressTrack, { backgroundColor: C.s3 }] }>
+              <View testID="original.download.progress" style={[styles.progressTrack, { backgroundColor: C.s3 }] }>
                 <View style={[styles.progressFill, { width: `${Math.max(2, Math.round(bundle.progress * 100))}%`, backgroundColor: C.orange }]} />
               </View>
               <Text accessibilityLiveRegion="polite" style={[styles.progressLabel, { color: C.text2 }]}>{Math.round(bundle.progress * 100)}% · Keep Trailhead open until verification finishes</Text>
@@ -559,6 +571,7 @@ function ReadinessModal({
 
           <Text style={[styles.sheetFootnote, { color: C.text3 }]}>Files are verified before the drive begins.</Text>
           <TrailheadButton
+            testID="original.download.action"
             label={ready ? 'Continue to safety check' : bundle.state === 'update_available' ? 'Update Original' : bundle.state === 'error' ? 'Retry download' : bundle.state === 'downloading' ? 'Downloading' : `Download · ${detail.offlineSizeLabel}`}
             icon={ready ? 'arrow-forward' : 'cloud-download'}
             variant="primary"
@@ -626,8 +639,8 @@ function StartTourModal({
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.modalOverlay}>
-        <View style={[styles.sheet, { backgroundColor: C.s1, borderColor: C.border }] }>
+      <View testID="original.start.overlay" style={styles.modalOverlay}>
+        <View testID="original.start.sheet" style={[styles.sheet, { backgroundColor: C.s1, borderColor: C.border }] }>
           <ScrollView
             style={styles.sheetScroll}
             contentContainerStyle={styles.sheetContent}
@@ -643,7 +656,7 @@ function StartTourModal({
               <Text style={[styles.sheetKicker, { color: C.orange }]}>{showPermissionDisclosure ? 'TRAILHEAD ORIGINAL' : 'BEFORE YOU DRIVE'}</Text>
               <Text style={[styles.sheetTitle, { color: C.text }]}>{showPermissionDisclosure ? 'Allow location for this tour' : `Start ${detail.title}`}</Text>
             </View>
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close" disabled={Boolean(starting)} onPress={onClose} style={styles.sheetClose}>
+            <TouchableOpacity testID="original.start.close" accessibilityRole="button" accessibilityLabel="Close" disabled={Boolean(starting)} onPress={onClose} style={styles.sheetClose}>
               <Ionicons name="close" size={20} color={C.text2} />
             </TouchableOpacity>
           </View>

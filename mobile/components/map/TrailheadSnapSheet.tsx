@@ -92,6 +92,7 @@ export default function TrailheadSnapSheet({
     });
     const expiry = setTimeout(() => {
       if (pendingScrollRestoreRef.current?.key === restore.key) {
+        scrollRef.current?.scrollTo({ y: restore.y, animated: false });
         pendingScrollRestoreRef.current = null;
       }
     }, 750);
@@ -104,7 +105,6 @@ export default function TrailheadSnapSheet({
   const restoreScrollAfterLayout = useCallback(() => {
     const pending = pendingScrollRestoreRef.current;
     if (!pending || stage === 'peek') return;
-    pendingScrollRestoreRef.current = null;
     requestAnimationFrame(() => {
       scrollRef.current?.scrollTo({ y: pending.y, animated: false });
     });

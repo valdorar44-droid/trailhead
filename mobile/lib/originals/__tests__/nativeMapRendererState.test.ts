@@ -49,7 +49,11 @@ async function main() {
     'a native completion callback alone must not mark an Original map ready',
   );
   assert.match(adapter, /pausePack\(name, renderer\)/);
-  assert.match(adapter, /message => finish[\s\S]*renderer,\s*\n\s*\)/);
+  assert.match(
+    adapter,
+    /message => finish[\s\S]*renderer,\s*\n\s*originalOfflineStyleURI\(renderer\),\s*\n\s*\)/,
+    'the Original pack binds RNMapbox to its approved offline style',
+  );
   assert.match(adapter, /pack_id: mapPackReference\(renderer, name\)/);
   assert.match(adapter, /reference\.renderer && reference\.renderer !== activeRenderer/);
   assert.match(adapter, /pack\.renderer === renderer/);
@@ -58,7 +62,11 @@ async function main() {
 
   const map = readFileSync('app/(tabs)/map.tsx', 'utf8');
   assert.match(map, /setActiveNativeMapRenderer\(renderer\)/);
-  assert.match(map, /mapRendererMode === 'mapbox' \? 'rnmapbox' : 'maplibre'/);
+  assert.match(map, /resolveOriginalMainMapPresentation/);
+  assert.match(map, /originalMapPresentation\.rendererMode === 'mapbox' \? 'rnmapbox' : 'maplibre'/);
+  assert.match(map, /mapLayer=\{originalMapPresentation\.mapLayer\}/);
+  assert.match(map, /premiumMapStyle=\{originalMapPresentation\.premiumMapStyle\}/);
+  assert.match(map, /rendererMode=\{originalMapPresentation\.rendererMode \?\? 'maplibre'\}/);
 
   console.log('Originals/main-map renderer binding tests passed.');
 }

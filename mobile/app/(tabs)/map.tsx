@@ -137,6 +137,7 @@ import {
 } from '@/lib/offlineV2/campDetail';
 import { resolveActiveOfflineRendererStyleId } from '@/lib/offlineV2/activeStyle';
 import { setActiveNativeMapRenderer } from '@/lib/nativeMapRendererState';
+import { resolveOriginalMainMapPresentation } from '@/lib/originals/mapPresentation';
 import {
   buildCampNearbyGroups,
   isLowValueGenericBlmPlace,
@@ -6539,11 +6540,31 @@ function MapScreen() {
   const [mapRendererMode, setMapRendererMode] = useState<'mapbox' | 'maplibre' | null>(
     initialMapboxToken ? 'mapbox' : null,
   );
+  const originalMapPresentation = useMemo(
+    () => resolveOriginalMainMapPresentation({
+      mapLayer,
+      premiumMapStyle,
+      rendererMode: mapRendererMode,
+    }, {
+      originalActive: originalsMapExperience.active && !navMode,
+      mapboxAvailable: Boolean(mapboxToken),
+    }),
+    [
+      mapLayer,
+      mapRendererMode,
+      mapboxToken,
+      navMode,
+      originalsMapExperience.active,
+      premiumMapStyle,
+    ],
+  );
   useEffect(() => {
-    if (mapRendererMode) {
-      setActiveNativeMapRenderer(mapRendererMode === 'mapbox' ? 'rnmapbox' : 'maplibre');
+    if (originalMapPresentation.rendererMode) {
+      setActiveNativeMapRenderer(
+        originalMapPresentation.rendererMode === 'mapbox' ? 'rnmapbox' : 'maplibre',
+      );
     }
-  }, [mapRendererMode]);
+  }, [originalMapPresentation.rendererMode]);
   const [mapCredentialsReady, setMapCredentialsReady] = useState(() => Boolean(initialMapboxToken));
   // Basemap rendering and route calculation are separate choices. A Mapbox
   // token must not silently replace a Trailhead route with a traffic route.
@@ -24209,9 +24230,9 @@ function MapScreen() {
           navIdx={navRef.current.idx}
           navHeading={smoothedHdgRef.current}
           navSpeed={userSpeed}
-          mapLayer={mapLayer}
-          premiumMapStyle={premiumMapStyle}
-          rendererMode={mapRendererMode ?? 'maplibre'}
+          mapLayer={originalMapPresentation.mapLayer}
+          premiumMapStyle={originalMapPresentation.premiumMapStyle}
+          rendererMode={originalMapPresentation.rendererMode ?? 'maplibre'}
           routeProviderMode={activeRouteProviderMode}
           routeOpts={routeOpts}
           traceMode={trailTraceMode}

@@ -748,3 +748,23 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Exact next action: commit this baseline checkpoint separately, implement the shared Original map-style contract, and add deterministic tests before device delivery.
 - Do not repeat: Plan/Downloads deltas, prior Moab retries, broad Map/Explore/NPS/Layer crawls, full pre-preview, Memory Gate V3, or Figma/Mobbin research.
 - Task-owned background processes: none. ADB remains intentionally available.
+
+## Checkpoint M4.C implementation — one main-map offline style
+
+- Timestamp: `2026-07-24T06:29:48-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; implementation baseline/checkpoint HEAD: `05840175d10193b41f867dfde3e9867eebceecee`.
+- Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. `.cursor/` and `dashboard/explore_serving_index_v2.json` remain excluded and unstaged.
+- The RNMapbox Original adapter now gives the existing native offline manager the approved `mapbox://styles/mapbox/outdoors-v12` style URI and explicitly applies the server-provided access token before pack creation. It no longer asks Mapbox's v11 style-pack/tile-region path to derive resources from Trailhead's custom HTTPS vector style.
+- MapLibre and ordinary Trailhead offline downloads are unchanged: they continue using the Trailhead HTTPS style, global-coverage validation before replacement, their existing stores, and their existing resume/delete behavior.
+- While a consumer Original owns the main map, presentation props temporarily select the same RNMapbox Outdoors style. The persisted map layer, premium style, and renderer choices are not mutated. Navigation still owns its own presentation, and End Tour reveals the user's prior map choices.
+- No second map engine, public API, native dependency, permission, runtime identifier, Offline V1/V2 store, Original ownership record, or playback behavior changed.
+- Focused verification passed:
+  - Complete Originals suite, including renderer binding, map presentation, installed-pack verification, watchdog, trigger/runtime/audio, account scope, and End Tour race coverage.
+  - Offline V2 catalog, preparation/runtime, scope cleanup, active-style, downloaded place, Offline manager, and parity tests.
+  - Telemetry/Sentry privacy allowlists and QA diagnostics.
+  - User-facing copy audit across `163` files.
+  - TypeScript and whitespace checks.
+- Open P0: none. The Android Moab P1 is corrected in code but remains pending the one exact-candidate device retry.
+- Exact next action: commit and push this named implementation scope, publish one paired preview OTA with Sentry source maps, verify update identities, then retry Moab once on Samsung. On success, test Start → main map → Minimize → Resume → End → relaunch and map-style restoration. On failure, checkpoint the P1 as blocked without another speculative OTA.
+- Do not repeat: full pre-preview, Plan/Downloads deltas, previous Moab retries, broad crawls, Memory Gate V3, or completed design research.
+- Task-owned background processes: none. Focused tests have exited; ADB remains intentionally available.

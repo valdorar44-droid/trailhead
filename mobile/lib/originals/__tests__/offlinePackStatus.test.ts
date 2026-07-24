@@ -86,6 +86,18 @@ async function main() {
     /renderer === 'rnmapbox' \? MapboxGL\.offlineManager : MapLibreGL\.offlineManager/,
   );
   assert.match(adapterSource, /renderer: NativeOfflineRenderer = 'maplibre'/);
+  assert.match(adapterSource, /styleURLOverride\?: string/);
+  assert.match(adapterSource, /const styleURL = styleURLOverride \|\| packStyleURI\(mapboxToken\)/);
+  assert.match(
+    adapterSource,
+    /if \(!styleURLOverride\) \{[\s\S]*offlineStyleCoversBounds\(style, bounds\)/,
+    'Trailhead custom styles retain their coverage verification',
+  );
+  assert.match(
+    adapterSource,
+    /renderer === 'rnmapbox' && mapboxToken[\s\S]*MapboxGL\.setAccessToken\(mapboxToken\)/,
+    'RNMapbox pack creation receives the server-provided access token',
+  );
   assert.match(adapterSource, /await manager\.createPack\(/);
   assert.match(adapterSource, /bounds: mapLibreOfflinePackBounds\(bounds\)/);
   const coverageCheckIndex = adapterSource.indexOf('offlineStyleCoversBounds(style, bounds)');

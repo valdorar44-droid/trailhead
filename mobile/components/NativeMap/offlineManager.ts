@@ -79,6 +79,7 @@ export async function downloadPack(
   onComplete: () => void,
   onError: (msg: string) => void,
   renderer: NativeOfflineRenderer = 'maplibre',
+  styleURLOverride?: string,
 ): Promise<void> {
   const manager = offlineManager(renderer);
   const nativeName = physicalPackName(name, renderer);
@@ -88,14 +89,19 @@ export async function downloadPack(
     await MapLibreGL.offlineManager.setTileCountLimit(MAX_TILE_COUNT);
   }
 
-  const styleURL = packStyleURI(mapboxToken);
-  const styleResponse = await fetch(styleURL, { headers: { Accept: 'application/json' } });
-  if (!styleResponse.ok) {
-    throw new Error('Trailhead could not verify offline map coverage. Try again.');
+  const styleURL = styleURLOverride || packStyleURI(mapboxToken);
+  if (!styleURLOverride) {
+    const styleResponse = await fetch(styleURL, { headers: { Accept: 'application/json' } });
+    if (!styleResponse.ok) {
+      throw new Error('Trailhead could not verify offline map coverage. Try again.');
+    }
+    const style = await styleResponse.json().catch(() => null);
+    if (!offlineStyleCoversBounds(style, bounds)) {
+      throw new Error('Offline map coverage is not available for this area yet.');
+    }
   }
-  const style = await styleResponse.json().catch(() => null);
-  if (!offlineStyleCoversBounds(style, bounds)) {
-    throw new Error('Offline map coverage is not available for this area yet.');
+  if (renderer === 'rnmapbox' && mapboxToken) {
+    await MapboxGL.setAccessToken(mapboxToken);
   }
 
   // Coverage must be proven before replacing an existing native pack. A

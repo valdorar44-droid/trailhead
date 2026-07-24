@@ -34,6 +34,7 @@ export async function downloadPack(
   _onComplete: () => void,
   onError: (msg: string) => void,
   _renderer: NativeOfflineRenderer = 'maplibre',
+  _styleURLOverride?: string,
 ): Promise<void> {
   onError('Native offline map packs are not available in the web preview.');
 }

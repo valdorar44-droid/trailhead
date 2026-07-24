@@ -4,6 +4,7 @@ import {
   createOriginalMapDownloadWatchdog,
   observeOriginalMapDownload,
 } from './mapDownloadWatchdog';
+import { originalOfflineStyleURI } from './mapPresentation';
 
 export type OriginalMapDownloadProgress = {
   percentage: number;
@@ -198,6 +199,7 @@ export const expoOriginalOfflineMapAdapter: OriginalOfflineMapAdapter = {
           },
           message => finish(() => reject(new Error(message))),
           renderer,
+          originalOfflineStyleURI(renderer),
         ).catch(error => finish(() => reject(error)));
         scheduleVerification();
       });

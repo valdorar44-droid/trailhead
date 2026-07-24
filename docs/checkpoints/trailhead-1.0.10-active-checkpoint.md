@@ -356,3 +356,34 @@ Read this file before resuming the 1.0.10 overhaul after a restart or context co
 Update this file after each implementation checkpoint, deployment, preview publication, or device gate. Record exact SHAs, artifact IDs, evidence paths and hashes, open P0/P1 defects, the next exact action, and task-owned background processes. Keep completed work in place so a future session can distinguish reusable evidence from tests that truly need to be repeated.
 
 Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, EAS, Maestro, Trailhead test, or audit process was found running in WSL.
+
+## Checkpoint M3.2 — Quick search and multi-sheet drilldown proof
+
+- Timestamp: `2026-07-23T20:22:24-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; final application, automation, and paired-preview source HEAD: `8083f6f79104d1fcab85fbbf35a7167526e85fee`. This documentation-only checkpoint commit follows that source SHA.
+- Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. `.cursor/` and `dashboard/explore_serving_index_v2.json` remained excluded, unstaged, and untouched.
+- Related-place routing now treats official `display_type`, `type`, and `subtype` as authoritative before legacy name heuristics. NPS sights, activities, and visitor centers use the generic place sheet; real campgrounds and trails retain their dedicated sheets. Legacy untyped records retain safe name fallbacks.
+- Generic NPS sheets no longer inherit campground reservation treatment from stale canonical metadata. Authored sentence-case labels such as `Place to see` and `Visitor Center` remain intact.
+- Visual review of the device evidence removed duplicate type/distance copy, suppresses a shorter summary only in the full stage when the complete Details text extends it, and allows long place names to wrap to two lines. Half sheets retain their useful summary. Campground modules were not flattened or removed.
+- Focused verification passed on the final source:
+  - Place-sheet adapters `8/8`.
+  - NPS preservation `14/14` and Explore-detail return navigation `3/3`.
+  - Maestro configuration `12` pinned flows.
+  - TypeScript, copy audit across `160` files, and `git diff --check`.
+  - Search V2 remained on its previously passing `68/68` regression baseline; this sheet-only polish did not change search ranking or request behavior.
+- One guarded JS-only paired preview OTA published from exact source `8083f6f79104d1fcab85fbbf35a7167526e85fee`, after Android/iOS/web Sentry source maps uploaded and both update records validated:
+  - Channel `preview`, channel ID `019dbc97-3cde-795b-a35d-e6aa985060d3`.
+  - Candidate branch `preview-candidate-8083f6f79104d1fcab85fbbf35a7167526e85fee-mry8qp6c-bf4785be4f1de2c2d8345f20`, branch ID `019f91ae-90a5-773a-9938-6ae328e37a1e`.
+  - Android build `59`, runtime `native-1.0.10-android.1`, group `747949fb-c30d-4696-acf6-af923ed38322`, update `019f91ae-b6e4-7a4f-b5c2-c5c64664aed0`.
+  - iOS build `54`, runtime `native-1.0.10-ios.1`, group `be895b2b-ce0a-454b-9020-8f3cc75d46c0`, update `019f91ae-b6e4-7445-a465-ef3583a5645a`.
+- Samsung `RFCR408DA9B` completed the two-launch update handoff without clearing account data. The admin QA screen reported Android `1.0.10`, build `59`, channel `preview`, full source SHA `8083f6f79104d1fcab85fbbf35a7167526e85fee`, runtime `native-1.0.10-android.1`, update `019f91ae-b6e4-7a4f-b5c2-c5c64664aed0`, and status `Ready`.
+- Exact-candidate child-sheet device evidence:
+  - Things to see → Anderson Cabin → Back → Visitor centers → Big Oak Flat Information Station → Back passed in `output/maestro/2026-07-24T01-15-41-826Z--RFCR408DA9B`. JUnit SHA-256 `f147eed392ffb3d61f458c51712b8e075a876b37cdd2c6099c26d4e6fa35b8a8`; sight screenshot `6d537cbb81ea55399d9179f3f04e2982d27e8ef44260a8165f7aa17786afc643`; visitor-center screenshot `06d3dc3b5bae98b10e6abf4bc876a536339d824b968705d6da52858e65393dd3`.
+  - Things to do → Go Skiing at Badger Pass → Back passed in `output/maestro/2026-07-24T01-17-52-054Z--RFCR408DA9B`. JUnit SHA-256 `4e5297df583b7bb283ca73f7e187472a0eae0b403a6e678981890e3de0786362`; drilldown screenshot `21830e40f865d816f4026da3a47142418f945700f948e0f03c5e5c4a600ec4bb`.
+  - Campgrounds nearby → Bridalveil Creek Campground → dedicated camp summary → Back passed in `output/maestro/2026-07-24T01-19-22-559Z--RFCR408DA9B`. JUnit SHA-256 `7444ddb6bf21c5c0449e3bf4f8941ff4e1c67e7e8e510eaf984ffe26b60c478c`; campground screenshot `94fb612b4f8f544f30a97d2639a8631396925fc58d6d1e27811bac316d8c782b`.
+- Earlier emulator canonical-search fixtures remain useful gap evidence rather than current sheet failures: Yellowstone, Goose Island, and Corona Arch exposed legacy coordinate identities or absent canonical fixture IDs; an unrelated query returned no expected target. Preserve the runs under `output/maestro/2026-07-23T23-30-23-874Z--emulator-5554`, `...23-33-33-130Z`, `...23-36-38-340Z`, `...23-44-32-205Z`, and retry `...23-46-02-008Z` for the later canonical-coverage pass.
+- Layers remain user-confirmed working and were not reopened. The broad Android crawl and long Memory Gate V3 were not repeated.
+- Open P0/P1 defects reproduced on `8083f6f`: none. Remaining evidence debt: physical iOS sheet delta, formal Search V2 latency sampling, one frozen-candidate Memory Gate V3, and an accessibility-assisted actual map-pin drilldown.
+- Exact next action: add one deterministic actual-map-pin path for campground → campsite details and one safe community-report pin → Suggest Update → Cancel path; then continue the characterized trail/trailhead, report, and Explore-hub sheet families without revisiting the completed NPS child chains.
+- Do not repeat: the three exact-candidate flows above, broad Layers testing, the 33-run crawl, NPS reference research, Figma packets, the paired `8083f6f` OTA, or the interrupted long memory run.
+- Task-owned background processes: none. The paired publisher, Metro, EAS, Maestro, and test processes completed. ADB remains intentionally active for the connected Samsung and emulator.

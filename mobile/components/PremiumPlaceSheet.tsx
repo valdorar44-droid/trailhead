@@ -35,7 +35,7 @@ import { TrailheadButton, TrailheadButtonDock, TrailheadLoadingRow, TrailheadRai
 import TrailheadPhotoGallery, { type TrailheadGalleryPhoto } from '@/components/TrailheadPhotoGallery';
 import PlaceSheetShell, { PlaceSheetHeroChrome, PlaceSheetShellHeader } from '@/components/map/PlaceSheetShell';
 import FirstPartyRatingSection from '@/components/map/FirstPartyRatingSection';
-import { adaptGenericPlaceSheet } from '@/lib/placeSheetAdapters';
+import { adaptGenericPlaceSheet, cleanPlaceSheetDisplayText } from '@/lib/placeSheetAdapters';
 import { communityRatingTarget } from '@/lib/communityRatingEligibility';
 import { boundedExploreImageUrl, EXPLORE_IMAGE_BOUNDS, exploreImageSource } from '@/lib/mediaPolicy';
 
@@ -605,7 +605,7 @@ export default function PremiumPlaceSheet({
     if (!url) return;
     setFailedPhotoUrls(prev => prev.includes(url) ? prev : [...prev, url]);
   };
-  const typeLabel = titleCaseOrEmpty(data.display_type || data.subtype || data.type) || 'Place';
+  const typeLabel = cleanPlaceSheetDisplayText(data.display_type) || titleCaseOrEmpty(data.subtype || data.type) || 'Place';
   const sourceLabel = cleanExploreSourceLabel(data.source_label || data.attribution || data.source, typeLabel);
   const sourceFooterLabel = cleanExploreSourceLabel(data.source_label || data.attribution || data.source, '');
   const footerSourceKey = sourceFooterLabel.toLowerCase();

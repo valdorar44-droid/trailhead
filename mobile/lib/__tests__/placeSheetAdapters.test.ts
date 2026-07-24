@@ -8,6 +8,7 @@ import {
   adaptGenericPlaceSheet,
   adaptTrailSheet,
   CAMPGROUND_SHEET_PARITY_MODULES,
+  cleanPlaceSheetDisplayText,
   COMMUNITY_REPORT_SHEET_PARITY_MODULES,
   EXPLORE_HUB_SHEET_PARITY_MODULES,
   isCanonicalSearchPlaceSheetSource,
@@ -41,6 +42,7 @@ test('official display types keep their authored sentence case', () => {
   });
   assert.equal(sight.subtitle, 'Place to see');
   assert.equal(visitorCenter.subtitle, 'Visitor Center');
+  assert.equal(cleanPlaceSheetDisplayText('place_to_see'), 'Place To See');
 });
 
 test('trail adapter preserves trailhead identity instead of switching shells after enrichment', () => {

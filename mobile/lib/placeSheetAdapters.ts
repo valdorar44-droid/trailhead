@@ -155,7 +155,7 @@ function makeModel<T extends PlaceSheetSource>(
             ? 'Explore'
             : 'Place';
   const title = cleanText(source.name) || fallbackTitle;
-  const subtitle = cleanDisplayText(source.display_type) || cleanText(
+  const subtitle = cleanPlaceSheetDisplayText(source.display_type) || cleanText(
     source.source_label
       || source.source_badge
       || source.verified_source
@@ -187,7 +187,7 @@ function cleanText(value: unknown): string {
   return text.replace(/\b\w/g, character => character.toUpperCase());
 }
 
-function cleanDisplayText(value: unknown): string {
+export function cleanPlaceSheetDisplayText(value: unknown): string {
   const raw = String(value || '').trim();
   if (!raw) return '';
   const clean = raw.replace(/[_-]+/g, ' ').replace(/\s+/g, ' ');

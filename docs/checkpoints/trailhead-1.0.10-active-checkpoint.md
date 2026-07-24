@@ -531,3 +531,24 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Open P0/P1 at baseline: none. Stop after one deterministic reproduction and one evidence-backed correction if a new P0/P1 appears.
 - Do not repeat: broad Android crawls, Layers testing, NPS research, Figma/Mobbin research, Search V2 baseline, Memory Gate V3, campground diversity flows, Trail/Trailhead flows, or the accepted campground Sites-anchor run.
 - Task-owned background processes: none. No Trailhead Gradle, Metro, Expo/EAS, Maestro, publisher, or memory-gate process is running; ADB and the Android emulator remain intentionally available.
+
+## Checkpoint M3.5 implementation — community reports and Explore hubs
+
+- Timestamp: `2026-07-24T01:39:34-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; application HEAD: `b15a72a` after intentional commits `78fbd4b` (campground/report sheets) and `b15a72a` (Explore hub states). The baseline checkpoint is `4e2c0de`.
+- Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. Protected files and all mode-only worktree noise remained unstaged.
+- Campground Peek now normalizes corrupted middle-dot separators. Sparse campground Full omits the generic access/rules/fees fallback when no sourced Summary exists.
+- Public and private community pins now use one controlled `TrailheadSnapSheet`, `SheetCoordinator`, and `PlaceSheetShell`. Reports open at Half; Android Back cancels an inline update first, then follows Full → Half → dismiss.
+- Known report identity, freshness, notes, coordinates, and actions render immediately. Nearby enrichment stays entity/request-generation-bound and uses a reserved loading row so it cannot change the header, action order, identity, or scroll position.
+- Report trust copy is concise: `Community report`, `Helpful`, and `Not accurate`. Empty Notes and prior verification filler are omitted. Suggest Update remains inline with Cancel; private field-check Edit, Photo, Checked, Not found, and admin Publish actions remain capability-gated.
+- Explore retains its per-place/source-revision module registry and transition-only scroll restoration. Modules and child rows now expose stable selectors. New-revision module removal shows a stable unavailable state with `Back to overview`; empty states no longer use trip-planning filler.
+- Existing NPS See/Do/Stay/Visitor Information/trails/fees/alerts/weather/calendar/maps/nearby/source depth, campground drilldowns, exact-place imagery, Viator lane, Offline, comments, ratings, navigation, and main-map return behavior remain present.
+- Focused verification passed:
+  - Camp sheet `4/4`, Trail sheet `5/5`, Trail hydration `4/4`, adapters `8/8`, coordinator `2/2`, report sheet `5/5`.
+  - Explore navigation `3/3`, module registry `3/3`, scroll/state contract `4/4`.
+  - Search V2 `68/68`, Offline V2 preservation/runtime, NPS preservation `14/14`, Viator backend `29/29`.
+  - User-facing copy audit across `163` files, Sentry/QA privacy allowlists, TypeScript, protected-file hash, staged-scope audit, and whitespace checks.
+- Open P0/P1 from implementation gates: none.
+- Paired preview OTA has not been published yet. Exact next action: commit this implementation checkpoint, push the three commits, run the guarded preview publisher from one immutable SHA with Sentry source maps, verify both update records, and run only the narrow Android/shared-iOS report and Explore deltas.
+- Do not repeat: completed unit baselines, broad crawls, Layers, NPS research, Figma/Mobbin research, Search V2 baseline, Memory Gate V3, camp/trail device flows, or the accepted campground Sites anchor.
+- Task-owned background processes: none. ADB and the Android emulator remain intentionally available.

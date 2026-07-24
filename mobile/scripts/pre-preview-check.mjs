@@ -137,6 +137,18 @@ const checks = [
     args: ['--import', 'tsx', 'lib/__tests__/mapLayerRegistry.test.ts'],
   },
   {
+    label: 'Camp sheet enrichment identity tests',
+    cwd: mobileRoot,
+    cmd: 'node',
+    args: ['--import', 'tsx', 'lib/__tests__/campDetailIdentity.test.ts'],
+  },
+  {
+    label: 'Camp sheet peek, loading, and nested Back contract',
+    cwd: mobileRoot,
+    cmd: 'node',
+    args: ['--import', 'tsx', 'lib/__tests__/campSheetFlowContract.test.ts'],
+  },
+  {
     label: 'Viewport-bounded wildfire overlay tests',
     cwd: mobileRoot,
     cmd: 'npm',

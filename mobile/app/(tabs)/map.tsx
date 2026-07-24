@@ -6,6 +6,7 @@ import type { NativeMapDebugEvent, NativeMapHandle } from '@/components/NativeMa
 import RouteSearchModal from '@/components/RouteSearchModal';
 import type { OfflineAreaSelection } from '@/components/NativeMap/OfflineModal';
 import CampCommentsSection from '@/components/map/CampCommentsSection';
+import CampPlaceSheetPeek from '@/components/map/CampPlaceSheetPeek';
 import CampCoordinatesSection from '@/components/map/CampCoordinatesSection';
 import CampFieldReportsSection from '@/components/map/CampFieldReportsSection';
 import FieldReportComposer from '@/components/reports/FieldReportComposer';
@@ -192,7 +193,7 @@ import {
   type FireOverlayStatus,
 } from '@/lib/fireOverlay';
 import { communityRatingTarget } from '@/lib/communityRatingEligibility';
-import { campDetailFetchId } from '@/lib/campDetailIdentity';
+import { campDetailFetchId, campDetailMatchesSelection } from '@/lib/campDetailIdentity';
 import {
   initialMapLayersFiltersState,
   mapLayersFiltersReducer,
@@ -936,6 +937,8 @@ type RelatedPlaceReturnEntry = {
   context: SelectedPlaceContext | null;
   tripContext: TripPlaceContext | null;
 };
+
+const CAMP_DETAIL_REVEAL_TIMEOUT_MS = 6000;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -6622,6 +6625,7 @@ function MapScreen() {
   const [campEditDraft, setCampEditDraft] = useState<CampEditDraft | null>(null);
   const [campEditSaving, setCampEditSaving] = useState(false);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  const [campDetailTimedOut, setCampDetailTimedOut] = useState(false);
 
   useEffect(() => {
     selectedCampRef.current = selectedCamp;
@@ -6906,6 +6910,23 @@ function MapScreen() {
 
   // Camp card extras
   const [campWeather,    setCampWeather]    = useState<WeatherForecast | null>(null);
+  const campSheetScrollYRef = useRef(0);
+  const [campSheetScrollRestore, setCampSheetScrollRestore] = useState({ key: 0, y: 0 });
+  const skipCampDetailReloadRef = useRef<string | null>(null);
+  const campPresentationRestoreRef = useRef<string | null>(null);
+  const campParentSnapshotRef = useRef<{
+    camp: CampsitePin;
+    detail: CampsiteDetail;
+    scrollY: number;
+    insight: CampsiteInsight | null;
+    wikiArticles: WikiArticle[];
+    fullness: CampFullness | null;
+    weather: WeatherForecast | null;
+    fieldReports: CampFieldReport[];
+    fieldReportSummary: FieldReportSummary | null;
+    comments: CampComment[];
+    canonicalId: string | null;
+  } | null>(null);
   const [mapWeatherEnabled, setMapWeatherEnabled] = useState(false);
   const [mapWeatherCenter, setMapWeatherCenter] = useState<{ lat: number; lng: number } | null>(null);
   const [mapWeather, setMapWeather] = useState<WeatherForecast | null>(null);
@@ -7140,10 +7161,17 @@ function MapScreen() {
       dispatchPlaceSheet({ type: 'close' });
       return;
     }
+    const restoreCampFull = activePlaceSheetModel.identity.kind === 'camp'
+      && campPresentationRestoreRef.current === activePlaceSheetModel.identity.entityId;
+    if (restoreCampFull) campPresentationRestoreRef.current = null;
+    if (activePlaceSheetModel.identity.kind === 'camp' && !restoreCampFull) {
+      campSheetScrollYRef.current = 0;
+      setCampSheetScrollRestore(current => ({ key: current.key + 1, y: 0 }));
+    }
     dispatchPlaceSheet({
       type: 'open',
       identity: activePlaceSheetModel.identity,
-      presentation: 'full',
+      presentation: activePlaceSheetModel.identity.kind === 'camp' && !restoreCampFull ? 'peek' : 'full',
       returnContext: { surface: 'map' },
     });
   }, [activePlaceSheetIdentityKey]);
@@ -7204,6 +7232,10 @@ function MapScreen() {
 
   useEffect(() => {
     if (!selectedCamp?.id || !selectedCampSheetModel) return;
+    if (skipCampDetailReloadRef.current === selectedCamp.id) {
+      skipCampDetailReloadRef.current = null;
+      return;
+    }
     const request = currentPlaceSheetRequest(selectedCampSheetModel);
     if (!request) return;
     loadCampDetailForCamp(selectedCamp, { loadInsight: hasPlan, sheetRequest: request }).catch(() => {});
@@ -9192,9 +9224,12 @@ function MapScreen() {
   }
 
   function closeSelectedCampProfile() {
+    campParentSnapshotRef.current = null;
     setSelectedCamp(null);
     setShowCampDetail(false);
     setCampDetail(null);
+    setLoadingDetail(false);
+    setCampDetailTimedOut(false);
     setCampInsight(null);
     setWikiArticles([]);
     setCampFullness(null);
@@ -19270,6 +19305,8 @@ function MapScreen() {
     if (!sheetRequest || !placeSheetRequestIsCurrent(sheetRequest)) return;
     const requestIsCurrent = () => placeSheetRequestIsCurrent(sheetRequest) && selectedCampRef.current?.id === camp.id;
     setLoadingDetail(true);
+    setCampDetailTimedOut(false);
+    setCampDetail(null);
     setCampInsight(null);
     setWikiArticles([]);
     setFieldReports([]);
@@ -19281,25 +19318,33 @@ function MapScreen() {
     setShowFieldReportForm(false);
     resetFieldReportForm();
     const minimal = minimalCampDetail(camp);
-    setCampDetail(minimal);
     if (opts.showModal) setShowCampDetail(true);
-    setLoadingDetail(false);
     let detail: CampsiteDetail = minimal;
+    let timedOut = false;
     const detailFetchId = campDetailFetchId(camp);
     if (detailFetchId) {
-      try {
-        detail = await api.getCampsiteDetail(detailFetchId);
-      } catch {
-        detail = minimal;
-      }
+      let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+      const result = await Promise.race([
+        api.getCampsiteDetail(detailFetchId)
+          .then(value => ({ status: 'ready' as const, value }))
+          .catch(() => ({ status: 'unavailable' as const })),
+        new Promise<{ status: 'timeout' }>(resolve => {
+          timeoutHandle = setTimeout(() => resolve({ status: 'timeout' }), CAMP_DETAIL_REVEAL_TIMEOUT_MS);
+        }),
+      ]);
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+      if (result.status === 'ready' && campDetailMatchesSelection(camp, result.value)) detail = result.value;
+      else timedOut = true;
     }
     if (!requestIsCurrent()) return;
     detail = normalizeCampDetailArrays(detail);
-    detail = await enrichCampDetailWithGoogle(detail, camp);
+    if (!timedOut) detail = await enrichCampDetailWithGoogle(detail, camp);
     if (!requestIsCurrent()) {
       return;
     }
     setCampDetail(detail);
+    setCampDetailTimedOut(timedOut);
+    setLoadingDetail(false);
     if (privateLeadKeyFromCamp(camp, detail)) {
       return;
     }
@@ -19364,6 +19409,19 @@ function MapScreen() {
     const siteId = String(site.id || '').replace(/^ridb_site:[^:]+:/, '');
     const siteCardId = site.map_card_id || (facilityId && siteId ? `ridb_site:${facilityId}:${siteId}` : site.id || '');
     if (!siteCardId) return;
+    const parentSnapshot = {
+      camp: parentCamp,
+      detail: parentDetail,
+      scrollY: campSheetScrollYRef.current,
+      insight: campInsight,
+      wikiArticles,
+      fullness: campFullness,
+      weather: campWeather,
+      fieldReports,
+      fieldReportSummary,
+      comments: campComments,
+      canonicalId: campCanonicalId,
+    };
     setLoadingDetail(true);
     setQuickCampPhotoIndex(0);
     setCampInsight(null);
@@ -19400,6 +19458,16 @@ function MapScreen() {
           booking_url: parentDetail.booking_url,
         },
       } as CampsitePin;
+      campParentSnapshotRef.current = parentSnapshot;
+      campPresentationRestoreRef.current = sitePin.id;
+      campSheetScrollYRef.current = 0;
+      setCampSheetScrollRestore(current => ({ key: current.key + 1, y: 0 }));
+      setFieldReports([]);
+      setFieldReportSummary(null);
+      setCampComments([]);
+      setCampCanonicalId(null);
+      setLoadingDetail(false);
+      selectedCampRef.current = sitePin;
       setSelectedCamp(sitePin);
       setCampDetail(detail);
       api.getCampFullness(sitePin.id).then(r => {
@@ -19425,9 +19493,12 @@ function MapScreen() {
   }
 
   function closeCampDetail() {
+    campParentSnapshotRef.current = null;
     setShowCampDetail(false);
     setSelectedCamp(null);
     setCampDetail(null);
+    setLoadingDetail(false);
+    setCampDetailTimedOut(false);
     setCampInsight(null);
     setCampGalleryIndex(null);
     setCampFullness(null);
@@ -21378,6 +21449,29 @@ function MapScreen() {
     postWebMessage(JSON.stringify({ type: 'fly_to', lat: parent.place.lat, lng: parent.place.lng, name: parent.place.name }));
   }
 
+  function restoreCampgroundParent() {
+    const parent = campParentSnapshotRef.current;
+    if (!parent) return;
+    campParentSnapshotRef.current = null;
+    skipCampDetailReloadRef.current = parent.camp.id;
+    campPresentationRestoreRef.current = parent.camp.id;
+    selectedCampRef.current = parent.camp;
+    setSelectedCamp(parent.camp);
+    setCampDetail(parent.detail);
+    setCampDetailTimedOut(false);
+    setLoadingDetail(false);
+    setCampInsight(parent.insight);
+    setWikiArticles(parent.wikiArticles);
+    setCampFullness(parent.fullness);
+    setCampWeather(parent.weather);
+    setFieldReports(parent.fieldReports);
+    setFieldReportSummary(parent.fieldReportSummary);
+    setCampComments(parent.comments);
+    setCampCanonicalId(parent.canonicalId);
+    setCampSheetScrollRestore(current => ({ key: current.key + 1, y: parent.scrollY }));
+    nativeMapRef.current?.flyTo(parent.camp.lat, parent.camp.lng, 11, parent.camp.name);
+  }
+
   useEffect(() => {
     if (!relatedPlaceReturnStack.length) return;
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -21386,6 +21480,15 @@ function MapScreen() {
     });
     return () => subscription.remove();
   }, [relatedPlaceReturnStack]);
+
+  useEffect(() => {
+    if (!selectedCamp || !campParentSnapshotRef.current) return;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      restoreCampgroundParent();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [selectedCamp?.id]);
 
   function openNearbyPlace(place: OsmPoi, day?: number | null) {
     setSelectedCamp(null);
@@ -27108,14 +27211,51 @@ function MapScreen() {
       {/* ── Campsite quick card ── */}
       {selectedCamp && !navMode && !safeWaterPlanningActive && (
         <TrailheadSnapSheet
-          initialStage="full"
+          key={`camp-sheet:${selectedCampSheetModel!.identity.entityId}`}
+          initialStage="peek"
+          stage={placeSheetCoordinator.current?.kind === 'camp' ? placeSheetCoordinator.presentation : 'peek'}
+          onStageChange={presentation => dispatchPlaceSheet({ type: 'set_presentation', presentation })}
+          peekHeight={Math.min(372, Math.max(340, windowHeight * 0.43))}
+          peekExpandsToFull
+          hidePeekHeaderWhenExpanded
           maxFullRatio={1}
           halfRatio={0.58}
           fullScreen
           style={s.quickSnapCard}
           contentStyle={s.quickSnapShell}
           scrollContentStyle={s.quickSnapContent}
-          peekHeader={null}
+          peekHeader={(
+            <CampPlaceSheetPeek
+              model={{ ...selectedCampSheetModel!, title: campDisplayName(selectedCamp.name) }}
+              meta={[
+                selectedCamp.address,
+                campSourceDisplayLabel(selectedCamp.verified_source || selectedCamp.source || selectedCamp.land_type, 'Campground'),
+              ].filter(Boolean).join(' Â· ')}
+              siteType={cleanDisplayLabel(selectedCamp.site_types?.[0] || selectedCamp.tags?.find(tag => /tent|rv|cabin|walk-in/i.test(tag)) || selectedCamp.land_type || 'Campground')}
+              inventory={Number((selectedCamp as CampsitePin & { campsites_count?: number }).campsites_count) > 0
+                ? `${Number((selectedCamp as CampsitePin & { campsites_count?: number }).campsites_count)} sites`
+                : selectedCamp.reservable ? 'Reservable' : 'Not listed'}
+              fee={campCostLine(selectedCamp) || 'Not listed'}
+              saved={favoriteCamps.some(f => f.id === selectedCamp.id)}
+              onViewSites={() => dispatchPlaceSheet({ type: 'set_presentation', presentation: 'full' })}
+              onSave={() => saveCampPlace(selectedCamp)}
+              onClose={() => {
+                setRelatedPlaceReturnStack([]);
+                closeSelectedCampProfile();
+              }}
+            />
+          )}
+          expandedLoading={loadingDetail && !campDetail}
+          expandedLoadingContent={(
+            <View testID={`${selectedCampSheetModel!.testID}-full-skeleton`} style={s.inlineLoadingDetail}>
+              <TrailheadCardSkeleton media lines={3} style={s.detailSkeletonCard} />
+              <TrailheadCardSkeleton lines={3} style={s.detailSkeletonCard} />
+              <TrailheadCardSkeleton lines={2} style={s.detailSkeletonCard} />
+            </View>
+          )}
+          initialScrollY={campSheetScrollRestore.y}
+          scrollRestoreKey={campSheetScrollRestore.key}
+          onScrollYChange={scrollY => { campSheetScrollYRef.current = scrollY; }}
         >
           <PlaceSheetShell model={selectedCampSheetModel!} fill={false}>
             {/* Photo / placeholder */}
@@ -27160,7 +27300,9 @@ function MapScreen() {
                     saved={favoriteCamps.some(f => f.id === selectedCamp.id)}
                     onSave={() => saveCampPlace(selectedCamp)}
                     onShare={() => shareCampPlace(selectedCamp)}
-                    onBack={relatedPlaceReturnStack.length ? restoreRelatedPlaceParent : undefined}
+                    onBack={campParentSnapshotRef.current
+                      ? restoreCampgroundParent
+                      : relatedPlaceReturnStack.length ? restoreRelatedPlaceParent : undefined}
                     onClose={() => {
                       setRelatedPlaceReturnStack([]);
                       closeSelectedCampProfile();
@@ -27187,6 +27329,16 @@ function MapScreen() {
               );
             })()}
             <View style={s.quickCardBody}>
+            {campDetailTimedOut ? (
+              <View style={s.campNoteCard} testID={`${selectedCampSheetModel!.testID}-details-unavailable`}>
+                <Text style={s.campNoteTitle}>Some details are unavailable</Text>
+                <Text style={s.campNoteText}>Showing verified listing information.</Text>
+                <TouchableOpacity style={s.quickCardSecondaryBtn} onPress={openCampDetail}>
+                  <Ionicons name="refresh-outline" size={12} color={C.text2} />
+                  <Text style={s.quickCardSecondaryText}>Retry</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
             {[
               selectedCamp.rating ? `${Number(selectedCamp.rating).toFixed(1)} (${selectedCamp.rating_count || 0})` : '',
               selectedCamp.address || '',

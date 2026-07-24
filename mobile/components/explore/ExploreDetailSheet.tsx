@@ -456,6 +456,7 @@ export function ExploreDetailSheet({
   const childScrollRef = useRef<ScrollView | null>(null);
   const mainScrollYRef = useRef(detailNavigation.mainScrollY);
   const childScrollYRef = useRef(detailNavigation.childScrollY);
+  const selectedItemKey = selectedItem ? String(selectedItem.source_id || selectedItem.title || '') : '';
   const [failedChildMediaKey, setFailedChildMediaKey] = useState('');
   const searchNeedle = placeSearch.trim().toLowerCase();
   const cleanStorySentences = useMemo(
@@ -477,20 +478,17 @@ export function ExploreDetailSheet({
   }, [controlledNavigation, place.id, tab]);
 
   useEffect(() => {
-    mainScrollYRef.current = detailNavigation.mainScrollY;
-    childScrollYRef.current = detailNavigation.childScrollY;
-  }, [detailNavigation.childScrollY, detailNavigation.mainScrollY]);
-
-  useEffect(() => {
     const frame = requestAnimationFrame(() => {
       if (selectedItem) {
+        childScrollYRef.current = detailNavigation.childScrollY;
         childScrollRef.current?.scrollTo({ y: detailNavigation.childScrollY, animated: false });
       } else {
+        mainScrollYRef.current = detailNavigation.mainScrollY;
         mainScrollRef.current?.scrollTo({ y: detailNavigation.mainScrollY, animated: false });
       }
     });
     return () => cancelAnimationFrame(frame);
-  }, [activeModule, detailNavigation.childScrollY, detailNavigation.mainScrollY, place.id, selectedItem]);
+  }, [activeModule, place.id, selectedItemKey]);
 
   const rememberScroll = useCallback((surface: 'main' | 'child') => {
     dispatchDetailNavigation({
@@ -1154,7 +1152,6 @@ export function ExploreDetailSheet({
           ref={childScrollRef}
           contentContainerStyle={styles.childContent}
           showsVerticalScrollIndicator={false}
-          contentOffset={{ x: 0, y: detailNavigation.childScrollY }}
           onScroll={event => { childScrollYRef.current = event.nativeEvent.contentOffset.y; }}
           onScrollEndDrag={() => rememberScroll('child')}
           onMomentumScrollEnd={() => rememberScroll('child')}
@@ -1435,7 +1432,6 @@ export function ExploreDetailSheet({
         ref={mainScrollRef}
         contentContainerStyle={styles.scroll}
         showsVerticalScrollIndicator={false}
-        contentOffset={{ x: 0, y: detailNavigation.mainScrollY }}
         onScroll={event => { mainScrollYRef.current = event.nativeEvent.contentOffset.y; }}
         onScrollEndDrag={() => rememberScroll('main')}
         onMomentumScrollEnd={() => rememberScroll('main')}

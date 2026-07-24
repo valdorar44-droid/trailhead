@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState, type ReactNode } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   Animated,
   PanResponder,
@@ -21,8 +21,15 @@ export type TrailheadSnapStage = 'peek' | 'half' | 'full';
 type Props = {
   visible?: boolean;
   initialStage?: TrailheadSnapStage;
+  stage?: TrailheadSnapStage;
+  onStageChange?: (stage: TrailheadSnapStage) => void;
   children: ReactNode;
   peekHeader?: ReactNode;
+  peekHeight?: number;
+  peekExpandsToFull?: boolean;
+  hidePeekHeaderWhenExpanded?: boolean;
+  expandedLoading?: boolean;
+  expandedLoadingContent?: ReactNode;
   actionDock?: ReactNode;
   style?: StyleProp<ViewStyle>;
   contentStyle?: StyleProp<ViewStyle>;
@@ -30,13 +37,23 @@ type Props = {
   maxFullRatio?: number;
   halfRatio?: number;
   fullScreen?: boolean;
+  initialScrollY?: number;
+  scrollRestoreKey?: string | number;
+  onScrollYChange?: (scrollY: number) => void;
 };
 
 export default function TrailheadSnapSheet({
   visible = true,
   initialStage = 'half',
+  stage: controlledStage,
+  onStageChange,
   children,
   peekHeader,
+  peekHeight,
+  peekExpandsToFull = false,
+  hidePeekHeaderWhenExpanded = false,
+  expandedLoading = false,
+  expandedLoadingContent,
   actionDock,
   style,
   contentStyle,
@@ -44,20 +61,38 @@ export default function TrailheadSnapSheet({
   maxFullRatio = 0.84,
   halfRatio = 0.42,
   fullScreen = false,
+  initialScrollY = 0,
+  scrollRestoreKey,
+  onScrollYChange,
 }: Props) {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
-  const [stage, setStage] = useState<TrailheadSnapStage>(initialStage);
+  const [internalStage, setInternalStage] = useState<TrailheadSnapStage>(initialStage);
+  const stage = controlledStage ?? internalStage;
   const dragY = useRef(new Animated.Value(0)).current;
+  const scrollRef = useRef<ScrollView>(null);
+
+  const updateStage = useCallback((next: TrailheadSnapStage) => {
+    if (controlledStage == null) setInternalStage(next);
+    onStageChange?.(next);
+  }, [controlledStage, onStageChange]);
+
+  useEffect(() => {
+    if (stage === 'peek') return;
+    const frame = requestAnimationFrame(() => {
+      scrollRef.current?.scrollTo({ y: Math.max(0, initialScrollY), animated: false });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [initialScrollY, scrollRestoreKey, stage]);
 
   const maxFull = fullScreen ? height : Math.min(height * maxFullRatio, height - Math.max(insets.top + 22, 54));
   const stageHeight = stage === 'full'
     ? maxFull
     : stage === 'half'
       ? Math.max(320, Math.min(height * halfRatio, 430))
-      : Math.max(92, insets.bottom + 76);
+      : peekHeight ?? Math.max(92, insets.bottom + 76);
 
   const pan = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => false,
@@ -71,16 +106,15 @@ export default function TrailheadSnapSheet({
     onPanResponderRelease: (_, g) => {
       dragY.setValue(0);
       if (g.vy < -0.45 || g.dy < -90) {
-        setStage(stage === 'peek' ? 'half' : 'full');
+        updateStage(stage === 'peek' ? (peekExpandsToFull ? 'full' : 'half') : 'full');
         return;
       }
       if (g.vy > 0.45 || g.dy > 90) {
-        setStage(stage === 'full' ? 'half' : 'peek');
+        updateStage(stage === 'full' ? (peekExpandsToFull ? 'peek' : 'half') : 'peek');
         return;
       }
-      setStage(current => current);
     },
-  }), [dragY, stage]);
+  }), [dragY, peekExpandsToFull, stage, updateStage]);
 
   if (!visible) return null;
 
@@ -103,22 +137,35 @@ export default function TrailheadSnapSheet({
             <TouchableOpacity
               style={s.grabberTap}
               activeOpacity={0.78}
-              onPress={() => setStage(current => current === 'full' ? 'half' : current === 'half' ? 'peek' : 'half')}
+              onPress={() => updateStage(
+                stage === 'full'
+                  ? (peekExpandsToFull ? 'peek' : 'half')
+                  : stage === 'half'
+                    ? 'peek'
+                    : (peekExpandsToFull ? 'full' : 'half'),
+              )}
             >
               <View style={s.grabber} />
             </TouchableOpacity>
-            {peekHeader}
+            {!hidePeekHeaderWhenExpanded || stage === 'peek' ? peekHeader : null}
           </View>
         ) : null}
         {stage !== 'peek' ? (
-          <ScrollView
-            showsVerticalScrollIndicator={false}
-            scrollEnabled
-            keyboardShouldPersistTaps="handled"
-            contentContainerStyle={[s.scrollContent, actionDock ? s.scrollWithDock : null, scrollContentStyle]}
-          >
-            {children}
-          </ScrollView>
+          expandedLoading ? (
+            <View style={s.loadingContent}>{expandedLoadingContent}</View>
+          ) : (
+            <ScrollView
+              ref={scrollRef}
+              showsVerticalScrollIndicator={false}
+              scrollEnabled
+              keyboardShouldPersistTaps="handled"
+              scrollEventThrottle={32}
+              onScroll={onScrollYChange ? event => onScrollYChange(event.nativeEvent.contentOffset.y) : undefined}
+              contentContainerStyle={[s.scrollContent, actionDock ? s.scrollWithDock : null, scrollContentStyle]}
+            >
+              {children}
+            </ScrollView>
+          )
         ) : null}
         {stage !== 'peek' && actionDock ? <View style={s.actionDock}>{actionDock}</View> : null}
       </TrailheadSheet>
@@ -178,6 +225,11 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   scrollWithDock: {
     paddingBottom: 104,
+  },
+  loadingContent: {
+    flex: 1,
+    paddingHorizontal: 14,
+    paddingTop: 10,
   },
   actionDock: {
     position: 'absolute',

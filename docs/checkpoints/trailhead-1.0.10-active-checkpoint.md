@@ -598,3 +598,18 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Do not repeat: this report/Explore delta, broad Android crawls, Layers testing, NPS research, Search V2 baseline, Memory Gate V3, campground diversity, Trail/Trailhead flows, Figma/Mobbin research already recorded for completed packets, or any paired OTA in this section.
 - Release authorization update: the user authorized paired production builds/OTA once the complete 1.0.10 candidate and remaining waves pass. This partial M3.5 packet does not satisfy that gate; production, public-stage changes, advertising, and store assets remain unchanged.
 - Task-owned background processes at evidence capture: none. The paired publisher exited successfully; no Gradle, Metro, Expo export, Maestro, audit, or Trailhead test job remains. ADB is intentionally available for the connected Samsung and emulator.
+
+## Checkpoint M4 baseline — Plan, Downloads, and Originals
+
+- Timestamp: `2026-07-24T02:49:08-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; exact pre-change HEAD: `71b0ce5f48fd9155ae47fbfbb71f6cc98e0413b6`, matching `origin/feat/trailhead-1.0.10-overhaul`.
+- Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. `.cursor/` and `dashboard/explore_serving_index_v2.json` are the only unrelated worktree changes and must remain unstaged, unmodified, and undiscarded.
+- Installed paired preview source remains `c1b575d476b14eaa20b05b217a9b388e9589f3a1`: Android build `59`, runtime `native-1.0.10-android.1`, update `019f92ff-093c-74ee-aee6-9566e6a1c01c`; iOS build `54`, runtime `native-1.0.10-ios.1`, update `019f92ff-093c-74fb-8823-a419cd82305f`.
+- Existing Android evidence confirms the real Plan structure is present: `Trip Planner`, `Route Builder`, `Trips`, Draft/Saved/Archived libraries, owned Moab Original, renderer-aware Downloads entry, availability watches, and Saved items. Current Moab artwork/detail is correct and remains the approved visual baseline.
+- Review boundary A is Plan and the existing main-map Downloads manager. Review boundary B is owned Originals, detail/download states, main-map playback, Minimize/Resume, and complete End Tour teardown. One paired preview is published only after both boundaries pass.
+- Preserve every existing TripRepository operation, Saved/watch surface, Offline V1/V2 store and artifact family, dedicated immutable Originals store, main-map renderer, account ownership boundary, and current feature stages. No public API, schema, native dependency, permission, runtime, second map engine, or production action is authorized by this packet.
+- Approved design direction remains the existing Trailhead Figma white/black/orange system and saved Mobbin behavior references. Major visual changes return for user review; this packet is stability, hierarchy, state, and recovery work.
+- Narrow verification only: new Plan/Downloads/Originals characterization, existing Plan/TripRepository/Offline/Originals/copy/privacy/TypeScript gates, one Android Checkpoint-A delta, then one guarded paired preview and final Android/shared-iOS delta.
+- Open P0/P1 at baseline: none reproduced. Loop guard: one deterministic reproduction and one evidence-backed correction for a new P0/P1, then checkpoint it instead of repeating broad crawls or speculative OTAs.
+- Do not repeat: completed Map/Search/sheet/NPS/Explore/report crawls, Layers testing, Figma/Mobbin research already saved for these surfaces, campground/trail deltas, or Memory Gate V3 before the frozen production candidate.
+- Task-owned background processes: none. No Trailhead Gradle, Metro, Expo/EAS, Maestro, audit, publisher, or memory-gate process is running; ADB remains intentionally available.

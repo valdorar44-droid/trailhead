@@ -927,3 +927,53 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Exact next action: freeze the current feature-complete preview candidate and run the remaining acceptance deltas: Search V2 performance, Memory Gate V3, Android Auto/DHU, Android Originals background/mock-route policy evidence, then the shared and platform-specific physical-iOS checks. Resolve only deterministic P0/P1 defects before producing paired production binaries.
 - Do not repeat: broad Profile, Map, Plan, Downloads, Route Editor, Trip Overview, Layers, NPS/Explore, campground/sheet, or Original acquisition/download crawls; completed Figma/Mobbin research; or earlier memory runs.
 - Task-owned background processes: none. The publisher, Expo export, Sentry upload, Metro, Maestro, Gradle, and focused tests have exited. ADB remains intentionally available for the Samsung and emulator.
+
+## Frozen-candidate Android delta — search, time-boxed memory, and Originals background proof
+
+- Timestamp: `2026-07-24T14:57:07-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; exact implementation and paired-preview source HEAD `c33ac03d23aadf34164f94f2125e5da3b97abe32`, pushed to origin.
+- Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. `.cursor/`, `dashboard/explore_serving_index_v2.json`, and the unrelated Valhalla/Maestro mode-only changes remain excluded and unstaged.
+- Canonical Search V2 performance passed against the current `48,486`-document index:
+  - One process-start prewarm took `4325.07 ms` and is not counted as indexed request latency.
+  - First indexed p95 was `13.36 ms` across ten synthetic queries.
+  - Repeated indexed p95 was `13.21 ms` across fifty calls.
+  - Responses remained below `100 KB`, and evidence does not retain query text.
+  - Evidence: `output/frozen-candidate/search-v2-canonical-performance.json`, SHA-256 `44953c3712efd0c2949063d0069363194c0c8d041955d9a221499e953578ab38`.
+- Memory Gate V3 was intentionally time-boxed at the user's request after four complete heavy-layer peak/recovery cycles and the start of cycle five. It was cancelled through the gate's handler, which restored and relaunch-verified the exact original layer state. The report status is therefore `cancelled`, not a memory failure.
+  - Explore settled total PSS was approximately `389,478–390,630 KB`; resident estimate `321,782–322,939 KB`; RSS `424,624–425,784 KB`.
+  - Map-idle total PSS was approximately `538,883–544,560 KB`; resident estimate `432,980–438,036 KB`; RSS `540,572–545,628 KB`.
+  - The highest completed heavy peak was `768,551 KB` total PSS, `566,884 KB` resident estimate, and `673,984 KB` RSS.
+  - Cycle four recovered to `647,049 KB` total PSS, `438,548 KB` resident estimate, and `538,244 KB` RSS.
+  - All four completed cycles verified both enabled and disabled layer states. The process stayed alive with no observed OOM, LMK, ANR, process death, duplicate renderer, or state loss.
+  - Evidence: `output/android-map-memory-gate/2026-07-24T18-31-07-955Z/report.json`, SHA-256 `b5d97029a3d252164e6131ee8ef678f3914947e77d9888e35c50a62c25692e8e`.
+  - Do not restart the ten-cycle run in this packet. This is useful stress evidence but is not represented as a complete ten-cycle pass.
+- Link infrastructure is healthy:
+  - `go.gettrailhead.app` serves valid HTTPS with HSTS.
+  - Android association evidence: `output/frozen-candidate/assetlinks.json`, SHA-256 `7dd65b3ef0df1fc512ec132470e60a6bfaa898abda3d18a91eb4d704be425121`.
+  - Apple association evidence: `output/frozen-candidate/apple-app-site-association.json`, SHA-256 `e24e05ee50214b67d2017ba6b398d39b0e68a254597cee02cbdc994d3a8474e4`.
+  - Branch deferred handoff remains disabled until fresh-install attribution, fallback, opt-out, and exactly-once crediting receive physical proof.
+- Android Auto exact-candidate preflight passed for `com.trailhead.app` version `1.0.10` build `59`; the older debug package remains disabled. Evidence: `output/android-auto/2026-07-24T19-24-16Z--RFCR408DA9B/candidate.json`, SHA-256 `02b2f090cef94d92b5901824b18c0bac0ec1c1d9b8588fa5432e05b5d34b641c`. The first DHU launch reached the local tool but the phone Head Unit Server was no longer accepting the forwarded connection. Treat the route/maneuver DHU session as pending setup, not as an app failure, and retry it once only after the server is confirmed active.
+- The published Moab Original version `1` was exported read-only from the authenticated production service and pinned to manifest SHA-256 `14cddd021e49310b1001013d7c542616080f848157c5f9b1a1a1b795012f43b7`.
+- The real consumer tour, not the admin simulator, passed the Android background trigger delta on the prior feature-complete candidate:
+  - The main Trailhead map opened the immutable Moab route and first story.
+  - Home/notification shade retained the `Trailhead Original active` foreground-service notification.
+  - Twenty-eight continuous OS-level GPS fixes from route progress `300–1700 m` crossed the first authored trigger window.
+  - The media session reported `PLAYING`; reopening showed `1/11` complete and story `02` next.
+  - End Tour removed the location notification and media session and did not auto-resume.
+- That run exposed one deterministic P1: an older active Flagstaff trip's route-alert panel and map annotations remained visible under the Moab Original. The cause was presentation-only mode isolation, not the trigger engine, bundle, ownership, or camera controller.
+- The correction gives an active non-navigation Original ownership of map context. It suppresses trip status, camps, gas, generic POIs, community/report pins, and route alerts while preserving those states for restoration. Navigation retains the higher-priority driving context.
+- Focused renderer, camera-ownership, map-presentation, TypeScript, copy audit across `164` files, and whitespace checks passed.
+- Replacement paired preview publication completed with Sentry source maps:
+  - Channel `preview`, channel ID `019dbc97-3cde-795b-a35d-e6aa985060d3`.
+  - Candidate branch `preview-candidate-c33ac03d23aadf34164f94f2125e5da3b97abe32-mrzcrj8l-84d9dba9fc30c3e3357b7953`, branch ID `019f95af-ff0a-7703-ac73-2636f38a43ce`.
+  - Android build `59`, runtime `native-1.0.10-android.1`, group `9df772da-8421-4be6-bdc1-d8ead84546ee`, update `019f95b0-2327-7120-90f1-bde72768af6d`.
+  - iOS build `54`, runtime `native-1.0.10-ios.1`, group `e741c2a2-5583-4b8c-b07c-7a9e219c8f5a`, update `019f95b0-2327-7bda-ab59-1ab3ccdcd5b7`.
+- Samsung `RFCR408DA9B` verified the exact `c33ac03` Android SHA, version, build, channel, runtime, update ID, and `Ready` status. Evidence: `output/frozen-candidate/qa-c33ac03.xml`, SHA-256 `25da9548fca1b200a742d4db64730b51e731fe4f2b535f86d296a4bdb891574f`.
+- The single corrected assertion passed: with the existing Flagstaff trip retained and Moab resumed, the player showed `1/11`, while visible stale Flagstaff text and route-alert/live-traffic content both counted `0`. Evidence:
+  - `output/frozen-candidate/original-c33-active.xml`, SHA-256 `64894a8617c45550a9c06be7e8e59a7b0f35ae5ebb32918052a7673a68929bef`.
+  - `output/frozen-candidate/original-c33-active.png`, SHA-256 `b9d064dda9c70da19f349993d96b576b1653c953e93fff8839600428cc979cd9`.
+  - End Tour again removed the Original notification and media session; post-End screenshot SHA-256 `c3c7682fd2b7eb912e16b929dda0d22c3de2deb45f445b4be51d10bd338a233f`.
+- Android app-code P0/P1: none open. Remaining release evidence is one confirmed DHU session and the physical iOS shared/native delta; neither is claimed complete here.
+- Exact next action: confirm the Android Auto Head Unit Server is active and run one DHU route/maneuver/reconnect session, then connect and unlock the iPhone for the shared Map/Search/sheets/Plan/Downloads/Originals delta plus Universal Links, background audio/location, Now Playing, interruptions, and durable resume. Run the complete pre-preview suite once at the final freeze, not after every device assertion.
+- Do not repeat: Memory Gate V3, canonical Search V2 performance, Moab download/acquisition, the first-story background trigger, Plan/Downloads, Route Editor/Trip Overview, Profile, Layers, NPS/Explore, or completed Figma/Mobbin research.
+- Task-owned background processes: none. Publisher, Expo export, Sentry upload, Metro, Maestro, Gradle, memory-gate, and Trailhead test processes have exited. The temporary export worktrees and pulled preview environment file were removed. ADB and the Codex-owned browser runtime remain intentionally available.

@@ -27,8 +27,15 @@ tags:
     id: "map.search.inline.result.place:nps-child:grca:places:bright-angel-trailhead"
 - extendedWaitUntil:
     visible:
-      id: "place-sheet-trailhead-trailhead-place-nps-child-grca-places-bright-angel-trailhead"
+      id: "place-sheet-trailhead-trailhead-place-nps-child-grca-places-bright-angel-trailhead-peek"
     timeout: 15000
 - assertVisible: "Bright Angel Trailhead"
-- assertVisible: "Build route"
-- takeScreenshot: map-search-trailhead-sheet
+- takeScreenshot: map-search-trailhead-peek
+- tapOn:
+    text: "^Bright Angel Trailhead$"
+- extendedWaitUntil:
+    visible:
+      id: "place-sheet-trailhead-trailhead-place-nps-child-grca-places-bright-angel-trailhead"
+    timeout: 15000
+- assertVisible: "Directions"
+- takeScreenshot: map-search-trailhead-full

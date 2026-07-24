@@ -6931,6 +6931,7 @@ function MapScreen() {
   const [campWeather,    setCampWeather]    = useState<WeatherForecast | null>(null);
   const campSheetScrollYRef = useRef(0);
   const campSitesSectionYRef = useRef(0);
+  const campSitesReturnTargetRef = useRef<string | null>(null);
   const [campSheetScrollRestore, setCampSheetScrollRestore] = useState({ key: 0, y: 0 });
   const skipCampDetailReloadRef = useRef<string | null>(null);
   const campPresentationRestoreRef = useRef<string | null>(null);
@@ -9276,6 +9277,7 @@ function MapScreen() {
 
   function closeSelectedCampProfile() {
     campParentSnapshotRef.current = null;
+    campSitesReturnTargetRef.current = null;
     setSelectedCamp(null);
     setShowCampDetail(false);
     setCampDetail(null);
@@ -21507,7 +21509,9 @@ function MapScreen() {
     if (!parent) return;
     campParentSnapshotRef.current = null;
     skipCampDetailReloadRef.current = parent.camp.id;
-    campPresentationRestoreRef.current = adaptCampgroundSheet(parent.camp).identity.entityId;
+    const parentEntityId = adaptCampgroundSheet(parent.camp).identity.entityId;
+    campPresentationRestoreRef.current = parentEntityId;
+    campSitesReturnTargetRef.current = parentEntityId;
     selectedCampRef.current = parent.camp;
     setSelectedCamp(parent.camp);
     setCampDetail(parent.detail);
@@ -27848,7 +27852,16 @@ function MapScreen() {
 	                {(campDetail.campsites ?? []).some(site => site.name || site.photo_url || site.photos?.length) ? (
 	                  <View
 	                    style={s.detailSection}
-	                    onLayout={event => { campSitesSectionYRef.current = event.nativeEvent.layout.y; }}
+	                    onLayout={event => {
+	                      const sectionY = event.nativeEvent.layout.y;
+	                      campSitesSectionYRef.current = sectionY;
+	                      if (campSitesReturnTargetRef.current === selectedCampSheetModel!.identity.entityId) {
+	                        campSitesReturnTargetRef.current = null;
+	                        const returnY = Math.max(0, sectionY - 180);
+	                        campSheetScrollYRef.current = returnY;
+	                        setCampSheetScrollRestore(current => ({ key: current.key + 1, y: returnY }));
+	                      }
+	                    }}
 	                  >
 	                    <Text style={s.detailSectionTitle}>Sites</Text>
 	                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.siteRail}>

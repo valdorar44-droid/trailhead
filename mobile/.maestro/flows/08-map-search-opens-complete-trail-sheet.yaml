@@ -27,9 +27,15 @@ tags:
     id: "map.search.inline.result.place:ridb:270422"
 - extendedWaitUntil:
     visible:
-      id: "place-sheet-trail-trail-place-ridb-270422"
+      id: "place-sheet-trail-trail-place-ridb-270422-peek"
     timeout: 15000
 - assertVisible: "Corona Arch Trail"
-- assertVisible: "Build route"
-- assertVisible: "Report"
-- takeScreenshot: map-search-complete-trail-sheet
+- takeScreenshot: map-search-trail-peek
+- tapOn:
+    text: "^Corona Arch Trail$"
+- extendedWaitUntil:
+    visible:
+      id: "place-sheet-trail-trail-place-ridb-270422"
+    timeout: 15000
+- assertVisible: "Navigate"
+- takeScreenshot: map-search-trail-full

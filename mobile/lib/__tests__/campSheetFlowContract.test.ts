@@ -29,10 +29,14 @@ test('campsite Back restores the parent campground and its scroll position', () 
   assert.match(mapSource, /campParentSnapshotRef\.current = parentSnapshot/);
   assert.match(mapSource, /campPresentationRestoreRef\.current = adaptCampgroundSheet\(sitePin\)\.identity\.entityId/);
   assert.match(mapSource, /function restoreCampgroundParent\(\)/);
-  assert.match(mapSource, /campPresentationRestoreRef\.current = adaptCampgroundSheet\(parent\.camp\)\.identity\.entityId/);
+  assert.match(mapSource, /const parentEntityId = adaptCampgroundSheet\(parent\.camp\)\.identity\.entityId/);
+  assert.match(mapSource, /campPresentationRestoreRef\.current = parentEntityId/);
   assert.match(mapSource, /sitesSectionY: campSitesSectionYRef\.current/);
   assert.match(mapSource, /sitesReturnY = parent\.sitesSectionY > 0/);
-  assert.match(mapSource, /onLayout=\{event => \{ campSitesSectionYRef\.current = event\.nativeEvent\.layout\.y; \}\}/);
+  assert.match(mapSource, /campSitesReturnTargetRef\.current = parentEntityId/);
+  assert.match(mapSource, /campSitesReturnTargetRef\.current === selectedCampSheetModel!\.identity\.entityId/);
+  assert.match(mapSource, /const returnY = Math\.max\(0, sectionY - 180\)/);
+  assert.match(mapSource, /campSitesReturnTargetRef\.current = null/);
   assert.match(mapSource, /setCampSheetScrollRestore\(current => \(\{ key: current\.key \+ 1, y: sitesReturnY \}\)\)/);
   assert.match(mapSource, /campParentSnapshotRef\.current\s*\? restoreCampgroundParent/);
 });

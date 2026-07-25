@@ -8,7 +8,13 @@ import {
   originalRestoreScopeIsCurrent,
   originalVersionAccessIsExact,
 } from '../ownership';
-import { createOriginalSession, finishManualOriginalStop, originalStopCanReplay, startManualOriginalStop } from '../session';
+import {
+  createOriginalSession,
+  finishManualOriginalStop,
+  normalizeCompletedOriginalSession,
+  originalStopCanReplay,
+  startManualOriginalStop,
+} from '../session';
 import { createOriginalSessionStore } from '../sessionStore';
 import type { OriginalAuthenticatedAcquisition, OriginalGuestAcquisition, OriginalSummary } from '../types';
 import { AUDIO_ONE, AUDIO_THREE, AUDIO_TWO, originalManifest } from './fixtures';
@@ -177,6 +183,24 @@ async function main() {
   const replayFinished = finishManualOriginalStop(replaying, 'story-1', 300);
   assert.equal(replayFinished?.status, 'completed', 'terminal replay returns to the completion state');
   assert.equal(replayFinished?.current_stop_id, null);
+  const staleForegroundCompletion = {
+    ...guest,
+    status: 'active' as const,
+    current_stop_id: null,
+    completed_stop_ids: ['story-1'],
+    completed_at_ms: 240,
+  };
+  const normalizedCompletion = normalizeCompletedOriginalSession(
+    staleForegroundCompletion,
+    ['story-1'],
+  );
+  assert.equal(normalizedCompletion.status, 'completed');
+  const staleCompletionReplay = startManualOriginalStop(staleForegroundCompletion, 'story-1', 250);
+  assert.equal(
+    staleCompletionReplay.manual_replay_return_status,
+    'completed',
+    'a stale foreground status cannot make a completed-tour replay return to active',
+  );
   await sessions.setActive(guest);
   assert.equal((await sessions.loadActive())?.session_id, guest.session_id);
   assert.equal((await sessions.list('guest')).length, 1);

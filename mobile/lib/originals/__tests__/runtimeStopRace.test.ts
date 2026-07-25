@@ -12,6 +12,20 @@ type AdminRuntime = import('../runtime').OriginalsAdminRuntimeValue;
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const nativeRuntimeStubs: Record<string, string> = {
+  'react-native': `
+    export const AppState = {
+      addEventListener(_event, listener) {
+        globalThis.__originalsRuntimeAppStateListener = listener;
+        return {
+          remove() {
+            if (globalThis.__originalsRuntimeAppStateListener === listener) {
+              globalThis.__originalsRuntimeAppStateListener = null;
+            }
+          },
+        };
+      },
+    };
+  `,
   '../store': `
     const state = () => globalThis.__originalsRuntimeAuthState || { user: null, token: null };
     export function useStore(selector) { return selector(state()); }
@@ -146,6 +160,7 @@ async function main() {
     __originalsRuntimeCarSyncCount?: number;
     __originalsRuntimeCarClearCount?: number;
     __originalsRuntimeHeadlessStopCount?: number;
+    __originalsRuntimeAppStateListener?: ((state: string) => void) | null;
   };
   globals.__originalsRuntimeAuthState = { user: { id: 'admin-preview', is_admin: true }, token: 'admin-token' };
   globals.__originalsRuntimeEpoch = 0;
@@ -478,6 +493,27 @@ async function main() {
     startsBeforeLockScreenResume + 1,
     'lock-screen Play restarts active-tour location delivery',
   );
+  const foregroundSession = activeStoredSession as unknown as Record<string, any>;
+  activeStoredSession = storeSession({
+    ...foregroundSession,
+    status: 'completed',
+    current_stop_id: null,
+    current_audio_position_ms: 12_345,
+    completed_stop_ids: manifest.stops.map(stop => stop.id),
+    completed_at_ms: foregroundSession.updated_at_ms + 2,
+    updated_at_ms: foregroundSession.updated_at_ms + 2,
+  });
+  await act(async () => {
+    globals.__originalsRuntimeAppStateListener?.('active');
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+  const reconciledRuntime = runtime as unknown as Runtime;
+  assert.equal(
+    reconciledRuntime.session?.status,
+    'completed',
+    'foreground activation reconciles a newer session completed by the background runtime',
+  );
+  assert.equal(reconciledRuntime.state, 'completed');
   audioState.position_ms = 12_345;
   await act(async () => { await runtime!.stopTour(); });
   const stoppedSession = storedSessions.find(item => item.owner_scope === 'account:driver');

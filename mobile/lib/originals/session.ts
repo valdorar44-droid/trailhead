@@ -100,6 +100,31 @@ export function originalStopCanReplay(session: OriginalSessionV1, stopId: string
     || session.missed_stop_ids.includes(stopId);
 }
 
+export function normalizeCompletedOriginalSession(
+  session: OriginalSessionV1,
+  allStopIds: string[],
+): OriginalSessionV1 {
+  const terminal = allStopIds.every(stopId => (
+    session.completed_stop_ids.includes(stopId)
+    || session.skipped_stop_ids.includes(stopId)
+    || session.missed_stop_ids.includes(stopId)
+  ));
+  if (
+    session.completed_at_ms == null
+    || !terminal
+    || session.current_stop_id
+    || session.queued_stop_id
+    || session.status === 'completed'
+  ) return session;
+  return {
+    ...session,
+    status: 'completed',
+    user_paused: false,
+    manual_replay_return_status: null,
+    manual_replay_stop_id: null,
+  };
+}
+
 export function completeOriginalStop(
   session: OriginalSessionV1,
   stopId: string,
@@ -158,7 +183,7 @@ export function startManualOriginalStop(
     current_stop_id: stopId,
     current_audio_position_ms: 0,
     user_paused: false,
-    manual_replay_return_status: session.status,
+    manual_replay_return_status: session.completed_at_ms == null ? session.status : 'completed',
     manual_replay_stop_id: stopId,
     updated_at_ms: now,
   };

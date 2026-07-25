@@ -8,6 +8,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
+import { AppState } from 'react-native';
 import { useStore } from '../store';
 import { accountStorage } from '../storage';
 import {
@@ -51,6 +52,7 @@ import {
   completeOriginalStop,
   createOriginalSession,
   finishManualOriginalStop,
+  normalizeCompletedOriginalSession,
   originalStopCanReplay,
   skipOriginalStop,
   startManualOriginalStop,
@@ -1419,8 +1421,12 @@ export function OriginalsRuntimeProvider({
       await dependencies.sessions.save(corrupt);
       return corrupt;
     }
-    let resumable = { ...active, download_state: 'ready' as const };
-    if (active.status === 'active') {
+    const normalizedActive = normalizeCompletedOriginalSession(
+      active,
+      restoredManifest.stops.map(stop => stop.id),
+    );
+    let resumable = { ...normalizedActive, download_state: 'ready' as const };
+    if (normalizedActive.status === 'active') {
       // A cold TaskManager runtime may still own native location/audio when the
       // foreground app is opened. Quiesce both adapters and persist the exact
       // position before presenting the durable Resume state.
@@ -1435,7 +1441,7 @@ export function OriginalsRuntimeProvider({
         user_paused: false,
         current_audio_position_ms: audioState?.loaded
           ? Math.max(0, audioState.position_ms)
-          : active.current_audio_position_ms,
+          : normalizedActive.current_audio_position_ms,
         updated_at_ms: Date.now(),
       };
     }
@@ -1452,6 +1458,53 @@ export function OriginalsRuntimeProvider({
     return resumable;
   }, [dependencies.access, dependencies.audio, dependencies.bundles, dependencies.location, dependencies.sessions]);
 
+  const reconcilePersistedSessionForScope = useCallback(async (ownerScope: OriginalOwnerScope) => {
+    const reconcileEpoch = accountStorage.epoch();
+    const scopeIsStillCurrent = () => originalRestoreScopeIsCurrent(
+      ownerScope,
+      reconcileEpoch,
+      accountStorage.epoch(),
+      useStore.getState().user?.id ?? null,
+    );
+    const current = sessionRef.current;
+    if (!current || current.owner_scope !== ownerScope) return null;
+    const persisted = await dependencies.sessions.loadActive();
+    if (!persisted || !scopeIsStillCurrent()) return null;
+    const matchesCurrentExperience = (
+      persisted.owner_scope === current.owner_scope
+      && persisted.session_id === current.session_id
+      && persisted.pack_id === current.pack_id
+      && persisted.version === current.version
+      && persisted.manifest_id === current.manifest_id
+    );
+    if (
+      !matchesCurrentExperience
+      || persisted.status === 'stopped'
+      || persisted.updated_at_ms <= current.updated_at_ms
+    ) return null;
+    const reconciled = manifestRef.current
+      ? normalizeCompletedOriginalSession(
+        persisted,
+        manifestRef.current.stops.map(stop => stop.id),
+      )
+      : persisted;
+    sessionRef.current = reconciled;
+    if (mountedRef.current) {
+      setSession(reconciled);
+      setState(
+        reconciled.status === 'completed'
+          ? 'completed'
+          : reconciled.status === 'paused'
+            ? reconciled.user_paused ? 'paused' : 'ready'
+            : reconciled.status === 'active'
+              ? 'tracking'
+              : 'ready',
+      );
+    }
+    if (reconciled !== persisted) await dependencies.sessions.setActive(reconciled);
+    return reconciled;
+  }, [dependencies.sessions]);
+
   useEffect(() => {
     mountedRef.current = true;
     void restoreActiveForScope(originalOwnerScopeForAccount(userId)).catch(() => {});
@@ -1462,6 +1515,16 @@ export function OriginalsRuntimeProvider({
       void releaseAudio();
     };
   }, []);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', nextState => {
+      if (nextState !== 'active') return;
+      void reconcilePersistedSessionForScope(
+        originalOwnerScopeForAccount(useStore.getState().user?.id ?? null),
+      ).catch(() => {});
+    });
+    return () => subscription.remove();
+  }, [reconcilePersistedSessionForScope]);
 
   useEffect(() => {
     const prior = priorUserIdRef.current;

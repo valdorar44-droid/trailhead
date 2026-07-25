@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
-import NativeMap, { type NativeMapHandle } from '@/components/NativeMap';
+import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import NativeMap, {
+  prepareNativeMapboxRenderer,
+  type NativeMapHandle,
+} from '@/components/NativeMap';
+import { api } from '@/lib/api';
 import { useTheme } from '@/lib/design';
 import { createMapCameraOwnership } from '@/lib/mapCameraOwnership';
 import { originalRouteDisplayModel } from '@/lib/originals/routeDisplay';
+import { storage } from '@/lib/storage';
+import { useStore } from '@/lib/store';
 import type { OriginalRouteMapProps } from './OriginalRouteMap.types';
 
 function remainingDistanceLabel(distanceM: number) {
@@ -26,6 +32,9 @@ export default function OriginalRouteMap({
   const lastFitKeyRef = useRef('');
   const [mapReadinessRevision, setMapReadinessRevision] = useState(0);
   const [styleGeneration, setStyleGeneration] = useState(0);
+  const mapboxToken = useStore(state => state.mapboxToken);
+  const setMapboxToken = useStore(state => state.setMapboxToken);
+  const [mapCredentialState, setMapCredentialState] = useState<'loading' | 'ready' | 'unavailable'>('loading');
   const authoredCoordinates = useMemo(() => originalRouteDisplayModel(
     route.geometry.coordinates,
     route.distance_m,
@@ -56,6 +65,38 @@ export default function OriginalRouteMap({
     [routeSignature],
   );
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function prepareMap() {
+      setMapCredentialState('loading');
+      let token = mapboxToken.trim();
+      if (!token) {
+        token = String(await storage.get('trailhead_mapbox_token').catch(() => '') || '').trim();
+      }
+      if (!token) {
+        const config = await api.getConfig().catch(() => null);
+        token = String(config?.mapbox_token || '').trim();
+        if (token) storage.set('trailhead_mapbox_token', token).catch(() => {});
+      }
+      if (cancelled) return;
+      if (!token || !await prepareNativeMapboxRenderer(token)) {
+        if (!cancelled) setMapCredentialState('unavailable');
+        return;
+      }
+      if (cancelled) return;
+      if (token !== mapboxToken) setMapboxToken(token);
+      setMapCredentialState('ready');
+    }
+
+    prepareMap().catch(() => {
+      if (!cancelled) setMapCredentialState('unavailable');
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [mapboxToken, setMapboxToken]);
+
   const fitAuthoredRoute = useCallback(() => {
     if (authoredCoordinates.length < 2) return;
     mapRef.current?.fitCoordinates(authoredCoordinates, [54, 28, 104, 28], 500);
@@ -77,6 +118,21 @@ export default function OriginalRouteMap({
     type: 'destination' as const,
     name: nextStop.title,
   }] : [];
+
+  if (mapCredentialState !== 'ready') {
+    return (
+      <View style={[styles.wrap, styles.mapPreparation]}>
+        {mapCredentialState === 'loading' ? (
+          <>
+            <ActivityIndicator color={C.orange} />
+            <Text style={styles.mapPreparationText}>Preparing route preview</Text>
+          </>
+        ) : (
+          <Text style={styles.mapPreparationText}>Route preview unavailable</Text>
+        )}
+      </View>
+    );
+  }
 
   return (
     <View
@@ -166,6 +222,8 @@ export default function OriginalRouteMap({
 
 const styles = StyleSheet.create({
   wrap: { flex: 1, backgroundColor: '#050505', overflow: 'hidden' },
+  mapPreparation: { alignItems: 'center', justifyContent: 'center', gap: 10 },
+  mapPreparationText: { color: '#D6D6D6', fontSize: 12, lineHeight: 16, fontWeight: '800' },
   overlays: { ...StyleSheet.absoluteFillObject },
   overviewBadge: {
     position: 'absolute', left: 14, top: 10, minHeight: 28, borderRadius: 999,

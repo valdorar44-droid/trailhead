@@ -111,6 +111,19 @@ function safelySetMapboxToken(mapRenderer: any, token: string) {
   } catch {}
 }
 
+export async function prepareNativeMapboxRenderer(token: string): Promise<boolean> {
+  const normalized = token.trim();
+  if (!normalized) return false;
+  try {
+    const mapRenderer = getNativeMapRenderer(true);
+    if (typeof mapRenderer?.setAccessToken !== 'function') return false;
+    await mapRenderer.setAccessToken(normalized);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 const TILE_BASE_URL = 'https://tiles.gettrailhead.app';
 const API_BASE_URL = TRAILHEAD_API_BASE;
 const BASE_DL_URL   = `${TILE_BASE_URL}/api/download/base.pmtiles`;

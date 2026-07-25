@@ -91,6 +91,16 @@ async function main() {
   assert.match(routeMap, /mapLayer="extreme"/);
   assert.match(routeMap, /premiumMapStyle="outdoors"/);
   assert.match(routeMap, /rendererMode="mapbox"/);
+  assert.match(routeMap, /storage\.get\('trailhead_mapbox_token'\)/);
+  assert.match(routeMap, /api\.getConfig\(\)/);
+  assert.match(routeMap, /prepareNativeMapboxRenderer\(token\)/);
+  assert.match(routeMap, /mapCredentialState !== 'ready'/);
+  assert.match(routeMap, /Preparing route preview/);
+  assert.match(
+    routeMap,
+    /if \(mapCredentialState !== 'ready'\)[\s\S]*return \([\s\S]*Preparing route preview[\s\S]*<NativeMap/,
+    'the cold-link preview must not mount RNMapbox before its token is installed',
+  );
   assert.match(routeMap, /onLayout=\{\(event\) => \{/);
   assert.match(routeMap, /onMapStyleLoaded=\{\(\) => setStyleGeneration/);
   assert.match(routeMap, /if \(!mapReadyRef\.current \|\| !layoutReadyRef\.current \|\| styleGeneration <= 0\) return/);

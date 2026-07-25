@@ -84,6 +84,9 @@ async function main() {
   const routeMap = readFileSync('components/originals/OriginalRouteMap.tsx', 'utf8');
   assert.match(routeMap, /createMapCameraOwnership\('originals', `original-route-preview:\$\{routeSignature\}`\)/);
   assert.match(routeMap, /cameraOwnership=\{routeCameraOwnership\}/);
+  assert.match(routeMap, /mapLayer="extreme"/);
+  assert.match(routeMap, /premiumMapStyle="outdoors"/);
+  assert.match(routeMap, /rendererMode="mapbox"/);
   assert.match(routeMap, /onLayout=\{\(event\) => \{/);
   assert.match(routeMap, /onMapStyleLoaded=\{\(\) => setStyleGeneration/);
   assert.match(routeMap, /if \(!mapReadyRef\.current \|\| !layoutReadyRef\.current \|\| styleGeneration <= 0\) return/);

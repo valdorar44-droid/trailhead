@@ -92,8 +92,9 @@ export default function OriginalRouteMap({
         navIdx={0}
         navHeading={null}
         navSpeed={null}
-        mapLayer="dark"
-        premiumMapStyle="navigation_night"
+        mapLayer="extreme"
+        premiumMapStyle="outdoors"
+        rendererMode="mapbox"
         routeOpts={{ avoidTolls: false, avoidHighways: false, backRoads: false, noFerries: false }}
         routeBuildActive={overview || model.progress_known}
         routeBuildCoords={authoredCoordinates}

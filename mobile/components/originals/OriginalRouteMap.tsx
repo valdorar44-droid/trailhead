@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import NativeMap, { type NativeMapHandle } from '@/components/NativeMap';
 import { useTheme } from '@/lib/design';
@@ -21,7 +21,11 @@ export default function OriginalRouteMap({
 }: OriginalRouteMapProps) {
   const C = useTheme();
   const mapRef = useRef<NativeMapHandle | null>(null);
-  const readyRef = useRef(false);
+  const mapReadyRef = useRef(false);
+  const layoutReadyRef = useRef(false);
+  const lastFitKeyRef = useRef('');
+  const [mapReadinessRevision, setMapReadinessRevision] = useState(0);
+  const [styleGeneration, setStyleGeneration] = useState(0);
   const authoredCoordinates = useMemo(() => originalRouteDisplayModel(
     route.geometry.coordinates,
     route.distance_m,
@@ -48,10 +52,12 @@ export default function OriginalRouteMap({
   }, [authoredCoordinates]);
 
   useEffect(() => {
-    if (!readyRef.current) return;
-    const timer = setTimeout(fitAuthoredRoute, 80);
-    return () => clearTimeout(timer);
-  }, [fitAuthoredRoute, routeSignature]);
+    if (!mapReadyRef.current || !layoutReadyRef.current || styleGeneration <= 0) return;
+    const fitKey = `${routeSignature}:${styleGeneration}`;
+    if (lastFitKeyRef.current === fitKey) return;
+    lastFitKeyRef.current = fitKey;
+    fitAuthoredRoute();
+  }, [fitAuthoredRoute, mapReadinessRevision, routeSignature, styleGeneration]);
 
   const routeStops = nextStop ? [{
     id: nextStop.id,
@@ -63,7 +69,15 @@ export default function OriginalRouteMap({
   }] : [];
 
   return (
-    <View style={styles.wrap}>
+    <View
+      style={styles.wrap}
+      onLayout={(event) => {
+        const { width, height } = event.nativeEvent.layout;
+        if (layoutReadyRef.current || width <= 0 || height <= 0) return;
+        layoutReadyRef.current = true;
+        setMapReadinessRevision(revision => revision + 1);
+      }}
+    >
       <NativeMap
         ref={mapRef}
         waypoints={[]}
@@ -99,9 +113,10 @@ export default function OriginalRouteMap({
         hideMapStatusBadge
         cameraOwnership={routeCameraOwnership}
         onMapReady={() => {
-          readyRef.current = true;
-          setTimeout(fitAuthoredRoute, 120);
+          mapReadyRef.current = true;
+          setMapReadinessRevision(revision => revision + 1);
         }}
+        onMapStyleLoaded={() => setStyleGeneration(generation => generation + 1)}
         onBoundsChange={() => {}}
         onMapTap={() => {}}
         onCampTap={() => {}}

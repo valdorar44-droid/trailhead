@@ -1116,3 +1116,41 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Exact next action: disconnect Android, connect and unlock the registered iPhone, install iOS build `56`, and run only identity plus the remaining platform-native interruption checks. Then run `audit:prepreview` exactly once on the frozen SHA before creating paired production binaries.
 - Do not repeat: Android Auto DHU, Map/Search/Yellowstone, Layers, NPS/Explore, Plan/Downloads, Originals acquisition/GPX/background trigger, route mini-map, Route Editor/Trip Overview, Profile, Memory Gate V3, or broad Android/iOS crawls.
 - Task-owned background processes after cleanup: none. The ADB forward and temporary `trailhead-preview-bced384` worktree were removed before this checkpoint commit.
+
+## Frozen-candidate iOS closeout - background playback and completed-tour teardown accepted
+
+- Timestamp: `2026-07-25T01:57:15-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; exact paired-preview source and pre-checkpoint HEAD `9f030b33db44e29a0693a7ad634b494e2111e36f`, pushed to origin.
+- Protected Explore index SHA-256 remains `7E59E5E2273DBBE1A26D7BBD4D947FAA20935C51FB79C464EED8A17BABF4D8F4`. `.cursor/`, `dashboard/explore_serving_index_v2.json`, and unrelated Valhalla/Maestro changes remain excluded and unstaged.
+- The physical iPhone retained version `1.0.10`, build `56`, and runtime `native-1.0.10-ios.3`. It accepted the exact `4696f085c2116ffdaed1aa30e7ecd1c9aa4f35c9` preview before the final correction:
+  - iOS update `019f97ec-b765-72fd-a633-c3c5c7bfe49b`.
+  - Identity screenshot: `C:\Users\User\AppData\Local\Temp\trailhead-ios56-4696f08-qa-identity.png`, SHA-256 `15DD848286E870F29341284E1184B991D9F66607043DFC27B46207D7F6767ED3`.
+- The real consumer Original passed the remaining platform-native playback assertions:
+  - A version-pinned continuous GPX replay triggered Story 11 while the phone was locked and Low Power Mode was enabled.
+  - Lock Screen metadata showed the exact title `Grand View: Water, Gravity, Time`, artist `Trailhead Originals`, and the real Moab artwork.
+  - Lock Screen Pause persisted the exact position. Lock Screen Play resumed from that position and rearmed location delivery.
+  - Metadata evidence: `C:\Users\User\AppData\Local\Temp\trailhead-ios56-story11-4696f08-awake-lockscreen.png`, SHA-256 `059898A7C94E8156BDD05234227665AEC8B1C9B37FE2E70A9514E62C5F57ECB4`.
+  - Paused session evidence: `C:\Users\User\AppData\Local\Temp\trailhead-ios56-session-story11-4696f08-paused.json`, SHA-256 `10F0797ECBA06C13EFADA89769C91B5EE5E5A7FCE8106F14FEB3A8483676668A`.
+  - Resumed session evidence: `C:\Users\User\AppData\Local\Temp\trailhead-ios56-session-story11-4696f08-resumed.json`, SHA-256 `C1B7CB6081896C70373334E04F45F2A3CDC9D83B80CEBDCF4C557A335419E1AB`.
+- That run exposed one deterministic P1: a tour completed by the background runtime could leave the foreground provider showing stale active/off-route state, and a manual replay from that stale state could return to `active` after playback finished.
+- The correction at `9f030b3` adds identity- and revision-guarded AppState reconciliation for newer background session writes. Terminal completion normalizes to `completed`; completed-tour manual replay returns to `completed`; an explicit stopped session remains a restore barrier.
+- Focused Originals store and runtime-race tests, TypeScript, and whitespace checks passed.
+- One paired preview OTA was published from exact clean `9f030b3` with Sentry source maps:
+  - Channel `preview`, channel ID `019dbc97-3cde-795b-a35d-e6aa985060d3`.
+  - Candidate branch `preview-candidate-9f030b33db44e29a0693a7ad634b494e2111e36f-ms0073py-89e40e41b83b8c464befac4b`, branch ID `019f9808-7de2-784f-b56d-9e92e2d1da3b`.
+  - Android group `75ed8371-99a4-4432-b761-5d10b32ba696`, update `019f9808-a175-758c-9596-07a834810940`, runtime `native-1.0.10-android.3`.
+  - iOS group `18819762-4969-45d1-8cef-10c8fc25470a`, update `019f9808-a175-7de6-8457-3196c94ec7bb`, runtime `native-1.0.10-ios.3`.
+  - Publisher log: `C:\Users\User\AppData\Local\Temp\trailhead-preview-9f030b3-ota-retry.log`, SHA-256 `BC6D03B5537E80CDB31B4E30285734868E757600574C88E1E57F677423FEAD7E`.
+- Physical completion and teardown passed on `9f030b3`:
+  - Reopening displayed the truthful Drive Complete recap with `5` heard, `6` missed, and `0` skipped.
+  - Recap screenshot: `C:\Users\User\AppData\Local\Temp\trailhead-ios56-9f030b3-completion-recap.png`, SHA-256 `14401D5DDA7931B27B84EC286DAC0A58B7AD6E0A0A4DB1E7EF471220FACB3844`.
+  - Completed session: `C:\Users\User\AppData\Local\Temp\trailhead-ios56-session-9f030b3-completion-recap.json`, SHA-256 `3CF82104229922A6EF54D4FECCDA37CCABD410D2EA954EB645AA81EB3D70BF97`.
+  - `Close recap` fully stopped the tour. After force-close and reopen, the app returned to Explore; opening Map showed the ordinary map with no Original player or automatic restart.
+  - Post-close Map screenshot: `C:\Users\User\AppData\Local\Temp\trailhead-ios56-9f030b3-after-close-map.png`, SHA-256 `F1541C6C16CDF4BC7E9DBF725F25A84D5DD796B367678464FB2322A1B6E5039F`.
+  - Stopped session: `C:\Users\User\AppData\Local\Temp\trailhead-ios56-session-9f030b3-after-close.json`, SHA-256 `4C003A31924DD26536894BC21D416AA60CA7C145D27CAC861225053B2A4A3E16`.
+- Durable resume remains intentional for an unfinished tour when the app is closed without End Tour. Explicit End Tour or Close recap clears automatic resume while retaining the verified download and completed-story history.
+- Simulated location was cleared. Task-owned publisher, GPX, Metro, Expo, EAS, Gradle, Maestro, memory-gate, and test processes: none.
+- P0/P1 from this iOS packet: none open.
+- Remaining release evidence, if physically available: one call/system-audio interruption and Bluetooth disconnect/reconnect. Universal Link and manual referral fallback may be verified without erasing the current account. Unavailable external hardware is checkpointed rather than retried in a loop.
+- Exact next action: commit and push this checkpoint, remove the clean temporary preview worktree, then decide the final focused link/interruption evidence boundary before running `audit:prepreview` exactly once on the frozen source.
+- Do not repeat: GPX route replay, Lock Screen metadata, Pause/Play rearm, completion/Close recap teardown, Android Auto, Yellowstone, Search performance, Memory Gate V3, broad Map/Search/sheets, Layers, NPS, Plan/Downloads, Route Editor/Trip Overview, Profile, or completed Figma/Mobbin work.

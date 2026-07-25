@@ -12,7 +12,11 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme, type ColorPalette } from '@/lib/design';
-import { formatSearchDistanceV2, type SearchResultV2 } from '@/lib/searchV2';
+import {
+  cleanSearchResultContextV2,
+  formatSearchDistanceV2,
+  type SearchResultV2,
+} from '@/lib/searchV2';
 
 export type SearchDistanceUnitMode = 'auto' | 'imperial' | 'metric';
 
@@ -99,12 +103,7 @@ export function searchResultKindLabelV2(kind: string) {
 
 export function searchResultSubtitleV2(result: SearchResultV2) {
   const fallback = searchResultKindLabelV2(result.kind);
-  return String(result.subtitle || result.parent || fallback)
-    .replace(/\b(mapbox|geoapify|nominatim|openstreetmap)\b/gi, '')
-    .replace(/[_-]+/g, ' ')
-    .replace(/\s*·\s*·\s*/g, ' · ')
-    .replace(/\s{2,}/g, ' ')
-    .trim() || fallback;
+  return cleanSearchResultContextV2(result) || fallback;
 }
 
 export function searchResultTrailingLabelV2(

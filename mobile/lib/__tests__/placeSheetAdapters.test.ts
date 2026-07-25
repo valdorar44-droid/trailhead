@@ -11,6 +11,7 @@ import {
   cleanPlaceSheetDisplayText,
   COMMUNITY_REPORT_SHEET_PARITY_MODULES,
   EXPLORE_HUB_SHEET_PARITY_MODULES,
+  formatPlaceSheetDistanceLabel,
   isCanonicalSearchPlaceSheetSource,
   isPlaceSheetSummaryRedundant,
   stablePlaceSheetEntityId,
@@ -56,6 +57,14 @@ test('a summary is redundant only when full details extend the same text', () =>
     'Open December through March.',
   ), false);
   assert.equal(isPlaceSheetSummaryRedundant('Same useful text.', 'Same useful text.'), false);
+});
+
+test('distance copy is omitted when no positive distance exists', () => {
+  assert.equal(formatPlaceSheetDistanceLabel(undefined, undefined), '');
+  assert.equal(formatPlaceSheetDistanceLabel(null, 0), '');
+  assert.equal(formatPlaceSheetDistanceLabel(0, 0), '');
+  assert.equal(formatPlaceSheetDistanceLabel(2.4, 8), '2.4 mi off route');
+  assert.equal(formatPlaceSheetDistanceLabel(null, 0.4), 'Under 1 mi away');
 });
 
 test('trail adapter preserves trailhead identity instead of switching shells after enrichment', () => {

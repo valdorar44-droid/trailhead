@@ -135,6 +135,43 @@ export type SearchV2DisplayPlace = Omit<SearchV2LegacyPlace, 'lat' | 'lng'> & {
   resolution_required: boolean;
 };
 
+function escapeSearchDisplayPattern(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function cleanSearchDisplayCandidate(value: unknown, title: string): string {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const escapedTitle = escapeSearchDisplayPattern(title.trim());
+  const withoutRepeatedTitle = escapedTitle
+    ? raw.replace(
+      new RegExp(`(?:\\s*[,·|]\\s*|\\s+-\\s+)?${escapedTitle}\\s*$`, 'i'),
+      '',
+    )
+    : raw;
+  return withoutRepeatedTitle
+    .replace(/\b(mapbox|geoapify|nominatim|openstreetmap)\b/gi, '')
+    .replace(/_/g, ' ')
+    .replace(/\s*,\s*/g, ', ')
+    .replace(/\s*·\s*·\s*/g, ' · ')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/^[\s,·|]+|[\s,·|]+$/g, '')
+    .trim();
+}
+
+/**
+ * Cleans provider display context without changing server order, result kind,
+ * identity, or selection behavior. The subtitle is preferred, with parent as
+ * a fallback only when the subtitle contains no useful context after cleanup.
+ */
+export function cleanSearchResultContextV2(result: SearchResultV2): string {
+  for (const candidate of [result.subtitle, result.parent]) {
+    const cleaned = cleanSearchDisplayCandidate(candidate, result.title);
+    if (cleaned) return cleaned;
+  }
+  return '';
+}
+
 export function searchResultV2ToDisplayPlace(result: SearchResultV2): SearchV2DisplayPlace {
   const lat = typeof result.coordinates?.lat === 'number' && Number.isFinite(result.coordinates.lat)
     ? result.coordinates.lat
@@ -144,6 +181,7 @@ export function searchResultV2ToDisplayPlace(result: SearchResultV2): SearchV2Di
     : undefined;
   const sourceLabel = cleanLabel(result.provenance?.source_label) || cleanLabel(result.kind) || 'Place';
   const normalizedKind = cleanKind(result.kind || result.categories?.[0] || 'place');
+  const displayContext = cleanSearchResultContextV2(result);
   return {
     name: result.title,
     lat,
@@ -157,8 +195,8 @@ export function searchResultV2ToDisplayPlace(result: SearchResultV2): SearchV2Di
     subtype: result.categories?.[0] || undefined,
     category: result.categories?.[0] || undefined,
     feature_type: result.kind || undefined,
-    address: result.subtitle || result.parent || undefined,
-    summary: result.subtitle || undefined,
+    address: displayContext || undefined,
+    summary: displayContext || undefined,
     distance_meters: result.distance_meters,
     persistence_policy: result.persistence_policy,
     temporary_use_only: result.persistence_policy === 'temporary'

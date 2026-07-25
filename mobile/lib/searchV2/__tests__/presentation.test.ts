@@ -5,6 +5,7 @@ import {
   exploreSearchIntentForCategory,
 } from '../explore';
 import {
+  cleanSearchResultContextV2,
   offlineSearchResultsV2,
   searchPlaceIsTemporary,
   searchResultV2ToDisplayPlace,
@@ -187,6 +188,39 @@ test('presentation adapter rejects unresolved coordinates and keeps stable ident
   assert.equal(place?.persistence_policy, 'canonical');
   assert.equal(place?.temporary_use_only, false);
   assert.equal(place?.profile_id, 'place-1');
+});
+
+test('presentation cleans repeated result titles and formats compact jurisdictions', () => {
+  const yellowstone: SearchResultV2 = {
+    result_id: 'place:nps:yell',
+    canonical_place_id: 'place:nps:yell',
+    title: 'Yellowstone National Park',
+    subtitle: 'ID,MT,WY, Yellowstone National Park',
+    kind: 'park',
+    categories: ['park'],
+    coordinates: { lat: 44.5982, lng: -110.5472 },
+    provenance: {
+      provider: 'trailhead',
+      source_label: 'National Park Service',
+      temporary_use_only: false,
+    },
+    persistence_policy: 'canonical',
+    score: 100,
+    match_reason: 'exact',
+  };
+  assert.equal(cleanSearchResultContextV2(yellowstone), 'ID, MT, WY');
+  assert.equal(searchResultV2ToDisplayPlace(yellowstone).address, 'ID, MT, WY');
+
+  const streetAddress = {
+    ...yellowstone,
+    result_id: 'place:moab-info',
+    title: 'Moab Information Center',
+    subtitle: '25 E Center Street, Moab, Utah',
+  };
+  assert.equal(
+    cleanSearchResultContextV2(streetAddress),
+    '25 E Center Street, Moab, Utah',
+  );
 });
 
 test('presentation keeps temporary provider policy through display and legacy adapters', () => {

@@ -208,6 +208,25 @@ export function isPlaceSheetSummaryRedundant(summary: unknown, details: unknown)
     && normalizedDetails.startsWith(normalizedSummary);
 }
 
+export function formatPlaceSheetDistanceLabel(
+  routeDistanceMiles?: number | null,
+  distanceMiles?: number | null,
+): string {
+  const routeDistance = formatMiles(routeDistanceMiles);
+  if (routeDistance) return `${routeDistance} off route`;
+  const distance = formatMiles(distanceMiles);
+  return distance ? `${distance} away` : '';
+}
+
+function formatMiles(value?: number | null): string {
+  if (value == null || !Number.isFinite(Number(value))) return '';
+  const miles = Number(value);
+  if (miles <= 0) return '';
+  if (miles < 1) return 'Under 1 mi';
+  if (miles >= 10) return `${Math.round(miles)} mi`;
+  return `${miles.toFixed(1).replace(/\.0$/, '')} mi`;
+}
+
 function normalizeComparableText(value: unknown): string {
   return String(value || '')
     .trim()

@@ -38,6 +38,7 @@ import FirstPartyRatingSection from '@/components/map/FirstPartyRatingSection';
 import {
   adaptGenericPlaceSheet,
   cleanPlaceSheetDisplayText,
+  formatPlaceSheetDistanceLabel,
   isPlaceSheetSummaryRedundant,
 } from '@/lib/placeSheetAdapters';
 import { communityRatingTarget } from '@/lib/communityRatingEligibility';
@@ -618,11 +619,10 @@ export default function PremiumPlaceSheet({
     : sourceFooterLabel;
   const addToRoute = () => onAddToRoute?.({ name: place.name, lat: place.lat, lng: place.lng, note: data.summary || subtitle });
   const promoteToRoute = () => onPromoteToRoute?.({ name: place.name, lat: place.lat, lng: place.lng, note: data.summary || subtitle });
-  const distanceLabel = data.route_distance_mi != null && Number.isFinite(data.route_distance_mi)
-    ? `${formatSheetMiles(data.route_distance_mi)} off route`
-    : data.distance_mi != null && Number.isFinite(data.distance_mi)
-      ? `${formatSheetMiles(data.distance_mi)} away`
-      : '';
+  const distanceLabel = formatPlaceSheetDistanceLabel(
+    data.route_distance_mi,
+    data.distance_mi,
+  );
   const ratingCount = Number(data.rating_count ?? data.review_count);
   const subtitle = [
     data.brand || typeLabel,

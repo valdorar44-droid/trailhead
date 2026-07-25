@@ -1018,3 +1018,23 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Exact next action: continue the remaining focused iOS Plan/Downloads/Originals and background-audio/location delta. Do not repeat the Yellowstone ranking or park-sheet assertion.
 - Do not repeat: Search V2 performance, backend diagnosis, broad Map/search/sheet crawls, Android memory work, Android Originals acquisition/background trigger, NPS research, Layers, DHU desktop handshake, or completed Figma/Mobbin work.
 - Task-owned background processes: none. Railway deployment and focused tests have exited; no Metro, Expo, EAS, Gradle, Maestro, memory-gate, or publisher process is running.
+
+## Frozen-candidate iOS closeout — Mapbox Original route preview accepted
+
+- Timestamp: `2026-07-24T22:15:00-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; exact implementation and paired-preview source HEAD `a69397052c9827701551edbe9c6b294796a594ce`, pushed to origin.
+- Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. `.cursor/`, `dashboard/explore_serving_index_v2.json`, and the unrelated Valhalla/Maestro mode-only changes remain excluded and unstaged.
+- The Original detail route preview now uses the existing native RNMapbox renderer with the Mapbox Outdoors style. It is not a static image, custom-topo fallback, or second map engine.
+- The embedded map receives the immutable authored-route bounds in its initial camera settings, then retains the existing readiness-gated idempotent fit for style reloads. Ordinary Map screens retain their previous free-camera behavior.
+- Focused Originals renderer/camera-ownership tests passed, including `6` camera-ownership cases. TypeScript and whitespace checks passed.
+- Replacement paired preview publication completed with Sentry source maps:
+  - Channel `preview`, channel ID `019dbc97-3cde-795b-a35d-e6aa985060d3`.
+  - Android build `59`, runtime `native-1.0.10-android.1`, group `8f3eda5c-55c9-481d-a611-19062e408733`, update `019f9743-1b1b-79b2-8573-455c079b3aed`.
+  - iOS build `54`, runtime `native-1.0.10-ios.1`, group `a74caa64-4045-45ca-88ef-0ddd041b978f`, update `019f9743-1b1b-7ef8-9ed4-d4bf0031e31d`.
+- Physical iPhone proof passed: the Published route mini-map rendered the real Mapbox Outdoors style, centered on Moab/Canyonlands, and displayed the orange authored route. Evidence: `C:\Users\User\AppData\Local\Temp\trailhead-ios-a693-original-detail.png`, SHA-256 `caff92024c669dea4a6b605327090fb60e7c487a4dd252a47026dbcba2aa5de5`.
+- The broader focused iOS packet already passed Plan warm retention, Plan-origin Downloads return, owned Moab detail and bundle readiness, Start disclosure, real version-pinned GPX background cue triggering, Minimize/Resume, captions/player controls, End Tour teardown, and no automatic restart after reopen.
+- iOS app-code P0/P1: none open. Call/system interruption, Bluetooth reconnection, Low Power Mode, and complete Now Playing control evidence remain release-evidence checks and are not claimed by this checkpoint.
+- Exact next action: disconnect the iPhone, reconnect Android, confirm the Head Unit Server is active, and run one live Android Auto route/maneuver/reconnect session. Do not repeat the desktop DHU handshake loop. If projection remains externally blocked, checkpoint it once rather than retrying.
+- After the Android Auto session: freeze one clean source SHA, run `audit:prepreview` exactly once, and create paired 1.0.10 production candidates only if no P0/P1 remains.
+- Do not repeat: Yellowstone search/ranking or Park sheet, Plan/Downloads/Originals acquisition and lifecycle, GPX trigger, mini-map implementation, broad Map/Explore/sheet crawls, Search performance, Memory Gate V3, Layers, NPS research, completed Figma/Mobbin work, or the earlier desktop DHU handshake sequence.
+- Task-owned background processes: none. Publisher, Expo export, Sentry upload, Metro, Maestro, Gradle, memory-gate, and focused test processes have exited.

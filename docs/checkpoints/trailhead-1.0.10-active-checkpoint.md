@@ -1058,3 +1058,26 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Exact next action: use one actual vehicle/head unit or a freshly reset Android Auto projection host for the missing live session. Do not repeat this desktop DHU handshake. Once that external proof passes, freeze one clean SHA, run `audit:prepreview` exactly once, and create the paired 1.0.10 production candidates.
 - Do not repeat: this Windows DHU session, earlier WSL/Windows DHU handshakes, Android/iOS Originals lifecycle or mini-map proof, Yellowstone search/Park sheet, Search performance, Memory Gate V3, broad crawls, Layers, NPS research, or completed Figma/Mobbin work.
 - Task-owned background processes: none. The DHU exited, the ADB forward was removed, and no Metro, EAS, Expo, Gradle, Maestro, memory-gate, publisher, or focused test process remains.
+
+## Android Auto live DHU proof and reconnect correction
+
+- Timestamp: `2026-07-24T23:03:02-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; pre-change HEAD `26cd337a6903c1f969e50cc0bfd42ea2b905fd24`. Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
+- The earlier DHU block was resolved without a vehicle. DHU 2.1 must retain an interactive console; launching it through a persistent command window completed the phone handshake that redirected/stdin-closed launches had terminated.
+- The physical Samsung and Windows DHU completed a real Trailhead Car App Library session:
+  - Trailhead appeared in the Android Auto launcher and rendered the Flagstaff-to-Moab route on its car map surface.
+  - Start Route opened active guidance with the route, current position, recenter/zoom controls, report action, ETA panel, End control, and navigation compass.
+  - The island position correctly produced an off-route state.
+  - Android's official `AUTO_DRIVE` command was accepted by `TrailheadCarAppService`; Trailhead acquired navigation audio focus and rendered simulated active-route progress without a vehicle.
+  - The projected host negotiated Car App API 8 with Trailhead's Car App Library 1.7.0 service.
+- One deterministic P1 was found during the required reconnect assertion: dropping only DHU stopped `TrailheadCarLocationService`; reconnect restored the route but returned to `Start route` instead of active guidance.
+- Evidence-backed cause: `TrailheadCarSession` treated host/session destruction as a user End action and unconditionally stopped the phone-owned location foreground service.
+- Correction:
+  - Explicit End, host stop-navigation, and final arrival still stop guidance.
+  - Session destruction while navigation is active leaves the phone-owned foreground service alive so a new car session can resume through the existing active-service path.
+  - Added a policy regression test covering active host disconnect and inactive-session cleanup.
+- Focused `:app:testDebugUnitTest --tests com.trailhead.app.car.TrailheadCarSessionPolicyTest` passed with `10/10` tests. Native/config drift passed.
+- This is a native Android correction. Android and iOS runtimes advance together to `native-1.0.10-android.2` and `native-1.0.10-ios.2`; it cannot ship through OTA to the `.1` binaries.
+- Exact next action: commit and push only the reconnect policy, regression test, paired runtime/config updates, and this checkpoint. Build paired `.2` previews from that immutable SHA, install Android first, and rerun only Start Route -> host drop -> reconnect -> active guidance plus explicit End teardown. Do not repeat Map, Search, Layers, NPS, Originals, Offline, memory, or broad Android crawls.
+- Open P0/P1: reconnect P1 is corrected in source and unit-tested but remains open until the `.2` Android preview passes the physical DHU assertion.
+- Task-owned background processes: DHU PID `24684` and its persistent command host PID `26240` remain intentionally active for the current device session. Gradle, Metro, Maestro, EAS, Expo, publisher, and memory-gate processes have exited.

@@ -137,7 +137,9 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
         snapshotObserver?.stopWatching()
         snapshotObserver = null
         TrailheadCarLocationService.removeListener(locationListener)
-        runCatching { TrailheadCarLocationService.stop(carContext) }
+        if (shouldStopCarLocationServiceOnSessionDestroy(navigating)) {
+          runCatching { TrailheadCarLocationService.stop(carContext) }
+        }
         if (::navigationManager.isInitialized) {
           if (navigating) runCatching { navigationManager.navigationEnded() }
           runCatching { navigationManager.clearNavigationManagerCallback() }
@@ -641,6 +643,10 @@ internal fun guidanceScreenCanBeInvalidated(state: Lifecycle.State): Boolean {
 
 internal fun shouldApplyLiveCarLocation(navigating: Boolean, autoDriveEnabled: Boolean): Boolean {
   return navigating && !autoDriveEnabled
+}
+
+internal fun shouldStopCarLocationServiceOnSessionDestroy(navigating: Boolean): Boolean {
+  return !navigating
 }
 
 private fun emptyCarSnapshot(): TrailheadCarSnapshot {

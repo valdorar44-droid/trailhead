@@ -119,6 +119,12 @@ class TrailheadCarSessionPolicyTest {
     assertFalse(shouldApplyLiveCarLocation(navigating = false, autoDriveEnabled = false))
   }
 
+  @Test
+  fun hostDisconnectKeepsPhoneOwnedGuidanceAliveForReconnect() {
+    assertFalse(shouldStopCarLocationServiceOnSessionDestroy(navigating = true))
+    assertTrue(shouldStopCarLocationServiceOnSessionDestroy(navigating = false))
+  }
+
   private fun snapshot(routeId: String, mode: TrailheadCarRouteMode): TrailheadCarSnapshot {
     val points = listOf(
       TrailheadCarPoint(38.57, -109.53),

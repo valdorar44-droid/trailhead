@@ -63,8 +63,8 @@ const androidNativeCiJob = workflowJobSource(ciWorkflow, 'android-native');
 expect(pkg.version === '1.0.10', 'package.json must use marketing version 1.0.10.');
 expect(lockRoot?.version === '1.0.10', 'package-lock.json root version must use 1.0.10.');
 expect(config.version === '1.0.10', 'app.config.js must use marketing version 1.0.10.');
-expect(config.ios.runtimeVersion === 'native-1.0.10-ios.1', 'iOS runtime is not native-1.0.10-ios.1.');
-expect(config.android.runtimeVersion === 'native-1.0.10-android.1', 'Android runtime is not native-1.0.10-android.1.');
+expect(config.ios.runtimeVersion === 'native-1.0.10-ios.2', 'iOS runtime is not native-1.0.10-ios.2.');
+expect(config.android.runtimeVersion === 'native-1.0.10-android.2', 'Android runtime is not native-1.0.10-android.2.');
 expect(pkg.dependencies.expo === '~54.0.36', 'Expo must remain pinned to ~54.0.36.');
 expect(pkg.dependencies['expo-updates'] === '~29.0.19', 'Expo Updates must remain pinned to ~29.0.19.');
 expect(pkg.dependencies['expo-sqlite'] === '~16.0.10', 'Expo SQLite must remain pinned to ~16.0.10.');
@@ -106,7 +106,7 @@ expect(
   !androidMainApplication.includes('RNBranchModule') && !androidMainActivity.includes('RNBranchModule'),
   'Do not duplicate Branch Expo adapter callbacks in Android app classes.',
 );
-contains('android/app/src/main/res/values/strings.xml', 'native-1.0.10-android.1', 'Android native runtime resource is stale.');
+contains('android/app/src/main/res/values/strings.xml', 'native-1.0.10-android.2', 'Android native runtime resource is stale.');
 
 expect(iosInfo.includes('<string>1.0.10</string>'), 'iOS Info.plist marketing version is stale.');
 expect(iosInfo.includes('<string>Automatic</string>'), 'iOS appearance must follow the app theme.');
@@ -142,7 +142,7 @@ for (const pathPattern of ['/originals/*', '/app/*', '/r/*', '/support/*', '/tri
   expect(siteProxyWorker.includes(`'${pathPattern}'`), `Cloudflare association path is missing: ${pathPattern}`);
 }
 expect(!applePaths.some(path => String(path).startsWith('/reset-password')), 'Password-reset web forms must not be captured by iOS.');
-contains('ios/Trailhead/Supporting/Expo.plist', 'native-1.0.10-ios.1', 'iOS native runtime resource is stale.');
+contains('ios/Trailhead/Supporting/Expo.plist', 'native-1.0.10-ios.2', 'iOS native runtime resource is stale.');
 contains('ios/Trailhead/Branch.json', '"checkPasteboardOnInstall": true', 'Branch NativeLink pasteboard setting is missing.');
 contains('.gitignore', '*.mobileprovision', 'Mobile provisioning profiles must stay ignored.');
 expect(!source('.gitignore').split(/\r?\n/).includes('/ios/'), 'The authoritative iOS project is still ignored.');

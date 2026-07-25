@@ -22,7 +22,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
 
 
 SearchSurfaceV2 = Literal[
@@ -286,6 +286,8 @@ class SearchRequestV2(BaseModel):
 
 
 class SearchResultV2(BaseModel):
+    _ranking_class: str = PrivateAttr(default="")
+
     result_id: str = Field(min_length=1, max_length=220)
     canonical_place_id: str | None = Field(default=None, max_length=220)
     title: str = Field(min_length=1, max_length=140)
@@ -857,12 +859,19 @@ class SearchIndexV2:
                 fts_rank = float(row["fts_rank"] or 0.0)
                 quality = float(row["quality_score"] or 0.0)
                 score = tier * 1000.0 + max(0.0, fts_rank + 20.0) * 10.0 - quality / 10.0
+                official_destination_prefix = (
+                    request.intent == "any"
+                    and bool(row["verified"])
+                    and tier == 2
+                    and _intent_accepts("destination", row["kind"], categories)
+                )
                 prefix_delta = max(0, len(title_norm) - len(query_norm)) if tier == 2 else 0
                 prefix_distance = (
                     distance if tier == 2 and distance is not None else float("inf")
                 )
                 prefix_title = title_norm if tier == 2 else ""
                 sort_key = (
+                    0 if official_destination_prefix else 1,
                     tier,
                     prefix_delta,
                     prefix_distance,
@@ -872,7 +881,7 @@ class SearchIndexV2:
                     title_norm,
                     row["result_id"],
                 )
-                results.append((sort_key, SearchResultV2(
+                result = SearchResultV2(
                     result_id=row["result_id"],
                     canonical_place_id=row["canonical_place_id"],
                     title=row["title"],
@@ -889,7 +898,10 @@ class SearchIndexV2:
                     detail_ref=row["detail_ref"],
                     score=round(score, 4),
                     match_reason=reason,
-                )))
+                )
+                if official_destination_prefix:
+                    result._ranking_class = "official_destination_prefix"
+                results.append((sort_key, result))
             results.sort(key=lambda item: item[0])
             return [result for _, result in results[:max(1, min(limit, _MAX_CURSOR_OFFSET + 31))]]
 
@@ -1463,6 +1475,10 @@ def _merge_results_internal_first(
     # destination/address match gets the next reserved tier so city searches do
     # not starve behind a full page of weak lakes, creeks, or similarly named
     # catalog rows. Ordering inside every tier remains stable and server-owned.
+    featured_destinations = [
+        item for item in internal
+        if item._ranking_class == "official_destination_prefix"
+    ]
     protected_internal = [
         item for item in internal
         if item.match_reason in {"exact_title", "exact_alias"}
@@ -1470,6 +1486,7 @@ def _merge_results_internal_first(
     strong_internal = [
         item for item in internal
         if item.match_reason in {"title_prefix", "title_terms"}
+        and item._ranking_class != "official_destination_prefix"
     ]
     weak_internal = [
         item for item in internal
@@ -1490,6 +1507,7 @@ def _merge_results_internal_first(
         if _external_geocode_match_tier(item, query) is None
     ]
     return [
+        *featured_destinations,
         *protected_internal,
         *exact_external,
         *strong_internal,

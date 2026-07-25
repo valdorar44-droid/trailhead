@@ -299,6 +299,67 @@ class SearchV2ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.selected.match_reason, "exact_title")
         self.assertEqual(response.selected.persistence_policy, "canonical")
 
+    async def test_verified_official_destination_prefix_beats_ambiguous_exact_trails(self):
+        async def provider(_request, _limit, _mode):
+            return []
+
+        documents = [
+            _document(
+                "place:nps:yell",
+                "Yellowstone National Park",
+                kind="park",
+                categories=("park", "parks"),
+                quality_score=97,
+                verified=True,
+            ),
+            _document(
+                "trail:yellowstone",
+                "Yellowstone",
+                kind="trail",
+                categories=("trail", "hiking"),
+            ),
+            _document(
+                "trail:yellowstone-river",
+                "Yellowstone River",
+                kind="trail",
+                categories=("trail", "hiking"),
+            ),
+            _document(
+                "trail:yellowstone-trail",
+                "Yellowstone Trail",
+                kind="trail",
+                categories=("trail", "hiking"),
+            ),
+        ]
+        service = SearchV2Service(
+            lambda: (documents, "yellowstone-destination-v1"),
+            provider,
+        )
+
+        response = await service.page(SearchRequestV2(
+            query="Yellowstone",
+            intent="any",
+            include_external=True,
+            session_id="yellowstone-destination-session",
+            limit=4,
+        ))
+
+        self.assertEqual(response.results[0].result_id, "place:nps:yell")
+        self.assertEqual(response.results[0].kind, "park")
+        self.assertEqual(
+            response.results[0].match_reason,
+            "title_prefix",
+        )
+        self.assertNotIn("_ranking_class", response.results[0].model_dump())
+        self.assertEqual(
+            [item.result_id for item in response.results[1:]],
+            [
+                "trail:yellowstone",
+                "trail:yellowstone-river",
+                "trail:yellowstone-trail",
+            ],
+        )
+
     async def test_typo_and_aliases_are_deterministic(self):
         service = _fixture_service()
 

@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const mobileRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -10,21 +11,40 @@ const repoRoot = join(mobileRoot, '..');
 const androidRoot = join(mobileRoot, 'android');
 
 function resolvedAndroidJavaEnvironment() {
-  const candidates = [
+  const javaCandidates = [
     process.env.JAVA_HOME,
     join(homedir(), '.local', 'share', 'jdks', 'temurin-17'),
     '/usr/lib/jvm/java-17-openjdk-amd64',
     '/usr/lib/jvm/temurin-17-jdk-amd64',
   ].filter(Boolean);
-  const javaHome = candidates.find(candidate => (
+  const javaHome = javaCandidates.find(candidate => (
     existsSync(join(candidate, 'bin', process.platform === 'win32' ? 'java.exe' : 'java'))
   ));
-  if (!javaHome) return {};
+  const sdkCandidates = [
+    process.env.ANDROID_HOME,
+    process.env.ANDROID_SDK_ROOT,
+    join(homedir(), 'android-sdk'),
+    join(homedir(), 'Android', 'Sdk'),
+    process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, 'Android', 'Sdk') : '',
+    '/opt/android-sdk',
+    '/usr/local/android-sdk',
+  ].filter(Boolean);
+  const androidHome = sdkCandidates.find(candidate => existsSync(join(candidate, 'platform-tools')));
   return {
-    JAVA_HOME: javaHome,
-    PATH: `${join(javaHome, 'bin')}${delimiter}${process.env.PATH ?? ''}`,
+    ...(javaHome ? {
+      JAVA_HOME: javaHome,
+      PATH: `${join(javaHome, 'bin')}${delimiter}${process.env.PATH ?? ''}`,
+    } : {}),
+    ...(androidHome ? {
+      ANDROID_HOME: androidHome,
+      ANDROID_SDK_ROOT: androidHome,
+    } : {}),
   };
 }
+
+const prepreviewDbRoot = mkdtempSync(join(tmpdir(), 'trailhead-prepreview-'));
+const prepreviewDbPath = join(prepreviewDbRoot, 'trailhead.db');
+const prepreviewDbEnvironment = { TRAILHEAD_DB_PATH: prepreviewDbPath };
 
 const checks = [
   {
@@ -86,6 +106,13 @@ const checks = [
     cwd: mobileRoot,
     cmd: 'node',
     args: ['scripts/release-environment.test.mjs'],
+  },
+  {
+    label: 'Isolated backend schema',
+    cwd: repoRoot,
+    cmd: 'python',
+    args: ['-c', 'from db.store import init_db; init_db()'],
+    env: prepreviewDbEnvironment,
   },
   {
     label: 'Version-pinned Originals route fixture',
@@ -219,12 +246,14 @@ const checks = [
     cwd: mobileRoot,
     cmd: 'python',
     args: ['../scripts/audit_explore_live.py'],
+    env: prepreviewDbEnvironment,
   },
   {
     label: 'Viator experiences audit',
     cwd: mobileRoot,
     cmd: 'python',
     args: ['../scripts/audit_viator_experiences.py'],
+    env: prepreviewDbEnvironment,
   },
   {
     label: 'Explore copy audit',
@@ -250,6 +279,7 @@ const checks = [
     cwd: repoRoot,
     cmd: 'python',
     args: ['-m', 'unittest', 'discover', '-s', 'tests'],
+    env: prepreviewDbEnvironment,
   },
   {
     label: 'Whitespace diff check',
@@ -303,6 +333,8 @@ for (const check of checks) {
   });
   if (result.status !== 0) failures.push(check.label);
 }
+
+rmSync(prepreviewDbRoot, { recursive: true, force: true });
 
 if (failures.length) {
   console.error(`\nPre-preview checks failed: ${failures.join(', ')}`);

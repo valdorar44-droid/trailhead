@@ -41,6 +41,7 @@ const branchAndroidApplicationAdapter = source('node_modules/@config-plugins/rea
 const branchAndroidActivityAdapter = source('node_modules/@config-plugins/react-native-branch/android/src/main/java/expo/modules/adapters/branch/BranchReactActivityLifecycleListener.kt');
 const branchIosAppDelegateAdapter = source('node_modules/@config-plugins/react-native-branch/ios/ExpoAdapterBranch/BranchAppDelegate.swift');
 const otaPublisher = source('scripts/publish-eas-update.mjs');
+const prePreviewCheck = source('scripts/pre-preview-check.mjs');
 const otaWorkflow = repoSource('.github/workflows/mobile-ota.yml');
 const ciWorkflow = repoSource('.github/workflows/ci.yml');
 const easConfig = JSON.parse(source('eas.json'));
@@ -77,6 +78,18 @@ expect(
 );
 expect(!pkg.dependencies['expo-modules-core'], 'Do not restore direct expo-modules-core dependency.');
 expect(!lockRoot?.dependencies?.['expo-modules-core'], 'package-lock.json restored direct expo-modules-core dependency.');
+expect(
+  prePreviewCheck.includes("join(homedir(), 'android-sdk')")
+    && prePreviewCheck.includes('ANDROID_HOME: androidHome')
+    && prePreviewCheck.includes('ANDROID_SDK_ROOT: androidHome'),
+  'The clean-worktree pre-preview gate must discover and export the Android SDK.',
+);
+expect(
+  prePreviewCheck.includes("label: 'Isolated backend schema'")
+    && prePreviewCheck.includes('TRAILHEAD_DB_PATH: prepreviewDbPath')
+    && prePreviewCheck.includes('from db.store import init_db; init_db()'),
+  'The clean-worktree pre-preview gate must initialize an isolated backend schema.',
+);
 
 expect(!/LocationTaskService[^>]*tools:node="remove"/.test(androidManifest), 'Android removes Expo LocationTaskService.');
 expect(/ACCESS_BACKGROUND_LOCATION" tools:node="remove"/.test(androidManifest), 'Android must continue blocking ACCESS_BACKGROUND_LOCATION.');

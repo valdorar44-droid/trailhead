@@ -1182,3 +1182,31 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Exact next action: commit and push this checkpoint, freeze the resulting SHA, and run `audit:prepreview` exactly once from a clean detached worktree. If it passes, create paired Android and iOS 1.0.10 production binaries from that same SHA. Publish production OTA only after compatible paired binaries exist; evaluate any iOS 1.0.9 stability/search OTA as a separate runtime-compatible backport.
 - Do not repeat: Android App Links, Original cold-link repair, Original share sheet, Android Auto, Yellowstone, Search performance, Memory Gate V3, Plan/Downloads/Originals lifecycle, GPX playback, broad Map/Search/sheets, Layers, NPS, Route Editor/Trip Overview, Profile, or completed Figma/Mobbin work.
 - Task-owned background processes: none. OTA publisher, Metro export, Sentry upload, Expo/EAS, Gradle, Maestro, memory-gate, and test processes have exited. Temporary `1744e33` and `2341076` preview worktrees were removed.
+
+## Final release-gate closeout - clean-worktree setup repaired
+
+- Timestamp: `2026-07-25T03:13:26-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; exact gate source and pre-checkpoint HEAD `89b6031f81f880f0182f1abef5e787420fe9a498`, pushed to origin.
+- Protected Explore index SHA-256 remains `7E59E5E2273DBBE1A26D7BBD4D947FAA20935C51FB79C464EED8A17BABF4D8F4`. `.cursor/` and `dashboard/explore_serving_index_v2.json` remain excluded and unstaged.
+- `audit:prepreview` was run exactly once from a clean detached worktree at `89b6031`.
+- All application assertions passed. Four assertions failed only because the clean worktree did not inherit local machine setup:
+  - Android Auto debug unit tests could not locate the Android SDK because the worktree had no `local.properties`.
+  - Explore live audit, Viator audit, and full backend regression opened a temporary SQLite file without initializing its schema.
+- The release harness now:
+  - Discovers the Android SDK from environment and standard host/WSL locations, then exports both `ANDROID_HOME` and `ANDROID_SDK_ROOT`.
+  - Creates an isolated temporary backend database, initializes it through `db.store.init_db()`, and supplies it only to the database-backed audit checks.
+  - Removes the isolated database directory after the gate.
+  - Includes native-drift assertions that prevent either clean-worktree requirement from being lost.
+- Only the four failed assertions were rerun after the harness correction:
+  - Android `:app:testDebugUnitTest`: `BUILD SUCCESSFUL` with 999 tasks.
+  - Explore live audit: passed with 5,338 catalog records, 144 index records, and 120 bulk details.
+  - Viator audit: passed disabled-safe behavior plus Yosemite and Moab fixture cards/details.
+  - Backend regression: 785 tests passed in 230.712 seconds.
+- Full-gate stdout: `C:\Users\User\AppData\Local\Temp\trailhead-final-gate-89b6031.out.log`, SHA-256 `923627F0E5F0033D31BB7856F6EA1C00DD8AC22944F6E1DA61BB098D5269AE0C`.
+- Full-gate stderr: `C:\Users\User\AppData\Local\Temp\trailhead-final-gate-89b6031.err.log`, SHA-256 `183EF0F7290B48FDF0DC9AE35AB37E9F966DDCEA809744F83F96DE67FFABCF12`.
+- Focused correction stdout: `C:\Users\User\AppData\Local\Temp\trailhead-final-gate-focused-fix.out.log`, SHA-256 `99925EDA1E19658CF918E77D7FAAC2D597895D270DAC4A746BBA2FF0167C4477`.
+- Focused correction stderr: `C:\Users\User\AppData\Local\Temp\trailhead-final-gate-focused-fix.err.log`, SHA-256 `A3A66CCC7D503BA8B3C5FCA257281CD557E6D17940BF4613658424F13C799852`.
+- Open app-code P0/P1: none. iOS call/system-audio interruption and Bluetooth disconnect/reconnect remain explicitly unclaimed physical evidence; the completed iOS locked-screen, Low Power Mode, Now Playing, GPX, completion, and teardown packet remains accepted.
+- Exact next action: commit and push the release-harness correction and this checkpoint, tag the resulting clean SHA, and create paired Android/iOS 1.0.10 production candidates from that same immutable source.
+- Do not repeat: the full pre-preview gate, its four focused assertions, Android App Links, Original cold-link/share checks, Android Auto, GPX playback, Memory Gate V3, Yellowstone/Search, Layers, NPS, Plan/Downloads, Route Editor/Trip Overview, Profile, or completed Figma/Mobbin work.
+- Task-owned background processes: none. Gradle daemons, temporary databases, detached gate worktree, publishers, Metro, EAS, Maestro, and test processes were stopped or removed.

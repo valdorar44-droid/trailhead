@@ -1154,3 +1154,31 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Remaining release evidence, if physically available: one call/system-audio interruption and Bluetooth disconnect/reconnect. Universal Link and manual referral fallback may be verified without erasing the current account. Unavailable external hardware is checkpointed rather than retried in a loop.
 - Exact next action: commit and push this checkpoint, remove the clean temporary preview worktree, then decide the final focused link/interruption evidence boundary before running `audit:prepreview` exactly once on the frozen source.
 - Do not repeat: GPX route replay, Lock Screen metadata, Pause/Play rearm, completion/Close recap teardown, Android Auto, Yellowstone, Search performance, Memory Gate V3, broad Map/Search/sheets, Layers, NPS, Plan/Downloads, Route Editor/Trip Overview, Profile, or completed Figma/Mobbin work.
+
+## Frozen-candidate link and Original-sharing closeout
+
+- Timestamp: `2026-07-25T02:54:09-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; exact paired-preview source and pre-checkpoint HEAD `2341076b6dc15d96a443947974f2e1be34b19bda`, pushed to origin.
+- Protected Explore index SHA-256 remains `7E59E5E2273DBBE1A26D7BBD4D947FAA20935C51FB79C464EED8A17BABF4D8F4`. `.cursor/`, `dashboard/explore_serving_index_v2.json`, and unrelated Valhalla/Maestro changes remain excluded and unstaged.
+- Android verified links passed after `pm verify-app-links --re-verify com.trailhead.app`: `api.gettrailhead.app`, `gettrailhead.app`, `go.gettrailhead.app`, `zswub.app.link`, and `zswub-alternate.app.link` all report `verified`.
+- `go.gettrailhead.app` now presents a valid certificate for its hostname and responds over HTTPS. The canonical referral fallback correctly rejects the nonexistent `QA-LINK-ONLY` code instead of crediting or mutating an account. Real-code fresh-install attribution remains separately gated; the privacy opt-out and manual-code fallback remain available.
+- A physical Android cold link to `https://gettrailhead.app/originals/moab-canyons-to-the-sky` exposed one deterministic P1: the Original route preview could mount RNMapbox before the cold path had installed the cached/server Mapbox access token, producing `MapboxConfigurationException` and a blank screen.
+- The correction at `1744e3326d3062da94ec6cb9cb3e09d11139e635` prepares the Mapbox token before mounting `OriginalRouteMap`, keeps the route preview on the existing native Mapbox renderer, and provides a stable loading/fallback state. Originals renderer, app-link, referral, TypeScript, and whitespace checks passed.
+- The corrected physical cold link opens the actual Moab detail with the Mapbox Outdoors route preview and no fatal exception. Evidence: `C:\Users\User\AppData\Local\Temp\trailhead-android-links-2026-07-25\original-link-open-15s-fixed.png`, SHA-256 `41F58A371AD56E26F7E5E4A544932BD60DFDFF28312EDA34AC390D801A7A9D13`.
+- The user then identified a P2 copy/function defect: the Original Share control showed a generic placeholder alert. The correction at `2341076b6dc15d96a443947974f2e1be34b19bda` now opens the native share sheet with the published title, actual summary, and canonical Original landing URL. A deterministic content test is part of `test:originals-renderer`.
+- Physical Android sharing passed. The share sheet contains `Moab: Canyons to the Sky`, the real scenic-drive summary, and `https://gettrailhead.app/originals/moab-canyons-to-the-sky`.
+  - Screenshot: `C:\Users\User\AppData\Local\Temp\trailhead-android-share-2026-07-25\share-sheet.png`, SHA-256 `E2D2E2573D8D621D44EE9F0FDF743329A08ED9010AB0B60F8DD9E54A2B1EBA2A`.
+  - UI hierarchy: `C:\Users\User\AppData\Local\Temp\trailhead-android-share-2026-07-25\share-sheet.xml`, SHA-256 `470A6E2318FFE1AA740C31E596F53B7DE35D5ABEE4976435C42AC43644BEA6D2`.
+- Final paired preview OTA for this source was published with Sentry source maps:
+  - Channel `preview`, channel ID `019dbc97-3cde-795b-a35d-e6aa985060d3`.
+  - Candidate branch `preview-candidate-2341076b6dc15d96a443947974f2e1be34b19bda-ms02ex0b-7e1843164d784e42ee1811b4`.
+  - Android group `26c99f19-a978-4a92-bff5-f1c8b5fe13b9`, update `019f9841-9343-7953-bcb3-88a310462831`, runtime `native-1.0.10-android.3`.
+  - iOS group `15bbd7be-decc-4f98-88d0-e44c6b08017a`, update `019f9841-9343-7e57-b35e-eb205cbedf91`, runtime `native-1.0.10-ios.3`.
+  - Publisher stdout: `C:\Users\User\AppData\Local\Temp\trailhead-preview-2341076-ota.out.log`, SHA-256 `E42B591C402DC833813EA03F153BC1D9D8F94EF29C53709706DBC62C1468B0F3`.
+  - Publisher stderr: `C:\Users\User\AppData\Local\Temp\trailhead-preview-2341076-ota.err.log`, SHA-256 `32089852BE8568DDBC2751B82D6448587817250D6BCB2284C018656C501B018E`.
+- Physical Samsung build `61`, runtime `native-1.0.10-android.3`, downloaded and restarted onto Android update `019f9841-9343-7953-bcb3-88a310462831`; the next launch reported no newer update.
+- iOS call/system interruption and Bluetooth disconnect/reconnect remain unclaimed external physical evidence. The completed iOS locked/Low Power/Now Playing/GPX/teardown packet is not repeated. AASA configuration is hosted; Android App Links cannot substitute for a physical iOS Universal Link assertion.
+- Open app-code P0/P1: none. Deferred Branch fresh-install attribution and the two unavailable iOS interruption exercises are release evidence boundaries, not newly reproduced app defects.
+- Exact next action: commit and push this checkpoint, freeze the resulting SHA, and run `audit:prepreview` exactly once from a clean detached worktree. If it passes, create paired Android and iOS 1.0.10 production binaries from that same SHA. Publish production OTA only after compatible paired binaries exist; evaluate any iOS 1.0.9 stability/search OTA as a separate runtime-compatible backport.
+- Do not repeat: Android App Links, Original cold-link repair, Original share sheet, Android Auto, Yellowstone, Search performance, Memory Gate V3, Plan/Downloads/Originals lifecycle, GPX playback, broad Map/Search/sheets, Layers, NPS, Route Editor/Trip Overview, Profile, or completed Figma/Mobbin work.
+- Task-owned background processes: none. OTA publisher, Metro export, Sentry upload, Expo/EAS, Gradle, Maestro, memory-gate, and test processes have exited. Temporary `1744e33` and `2341076` preview worktrees were removed.

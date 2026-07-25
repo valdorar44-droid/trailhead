@@ -22,6 +22,7 @@ import androidx.lifecycle.Lifecycle
 import expo.modules.trailheadcarreports.CarReportEnqueueStatus
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -206,6 +207,32 @@ class TrailheadCarTemplateTest {
     assertEquals(listOf("Done"), arrival.pane.actions.map { it.title.toString() })
   }
 
+  @Test
+  fun endingReconnectRootReplacesGuidanceWithHome() {
+    val controller = TestController(readySnapshot(), navigating = true)
+
+    assertTrue(
+      shouldReplacePostGuidanceRoot(
+        TrailheadCarGuidanceScreen(carContext, controller),
+      ),
+    )
+    assertTrue(
+      shouldReplacePostGuidanceRoot(
+        TrailheadCarArrivalScreen(
+          carContext = carContext,
+          controller = controller,
+          stopIndex = 1,
+          finalArrival = true,
+        ),
+      ),
+    )
+    assertFalse(
+      shouldReplacePostGuidanceRoot(
+        TrailheadCarHomeScreen(carContext, controller),
+      ),
+    )
+  }
+
   private fun render(screen: Screen): Template {
     val controller = ScreenController(screen)
     controller.moveToState(Lifecycle.State.RESUMED)
@@ -223,7 +250,7 @@ class TrailheadCarTemplateTest {
     override val mapSurface: TrailheadCarMapSurface = this@TrailheadCarTemplateTest.mapSurface
 
     override fun startGuidance() = Unit
-    override fun endGuidance() = Unit
+    override fun endGuidanceAndReturnHome() = Unit
     override fun continueAfterArrival(stopIndex: Int) = Unit
     override fun toggleMuted() = Unit
     override fun beginReportLocation() = Unit

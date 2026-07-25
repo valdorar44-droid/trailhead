@@ -105,8 +105,7 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
     override fun onStopNavigation() {
       mainHandler.post {
         if (destroyed) return@post
-        endGuidance()
-        carContext.getCarService(ScreenManager::class.java).popToRoot()
+        endGuidanceAndReturnHome()
       }
     }
 
@@ -260,7 +259,16 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
     TrailheadCarLocationService.freshNavigationLocation(MAX_NAVIGATION_LOCATION_AGE_MS)?.let(::handleLocation)
   }
 
-  override fun endGuidance() = endGuidance(refreshSnapshot = true)
+  override fun endGuidanceAndReturnHome() = endGuidanceAndReturnHome(refreshSnapshot = true)
+
+  private fun endGuidanceAndReturnHome(refreshSnapshot: Boolean) {
+    endGuidance(refreshSnapshot)
+    val manager = carContext.getCarService(ScreenManager::class.java)
+    manager.popToRoot()
+    if (shouldReplacePostGuidanceRoot(manager.top)) {
+      manager.push(TrailheadCarHomeScreen(carContext, this))
+    }
+  }
 
   private fun endGuidance(refreshSnapshot: Boolean) {
     if (navigating) navigationManager.navigationEnded()
@@ -573,8 +581,7 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
     if (routeChanged) routeReplacementRequestedUntilElapsedMs = 0L
 
     if (shouldEndActiveOriginalGuidance(previous, next, navigating, routeChanged)) {
-      endGuidance(refreshSnapshot = false)
-      carContext.getCarService(ScreenManager::class.java).popToRoot()
+      endGuidanceAndReturnHome(refreshSnapshot = false)
       CarToast.makeText(carContext, "Original ended on phone", CarToast.LENGTH_SHORT).show()
       return
     }
@@ -582,8 +589,7 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
     if (navigating && routeChanged) {
       val nextRoute = next.route
       if (nextRoute == null) {
-        endGuidance(refreshSnapshot = false)
-        carContext.getCarService(ScreenManager::class.java).popToRoot()
+        endGuidanceAndReturnHome(refreshSnapshot = false)
         CarToast.makeText(carContext, "Route closed", CarToast.LENGTH_SHORT).show()
         return
       }
@@ -647,6 +653,10 @@ internal fun shouldApplyLiveCarLocation(navigating: Boolean, autoDriveEnabled: B
 
 internal fun shouldStopCarLocationServiceOnSessionDestroy(navigating: Boolean): Boolean {
   return !navigating
+}
+
+internal fun shouldReplacePostGuidanceRoot(screen: Screen): Boolean {
+  return screen is TrailheadCarGuidanceScreen || screen is TrailheadCarArrivalScreen
 }
 
 private fun emptyCarSnapshot(): TrailheadCarSnapshot {

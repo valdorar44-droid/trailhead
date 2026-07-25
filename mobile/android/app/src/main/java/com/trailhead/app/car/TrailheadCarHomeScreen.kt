@@ -58,7 +58,7 @@ internal interface TrailheadCarSessionController {
   val mapSurface: TrailheadCarMapSurface
 
   fun startGuidance()
-  fun endGuidance()
+  fun endGuidanceAndReturnHome()
   fun continueAfterArrival(stopIndex: Int)
   fun toggleMuted()
   fun beginReportLocation()
@@ -396,8 +396,7 @@ internal class TrailheadCarGuidanceScreen(
       Action.Builder()
         .setTitle("End")
         .setOnClickListener {
-          controller.endGuidance()
-          screenManager.popToRoot()
+          controller.endGuidanceAndReturnHome()
         }
         .build(),
     )
@@ -427,8 +426,7 @@ internal class TrailheadCarArrivalScreen(
           .setTitle("Done")
           .setBackgroundColor(TRAILHEAD_ACCENT)
           .setOnClickListener {
-            controller.endGuidance()
-            screenManager.popToRoot()
+            controller.endGuidanceAndReturnHome()
           }
           .build(),
       )
@@ -447,8 +445,7 @@ internal class TrailheadCarArrivalScreen(
         Action.Builder()
           .setTitle("End")
           .setOnClickListener {
-            controller.endGuidance()
-            screenManager.popToRoot()
+            controller.endGuidanceAndReturnHome()
           }
           .build(),
       )

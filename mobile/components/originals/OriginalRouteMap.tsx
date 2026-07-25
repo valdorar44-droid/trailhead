@@ -41,6 +41,16 @@ export default function OriginalRouteMap({
     const last = authoredCoordinates[authoredCoordinates.length - 1];
     return `${authoredCoordinates.length}:${first?.join(',') ?? ''}:${last?.join(',') ?? ''}`;
   }, [authoredCoordinates]);
+  const initialCameraBounds = useMemo(() => {
+    if (authoredCoordinates.length < 2) return undefined;
+    const lngs = authoredCoordinates.map(coordinate => coordinate[0]);
+    const lats = authoredCoordinates.map(coordinate => coordinate[1]);
+    return {
+      ne: [Math.max(...lngs), Math.max(...lats)] as [number, number],
+      sw: [Math.min(...lngs), Math.min(...lats)] as [number, number],
+      padding: [54, 28, 104, 28] as [number, number, number, number],
+    };
+  }, [authoredCoordinates]);
   const routeCameraOwnership = useMemo(
     () => createMapCameraOwnership('originals', `original-route-preview:${routeSignature}`),
     [routeSignature],
@@ -113,6 +123,7 @@ export default function OriginalRouteMap({
         showRadar={false}
         hideMapStatusBadge
         cameraOwnership={routeCameraOwnership}
+        initialCameraBounds={initialCameraBounds}
         onMapReady={() => {
           mapReadyRef.current = true;
           setMapReadinessRevision(revision => revision + 1);

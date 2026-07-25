@@ -267,6 +267,12 @@ export interface NativeMapProps {
   visualWorkActive?: boolean;
   /** The active experience owns camera initialization without replacing the map. */
   cameraOwnership?: MapCameraOwnership;
+  /** Optional first-frame bounds for embedded route maps. Later camera ownership still applies. */
+  initialCameraBounds?: {
+    ne: [number, number];
+    sw: [number, number];
+    padding?: [number, number, number, number];
+  };
 
   // Data
   waypoints:     WP[];
@@ -864,6 +870,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const {
     visualWorkActive = true,
     cameraOwnership = BROWSE_MAP_CAMERA_OWNERSHIP,
+    initialCameraBounds,
     waypoints, camps, gas, pois, offlineTrailFeatures = emptyFC(), waterNavLines, waterSpotCards = [], waterCorridor = null, waterFollowRoute = null, reports, communityPins, searchMarker,
     userLoc, navMode, navCameraFollow = false, nativeNavEngineActive = false, navIdx, navHeading, navSpeed,
     mapLayer, routeProviderMode = 'trailhead', routeOpts, rendererMode,
@@ -1212,6 +1219,25 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     pitch: showTerrain ? 68 : 0,
     animationDuration: 0,
   });
+  const initialBoundsCameraDefaultRef = useRef((() => {
+    const ne = initialCameraBounds?.ne;
+    const sw = initialCameraBounds?.sw;
+    if (
+      !ne
+      || !sw
+      || ![...ne, ...sw].every(Number.isFinite)
+      || ne[0] < sw[0]
+      || ne[1] < sw[1]
+    ) return null;
+    const [paddingTop, paddingRight, paddingBottom, paddingLeft] =
+      initialCameraBounds?.padding ?? [48, 28, 48, 28];
+    return {
+      bounds: { ne, sw },
+      padding: { paddingTop, paddingRight, paddingBottom, paddingLeft },
+      pitch: 0,
+      animationDuration: 0,
+    };
+  })());
   const pendingFreeCameraRef = useRef<null | (() => void)>(null);
   const programmaticCameraUntilRef = useRef(0);
   const userCameraGestureUntilRef = useRef(0);
@@ -3320,7 +3346,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           pan gesture disables nav follow can crash RNMapbox/MapLibre. */}
       <MapGL.Camera
         ref={camRef}
-        defaultSettings={freeCameraDefaultRef.current}
+        defaultSettings={initialBoundsCameraDefaultRef.current ?? freeCameraDefaultRef.current}
         followUserLocation={!!(visualWorkActive && navMode && navCameraFollow)}
         followUserMode={(navSpeed ?? 0) > 1.2 ? MapGL.UserTrackingMode.FollowWithCourse : MapGL.UserTrackingMode.FollowWithHeading}
         followZoomLevel={(navSpeed ?? 0) > 20 ? 15.5 : (navSpeed ?? 0) > 9 ? 16.2 : 17}

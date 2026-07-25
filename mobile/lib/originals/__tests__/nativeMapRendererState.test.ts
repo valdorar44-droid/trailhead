@@ -76,6 +76,7 @@ async function main() {
   const nativeMap = readFileSync('components/NativeMap/index.tsx', 'utf8');
   assert.match(nativeMap, /onMapStyleLoaded\?: \(\) => void/);
   assert.match(nativeMap, /cameraOwnership\?: MapCameraOwnership/);
+  assert.match(nativeMap, /initialCameraBounds\?: \{/);
   assert.match(nativeMap, /cameraOwnershipRef\.current\.blocksRecentViewport/);
   assert.match(nativeMap, /camera:restore-browse-owner/);
   assert.match(nativeMap, /pendingBrowseCameraRestoreRef\.current/);
@@ -84,6 +85,9 @@ async function main() {
   const routeMap = readFileSync('components/originals/OriginalRouteMap.tsx', 'utf8');
   assert.match(routeMap, /createMapCameraOwnership\('originals', `original-route-preview:\$\{routeSignature\}`\)/);
   assert.match(routeMap, /cameraOwnership=\{routeCameraOwnership\}/);
+  assert.match(routeMap, /initialCameraBounds=\{initialCameraBounds\}/);
+  assert.match(routeMap, /ne: \[Math\.max\(\.\.\.lngs\), Math\.max\(\.\.\.lats\)\]/);
+  assert.match(routeMap, /sw: \[Math\.min\(\.\.\.lngs\), Math\.min\(\.\.\.lats\)\]/);
   assert.match(routeMap, /mapLayer="extreme"/);
   assert.match(routeMap, /premiumMapStyle="outdoors"/);
   assert.match(routeMap, /rendererMode="mapbox"/);
@@ -92,6 +96,10 @@ async function main() {
   assert.match(routeMap, /if \(!mapReadyRef\.current \|\| !layoutReadyRef\.current \|\| styleGeneration <= 0\) return/);
   assert.match(routeMap, /const fitKey = `\$\{routeSignature\}:\$\{styleGeneration\}`/);
   assert.doesNotMatch(routeMap, /setTimeout\(fitAuthoredRoute/);
+  assert.match(
+    nativeMap,
+    /defaultSettings=\{initialBoundsCameraDefaultRef\.current \?\? freeCameraDefaultRef\.current\}/,
+  );
 
   console.log('Originals/main-map renderer binding tests passed.');
 }

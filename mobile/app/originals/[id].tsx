@@ -6,6 +6,7 @@ import {
   Modal,
   Platform,
   ScrollView,
+  Share,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -36,6 +37,7 @@ import {
 import type { OriginalUiBundleState, OriginalUiDetail } from '@/components/originals/types';
 import { originalStartDestination } from '@/lib/originals/mainMapNavigation';
 import { originalStartNeedsPermissionDisclosure } from '@/lib/originals/locationPolicy';
+import { originalShareContent } from '@/lib/originals/shareOriginal';
 
 const EMPTY_BUNDLE: OriginalUiBundleState = {
   state: 'not_downloaded',
@@ -315,6 +317,17 @@ export default function OriginalDetailScreen() {
     : !ready
       ? () => setReadinessVisible(true)
       : () => { void openStart(); };
+  const shareOriginal = async () => {
+    const content = originalShareContent(detail);
+    try {
+      await Share.share({
+        title: content.title,
+        message: content.message,
+      });
+    } catch {
+      Alert.alert('Couldn’t share', 'Please try again.');
+    }
+  };
 
   return (
     <View testID="original.detail.screen" style={[styles.screen, { backgroundColor: C.bg }] }>
@@ -325,7 +338,7 @@ export default function OriginalDetailScreen() {
             <Ionicons name="chevron-back" size={20} color="#FFFFFF" />
           </TouchableOpacity>
           {!adminPreview ? (
-            <TouchableOpacity testID="original.detail.share" accessibilityRole="button" accessibilityLabel="Share this Original" onPress={() => Alert.alert('Share', 'Original sharing will use the published Trailhead link.')} style={styles.floatingButton}>
+            <TouchableOpacity testID="original.detail.share" accessibilityRole="button" accessibilityLabel="Share this Original" onPress={() => { void shareOriginal(); }} style={styles.floatingButton}>
               <Ionicons name="share-outline" size={19} color="#FFFFFF" />
             </TouchableOpacity>
           ) : <View style={styles.floatingButtonSpacer} />}

@@ -2,6 +2,7 @@ import {
   createAudioPlayer,
   setAudioModeAsync,
   setIsAudioActiveAsync,
+  type AudioMetadata,
   type AudioPlayer,
   type AudioStatus,
 } from 'expo-audio';
@@ -23,8 +24,10 @@ export type OriginalAudioAdapter = {
   };
   load(uri: string, options?: {
     positionMs?: number;
+    metadata?: AudioMetadata;
     onState?: (state: OriginalAudioPlaybackState) => void;
     onUserPause?: (state: OriginalAudioPlaybackState) => void | Promise<void>;
+    onUserPlay?: (state: OriginalAudioPlaybackState) => void | Promise<void>;
   }): Promise<void>;
   play(): Promise<void>;
   pause(): Promise<void>;
@@ -131,8 +134,10 @@ export function createExpoAudioOriginalAudioAdapter(): OriginalAudioAdapter {
   let pendingLoad: PendingLoad | null = null;
   let onState: ((state: OriginalAudioPlaybackState) => void) | undefined;
   let onUserPause: ((state: OriginalAudioPlaybackState) => void | Promise<void>) | undefined;
+  let onUserPlay: ((state: OriginalAudioPlaybackState) => void | Promise<void>) | undefined;
   let lastState = emptyOriginalPlaybackState();
   let plannedPause = false;
+  let plannedPlay = false;
   let volume = 1;
   const supportsNativePlayback = Platform.OS === 'android' || Platform.OS === 'ios';
 
@@ -141,7 +146,15 @@ export function createExpoAudioOriginalAudioAdapter(): OriginalAudioAdapter {
     const next = originalPlaybackState(status as AudioStatus & { isPausedByInterruption?: boolean });
     lastState = next;
     onState?.(next);
-    if (next.playing) plannedPause = false;
+    const externallyPlayed = previous.loaded
+      && !previous.playing
+      && next.loaded
+      && next.playing;
+    if (next.playing) {
+      plannedPause = false;
+      if (plannedPlay) plannedPlay = false;
+      else if (externallyPlayed) void onUserPlay?.(next);
+    }
     const externallyPaused = previous.playing
       && next.loaded
       && !next.playing
@@ -162,7 +175,9 @@ export function createExpoAudioOriginalAudioAdapter(): OriginalAudioAdapter {
     statusSubscription = null;
     onState = undefined;
     onUserPause = undefined;
+    onUserPlay = undefined;
     plannedPause = false;
+    plannedPlay = false;
     lastState = emptyOriginalPlaybackState();
     if (!current) return;
     if (supportsNativePlayback) {
@@ -190,6 +205,7 @@ export function createExpoAudioOriginalAudioAdapter(): OriginalAudioAdapter {
       await configureOriginalsAudioMode();
       onState = options.onState;
       onUserPause = options.onUserPause;
+      onUserPlay = options.onUserPlay;
       const created = createAudioPlayer(
         { uri },
         {
@@ -202,7 +218,10 @@ export function createExpoAudioOriginalAudioAdapter(): OriginalAudioAdapter {
       statusSubscription = created.addListener('playbackStatusUpdate', emitState);
 
       if (supportsNativePlayback) {
-        created.setActiveForLockScreen(true, LOCK_SCREEN_METADATA, {
+        created.setActiveForLockScreen(true, {
+          ...LOCK_SCREEN_METADATA,
+          ...options.metadata,
+        }, {
           showSeekBackward: true,
           showSeekForward: true,
         });
@@ -232,6 +251,7 @@ export function createExpoAudioOriginalAudioAdapter(): OriginalAudioAdapter {
       if (!player) throw new Error('No Trailhead Original narration is loaded.');
       await activateOriginalsAudioSession();
       plannedPause = false;
+      plannedPlay = !player.currentStatus.playing;
       player.play();
     },
 

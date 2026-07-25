@@ -172,6 +172,9 @@ async function main() {
   let audioUnloadCount = 0;
   let audioReleaseSessionCount = 0;
   let audioStateListener: ((state: typeof audioState) => void) | undefined;
+  let audioUserPauseListener: ((state: typeof audioState) => void | Promise<void>) | undefined;
+  let audioUserPlayListener: ((state: typeof audioState) => void | Promise<void>) | undefined;
+  let audioLoadMetadata: Record<string, unknown> | undefined;
   let failNextSessionSave = false;
   let locationCallback: ((sample: Record<string, unknown>) => Promise<void> | void) | null = null;
   let activeStoredSession: Record<string, any> | null = null;
@@ -278,8 +281,16 @@ async function main() {
     },
     audio: {
       capabilities: { backgroundPlayback: true, lockScreenControls: true },
-      async load(_uri: string, options?: { onState?: (state: typeof audioState) => void }) {
+      async load(_uri: string, options?: {
+        metadata?: Record<string, unknown>;
+        onState?: (state: typeof audioState) => void;
+        onUserPause?: (state: typeof audioState) => void | Promise<void>;
+        onUserPlay?: (state: typeof audioState) => void | Promise<void>;
+      }) {
+        audioLoadMetadata = options?.metadata;
         audioStateListener = options?.onState;
+        audioUserPauseListener = options?.onUserPause;
+        audioUserPlayListener = options?.onUserPlay;
         audioState.loaded = true;
         audioState.position_ms = 0;
       },
@@ -298,6 +309,8 @@ async function main() {
         audioState.loaded = false;
         audioState.playing = false;
         audioStateListener = undefined;
+        audioUserPauseListener = undefined;
+        audioUserPlayListener = undefined;
       },
       async releaseSession() { audioReleaseSessionCount += 1; audioState.loaded = false; audioState.playing = false; },
       async getState() { return audioState; },
@@ -434,6 +447,37 @@ async function main() {
     });
   });
   assert.equal(playCount, 1, 'the real tour reached active narration before teardown');
+  assert.equal(audioLoadMetadata?.title, 'Story 1', 'lock-screen metadata uses the current story title');
+  assert.equal(audioLoadMetadata?.albumTitle, manifest.title);
+  assert.equal(audioLoadMetadata?.artworkUrl, undefined, 'artwork metadata is omitted when the authored stop has none');
+  assert.ok(audioUserPauseListener && audioUserPlayListener);
+  audioState.playing = false;
+  audioState.position_ms = 3_895;
+  await act(async () => {
+    await audioUserPauseListener?.({ ...audioState });
+  });
+  assert.equal((activeStoredSession as Record<string, any> | null)?.status, 'paused');
+  assert.equal((activeStoredSession as Record<string, any> | null)?.user_paused, true);
+  const startsBeforeLockScreenResume = locationStartCount;
+  audioState.playing = true;
+  await act(async () => {
+    await audioUserPlayListener?.({ ...audioState });
+  });
+  assert.equal(
+    (activeStoredSession as Record<string, any> | null)?.status,
+    'active',
+    'lock-screen Play re-arms the active tour',
+  );
+  assert.equal(
+    (activeStoredSession as Record<string, any> | null)?.user_paused,
+    false,
+    'lock-screen Play clears the durable user-pause gate',
+  );
+  assert.equal(
+    locationStartCount,
+    startsBeforeLockScreenResume + 1,
+    'lock-screen Play restarts active-tour location delivery',
+  );
   audioState.position_ms = 12_345;
   await act(async () => { await runtime!.stopTour(); });
   const stoppedSession = storedSessions.find(item => item.owner_scope === 'account:driver');

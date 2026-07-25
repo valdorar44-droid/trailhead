@@ -143,6 +143,14 @@ export function createOriginalHeadlessController(
       stop.audio_asset_id,
     );
     if (!localUri) throw new Error('The active Original narration is not available offline.');
+    const artworkUri = stop.artwork_asset_id
+      ? await dependencies.bundles.assetUri(
+        session.owner_scope,
+        session.pack_id,
+        session.version,
+        stop.artwork_asset_id,
+      ).catch(() => null)
+      : null;
     if (!await activeSessionStillMatches(session, operationGeneration)) return false;
 
     const persisted = {
@@ -177,6 +185,12 @@ export function createOriginalHeadlessController(
     try {
       await dependencies.audio.load(localUri, {
         positionMs: persisted.current_audio_position_ms,
+        metadata: {
+          title: stop.title,
+          artist: 'Trailhead Originals',
+          albumTitle: manifest.title,
+          ...(artworkUri ? { artworkUrl: artworkUri } : {}),
+        },
         onState: state => {
           if (state.did_finish) void serialized(() => finishStopInternal(manifest, stopId, operationGeneration));
           else void persistAudioState(stopId, state);

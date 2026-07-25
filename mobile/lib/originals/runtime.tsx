@@ -271,6 +271,7 @@ export function OriginalsRuntimeProvider({
 
   const handleAudioFinishedRef = useRef<() => Promise<void>>(async () => {});
   const handleExternalUserPauseRef = useRef<(state: OriginalAudioPlaybackState) => Promise<void>>(async () => {});
+  const handleExternalUserPlayRef = useRef<(state: OriginalAudioPlaybackState) => Promise<void>>(async () => {});
 
   const handleAudioState = useCallback((audioState: OriginalAudioPlaybackState) => {
     if (stoppingRef.current) return;
@@ -357,6 +358,15 @@ export function OriginalsRuntimeProvider({
     );
     if (!operationIsCurrent()) return;
     if (!localUri) throw new Error('Download this Original before playing its stories.');
+    const artworkUri = stop.artwork_asset_id
+      ? await dependencies.bundles.assetUri(
+        ownerScope,
+        activeManifest.pack_id,
+        activeManifest.version,
+        stop.artwork_asset_id,
+      ).catch(() => null)
+      : null;
+    if (!operationIsCurrent()) return;
 
     // Persist the trigger/current cue before audio begins. A process restart can
     // resume it, and the trigger engine will never fire the same cue twice.
@@ -376,8 +386,15 @@ export function OriginalsRuntimeProvider({
     try {
       await dependencies.audio.load(localUri, {
         positionMs: persisted.current_audio_position_ms,
+        metadata: {
+          title: stop.title,
+          artist: 'Trailhead Originals',
+          albumTitle: activeManifest.title,
+          ...(artworkUri ? { artworkUrl: artworkUri } : {}),
+        },
         onState: handleAudioState,
         onUserPause: value => handleExternalUserPauseRef.current(value),
+        onUserPlay: value => handleExternalUserPlayRef.current(value),
       });
       if (!operationIsCurrent()) {
         await dependencies.audio.unload().catch(() => {});
@@ -556,6 +573,50 @@ export function OriginalsRuntimeProvider({
     }
     if (result.permission === 'denied') throw new Error('Location permission is required to trigger stories.');
   }, [dependencies.location, publishSession, stopLocation, submitLocationSample]);
+
+  const handleExternalUserPlay = useCallback(async () => {
+    const active = sessionRef.current;
+    const activeManifest = manifestRef.current;
+    if (
+      !active?.current_stop_id
+      || !active.user_paused
+      || !activeManifest
+      || stoppingRef.current
+    ) return;
+    trackingGenerationRef.current += 1;
+    const generation = trackingGenerationRef.current;
+    const simulating = simulationRef.current;
+    const operationIsCurrent = () => (
+      !stoppingRef.current
+      && generation === trackingGenerationRef.current
+      && sessionRef.current?.session_id === active.session_id
+      && sessionRef.current?.current_stop_id === active.current_stop_id
+      && manifestRef.current?.manifest_id === activeManifest.manifest_id
+    );
+    await publishSession({
+      ...active,
+      status: 'active',
+      user_paused: false,
+      updated_at_ms: Date.now(),
+    });
+    if (!operationIsCurrent()) return;
+    await acquireOriginalAudioFocus();
+    if (!operationIsCurrent()) {
+      await releaseAudio();
+      return;
+    }
+    if (!simulating) {
+      await startLocation(operationIsCurrent);
+      if (!operationIsCurrent()) {
+        await stopLocation();
+        return;
+      }
+      await syncOriginalDriveToCar(activeManifest).catch(() => {});
+      if (!operationIsCurrent()) return;
+    }
+    if (mountedRef.current) setState('tracking');
+  }, [acquireOriginalAudioFocus, publishSession, releaseAudio, startLocation, stopLocation]);
+  handleExternalUserPlayRef.current = handleExternalUserPlay;
 
   const activateTour = useCallback(async (
     manifestInput: OriginalManifestV1,

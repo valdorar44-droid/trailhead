@@ -1081,3 +1081,38 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Exact next action: commit and push only the reconnect policy, regression test, paired runtime/config updates, and this checkpoint. Build paired `.2` previews from that immutable SHA, install Android first, and rerun only Start Route -> host drop -> reconnect -> active guidance plus explicit End teardown. Do not repeat Map, Search, Layers, NPS, Originals, Offline, memory, or broad Android crawls.
 - Open P0/P1: reconnect P1 is corrected in source and unit-tested but remains open until the `.2` Android preview passes the physical DHU assertion.
 - Task-owned background processes: DHU PID `24684` and its persistent command host PID `26240` remain intentionally active for the current device session. Gradle, Metro, Maestro, EAS, Expo, publisher, and memory-gate processes have exited.
+
+## Android Auto live DHU closeout - reconnect and End accepted
+
+- Timestamp: `2026-07-25T00:20:32-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; exact paired-preview source and current HEAD `bced38493f3389d1f75895ad99fe8fe4c0f9f0b8`, pushed to origin.
+- Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. `.cursor/`, `dashboard/explore_serving_index_v2.json`, and unrelated Valhalla/Maestro mode-only changes remain excluded and unstaged.
+- The paired `.2` preview proved the host-disconnect correction:
+  - Android build `60`, build ID `ac5b8d0e-1a6d-4f70-8c3a-192fe97e3190`, runtime `native-1.0.10-android.2`.
+  - iOS build `55`, build ID `28e32006-ca43-438d-862b-163b20207e26`, runtime `native-1.0.10-ios.2`.
+  - Start Route, official `AUTO_DRIVE`, foreground service, host drop, and reconnect all passed. The phone-owned navigation service stayed active and reconnect returned directly to active guidance.
+- One final deterministic P1 appeared after reconnect: explicit End stopped the phone-owned location service and navigation notification, but the DHU continued to render the old guidance template.
+- Evidence-backed cause: on reconnect, active guidance is the root `Screen`. AndroidX `ScreenManager.popToRoot()` cannot remove the root screen, so the old guidance root remained after the session state ended.
+- Correction:
+  - End, host `onStopNavigation`, final arrival, phone-ended Original, and phone-closed route all use one `endGuidanceAndReturnHome` path.
+  - The controller ends guidance, pops ordinary child screens, and replaces a remaining guidance/arrival root with the real Trailhead route-preview home.
+  - Normal home -> guidance stacks still return to the existing home; no duplicate home screen is added.
+  - Host disconnect while navigating still preserves the phone-owned service for reconnect.
+- Focused car tests passed:
+  - `TrailheadCarSessionPolicyTest`
+  - `TrailheadCarTemplateTest`
+  - `BUILD SUCCESSFUL`; native/config drift passed.
+- Final paired `.3` previews were created from the identical immutable SHA:
+  - Android build `61`, build ID `093c2d9f-bcf8-49f3-9d91-5c821177c238`, runtime `native-1.0.10-android.3`, artifact SHA-256 `ce75cd3fc39264676873ffd7e24bd12f736f13290746bfa9394867839ac06e93`.
+  - iOS build `56`, build ID `9c95c429-d9e9-464c-9823-2f16d610edb2`, runtime `native-1.0.10-ios.3`, artifact SHA-256 `e32e515b524cd14a877bb491fb59ef4edf0f5567ee97ccaae3538195e911c4d9`.
+- Physical Samsung `RFCR408DA9B` accepted Android build `61`:
+  - Route-ready home rendered the saved Flagstaff-to-Moab route.
+  - Start Route opened active off-route guidance with route map, ETA, Report, map controls, and compass.
+  - Dropping only DHU left `TrailheadCarLocationService` active as foreground notification `4071`.
+  - Reconnecting DHU returned directly to active guidance.
+  - Explicit End visibly returned to the Flagstaff-to-Moab route-ready screen.
+  - Post-End `TrailheadCarLocationService` was absent and no active `trailhead_navigation` notification remained.
+- Android Auto P0/P1: none open. The no-vehicle DHU session is accepted as the live Car App Library route/reconnect/End proof.
+- Exact next action: disconnect Android, connect and unlock the registered iPhone, install iOS build `56`, and run only identity plus the remaining platform-native interruption checks. Then run `audit:prepreview` exactly once on the frozen SHA before creating paired production binaries.
+- Do not repeat: Android Auto DHU, Map/Search/Yellowstone, Layers, NPS/Explore, Plan/Downloads, Originals acquisition/GPX/background trigger, route mini-map, Route Editor/Trip Overview, Profile, Memory Gate V3, or broad Android/iOS crawls.
+- Task-owned background processes after cleanup: none. The ADB forward and temporary `trailhead-preview-bced384` worktree were removed before this checkpoint commit.

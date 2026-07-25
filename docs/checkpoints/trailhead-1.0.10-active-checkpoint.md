@@ -1038,3 +1038,23 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - After the Android Auto session: freeze one clean source SHA, run `audit:prepreview` exactly once, and create paired 1.0.10 production candidates only if no P0/P1 remains.
 - Do not repeat: Yellowstone search/ranking or Park sheet, Plan/Downloads/Originals acquisition and lifecycle, GPX trigger, mini-map implementation, broad Map/Explore/sheet crawls, Search performance, Memory Gate V3, Layers, NPS research, completed Figma/Mobbin work, or the earlier desktop DHU handshake sequence.
 - Task-owned background processes: none. Publisher, Expo export, Sentry upload, Metro, Maestro, Gradle, memory-gate, and focused test processes have exited.
+
+## Frozen-candidate Android closeout — single DHU session remains externally blocked
+
+- Timestamp: `2026-07-24T22:35:35-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; checkpoint base HEAD `e40e0e58c41518275c2327d85e796be8f61294ba`. Exact paired mobile source remains `a69397052c9827701551edbe9c6b294796a594ce`.
+- Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. `.cursor/`, `dashboard/explore_serving_index_v2.json`, and unrelated mode-only changes remain excluded and unstaged.
+- Physical Samsung `RFCR408DA9B` was connected and authorized with `com.trailhead.app` version `1.0.10`, build `59`. The emulator remained connected but was not selected.
+- Exactly one Windows DHU session was run after the user started the Android Auto Head Unit Server. ADB forwarding selected only the Samsung. The Windows DHU reached `[I]: connected.` on `localhost:5277`, then the projection host closed before Trailhead's `androidx.car.app` service received or bound a session.
+- The phone returned to Android Auto's ordinary `Connect a vehicle` screen. The post-session activity-service and relevant logcat filters were empty. Trailhead produced no crash, ANR, process-death, or car-service exception; recorded historical process exits were user-requested/force-stop events.
+- This reproduces the previously checkpointed projection-host handshake boundary with no new Trailhead app-code signal. It is not recorded as a passed route/maneuver/reconnect session and will not be retried through this desktop setup.
+- Evidence directory: `C:\Users\User\AppData\Local\Temp\trailhead-android-auto-2026-07-24T22-34-18`.
+  - DHU stdout SHA-256 `ae04548587f2d83b79a54ac2d6c3c8154bfee019125aaa52ed93998cae3f0d71`.
+  - DHU stderr SHA-256 `31f3f1fac8d2f73ece24ba3ddb94caf5048a5fb4ad0beb1ef4b64338b0a297fe`.
+  - Phone-state screenshot SHA-256 `e39e0ccdb67bcef18f20d0ce297fb3bec94ea599360d2b0b642e0ff034ae3f6a`.
+  - Phone hierarchy SHA-256 `cba78d57a8da57c4a96db645f6a58ec2575ab06d72e8a8fcb6d853dbc9eebcb0`.
+  - Evidence manifest SHA-256 `90dac76dc0988d7ddadc3b9fc45f562912e0595184c3912f470b8c4183e114cc`.
+- Android app-code P0/P1: none open. Live Android Auto route/maneuver/reconnect evidence remains a production-submission blocker under the approved release plan.
+- Exact next action: use one actual vehicle/head unit or a freshly reset Android Auto projection host for the missing live session. Do not repeat this desktop DHU handshake. Once that external proof passes, freeze one clean SHA, run `audit:prepreview` exactly once, and create the paired 1.0.10 production candidates.
+- Do not repeat: this Windows DHU session, earlier WSL/Windows DHU handshakes, Android/iOS Originals lifecycle or mini-map proof, Yellowstone search/Park sheet, Search performance, Memory Gate V3, broad crawls, Layers, NPS research, or completed Figma/Mobbin work.
+- Task-owned background processes: none. The DHU exited, the ADB forward was removed, and no Metro, EAS, Expo, Gradle, Maestro, memory-gate, publisher, or focused test process remains.

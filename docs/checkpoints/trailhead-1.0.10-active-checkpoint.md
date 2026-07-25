@@ -1210,3 +1210,56 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Exact next action: commit and push the release-harness correction and this checkpoint, tag the resulting clean SHA, and create paired Android/iOS 1.0.10 production candidates from that same immutable source.
 - Do not repeat: the full pre-preview gate, its four focused assertions, Android App Links, Original cold-link/share checks, Android Auto, GPX playback, Memory Gate V3, Yellowstone/Search, Layers, NPS, Plan/Downloads, Route Editor/Trip Overview, Profile, or completed Figma/Mobbin work.
 - Task-owned background processes: none. Gradle daemons, temporary databases, detached gate worktree, publishers, Metro, EAS, Maestro, and test processes were stopped or removed.
+
+## Paired 1.0.10 production build and compatible OTA promotion
+
+- Timestamp: `2026-07-25T04:06:24-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; immutable production source `f90c150d8801d0d2ba73cc6a52277ca9ef5978eb`, pushed to origin.
+- Production source tags `v1.0.10-rc1` and `v1.0.10` both resolve to `f90c150d8801d0d2ba73cc6a52277ca9ef5978eb`; `v1.0.10` is pushed.
+- Protected Explore index SHA-256 remains `7E59E5E2273DBBE1A26D7BBD4D947FAA20935C51FB79C464EED8A17BABF4D8F4`. `.cursor/` and `dashboard/explore_serving_index_v2.json` remain excluded and unstaged.
+- The first paired EAS attempt failed after dependency installation because the EAS production environment did not include the already-configured Branch and Sentry variable names:
+  - Android build `62`, ID `e5276969-dc95-4926-92b9-265107c8558e`.
+  - iOS build `57`, ID `a71ef58c-4845-4ede-a0e9-3caeb7c398af`.
+  - Existing values for `BRANCH_API_KEY`, `EXPO_PUBLIC_SENTRY_DSN`, `SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, and `SENTRY_PROJECT` were extended from preview to production. No secret value was printed or changed.
+- The corrected paired production builds finished from the identical immutable SHA:
+  - Android build `63`, ID `7ab0f1bb-a742-4043-8a97-4d8986485e12`, runtime `native-1.0.10-android.3`, fingerprint `60af3c45848a22f1ce3173738969ed10746bcff1`.
+  - Android AAB: `C:\Users\User\Downloads\Trailhead-1.0.10-Android-build63.aab`, 161,739,412 bytes, SHA-256 `509A771B59B3E20B005184F5E518684C43699466A6D9748B26E78DDED27BFD0C`.
+  - Official bundletool `1.18.3` validation exited `0`.
+  - iOS build `58`, ID `464207e7-dfdf-47ab-bd36-6b32e97aa362`, runtime `native-1.0.10-ios.3`, fingerprint `5aa15fca809fa2a731b6a7c40f26912d4794de48`.
+  - iOS IPA: `C:\Users\User\Downloads\Trailhead-1.0.10-iOS-build58.ipa`, 70,159,516 bytes, SHA-256 `41BC4524BABBC7F33BC436B66ACF470C4EB247F9893E17247765F727424FFD08`.
+  - The IPA reports bundle `com.trailhead.app`, marketing version `1.0.10`, build `58`, and background modes `location`, `audio`, and `fetch`. Sentry's debug-symbol build phase ran.
+  - The paired-build evidence check verified both build IDs, build numbers, runtime versions, fingerprints, and exact commit.
+- Sentry source-map upload completed for the production export:
+  - Android bundle debug ID `8ef9671f-5e21-44c5-9e24-f80dda7c05a1`.
+  - iOS bundle debug ID `2182a483-1276-4f09-aa7e-e3a4c5814a44`.
+- A production OTA was published to an isolated candidate branch from exact `f90c150`:
+  - Branch `production-candidate-f90c150d-legacy-20260725035506`, ID `019f9881-6155-7eb7-ac71-26927a0674e2`.
+  - Android group `5b65d023-482b-41fe-a142-5a496ec99bda`, update `019f9881-8483-7a60-b226-310c26296705`, runtime `native-1.0.10-android.3`.
+  - iOS group `f9963578-597a-4643-aa57-6b919b1382f0`, update `019f9881-8483-7974-8faa-4cc0b01706db`, runtime `native-1.0.10-ios.3`.
+- Before promotion, the candidate branch was populated with the latest compatible production group for every legacy runtime:
+  - `native-1.0.9-car2-originals1` Android.
+  - `native-1.0.9-originals1` iOS.
+  - `native-1.0.8-car2-originals1` Android.
+  - `native-1.0.8-originals1` iOS.
+  - `native-1.0.7` Android and iOS.
+  - `native-202607-mission-animator-1` Android and iOS.
+  - `native-20260614-sdk54-1` Android and iOS.
+- Candidate verification found nine current runtime groups and twelve platform updates. The new 1.0.10 groups report exact source `f90c150`; republished legacy records retain their prior manifests, runtimes, and platform compatibility.
+- The production channel `019dc26b-268a-794b-8aa8-3497b4d38487` now points to the verified candidate branch. Existing 1.0.9 and older installs therefore retain their compatible production update instead of being stranded.
+- The 1.0.9 runtime predates Search V2 and did not receive incompatible 1.0.10 Search code. Its existing compatible Originals artwork and End Tour stability update remains available.
+- OTA evidence:
+  - Pre-promotion candidate listing: `\\wsl.localhost\Ubuntu\tmp\trailhead-production-candidate-updates.json`, SHA-256 `97777FD44507E953CB08CD48CF64623F49556B072941D41DE865B7BDE665B972`.
+  - Post-promotion candidate listing: `\\wsl.localhost\Ubuntu\tmp\trailhead-production-after-updates.json`, SHA-256 `83EFBA1DB1C38219EB3B63D161C66F56517114D2339128F13016C9709F1F094A`.
+  - Production-channel proof: `\\wsl.localhost\Ubuntu\tmp\trailhead-production-channel-after.json`, SHA-256 `9D7A53B58BACCCFF223EDE60317A37AC37943EF3DD4E163522D88126E40FF63E`.
+- The live backend required no new deployment for this final mobile-only packet. `https://api.gettrailhead.app/api/health` returned HTTP `200` with service status `ok`; the previously deployed additive compatibility remains active.
+- iOS build `58` was scheduled for App Store Connect upload through EAS submission `fb1eddea-1232-48e9-9ad5-120120d945e5`. EAS accepted the request using the configured App Store Connect API key. App Store processing/review remains external and is not claimed complete.
+- Android build `63` is intentionally handed off as a validated AAB for the user's manual Play Console upload and Google background-location/media evidence. Google upload/review is not claimed complete.
+- Open app-code P0/P1: none.
+- Remaining release evidence boundaries:
+  - iOS call/system-audio interruption and Bluetooth disconnect/reconnect remain explicitly unclaimed; the accepted locked-screen, Low Power, Now Playing, GPX, completion, and teardown evidence is not repeated.
+  - Google Play still requires the real-candidate background-location/media evidence and the user's manual AAB upload.
+  - Deferred Branch fresh-install attribution remains disabled until its separate exactly-once/privacy gate passes.
+- Production OTA is live only for runtime-compatible binaries. Public Originals-stage changes, advertising, CarPlay claims, and replacement store screenshots remain separate approvals.
+- Exact next action: wait for App Store Connect processing, upload the validated Android AAB with the Google policy video/declaration, install-test the resulting store candidates, and coordinate review/release timing.
+- Do not repeat: full pre-preview, Android Auto DHU, iOS GPX/lock-screen playback, Android App Links, Original cold link/share, Yellowstone/Search, Memory Gate V3, Layers, NPS, Plan/Downloads, broad app crawls, or completed Figma/Mobbin work.
+- Task-owned background processes at checkpoint: none after the temporary clean release worktree is removed.

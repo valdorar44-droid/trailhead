@@ -81,6 +81,10 @@ async function main() {
   assert.match(nativeMap, /pendingBrowseCameraRestoreRef\.current/);
   assert.match(nativeMap, /onDidFinishLoadingStyle=\{\(\) => \{[\s\S]*onMapStyleLoaded\?\.\(\)/);
 
+  const routeMap = readFileSync('components/originals/OriginalRouteMap.tsx', 'utf8');
+  assert.match(routeMap, /createMapCameraOwnership\('originals', `original-route-preview:\$\{routeSignature\}`\)/);
+  assert.match(routeMap, /cameraOwnership=\{routeCameraOwnership\}/);
+
   console.log('Originals/main-map renderer binding tests passed.');
 }
 

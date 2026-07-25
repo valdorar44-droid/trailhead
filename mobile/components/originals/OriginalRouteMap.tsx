@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import NativeMap, { type NativeMapHandle } from '@/components/NativeMap';
 import { useTheme } from '@/lib/design';
+import { createMapCameraOwnership } from '@/lib/mapCameraOwnership';
 import { originalRouteDisplayModel } from '@/lib/originals/routeDisplay';
 import type { OriginalRouteMapProps } from './OriginalRouteMap.types';
 
@@ -36,6 +37,10 @@ export default function OriginalRouteMap({
     const last = authoredCoordinates[authoredCoordinates.length - 1];
     return `${authoredCoordinates.length}:${first?.join(',') ?? ''}:${last?.join(',') ?? ''}`;
   }, [authoredCoordinates]);
+  const routeCameraOwnership = useMemo(
+    () => createMapCameraOwnership('originals', `original-route-preview:${routeSignature}`),
+    [routeSignature],
+  );
 
   const fitAuthoredRoute = useCallback(() => {
     if (authoredCoordinates.length < 2) return;
@@ -92,6 +97,7 @@ export default function OriginalRouteMap({
         showAva={false}
         showRadar={false}
         hideMapStatusBadge
+        cameraOwnership={routeCameraOwnership}
         onMapReady={() => {
           readyRef.current = true;
           setTimeout(fitAuthoredRoute, 120);

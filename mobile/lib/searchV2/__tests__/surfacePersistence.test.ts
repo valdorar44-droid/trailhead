@@ -132,7 +132,9 @@ test('Search V2 place sheets keep a bounded, visible result body', () => {
   assert.match(premiumPlaceSheetSource, /sheetContent:\s*\{\s*padding:\s*0,\s*flex:\s*1,\s*minHeight:\s*0\s*\}/);
   assert.match(premiumPlaceSheetSource, /contentScroll:\s*\{\s*flex:\s*1,\s*minHeight:\s*0\s*\}/);
   assert.match(premiumPlaceSheetSource, /style=\{s\.contentScroll\}[\s\S]{0,360}testID=\{`\$\{sheetModel\.testID\}-content`\}/);
-  assert.match(premiumPlaceSheetSource, /label="Navigate"[\s\S]{0,180}onPress=\{\(\) => onNavigate\(place\)\}/);
+  assert.match(premiumPlaceSheetSource, /testID=\{sheetActionTestIDV1\(sheetModel\.testID, 'navigate'\)\}/);
+  assert.match(premiumPlaceSheetSource, /label=\{sheetAction\('navigate'\)\?\.label \|\| 'Navigate'\}/);
+  assert.match(premiumPlaceSheetSource, /onPress=\{\(\) => onNavigate\(place\)\}/);
   assert.match(premiumPlaceSheetSource, /testID=\{railTestID\}/);
   assert.match(premiumPlaceSheetSource, /testID=\{`\$\{railTestID\}\.item\.\$\{relatedTestIDPart\(item\.id \|\| item\.name \|\| idx\)\}`\}/);
   assert.match(premiumPlaceSheetSource, /accessibilityLabel=\{item\.name \|\| titleCase\(item\.type\)\}/);

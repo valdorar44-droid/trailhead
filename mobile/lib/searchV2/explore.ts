@@ -50,6 +50,73 @@ export function isTemporarySearchResultV2(
   return result.persistence_policy === 'temporary' || result.provenance.temporary_use_only;
 }
 
+export function isCanonicalCampgroundSearchResultV2(
+  result: Pick<
+    SearchResultV2,
+    'canonical_place_id' | 'persistence_policy' | 'provenance' | 'kind' | 'categories' | 'detail_ref'
+  >,
+) {
+  if (!canonicalSearchResultIdV2(result)) return false;
+  const identity = [
+    result.kind,
+    ...(result.categories ?? []),
+    result.detail_ref,
+    result.provenance.source_label,
+  ].filter(Boolean).join(' ').toLowerCase();
+  return /\b(?:camp|campground|campsite|camping|rv park|rv_park|dispersed camp|dispersed_camp|overnight parking|overnight_parking)\b/.test(identity)
+    || /^camp:/i.test(String(result.canonical_place_id || ''));
+}
+
+export function canonicalCampgroundSearchResultPinV2(
+  result: Pick<
+    SearchResultV2,
+    | 'canonical_place_id'
+    | 'persistence_policy'
+    | 'provenance'
+    | 'kind'
+    | 'categories'
+    | 'coordinates'
+    | 'title'
+    | 'subtitle'
+  >,
+) {
+  const canonicalId = canonicalSearchResultIdV2(result);
+  if (!canonicalId || !result.coordinates) return null;
+  const lat = Number(result.coordinates.lat);
+  const lng = Number(result.coordinates.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  const categories = (result.categories ?? []).map(value => String(value || '').trim()).filter(Boolean);
+  const categoryText = categories.join(' ').toLowerCase();
+  const sourceText = `${result.provenance.provider || ''} ${result.provenance.source_label || ''}`.toLowerCase();
+  const landType = /\b(?:rv|rv_park)\b/.test(categoryText)
+    ? 'RV campground'
+    : /\b(?:dispersed|dispersed_camp|informal_camp|wild_camp)\b/.test(categoryText)
+      ? 'Dispersed camping'
+      : 'Campground';
+  const sourceBadge = /recreation|ridb/.test(sourceText)
+    ? 'Recreation.gov'
+    : /national park service|\bnps\b/.test(sourceText)
+      ? 'NPS'
+      : 'Campground';
+  return {
+    id: canonicalId,
+    name: String(result.title || '').trim() || 'Campground',
+    lat,
+    lng,
+    tags: categories,
+    land_type: landType,
+    description: String(result.subtitle || '').trim(),
+    reservable: /recreation|ridb|reserv/.test(`${sourceText} ${categoryText}`),
+    url: '',
+    ada: false,
+    provider_place_id: canonicalId,
+    place_id: canonicalId,
+    source: result.provenance.provider,
+    verified_source: result.provenance.source_label || undefined,
+    source_badge: sourceBadge,
+  };
+}
+
 export function formatSearchDistanceV2(
   distanceMeters: number | null | undefined,
   unitMode: 'auto' | 'imperial' | 'metric' = 'auto',

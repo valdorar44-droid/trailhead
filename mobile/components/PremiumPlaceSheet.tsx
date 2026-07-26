@@ -7,6 +7,7 @@ import {
   Linking,
   PanResponder,
   Platform,
+  Share,
   ScrollView,
   StyleSheet,
   Text,
@@ -43,6 +44,14 @@ import {
 } from '@/lib/placeSheetAdapters';
 import { communityRatingTarget } from '@/lib/communityRatingEligibility';
 import { boundedExploreImageUrl, EXPLORE_IMAGE_BOUNDS, exploreImageSource } from '@/lib/mediaPolicy';
+import {
+  inferSheetActionEntityKindV1,
+  resolveSheetActionDescriptorsV1,
+  sheetActionByIdV1,
+  sheetActionTestIDV1,
+  type SheetActionIdV1,
+} from '@/lib/sheetActions';
+import type { SheetReturnContext } from '@/lib/sheetCoordinator';
 
 type Stage = 'full' | 'half' | 'peek';
 const API_BASE = TRAILHEAD_API_BASE;
@@ -185,6 +194,7 @@ type Props = {
   onOpenRelatedTrail?: (place: RelatedItem) => void;
   communityRatingsEnabled?: boolean;
   canRate?: boolean;
+  returnContext?: SheetReturnContext | null;
 };
 
 function titleCase(value?: string) {
@@ -411,6 +421,7 @@ export default function PremiumPlaceSheet({
   onOpenRelatedTrail,
   communityRatingsEnabled = false,
   canRate = false,
+  returnContext,
 }: Props) {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
@@ -517,6 +528,28 @@ export default function PremiumPlaceSheet({
   }, [place?.id, place?.name, place?.lat, place?.lng, initialStage, transientPlace]);
 
   const data = detail ?? place;
+  const actionEntityKind = inferSheetActionEntityKindV1(data ?? {}, sheetModel.identity.kind);
+  const sheetActions = resolveSheetActionDescriptorsV1({
+    entityKind: actionEntityKind,
+    capabilities: {
+      coordinates: Boolean(data && Number.isFinite(data.lat) && Number.isFinite(data.lng)),
+      savable: Boolean(onSave && !transientPlace),
+      trip_edit: Boolean(onAddToRoute && !transientPlace),
+      official_url: Boolean(data?.official_url || data?.website),
+      booking_url: Boolean(data?.registration_url || data?.booking_url),
+      phone_number: Boolean(data?.phone),
+      shareable: Boolean(data),
+      comments: Boolean(canonical && !transientPlace),
+      ratings: Boolean(ratingTarget),
+      reporting: Boolean(onReport && !transientPlace),
+      suggest_edit: Boolean(!transientPlace),
+    },
+    returnContext,
+  });
+  const sheetAction = (id: SheetActionIdV1) => {
+    const action = sheetActionByIdV1(sheetActions, id);
+    return action?.available ? action : undefined;
+  };
   const maxFull = Math.min(height * 0.84, height - Math.max(insets.top + 22, 54));
   const stageHeight = stage === 'full'
     ? maxFull
@@ -548,6 +581,12 @@ export default function PremiumPlaceSheet({
   }), [dragY, stage]);
 
   if (!visible || !place || !data) return null;
+  const sharePlace = () => {
+    const location = Number.isFinite(data.lat) && Number.isFinite(data.lng)
+      ? `\n${data.lat.toFixed(5)}, ${data.lng.toFixed(5)}`
+      : '';
+    Share.share({ message: `${data.name}${location}` }).catch(() => {});
+  };
   const richDetailLocked = (hasPaidProviderSource(place) || !!place.rich_detail_locked) && !detail;
 
   const officialPhotos: TrailheadGalleryPhoto[] = detail?.photos?.length
@@ -923,8 +962,8 @@ export default function PremiumPlaceSheet({
                   {related?.loading ? (
                     <View style={s.relatedLoadingBody}>
                       <TrailheadLoadingRow
-                        label="Loading nearby options"
-                        sub="Checking useful stops, camps, trails, and services around this place."
+                        label="Loading nearby"
+                        sub="Camps, trails and services."
                         icon="location-outline"
                       />
                       <TrailheadRailSkeleton count={3} cardWidth={174} />
@@ -989,13 +1028,18 @@ export default function PremiumPlaceSheet({
                 {addToRoutePrimary && !!onAddToRoute && !transientPlace ? (
                   <>
                     <TrailheadButton
-                      label={addToRouteLabel}
+                      testID={sheetActionTestIDV1(sheetModel.testID, 'add_to_trip')}
+                      label={addToRouteLabel || sheetAction('add_to_trip')?.label || 'Add to trip'}
                       icon="add-circle-outline"
                       variant="primary"
                       onPress={addToRoute}
                       style={{ flex: 1 }}
                     />
-                    <TouchableOpacity style={s.secondaryBtn} onPress={() => onNavigate(place)}>
+                    <TouchableOpacity
+                      testID={sheetActionTestIDV1(sheetModel.testID, 'navigate')}
+                      style={s.secondaryBtn}
+                      onPress={() => onNavigate(place)}
+                    >
                       <Ionicons name="navigate-outline" size={15} color={C.text2} />
                     </TouchableOpacity>
                     {!!onPromoteToRoute && (
@@ -1007,7 +1051,8 @@ export default function PremiumPlaceSheet({
                   </>
                 ) : (
                   <TrailheadButton
-                    label="Navigate"
+                    testID={sheetActionTestIDV1(sheetModel.testID, 'navigate')}
+                    label={sheetAction('navigate')?.label || 'Navigate'}
                     icon="navigate"
                     variant="primary"
                     onPress={() => onNavigate(place)}
@@ -1015,22 +1060,41 @@ export default function PremiumPlaceSheet({
                   />
                 )}
                 {!!data.phone && (
-                  <TouchableOpacity style={s.secondaryBtn} onPress={() => Linking.openURL(`tel:${data.phone}`)}>
+                  <TouchableOpacity
+                    testID={sheetActionTestIDV1(sheetModel.testID, 'phone')}
+                    style={s.secondaryBtn}
+                    onPress={() => Linking.openURL(`tel:${data.phone}`)}
+                  >
                     <Ionicons name="call-outline" size={15} color={C.text2} />
                   </TouchableOpacity>
                 )}
                 {!!(data.registration_url || data.booking_url || data.official_url || data.website) && (
-                  <TouchableOpacity style={s.secondaryBtn} onPress={() => Linking.openURL(String(data.registration_url || data.booking_url || data.official_url || data.website))}>
+                  <TouchableOpacity
+                    testID={sheetActionTestIDV1(
+                      sheetModel.testID,
+                      data.registration_url || data.booking_url ? 'booking' : 'official_website',
+                    )}
+                    style={s.secondaryBtn}
+                    onPress={() => Linking.openURL(String(data.registration_url || data.booking_url || data.official_url || data.website))}
+                  >
                     <Ionicons name="globe-outline" size={15} color={C.text2} />
                   </TouchableOpacity>
                 )}
                 {!!onSave && !transientPlace && (
-                  <TouchableOpacity style={s.secondaryBtn} onPress={() => onSave({ name: place.name, lat: place.lat, lng: place.lng, note: subtitle })}>
+                  <TouchableOpacity
+                    testID={sheetActionTestIDV1(sheetModel.testID, 'save')}
+                    style={s.secondaryBtn}
+                    onPress={() => onSave({ name: place.name, lat: place.lat, lng: place.lng, note: subtitle })}
+                  >
                     <Ionicons name="bookmark-outline" size={15} color={C.text2} />
                   </TouchableOpacity>
                 )}
                 {!!onAddToRoute && !addToRoutePrimary && !transientPlace && (
-                  <TouchableOpacity style={s.secondaryBtn} onPress={addToRoute}>
+                  <TouchableOpacity
+                    testID={sheetActionTestIDV1(sheetModel.testID, 'add_to_trip')}
+                    style={s.secondaryBtn}
+                    onPress={addToRoute}
+                  >
                     <Ionicons name="add-circle-outline" size={15} color={C.text2} />
                   </TouchableOpacity>
                 )}
@@ -1045,9 +1109,23 @@ export default function PremiumPlaceSheet({
                     </TouchableOpacity>
                   )}
                   {!!onReport && !transientPlace && (
-                    <TouchableOpacity style={s.linkBtn} onPress={onReport}>
+                    <TouchableOpacity
+                      testID={sheetActionTestIDV1(sheetModel.testID, 'report')}
+                      style={s.linkBtn}
+                      onPress={onReport}
+                    >
                       <Ionicons name="warning-outline" size={14} color={C.orange} />
-                      <Text style={[s.linkText, { color: C.orange }]}>Report / update</Text>
+                      <Text style={[s.linkText, { color: C.orange }]}>{sheetAction('report')?.label || 'Report'}</Text>
+                    </TouchableOpacity>
+                  )}
+                  {!!sheetAction('share') && (
+                    <TouchableOpacity
+                      testID={sheetActionTestIDV1(sheetModel.testID, 'share')}
+                      style={s.linkBtn}
+                      onPress={sharePlace}
+                    >
+                      <Ionicons name="share-outline" size={14} color={C.text2} />
+                      <Text style={s.linkText}>{sheetAction('share')?.label}</Text>
                     </TouchableOpacity>
                   )}
                 </View>
@@ -1096,12 +1174,15 @@ export default function PremiumPlaceSheet({
               {stage === 'full' ? (
                 <FirstPartyRatingSection
                   target={ratingTarget}
-                  testID={`${sheetModel.testID}-rating`}
+                  testID={sheetActionTestIDV1(sheetModel.testID, 'rating')}
                 />
               ) : null}
 
               {stage === 'full' && !transientPlace && (
-                <View style={s.communityBlock}>
+                <View
+                  testID={sheetActionTestIDV1(sheetModel.testID, 'comments')}
+                  style={s.communityBlock}
+                >
                   <View style={s.communityHeader}>
                     <Text style={s.sectionLabel}>Community notes</Text>
                     {comments.length > 0 ? <Text style={s.communityCount}>{comments.length}</Text> : null}
@@ -1156,7 +1237,10 @@ export default function PremiumPlaceSheet({
               )}
 
               {stage === 'full' && !transientPlace && (
-                <View style={s.communityBlock}>
+                <View
+                  testID={sheetActionTestIDV1(sheetModel.testID, 'suggest_edit')}
+                  style={s.communityBlock}
+                >
                   <View style={s.communityHeader}>
                     <Text style={s.sectionLabel}>Suggest an edit</Text>
                   </View>
@@ -1199,9 +1283,13 @@ export default function PremiumPlaceSheet({
                       </View>
                     </View>
                   ) : (
-                    <TouchableOpacity style={s.linkBtn} onPress={() => setShowEditForm(true)}>
+                    <TouchableOpacity
+                      testID={`${sheetActionTestIDV1(sheetModel.testID, 'suggest_edit')}-open`}
+                      style={s.linkBtn}
+                      onPress={() => setShowEditForm(true)}
+                    >
                       <Ionicons name="create-outline" size={14} color={C.text2} />
-                      <Text style={s.linkText}>Suggest name, hours, access, photo, duplicate, or location fix</Text>
+                      <Text style={s.linkText}>{sheetAction('suggest_edit')?.label || 'Suggest edit'}</Text>
                     </TouchableOpacity>
                   )}
                 </View>
@@ -1244,13 +1332,18 @@ export default function PremiumPlaceSheet({
         {stage !== 'peek' && addToRoutePrimary && !!onAddToRoute && !transientPlace && (
           <TrailheadButtonDock style={[s.stickyRouteAction, { paddingBottom: Math.max(insets.bottom, 10) }]}>
             <TrailheadButton
-              label={addToRouteLabel}
+              testID={sheetActionTestIDV1(sheetModel.testID, 'add_to_trip')}
+              label={addToRouteLabel || sheetAction('add_to_trip')?.label || 'Add to trip'}
               icon="add-circle-outline"
               variant="primary"
               onPress={addToRoute}
               style={{ flex: 1 }}
             />
-            <TouchableOpacity style={s.secondaryBtn} onPress={() => onNavigate(place)}>
+            <TouchableOpacity
+              testID={sheetActionTestIDV1(sheetModel.testID, 'navigate')}
+              style={s.secondaryBtn}
+              onPress={() => onNavigate(place)}
+            >
               <Ionicons name="navigate-outline" size={15} color={C.text2} />
             </TouchableOpacity>
             {!!onPromoteToRoute && (

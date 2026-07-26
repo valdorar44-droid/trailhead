@@ -79,8 +79,10 @@ import {
   normalizeSearchV2Query,
   offlineSearchResultsV2,
   canonicalSearchResultIdV2,
+  canonicalCampgroundSearchResultPinV2,
   exploreSearchCategoriesForCategory,
   exploreSearchIntentForCategory,
+  isCanonicalCampgroundSearchResultV2,
   isTemporarySearchResultV2,
   productFeaturesAllowSearchV2,
   useFrozenSearchCenterV2,
@@ -5619,6 +5621,29 @@ function GuideScreenContent() {
       } else {
         setSelectedLivePlace(offlinePlace);
       }
+      return;
+    }
+
+    if (canonicalId && isCanonicalCampgroundSearchResultV2(selected)) {
+      let camp = canonicalCampgroundSearchResultPinV2(selected) as CampsitePin | null;
+      if (!camp) {
+        try {
+          camp = await api.getCampsiteDetail(canonicalId);
+        } catch {
+          camp = null;
+        }
+      }
+      if (!selectionIsCurrent()) return;
+      if (!camp) {
+        setExploreOpeningResultId(null);
+        setExploreSearchSelectionError('That campground could not open. Try it again.');
+        return;
+      }
+      setExploreSearchOpen(false);
+      setExploreSearchDraft(camp.name || selected.title);
+      setExploreOpeningResultId(null);
+      exploreSearchV2.pause();
+      showExploreCampOnMap(camp);
       return;
     }
 

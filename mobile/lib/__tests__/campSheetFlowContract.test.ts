@@ -49,3 +49,10 @@ test('campground sheets clean metadata and omit invented summary fallbacks', () 
   assert.match(mapSource, /if \(useful\) return useful;\s+return '';/);
   assert.match(mapSource, /const summaryText = campSummaryText\(selectedCamp, null\)/);
 });
+
+test('campground action parity retains its existing offline area workflow', () => {
+  assert.match(mapSource, /offline_download: true/);
+  assert.match(mapSource, /sheetActionTestIDV1\(selectedCampSheetModel!\.testID, 'download'\)/);
+  assert.match(mapSource, /onPress=\{\(\) => downloadCampPlace\(campDetail \|\| selectedCamp\)\}/);
+  assert.match(mapSource, /setOfflineAreaPicker\(true\)/);
+});

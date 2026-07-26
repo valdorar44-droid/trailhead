@@ -7,6 +7,7 @@ import test from 'node:test';
 const mobileRoot = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const mapSource = readFileSync(join(mobileRoot, 'app/(tabs)/map.tsx'), 'utf8');
 const snapSheetSource = readFileSync(join(mobileRoot, 'components/map/TrailheadSnapSheet.tsx'), 'utf8');
+const actionSource = readFileSync(join(mobileRoot, 'lib/sheetActions.ts'), 'utf8');
 
 test('community reports use one controlled shared half sheet', () => {
   assert.match(mapSource, /const opensAtHalf = activePlaceSheetModel\.identity\.kind === 'community_report'/);
@@ -33,25 +34,16 @@ test('nearby enrichment remains identity-bound and uses a stable reserved loadin
 });
 
 test('report trust actions and update cancellation preserve the approved capabilities', () => {
-  for (const suffix of [
-    'navigate',
-    'save',
-    'helpful',
-    'not-accurate',
-    'suggest-update',
-    'report',
-    'suggest-update-cancel',
-    'edit',
-    'photo',
-    'checked',
-    'not-found',
-    'publish',
+  for (const actionId of [
+    'navigate', 'save', 'share', 'helpful', 'not_accurate', 'suggest_edit',
+    'report', 'field_edit', 'field_photo', 'field_checked', 'field_not_found', 'field_publish',
   ]) {
-    const expected = 'testID={`${selectedReportSheetModel!.testID}-' + suffix + '`}';
+    const expected = `sheetActionTestIDV1(selectedReportSheetModel!.testID, '${actionId}')`;
     assert.ok(mapSource.includes(expected), `missing ${expected}`);
   }
-  assert.match(mapSource, />Helpful</);
-  assert.match(mapSource, />Not accurate</);
+  assert.match(mapSource, /suggest-update-cancel/);
+  assert.match(actionSource, /const HELPFUL:[\s\S]*?'Helpful'/);
+  assert.match(actionSource, /const NOT_ACCURATE:[\s\S]*?'Not accurate'/);
   assert.match(mapSource, /helpful · \$\{selectedCommunityPin\.downvotes \?\? 0\} marked inaccurate/);
   assert.match(mapSource, /privateLead \? 'Needs field check' : 'Community report'/);
 });

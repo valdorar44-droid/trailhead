@@ -268,6 +268,11 @@ import {
   type SheetIdentity,
 } from '@/lib/sheetCoordinator';
 import {
+  resolveSheetActionDescriptorsV1,
+  sheetActionByIdV1,
+  sheetActionTestIDV1,
+} from '@/lib/sheetActions';
+import {
   beginTrailSheetHydration,
   completeTrailSheetHydration,
   EMPTY_TRAIL_SHEET_HYDRATION,
@@ -7295,6 +7300,33 @@ function MapScreen() {
   const [placeSheetCoordinator, dispatchPlaceSheet] = useReducer(sheetCoordinatorReducer, initialSheetCoordinatorState);
   const placeSheetCoordinatorRef = useRef(placeSheetCoordinator);
   placeSheetCoordinatorRef.current = placeSheetCoordinator;
+  const selectedCampActions = selectedCamp ? resolveSheetActionDescriptorsV1({
+    entityKind: 'campground',
+    capabilities: {
+      coordinates: true,
+      savable: true,
+      trip_edit: Boolean(activeTrip),
+      offline_download: true,
+      official_url: Boolean((campDetail || selectedCamp).official_url || (campDetail || selectedCamp).url),
+      booking_url: Boolean((campDetail || selectedCamp).booking_url),
+      phone_number: Boolean((campDetail || selectedCamp).phone),
+      shareable: true,
+      comments: !privateLeadKeyFromCamp(selectedCamp, campDetail),
+      ratings: Boolean(selectedCampRatingTarget),
+      reporting: !privateLeadKeyFromCamp(selectedCamp, campDetail),
+      suggest_edit: true,
+      field_review: Boolean(privateLeadKeyFromCamp(selectedCamp, campDetail)),
+      field_photo: Boolean(privateLeadKeyFromCamp(selectedCamp, campDetail)),
+      admin_publish: Boolean(privateLeadKeyFromCamp(selectedCamp, campDetail) && user?.is_admin),
+    },
+    returnContext: placeSheetCoordinator.returnContext,
+    saved: favoriteCamps.some(camp => camp.id === selectedCamp.id),
+    privateFieldLead: Boolean(privateLeadKeyFromCamp(selectedCamp, campDetail)),
+  }) : [];
+  const selectedCampAction = (id: Parameters<typeof sheetActionByIdV1>[1]) => {
+    const descriptor = sheetActionByIdV1(selectedCampActions, id);
+    return descriptor?.available ? descriptor : undefined;
+  };
   const activePlaceSheetIdentityKey = activePlaceSheetModel
     ? `${activePlaceSheetModel.identity.kind}:${activePlaceSheetModel.identity.entityId}`
     : '';
@@ -22678,14 +22710,52 @@ function MapScreen() {
   }
 
   function openSelectedTrailMoreActions(trail: TrailFeature, canPreview: boolean) {
+    const descriptors = resolveSheetActionDescriptorsV1({
+      entityKind: trail.type === 'trailhead' ? 'trailhead' : 'trail',
+      capabilities: {
+        coordinates: true,
+        savable: true,
+        trip_edit: Boolean(activeTrip),
+        offline_download: true,
+        route_geometry: canPreview,
+        official_url: Boolean(selectedTrailProfile?.official_url || selectedTrailProfile?.source_pack?.official_url),
+        shareable: true,
+        ratings: Boolean(selectedTrailRatingTarget),
+        reporting: true,
+        suggest_edit: Boolean(selectedTrailProfile?.id || trail.profile_id),
+      },
+      returnContext: placeSheetCoordinatorRef.current.returnContext,
+      saved: trail.support.offlineReady,
+    });
+    const action = (id: Parameters<typeof sheetActionByIdV1>[1]) => {
+      const descriptor = sheetActionByIdV1(descriptors, id);
+      return descriptor?.available ? descriptor : undefined;
+    };
     const actions: any[] = [];
-    if (canPreview) actions.push({ text: 'Preview in 3D', onPress: () => openTrailPreview(trail) });
+    if (action('preview_3d')) actions.push({ text: action('preview_3d')!.label, onPress: () => openTrailPreview(trail) });
+    if (action('download')) {
+      actions.push({
+        text: trail.support.offlineReady ? 'Refresh offline trail' : 'Download for offline',
+        onPress: () => downloadSelectedTrail(trail),
+      });
+    }
+    if (action('add_to_trip')) {
+      actions.push({
+        text: action('add_to_trip')!.label,
+        onPress: () => addPlaceToActiveTripDay(trail, selectedDay),
+      });
+    }
+    actions.push({ text: 'Build route', onPress: () => seedTrailPinCaptureFromTrail(trail) });
+    if (action('report')) actions.push({ text: action('report')!.label, onPress: openTrailFieldReportComposer });
+    if (action('suggest_edit')) actions.push({ text: action('suggest_edit')!.label, onPress: () => openSelectedTrailEdit(trail) });
+    if (action('official_website')) {
+      actions.push({
+        text: action('official_website')!.label,
+        onPress: () => Linking.openURL(String(selectedTrailProfile?.official_url || selectedTrailProfile?.source_pack?.official_url)),
+      });
+    }
+    if (action('share')) actions.push({ text: action('share')!.label, onPress: () => shareSelectedTrail(trail) });
     actions.push(
-      { text: trail.support.offlineReady ? 'Refresh offline trail' : 'Download for offline', onPress: () => downloadSelectedTrail(trail) },
-      { text: 'Build route', onPress: () => seedTrailPinCaptureFromTrail(trail) },
-      { text: 'Report conditions', onPress: openTrailFieldReportComposer },
-      ...((selectedTrailProfile?.id || trail.profile_id) ? [{ text: 'Suggest edit', onPress: () => openSelectedTrailEdit(trail) }] : []),
-      { text: 'Share', onPress: () => shareSelectedTrail(trail) },
       { text: 'Refresh details', onPress: refreshSelectedTrailSource },
       { text: 'Cancel', style: 'cancel' },
     );
@@ -27607,6 +27677,7 @@ function MapScreen() {
         initialStage="full"
         communityRatingsEnabled={productFeatures?.community_ratings === true}
         canRate={!!user}
+        returnContext={placeSheetCoordinator.returnContext}
         related={selectedPlaceContext ?? undefined}
         routeContextLabel={selectedPlaceTripContext?.label}
         onBack={relatedPlaceReturnStack.length ? restoreRelatedPlaceParent : undefined}
@@ -27732,6 +27803,7 @@ function MapScreen() {
         initialStage="full"
         communityRatingsEnabled={productFeatures?.community_ratings === true}
         canRate={!!user}
+        returnContext={placeSheetCoordinator.returnContext}
         routeContextLabel={tappedPoi ? tripPlaceContextFor(tappedPoi)?.label : undefined}
         onClose={() => {
           setTappedPoi(null);
@@ -27970,6 +28042,7 @@ function MapScreen() {
             ) : null}
             {activeTrip && (
               <TouchableOpacity
+                testID={sheetActionTestIDV1(selectedCampSheetModel!.testID, 'add_to_trip')}
                 style={s.quickCardTripBtn}
                 onPress={() => useCampForTripDay(selectedCamp, selectedDay ?? selectedCamp.recommended_day ?? activeTrip.plan.daily_itinerary[0]?.day ?? 1)}
               >
@@ -28190,21 +28263,23 @@ function MapScreen() {
 
                 <FirstPartyRatingSection
                   target={selectedCampRatingTarget}
-                  testID={`${selectedCampSheetModel!.testID}-rating`}
+                  testID={sheetActionTestIDV1(selectedCampSheetModel!.testID, 'rating')}
                 />
 
-                <CampCommentsSection
-                  comments={campComments}
-                  limit={3}
-                  showForm={showCampCommentForm}
-                  commentText={campCommentText}
-                  commentSubmitting={campCommentSubmitting}
-                  canComment={!!user}
-                  onOpenForm={() => setShowCampCommentForm(true)}
-                  onCancelForm={() => { setShowCampCommentForm(false); setCampCommentText(''); }}
-                  onChangeCommentText={setCampCommentText}
-                  onSubmitComment={submitCampComment}
-                />
+                <View testID={sheetActionTestIDV1(selectedCampSheetModel!.testID, 'comments')}>
+                  <CampCommentsSection
+                    comments={campComments}
+                    limit={3}
+                    showForm={showCampCommentForm}
+                    commentText={campCommentText}
+                    commentSubmitting={campCommentSubmitting}
+                    canComment={!!user}
+                    onOpenForm={() => setShowCampCommentForm(true)}
+                    onCancelForm={() => { setShowCampCommentForm(false); setCampCommentText(''); }}
+                    onChangeCommentText={setCampCommentText}
+                    onSubmitComment={submitCampComment}
+                  />
+                </View>
 
                 <CampFieldReportsSection
                   reports={fieldReports}
@@ -28225,28 +28300,32 @@ function MapScreen() {
             })() : null}
             {privateLeadKeyFromCamp(selectedCamp, campDetail) ? (
               <View style={s.communityActionsGrid}>
-                <TouchableOpacity style={s.communityPrimaryAction} onPress={() => navigateToCamp(selectedCamp)}>
+                <TouchableOpacity
+                  testID={sheetActionTestIDV1(selectedCampSheetModel!.testID, 'navigate')}
+                  style={s.communityPrimaryAction}
+                  onPress={() => navigateToCamp(selectedCamp)}
+                >
                   <Ionicons name="navigate" size={14} color="#fff" />
                   <Text style={s.communityPrimaryActionText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>Navigate</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={s.communityActionBtn} onPress={openSelectedPrivateReviewEdit}>
+                <TouchableOpacity testID={sheetActionTestIDV1(selectedCampSheetModel!.testID, 'field_edit')} style={s.communityActionBtn} onPress={openSelectedPrivateReviewEdit}>
                   <Ionicons name="create-outline" size={14} color={OVR.text2} />
                   <Text style={s.communityActionText} numberOfLines={1}>Edit</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={s.communityActionBtn} onPress={addSelectedPrivateReviewPhoto}>
+                <TouchableOpacity testID={sheetActionTestIDV1(selectedCampSheetModel!.testID, 'field_photo')} style={s.communityActionBtn} onPress={addSelectedPrivateReviewPhoto}>
                   <Ionicons name="camera-outline" size={14} color={OVR.text2} />
                   <Text style={s.communityActionText} numberOfLines={1}>Photo</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={s.communityActionBtn} onPress={() => reviewSelectedPrivateReviewCamp('community_verified')}>
+                <TouchableOpacity testID={sheetActionTestIDV1(selectedCampSheetModel!.testID, 'field_checked')} style={s.communityActionBtn} onPress={() => reviewSelectedPrivateReviewCamp('community_verified')}>
                   <Ionicons name="checkmark-circle-outline" size={14} color={OVR.text2} />
                   <Text style={s.communityActionText} numberOfLines={1}>Checked</Text>
                 </TouchableOpacity>
-                <TouchableOpacity style={[s.communityActionBtn, { borderColor: '#ef4444' + '44' }]} onPress={() => reviewSelectedPrivateReviewCamp('rejected', 'Not found during field check')}>
+                <TouchableOpacity testID={sheetActionTestIDV1(selectedCampSheetModel!.testID, 'field_not_found')} style={[s.communityActionBtn, { borderColor: '#ef4444' + '44' }]} onPress={() => reviewSelectedPrivateReviewCamp('rejected', 'Not found during field check')}>
                   <Ionicons name="close-circle-outline" size={14} color="#ef4444" />
                   <Text style={[s.communityActionText, { color: '#ef4444' }]} numberOfLines={1}>Not found</Text>
                 </TouchableOpacity>
                 {user?.is_admin && (
-                  <TouchableOpacity style={[s.communityActionBtn, { borderColor: C.orange + '44' }]} onPress={publishSelectedPrivateReviewCamp}>
+                  <TouchableOpacity testID={sheetActionTestIDV1(selectedCampSheetModel!.testID, 'field_publish')} style={[s.communityActionBtn, { borderColor: C.orange + '44' }]} onPress={publishSelectedPrivateReviewCamp}>
                     <Ionicons name="shield-checkmark-outline" size={14} color={C.orange} />
                     <Text style={[s.communityActionText, { color: C.orange }]} numberOfLines={1}>Publish</Text>
                   </TouchableOpacity>
@@ -28254,6 +28333,26 @@ function MapScreen() {
               </View>
             ) : null}
             <View style={s.quickCardSecondaryActions}>
+              {!privateLeadKeyFromCamp(selectedCamp, campDetail) && selectedCampAction('navigate') ? (
+                <TouchableOpacity
+                  testID={sheetActionTestIDV1(selectedCampSheetModel!.testID, 'navigate')}
+                  style={s.quickCardSecondaryBtn}
+                  onPress={() => navigateToCamp(selectedCamp)}
+                >
+                  <Ionicons name="navigate-outline" size={12} color={C.text2} />
+                  <Text style={s.quickCardSecondaryText}>{selectedCampAction('navigate')!.label}</Text>
+                </TouchableOpacity>
+              ) : null}
+              {!privateLeadKeyFromCamp(selectedCamp, campDetail) && selectedCampAction('download') ? (
+                <TouchableOpacity
+                  testID={sheetActionTestIDV1(selectedCampSheetModel!.testID, 'download')}
+                  style={s.quickCardSecondaryBtn}
+                  onPress={() => downloadCampPlace(campDetail || selectedCamp)}
+                >
+                  <Ionicons name="download-outline" size={12} color={C.text2} />
+                  <Text style={s.quickCardSecondaryText}>{selectedCampAction('download')!.label}</Text>
+                </TouchableOpacity>
+              ) : null}
               <TouchableOpacity
                 style={s.quickCardSecondaryBtn}
                 onPress={() => {
@@ -28267,19 +28366,43 @@ function MapScreen() {
                 <Text style={s.quickCardSecondaryText}>Nearby camps</Text>
               </TouchableOpacity>
               {!privateLeadKeyFromCamp(selectedCamp, campDetail) && (
-                <TouchableOpacity style={s.quickCardSecondaryBtn} onPress={handleReportFull}>
+                <TouchableOpacity
+                  testID={sheetActionTestIDV1(selectedCampSheetModel!.testID, 'report')}
+                  style={s.quickCardSecondaryBtn}
+                  onPress={handleReportFull}
+                >
                   <Ionicons name="warning-outline" size={12} color={C.text2} />
-                  <Text style={s.quickCardSecondaryText}>Report</Text>
+                  <Text style={s.quickCardSecondaryText}>{selectedCampAction('report')?.label || 'Report'}</Text>
                 </TouchableOpacity>
               )}
-              <TouchableOpacity style={s.quickCardSecondaryBtn} onPress={() => privateLeadKeyFromCamp(selectedCamp, campDetail) ? openSelectedPrivateReviewEdit() : openCampEdit('suggest')}>
+              <TouchableOpacity
+                testID={sheetActionTestIDV1(selectedCampSheetModel!.testID, privateLeadKeyFromCamp(selectedCamp, campDetail) ? 'field_edit' : 'suggest_edit')}
+                style={s.quickCardSecondaryBtn}
+                onPress={() => privateLeadKeyFromCamp(selectedCamp, campDetail) ? openSelectedPrivateReviewEdit() : openCampEdit('suggest')}
+              >
                 <Ionicons name="create-outline" size={12} color={C.text2} />
-                <Text style={s.quickCardSecondaryText}>Edit</Text>
+                <Text style={s.quickCardSecondaryText}>{privateLeadKeyFromCamp(selectedCamp, campDetail) ? 'Edit' : selectedCampAction('suggest_edit')?.label || 'Suggest edit'}</Text>
               </TouchableOpacity>
+              {!privateLeadKeyFromCamp(selectedCamp, campDetail) && selectedCampAction('phone') ? (
+                <TouchableOpacity
+                  testID={sheetActionTestIDV1(selectedCampSheetModel!.testID, 'phone')}
+                  style={s.quickCardSecondaryBtn}
+                  onPress={() => Linking.openURL(`tel:${String((campDetail || selectedCamp).phone)}`)}
+                >
+                  <Ionicons name="call-outline" size={12} color={C.text2} />
+                  <Text style={s.quickCardSecondaryText}>{selectedCampAction('phone')!.label}</Text>
+                </TouchableOpacity>
+              ) : null}
               {!privateLeadKeyFromCamp(selectedCamp, campDetail) && !!campSourceUrl(campDetail || selectedCamp) && (
-                <TouchableOpacity style={s.quickCardSecondaryBtn} onPress={() => Linking.openURL(campSourceUrl(campDetail || selectedCamp))}>
+                <TouchableOpacity
+                  testID={sheetActionTestIDV1(selectedCampSheetModel!.testID, selectedCampAction('booking') ? 'booking' : 'official_website')}
+                  style={s.quickCardSecondaryBtn}
+                  onPress={() => Linking.openURL(campSourceUrl(campDetail || selectedCamp))}
+                >
                   <Ionicons name="open-outline" size={12} color={C.text2} />
-                  <Text style={s.quickCardSecondaryText}>Open details</Text>
+                  <Text style={s.quickCardSecondaryText}>
+                    {selectedCampAction('booking')?.label || selectedCampAction('official_website')?.label || 'Official website'}
+                  </Text>
                 </TouchableOpacity>
               )}
               </View>
@@ -30347,7 +30470,23 @@ function MapScreen() {
       )}
 
       {/* ── Gas station tap card ── */}
-      {tappedGas && (
+      {tappedGas && (() => {
+        const gasSheetModel = adaptGenericPlaceSheet({ ...tappedGas, id: `fuel:${tappedGas.lat}:${tappedGas.lng}`, type: 'fuel' });
+        const gasActions = resolveSheetActionDescriptorsV1({
+          entityKind: 'fuel_service',
+          capabilities: {
+            coordinates: true,
+            savable: true,
+            trip_edit: Boolean(activeTrip),
+            shareable: true,
+          },
+          returnContext: placeSheetCoordinator.returnContext,
+        });
+        const gasAction = (id: Parameters<typeof sheetActionByIdV1>[1]) => {
+          const descriptor = sheetActionByIdV1(gasActions, id);
+          return descriptor?.available ? descriptor : undefined;
+        };
+        return (
         <Modal visible transparent animationType="slide" onRequestClose={() => setTappedGas(null)}>
           <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setTappedGas(null)}>
             <TrailheadSheet handle={false} style={[s.wpSheet, modalSheetPad]} contentStyle={{ padding: 0 }}>
@@ -30360,9 +30499,47 @@ function MapScreen() {
                 </View>
               </View>
               <View style={s.wpSheetActions}>
-                <TouchableOpacity style={s.wpSheetNavBtn} onPress={() => { setTappedGas(null); navigateToCamp(tappedGas); }}>
+                <TouchableOpacity testID={sheetActionTestIDV1(gasSheetModel.testID, 'navigate')} style={s.wpSheetNavBtn} onPress={() => { setTappedGas(null); navigateToCamp(tappedGas); }}>
                   <Ionicons name="navigate" size={14} color="#fff" />
-                  <Text style={s.wpSheetNavText}>Navigate here</Text>
+                  <Text style={s.wpSheetNavText}>{gasAction('navigate')?.label || 'Navigate'}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  testID={sheetActionTestIDV1(gasSheetModel.testID, 'save')}
+                  style={s.wpSheetDayBtn}
+                  onPress={() => {
+                    addSavedPlace({
+                      id: gasSheetModel.identity.entityId,
+                      name: tappedGas.name,
+                      lat: tappedGas.lat,
+                      lng: tappedGas.lng,
+                      icon: 'fuel',
+                      note: 'Fuel stop',
+                      createdAt: Date.now(),
+                    });
+                    setQuickToast('Fuel stop saved');
+                    setTimeout(() => setQuickToast(''), 2200);
+                  }}
+                >
+                  <Ionicons name="bookmark-outline" size={14} color={OVR.text2} />
+                  <Text style={s.wpSheetDayText}>{gasAction('save')?.label || 'Save'}</Text>
+                </TouchableOpacity>
+                {gasAction('add_to_trip') ? (
+                  <TouchableOpacity
+                    testID={sheetActionTestIDV1(gasSheetModel.testID, 'add_to_trip')}
+                    style={s.wpSheetDayBtn}
+                    onPress={() => addPlaceToActiveTripDay({ ...tappedGas, type: 'fuel' }, selectedDay)}
+                  >
+                    <Ionicons name="add-circle-outline" size={14} color={OVR.text2} />
+                    <Text style={s.wpSheetDayText}>{gasAction('add_to_trip')!.label}</Text>
+                  </TouchableOpacity>
+                ) : null}
+                <TouchableOpacity
+                  testID={sheetActionTestIDV1(gasSheetModel.testID, 'share')}
+                  style={s.wpSheetDayBtn}
+                  onPress={() => Share.share({ message: `${tappedGas.name}\n${tappedGas.lat.toFixed(5)}, ${tappedGas.lng.toFixed(5)}` }).catch(() => {})}
+                >
+                  <Ionicons name="share-outline" size={14} color={OVR.text2} />
+                  <Text style={s.wpSheetDayText}>{gasAction('share')?.label || 'Share'}</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={s.wpSheetDayBtn} onPress={() => setTappedGas(null)}>
                   <Ionicons name="close" size={14} color={OVR.text2} />
@@ -30372,11 +30549,32 @@ function MapScreen() {
             </TrailheadSheet>
           </TouchableOpacity>
         </Modal>
-      )}
+        );
+      })()}
 
       {/* ── Community pin card ── */}
       {selectedCommunityPin && (() => {
         const privateLead = isDispersedLeadPin(selectedCommunityPin);
+        const reportActions = resolveSheetActionDescriptorsV1({
+          entityKind: 'community_report',
+          capabilities: {
+            coordinates: true,
+            savable: !privateLead,
+            shareable: !privateLead,
+            community_vote: !privateLead,
+            reporting: !privateLead,
+            suggest_edit: !privateLead,
+            field_review: privateLead,
+            field_photo: privateLead,
+            admin_publish: privateLead && dispersedLeadAccess === 'admin',
+          },
+          returnContext: placeSheetCoordinator.returnContext,
+          privateFieldLead: privateLead,
+        });
+        const reportAction = (id: Parameters<typeof sheetActionByIdV1>[1]) => {
+          const descriptor = sheetActionByIdV1(reportActions, id);
+          return descriptor?.available ? descriptor : undefined;
+        };
         const meta = communityPinMeta(normalizedCommunityPinType(selectedCommunityPin));
         const detailRows = pinDetailRows(selectedCommunityPin);
         const communitySupport = buildTrailSupport(
@@ -30414,6 +30612,11 @@ function MapScreen() {
           });
           setQuickToast('Community place saved');
           setTimeout(() => setQuickToast(''), 2500);
+        };
+        const shareCommunityPlace = () => {
+          Share.share({
+            message: `${selectedCommunityPin.name || meta.label}\n${selectedCommunityPin.lat.toFixed(5)}, ${selectedCommunityPin.lng.toFixed(5)}`,
+          }).catch(() => {});
         };
         const suggestCommunityUpdate = () => {
           openCommunityUpdate(selectedCommunityPin);
@@ -30561,57 +30764,61 @@ function MapScreen() {
                     </View>
                   )}
                   {!updateOpen && privateLead && <View style={s.communityActionsGrid}>
-                    <TouchableOpacity testID={`${selectedReportSheetModel!.testID}-navigate`} style={s.communityPrimaryAction} onPress={() => { setSelectedCommunityPin(null); navigateToCamp(selectedCommunityPin); }}>
+                    <TouchableOpacity testID={sheetActionTestIDV1(selectedReportSheetModel!.testID, 'navigate')} style={s.communityPrimaryAction} onPress={() => { setSelectedCommunityPin(null); navigateToCamp(selectedCommunityPin); }}>
                       <Ionicons name="navigate" size={14} color="#fff" />
-                      <Text style={s.communityPrimaryActionText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>Navigate</Text>
+                      <Text style={s.communityPrimaryActionText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>{reportAction('navigate')?.label || 'Navigate'}</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity testID={`${selectedReportSheetModel!.testID}-edit`} style={s.communityActionBtn} onPress={() => openDispersedLeadEdit(selectedCommunityPin)}>
+                    <TouchableOpacity testID={sheetActionTestIDV1(selectedReportSheetModel!.testID, 'field_edit')} style={s.communityActionBtn} onPress={() => openDispersedLeadEdit(selectedCommunityPin)}>
                       <Ionicons name="create-outline" size={14} color={OVR.text2} />
-                      <Text style={s.communityActionText} numberOfLines={1}>Edit</Text>
+                      <Text style={s.communityActionText} numberOfLines={1}>{reportAction('field_edit')?.label || 'Edit'}</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity testID={`${selectedReportSheetModel!.testID}-photo`} style={s.communityActionBtn} onPress={() => addDispersedLeadPhoto(selectedCommunityPin)}>
+                    <TouchableOpacity testID={sheetActionTestIDV1(selectedReportSheetModel!.testID, 'field_photo')} style={s.communityActionBtn} onPress={() => addDispersedLeadPhoto(selectedCommunityPin)}>
                       <Ionicons name="camera-outline" size={14} color={OVR.text2} />
-                      <Text style={s.communityActionText} numberOfLines={1}>Photo</Text>
+                      <Text style={s.communityActionText} numberOfLines={1}>{reportAction('field_photo')?.label || 'Photo'}</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity testID={`${selectedReportSheetModel!.testID}-checked`} style={s.communityActionBtn} onPress={() => reviewDispersedLeadPin(selectedCommunityPin, 'community_verified')}>
+                    <TouchableOpacity testID={sheetActionTestIDV1(selectedReportSheetModel!.testID, 'field_checked')} style={s.communityActionBtn} onPress={() => reviewDispersedLeadPin(selectedCommunityPin, 'community_verified')}>
                       <Ionicons name="checkmark-circle-outline" size={14} color={OVR.text2} />
-                      <Text style={s.communityActionText} numberOfLines={1}>Checked</Text>
+                      <Text style={s.communityActionText} numberOfLines={1}>{reportAction('field_checked')?.label || 'Checked'}</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity testID={`${selectedReportSheetModel!.testID}-not-found`} style={[s.communityActionBtn, { borderColor: '#ef4444' + '44' }]} onPress={() => reviewDispersedLeadPin(selectedCommunityPin, 'rejected', 'Not found during field check')}>
+                    <TouchableOpacity testID={sheetActionTestIDV1(selectedReportSheetModel!.testID, 'field_not_found')} style={[s.communityActionBtn, { borderColor: '#ef4444' + '44' }]} onPress={() => reviewDispersedLeadPin(selectedCommunityPin, 'rejected', 'Not found during field check')}>
                       <Ionicons name="close-circle-outline" size={14} color="#ef4444" />
-                      <Text style={[s.communityActionText, { color: '#ef4444' }]} numberOfLines={1}>Not found</Text>
+                      <Text style={[s.communityActionText, { color: '#ef4444' }]} numberOfLines={1}>{reportAction('field_not_found')?.label || 'Not found'}</Text>
                     </TouchableOpacity>
                     {dispersedLeadAccess === 'admin' && (
-                      <TouchableOpacity testID={`${selectedReportSheetModel!.testID}-publish`} style={[s.communityActionBtn, { borderColor: C.orange + '44' }]} onPress={() => publishDispersedLeadPin(selectedCommunityPin)}>
+                      <TouchableOpacity testID={sheetActionTestIDV1(selectedReportSheetModel!.testID, 'field_publish')} style={[s.communityActionBtn, { borderColor: C.orange + '44' }]} onPress={() => publishDispersedLeadPin(selectedCommunityPin)}>
                         <Ionicons name="shield-checkmark-outline" size={14} color={C.orange} />
-                        <Text style={[s.communityActionText, { color: C.orange }]} numberOfLines={1}>Publish</Text>
+                        <Text style={[s.communityActionText, { color: C.orange }]} numberOfLines={1}>{reportAction('field_publish')?.label || 'Publish'}</Text>
                       </TouchableOpacity>
                     )}
                   </View>}
                   {!updateOpen && !privateLead && <View style={s.communityActionsGrid}>
-                    <TouchableOpacity testID={`${selectedReportSheetModel!.testID}-navigate`} style={s.communityPrimaryAction} onPress={() => { setSelectedCommunityPin(null); navigateToCamp(selectedCommunityPin); }}>
+                    <TouchableOpacity testID={sheetActionTestIDV1(selectedReportSheetModel!.testID, 'navigate')} style={s.communityPrimaryAction} onPress={() => { setSelectedCommunityPin(null); navigateToCamp(selectedCommunityPin); }}>
                       <Ionicons name="navigate" size={14} color="#fff" />
-                      <Text style={s.communityPrimaryActionText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>Navigate</Text>
+                      <Text style={s.communityPrimaryActionText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>{reportAction('navigate')?.label || 'Navigate'}</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity testID={`${selectedReportSheetModel!.testID}-save`} style={s.communityActionBtn} onPress={saveCommunityPlace}>
+                    <TouchableOpacity testID={sheetActionTestIDV1(selectedReportSheetModel!.testID, 'save')} style={s.communityActionBtn} onPress={saveCommunityPlace}>
                       <Ionicons name="bookmark-outline" size={14} color={OVR.text2} />
-                      <Text style={s.communityActionText} numberOfLines={1}>Save</Text>
+                      <Text style={s.communityActionText} numberOfLines={1}>{reportAction('save')?.label || 'Save'}</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity testID={`${selectedReportSheetModel!.testID}-helpful`} style={s.communityActionBtn} onPress={() => voteCommunityPin(selectedCommunityPin, 'upvote')}>
+                    <TouchableOpacity testID={sheetActionTestIDV1(selectedReportSheetModel!.testID, 'share')} style={s.communityActionBtn} onPress={shareCommunityPlace}>
+                      <Ionicons name="share-outline" size={14} color={OVR.text2} />
+                      <Text style={s.communityActionText} numberOfLines={1}>{reportAction('share')?.label || 'Share'}</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity testID={sheetActionTestIDV1(selectedReportSheetModel!.testID, 'helpful')} style={s.communityActionBtn} onPress={() => voteCommunityPin(selectedCommunityPin, 'upvote')}>
                       <Ionicons name="thumbs-up-outline" size={14} color={OVR.text2} />
-                      <Text style={s.communityActionText} numberOfLines={1}>Helpful</Text>
+                      <Text style={s.communityActionText} numberOfLines={1}>{reportAction('helpful')?.label || 'Helpful'}</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity testID={`${selectedReportSheetModel!.testID}-not-accurate`} style={[s.communityActionBtn, { borderColor: '#ef4444' + '44' }]} onPress={() => voteCommunityPin(selectedCommunityPin, 'downvote')}>
+                    <TouchableOpacity testID={sheetActionTestIDV1(selectedReportSheetModel!.testID, 'not_accurate')} style={[s.communityActionBtn, { borderColor: '#ef4444' + '44' }]} onPress={() => voteCommunityPin(selectedCommunityPin, 'downvote')}>
                       <Ionicons name="thumbs-down-outline" size={14} color="#ef4444" />
-                      <Text style={[s.communityActionText, { color: '#ef4444' }]} numberOfLines={1}>Not accurate</Text>
+                      <Text style={[s.communityActionText, { color: '#ef4444' }]} numberOfLines={1}>{reportAction('not_accurate')?.label || 'Not accurate'}</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity testID={`${selectedReportSheetModel!.testID}-suggest-update`} style={s.communityActionBtn} onPress={suggestCommunityUpdate}>
+                    <TouchableOpacity testID={sheetActionTestIDV1(selectedReportSheetModel!.testID, 'suggest_edit')} style={s.communityActionBtn} onPress={suggestCommunityUpdate}>
                       <Ionicons name="create-outline" size={14} color={OVR.text2} />
-                      <Text style={s.communityActionText} numberOfLines={1}>Suggest update</Text>
+                      <Text style={s.communityActionText} numberOfLines={1}>{reportAction('suggest_edit')?.label || 'Suggest update'}</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity testID={`${selectedReportSheetModel!.testID}-report`} style={[s.communityActionBtn, { borderColor: C.orange + '44' }]} onPress={() => { setSelectedCommunityPin(null); setQuickReport(true); }}>
+                    <TouchableOpacity testID={sheetActionTestIDV1(selectedReportSheetModel!.testID, 'report')} style={[s.communityActionBtn, { borderColor: C.orange + '44' }]} onPress={() => { setSelectedCommunityPin(null); setQuickReport(true); }}>
                       <Ionicons name="warning-outline" size={14} color={C.orange} />
-                      <Text style={[s.communityActionText, { color: C.orange }]} numberOfLines={1}>Report</Text>
+                      <Text style={[s.communityActionText, { color: C.orange }]} numberOfLines={1}>{reportAction('report')?.label || 'Report'}</Text>
                     </TouchableOpacity>
                   </View>}
           </PlaceSheetShell>

@@ -11,7 +11,7 @@ const routeBuilderSource = readFileSync(join(mobileRoot, 'app/(tabs)/route-build
 const briefSource = readFileSync(join(mobileRoot, 'components/map/CampgroundBriefSection.tsx'), 'utf8');
 
 test('the researched campground brief uses a source-owned opt-in endpoint', () => {
-  assert.match(apiSource, /getCampgroundPlanningBrief: async \(id: string\) =>/);
+  assert.match(apiSource, /getCampgroundPlanningBrief: async \(id: string\): Promise<CampgroundPlanningBriefV1> =>/);
   assert.match(apiSource, /\/api\/campsites\/\$\{encodeURIComponent\(facilityId\)\}\/planning-brief/);
   assert.match(apiSource, /method: 'POST'/);
   assert.match(apiSource, /response\.status === 'preparing'/);

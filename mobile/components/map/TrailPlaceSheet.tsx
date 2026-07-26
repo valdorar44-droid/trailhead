@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme, type ColorPalette } from '@/lib/design';
 import type { PlaceSheetModel } from '@/lib/placeSheetAdapters';
+import { sheetActionTestIDV1 } from '@/lib/sheetActions';
 import { trailheadFonts } from '@/lib/typography';
 
 export type TrailSheetMetric = {
@@ -128,7 +129,7 @@ export function TrailSheetActionRow({
   return (
     <View style={s.fullActions}>
       <TouchableOpacity
-        testID={`${model.testID}-primary`}
+        testID={sheetActionTestIDV1(model.testID, 'navigate')}
         accessibilityRole="button"
         style={s.fullPrimary}
         onPress={onPrimary}
@@ -136,7 +137,7 @@ export function TrailSheetActionRow({
         <Text style={s.primaryButtonText}>{primaryLabel}</Text>
       </TouchableOpacity>
       <TouchableOpacity
-        testID={`${model.testID}-save`}
+        testID={sheetActionTestIDV1(model.testID, 'save')}
         accessibilityRole="button"
         accessibilityState={{ selected: saved }}
         style={s.fullSecondary}

@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme, type ColorPalette } from '@/lib/design';
 import type { PlaceSheetModel } from '@/lib/placeSheetAdapters';
+import { sheetActionTestIDV1 } from '@/lib/sheetActions';
 import { trailheadFonts } from '@/lib/typography';
 
 type Props = {
@@ -81,7 +82,7 @@ export default function CampPlaceSheetPeek({
           <Text style={s.primaryButtonText}>View sites</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          testID={`${model.testID}-peek-save`}
+          testID={sheetActionTestIDV1(model.testID, 'save')}
           accessibilityRole="button"
           accessibilityState={{ selected: saved }}
           style={s.secondaryButton}

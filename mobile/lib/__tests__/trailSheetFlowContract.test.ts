@@ -9,6 +9,7 @@ import { TRAIL_SHEET_PARITY_MODULES } from '../placeSheetAdapters';
 const mobileRoot = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const mapSource = readFileSync(join(mobileRoot, 'app/(tabs)/map.tsx'), 'utf8');
 const presentationSource = readFileSync(join(mobileRoot, 'components/map/TrailPlaceSheet.tsx'), 'utf8');
+const actionSource = readFileSync(join(mobileRoot, 'lib/sheetActions.ts'), 'utf8');
 
 test('trail and trailhead selections enter the shared Peek/Full coordinator', () => {
   assert.match(mapSource, /activePlaceSheetModel\.identity\.kind === 'trail'/);
@@ -44,13 +45,13 @@ test('trail sheet parity retains planning, offline, community, source, and navig
     'linked_trails', 'coordinates', 'navigation',
   ]);
   assert.match(mapSource, /Download for offline/);
-  assert.match(mapSource, /Preview in 3D/);
+  assert.match(actionSource, /const PREVIEW_3D:[\s\S]*?'Preview in 3D'/);
   assert.match(mapSource, /Build route/);
-  assert.match(mapSource, /Report conditions/);
+  assert.match(actionSource, /const REPORT:[\s\S]*?'Report'/);
   assert.match(mapSource, /<FirstPartyRatingSection/);
   assert.match(mapSource, /<TrailSheetSectionTitle>Source<\/TrailSheetSectionTitle>/);
   assert.match(mapSource, /api\.suggestTrailEdit/);
-  assert.match(mapSource, /text: 'Suggest edit'/);
+  assert.match(actionSource, /const SUGGEST_EDIT:[\s\S]*?'Suggest edit'/);
 });
 
 test('full sheet copy avoids invented confidence and access assurances', () => {

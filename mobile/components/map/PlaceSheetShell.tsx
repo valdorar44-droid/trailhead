@@ -12,6 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme, type ColorPalette } from '@/lib/design';
 import type { PlaceSheetModel } from '@/lib/placeSheetAdapters';
+import { sheetActionTestIDV1 } from '@/lib/sheetActions';
 import { trailheadFonts } from '@/lib/typography';
 
 type ShellProps = {
@@ -128,14 +129,14 @@ export function PlaceSheetHeroChrome({
         <View style={[styles.heroActions, { top }]}>
           {onSave ? (
             <HeroAction
-              testID={`${model.testID}-save`}
+              testID={sheetActionTestIDV1(model.testID, 'save')}
               label={saved ? `Remove saved ${model.title}` : `Save ${model.title}`}
               icon={saved ? 'heart' : 'heart-outline'}
               color={saved ? '#ef4444' : '#fff'}
               onPress={onSave}
             />
           ) : null}
-          {onShare ? <HeroAction testID={`${model.testID}-share`} label={`Share ${model.title}`} icon="share-outline" onPress={onShare} /> : null}
+          {onShare ? <HeroAction testID={sheetActionTestIDV1(model.testID, 'share')} label={`Share ${model.title}`} icon="share-outline" onPress={onShare} /> : null}
           {onClose ? <HeroAction testID={`${model.testID}-close`} label={`Close ${model.title}`} icon="close" onPress={onClose} /> : null}
         </View>
       ) : null}

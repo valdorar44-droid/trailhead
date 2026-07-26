@@ -64,3 +64,12 @@ test('campground Save and Remove saved use the same reversible action', () => {
   assert.match(mapSource, /onSave=\{\(\) => toggleCampPlaceSaved\(selectedCamp\)\}/);
   assert.match(mapSource, /function downloadCampPlace\(camp: CampsitePin \| CampsiteDetail\)[\s\S]*?saveCampPlace\(camp\)/);
 });
+
+test('campground availability reports are explicit and require confirmation', () => {
+  assert.match(mapSource, /availability_report: !privateLeadKeyFromCamp\(selectedCamp, campDetail\)/);
+  assert.match(mapSource, /function confirmReportFull\(\)/);
+  assert.match(mapSource, /'Report campground full\?'/);
+  assert.match(mapSource, /sheetActionTestIDV1\(selectedCampSheetModel!\.testID, 'report_full'\)/);
+  assert.match(mapSource, /onPress=\{confirmReportFull\}/);
+  assert.match(mapSource, /<Text style=\{s\.reportFullText\}>Report full<\/Text>/);
+});

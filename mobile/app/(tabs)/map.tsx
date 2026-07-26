@@ -7315,6 +7315,7 @@ function MapScreen() {
       comments: !privateLeadKeyFromCamp(selectedCamp, campDetail),
       ratings: Boolean(selectedCampRatingTarget),
       reporting: !privateLeadKeyFromCamp(selectedCamp, campDetail),
+      availability_report: !privateLeadKeyFromCamp(selectedCamp, campDetail),
       suggest_edit: true,
       field_review: Boolean(privateLeadKeyFromCamp(selectedCamp, campDetail)),
       field_photo: Boolean(privateLeadKeyFromCamp(selectedCamp, campDetail)),
@@ -19558,6 +19559,18 @@ function MapScreen() {
     setFullnessVoting(false);
   }
 
+  function confirmReportFull() {
+    if (!selectedCamp || fullnessVoting) return;
+    Alert.alert(
+      'Report campground full?',
+      'This publishes a current availability report for other campers.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Report full', onPress: () => { void handleReportFull(); } },
+      ],
+    );
+  }
+
   async function handleFullnessVote(action: 'confirm' | 'dispute') {
     if (!selectedCamp || fullnessVoting) return;
     setFullnessVoting(true);
@@ -28049,9 +28062,16 @@ function MapScreen() {
                 </View>
               </View>
             ) : !privateLeadKeyFromCamp(selectedCamp, campDetail) ? (
-              <TouchableOpacity style={s.reportFullBtn} onPress={handleReportFull} disabled={fullnessVoting}>
+              <TouchableOpacity
+                testID={selectedCampAction('report_full')
+                  ? sheetActionTestIDV1(selectedCampSheetModel!.testID, 'report_full')
+                  : undefined}
+                style={s.reportFullBtn}
+                onPress={confirmReportFull}
+                disabled={fullnessVoting}
+              >
                 <Ionicons name="warning-outline" size={12} color="#f59e0b" />
-                <Text style={s.reportFullText}>Report</Text>
+                <Text style={s.reportFullText}>Report full</Text>
               </TouchableOpacity>
             ) : null}
             {activeTrip && (

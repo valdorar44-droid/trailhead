@@ -22,6 +22,7 @@ export type SheetActionIdV1 =
   | 'comments'
   | 'rating'
   | 'report'
+  | 'report_full'
   | 'suggest_edit'
   | 'helpful'
   | 'not_accurate'
@@ -44,6 +45,7 @@ export type SheetActionCapabilityV1 =
   | 'comments'
   | 'ratings'
   | 'reporting'
+  | 'availability_report'
   | 'suggest_edit'
   | 'community_vote'
   | 'field_review'
@@ -63,6 +65,7 @@ export type SheetActionDestinationV1 =
   | 'comments_section'
   | 'rating_section'
   | 'report_composer'
+  | 'availability_report'
   | 'edit_form'
   | 'community_vote'
   | 'field_review';
@@ -199,6 +202,14 @@ const REPORT: ActionTemplate = template(
   'mutating',
   { sheet: 'restore', map: 'preserve', confirmation: 'before_commit' },
 );
+const REPORT_FULL: ActionTemplate = template(
+  'report_full',
+  'availability_report',
+  'Report full',
+  'availability_report',
+  'mutating',
+  { sheet: 'preserve', map: 'preserve', confirmation: 'before_commit' },
+);
 const SUGGEST_EDIT: ActionTemplate = template(
   'suggest_edit',
   'suggest_edit',
@@ -292,6 +303,7 @@ const REGISTRY: Record<SheetActionEntityKindV1, readonly ActionTemplate[]> = {
     COMMENTS,
     RATING,
     REPORT,
+    REPORT_FULL,
     SUGGEST_EDIT,
   ],
   trail: [

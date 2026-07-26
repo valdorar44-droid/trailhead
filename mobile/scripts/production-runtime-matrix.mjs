@@ -24,6 +24,15 @@ function updateRecords(branch) {
   return (branch?.updateGroups || []).flatMap(group => Array.isArray(group) ? group : []);
 }
 
+function listingRows(payload) {
+  const rows = Array.isArray(payload?.currentPage) ? payload.currentPage : payload;
+  if (!Array.isArray(rows)) throw new Error('Production branch listing is missing.');
+  // EAS CLI currently caps update:list at 50 and does not expose a pagination
+  // cursor in its JSON payload. Treat a full page as incomplete evidence.
+  if (rows.length >= 50) throw new Error('Production branch listing may be truncated at the EAS 50-record limit.');
+  return rows;
+}
+
 export function runtimePlatformKey(runtimeVersion, platform) {
   return `${nonempty(runtimeVersion)}::${nonempty(platform).toLowerCase()}`;
 }
@@ -58,14 +67,61 @@ export function productionRuntimeSnapshot(payload, excludedRuntimes = []) {
   };
 }
 
+export function productionRuntimeSnapshotFromListing(
+  channelPayload,
+  listingPayload,
+  excludedRuntimes = [],
+) {
+  const channel = channelPayload?.currentPage || channelPayload;
+  if (!channel?.name) throw new Error('Production channel evidence is missing.');
+  const branch = mappedBranch(channel);
+  const listedBranch = nonempty(listingPayload?.name);
+  if (listedBranch && listedBranch !== branch.name) {
+    throw new Error(`Production listing branch mismatch: expected ${branch.name}, got ${listedBranch}.`);
+  }
+  const excluded = new Set(excludedRuntimes.map(nonempty));
+  const newest = new Map();
+  for (const row of listingRows(listingPayload)) {
+    const runtime = nonempty(row?.runtimeVersion);
+    const group = nonempty(row?.group);
+    if (!runtime || !group || excluded.has(runtime)) continue;
+    for (const platform of platforms(row?.platforms || row?.platform)) {
+      if (!['android', 'ios'].includes(platform)) continue;
+      const key = runtimePlatformKey(runtime, platform);
+      if (newest.has(key)) {
+        throw new Error(`Production branch has duplicate runtime/platform coverage: ${key}`);
+      }
+      newest.set(key, {
+        key,
+        runtimeVersion: runtime,
+        platform,
+        group,
+        createdAt: row?.createdAt || '',
+      });
+    }
+  }
+  const records = [...newest.values()].sort((a, b) => a.key.localeCompare(b.key));
+  return {
+    channel: channel.name,
+    channelId: channel.id,
+    branch: branch.name,
+    branchId: branch.id,
+    records,
+    groups: [...new Set(records.map(record => record.group))],
+    keys: records.map(record => record.key),
+  };
+}
+
 export function branchRuntimeKeys(payload) {
-  const rows = Array.isArray(payload?.currentPage) ? payload.currentPage : payload;
-  if (!Array.isArray(rows)) throw new Error('Candidate branch listing is missing.');
+  const rows = listingRows(payload);
   const keys = new Set();
   for (const row of rows) {
     const runtime = nonempty(row?.runtimeVersion);
     for (const platform of platforms(row?.platforms || row?.platform)) {
-      if (runtime && ['android', 'ios'].includes(platform)) keys.add(runtimePlatformKey(runtime, platform));
+      if (!runtime || !['android', 'ios'].includes(platform)) continue;
+      const key = runtimePlatformKey(runtime, platform);
+      if (keys.has(key)) throw new Error(`Candidate branch has duplicate runtime/platform coverage: ${key}`);
+      keys.add(key);
     }
   }
   return [...keys].sort();

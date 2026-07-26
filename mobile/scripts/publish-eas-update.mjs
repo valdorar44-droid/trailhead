@@ -8,6 +8,7 @@ import { assertAuthoritativeWorktreeClean } from './release-worktree.mjs';
 import { validateReleaseEnvironment } from './release-environment.mjs';
 import { verifyJsOnlyProductionCompatibility } from './native-ota-compatibility.mjs';
 import {
+  productionRuntimeSnapshotFromListing,
   productionRuntimeSnapshot,
   runtimePlatformKey,
   validateRuntimeMatrixCoverage,
@@ -193,19 +194,35 @@ if (!dryRun) validateReleaseEnvironment(process.env, { requirePreviewQa: target 
 const compatibilityEvidence = target === 'production' && !dryRun ? assertProductionApproval() : null;
 let productionSnapshot = null;
 if (target === 'production' && !dryRun) {
-  const { payload } = queryJsonWithRetry([
+  const { payload: channelPayload, evidence: channelSnapshot } = queryJsonWithRetry([
     '--yes', 'eas-cli@21.0.2', 'channel:view', target, '--json', '--non-interactive',
   ], 'Current production channel', payload => productionRuntimeSnapshot(payload, [
     appConfig.android.runtimeVersion,
     appConfig.ios.runtimeVersion,
   ]));
-  productionSnapshot = productionRuntimeSnapshot(payload, [
+  const { payload: branchListing } = queryJsonWithRetry([
+    '--yes', 'eas-cli@21.0.2', 'update:list',
+    '--branch', channelSnapshot.branch,
+    '--limit', '50',
+    '--json',
+    '--non-interactive',
+  ], 'Current production branch listing', payload => productionRuntimeSnapshotFromListing(
+    channelPayload,
+    payload,
+    [appConfig.android.runtimeVersion, appConfig.ios.runtimeVersion],
+  ));
+  productionSnapshot = productionRuntimeSnapshotFromListing(channelPayload, branchListing, [
     appConfig.android.runtimeVersion,
     appConfig.ios.runtimeVersion,
   ]);
   writeFileSync(
     resolve(compatibilityEvidence.summaryPath, '..', 'production-channel-before.json'),
-    JSON.stringify(payload, null, 2),
+    JSON.stringify(channelPayload, null, 2),
+    'utf8',
+  );
+  writeFileSync(
+    resolve(compatibilityEvidence.summaryPath, '..', 'production-branch-before.json'),
+    JSON.stringify(branchListing, null, 2),
     'utf8',
   );
 }

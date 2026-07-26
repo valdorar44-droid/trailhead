@@ -8,6 +8,7 @@ const mobileRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const read = path => readFileSync(join(mobileRoot, path), 'utf8');
 
 const appConfig = read('app.config.js');
+const easConfig = JSON.parse(read('eas.json'));
 const rootLayout = read('app/_layout.tsx');
 const mapboxPrivacy = read('lib/privacy/mapboxTelemetry.ts');
 const branchAttribution = read('lib/referrals/branchAttribution.ts');
@@ -17,6 +18,16 @@ assert.match(
   appConfig,
   /EXPO_PUBLIC_BRANCH_ATTRIBUTION_ENABLED \|\| 'false'/,
   'Third-party deferred referral attribution must remain disabled by default.',
+);
+assert.equal(
+  easConfig.build.preview.env.EXPO_PUBLIC_BRANCH_ATTRIBUTION_ENABLED,
+  'false',
+  'Preview builds must not override Branch attribution back on.',
+);
+assert.equal(
+  easConfig.build.production.env.EXPO_PUBLIC_BRANCH_ATTRIBUTION_ENABLED,
+  'false',
+  'Production builds must not override Branch attribution back on.',
 );
 assert.match(branchAttribution, /const effectiveEnabled = enabled && branchConfig\(\)\.enabled/);
 assert.match(branchAttribution, /branch\?\.disableTracking\(!effectiveEnabled\)/);

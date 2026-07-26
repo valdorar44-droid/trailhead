@@ -69,6 +69,11 @@ expect(lockRoot?.version === '1.0.10', 'package-lock.json root version must use 
 expect(config.version === '1.0.10', 'app.config.js must use marketing version 1.0.10.');
 expect(config.ios.runtimeVersion === 'native-1.0.10-ios.3', 'iOS runtime is not native-1.0.10-ios.3.');
 expect(config.android.runtimeVersion === 'native-1.0.10-android.4', 'Android runtime is not native-1.0.10-android.4.');
+expect(
+  easConfig.build.preview.env.EXPO_PUBLIC_BRANCH_ATTRIBUTION_ENABLED === 'false'
+    && easConfig.build.production.env.EXPO_PUBLIC_BRANCH_ATTRIBUTION_ENABLED === 'false',
+  'EAS profiles must not override Branch attribution back on.',
+);
 expect(pkg.dependencies.expo === '~54.0.36', 'Expo must remain pinned to ~54.0.36.');
 expect(pkg.dependencies['expo-updates'] === '~29.0.19', 'Expo Updates must remain pinned to ~29.0.19.');
 expect(pkg.dependencies['expo-sqlite'] === '~16.0.10', 'Expo SQLite must remain pinned to ~16.0.10.');

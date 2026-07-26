@@ -1702,3 +1702,15 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Next action: commit/push this deterministic gate correction, create the
   Android `.4` native candidate from that exact source, and run the bounded
   DHU destination-routing proof.
+
+### Privacy build-profile correction
+
+- Android production build `11d6e37b-77c5-40fe-80db-273a4c9f6e3a`
+  (remote build number `64`) was canceled before completion and must never be
+  used. The EAS production profile still overrode the source default with
+  `EXPO_PUBLIC_BRANCH_ATTRIBUTION_ENABLED=true`.
+- Preview and production EAS profiles now set the value to `false`.
+  `test:privacy-controls` and native/config drift both assert the profile
+  values so a build cannot silently re-enable deferred attribution.
+- The replacement build must come from the new immutable descendant commit and
+  use Android runtime `native-1.0.10-android.4`.

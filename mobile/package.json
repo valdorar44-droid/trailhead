@@ -49,6 +49,7 @@
     "test:app-links": "node --import tsx lib/__tests__/appLinks.test.ts",
     "test:report-alert-preferences": "node --import tsx lib/__tests__/reportAlertPreferences.test.ts",
     "test:route-brief": "node --import tsx lib/__tests__/routeBrief.test.ts",
+    "test:campground-brief": "node --import tsx lib/__tests__/campgroundBriefV3Contract.test.ts && node --import tsx lib/__tests__/campSheetFlowContract.test.ts && node --import tsx lib/__tests__/campDetailIdentity.test.ts",
     "pretest:offline-v2": "node --import tsx lib/__tests__/accountInventoryScope.test.ts && node --import tsx lib/__tests__/downloadedPlacePoint.test.ts && node --import tsx lib/offlineV2/__tests__/offlineCatalogPreservation.test.ts",
     "test:offline-v2": "node --import tsx lib/offlineV2/__tests__/offlineV2.test.ts && node --import tsx lib/offlineV2/__tests__/offlineV2Runtime.test.ts && node --import tsx lib/offlineV2/__tests__/scopeCleanup.test.ts && node --import tsx lib/offlineV2/__tests__/activeStyle.test.ts && node --import tsx lib/__tests__/offlinePlacePackIndex.test.ts && node --import tsx components/NativeMap/__tests__/offlineHubModel.test.ts && node --import tsx components/NativeMap/__tests__/offlineModalParity.test.ts",
     "test:plan-deep-links": "node --import tsx lib/__tests__/planDeepLinks.test.ts && node --import tsx lib/__tests__/planLibraryPresentation.test.ts",

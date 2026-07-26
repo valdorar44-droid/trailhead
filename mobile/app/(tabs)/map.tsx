@@ -20,7 +20,7 @@ import {
 import CampCoordinatesSection from '@/components/map/CampCoordinatesSection';
 import CampFieldReportsSection from '@/components/map/CampFieldReportsSection';
 import FieldReportComposer from '@/components/reports/FieldReportComposer';
-import CampInsightSection from '@/components/map/CampInsightSection';
+import CampgroundBriefSection from '@/components/map/CampgroundBriefSection';
 import CampNearbyPlacesSection from '@/components/map/CampNearbyPlacesSection';
 import CampReviewsSection from '@/components/map/CampReviewsSection';
 import CampEditSheet, { type CampEditDraft } from '@/components/map/CampEditSheet';
@@ -83,7 +83,7 @@ import {
   setCarTrailFollow,
   type CarNavigationMode,
 } from '@/lib/carIntegration';
-import { api, ApiError, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, CampComment, Waypoint, TripResult, TrailProfile, MapCardResolveResponse, WaterNavigationLinesResponse, WaterConditionsResponse, WaterSpotCard, WaterSpotCardsResponse, FishingConditionsResponse, SuggestedWaterCorridorResponse, type BookableExperience, type BriefAndBackupV1, type GasStation, type GeocodePlace, type ExtremeConfig, type CopilotContext, type MapActionRequest, type MapSelectableFeature, type RouteCampWindowInput, type RouteCampWindowResult, type RouteScoutDayPlan, type RouteScoutState, type TrailPreviewManifest, type DispersedLead, type MissionControlBrief, type SavedRouteGeometryPayload } from '@/lib/api';
+import { api, ApiError, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, CampComment, Waypoint, TripResult, TrailProfile, MapCardResolveResponse, WaterNavigationLinesResponse, WaterConditionsResponse, WaterSpotCard, WaterSpotCardsResponse, FishingConditionsResponse, SuggestedWaterCorridorResponse, type BookableExperience, type BriefAndBackupV1, type CampgroundBriefV3, type GasStation, type GeocodePlace, type ExtremeConfig, type CopilotContext, type MapActionRequest, type MapSelectableFeature, type RouteCampWindowInput, type RouteCampWindowResult, type RouteScoutDayPlan, type RouteScoutState, type TrailPreviewManifest, type DispersedLead, type MissionControlBrief, type SavedRouteGeometryPayload } from '@/lib/api';
 import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
 import { trackPhase0Event, trackPhase0Once } from '@/lib/telemetry';
 import {
@@ -7020,6 +7020,11 @@ function MapScreen() {
   // AI & Wikipedia in campsite detail
   const [campInsight,    setCampInsight]    = useState<CampsiteInsight | null>(null);
   const [loadingInsight, setLoadingInsight] = useState(false);
+  const [campgroundBrief, setCampgroundBrief] = useState<CampgroundBriefV3 | null>(null);
+  const [loadingCampgroundBrief, setLoadingCampgroundBrief] = useState(false);
+  const campgroundBriefOwnerRef = useRef<string | null>(null);
+  const visibleCampgroundBrief = campgroundBriefOwnerRef.current === selectedCamp?.id ? campgroundBrief : null;
+  const visibleCampgroundBriefLoading = campgroundBriefOwnerRef.current === selectedCamp?.id && loadingCampgroundBrief;
   const [wikiArticles,   setWikiArticles]   = useState<WikiArticle[]>([]);
   const [loadingWiki,    setLoadingWiki]    = useState(false);
 
@@ -7041,6 +7046,7 @@ function MapScreen() {
     scrollY: number;
     sitesSectionY: number;
     insight: CampsiteInsight | null;
+    brief: CampgroundBriefV3 | null;
     wikiArticles: WikiArticle[];
     fullness: CampFullness | null;
     weather: WeatherForecast | null;
@@ -19550,6 +19556,9 @@ function MapScreen() {
     setCampDetailTimedOut(false);
     setCampDetail(null);
     setCampInsight(null);
+    campgroundBriefOwnerRef.current = camp.id;
+    setCampgroundBrief(null);
+    setLoadingCampgroundBrief(false);
     setWikiArticles([]);
     setFieldReports([]);
     setFieldReportSummary(null);
@@ -19564,6 +19573,12 @@ function MapScreen() {
     let detail: CampsiteDetail = minimal;
     let timedOut = false;
     const detailFetchId = campDetailFetchId(camp);
+    const briefPromise = detailFetchId
+      ? api.getCampgroundBrief(detailFetchId)
+          .then(value => ({ status: 'ready' as const, value }))
+          .catch(() => ({ status: 'unavailable' as const }))
+      : Promise.resolve({ status: 'unavailable' as const });
+    setLoadingCampgroundBrief(!!detailFetchId);
     if (detailFetchId) {
       let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
       const result = await Promise.race([
@@ -19587,6 +19602,11 @@ function MapScreen() {
     setCampDetail(detail);
     setCampDetailTimedOut(timedOut);
     setLoadingDetail(false);
+    briefPromise.then(result => {
+      if (!requestIsCurrent()) return;
+      if (result.status === 'ready') setCampgroundBrief(result.value);
+      setLoadingCampgroundBrief(false);
+    });
     if (privateLeadKeyFromCamp(camp, detail)) {
       return;
     }
@@ -19657,6 +19677,7 @@ function MapScreen() {
       scrollY: campSheetScrollYRef.current,
       sitesSectionY: campSitesSectionYRef.current,
       insight: campInsight,
+      brief: campgroundBrief,
       wikiArticles,
       fullness: campFullness,
       weather: campWeather,
@@ -19668,6 +19689,8 @@ function MapScreen() {
     setLoadingDetail(true);
     setQuickCampPhotoIndex(0);
     setCampInsight(null);
+    setCampgroundBrief(null);
+    setLoadingCampgroundBrief(true);
     setWikiArticles([]);
     setCampFullness(null);
     setCampWeather(null);
@@ -19711,8 +19734,17 @@ function MapScreen() {
       setCampCanonicalId(null);
       setLoadingDetail(false);
       selectedCampRef.current = sitePin;
+      campgroundBriefOwnerRef.current = sitePin.id;
       setSelectedCamp(sitePin);
       setCampDetail(detail);
+      api.getCampgroundBrief(String(siteCardId))
+        .then(brief => {
+          if (selectedCampRef.current?.id === sitePin.id) setCampgroundBrief(brief);
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (selectedCampRef.current?.id === sitePin.id) setLoadingCampgroundBrief(false);
+        });
       api.getCampFullness(sitePin.id).then(r => {
         if (selectedCampRef.current?.id === sitePin.id) setCampFullness(r);
       }).catch(() => {});
@@ -19732,7 +19764,7 @@ function MapScreen() {
 
   async function openCampDetail() {
     if (!selectedCamp) return;
-    await loadCampDetailForCamp(selectedCamp, { loadInsight: true });
+    await loadCampDetailForCamp(selectedCamp, { loadInsight: false });
   }
 
   function closeCampDetail() {
@@ -21748,11 +21780,14 @@ function MapScreen() {
     campPresentationRestoreRef.current = parentEntityId;
     campSitesReturnTargetRef.current = parentEntityId;
     selectedCampRef.current = parent.camp;
+    campgroundBriefOwnerRef.current = parent.camp.id;
     setSelectedCamp(parent.camp);
     setCampDetail(parent.detail);
     setCampDetailTimedOut(false);
     setLoadingDetail(false);
     setCampInsight(parent.insight);
+    setCampgroundBrief(parent.brief);
+    setLoadingCampgroundBrief(false);
     setWikiArticles(parent.wikiArticles);
     setCampFullness(parent.fullness);
     setCampWeather(parent.weather);
@@ -28216,43 +28251,14 @@ function MapScreen() {
                   onAddReport={() => setShowFieldReportForm(true)}
                 />
 
-                {(campInsight || loadingInsight) ? (
-                  <CampInsightSection
-                    title="Camp guide"
-                    nearbyTitle="Nearby"
-                    insight={campInsight}
-                    loading={loadingInsight}
-                    showLoadingSpinner
-                  />
-	                ) : hasPlan ? (
-	                  <TouchableOpacity style={s.lockedInlineCard} onPress={() => openCampInsight(selectedCamp, campDetail)}>
-	                    <Ionicons name="compass-outline" size={15} color={C.orange} />
-	                    <Text style={s.lockedInlineText}>Check fit, hazards, and nearby highlights.</Text>
-	                  </TouchableOpacity>
-	                ) : (
-	                  <TouchableOpacity style={s.lockedAiPreview} onPress={() => openCampInsight(selectedCamp, campDetail)} activeOpacity={0.9}>
-	                    <View style={s.lockedAiPreviewTop}>
-	                      <Text style={s.detailSectionTitle}>Camp guide</Text>
-                      <View style={s.lockedAiBadge}>
-                        <Ionicons name="lock-closed-outline" size={12} color={C.orange} />
-                        <Text style={s.lockedAiBadgeText}>Unlock</Text>
-                      </View>
-                    </View>
-                    <View style={s.lockedAiFakeBlock}>
-                      <View style={[s.lockedAiLine, { width: '76%' }]} />
-                      <View style={[s.lockedAiLine, { width: '92%' }]} />
-                      <View style={[s.lockedAiLine, { width: '68%' }]} />
-                      <View style={s.lockedAiMetaRow}>
-                        <View style={[s.lockedAiPill, { width: 92 }]} />
-                        <View style={[s.lockedAiPill, { width: 118 }]} />
-                      </View>
-                    </View>
-	                    <View style={s.lockedAiOverlay}>
-	                      <Ionicons name="compass-outline" size={17} color={C.orange} />
-	                      <Text style={s.lockedAiOverlayText}>Check fit, hazards, best season, and nearby highlights.</Text>
-                    </View>
-                  </TouchableOpacity>
-                )}
+                <CampgroundBriefSection
+                  brief={visibleCampgroundBrief}
+                  loading={visibleCampgroundBriefLoading}
+                  weather={campWeather}
+                  insight={campInsight}
+                  loadingInsight={loadingInsight}
+                  onPersonalize={() => selectedCamp && openCampInsight(selectedCamp, campDetail)}
+                />
               </>
               );
             })() : null}
@@ -28573,13 +28579,13 @@ function MapScreen() {
                   onCopy={() => copyCoordinates(campDetail.lat, campDetail.lng)}
                 />
 
-	                {/* Camp insight */}
-                <CampInsightSection
-                  title="Camp guide"
-                  nearbyTitle="Nearby"
+                <CampgroundBriefSection
+                  brief={visibleCampgroundBrief}
+                  loading={visibleCampgroundBriefLoading}
+                  weather={campWeather}
                   insight={campInsight}
-                  loading={loadingInsight}
-                  showLoadingSpinner={!campInsight}
+                  loadingInsight={loadingInsight}
+                  onPersonalize={() => selectedCamp && openCampInsight(selectedCamp, campDetail)}
                 />
 
                 <CampReviewsSection reviews={campDetail.reviews ?? []} limit={3} />

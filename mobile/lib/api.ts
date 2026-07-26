@@ -930,6 +930,12 @@ export const api = {
     const canonicalRidbId = ridbFacilityIdFromCanonicalCampId(raw);
     return req<CampsiteDetail>(`/api/campsites/${encodeURIComponent(canonicalRidbId || raw)}/detail`);
   },
+  getCampgroundBrief: (id: string) => {
+    const raw = String(id || '');
+    const siteParts = raw.startsWith('ridb_site:') ? raw.split(':') : [];
+    const facilityId = siteParts[1] || ridbFacilityIdFromCanonicalCampId(raw) || raw;
+    return req<CampgroundBriefV3>(`/api/campsites/${encodeURIComponent(facilityId)}/brief`);
+  },
   suggestCampsiteEdit: (id: string, data: CampEditSuggestionPayload) =>
     req<{ id: number; status: string; credits_earned: number; new_balance: number }>(`/api/campsites/${encodeURIComponent(id)}/suggest-edit`, {
       method: 'POST', body: JSON.stringify(data),
@@ -2960,6 +2966,70 @@ export interface CampsiteDetail extends CampsitePin {
   reviews?: PlaceReview[];
   provider_notices?: Array<{ label?: string; text?: string }>;
   media_source?: 'trailhead' | 'ridb' | 'blm' | 'osm' | 'google' | 'mixed' | string;
+}
+export interface CampgroundBriefFactV3 {
+  id: string;
+  label: string;
+  value: string;
+  url?: string | null;
+  source_ids: string[];
+}
+export interface CampgroundBriefNearbyV3 {
+  id: string;
+  name: string;
+  kind: string;
+  label: string;
+  distance_mi?: number | null;
+  source_label: string;
+  url?: string | null;
+}
+export interface CampgroundBriefSourceV3 {
+  id: string;
+  label: string;
+  url?: string | null;
+  updated_at?: number | null;
+  freshness?: string | null;
+  role: string;
+}
+export interface CampgroundBriefCoverageV3 {
+  records: Array<{
+    provider: string;
+    technology: string;
+    availability: string;
+    data_date?: string | null;
+  }>;
+  source_label: string;
+  source_url?: string | null;
+  last_checked?: number | null;
+  notice: string;
+}
+export interface CampgroundBriefV3 {
+  schema_version: 'campground-brief-v3';
+  entity: {
+    id: string;
+    name: string;
+    source_label: string;
+    source_url?: string | null;
+  };
+  source_revision: string;
+  generated_at: number;
+  evidence_status: 'complete' | 'partial' | 'limited';
+  facts: CampgroundBriefFactV3[];
+  site_types: string[];
+  access: CampgroundBriefFactV3[];
+  amenities: string[];
+  booking_contact: CampgroundBriefFactV3[];
+  conditions: CampgroundBriefFactV3[];
+  mobile_coverage?: CampgroundBriefCoverageV3 | null;
+  nearby_services: CampgroundBriefNearbyV3[];
+  nearby_places: CampgroundBriefNearbyV3[];
+  sources: CampgroundBriefSourceV3[];
+  unavailable: string[];
+  personalized_planning: {
+    available: boolean;
+    access: 'explorer_or_credits';
+    label: string;
+  };
 }
 export interface PlaceContextStatus {
   status?: 'full' | 'partial' | 'empty' | string;

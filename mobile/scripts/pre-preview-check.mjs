@@ -176,6 +176,12 @@ const checks = [
     args: ['--import', 'tsx', 'lib/__tests__/campSheetFlowContract.test.ts'],
   },
   {
+    label: 'Campground factual brief contract',
+    cwd: mobileRoot,
+    cmd: 'node',
+    args: ['--import', 'tsx', 'lib/__tests__/campgroundBriefV3Contract.test.ts'],
+  },
+  {
     label: 'Viewport-bounded wildfire overlay tests',
     cwd: mobileRoot,
     cmd: 'npm',

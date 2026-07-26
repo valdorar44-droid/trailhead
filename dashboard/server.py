@@ -58,6 +58,7 @@ from dashboard.route_enrichment import enrich_trip_along_route
 from dashboard.adventure_intelligence import build_mission_control
 from dashboard.mission_storyboard import generate_mission_storyboard
 from dashboard.provider_registry import list_provider_metadata
+from dashboard.campground_briefs import build_campground_brief_v3
 from dashboard.marine_chart_provider import (
     MarineBounds,
     fishing_conditions,
@@ -20885,8 +20886,7 @@ async def campsites_search(
         merged = _merge_camp_sources(merged, _explore_catalog_fallback_camps(lat, lng, max(radius, 75), limit=24), type_filters=type_filters)
     return merged[:80]
 
-@app.get("/api/campsites/{facility_id}/detail")
-async def campsite_detail(facility_id: str, user: dict | None = Depends(_optional_user)):
+async def _load_campsite_detail(facility_id: str, user: dict | None = None) -> dict:
     requested_facility_id = facility_id
     canonical_ridb = re.fullmatch(r"(?:place:)?ridb:([^:]+)", facility_id, re.I)
     if canonical_ridb:
@@ -20929,6 +20929,60 @@ async def campsite_detail(facility_id: str, user: dict | None = Depends(_optiona
     if override:
         detail = {**detail, **override, "admin_edited": True}
     return detail
+
+
+@app.get("/api/campsites/{facility_id}/detail")
+async def campsite_detail(facility_id: str, user: dict | None = Depends(_optional_user)):
+    return await _load_campsite_detail(facility_id, user)
+
+
+CAMPGROUND_BRIEF_SERVICE_CATEGORIES = {
+    "fuel",
+    "propane",
+    "water",
+    "grocery",
+    "mechanic",
+    "parts",
+    "hardware",
+    "medical",
+    "trailhead",
+    "viewpoint",
+    "dump",
+    "parking",
+}
+
+
+@app.get("/api/campsites/{facility_id}/brief")
+async def campground_brief_v3(facility_id: str, user: dict | None = Depends(_optional_user)):
+    """Return the free, source-owned campground brief.
+
+    The optional personalized planning note remains on the compatible
+    `/api/ai/campsite-insight` endpoint and is never required for these facts.
+    """
+    detail = await _load_campsite_detail(facility_id, user)
+    nearby_services: list[dict] = []
+    try:
+        lat = float(detail.get("lat"))
+        lng = float(detail.get("lng"))
+        if math.isfinite(lat) and math.isfinite(lng) and (lat or lng):
+            nearby_services = await asyncio.wait_for(
+                get_service_places(
+                    lat,
+                    lng,
+                    radius_m=32_000,
+                    categories=CAMPGROUND_BRIEF_SERVICE_CATEGORIES,
+                ),
+                timeout=8.0,
+            )
+    except Exception:
+        # Existing detail rails still supply any source-backed nearby rows.
+        nearby_services = []
+    return build_campground_brief_v3(
+        detail,
+        requested_id=facility_id,
+        nearby_services=nearby_services,
+    )
+
 
 @app.get("/api/campsites/{facility_id}/sites/{campsite_id}/detail")
 async def campsite_site_detail(facility_id: str, campsite_id: str):
@@ -35236,22 +35290,23 @@ async def campsite_insight(request: Request, body: CampsiteInsightRequest, user:
     if not _planner_provider_configured():
         raise HTTPException(503, TRIP_PLANNER_UNAVAILABLE)
 
-    # Full camp briefs are a paid/token feature even when the AI text is cached.
+    # The factual campground brief is free. This optional personalized
+    # planning note retains the existing Explorer or credit entitlement.
     if user:
         if has_active_plan(user) or user.get("is_admin"):
             pass
         else:
             cost = AI_COSTS["campsite_insight"]
-            if not deduct_credits(user["id"], cost, f"Campsite insight — {body.name}"):
+            if not deduct_credits(user["id"], cost, f"Campsite planning note — {body.name}"):
                 raise HTTPException(402, detail={
                     "code": "insufficient_credits",
-                    "message": f"Campsite briefs cost {cost} credits.",
+                    "message": f"Personalized planning notes cost {cost} credits.",
                     "earn_hint": True,
                 })
     else:
         raise HTTPException(402, detail={
             "code": "login_required",
-            "message": "Sign in or join a plan to view full camp briefs.",
+            "message": "Sign in to add a personalized planning note.",
             "earn_hint": True,
         })
 
@@ -35301,7 +35356,7 @@ async def campsite_insight(request: Request, body: CampsiteInsightRequest, user:
         )
     except Exception as e:
         if user and not has_active_plan(user):
-            add_credits(user["id"], AI_COSTS["campsite_insight"], "Refund — campsite insight error")
+            add_credits(user["id"], AI_COSTS["campsite_insight"], "Refund — campsite planning note error")
         raise HTTPException(500, str(e))
 
     validated = build_campsite_insight(result, evidence)

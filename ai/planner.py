@@ -869,7 +869,7 @@ Rules:
                 "schema": _CAMP_PLANNING_BRIEF_SCHEMA,
             },
         },
-        "max_output_tokens": 1400,
+        "max_output_tokens": 2200,
         "store": False,
         "safety_identifier": str(safety_identifier or "campground-brief")[:64],
     }

@@ -132,7 +132,7 @@ class CampgroundPlanningBriefOpenAITests(unittest.TestCase):
         self.assertEqual(payload["tools"][0]["type"], "web_search")
         self.assertEqual(payload["tools"][0]["search_context_size"], "low")
         self.assertEqual(payload["reasoning"], {"effort": "none"})
-        self.assertEqual(payload["max_output_tokens"], 1400)
+        self.assertEqual(payload["max_output_tokens"], 2200)
         self.assertEqual(payload["text"]["format"]["type"], "json_schema")
         self.assertTrue(payload["text"]["format"]["strict"])
         self.assertEqual(payload["safety_identifier"], "safe-test-id")

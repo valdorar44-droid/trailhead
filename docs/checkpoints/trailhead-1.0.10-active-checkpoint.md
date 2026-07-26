@@ -1287,3 +1287,47 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Do not repeat: Memory Gate, broad Map/Search/sheets crawls, Layers, Yellowstone, NPS research, Android Auto, Originals lifecycle, final 1.0.10 release gate, or store screenshot work.
 - Open P0/P1: none in source-level focused tests. Live Railway generation and Android presentation remain unverified until the packet preview is deployed.
 - Task-owned background processes: none.
+
+## Camp Guide brief completion - layered, grounded planning copy
+
+- Timestamp: `2026-07-26T02:46:16-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; completion HEAD `3ebb84c66059a97eaa51df358a2e7625d6ceed37`, pushed to origin.
+- Protected Explore index SHA-256 remains `7E59E5E2273DBBE1A26D7BBD4D947FAA20935C51FB79C464EED8A17BABF4D8F4`. `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, Android helper mode changes, Valhalla scripts, and all unrelated worktree changes remain excluded and unstaged.
+- The paired mobile preview carrying the opt-in Camp Guide UI remains:
+  - Android update `019f9d3a-39f2-7fc2-adc9-ddb54f0b0c9d`, group `3c70d0e0-4f90-4832-ad66-2fbb58e08990`, runtime `native-1.0.10-android.3`.
+  - iOS update `019f9d3a-39f2-7733-ba1a-86d2227ed627`, group `2f15d441-fb8b-4c71-8647-17d5d74f9319`, runtime `native-1.0.10-ios.3`.
+  - Candidate branch `preview-candidate-b9d4274d554ba43cb52e1da1bb866dd2d144c2ef-ms1g1qje-406f4b9ac1ced1c236033a98`; Sentry source maps were uploaded.
+- The ordinary campground sheet remains authoritative and unchanged. `Show brief` is opt-in, costs `5 credits`, is included with Explorer, and retains a permanent user/camp unlock. The brief does not duplicate booking, phone, prices, site counts, amenities, photos, comments, ratings, edits, field reports, weather, or other normal sheet modules.
+- The first live Railway request reproduced a `499` after approximately 125 seconds. The evidence-backed correction moved generation into a durable server-side job so closing or timing out a mobile request cannot cancel the work.
+- Model evaluation stopped after one bounded comparison:
+  - GPT-5.4 nano with reasoning `none` was fast but produced brittle, compressed copy and invalid structured output at the lower output cap.
+  - GPT-5.4 mini with reasoning `none`, low web-search context, strict structured output, and a 2,200-token cap completed the live comparisons in approximately 7-10 seconds server-side and produced the stronger field-guide result.
+- Final prompt and server policy require distinct roles for Summary, Best Time, Access and Rig, Service and Signal, What to Look Out For, Before You Go, and Nearby. They prohibit model/process/evidence language, generic checklists, off-site app/download instructions, inline domains, provider wording, unsupported assurance, and duplication of ordinary campground facts.
+- Server sanitization strips Markdown/inline links, applies sentence-aware truncation, and scopes FCC/mobile evidence to Service and Signal. The source-policy revision `2026-07-26-grounding-3` invalidates older cached copy.
+- Final backend deployment:
+  - Railway deployment `af9c808c-93ef-4d50-8cd6-19582c8e6d23`.
+  - Status `SUCCESS`.
+  - Image digest `sha256:4931382560b67cf09d4e05a727839ca5aa33be896bd5afec5078cefaa40fa415`.
+  - This was backend-only and required no replacement mobile OTA.
+- Final focused verification:
+  - `python -m unittest tests.test_campground_planning_briefs tests.test_campground_briefs tests.test_campsite_insight_integrity`: `10/10` passed. The suite includes one deliberate mocked generation failure that verifies refund behavior.
+  - `git diff --check`: passed.
+  - Earlier mobile campground contracts, sheet identity, TypeScript, copy/privacy, telemetry, and native-drift gates remained passed; they were not repeated after backend-only prompt/sanitizer changes.
+- Android build 61 live proof used a source-backed developed campground:
+  - The full campground sheet retained photos, weather, comments, ratings, reports, booking, and its normal modules.
+  - `Show brief` displayed `5 credits · Included with Explorer`, transitioned through Preparing, and settled in approximately 15 seconds.
+  - The final brief included a concise campground orientation, seasonal context, road/rig specifics, an evidence-backed no-service warning, bear/fire considerations, one actionable preparation note, and relevant nearby trailhead/dump-station context.
+  - No model, AI, database, evidence-process, provider, inline-domain, or off-site download-app wording appeared.
+- Evidence:
+  - `C:\Users\User\AppData\Local\Temp\trailhead-camp-brief-qa-b9d4274.xml`, SHA-256 `92E921CEE452330CC3E5892C02901A05E10D78A1050212C46FA115E3BA6AF0BA`.
+  - `C:\Users\User\AppData\Local\Temp\trailhead-camp-show-brief-b9.png`, SHA-256 `515F0156A44D5028A7ABD2AD47BCF3F79A3E6B120A2575CE82735CF72AC00C32`.
+  - `C:\Users\User\AppData\Local\Temp\trailhead-camp-brief-preparing-b9.png`, SHA-256 `304DC61C6B4F6B3A25BE6AEAF2CAC9F3D784689CDDEFCBC69A1EB915B797B0D2`.
+  - `C:\Users\User\AppData\Local\Temp\trailhead-indian-brief-ready.png`, SHA-256 `64223CBC572A4F906D6BD8AB2EF94E7B11B3898884F7F161A316EBA20494893F`.
+  - `C:\Users\User\AppData\Local\Temp\trailhead-indian-brief-mid.png`, SHA-256 `7D697D2B800A861537B66C44AF97648BF0E62B6303E09A780D384990587FB298`.
+  - `C:\Users\User\AppData\Local\Temp\trailhead-indian-brief-sections.png`, SHA-256 `D294C95AA9B2F82C5D0DCC4DC941ADD9DA0FB2F0DA90F5CFAD24ADDAB10EE332`.
+- Sparse generic pins without sufficient authoritative sources now return unavailable and refund the charge instead of fabricating a planning brief.
+- Open P0/P1 for this packet: none.
+- Deferred P2 observation: selecting the same Recreation.gov campground through one Explore search path can open a generic source hub rather than the canonical campground sheet. This belongs to the later Sheet Action/POI and Explore adapter packet and is not reopened here.
+- Exact next action: the user reviews the Android Camp Guide result. On acceptance, promote only the exact compatible preview-tested mobile source as appropriate, or begin the next forward-only `Sheet Action and POI Rabbit-Hole Audit` packet.
+- Do not repeat: model comparison, Camp Guide live generation, campground lifecycle, Memory Gate, broad Map/Search/sheet crawls, Layers, Yellowstone, NPS research, Android Auto, Originals lifecycle, production release validation, or store-screenshot work without new evidence.
+- Task-owned background processes: none. Temporary Camp Guide Railway deployment worktrees were removed; managed historical preview/deploy worktrees were left intact.

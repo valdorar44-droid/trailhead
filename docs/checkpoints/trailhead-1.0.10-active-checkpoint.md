@@ -1529,3 +1529,42 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Exact next action: commit and push this baseline, inspect the Search V2 request and provider paths, implement one evidence-backed correction, and stop for review after the paired preview and narrow Android proof.
 - Do not repeat: Camp Guide work, Sheet/POI broad crawl, Memory Gate, Layers, Yellowstone, NPS research, Android Auto, Originals lifecycle, production promotion, or store screenshots.
 - Task-owned background processes: none.
+
+## Search V2 service grounding and sheet Back - paired preview evidence
+
+- Timestamp: `2026-07-26T11:52:00-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; final mobile preview HEAD `5401f6b5a6a8cee9652e0374ef8c12a4cb352db3`, pushed to origin. Backend locality-grounding implementation is commit `d618ff4f`.
+- Protected Explore index SHA-256 remains `7E59E5E2273DBBE1A26D7BBD4D947FAA20935C51FB79C464EED8A17BABF4D8F4`. `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, Android helper mode changes, Valhalla files, and unrelated worktree changes remain excluded and unstaged.
+- The accepted Camp Guide production OTA remains unchanged on source `29e48a82e7c6bd605bfb31185b830f22b5101c83`. This Search/Sheet packet has not been promoted to production.
+- Search V2 now applies deterministic service intent for fuel/gas, drinking water, grocery, RV dump, vehicle repair, and parking across shared mobile surfaces and old clients. A named query is resolved in two bounded steps: resolve the named destination, then search the service term around that coordinate. Out-of-radius provider rows are rejected when Mapbox supplies distance.
+- The reproduced `fuel near Flagstaff` failure is resolved. The connected Samsung returned Flagstaff, Arizona fuel results headed by Fry's Fuel Center, Safeway Fuel Station, and VP Racing Fuels rather than businesses on Flagstaff Plaza in Virginia.
+- `auto repair near Flagstaff` returned four nearby Flagstaff, Arizona businesses. Selecting University Auto Repair opened the nonblank shared place sheet with identity, address, and Navigate.
+- That service-sheet check exposed one separate Android Back P1: the generic place sheet did not own the hardware Back event and the app returned to the previous host activity. The single bounded correction adds an identity-independent Back handler to the existing generic place sheet. Gallery and edit/comment forms close first, a parent return callback wins when present, and otherwise the sheet closes.
+- The exact failing Back assertion now passes: after opening University Auto Repair, Android Back removed all place-sheet nodes, kept `com.trailhead.app` foreground, and restored `explore.screen` plus `app.tab-bar`.
+- Remaining inventory observations are not disguised with fabricated results:
+  - Bare `fuel` and `gas station` without a usable map/location center show an honest empty state rather than distant trails or names containing `station`.
+  - Drinking water, grocery, RV dump, and Walnut Canyon parking produced honest empty states in this bounded provider check.
+  - These are recorded as P2 source/category coverage gaps for the later POI-ingestion work; no unsupported place, distance, or module was created.
+- Backend deployment `0a93ade7-5dc3-4d9a-91e1-301542c8e5ce` is healthy on Railway. `https://api.gettrailhead.app/api/health` returned `{"status":"ok","service":"trailhead"}`.
+- Final paired preview:
+  - Candidate branch `preview-candidate-5401f6b5a6a8cee9652e0374ef8c12a4cb352db3-ms21062z-5df51abf84d0f2c8e906933e`, branch ID `019f9f52-e567-710a-a80b-5f61e36ca8c6`.
+  - Android group `1b437ee0-8476-4c47-af1b-bb5c4a2531dc`, update `019f9f53-0bbf-7aff-a682-3ff27b1a1995`, runtime `native-1.0.10-android.3`.
+  - iOS group `9559e7d9-c713-4de8-a666-f317b1cd9ca2`, update `019f9f53-0bbf-7c61-b3f2-0fb4c8e66c4b`, runtime `native-1.0.10-ios.3`.
+  - Android device identity: app `1.0.10`, build `61`, channel `preview`, source `5401f6b5a6a8cee9652e0374ef8c12a4cb352db3`.
+  - Sentry source maps were uploaded for Android, iOS, and web before channel promotion.
+- Focused verification passed:
+  - Backend Search V2: `66/66`.
+  - Mobile Search V2: `74/74` from the implementation pass.
+  - Generic place Back contract: `1/1`.
+  - Sheet action/coordinator: `8/8`.
+  - TypeScript, copy audit (`165` files), Python compilation, privacy-preserving Search behavior, and whitespace checks passed.
+- Evidence:
+  - Final Android identity: `C:\Users\User\AppData\Local\Temp\trailhead-service-search-70b8209\qa-5401.xml`, SHA-256 `084C1A7FB32D4AE62AADF34604858A8D367B18042C2C2C95A628497BE9DE4CB9`.
+  - Grounded Flagstaff fuel results: `C:\Users\User\AppData\Local\Temp\trailhead-service-search-70b8209\fuel-flagstaff-grounded.xml`, SHA-256 `54E17634CD4AAECCEADB30AAF886F75A5913DC5CFFCA6CAD285777DF44D37FF4`.
+  - Flagstaff repair results: `C:\Users\User\AppData\Local\Temp\trailhead-service-search-70b8209\repair-flagstaff.xml`, SHA-256 `1C57E54813AEC12AADD97BDAEE653F17C985022AE0C3F9C23B91EB776E57F288`.
+  - Nonblank repair sheet before Back: `C:\Users\User\AppData\Local\Temp\trailhead-service-search-70b8209\backfix-sheet.xml`, SHA-256 `EA8AFF14B6FAEC3E2BB899D71295253DBAFD156BB2088984AF3C535AE7C73BF1`.
+  - In-app Explore restoration after Back: `C:\Users\User\AppData\Local\Temp\trailhead-service-search-70b8209\backfix-return.xml`, SHA-256 `7037907028C689B131A5D44D2F9E05F965D5BE585B03FFD8D69485A26911038C`.
+- Open P0/P1: none in the bounded Android packet. Physical iOS shared spot checks remain pending because the iPhone was not connected; the paired iOS update was published successfully.
+- Exact next action: user reviews this paired preview. If accepted, promote this exact Sheet/POI/Search descendant through the compatible production OTA gate, then start the real saved/downloaded trip-map packet in the approved Figma system before implementation.
+- Do not repeat: Camp Guide generation or production promotion, broad Map/Search/sheet crawls, Memory Gate, Layers, Yellowstone, NPS rabbit-hole research, Android Auto, Originals lifecycle, final production-build validation, or store screenshots.
+- Task-owned background processes: none. Metro, the EAS publisher, Sentry upload, focused tests, and Railway deployment commands have exited. The existing ADB daemon and pre-existing Codex host Node process were not stopped or modified.

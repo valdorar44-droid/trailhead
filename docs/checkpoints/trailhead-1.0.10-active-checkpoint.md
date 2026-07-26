@@ -1263,3 +1263,27 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Exact next action: wait for App Store Connect processing, upload the validated Android AAB with the Google policy video/declaration, install-test the resulting store candidates, and coordinate review/release timing.
 - Do not repeat: full pre-preview, Android Auto DHU, iOS GPX/lock-screen playback, Android App Links, Original cold link/share, Yellowstone/Search, Memory Gate V3, Layers, NPS, Plan/Downloads, broad app crawls, or completed Figma/Mobbin work.
 - Task-owned background processes at checkpoint: none after the temporary clean release worktree is removed.
+
+## Forward packet baseline - opt-in campground planning brief
+
+- Timestamp: `2026-07-26T01:27:32-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; pre-change HEAD `05acb975a10b25b2c31ec205e57492a0a97ca488`.
+- Existing paired 1.0.10 preview identity before this packet:
+  - Android update `019f9cff-bcbb-77d1-9799-dd087c299934`, runtime `native-1.0.10-android.3`.
+  - iOS update `019f9cff-bcbb-7e0a-86a9-e01c12974118`, runtime `native-1.0.10-ios.3`.
+- Protected Explore index SHA-256 is `7E59E5E2273DBBE1A26D7BBD4D947FAA20935C51FB79C464EED8A17BABF4D8F4`. `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, Android helper mode changes, Valhalla scripts, and unrelated worktree changes remain excluded and unstaged.
+- Scope is one forward-only packet:
+  - Keep the normal campground sheet and all existing facts/modules unchanged.
+  - Replace the automatically rendered duplicative factual brief with one explicit `Show brief` action.
+  - Charge exactly 5 credits once per campground, or include access with Explorer.
+  - Research the planning brief server-side through the existing Railway OpenAI configuration, using web search and strict structured output.
+  - Validate citations server-side, omit unsupported claims, and expose no provider/model or public AI label.
+  - Preserve the legacy campsite-insight endpoint for older clients.
+- Narrow verification completed before committing:
+  - Campground planning-brief, factual-brief, and legacy insight backend tests: `23/23`.
+  - Mobile campground contract, sheet-flow, and identity tests: `17/17`.
+  - TypeScript, user-facing copy, telemetry/privacy, native/config drift, and whitespace checks passed.
+- Exact next action: commit this baseline checkpoint separately, then commit only the named backend/mobile packet files, deploy backend compatibility, publish one paired preview OTA, and run the single Android developed/dispersed campground delta.
+- Do not repeat: Memory Gate, broad Map/Search/sheets crawls, Layers, Yellowstone, NPS research, Android Auto, Originals lifecycle, final 1.0.10 release gate, or store screenshot work.
+- Open P0/P1: none in source-level focused tests. Live Railway generation and Android presentation remain unverified until the packet preview is deployed.
+- Task-owned background processes: none.

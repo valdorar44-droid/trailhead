@@ -3263,11 +3263,16 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             : waterCorridorFC.features.length > 0
               ? 'safe-water-corridor-band'
               : undefined;
-  const publicLandLayerPositionProps = isMapboxStandardStyle
-    ? ({ slot: 'bottom' } as any)
+  // RNMapbox 10.2/Fabric can tear down the React host when a mounted
+  // RasterLayer changes between slot and belowLayerID placement. Remount this
+  // one overlay whenever its placement contract changes, and only pass scalar
+  // native props. This transition happens when an Original releases its
+  // Standard-style presentation back to the user's normal map style.
+  const publicLandLayerPlacementKey = isMapboxStandardStyle
+    ? 'slot-bottom'
     : publicLandBelowLayerID
-      ? ({ belowLayerID: publicLandBelowLayerID } as any)
-      : {};
+      ? `below-${publicLandBelowLayerID}`
+      : 'default';
   const userLocationShape = userLoc
     ? {
         type: 'FeatureCollection',
@@ -4653,6 +4658,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       {/* ── Public land ownership overlay ─────────────────────────────── */}
       {visualWorkActive && showLandOverlay && (
         <MapGL.RasterSource
+          key={`public-land-overlay-${publicLandLayerPlacementKey}`}
           id="public-land-overlay"
           tileUrlTemplates={[`${API_BASE_URL}/api/land-tile/{z}/{y}/{x}`]}
           tileSize={256}
@@ -4661,7 +4667,12 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         >
           <MapGL.RasterLayer
             id="public-land-overlay-layer"
-            {...publicLandLayerPositionProps}
+            slot={isMapboxStandardStyle ? 'bottom' : undefined}
+            belowLayerID={
+              !isMapboxStandardStyle && typeof publicLandBelowLayerID === 'string'
+                ? publicLandBelowLayerID
+                : undefined
+            }
             style={{ rasterOpacity: 0.58 }}
           />
         </MapGL.RasterSource>

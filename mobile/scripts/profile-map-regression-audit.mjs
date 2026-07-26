@@ -368,8 +368,13 @@ assert(
   'Map visual work follows screen focus while background navigation location remains independent',
 );
 
-assert(nativeMap.includes("slot: 'bottom'") && nativeMap.includes('belowLayerID: publicLandBelowLayerID'),
-  'native public-land raster is positioned below route overlays');
+assert(
+  nativeMap.includes('publicLandLayerPlacementKey = isMapboxStandardStyle')
+    && nativeMap.includes('key={`public-land-overlay-${publicLandLayerPlacementKey}`}')
+    && nativeMap.includes("slot={isMapboxStandardStyle ? 'bottom' : undefined}")
+    && nativeMap.includes("typeof publicLandBelowLayerID === 'string'"),
+  'native public-land raster remounts across placement modes and passes only scalar placement props',
+);
 assert(webMap.includes("? 'trailhead-web-route-casing' : undefined"),
   'web public-land raster is inserted below the route casing');
 assert(

@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  BackHandler,
   Image,
   Linking,
   PanResponder,
@@ -556,6 +557,39 @@ export default function PremiumPlaceSheet({
     : stage === 'half'
       ? Math.max(260, Math.min(height * 0.38, 360))
       : Math.max(78, insets.bottom + 70);
+
+  useEffect(() => {
+    if (!visible || !place) return;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (galleryIndex !== null) {
+        setGalleryIndex(null);
+        return true;
+      }
+      if (showCommentForm) {
+        setShowCommentForm(false);
+        return true;
+      }
+      if (showEditForm) {
+        setShowEditForm(false);
+        return true;
+      }
+      if (onBack) {
+        onBack();
+        return true;
+      }
+      onClose();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [
+    galleryIndex,
+    onBack,
+    onClose,
+    place?.id,
+    showCommentForm,
+    showEditForm,
+    visible,
+  ]);
 
   const pan = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => false,

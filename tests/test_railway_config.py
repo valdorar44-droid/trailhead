@@ -10,7 +10,7 @@ class RailwayConfigTests(unittest.TestCase):
         deploy = config.get("deploy", {})
 
         self.assertEqual(deploy.get("healthcheckPath"), "/api/health")
-        self.assertEqual(deploy.get("healthcheckTimeout"), 30)
+        self.assertEqual(deploy.get("healthcheckTimeout"), 90)
         self.assertNotIn("healthcheck", deploy)
 
 

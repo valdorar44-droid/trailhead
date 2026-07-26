@@ -1684,3 +1684,21 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Task-owned background processes: none. Gradle daemons exited after the
   no-daemon tests; no Metro, Maestro, EAS publisher, or Railway deployment
   remains running.
+
+### Deployment and pre-preview follow-up
+
+- Railway deployment `64bb6061-d643-4f8d-8323-7bbf6493037b` succeeded from
+  exact source `87974b221d5148fe84916a88ace7c8bead7c4e3e`; image digest
+  `sha256:fd13366d5049bac72469444203c193fecfeb68caaed6c9e8841b9a5968172ecd`.
+  Health, `/privacy`, and `/delete-account` all returned HTTP `200`.
+- The one complete pre-preview run reached the full `807`-test backend suite.
+  Every mobile/native/privacy/release check and `806/807` backend assertions
+  passed. The sole failure was a stale Railway unit assertion expecting the
+  former 30-second health window after commit `3f635f1` intentionally changed
+  `railway.toml` to 90 seconds.
+- `tests.test_railway_config` was corrected to match the deployed,
+  source-controlled 90-second health gate and its one focused assertion
+  passed. The entire 11-minute suite is not repeated.
+- Next action: commit/push this deterministic gate correction, create the
+  Android `.4` native candidate from that exact source, and run the bounded
+  DHU destination-routing proof.

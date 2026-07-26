@@ -11,6 +11,7 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as Location from 'expo-location';
 import PaywallModal from '@/components/PaywallModal';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
+import CampgroundBriefSection from '@/components/map/CampgroundBriefSection';
 import ActivityStatusCard from '@/components/planning/ActivityStatusCard';
 import RouteBuilderActiveDayControls, { RouteBuilderEmptyDayGuidance } from '@/components/routeBuilder/RouteBuilderActiveDayControls';
 import RouteBuilderActiveDayStopList from '@/components/routeBuilder/RouteBuilderActiveDayStopList';
@@ -38,7 +39,7 @@ import useRouteBuilderDiscoveryState, {
 } from '@/components/routeBuilder/useRouteBuilderDiscoveryState';
 import { TrailheadButton, TrailheadCard, TrailheadCardSkeleton, TrailheadSheet, TrailheadTopBar } from '@/components/TrailheadUI';
 import TrailheadPhotoGallery, { type TrailheadGalleryPhoto } from '@/components/TrailheadPhotoGallery';
-import { api, ApiError, BookableExperience, CampFullness, Campsite, CampsiteDetail, CampsiteInsight, CampsitePin, CampReusePolicy, ExcursionCandidate, ExtremeConfig, FuelEstimate, GasStation, GeocodePlace, OutdoorOffer, OsmPoi, PaywallError, RouteStyleMode, SavedRouteGeometryPayload, TripResult, TripShapeMode, TripTimeline, Waypoint, WeatherForecast } from '@/lib/api';
+import { api, ApiError, BookableExperience, CampFullness, Campsite, CampsiteDetail, CampgroundPlanningBriefV1, CampsitePin, CampReusePolicy, ExcursionCandidate, ExtremeConfig, FuelEstimate, GasStation, GeocodePlace, OutdoorOffer, OsmPoi, PaywallError, RouteStyleMode, SavedRouteGeometryPayload, TripResult, TripShapeMode, TripTimeline, Waypoint, WeatherForecast } from '@/lib/api';
 import { loadAllPlacePoints } from '@/lib/offlinePlacePacks';
 import { downloadedPlacePointToPoi } from '@/lib/downloadedPlacePoint';
 import {
@@ -2010,7 +2011,8 @@ function RouteBuilderScreenContent() {
   const [campDetail, setCampDetail] = useState<CampsiteDetail | null>(null);
   const [campWeather, setCampWeather] = useState<WeatherForecast | null>(null);
   const [campFullness, setCampFullness] = useState<CampFullness | null>(null);
-  const [campInsight, setCampInsight] = useState<CampsiteInsight | null>(null);
+  const [campInsight, setCampInsight] = useState<CampgroundPlanningBriefV1 | null>(null);
+  const [campBriefLoading, setCampBriefLoading] = useState(false);
   const [showCampDetail, setShowCampDetail] = useState(false);
   const [campGalleryIndex, setCampGalleryIndex] = useState<number | null>(null);
   const [quickCampPhotoIndex, setQuickCampPhotoIndex] = useState(0);
@@ -4338,21 +4340,8 @@ function RouteBuilderScreenContent() {
     try {
       const detail = await enrichCampDetailWithGoogle(await api.getCampsiteDetail(camp.id), camp);
       if (!accountRequestIsCurrent(requestEpoch, requestAccountId) || selectedCampRef.current?.id !== camp.id) return;
-      const insight = await api.getCampsiteInsight({
-        name: camp.name,
-        lat: camp.lat,
-        lng: camp.lng,
-        description: stripHtml(detail.description || camp.description),
-        land_type: detail.land_type || camp.land_type,
-        amenities: detail.amenities ?? [],
-        facility_id: camp.id ?? '',
-        source_label: detail.source_badge || detail.verified_source || camp.source_badge || camp.verified_source || '',
-        source_url: detail.official_url || detail.url || camp.official_url || camp.url || '',
-        source_updated_at: detail.last_checked || detail.fetched_at || camp.last_checked || camp.fetched_at || null,
-      });
-      if (!accountRequestIsCurrent(requestEpoch, requestAccountId) || selectedCampRef.current?.id !== camp.id) return;
       setCampDetail({ ...detail, description: stripHtml(detail.description) });
-      setCampInsight(insight);
+      setCampInsight(null);
       setShowCampDetail(true);
     } catch (e: any) {
       if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
@@ -4382,11 +4371,36 @@ function RouteBuilderScreenContent() {
     }
   }
 
+  async function showCampPlanningBrief() {
+    if (!selectedCamp || campBriefLoading) return;
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
+    const camp = selectedCamp;
+    setCampBriefLoading(true);
+    try {
+      const brief = await api.getCampgroundPlanningBrief(camp.id);
+      if (!accountRequestIsCurrent(requestEpoch, requestAccountId) || selectedCampRef.current?.id !== camp.id) return;
+      setCampInsight(brief);
+    } catch (e: any) {
+      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
+      if (e instanceof PaywallError) {
+        setPaywallCode(e.code || 'campground_brief');
+        setPaywallMessage(e.message || 'Show brief costs 5 credits or is included with Explorer.');
+        setPaywallVisible(true);
+      } else {
+        Alert.alert('Brief unavailable', e?.message || 'Try again in a moment.');
+      }
+    } finally {
+      if (accountRequestIsCurrent(requestEpoch, requestAccountId)) setCampBriefLoading(false);
+    }
+  }
+
   function closeCampDetail() {
     setShowCampDetail(false);
     setSelectedCamp(null);
     setCampDetail(null);
     setCampInsight(null);
+    setCampBriefLoading(false);
     setCampGalleryIndex(null);
     setCampWeather(null);
     setCampFullness(null);
@@ -7549,34 +7563,12 @@ function RouteBuilderScreenContent() {
                 <TrailheadCard style={s.detailSection}>
                   <Text style={s.detailSectionTitle}>Coordinates</Text>
                   <Text style={s.coordText}>{campDetail.lat.toFixed(6)}, {campDetail.lng.toFixed(6)}</Text>
-                  {campInsight?.coordinates_dms ? <Text style={s.coordDms}>{campInsight.coordinates_dms}</Text> : null}
                 </TrailheadCard>
-                {campInsight && (
-                  <TrailheadCard style={s.detailSection}>
-                    <View style={s.aiHeader}>
-                      <Text style={s.detailSectionTitle}>Camp guide</Text>
-                    </View>
-                    {campInsight.insider_tip ? (
-                      <View style={s.insiderTip}>
-                        <Text style={s.insiderLabel}>Good to know</Text>
-                        <Text style={s.insiderText}>{campInsight.insider_tip}</Text>
-                      </View>
-                    ) : null}
-                    {campInsight.best_for ? <Text style={s.aiMeta}>Best for: {campInsight.best_for}</Text> : null}
-                    {campInsight.best_season ? <Text style={s.aiMeta}>Best season: {campInsight.best_season}</Text> : null}
-                    {campInsight.hazards ? (
-                      <View style={s.hazardRow}>
-                        <Ionicons name="warning-outline" size={13} color={C.yellow} />
-                        <Text style={s.hazardText}>{campInsight.hazards}</Text>
-                      </View>
-                    ) : null}
-                    {campInsight.nearby_highlights?.length ? (
-                      <View style={{ marginTop: 8 }}>
-                        {campInsight.nearby_highlights.map((h, i) => <Text key={i} style={s.nearbyItem}>• {h}</Text>)}
-                      </View>
-                    ) : null}
-                  </TrailheadCard>
-                )}
+                <CampgroundBriefSection
+                  brief={campInsight}
+                  loading={campBriefLoading}
+                  onShow={showCampPlanningBrief}
+                />
                 {(campDetail.reviews ?? []).length > 0 && (
                   <TrailheadCard style={s.detailSection}>
                     <Text style={s.detailSectionTitle}>Reviews</Text>

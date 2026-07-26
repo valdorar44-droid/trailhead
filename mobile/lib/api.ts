@@ -936,6 +936,14 @@ export const api = {
     const facilityId = siteParts[1] || ridbFacilityIdFromCanonicalCampId(raw) || raw;
     return req<CampgroundBriefV3>(`/api/campsites/${encodeURIComponent(facilityId)}/brief`);
   },
+  getCampgroundPlanningBrief: (id: string) => {
+    const raw = String(id || '');
+    const siteParts = raw.startsWith('ridb_site:') ? raw.split(':') : [];
+    const facilityId = siteParts[1] || ridbFacilityIdFromCanonicalCampId(raw) || raw;
+    return req<CampgroundPlanningBriefV1>(`/api/campsites/${encodeURIComponent(facilityId)}/planning-brief`, {
+      method: 'POST',
+    });
+  },
   suggestCampsiteEdit: (id: string, data: CampEditSuggestionPayload) =>
     req<{ id: number; status: string; credits_earned: number; new_balance: number }>(`/api/campsites/${encodeURIComponent(id)}/suggest-edit`, {
       method: 'POST', body: JSON.stringify(data),
@@ -4631,6 +4639,33 @@ export interface CampsiteInsight {
   nearby_highlights: string[]; hazards: string | null;
   star_rating: number; coordinates_dms: string;
   provenance?: CampsiteInsightProvenance;
+}
+export interface CampgroundPlanningBriefSourceV1 {
+  label: string;
+  url: string;
+}
+export interface CampgroundPlanningBriefAccessV1 {
+  permanent: boolean;
+  included_with_explorer: boolean;
+  credits_spent: number;
+  new_balance?: number | null;
+}
+export interface CampgroundPlanningBriefV1 {
+  schema_version: 'campground-planning-brief-v1' | string;
+  entity: { id: string; name: string };
+  summary: string;
+  best_time: string;
+  access_and_rig: string;
+  service_and_signal: string;
+  look_out_for: string[];
+  preparation: string[];
+  nearby_context: string[];
+  sources: CampgroundPlanningBriefSourceV1[];
+  field_sources: Record<string, string[]>;
+  source_revision: string;
+  generated_at: number;
+  expires_at: number;
+  access: CampgroundPlanningBriefAccessV1;
 }
 export interface RouteBriefRequest {
   trip_name: string; waypoints: object[]; reports?: object[];

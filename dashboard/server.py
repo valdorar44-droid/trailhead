@@ -175,7 +175,9 @@ from db.store import (
     get_trail_dna, save_trail_dna, get_conversation, save_conversation, clear_conversation,
     report_camp_full, confirm_camp_full, dispute_camp_full, get_camp_fullness, get_fullness_nearby,
     log_event, cleanup_stale_data,
-    get_camp_brief, set_camp_brief, has_active_plan, activate_plan, use_free_camp_search,
+    get_camp_brief, set_camp_brief, get_camp_planning_brief_unlock,
+    unlock_camp_planning_brief, refund_camp_planning_brief_unlock,
+    has_active_plan, activate_plan, use_free_camp_search,
     has_extreme_plan, create_extreme_demo_session, end_extreme_demo_session,
     log_extreme_ledger_event, save_extreme_trip_metadata, stage_extreme_copilot_action, confirm_extreme_copilot_action,
     list_extreme_sessions, list_extreme_ledger_events, get_extreme_ledger_summary,
@@ -20982,6 +20984,141 @@ async def campground_brief_v3(facility_id: str, user: dict | None = Depends(_opt
         requested_id=facility_id,
         nearby_services=nearby_services,
     )
+
+
+@app.post("/api/campsites/{facility_id}/planning-brief")
+async def campground_planning_brief_v1(
+    facility_id: str,
+    user: dict | None = Depends(_optional_user),
+):
+    """Research an opt-in, source-cited campground planning brief.
+
+    The ordinary campground profile remains free and unchanged. This endpoint
+    permanently unlocks the researched brief for five credits, or includes it
+    while the account has Explorer access.
+    """
+    if not user:
+        raise HTTPException(402, detail={
+            "code": "login_required",
+            "message": "Sign in to show this campground brief.",
+            "earn_hint": True,
+        })
+    if not settings.openai_api_key:
+        raise HTTPException(503, "Campground briefs are temporarily unavailable.")
+
+    detail = await _load_campsite_detail(facility_id, user)
+    nearby_services: list[dict] = []
+    try:
+        lat = float(detail.get("lat"))
+        lng = float(detail.get("lng"))
+        if math.isfinite(lat) and math.isfinite(lng) and (lat or lng):
+            nearby_services = await asyncio.wait_for(
+                get_service_places(
+                    lat,
+                    lng,
+                    radius_m=32_000,
+                    categories=CAMPGROUND_BRIEF_SERVICE_CATEGORIES,
+                ),
+                timeout=8.0,
+            )
+    except Exception:
+        nearby_services = []
+
+    from dashboard.campground_planning_briefs import (
+        build_campground_planning_brief,
+        cached_campground_planning_brief,
+        campground_planning_evidence,
+    )
+    factual_brief = build_campground_brief_v3(
+        detail,
+        requested_id=facility_id,
+        nearby_services=nearby_services,
+    )
+    evidence = campground_planning_evidence(factual_brief)
+    entity = evidence.get("entity") if isinstance(evidence.get("entity"), dict) else {}
+    resolved_id = str(entity.get("id") or facility_id).strip()[:180]
+    name = str(entity.get("name") or detail.get("name") or "Campground").strip()[:160]
+    included_with_explorer = bool(has_active_plan(user) or user.get("is_admin"))
+    existing_unlock = get_camp_planning_brief_unlock(user["id"], resolved_id)
+    newly_unlocked = False
+    unlock: dict[str, Any]
+
+    if included_with_explorer:
+        unlock = {
+            "unlocked": True,
+            "newly_unlocked": False,
+            "credits_spent": 0,
+            "credit_balance": int(user.get("credits") or 0),
+        }
+    elif existing_unlock:
+        unlock = {
+            "unlocked": True,
+            "newly_unlocked": False,
+            "credits_spent": 0,
+            "credit_balance": int(user.get("credits") or 0),
+        }
+    else:
+        cost = AI_COSTS["campsite_insight"]
+        unlock = unlock_camp_planning_brief(
+            user["id"],
+            resolved_id,
+            cost,
+            f"Campground brief - {name}",
+        )
+        if not unlock.get("unlocked"):
+            raise HTTPException(402, detail={
+                "code": "insufficient_credits",
+                "message": f"Show brief costs {cost} credits or is included with Explorer.",
+                "credits_needed": cost,
+                "earn_hint": True,
+            })
+        newly_unlocked = bool(unlock.get("newly_unlocked"))
+
+    access = {
+        "permanent": not included_with_explorer or bool(existing_unlock),
+        "included_with_explorer": included_with_explorer,
+        "credits_spent": int(unlock.get("credits_spent") or 0),
+        "new_balance": unlock.get("credit_balance"),
+    }
+    cached = cached_campground_planning_brief(get_camp_brief(resolved_id), evidence)
+    if cached:
+        return {**cached, "access": access}
+
+    safety_identifier = hmac.new(
+        str(settings.secret_key).encode("utf-8"),
+        f"campground-brief:{user['id']}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()[:48]
+    try:
+        from ai.planner import generate_campground_planning_brief
+        researched = await asyncio.to_thread(
+            generate_campground_planning_brief,
+            evidence,
+            safety_identifier=safety_identifier,
+        )
+        result = build_campground_planning_brief(
+            researched.get("brief") if isinstance(researched, dict) else {},
+            evidence,
+            researched.get("sources") if isinstance(researched, dict) else [],
+        )
+        set_camp_brief(resolved_id, result)
+        return {**result, "access": access}
+    except Exception as exc:
+        if newly_unlocked:
+            try:
+                refund_camp_planning_brief_unlock(
+                    user["id"],
+                    resolved_id,
+                    "Refund - campground brief unavailable",
+                )
+            except Exception:
+                logger.exception("campground_brief_refund_failed user=%s", user.get("id"))
+        logger.warning(
+            "campground_planning_brief_failed facility=%s error=%s",
+            resolved_id,
+            type(exc).__name__,
+        )
+        raise HTTPException(503, "This campground brief could not be prepared right now.") from exc
 
 
 @app.get("/api/campsites/{facility_id}/sites/{campsite_id}/detail")

@@ -83,7 +83,7 @@ import {
   setCarTrailFollow,
   type CarNavigationMode,
 } from '@/lib/carIntegration';
-import { api, ApiError, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, CampComment, Waypoint, TripResult, TrailProfile, MapCardResolveResponse, WaterNavigationLinesResponse, WaterConditionsResponse, WaterSpotCard, WaterSpotCardsResponse, FishingConditionsResponse, SuggestedWaterCorridorResponse, type BookableExperience, type BriefAndBackupV1, type CampgroundBriefV3, type GasStation, type GeocodePlace, type ExtremeConfig, type CopilotContext, type MapActionRequest, type MapSelectableFeature, type RouteCampWindowInput, type RouteCampWindowResult, type RouteScoutDayPlan, type RouteScoutState, type TrailPreviewManifest, type DispersedLead, type MissionControlBrief, type SavedRouteGeometryPayload } from '@/lib/api';
+import { api, ApiError, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, CampComment, Waypoint, TripResult, TrailProfile, MapCardResolveResponse, WaterNavigationLinesResponse, WaterConditionsResponse, WaterSpotCard, WaterSpotCardsResponse, FishingConditionsResponse, SuggestedWaterCorridorResponse, type BookableExperience, type BriefAndBackupV1, type CampgroundPlanningBriefV1, type GasStation, type GeocodePlace, type ExtremeConfig, type CopilotContext, type MapActionRequest, type MapSelectableFeature, type RouteCampWindowInput, type RouteCampWindowResult, type RouteScoutDayPlan, type RouteScoutState, type TrailPreviewManifest, type DispersedLead, type MissionControlBrief, type SavedRouteGeometryPayload } from '@/lib/api';
 import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
 import { trackPhase0Event, trackPhase0Once } from '@/lib/telemetry';
 import {
@@ -7020,7 +7020,7 @@ function MapScreen() {
   // AI & Wikipedia in campsite detail
   const [campInsight,    setCampInsight]    = useState<CampsiteInsight | null>(null);
   const [loadingInsight, setLoadingInsight] = useState(false);
-  const [campgroundBrief, setCampgroundBrief] = useState<CampgroundBriefV3 | null>(null);
+  const [campgroundBrief, setCampgroundBrief] = useState<CampgroundPlanningBriefV1 | null>(null);
   const [loadingCampgroundBrief, setLoadingCampgroundBrief] = useState(false);
   const campgroundBriefOwnerRef = useRef<string | null>(null);
   const visibleCampgroundBrief = campgroundBriefOwnerRef.current === selectedCamp?.id ? campgroundBrief : null;
@@ -7046,7 +7046,7 @@ function MapScreen() {
     scrollY: number;
     sitesSectionY: number;
     insight: CampsiteInsight | null;
-    brief: CampgroundBriefV3 | null;
+    brief: CampgroundPlanningBriefV1 | null;
     wikiArticles: WikiArticle[];
     fullness: CampFullness | null;
     weather: WeatherForecast | null;
@@ -7419,7 +7419,7 @@ function MapScreen() {
     }
     const request = currentPlaceSheetRequest(selectedCampSheetModel);
     if (!request) return;
-    loadCampDetailForCamp(selectedCamp, { loadInsight: hasPlan, sheetRequest: request }).catch(() => {});
+    loadCampDetailForCamp(selectedCamp, { sheetRequest: request }).catch(() => {});
   }, [
     currentPlaceSheetRequest,
     hasPlan,
@@ -18163,50 +18163,35 @@ function MapScreen() {
     setShowMapDrawer(false);
   }
 
-  async function openCampInsight(
+  async function openCampgroundPlanningBrief(
     camp: CampsitePin,
     detail?: CampsiteDetail | null,
     request = currentPlaceSheetRequest(adaptCampgroundSheet(camp)),
   ): Promise<boolean> {
     if (!request || !placeSheetRequestIsCurrent(request)) return false;
     const requestIsCurrent = () => placeSheetRequestIsCurrent(request) && selectedCampRef.current?.id === camp.id;
-    setLoadingInsight(true);
-    setLoadingWiki(true);
+    campgroundBriefOwnerRef.current = camp.id;
+    setLoadingCampgroundBrief(true);
     try {
-      const insight = await api.getCampsiteInsight({ name: camp.name, lat: camp.lat, lng: camp.lng,
-        description: detail?.description || camp.description, land_type: detail?.land_type || camp.land_type,
-        amenities: detail?.amenities ?? camp.amenities ?? [], facility_id: camp.id ?? '',
-        source_label: detail?.source_badge || detail?.verified_source || camp.source_badge || camp.verified_source || '',
-        source_url: detail?.official_url || detail?.url || camp.official_url || camp.url || '',
-        source_updated_at: detail?.last_checked || detail?.fetched_at || camp.last_checked || camp.fetched_at || null,
-      });
-      if (!requestIsCurrent()) {
-        setLoadingWiki(false);
-        return false;
-      }
-      setCampInsight(insight);
-      api.getWikipediaNearby(camp.lat, camp.lng, 15000)
-        .then(articles => {
-          if (requestIsCurrent()) setWikiArticles(articles);
-        })
-        .catch(() => {
-          if (requestIsCurrent()) setWikiArticles([]);
-        })
-        .finally(() => {
-          if (requestIsCurrent()) setLoadingWiki(false);
-        });
+      const briefId = campDetailFetchId(camp) || detail?.id || camp.id;
+      const brief = await api.getCampgroundPlanningBrief(String(briefId));
+      if (!requestIsCurrent()) return false;
+      setCampgroundBrief(brief);
       return true;
     } catch (e: any) {
-      if (requestIsCurrent()) setLoadingWiki(false);
       if (e instanceof PaywallError) {
         if (requestIsCurrent()) {
           setPaywallCode(e.code); setPaywallMessage(e.message); setPaywallVisible(true);
         }
         return false;
       }
+      if (requestIsCurrent()) {
+        setQuickToast(e?.message || 'This brief could not be prepared right now');
+        setTimeout(() => setQuickToast(''), 2800);
+      }
       return true;
     } finally {
-      if (requestIsCurrent()) setLoadingInsight(false);
+      if (requestIsCurrent()) setLoadingCampgroundBrief(false);
     }
   }
 
@@ -19545,7 +19530,6 @@ function MapScreen() {
     camp: CampsitePin,
     opts: {
       showModal?: boolean;
-      loadInsight?: boolean;
       sheetRequest?: { identity: SheetIdentity; requestGeneration: number };
     } = {},
   ) {
@@ -19573,12 +19557,6 @@ function MapScreen() {
     let detail: CampsiteDetail = minimal;
     let timedOut = false;
     const detailFetchId = campDetailFetchId(camp);
-    const briefPromise = detailFetchId
-      ? api.getCampgroundBrief(detailFetchId)
-          .then(value => ({ status: 'ready' as const, value }))
-          .catch(() => ({ status: 'unavailable' as const }))
-      : Promise.resolve({ status: 'unavailable' as const });
-    setLoadingCampgroundBrief(!!detailFetchId);
     if (detailFetchId) {
       let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
       const result = await Promise.race([
@@ -19602,15 +19580,9 @@ function MapScreen() {
     setCampDetail(detail);
     setCampDetailTimedOut(timedOut);
     setLoadingDetail(false);
-    briefPromise.then(result => {
-      if (!requestIsCurrent()) return;
-      if (result.status === 'ready') setCampgroundBrief(result.value);
-      setLoadingCampgroundBrief(false);
-    });
     if (privateLeadKeyFromCamp(camp, detail)) {
       return;
     }
-    if (opts.loadInsight) openCampInsight(camp, detail, sheetRequest).catch(() => {});
     if (!requestIsCurrent()) {
       return;
     }
@@ -19690,7 +19662,7 @@ function MapScreen() {
     setQuickCampPhotoIndex(0);
     setCampInsight(null);
     setCampgroundBrief(null);
-    setLoadingCampgroundBrief(true);
+    setLoadingCampgroundBrief(false);
     setWikiArticles([]);
     setCampFullness(null);
     setCampWeather(null);
@@ -19737,14 +19709,6 @@ function MapScreen() {
       campgroundBriefOwnerRef.current = sitePin.id;
       setSelectedCamp(sitePin);
       setCampDetail(detail);
-      api.getCampgroundBrief(String(siteCardId))
-        .then(brief => {
-          if (selectedCampRef.current?.id === sitePin.id) setCampgroundBrief(brief);
-        })
-        .catch(() => {})
-        .finally(() => {
-          if (selectedCampRef.current?.id === sitePin.id) setLoadingCampgroundBrief(false);
-        });
       api.getCampFullness(sitePin.id).then(r => {
         if (selectedCampRef.current?.id === sitePin.id) setCampFullness(r);
       }).catch(() => {});
@@ -19764,7 +19728,7 @@ function MapScreen() {
 
   async function openCampDetail() {
     if (!selectedCamp) return;
-    await loadCampDetailForCamp(selectedCamp, { loadInsight: false });
+    await loadCampDetailForCamp(selectedCamp);
   }
 
   function closeCampDetail() {
@@ -28254,10 +28218,7 @@ function MapScreen() {
                 <CampgroundBriefSection
                   brief={visibleCampgroundBrief}
                   loading={visibleCampgroundBriefLoading}
-                  weather={campWeather}
-                  insight={campInsight}
-                  loadingInsight={loadingInsight}
-                  onPersonalize={() => selectedCamp && openCampInsight(selectedCamp, campDetail)}
+                  onShow={() => selectedCamp && openCampgroundPlanningBrief(selectedCamp, campDetail)}
                 />
               </>
               );
@@ -28582,10 +28543,7 @@ function MapScreen() {
                 <CampgroundBriefSection
                   brief={visibleCampgroundBrief}
                   loading={visibleCampgroundBriefLoading}
-                  weather={campWeather}
-                  insight={campInsight}
-                  loadingInsight={loadingInsight}
-                  onPersonalize={() => selectedCamp && openCampInsight(selectedCamp, campDetail)}
+                  onShow={() => selectedCamp && openCampgroundPlanningBrief(selectedCamp, campDetail)}
                 />
 
                 <CampReviewsSection reviews={campDetail.reviews ?? []} limit={3} />

@@ -781,6 +781,13 @@ def init_db():
             generated_at INTEGER NOT NULL,
             view_count   INTEGER NOT NULL DEFAULT 0
         );
+        CREATE TABLE IF NOT EXISTS camp_planning_brief_unlocks (
+            user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            facility_id   TEXT NOT NULL,
+            credits_spent INTEGER NOT NULL DEFAULT 0,
+            unlocked_at   INTEGER NOT NULL,
+            PRIMARY KEY (user_id, facility_id)
+        );
         CREATE TABLE IF NOT EXISTS camp_profile_overrides (
             camp_id     TEXT PRIMARY KEY,
             data        TEXT NOT NULL,
@@ -1515,6 +1522,7 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_analytics_session ON analytics_events(session_id, event_type)",
         "CREATE INDEX IF NOT EXISTS idx_analytics_type ON analytics_events(event_type, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_route_cache_time ON route_cache(fetched_at)",
+        "CREATE INDEX IF NOT EXISTS idx_camp_planning_brief_unlocks_user ON camp_planning_brief_unlocks(user_id, unlocked_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_offline_downloads_user ON offline_downloads(user_id, asset_type, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_users_email_verify_token ON users(email_verify_token)",
         "CREATE INDEX IF NOT EXISTS idx_users_password_reset_token ON users(password_reset_token)",
@@ -1608,6 +1616,14 @@ def init_db():
         "ALTER TABLE trips ADD COLUMN version INTEGER NOT NULL DEFAULT 1",
         "CREATE INDEX IF NOT EXISTS idx_trips_user_updated ON trips(user_id, updated_at)",
         "CREATE TABLE IF NOT EXISTS stripe_purchases (session_id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, credits INTEGER NOT NULL, created_at INTEGER NOT NULL)",
+        """CREATE TABLE IF NOT EXISTS camp_planning_brief_unlocks (
+            user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            facility_id   TEXT NOT NULL,
+            credits_spent INTEGER NOT NULL DEFAULT 0,
+            unlocked_at   INTEGER NOT NULL,
+            PRIMARY KEY (user_id, facility_id)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_camp_planning_brief_unlocks_user ON camp_planning_brief_unlocks(user_id, unlocked_at DESC)",
         """CREATE TABLE IF NOT EXISTS app_store_subscriptions (
             original_transaction_id TEXT PRIMARY KEY,
             transaction_id          TEXT,
@@ -7427,6 +7443,122 @@ def set_camp_brief(facility_id: str, data: dict):
 
 
 # ── Subscription / plan helpers ───────────────────────────────────────────────
+
+def get_camp_planning_brief_unlock(user_id: int, facility_id: str) -> dict | None:
+    clean_id = str(facility_id or "").strip()
+    if not clean_id:
+        return None
+    db = _conn()
+    row = db.execute(
+        """SELECT user_id,facility_id,credits_spent,unlocked_at
+           FROM camp_planning_brief_unlocks WHERE user_id=? AND facility_id=?""",
+        (int(user_id), clean_id),
+    ).fetchone()
+    db.close()
+    return dict(row) if row else None
+
+
+def unlock_camp_planning_brief(user_id: int, facility_id: str, cost: int, reason: str) -> dict:
+    """Atomically create a permanent per-camp unlock and charge at most once."""
+    clean_id = str(facility_id or "").strip()
+    if not clean_id or len(clean_id) > 180:
+        raise ValueError("Invalid campground id")
+    amount = max(0, int(cost))
+    now = int(time.time())
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        existing = db.execute(
+            """SELECT credits_spent,unlocked_at FROM camp_planning_brief_unlocks
+               WHERE user_id=? AND facility_id=?""",
+            (int(user_id), clean_id),
+        ).fetchone()
+        if existing:
+            balance_row = db.execute("SELECT credits FROM users WHERE id=?", (int(user_id),)).fetchone()
+            db.commit()
+            return {
+                "unlocked": True,
+                "newly_unlocked": False,
+                "credits_spent": 0,
+                "original_credits_spent": int(existing["credits_spent"]),
+                "unlocked_at": int(existing["unlocked_at"]),
+                "credit_balance": int(balance_row["credits"]) if balance_row else 0,
+            }
+
+        cursor = db.execute(
+            "UPDATE users SET credits=credits-? WHERE id=? AND credits>=?",
+            (amount, int(user_id), amount),
+        )
+        if cursor.rowcount != 1:
+            db.rollback()
+            return {
+                "unlocked": False,
+                "newly_unlocked": False,
+                "credits_spent": 0,
+                "credit_balance": None,
+            }
+        if amount:
+            db.execute(
+                "INSERT INTO credit_transactions (user_id,amount,reason,created_at) VALUES (?,?,?,?)",
+                (int(user_id), -amount, str(reason or "Campground brief")[:240], now),
+            )
+        db.execute(
+            """INSERT INTO camp_planning_brief_unlocks
+               (user_id,facility_id,credits_spent,unlocked_at) VALUES (?,?,?,?)""",
+            (int(user_id), clean_id, amount, now),
+        )
+        balance = int(db.execute("SELECT credits FROM users WHERE id=?", (int(user_id),)).fetchone()[0])
+        db.commit()
+        return {
+            "unlocked": True,
+            "newly_unlocked": True,
+            "credits_spent": amount,
+            "original_credits_spent": amount,
+            "unlocked_at": now,
+            "credit_balance": balance,
+        }
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def refund_camp_planning_brief_unlock(user_id: int, facility_id: str, reason: str) -> bool:
+    """Remove a newly-created unlock and return its credits after generation fails."""
+    clean_id = str(facility_id or "").strip()
+    if not clean_id:
+        return False
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute(
+            """SELECT credits_spent FROM camp_planning_brief_unlocks
+               WHERE user_id=? AND facility_id=?""",
+            (int(user_id), clean_id),
+        ).fetchone()
+        if not row:
+            db.commit()
+            return False
+        credits = max(0, int(row["credits_spent"]))
+        db.execute(
+            "DELETE FROM camp_planning_brief_unlocks WHERE user_id=? AND facility_id=?",
+            (int(user_id), clean_id),
+        )
+        if credits:
+            db.execute("UPDATE users SET credits=credits+? WHERE id=?", (credits, int(user_id)))
+            db.execute(
+                "INSERT INTO credit_transactions (user_id,amount,reason,created_at) VALUES (?,?,?,?)",
+                (int(user_id), credits, str(reason or "Campground brief refund")[:240], int(time.time())),
+            )
+        db.commit()
+        return True
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
 
 def has_active_plan(user: dict) -> bool:
     """True if user has a monthly or annual plan that hasn't expired."""

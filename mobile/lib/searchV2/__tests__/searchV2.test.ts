@@ -24,7 +24,41 @@ import {
 } from '../session';
 import { runSearchRaceQaCheck } from '../qaAcceptance';
 import { nextFrozenSearchCenterStateV2 } from '../searchOrigin';
+import { inferServiceSearchRequestV2 } from '../serviceIntent';
 import type { SearchPageV2, SearchRequestV2, SearchResultV2 } from '../types';
+
+test('typed service searches gain deterministic category and proximity context', () => {
+  const nearby = inferServiceSearchRequestV2({
+    query: 'fuel',
+    surface: 'map',
+    scope: 'global',
+    center: { lat: 38.5733, lng: -109.5498 },
+  });
+  assert.equal(nearby.intent, 'service');
+  assert.equal(nearby.scope, 'nearby');
+  assert.equal(nearby.radius_meters, 30_000);
+  assert.ok(nearby.categories?.includes('gas_station'));
+
+  const explicit = inferServiceSearchRequestV2({
+    query: 'drinking water near Flagstaff',
+    surface: 'map',
+    scope: 'global',
+    center: { lat: 49.8951, lng: -97.1384 },
+  });
+  assert.equal(explicit.intent, 'service');
+  assert.equal(explicit.scope, 'global');
+  assert.equal(explicit.radius_meters, undefined);
+  assert.ok(explicit.categories?.includes('drinking_water'));
+
+  const destination = inferServiceSearchRequestV2({
+    query: 'Yellowstone',
+    surface: 'map',
+    scope: 'global',
+    center: { lat: 49.8951, lng: -97.1384 },
+  });
+  assert.equal(destination.intent, undefined);
+  assert.equal(destination.categories, undefined);
+});
 
 test('Explore search maps visible filters to real server facets', () => {
   assert.equal(exploreSearchIntentForCategory('camp'), 'camp');

@@ -83,7 +83,10 @@ _TRAIL_INTENT_FACETS = frozenset({
 _SERVICE_INTENT_FACETS = frozenset({
     "service", "fuel", "gas_station", "service_station", "resupply", "grocery",
     "market", "mechanic", "repair", "supplies", "propane", "dump", "hardware",
-    "parts", "water",
+    "parts", "water", "drinking_water", "potable_water", "water_fill",
+    "rv_dump_station", "dump_station", "waste_disposal", "auto_repair",
+    "car_repair", "vehicle_repair", "grocery_store", "supermarket", "parking",
+    "parking_lot",
 })
 _DESTINATION_INTENT_FACETS = frozenset({
     "destination", "address", "street", "postcode", "city", "locality",
@@ -127,6 +130,84 @@ _COMMON_TYPOS = {
     "traill": "trail",
     "yosemti": "yosemite",
 }
+
+_SERVICE_CATEGORY_EQUIVALENTS: dict[str, frozenset[str]] = {
+    "fuel": frozenset({"fuel", "gas_station", "service_station"}),
+    "gas_station": frozenset({"fuel", "gas_station", "service_station"}),
+    "service_station": frozenset({"fuel", "gas_station", "service_station"}),
+    "drinking_water": frozenset({
+        "water", "drinking_water", "potable_water", "water_fill",
+    }),
+    "potable_water": frozenset({
+        "water", "drinking_water", "potable_water", "water_fill",
+    }),
+    "water_fill": frozenset({
+        "water", "drinking_water", "potable_water", "water_fill",
+    }),
+    "grocery": frozenset({
+        "grocery", "grocery_store", "market", "supermarket", "supplies",
+    }),
+    "market": frozenset({
+        "grocery", "grocery_store", "market", "supermarket", "supplies",
+    }),
+    "dump": frozenset({
+        "dump", "dump_station", "rv_dump_station", "waste_disposal",
+    }),
+    "dump_station": frozenset({
+        "dump", "dump_station", "rv_dump_station", "waste_disposal",
+    }),
+    "rv_dump_station": frozenset({
+        "dump", "dump_station", "rv_dump_station", "waste_disposal",
+    }),
+    "repair": frozenset({
+        "repair", "mechanic", "auto_repair", "car_repair", "vehicle_repair",
+        "parts",
+    }),
+    "mechanic": frozenset({
+        "repair", "mechanic", "auto_repair", "car_repair", "vehicle_repair",
+        "parts",
+    }),
+    "parking": frozenset({"parking", "parking_lot"}),
+}
+_SERVICE_QUERY_RULES: tuple[tuple[re.Pattern[str], tuple[str, ...], int], ...] = (
+    (
+        re.compile(r"\b(?:gas stations?|gas|fuel|petrol|diesel)\b", re.I),
+        ("fuel", "gas_station", "service_station"),
+        30_000,
+    ),
+    (
+        re.compile(r"\b(?:drinking water|potable water|water fill(?:ing)?(?: station)?)\b", re.I),
+        ("drinking_water", "potable_water", "water_fill"),
+        40_000,
+    ),
+    (
+        re.compile(r"\b(?:grocer(?:y|ies)|grocery stores?|supermarkets?)\b", re.I),
+        ("grocery", "grocery_store", "market", "supermarket", "supplies"),
+        30_000,
+    ),
+    (
+        re.compile(r"\b(?:rv\s+)?dump stations?\b", re.I),
+        ("dump", "dump_station", "rv_dump_station", "waste_disposal"),
+        50_000,
+    ),
+    (
+        re.compile(r"\b(?:auto|car|vehicle)?\s*(?:repair|mechanics?|service shops?)\b", re.I),
+        ("repair", "mechanic", "auto_repair", "car_repair", "vehicle_repair", "parts"),
+        40_000,
+    ),
+    (
+        re.compile(r"\b(?:parking|parking lots?)\b", re.I),
+        ("parking", "parking_lot"),
+        25_000,
+    ),
+)
+_EXPLICIT_LOCALITY_RE = re.compile(
+    r"\b(?:near|around|in|at|by|close\s+to)\s+(.+?)\s*$",
+    re.I,
+)
+_CURRENT_LOCATION_TERMS = frozenset({
+    "me", "my location", "current location", "here",
+})
 
 
 def _monotonic_seconds() -> float:
@@ -283,6 +364,47 @@ class SearchRequestV2(BaseModel):
         if self.scope == "nearby":
             return _DEFAULT_NEARBY_RADIUS_METERS
         return None
+
+
+def infer_service_search_request_v2(request: SearchRequestV2) -> SearchRequestV2:
+    """Apply deterministic service intent without guessing destination facts.
+
+    Search surfaces historically sent free-typed queries as global ``any``
+    searches, even when the text was an unambiguous service request. That let
+    literal trail/place names outrank nearby fuel, water, grocery, dump,
+    repair, and parking inventory. Explicit client intent or categories always
+    win. A bare/current-location service query becomes nearby only when the
+    client supplied a center; an explicit named locality remains global so the
+    provider can honor the user's destination text instead of the device.
+    """
+    if request.intent != "any" or request.categories:
+        return request
+    matched: tuple[tuple[str, ...], int] | None = None
+    for pattern, categories, radius_meters in _SERVICE_QUERY_RULES:
+        if pattern.search(request.query):
+            matched = (categories, radius_meters)
+            break
+    if matched is None:
+        return request
+
+    categories, radius_meters = matched
+    update: dict[str, Any] = {
+        "intent": "service",
+        "categories": list(categories),
+    }
+    locality_match = _EXPLICIT_LOCALITY_RE.search(request.query)
+    locality = normalize_search_text(locality_match.group(1)) if locality_match else ""
+    is_named_locality = bool(locality and locality not in _CURRENT_LOCATION_TERMS)
+    if (
+        request.scope == "global"
+        and request.center is not None
+        and not is_named_locality
+    ):
+        update.update({
+            "scope": "nearby",
+            "radius_meters": radius_meters,
+        })
+    return request.model_copy(update=update)
 
 
 class SearchResultV2(BaseModel):
@@ -965,6 +1087,7 @@ def _expanded_category_values(value: Any) -> set[str]:
     expanded = set(values)
     for item in values:
         expanded.update(_EXPLORE_CATEGORY_FACETS.get(item, ()))
+        expanded.update(_SERVICE_CATEGORY_EQUIVALENTS.get(item, ()))
     return expanded
 
 
@@ -1093,6 +1216,7 @@ class SearchV2Service:
         mode: str = "results",
         external_subject: str | None = None,
     ) -> SearchPageV2:
+        request = infer_service_search_request_v2(request)
         started = time.perf_counter()
         fingerprint = _request_fingerprint(request, mode)
 

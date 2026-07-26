@@ -5,5 +5,6 @@ export * from './explore';
 export * from './presentation';
 export * from './react';
 export * from './searchOrigin';
+export * from './serviceIntent';
 export * from './session';
 export * from './types';

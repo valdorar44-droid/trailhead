@@ -13,6 +13,7 @@ import type {
   SearchRequestV2,
   SearchResultV2,
 } from './types';
+import { inferServiceSearchRequestV2 } from './serviceIntent';
 
 export type SearchV2SessionStatus =
   | 'idle'
@@ -786,7 +787,7 @@ export class SearchV2SessionController {
   }
 
   private buildRequest(query: string, mode: SearchPageModeV2, cursor?: string): SearchRequestV2 {
-    return {
+    return inferServiceSearchRequestV2({
       ...this.context,
       query,
       cursor,
@@ -796,7 +797,7 @@ export class SearchV2SessionController {
         1,
         mode === 'suggest' ? 10 : 30,
       ),
-    };
+    });
   }
 
   private shouldEnrichSuggestions(): boolean {

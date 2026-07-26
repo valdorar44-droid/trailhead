@@ -84,6 +84,7 @@ from dashboard.search_v2 import (
     SearchResultV2,
     SearchV2Service,
     documents_from_canonical,
+    infer_service_search_request_v2,
     normalize_search_text,
     _external_result_for_request,
 )
@@ -19232,10 +19233,25 @@ async def _search_v2_external_mapbox(
         return []
     if request.intent == "destination":
         mapbox_types = "place,locality,neighborhood,district,region,country,address"
-    elif request.intent == "trail":
+    elif request.intent in {"trail", "service"}:
         mapbox_types = "poi"
     else:
         mapbox_types = "poi,place,address"
+    category_values = {
+        normalize_search_text(value).replace(" ", "_")
+        for value in request.categories
+    }
+    # Mapbox documents gas_station as a canonical Search Box category. Keep
+    # the provider parameter deliberately allowlisted: Trailhead's broader
+    # internal service taxonomy contains categories that are not guaranteed to
+    # be valid Mapbox category IDs.
+    mapbox_poi_categories = (
+        "gas_station"
+        if category_values.intersection({
+            "fuel", "gas_station", "service_station",
+        })
+        else ""
+    )
     proximity = (
         f"{request.center.lng:.6f},{request.center.lat:.6f}"
         if request.center else ""
@@ -19252,6 +19268,7 @@ async def _search_v2_external_mapbox(
         "origin": proximity,
         "bbox": bbox,
         "types": mapbox_types,
+        "poi_category": mapbox_poi_categories,
         "language": "en",
         "limit": str(max(1, min(int(limit), 10))),
     })
@@ -19864,14 +19881,14 @@ def _search_v2_parse_query_request(
             raise HTTPException(422, {"code": "invalid_search_request", "message": "filters must be a JSON object"})
         parsed_filters = decoded
     try:
-        return SearchRequestV2(
+        return infer_service_search_request_v2(SearchRequestV2(
             query=q, surface=surface, intent=intent, scope=scope,
             center=center, bounds=bounds, route_ref=route_ref.strip() or None,
             radius_meters=radius_meters,
             categories=[value.strip() for value in categories.split(",") if value.strip()],
             filters=parsed_filters, cursor=cursor.strip() or None, limit=limit,
             session_id=session_id.strip() or None, include_external=include_external,
-        )
+        ))
     except ValidationError as exc:
         raise HTTPException(422, {
             "code": "invalid_search_request",
@@ -20051,6 +20068,7 @@ async def api_search_v2_resolve(
     request = SearchRequestV2.model_validate(body.model_dump(
         exclude={"selected_result_id", "selected_detail_ref"},
     ))
+    request = infer_service_search_request_v2(request)
     request = _authorize_search_v2_request(request, user)
     if selected_result_id and selected_detail_ref:
         external_subject = _search_v2_external_subject(http_request, user)

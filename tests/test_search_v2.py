@@ -26,6 +26,7 @@ from dashboard.search_v2 import (
     SearchResultV2,
     SearchV2Service,
     documents_from_canonical,
+    infer_service_search_request_v2,
 )
 
 
@@ -588,6 +589,60 @@ class SearchV2ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             {item.result_id for item in service_results.results},
             {f"place:service:{value}" for value in fuel_categories | supply_categories | {"water"}},
+        )
+
+    def test_typed_service_intent_uses_nearby_center_but_preserves_named_locality(self):
+        nearby = infer_service_search_request_v2(SearchRequestV2(
+            query="fuel",
+            surface="map",
+            center=SearchCenterV2(lat=38.5733, lng=-109.5498),
+            include_external=True,
+            session_id="typed-service-nearby",
+        ))
+        self.assertEqual(nearby.intent, "service")
+        self.assertEqual(nearby.scope, "nearby")
+        self.assertEqual(nearby.radius_meters, 30_000)
+        self.assertIn("gas_station", nearby.categories)
+
+        explicit = infer_service_search_request_v2(SearchRequestV2(
+            query="fuel near Flagstaff",
+            surface="map",
+            center=SearchCenterV2(lat=49.8951, lng=-97.1384),
+            include_external=True,
+            session_id="typed-service-locality",
+        ))
+        self.assertEqual(explicit.intent, "service")
+        self.assertEqual(explicit.scope, "global")
+        self.assertIsNone(explicit.radius_meters)
+        self.assertIn("gas_station", explicit.categories)
+
+        untouched = infer_service_search_request_v2(SearchRequestV2(
+            query="Yellowstone",
+            surface="map",
+            center=SearchCenterV2(lat=49.8951, lng=-97.1384),
+        ))
+        self.assertEqual(untouched.intent, "any")
+        self.assertEqual(untouched.categories, [])
+
+    async def test_typed_service_query_rejects_literal_trail_matches(self):
+        service = SearchV2Service(lambda: ([
+            _document(
+                "trail:station", "Gas Station Trail",
+                kind="trail", categories=("trail",),
+            ),
+            _document(
+                "service:fuel", "Moab Fuel",
+                kind="service", categories=("fuel", "gas_station"),
+            ),
+        ], "typed-service-v1"))
+        response = await service.page(SearchRequestV2(
+            query="gas station",
+            center=SearchCenterV2(lat=38.5733, lng=-109.5498),
+            limit=10,
+        ))
+        self.assertEqual(
+            [item.result_id for item in response.results],
+            ["service:fuel"],
         )
 
     async def test_external_service_rows_use_the_same_fuel_and_supplies_facets(self):
@@ -1434,6 +1489,25 @@ class SearchV2ServiceTests(unittest.IsolatedAsyncioTestCase):
             re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"),
         )
         legacy_geocoder.assert_not_awaited()
+
+    async def test_mapbox_service_suggest_is_poi_only_and_filters_gas_category(self):
+        provider = AsyncMock(return_value={"suggestions": []})
+        request = infer_service_search_request_v2(SearchRequestV2(
+            query="fuel near Flagstaff",
+            center=SearchCenterV2(lat=49.8951, lng=-97.1384),
+            include_external=True,
+            session_id="mapbox-service-category-session",
+        ))
+        with (
+            patch.object(server.settings, "mapbox_token", "pk.test"),
+            patch.object(server, "_mapbox_get", provider),
+        ):
+            await server._search_v2_external_mapbox(request, 8, "suggest")
+
+        _url, params = provider.await_args.args
+        self.assertEqual(params["types"], "poi")
+        self.assertEqual(params["poi_category"], "gas_station")
+        self.assertEqual(params["q"], "fuel near Flagstaff")
 
     async def test_concurrent_mapbox_selection_replays_share_one_retrieve(self):
         request = SearchRequestV2(

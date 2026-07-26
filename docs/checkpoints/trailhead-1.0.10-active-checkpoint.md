@@ -1499,3 +1499,33 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Exact next action: user reviews the Sheet/POI preview. Before production promotion, implement one bounded Search V2 service-intent/proximity correction, rerun only the affected service-query assertions on Android, and perform the short shared iOS spot check when the iPhone is connected.
 - Do not repeat: Camp Guide generation or production promotion, broad Map/Search/sheet crawls, Memory Gate, Layers, Yellowstone, NPS rabbit-hole research, Android Auto, Originals lifecycle, final production-build validation, or store screenshot work.
 - Task-owned background processes: none. The EAS publisher, Metro exporter, Sentry upload, and temporary preview worktree exited or were removed. The pre-existing long-running host Node process was not started or modified by this packet.
+
+## Search V2 service intent and proximity - pre-change baseline
+
+- Timestamp: `2026-07-26T11:07:46-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; pre-change HEAD `a2e1f2ddf43aa726d9585e6a8356ef636a99368d`, pushed to origin.
+- Protected Explore index SHA-256 remains `7E59E5E2273DBBE1A26D7BBD4D947FAA20935C51FB79C464EED8A17BABF4D8F4`.
+- Protected and unrelated worktree changes remain excluded and unstaged:
+  - `.cursor/`
+  - `dashboard/explore_serving_index_v2.json`
+  - `docs/app-store-copy.md`
+  - Android helper mode changes
+  - Valhalla artifact, probe, publication, and NPS-enrichment scripts
+- Current paired preview remains:
+  - Android group `b1c0307d-96e4-47d8-9f38-7d85f86e564e`, update `019f9dc3-43c8-79f9-9686-e46719cc590b`, runtime `native-1.0.10-android.3`.
+  - iOS group `bbe33769-4fd7-4492-bddf-ad1e5685dc66`, update `019f9dc3-43c8-7c0c-86eb-1cbc75ddd27d`, runtime `native-1.0.10-ios.3`.
+- Open P1 is narrowly scoped to Search V2 service intent and geographic grounding:
+  - Broad fuel, water, grocery, dump-station, repair, and parking queries can rank distant literal text matches above nearby service inventory.
+  - Named-locality queries such as `fuel near Flagstaff` can still rank an out-of-state literal match first.
+  - `viewpoint near Moab` already returns appropriate nearby results and must remain unchanged.
+- Implementation scope:
+  - Trace the existing server-owned search intent, scope, Mapbox session, category, proximity, and ranking paths.
+  - Add a deterministic service-intent correction that respects current-map/route scope and explicit named locality without changing generic search behavior.
+  - Preserve immediate cached/offline results, server ranking, explicit selection, Search Box session behavior, temporary-result rules, canonical-first ranking, and all accepted sheets.
+- Focused verification scope:
+  - Unit and integration tests for service aliases, explicit locality, current-map proximity, category filtering, stable A-to-B generations, and no automatic opening.
+  - Copy/privacy, TypeScript, and whitespace checks.
+  - One paired preview OTA followed by only the affected Android service queries and one service-sheet/Back assertion.
+- Exact next action: commit and push this baseline, inspect the Search V2 request and provider paths, implement one evidence-backed correction, and stop for review after the paired preview and narrow Android proof.
+- Do not repeat: Camp Guide work, Sheet/POI broad crawl, Memory Gate, Layers, Yellowstone, NPS research, Android Auto, Originals lifecycle, production promotion, or store screenshots.
+- Task-owned background processes: none.

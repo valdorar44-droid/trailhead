@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import tempfile
 import unittest
 from unittest.mock import AsyncMock, Mock, patch
-
-from fastapi import HTTPException
 
 from ai import planner
 from config.settings import settings
@@ -180,9 +179,36 @@ class CampgroundPlanningBriefUnlockTests(unittest.TestCase):
         self.assertIsNone(store.get_camp_planning_brief_unlock(self.user_id, "234059"))
         self.assertEqual(store.get_user_by_id(self.user_id)["credits"], 10)
 
+    def test_job_state_is_durable_and_bound_to_user_camp_and_revision(self):
+        evidence = {"entity": {"id": "234059", "name": "Juniper"}}
+        created = store.create_camp_planning_brief_job(
+            "job-1",
+            self.user_id,
+            "234059",
+            "revision-1",
+            evidence,
+            refund_on_error=True,
+        )
+        self.assertEqual(created["status"], "queued")
+        self.assertEqual(
+            store.find_active_camp_planning_brief_job(
+                self.user_id, "234059", "revision-1"
+            )["id"],
+            "job-1",
+        )
+        store.update_camp_planning_brief_job("job-1", "running")
+        self.assertEqual(
+            store.get_camp_planning_brief_job("job-1", self.user_id)["evidence"],
+            evidence,
+        )
+        store.update_camp_planning_brief_job("job-1", "ready")
+        self.assertIsNone(store.find_active_camp_planning_brief_job(
+            self.user_id, "234059", "revision-1"
+        ))
+
 
 class CampgroundPlanningBriefEndpointTests(unittest.TestCase):
-    def test_endpoint_charges_five_once_and_returns_provider_neutral_brief(self):
+    def test_endpoint_charges_five_once_and_returns_background_job(self):
         user = {"id": 7, "credits": 10, "plan_type": "free", "is_admin": 0}
         with (
             patch.object(server.settings, "openai_api_key", "test-key"),
@@ -197,44 +223,45 @@ class CampgroundPlanningBriefEndpointTests(unittest.TestCase):
                 "credit_balance": 5,
             }) as unlock,
             patch.object(server, "get_camp_brief", return_value=None),
-            patch.object(server, "set_camp_brief") as cache,
-            patch("ai.planner.generate_campground_planning_brief", return_value={
-                "brief": _model_result(),
-                "sources": [{"title": "Official", "url": "https://www.nps.gov/example/campground.htm"}],
+            patch.object(server, "find_active_camp_planning_brief_job", return_value=None),
+            patch.object(server, "create_camp_planning_brief_job", return_value={
+                "id": "job-1",
+                "facility_id": "234059",
+                "status": "queued",
             }),
+            patch.object(server, "_schedule_camp_planning_brief_job") as schedule,
         ):
             result = asyncio.run(server.campground_planning_brief_v1("234059", user))
 
-        self.assertEqual(result["access"]["credits_spent"], 5)
-        self.assertEqual(result["access"]["new_balance"], 5)
-        self.assertNotIn("provider", result)
+        body = json.loads(result.body)
+        self.assertEqual(result.status_code, 202)
+        self.assertEqual(body["access"]["credits_spent"], 5)
+        self.assertEqual(body["access"]["new_balance"], 5)
+        self.assertEqual(body["status"], "preparing")
         unlock.assert_called_once()
         self.assertEqual(unlock.call_args.args[2], 5)
-        cache.assert_called_once()
+        schedule.assert_called_once_with("job-1")
 
-    def test_endpoint_refunds_a_new_unlock_when_research_fails(self):
-        user = {"id": 7, "credits": 10, "plan_type": "free", "is_admin": 0}
+    def test_background_job_refunds_a_new_unlock_when_research_fails(self):
+        job = {
+            "id": "job-1",
+            "user_id": 7,
+            "facility_id": "234059",
+            "evidence": campground_planning_evidence(
+                build_campground_brief_v3(_detail(), generated_at=1_780_000_100)
+            ),
+            "refund_on_error": 1,
+        }
         with (
-            patch.object(server.settings, "openai_api_key", "test-key"),
-            patch.object(server, "_load_campsite_detail", new=AsyncMock(return_value=_detail())),
-            patch.object(server, "get_service_places", new=AsyncMock(return_value=[])),
-            patch.object(server, "has_active_plan", return_value=False),
-            patch.object(server, "get_camp_planning_brief_unlock", return_value=None),
-            patch.object(server, "unlock_camp_planning_brief", return_value={
-                "unlocked": True,
-                "newly_unlocked": True,
-                "credits_spent": 5,
-                "credit_balance": 5,
-            }),
-            patch.object(server, "get_camp_brief", return_value=None),
+            patch.object(server, "get_camp_planning_brief_job", return_value=job),
+            patch.object(server, "update_camp_planning_brief_job") as update,
             patch.object(server, "refund_camp_planning_brief_unlock", return_value=True) as refund,
             patch("ai.planner.generate_campground_planning_brief", side_effect=RuntimeError("no response")),
         ):
-            with self.assertRaises(HTTPException) as raised:
-                asyncio.run(server.campground_planning_brief_v1("234059", user))
+            asyncio.run(server._execute_camp_planning_brief_job("job-1"))
 
-        self.assertEqual(raised.exception.status_code, 503)
         refund.assert_called_once()
+        self.assertEqual(update.call_args_list[-1].args[:2], ("job-1", "error"))
 
 
 if __name__ == "__main__":

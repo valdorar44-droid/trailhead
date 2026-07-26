@@ -11,9 +11,11 @@ const routeBuilderSource = readFileSync(join(mobileRoot, 'app/(tabs)/route-build
 const briefSource = readFileSync(join(mobileRoot, 'components/map/CampgroundBriefSection.tsx'), 'utf8');
 
 test('the researched campground brief uses a source-owned opt-in endpoint', () => {
-  assert.match(apiSource, /getCampgroundPlanningBrief: \(id: string\) =>/);
+  assert.match(apiSource, /getCampgroundPlanningBrief: async \(id: string\) =>/);
   assert.match(apiSource, /\/api\/campsites\/\$\{encodeURIComponent\(facilityId\)\}\/planning-brief/);
   assert.match(apiSource, /method: 'POST'/);
+  assert.match(apiSource, /response\.status === 'preparing'/);
+  assert.match(apiSource, /planning-brief\/jobs\/\$\{encodeURIComponent\(response\.job_id\)\}/);
 });
 
 test('Recreation.gov campsite cards resolve their parent campground brief', () => {

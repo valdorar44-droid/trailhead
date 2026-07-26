@@ -8,7 +8,7 @@ from email.utils import formataddr
 from pathlib import Path
 from urllib.parse import parse_qsl, quote, unquote, urlencode, urlsplit, urlunsplit
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Depends, Header, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
@@ -177,6 +177,8 @@ from db.store import (
     log_event, cleanup_stale_data,
     get_camp_brief, set_camp_brief, get_camp_planning_brief_unlock,
     unlock_camp_planning_brief, refund_camp_planning_brief_unlock,
+    create_camp_planning_brief_job, get_camp_planning_brief_job,
+    find_active_camp_planning_brief_job, update_camp_planning_brief_job,
     has_active_plan, activate_plan, use_free_camp_search,
     has_extreme_plan, create_extreme_demo_session, end_extreme_demo_session,
     log_extreme_ledger_event, save_extreme_trip_metadata, stage_extreme_copilot_action, confirm_extreme_copilot_action,
@@ -20986,26 +20988,24 @@ async def campground_brief_v3(facility_id: str, user: dict | None = Depends(_opt
     )
 
 
-@app.post("/api/campsites/{facility_id}/planning-brief")
-async def campground_planning_brief_v1(
+_camp_planning_brief_tasks: dict[str, asyncio.Task] = {}
+
+
+def _camp_planning_brief_access(user: dict, facility_id: str, *, credits_spent: int = 0) -> dict:
+    included_with_explorer = bool(has_active_plan(user) or user.get("is_admin"))
+    existing_unlock = get_camp_planning_brief_unlock(user["id"], facility_id)
+    return {
+        "permanent": bool(existing_unlock),
+        "included_with_explorer": included_with_explorer,
+        "credits_spent": max(0, int(credits_spent)),
+        "new_balance": int(user.get("credits") or 0),
+    }
+
+
+async def _camp_planning_brief_context(
     facility_id: str,
-    user: dict | None = Depends(_optional_user),
-):
-    """Research an opt-in, source-cited campground planning brief.
-
-    The ordinary campground profile remains free and unchanged. This endpoint
-    permanently unlocks the researched brief for five credits, or includes it
-    while the account has Explorer access.
-    """
-    if not user:
-        raise HTTPException(402, detail={
-            "code": "login_required",
-            "message": "Sign in to show this campground brief.",
-            "earn_hint": True,
-        })
-    if not settings.openai_api_key:
-        raise HTTPException(503, "Campground briefs are temporarily unavailable.")
-
+    user: dict,
+) -> tuple[str, str, dict]:
     detail = await _load_campsite_detail(facility_id, user)
     nearby_services: list[dict] = []
     try:
@@ -21023,12 +21023,7 @@ async def campground_planning_brief_v1(
             )
     except Exception:
         nearby_services = []
-
-    from dashboard.campground_planning_briefs import (
-        build_campground_planning_brief,
-        cached_campground_planning_brief,
-        campground_planning_evidence,
-    )
+    from dashboard.campground_planning_briefs import campground_planning_evidence
     factual_brief = build_campground_brief_v3(
         detail,
         requested_id=facility_id,
@@ -21038,26 +21033,84 @@ async def campground_planning_brief_v1(
     entity = evidence.get("entity") if isinstance(evidence.get("entity"), dict) else {}
     resolved_id = str(entity.get("id") or facility_id).strip()[:180]
     name = str(entity.get("name") or detail.get("name") or "Campground").strip()[:160]
+    return resolved_id, name, evidence
+
+
+async def _execute_camp_planning_brief_job(job_id: str) -> None:
+    job = get_camp_planning_brief_job(job_id)
+    if not job:
+        return
+    try:
+        update_camp_planning_brief_job(job_id, "running")
+        from ai.planner import generate_campground_planning_brief
+        from dashboard.campground_planning_briefs import build_campground_planning_brief
+        safety_identifier = hmac.new(
+            str(settings.secret_key).encode("utf-8"),
+            f"campground-brief:{job['user_id']}".encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()[:48]
+        researched = await asyncio.to_thread(
+            generate_campground_planning_brief,
+            job.get("evidence") if isinstance(job.get("evidence"), dict) else {},
+            safety_identifier=safety_identifier,
+        )
+        result = build_campground_planning_brief(
+            researched.get("brief") if isinstance(researched, dict) else {},
+            job.get("evidence") if isinstance(job.get("evidence"), dict) else {},
+            researched.get("sources") if isinstance(researched, dict) else [],
+        )
+        set_camp_brief(job["facility_id"], result)
+        update_camp_planning_brief_job(job_id, "ready")
+    except Exception as exc:
+        if bool(job.get("refund_on_error")):
+            try:
+                refund_camp_planning_brief_unlock(
+                    int(job["user_id"]),
+                    str(job["facility_id"]),
+                    "Refund - campground brief unavailable",
+                )
+            except Exception:
+                logger.exception("campground_brief_refund_failed user=%s", job.get("user_id"))
+        update_camp_planning_brief_job(job_id, "error", type(exc).__name__)
+        logger.warning(
+            "campground_planning_brief_failed facility=%s error=%s",
+            job.get("facility_id"),
+            type(exc).__name__,
+        )
+    finally:
+        _camp_planning_brief_tasks.pop(job_id, None)
+
+
+def _schedule_camp_planning_brief_job(job_id: str) -> None:
+    task = _camp_planning_brief_tasks.get(job_id)
+    if task and not task.done():
+        return
+    _camp_planning_brief_tasks[job_id] = asyncio.create_task(
+        _execute_camp_planning_brief_job(job_id)
+    )
+
+
+@app.post("/api/campsites/{facility_id}/planning-brief")
+async def campground_planning_brief_v1(
+    facility_id: str,
+    user: dict | None = Depends(_optional_user),
+):
+    """Unlock and start a source-cited campground planning brief."""
+    if not user:
+        raise HTTPException(402, detail={
+            "code": "login_required",
+            "message": "Sign in to show this campground brief.",
+            "earn_hint": True,
+        })
+    if not settings.openai_api_key:
+        raise HTTPException(503, "Campground briefs are temporarily unavailable.")
+
+    resolved_id, name, evidence = await _camp_planning_brief_context(facility_id, user)
     included_with_explorer = bool(has_active_plan(user) or user.get("is_admin"))
     existing_unlock = get_camp_planning_brief_unlock(user["id"], resolved_id)
     newly_unlocked = False
-    unlock: dict[str, Any]
-
-    if included_with_explorer:
-        unlock = {
-            "unlocked": True,
-            "newly_unlocked": False,
-            "credits_spent": 0,
-            "credit_balance": int(user.get("credits") or 0),
-        }
-    elif existing_unlock:
-        unlock = {
-            "unlocked": True,
-            "newly_unlocked": False,
-            "credits_spent": 0,
-            "credit_balance": int(user.get("credits") or 0),
-        }
-    else:
+    credits_spent = 0
+    if not included_with_explorer and not existing_unlock:
         cost = AI_COSTS["campsite_insight"]
         unlock = unlock_camp_planning_brief(
             user["id"],
@@ -21073,52 +21126,84 @@ async def campground_planning_brief_v1(
                 "earn_hint": True,
             })
         newly_unlocked = bool(unlock.get("newly_unlocked"))
+        credits_spent = int(unlock.get("credits_spent") or 0)
+        user = {**user, "credits": unlock.get("credit_balance")}
 
-    access = {
-        "permanent": not included_with_explorer or bool(existing_unlock),
-        "included_with_explorer": included_with_explorer,
-        "credits_spent": int(unlock.get("credits_spent") or 0),
-        "new_balance": unlock.get("credit_balance"),
-    }
+    access = _camp_planning_brief_access(user, resolved_id, credits_spent=credits_spent)
+    from dashboard.campground_planning_briefs import (
+        cached_campground_planning_brief,
+        campground_planning_source_revision,
+    )
     cached = cached_campground_planning_brief(get_camp_brief(resolved_id), evidence)
     if cached:
         return {**cached, "access": access}
 
-    safety_identifier = hmac.new(
-        str(settings.secret_key).encode("utf-8"),
-        f"campground-brief:{user['id']}".encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()[:48]
-    try:
-        from ai.planner import generate_campground_planning_brief
-        researched = await asyncio.to_thread(
-            generate_campground_planning_brief,
-            evidence,
-            safety_identifier=safety_identifier,
-        )
-        result = build_campground_planning_brief(
-            researched.get("brief") if isinstance(researched, dict) else {},
-            evidence,
-            researched.get("sources") if isinstance(researched, dict) else [],
-        )
-        set_camp_brief(resolved_id, result)
-        return {**result, "access": access}
-    except Exception as exc:
-        if newly_unlocked:
-            try:
-                refund_camp_planning_brief_unlock(
-                    user["id"],
-                    resolved_id,
-                    "Refund - campground brief unavailable",
-                )
-            except Exception:
-                logger.exception("campground_brief_refund_failed user=%s", user.get("id"))
-        logger.warning(
-            "campground_planning_brief_failed facility=%s error=%s",
+    source_revision = campground_planning_source_revision(evidence)
+    job = find_active_camp_planning_brief_job(
+        user["id"],
+        resolved_id,
+        source_revision,
+    )
+    if not job:
+        job = create_camp_planning_brief_job(
+            uuid.uuid4().hex,
+            user["id"],
             resolved_id,
-            type(exc).__name__,
+            source_revision,
+            evidence,
+            refund_on_error=newly_unlocked,
         )
-        raise HTTPException(503, "This campground brief could not be prepared right now.") from exc
+    _schedule_camp_planning_brief_job(str(job["id"]))
+    return JSONResponse(status_code=202, content={
+        "schema_version": "campground-planning-brief-job-v1",
+        "status": "preparing",
+        "job_id": str(job["id"]),
+        "facility_id": resolved_id,
+        "retry_after_seconds": 3,
+        "access": access,
+    })
+
+
+@app.get("/api/campsites/{facility_id}/planning-brief/jobs/{job_id}")
+async def campground_planning_brief_job_v1(
+    facility_id: str,
+    job_id: str,
+    user: dict | None = Depends(_optional_user),
+):
+    if not user:
+        raise HTTPException(401, "Sign in to show this campground brief.")
+    job = get_camp_planning_brief_job(job_id, user["id"])
+    if not job or str(job.get("facility_id")) != str(facility_id):
+        raise HTTPException(404, "Campground brief job not found.")
+    status = str(job.get("status") or "error")
+    access = _camp_planning_brief_access(user, str(job["facility_id"]))
+    if status == "ready":
+        from dashboard.campground_planning_briefs import cached_campground_planning_brief
+        cached = cached_campground_planning_brief(
+            get_camp_brief(str(job["facility_id"])),
+            job.get("evidence") if isinstance(job.get("evidence"), dict) else {},
+        )
+        if cached:
+            return {**cached, "access": access}
+        update_camp_planning_brief_job(job_id, "error", "result_missing")
+        status = "error"
+    if status == "error":
+        return {
+            "schema_version": "campground-planning-brief-job-v1",
+            "status": "error",
+            "job_id": job_id,
+            "message": "This campground brief could not be prepared right now.",
+            "access": access,
+        }
+    _schedule_camp_planning_brief_job(job_id)
+    return JSONResponse(status_code=202, content={
+        "schema_version": "campground-planning-brief-job-v1",
+        "status": "preparing",
+        "job_id": job_id,
+        "facility_id": str(job["facility_id"]),
+        "retry_after_seconds": 3,
+        "access": access,
+    })
 
 
 @app.get("/api/campsites/{facility_id}/sites/{campsite_id}/detail")

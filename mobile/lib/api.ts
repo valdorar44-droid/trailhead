@@ -936,13 +936,35 @@ export const api = {
     const facilityId = siteParts[1] || ridbFacilityIdFromCanonicalCampId(raw) || raw;
     return req<CampgroundBriefV3>(`/api/campsites/${encodeURIComponent(facilityId)}/brief`);
   },
-  getCampgroundPlanningBrief: (id: string) => {
+  getCampgroundPlanningBrief: async (id: string): Promise<CampgroundPlanningBriefV1> => {
     const raw = String(id || '');
     const siteParts = raw.startsWith('ridb_site:') ? raw.split(':') : [];
     const facilityId = siteParts[1] || ridbFacilityIdFromCanonicalCampId(raw) || raw;
-    return req<CampgroundPlanningBriefV1>(`/api/campsites/${encodeURIComponent(facilityId)}/planning-brief`, {
+    let response = await req<CampgroundPlanningBriefV1 | CampgroundPlanningBriefJobV1>(`/api/campsites/${encodeURIComponent(facilityId)}/planning-brief`, {
       method: 'POST',
     });
+    for (let attempt = 0; attempt < 100 && response.status === 'preparing'; attempt += 1) {
+      const delaySeconds = Math.min(5, Math.max(2, Number(response.retry_after_seconds) || 3));
+      await new Promise(resolve => setTimeout(resolve, delaySeconds * 1000));
+      response = await req<CampgroundPlanningBriefV1 | CampgroundPlanningBriefJobV1>(
+        `/api/campsites/${encodeURIComponent(response.facility_id)}/planning-brief/jobs/${encodeURIComponent(response.job_id)}`,
+      );
+    }
+    if (response.status === 'error') {
+      throw new ApiError(
+        response.message || 'This campground brief could not be prepared right now.',
+        503,
+        { code: 'campground_brief_failed' },
+      );
+    }
+    if (response.status === 'preparing') {
+      throw new ApiError(
+        'This campground brief is still being prepared. Try again in a moment.',
+        504,
+        { code: 'campground_brief_timeout' },
+      );
+    }
+    return response as CampgroundPlanningBriefV1;
   },
   suggestCampsiteEdit: (id: string, data: CampEditSuggestionPayload) =>
     req<{ id: number; status: string; credits_earned: number; new_balance: number }>(`/api/campsites/${encodeURIComponent(id)}/suggest-edit`, {
@@ -4665,6 +4687,16 @@ export interface CampgroundPlanningBriefV1 {
   source_revision: string;
   generated_at: number;
   expires_at: number;
+  access: CampgroundPlanningBriefAccessV1;
+  status?: never;
+}
+export interface CampgroundPlanningBriefJobV1 {
+  schema_version: 'campground-planning-brief-job-v1';
+  status: 'preparing' | 'error';
+  job_id: string;
+  facility_id: string;
+  retry_after_seconds?: number;
+  message?: string;
   access: CampgroundPlanningBriefAccessV1;
 }
 export interface RouteBriefRequest {

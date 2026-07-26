@@ -788,6 +788,18 @@ def init_db():
             unlocked_at   INTEGER NOT NULL,
             PRIMARY KEY (user_id, facility_id)
         );
+        CREATE TABLE IF NOT EXISTS camp_planning_brief_jobs (
+            id              TEXT PRIMARY KEY,
+            user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            facility_id     TEXT NOT NULL,
+            source_revision TEXT NOT NULL,
+            evidence_json   TEXT NOT NULL,
+            status          TEXT NOT NULL DEFAULT 'queued',
+            refund_on_error INTEGER NOT NULL DEFAULT 0,
+            error_code      TEXT,
+            created_at      INTEGER NOT NULL,
+            updated_at      INTEGER NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS camp_profile_overrides (
             camp_id     TEXT PRIMARY KEY,
             data        TEXT NOT NULL,
@@ -1523,6 +1535,7 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_analytics_type ON analytics_events(event_type, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_route_cache_time ON route_cache(fetched_at)",
         "CREATE INDEX IF NOT EXISTS idx_camp_planning_brief_unlocks_user ON camp_planning_brief_unlocks(user_id, unlocked_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_camp_planning_brief_jobs_lookup ON camp_planning_brief_jobs(user_id, facility_id, source_revision, updated_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_offline_downloads_user ON offline_downloads(user_id, asset_type, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_users_email_verify_token ON users(email_verify_token)",
         "CREATE INDEX IF NOT EXISTS idx_users_password_reset_token ON users(password_reset_token)",
@@ -1624,6 +1637,19 @@ def init_db():
             PRIMARY KEY (user_id, facility_id)
         )""",
         "CREATE INDEX IF NOT EXISTS idx_camp_planning_brief_unlocks_user ON camp_planning_brief_unlocks(user_id, unlocked_at DESC)",
+        """CREATE TABLE IF NOT EXISTS camp_planning_brief_jobs (
+            id              TEXT PRIMARY KEY,
+            user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            facility_id     TEXT NOT NULL,
+            source_revision TEXT NOT NULL,
+            evidence_json   TEXT NOT NULL,
+            status          TEXT NOT NULL DEFAULT 'queued',
+            refund_on_error INTEGER NOT NULL DEFAULT 0,
+            error_code      TEXT,
+            created_at      INTEGER NOT NULL,
+            updated_at      INTEGER NOT NULL
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_camp_planning_brief_jobs_lookup ON camp_planning_brief_jobs(user_id, facility_id, source_revision, updated_at DESC)",
         """CREATE TABLE IF NOT EXISTS app_store_subscriptions (
             original_transaction_id TEXT PRIMARY KEY,
             transaction_id          TEXT,
@@ -7558,6 +7584,107 @@ def refund_camp_planning_brief_unlock(user_id: int, facility_id: str, reason: st
         raise
     finally:
         db.close()
+
+
+def create_camp_planning_brief_job(
+    job_id: str,
+    user_id: int,
+    facility_id: str,
+    source_revision: str,
+    evidence: dict,
+    *,
+    refund_on_error: bool,
+) -> dict:
+    now = int(time.time())
+    row = {
+        "id": str(job_id),
+        "user_id": int(user_id),
+        "facility_id": str(facility_id),
+        "source_revision": str(source_revision),
+        "evidence_json": json.dumps(evidence, separators=(",", ":"), ensure_ascii=False),
+        "status": "queued",
+        "refund_on_error": 1 if refund_on_error else 0,
+        "error_code": None,
+        "created_at": now,
+        "updated_at": now,
+    }
+    db = _conn()
+    db.execute(
+        """INSERT INTO camp_planning_brief_jobs
+           (id,user_id,facility_id,source_revision,evidence_json,status,refund_on_error,error_code,created_at,updated_at)
+           VALUES (:id,:user_id,:facility_id,:source_revision,:evidence_json,:status,:refund_on_error,:error_code,:created_at,:updated_at)""",
+        row,
+    )
+    db.commit()
+    db.close()
+    return {**row, "evidence": evidence}
+
+
+def get_camp_planning_brief_job(job_id: str, user_id: int | None = None) -> dict | None:
+    db = _conn()
+    if user_id is None:
+        row = db.execute(
+            "SELECT * FROM camp_planning_brief_jobs WHERE id=?",
+            (str(job_id),),
+        ).fetchone()
+    else:
+        row = db.execute(
+            "SELECT * FROM camp_planning_brief_jobs WHERE id=? AND user_id=?",
+            (str(job_id), int(user_id)),
+        ).fetchone()
+    db.close()
+    if not row:
+        return None
+    result = dict(row)
+    try:
+        result["evidence"] = json.loads(result.pop("evidence_json"))
+    except (TypeError, json.JSONDecodeError):
+        result["evidence"] = {}
+        result.pop("evidence_json", None)
+    return result
+
+
+def find_active_camp_planning_brief_job(
+    user_id: int,
+    facility_id: str,
+    source_revision: str,
+    *,
+    max_age_seconds: int = 15 * 60,
+) -> dict | None:
+    cutoff = int(time.time()) - max(60, int(max_age_seconds))
+    db = _conn()
+    row = db.execute(
+        """SELECT * FROM camp_planning_brief_jobs
+           WHERE user_id=? AND facility_id=? AND source_revision=?
+             AND status IN ('queued','running') AND updated_at>=?
+           ORDER BY updated_at DESC LIMIT 1""",
+        (int(user_id), str(facility_id), str(source_revision), cutoff),
+    ).fetchone()
+    db.close()
+    if not row:
+        return None
+    result = dict(row)
+    try:
+        result["evidence"] = json.loads(result.pop("evidence_json"))
+    except (TypeError, json.JSONDecodeError):
+        result["evidence"] = {}
+        result.pop("evidence_json", None)
+    return result
+
+
+def update_camp_planning_brief_job(job_id: str, status: str, error_code: str | None = None) -> None:
+    allowed = {"queued", "running", "ready", "error"}
+    clean_status = str(status)
+    if clean_status not in allowed:
+        raise ValueError("Invalid campground brief job status")
+    db = _conn()
+    db.execute(
+        """UPDATE camp_planning_brief_jobs
+           SET status=?,error_code=?,updated_at=? WHERE id=?""",
+        (clean_status, str(error_code or "")[:80] or None, int(time.time()), str(job_id)),
+    )
+    db.commit()
+    db.close()
 
 
 def has_active_plan(user: dict) -> bool:

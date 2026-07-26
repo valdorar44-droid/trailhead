@@ -1420,3 +1420,32 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Exact next action: commit and push this baseline, then implement only named Sheet/POI files before focused tests.
 - Do not repeat: Camp Guide generation, production OTA compatibility work, Memory Gate, Layers, Yellowstone, NPS rabbit-hole research, Android Auto, Originals lifecycle, broad Map/sheet crawls, final 1.0.10 release gate, or store screenshots.
 - Task-owned background processes: none.
+
+## Sheet Action and POI packet - implementation ready for preview
+
+- Timestamp: `2026-07-26T03:57:37-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; implementation HEAD `4ea6b1ac57cdd2ca5a7066f001a3e43bde4b2133`.
+- Protected Explore index SHA-256 remains `7E59E5E2273DBBE1A26D7BBD4D947FAA20935C51FB79C464EED8A17BABF4D8F4`. `.cursor/`, `dashboard/explore_serving_index_v2.json`, and `docs/app-store-copy.md` remain excluded and unstaged.
+- Added internal `SheetActionDescriptorV1` coverage for campground, trail, trailhead, fuel/service, generic place, NPS child, and community-report sheets. Each descriptor carries a stable action ID, capability requirement, availability, destination, safe/mutating classification, return context, and expected sheet/map state.
+- Existing sheet layouts and feature modules remain intact. Stable action IDs now cover navigation, Save/remove, Add to trip, offline download, 3D preview, official/booking/phone/share, ratings, comments, reports, edits, voting, and private field-review actions.
+- Campground Download now reuses the existing selected-area/offline workflow; no second download store or new claim was added.
+- Canonical Recreation.gov/RIDB campground Search V2 results, including results whose broad kind is `place`, now open the existing main-Map campground sheet. Temporary provider rows remain clearly temporary and retain the generic source-result flow.
+- Selection generation and return context remain controlled by the existing `SheetCoordinator`. The packet does not change sheet hydration, camera ownership, filters, navigation, Offline V1/V2, NPS modules, Viator, ratings, comments, or report backends.
+- Focused verification passed:
+  - Sheet action/return/coordinator: `8/8`.
+  - Search V2 presentation, persistence, canonical campground routing, and client/session behavior: `73/73`.
+  - Camp Guide/camp sheet/identity: `18/18`.
+  - Trail/trailhead parity: `5/5`.
+  - Community-report sheet contract: `5/5`.
+  - NPS hub/navigation/scroll preservation: `21/21`.
+  - Offline V1/V2 catalog and manager preservation: passed.
+  - User-facing copy audit: `165` files passed.
+  - Telemetry/privacy, automation selectors, TypeScript, and whitespace: passed.
+- Read-only ingestion observation, not a fabricated UI fix: the current protected Explore featured index reports `fuel: 0` and `resupply: 0`. It contains NPS visitor-center and viewpoint content, but the featured index is not the complete Map/Search provider inventory. Fuel, water, groceries, dump stations, repair, parking, visitor centers, and viewpoints remain device-delta assertions; missing inventory will be recorded as an ingestion defect rather than synthesized.
+- Existing paired preview before this packet remains:
+  - Android update `019f9d3a-39f2-7fc2-adc9-ddb54f0b0c9d`, group `3c70d0e0-4f90-4832-ad66-2fbb58e08990`, runtime `native-1.0.10-android.3`.
+  - iOS update `019f9d3a-39f2-7733-ba1a-86d2227ed627`, group `2f15d441-fb8b-4c71-8647-17d5d74f9319`, runtime `native-1.0.10-ios.3`.
+- Open P0/P1 before device proof: none.
+- Exact next action: commit and push this checkpoint, publish one paired preview OTA from the resulting immutable SHA with Sentry maps, then run only the bounded Android sheet/POI delta and shared high-risk iOS spot checks.
+- Do not repeat: Camp Guide generation or production promotion, Memory Gate, Layers, Yellowstone, NPS rabbit-hole research, Android Auto, Originals lifecycle, broad Map/sheet crawls, final production-build validation, or store screenshots.
+- Task-owned background processes: none. Focused Node/TypeScript tests have exited; no Metro, Gradle, Maestro, EAS publisher, or Sentry upload remains running.

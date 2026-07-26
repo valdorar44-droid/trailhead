@@ -273,10 +273,13 @@ const expectedCandidate = {
   androidRuntime: appConfig.android.runtimeVersion,
   iosRuntime: appConfig.ios.runtimeVersion,
 };
-const { payload: candidateListing, evidence: selectedGroups } = queryJsonWithRetry([
+  const { payload: candidateListing, evidence: selectedGroups } = queryJsonWithRetry([
     '--yes', 'eas-cli@21.0.2', 'update:list',
     '--branch', candidateBranch,
-    '--limit', '100',
+    // EAS CLI accepts at most 50 records for update:list. The production
+    // matrix is validated from this bounded server-owned listing before the
+    // channel pointer moves.
+    '--limit', '50',
     '--json',
     '--non-interactive',
   ], 'EAS candidate branch listing', payload => selectPairedUpdateGroups(payload, expectedCandidate));

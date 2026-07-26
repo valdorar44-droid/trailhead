@@ -1597,3 +1597,37 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Exact next action: audit every active mobile SDK and server-bound user-data flow, reconcile the Play Data Safety form and privacy policy with actual collection/sharing, then begin the approved real saved/downloaded trip-map packet.
 - Do not repeat: Camp Guide generation, Sheet/POI broad crawl, service-query crawl, Memory Gate, Layers, Yellowstone, NPS rabbit-hole research, Android Auto, Originals lifecycle, final production-build validation, or store screenshots without new evidence.
 - Task-owned background processes: none. Production EAS export, Sentry upload, and publisher processes exited successfully.
+
+## Google Play compliance and Android Auto - pre-change checkpoint
+
+- Timestamp: `2026-07-26T15:35:00-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; baseline HEAD `55b787c`.
+- The accepted Sheet/POI/Search production OTA is live only for compatible 1.0.10 runtimes:
+  - Android update `019f9ff6-714c-7134-b779-af1e99bc910e`, runtime `native-1.0.10-android.3`.
+  - iOS update `019f9ff6-714c-7707-ba11-b3ff66734603`, runtime `native-1.0.10-ios.3`.
+- Protected and unrelated worktree changes remain excluded and unstaged:
+  - `.cursor/`
+  - `dashboard/explore_serving_index_v2.json`
+  - `docs/app-store-copy.md`
+  - Android helper mode changes
+  - Valhalla artifact, probe, publication, and NPS-enrichment scripts
+- Google Play’s current rejection is `Auto App Quality Guidelines: App doesn't perform as expected`, with the concrete finding that Trailhead requires navigation to be started from the phone. It is not a Data Safety rejection.
+- Deterministic source cause:
+  - Android Auto already accepts `androidx.car.app.action.NAVIGATE` geo intents.
+  - The request screen only starts guidance when the requested destination matches a route already selected on the phone.
+  - A clean or unmatched request tells the reviewer to choose or finish the route on the phone.
+- Data Safety is a separate incomplete declaration:
+  - The current form declares only `Device or other IDs`.
+  - It marks encryption in transit as No, omits Google and Apple OAuth account creation, points deletion to the generic home page, and does not disclose the active location, app activity, diagnostics, user content, purchases, photos, support, push, referral, and optional voice-processing paths.
+  - No Play Console form answer will be changed until the source-owned data inventory and user-facing privacy/deletion pages are complete and the proposed answers are reviewed.
+- Active implementation scope:
+  1. Add a source-controlled Google Play Data Safety inventory and provider matrix.
+  2. Update the public privacy policy and add a dedicated account-deletion page.
+  3. Add a visible Mapbox telemetry control and initialize it privacy-first.
+  4. Make Android Auto resolve and start a requested destination without requiring phone route selection, then produce a new Android native candidate.
+- Open defects:
+  - P1: Android Auto navigation requests cannot independently calculate and start an unmatched destination.
+  - P1 compliance: the Data Safety form and privacy/deletion disclosures do not match active app behavior.
+- Exact next action: commit this checkpoint, implement the source-owned privacy inventory and disclosure pages, then implement and test independent Android Auto destination routing.
+- Do not repeat: Camp Guide generation, Sheet/POI/Search crawls, Memory Gate, Layers, Yellowstone, NPS research, Originals lifecycle, current production OTA publication, or store screenshot work.
+- Task-owned background processes: none.

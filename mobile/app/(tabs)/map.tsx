@@ -7073,6 +7073,7 @@ function MapScreen() {
   const favoriteCamps  = useStore(s => s.favoriteCamps);
   const toggleFavorite = useStore(s => s.toggleFavorite);
   const addSavedPlace = useStore(s => s.addSavedPlace);
+  const removeSavedPlace = useStore(s => s.removeSavedPlace);
   const waterSpots = useStore(s => s.waterSpots);
   const addWaterSpot = useStore(s => s.addWaterSpot);
   const catchLogs = useStore(s => s.catchLogs);
@@ -9518,6 +9519,19 @@ function MapScreen() {
       createdAt: Date.now(),
     });
     setQuickToast('Camp saved');
+    setTimeout(() => setQuickToast(''), 2200);
+  }
+
+  function toggleCampPlaceSaved(camp: CampsitePin | CampsiteDetail) {
+    const favoriteId = String((camp as any).id || campKey(camp));
+    const isSaved = favoriteCamps.some(f => String(f.id) === favoriteId);
+    if (!isSaved) {
+      saveCampPlace(camp);
+      return;
+    }
+    toggleFavorite(camp as CampsitePin);
+    removeSavedPlace(`camp:${campKey(camp)}`);
+    setQuickToast('Removed from saved');
     setTimeout(() => setQuickToast(''), 2200);
   }
 
@@ -27881,7 +27895,7 @@ function MapScreen() {
               fee={campCostLine(selectedCamp) || 'Not listed'}
               saved={favoriteCamps.some(f => f.id === selectedCamp.id)}
               onViewSites={() => dispatchPlaceSheet({ type: 'set_presentation', presentation: 'full' })}
-              onSave={() => saveCampPlace(selectedCamp)}
+              onSave={() => toggleCampPlaceSaved(selectedCamp)}
               onClose={() => {
                 setRelatedPlaceReturnStack([]);
                 closeSelectedCampProfile();
@@ -27941,7 +27955,7 @@ function MapScreen() {
                     }}
                     top={Math.max(insets.top + 8, 12)}
                     saved={favoriteCamps.some(f => f.id === selectedCamp.id)}
-                    onSave={() => saveCampPlace(selectedCamp)}
+                    onSave={() => toggleCampPlaceSaved(selectedCamp)}
                     onShare={() => shareCampPlace(selectedCamp)}
                     onBack={campParentSnapshotRef.current
                       ? restoreCampgroundParent

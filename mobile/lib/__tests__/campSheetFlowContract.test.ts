@@ -56,3 +56,11 @@ test('campground action parity retains its existing offline area workflow', () =
   assert.match(mapSource, /onPress=\{\(\) => downloadCampPlace\(campDetail \|\| selectedCamp\)\}/);
   assert.match(mapSource, /setOfflineAreaPicker\(true\)/);
 });
+
+test('campground Save and Remove saved use the same reversible action', () => {
+  assert.match(mapSource, /const removeSavedPlace = useStore\(s => s\.removeSavedPlace\)/);
+  assert.match(mapSource, /function toggleCampPlaceSaved\(camp: CampsitePin \| CampsiteDetail\)/);
+  assert.match(mapSource, /removeSavedPlace\(`camp:\$\{campKey\(camp\)\}`\)/);
+  assert.match(mapSource, /onSave=\{\(\) => toggleCampPlaceSaved\(selectedCamp\)\}/);
+  assert.match(mapSource, /function downloadCampPlace\(camp: CampsitePin \| CampsiteDetail\)[\s\S]*?saveCampPlace\(camp\)/);
+});

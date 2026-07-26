@@ -27,6 +27,7 @@ from dashboard.search_v2 import (
     SearchV2Service,
     documents_from_canonical,
     infer_service_search_request_v2,
+    service_search_named_locality_v2,
 )
 
 
@@ -623,6 +624,12 @@ class SearchV2ServiceTests(unittest.IsolatedAsyncioTestCase):
         ))
         self.assertEqual(untouched.intent, "any")
         self.assertEqual(untouched.categories, [])
+
+        self.assertEqual(
+            service_search_named_locality_v2(explicit),
+            ("fuel", "Flagstaff", 30_000),
+        )
+        self.assertIsNone(service_search_named_locality_v2(nearby))
 
     async def test_typed_service_query_rejects_literal_trail_matches(self):
         service = SearchV2Service(lambda: ([
@@ -1491,7 +1498,34 @@ class SearchV2ServiceTests(unittest.IsolatedAsyncioTestCase):
         legacy_geocoder.assert_not_awaited()
 
     async def test_mapbox_service_suggest_is_poi_only_and_filters_gas_category(self):
-        provider = AsyncMock(return_value={"suggestions": []})
+        provider = AsyncMock(side_effect=[
+            {
+                "features": [{
+                    "geometry": {
+                        "type": "Point",
+                        "coordinates": [-111.6513, 35.1983],
+                    },
+                }],
+            },
+            {
+                "suggestions": [
+                    {
+                        "mapbox_id": "poi.flagstaff-local",
+                        "name": "Flagstaff Fuel",
+                        "feature_type": "poi",
+                        "poi_category_ids": ["gas_station"],
+                        "distance": 2_500,
+                    },
+                    {
+                        "mapbox_id": "poi.flagstaff-plaza-virginia",
+                        "name": "Flagstaff Plaza Fuel",
+                        "feature_type": "poi",
+                        "poi_category_ids": ["gas_station"],
+                        "distance": 3_200_000,
+                    },
+                ],
+            },
+        ])
         request = infer_service_search_request_v2(SearchRequestV2(
             query="fuel near Flagstaff",
             center=SearchCenterV2(lat=49.8951, lng=-97.1384),
@@ -1502,12 +1536,24 @@ class SearchV2ServiceTests(unittest.IsolatedAsyncioTestCase):
             patch.object(server.settings, "mapbox_token", "pk.test"),
             patch.object(server, "_mapbox_get", provider),
         ):
-            await server._search_v2_external_mapbox(request, 8, "suggest")
+            results = await server._search_v2_external_mapbox(
+                request, 8, "suggest",
+            )
 
-        _url, params = provider.await_args.args
+        locality_url, locality_params = provider.await_args_list[0].args
+        self.assertEqual(
+            locality_url, "https://api.mapbox.com/search/geocode/v6/forward",
+        )
+        self.assertEqual(locality_params["q"], "Flagstaff")
+        _url, params = provider.await_args_list[1].args
         self.assertEqual(params["types"], "poi")
         self.assertEqual(params["poi_category"], "gas_station")
-        self.assertEqual(params["q"], "fuel near Flagstaff")
+        self.assertEqual(params["q"], "fuel")
+        self.assertEqual(params["proximity"], "-111.651300,35.198300")
+        self.assertEqual(
+            [item.result_id for item in results],
+            ["mapbox:poi.flagstaff-local"],
+        )
 
     async def test_concurrent_mapbox_selection_replays_share_one_retrieve(self):
         request = SearchRequestV2(

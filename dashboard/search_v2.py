@@ -407,6 +407,38 @@ def infer_service_search_request_v2(request: SearchRequestV2) -> SearchRequestV2
     return request.model_copy(update=update)
 
 
+def service_search_named_locality_v2(
+    request: SearchRequestV2,
+) -> tuple[str, str, int] | None:
+    """Return provider query, named locality, and radius for service searches.
+
+    ``fuel near Flagstaff`` must not be sent to a POI provider as one literal
+    phrase: that can rank a business on "Flagstaff Plaza" ahead of fuel in
+    Flagstaff, Arizona. The caller resolves the locality first, then searches
+    the service term around that coordinate.
+    """
+    if request.intent != "service":
+        return None
+    matched_radius: int | None = None
+    for pattern, _categories, radius_meters in _SERVICE_QUERY_RULES:
+        if pattern.search(request.query):
+            matched_radius = radius_meters
+            break
+    locality_match = _EXPLICIT_LOCALITY_RE.search(request.query)
+    if matched_radius is None or locality_match is None:
+        return None
+    locality = re.sub(r"\s+", " ", locality_match.group(1).strip())
+    normalized_locality = normalize_search_text(locality)
+    if not normalized_locality or normalized_locality in _CURRENT_LOCATION_TERMS:
+        return None
+    provider_query = re.sub(
+        r"\s+", " ", request.query[:locality_match.start()].strip(),
+    )
+    if not provider_query:
+        return None
+    return provider_query, locality, matched_radius
+
+
 class SearchResultV2(BaseModel):
     _ranking_class: str = PrivateAttr(default="")
 

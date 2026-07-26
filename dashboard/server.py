@@ -86,6 +86,7 @@ from dashboard.search_v2 import (
     documents_from_canonical,
     infer_service_search_request_v2,
     normalize_search_text,
+    service_search_named_locality_v2,
     _external_result_for_request,
 )
 from dashboard.offline_bundles_v2 import (
@@ -19256,13 +19257,47 @@ async def _search_v2_external_mapbox(
         f"{request.center.lng:.6f},{request.center.lat:.6f}"
         if request.center else ""
     )
+    provider_query = request.query
+    named_service_radius: int | None = None
+    named_service = service_search_named_locality_v2(request)
+    if named_service is not None:
+        service_query, locality_query, service_radius = named_service
+        try:
+            locality_data = await _mapbox_get(
+                "https://api.mapbox.com/search/geocode/v6/forward",
+                _searchbox_params({
+                    "q": locality_query,
+                    "language": "en",
+                    "limit": "1",
+                    "permanent": "false",
+                }),
+            )
+            locality_features = locality_data.get("features", [])
+            locality_feature = (
+                locality_features[0]
+                if isinstance(locality_features, list) and locality_features
+                and isinstance(locality_features[0], dict)
+                else None
+            )
+            locality_lat, locality_lng = (
+                _map_context_feature_coords(locality_feature)
+                if locality_feature is not None else (None, None)
+            )
+            if locality_lat is not None and locality_lng is not None:
+                provider_query = service_query
+                proximity = f"{locality_lng:.6f},{locality_lat:.6f}"
+                named_service_radius = service_radius
+        except (HTTPException, httpx.HTTPError, TypeError, ValueError):
+            # Search remains usable if locality grounding is temporarily
+            # unavailable; the ordinary provider request is still bounded.
+            pass
     bbox = (
         f"{request.bounds.west:.6f},{request.bounds.south:.6f},"
         f"{request.bounds.east:.6f},{request.bounds.north:.6f}"
         if request.bounds else ""
     )
     params = _searchbox_params({
-        "q": request.query,
+        "q": provider_query,
         "session_token": _search_v2_mapbox_session_token(request.session_id),
         "proximity": proximity,
         "origin": proximity,
@@ -19312,6 +19347,12 @@ async def _search_v2_external_mapbox(
                 distance_meters = max(0.0, float(suggestion["distance"]))
         except (TypeError, ValueError):
             distance_meters = None
+        if (
+            named_service_radius is not None
+            and distance_meters is not None
+            and distance_meters > named_service_radius
+        ):
+            continue
         context = suggestion.get("context") if isinstance(suggestion.get("context"), dict) else {}
         region = context.get("region") if isinstance(context.get("region"), dict) else {}
         results.append(SearchResultV2(

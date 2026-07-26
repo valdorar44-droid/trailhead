@@ -1388,3 +1388,35 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Exact next action: commit and push this checkpoint, remove the three temporary production worktrees after evidence capture, then create the Sheet Action/POI baseline and implement only the capability registry plus canonical Recreation.gov campground routing before focused tests and one paired preview.
 - Do not repeat: Camp Guide generation/model comparison, Memory Gate, Layers, Yellowstone, NPS research, Android Auto, Originals lifecycle, broad Map/sheet crawls, final production-build validation, or store screenshot work.
 - Task-owned background processes: the corrected publisher has exited successfully. No Metro, EAS publisher, Sentry upload, Gradle, Maestro, or test process remains.
+
+## Sheet Action and POI packet - pre-change baseline
+
+- Timestamp: `2026-07-26T03:36:00-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; pre-change HEAD `034723af11f065f2c03c2fc4b72609af539294fe`, pushed to origin.
+- Protected Explore index SHA-256 remains `7E59E5E2273DBBE1A26D7BBD4D947FAA20935C51FB79C464EED8A17BABF4D8F4`.
+- Protected and unrelated worktree changes remain excluded and unstaged:
+  - `.cursor/`
+  - `dashboard/explore_serving_index_v2.json`
+  - `docs/app-store-copy.md`
+  - Android helper mode changes
+  - Valhalla artifact, probe, publication, and NPS-enrichment scripts
+- Production channel `019dc26b-268a-794b-8aa8-3497b4d38487` points to the verified Camp Guide candidate from `29e48a82`; rollback branch remains `production-candidate-f90c150d-legacy-20260725035506`.
+- Existing paired preview identity before this packet remains:
+  - Android update `019f9d3a-39f2-7fc2-adc9-ddb54f0b0c9d`, group `3c70d0e0-4f90-4832-ad66-2fbb58e08990`, runtime `native-1.0.10-android.3`.
+  - iOS update `019f9d3a-39f2-7733-ba1-86d2227ed627`, group `2f15d441-fb8b-4c71-8647-17d5d74f9319`, runtime `native-1.0.10-ios.3`.
+- Exact bounded implementation scope:
+  - Add the internal `SheetActionDescriptorV1` capability registry and stable action identifiers without materially changing approved sheet layouts.
+  - Apply it incrementally to campground, trail, trailhead, fuel/service, generic POI, NPS child, and community-report actions.
+  - Route canonical Recreation.gov/RIDB campground Search results, including Explore Search, to the existing main-Map campground sheet.
+  - Preserve camera, filters, selected identity, return context, campground modules, NPS modules, Viator, comments, ratings, reports, edits, Offline, booking, and current sheet hydration behavior.
+  - Document actual POI ingestion gaps; do not fabricate missing records or modules.
+- Exact focused verification scope:
+  - Registry visibility/destination/return-state tests.
+  - Canonical campground-versus-source-hub routing tests.
+  - Existing sheet coordinator, campground, trail/trailhead, community-report, Search V2, Offline preservation, copy/privacy, TypeScript, and whitespace gates.
+  - One bounded Android delta across the named safe branches and POI families, stopping before irreversible confirmation.
+  - One paired preview OTA and shared high-risk iOS spot checks only.
+- Open P0/P1 at baseline: none. The known Recreation.gov Explore-search routing defect is P2 because the same canonical campground remains reachable through the correct Map path.
+- Exact next action: commit and push this baseline, then implement only named Sheet/POI files before focused tests.
+- Do not repeat: Camp Guide generation, production OTA compatibility work, Memory Gate, Layers, Yellowstone, NPS rabbit-hole research, Android Auto, Originals lifecycle, broad Map/sheet crawls, final 1.0.10 release gate, or store screenshots.
+- Task-owned background processes: none.

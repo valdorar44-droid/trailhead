@@ -152,7 +152,7 @@ class CampgroundPlanningBriefOpenAITests(unittest.TestCase):
             patch.object(
                 planner.settings,
                 "openai_campground_brief_model",
-                "gpt-5.4-nano",
+                "gpt-5.4-mini",
             ),
             patch.object(planner.httpx, "post", return_value=response) as post,
         ):
@@ -164,7 +164,7 @@ class CampgroundPlanningBriefOpenAITests(unittest.TestCase):
 
         payload = post.call_args.kwargs["json"]
         self.assertEqual(post.call_args.args[0], "https://api.openai.com/v1/responses")
-        self.assertEqual(payload["model"], "gpt-5.4-nano")
+        self.assertEqual(payload["model"], "gpt-5.4-mini")
         self.assertFalse(payload["store"])
         self.assertEqual(payload["tools"][0]["type"], "web_search")
         self.assertEqual(payload["tools"][0]["search_context_size"], "low")
@@ -174,6 +174,31 @@ class CampgroundPlanningBriefOpenAITests(unittest.TestCase):
         self.assertTrue(payload["text"]["format"]["strict"])
         self.assertEqual(payload["safety_identifier"], "safe-test-id")
         self.assertEqual(result["sources"][0]["url"], "https://www.nps.gov/example/campground.htm")
+
+    def test_public_copy_removes_inline_links_and_ends_on_a_sentence(self):
+        evidence = campground_planning_evidence(
+            build_campground_brief_v3(_detail(), generated_at=1_780_000_100)
+        )
+        official = "https://www.nps.gov/example/campground.htm"
+        generated = _model_result()
+        generated["summary"] = {
+            "text": (
+                "A quiet base near the main park road. (nps.gov) "
+                + "This extra sentence contains "
+                + ("more detail " * 80)
+                + f"[NPS]({official})."
+            ),
+            "source_urls": [official],
+        }
+        brief = build_campground_planning_brief(
+            generated,
+            evidence,
+            [{"title": "Official campground", "url": official}],
+            now=1_780_000_200,
+        )
+
+        self.assertEqual(brief["summary"], "A quiet base near the main park road.")
+        self.assertNotIn("http", str(brief["summary"]).casefold())
 
 
 class CampgroundPlanningBriefUnlockTests(unittest.TestCase):

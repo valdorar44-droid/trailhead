@@ -55,7 +55,7 @@ class Settings:
     openai_planner_model: str = os.environ.get("OPENAI_PLANNER_MODEL", "gpt-5.4")
     openai_campground_brief_model: str = os.environ.get(
         "OPENAI_CAMPGROUND_BRIEF_MODEL",
-        "gpt-5.4-nano",
+        "gpt-5.4-mini",
     )
     openai_realtime_model: str = os.environ.get("OPENAI_REALTIME_MODEL", "gpt-realtime-2")
     openai_realtime_fallback_model: str = os.environ.get("OPENAI_REALTIME_FALLBACK_MODEL", "gpt-realtime-mini")

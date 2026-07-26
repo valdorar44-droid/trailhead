@@ -833,12 +833,37 @@ Rules:
 - Do not mention models, web search, providers, or how this brief was made.
 - Never refer to evidence, supplied/provided context, records, fields, databases,
   prompts, or research. Write direct visitor-facing guidance.
+- Use a calm field-guide voice: specific, natural, compact, and useful. Avoid
+  bureaucratic phrases such as "the page lists," "the listing says," and
+  "for planning purposes" when the fact can be stated directly.
 - Do not add generic camping checklists, Leave No Trace reminders, weather
   advice, or offline-map advice unless a cited source makes it specific to this
   campground or access area.
+- Never tell the visitor to download another app, visit another website, or
+  look elsewhere for the brief. Trailhead shows cited sources separately.
+- Do not repeat booking links, phone numbers, prices, listed amenities, site
+  counts, or campsite rows already present on the campground sheet.
 - A general mobile-coverage source may support only service/signal guidance,
   not access, seasons, nearby places, hazards, or preparation claims.
-- Do not use markdown headings or repeat labels inside field text."""
+- If current service/signal information is not directly supported, leave that
+  field empty instead of telling the visitor to assume poor service.
+- Summary: one orientation sentence, no dates, inventory, rig limits, signal,
+  warnings, or preparation advice, under 240 characters.
+- Best time, access/rig, and service/signal: at most two complete sentences
+  each, under 260 characters.
+- Each look-out item must be a concrete place-specific restriction, hazard, or
+  operational issue. Do not use this section for scenery or nearby attractions.
+- Each preparation item must be a concrete place-specific item or action not
+  already shown in amenities, booking, phone, weather, or another brief
+  section. Do not tell visitors to call a contact line, check another site,
+  bring generic camping basics, or "plan on" listed amenities. Leave it empty
+  if there is nothing additive.
+- Each nearby item must name a specific useful place or service and why it
+  matters. Do not repeat the campground's own amenities.
+- Each list item: one complete sentence under 220 characters. Return no more
+  than three strong items per list.
+- Do not include inline links, domains, source names, footnotes, markdown
+  headings, or repeated labels inside field text."""
 
     payload: dict[str, object] = {
         "model": settings.openai_campground_brief_model,

@@ -35,6 +35,7 @@ import expo.modules.trailheadcarreports.CarReportEnqueueStatus
 import expo.modules.trailheadcarreports.CarReportManager
 import java.io.File
 import java.util.Locale
+import java.util.concurrent.Executors
 
 class TrailheadCarAppService : CarAppService() {
   override fun createHostValidator(): HostValidator {
@@ -68,6 +69,16 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
   private var snapshotObserver: FileObserver? = null
   private var snapshotRemovalObserved = false
   private var routeReplacementRequestedUntilElapsedMs = 0L
+  private val destinationRouteExecutor = Executors.newSingleThreadExecutor()
+  private var destinationRouteGeneration = 0L
+  private var pendingNavigationRequest: PendingNavigationRequest? = null
+  private val destinationLocationTimeout = Runnable {
+    val pending = pendingNavigationRequest ?: return@Runnable
+    pendingNavigationRequest = null
+    destinationRouteGeneration += 1L
+    if (!navigating) TrailheadCarLocationService.stop(carContext)
+    pending.onResult(TrailheadCarNavigationStartResult.Failed("Still waiting for location"))
+  }
   private var destroyed = false
   private val locationListener: (Location) -> Unit = { location ->
     mainHandler.post { if (!destroyed) handleLocation(location) }
@@ -149,6 +160,10 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
         mainHandler.removeCallbacks(autoDriveStep)
         mainHandler.removeCallbacks(snapshotReload)
         mainHandler.removeCallbacks(optionalSessionSetup)
+        mainHandler.removeCallbacks(destinationLocationTimeout)
+        destinationRouteGeneration += 1L
+        pendingNavigationRequest = null
+        destinationRouteExecutor.shutdownNow()
         activeSpeechId = null
         tts?.stop()
         runCatching { abandonSpeechAudioFocus() }
@@ -193,19 +208,7 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
     }
     reloadSnapshotFromDisk()
     if (navigationRequest != null) {
-      if (navigating) {
-        val message = if (navigationRequest.mode == TrailheadCarNavigationMode.ADD_A_STOP) {
-          "Add ${navigationRequest.label.take(60)} on your phone when parked"
-        } else {
-          "Finish the new route on your phone when parked"
-        }
-        CarToast.makeText(carContext, message, CarToast.LENGTH_LONG).show()
-        val manager = carContext.getCarService(ScreenManager::class.java)
-        showGuidanceScreen(manager)
-        return
-      }
       val manager = carContext.getCarService(ScreenManager::class.java)
-      manager.popToRoot()
       manager.push(TrailheadCarNavigationRequestScreen(carContext, this, navigationRequest))
       return
     }
@@ -235,7 +238,7 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
     }
     snapshot = TrailheadCarRepository.load(carContext)
     if (snapshot.route == null) {
-      CarToast.makeText(carContext, "Open a route on your phone first.", CarToast.LENGTH_SHORT).show()
+      CarToast.makeText(carContext, "Choose a destination first.", CarToast.LENGTH_SHORT).show()
       return
     }
     navigationState = TrailheadCarNavigationState(snapshot)
@@ -257,6 +260,51 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
     guidanceScreen = newGuidanceScreen()
     carContext.getCarService(ScreenManager::class.java).push(guidanceScreen)
     TrailheadCarLocationService.freshNavigationLocation(MAX_NAVIGATION_LOCATION_AGE_MS)?.let(::handleLocation)
+  }
+
+  override fun startNavigationRequest(
+    request: TrailheadCarNavigationRequest,
+    onResult: (TrailheadCarNavigationStartResult) -> Unit,
+  ) {
+    if (destroyed) {
+      onResult(TrailheadCarNavigationStartResult.Failed("Navigation is unavailable"))
+      return
+    }
+    if (
+      request.mode != TrailheadCarNavigationMode.ADD_A_STOP &&
+      requestMatchesCurrentRoute(request, snapshot) &&
+      snapshot.route != null
+    ) {
+      startGuidance()
+      onResult(TrailheadCarNavigationStartResult.Started)
+      return
+    }
+    if (!hasGuidancePermissions()) {
+      onResult(TrailheadCarNavigationStartResult.Failed("Allow location and notifications when parked"))
+      return
+    }
+    if (snapshot.mapboxAccessToken.isBlank()) {
+      onResult(TrailheadCarNavigationStartResult.Failed("Online routing is unavailable"))
+      return
+    }
+    val generation = ++destinationRouteGeneration
+    val pending = PendingNavigationRequest(generation, request, onResult)
+    mainHandler.removeCallbacks(destinationLocationTimeout)
+    pendingNavigationRequest = pending
+    val location = TrailheadCarLocationService.freshNavigationLocation(MAX_NAVIGATION_LOCATION_AGE_MS)
+    if (location != null) {
+      beginDestinationRoute(pending, location)
+      return
+    }
+    runCatching { TrailheadCarLocationService.start(carContext) }
+      .onFailure {
+        mainHandler.removeCallbacks(destinationLocationTimeout)
+        pendingNavigationRequest = null
+        onResult(TrailheadCarNavigationStartResult.Failed("Location is unavailable"))
+      }
+      .onSuccess {
+        mainHandler.postDelayed(destinationLocationTimeout, DESTINATION_LOCATION_TIMEOUT_MS)
+      }
   }
 
   override fun endGuidanceAndReturnHome() = endGuidanceAndReturnHome(refreshSnapshot = true)
@@ -352,9 +400,86 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
   override fun latestLocation(): Location? = TrailheadCarLocationService.freshLocation()
 
   private fun handleLocation(location: Location) {
+    pendingNavigationRequest?.let { pending ->
+      beginDestinationRoute(pending, location)
+      return
+    }
     if (!shouldApplyLiveCarLocation(navigating, autoDriveEnabled)) return
     val next = navigationState?.update(location) ?: return
     applyProgress(next)
+  }
+
+  private fun beginDestinationRoute(
+    pending: PendingNavigationRequest,
+    location: Location,
+  ) {
+    if (pendingNavigationRequest?.generation != pending.generation) return
+    mainHandler.removeCallbacks(destinationLocationTimeout)
+    pendingNavigationRequest = null
+    val origin = TrailheadCarPoint(location.latitude, location.longitude)
+    val priorFinalDestination = snapshot.route?.points?.lastOrNull()
+    val token = snapshot.mapboxAccessToken
+    destinationRouteExecutor.execute {
+      val result = runCatching {
+        TrailheadCarDestinationRouter(token).resolve(
+          origin = origin,
+          request = pending.request,
+          finalDestinationAfterStop = priorFinalDestination,
+        )
+      }
+      mainHandler.post {
+        if (destroyed || pending.generation != destinationRouteGeneration) return@post
+        result.fold(
+          onSuccess = { resolution ->
+            applyResolvedDestinationRoute(resolution, pending.request)
+            pending.onResult(TrailheadCarNavigationStartResult.Started)
+          },
+          onFailure = {
+            if (!navigating) TrailheadCarLocationService.stop(carContext)
+            pending.onResult(
+              TrailheadCarNavigationStartResult.Failed(
+                it.message?.takeIf { message -> message.isNotBlank() } ?: "Route unavailable",
+              ),
+            )
+          },
+        )
+      }
+    }
+  }
+
+  private fun applyResolvedDestinationRoute(
+    resolution: TrailheadCarRouteResolution,
+    request: TrailheadCarNavigationRequest,
+  ) {
+    if (navigating) endGuidance(refreshSnapshot = false)
+    val destinationStop = TrailheadCarStop(
+      name = resolution.destinationLabel,
+      description = "",
+      kindLabel = if (request.mode == TrailheadCarNavigationMode.ADD_A_STOP) "Stop" else "Destination",
+      kind = if (request.mode == TrailheadCarNavigationMode.ADD_A_STOP) "stop" else "destination",
+      day = 0,
+      lat = resolution.destination.lat,
+      lng = resolution.destination.lng,
+    )
+    val nextStops = if (
+      request.mode == TrailheadCarNavigationMode.ADD_A_STOP &&
+      snapshot.stops.isNotEmpty()
+    ) {
+      snapshot.stops.dropLast(1) + destinationStop + snapshot.stops.last()
+    } else {
+      listOf(destinationStop)
+    }
+    snapshot = snapshot.copy(
+      state = TrailheadCarSnapshotState.READY,
+      tripName = resolution.destinationLabel,
+      tripSummary = resolution.route.summary,
+      stops = nextStops,
+      route = resolution.route,
+      updatedAt = System.currentTimeMillis(),
+    )
+    TrailheadCarRepository.saveGeneratedRoute(carContext, snapshot)
+    mapSurface.setSnapshot(snapshot)
+    startGuidance()
   }
 
   private fun hasGuidancePermissions(): Boolean {
@@ -623,8 +748,15 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
   private companion object {
     const val TAG = "TrailheadCarSession"
     const val MAX_NAVIGATION_LOCATION_AGE_MS = 2L * 60L * 1_000L
+    const val DESTINATION_LOCATION_TIMEOUT_MS = 15_000L
     const val ROUTE_REPLACEMENT_WINDOW_MS = 10L * 60L * 1_000L
   }
+
+  private data class PendingNavigationRequest(
+    val generation: Long,
+    val request: TrailheadCarNavigationRequest,
+    val onResult: (TrailheadCarNavigationStartResult) -> Unit,
+  )
 }
 
 internal fun routeReplacementRequestDeadline(

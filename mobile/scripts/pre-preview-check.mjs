@@ -212,6 +212,12 @@ const checks = [
     args: ['run', 'test:referrals'],
   },
   {
+    label: 'Nonessential third-party collection controls',
+    cwd: mobileRoot,
+    cmd: 'npm',
+    args: ['run', 'test:privacy-controls'],
+  },
+  {
     label: 'Universal and app-link routing tests',
     cwd: mobileRoot,
     cmd: 'node',

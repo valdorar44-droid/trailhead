@@ -58,7 +58,7 @@ module.exports = {
       },
     },
     android: {
-      runtimeVersion: 'native-1.0.10-android.3',
+      runtimeVersion: 'native-1.0.10-android.4',
       adaptiveIcon: {
         foregroundImage: './assets/adaptive-icon.png',
         backgroundColor: '#0c0f14',
@@ -195,7 +195,7 @@ module.exports = {
         process.env.EXPO_PUBLIC_UI_SYSTEM_V2_ENABLED || process.env.UI_SYSTEM_V2_ENABLED || '',
       ),
       branch: {
-        attributionEnabled: enabled(process.env.EXPO_PUBLIC_BRANCH_ATTRIBUTION_ENABLED || 'true'),
+        attributionEnabled: enabled(process.env.EXPO_PUBLIC_BRANCH_ATTRIBUTION_ENABLED || 'false'),
         // The native key stays secret. OTA manifests use this public capability
         // bit so an update cannot accidentally disable an already-configured
         // native Branch SDK just because EAS does not expose secret values to

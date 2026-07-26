@@ -65,8 +65,13 @@ export async function getReferralAttributionEnabled(): Promise<boolean> {
   return await storage.get(ATTRIBUTION_DISABLED_KEY).catch(() => null) !== '1';
 }
 
+export function referralAttributionIsAvailable(): boolean {
+  return branchConfig().enabled && branchConfig().configured;
+}
+
 export async function setReferralAttributionEnabled(enabled: boolean): Promise<void> {
-  if (enabled) await storage.del(ATTRIBUTION_DISABLED_KEY).catch(() => {});
+  const effectiveEnabled = enabled && branchConfig().enabled;
+  if (effectiveEnabled) await storage.del(ATTRIBUTION_DISABLED_KEY).catch(() => {});
   else {
     await storage.set(ATTRIBUTION_DISABLED_KEY, '1').catch(() => {});
     // A code captured by the SDK before opt-out is attribution data. Remove it;
@@ -74,7 +79,7 @@ export async function setReferralAttributionEnabled(enabled: boolean): Promise<v
     await clearPendingReferralCode();
   }
   const branch = await getBranchModule();
-  branch?.disableTracking(!enabled);
+  branch?.disableTracking(!effectiveEnabled);
 }
 
 export function startBranchReferralAttribution(onReferral?: ReferralHandler): () => void {

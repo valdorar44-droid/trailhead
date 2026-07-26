@@ -61,7 +61,7 @@ class TrailheadCarTemplateTest {
   }
 
   @Test
-  fun noTripReturnsParkedPhoneMessage() {
+  fun noTripOffersVoiceDestinationWithoutRequiringPhoneRouteSelection() {
     val snapshot = TrailheadCarSnapshot(
       state = TrailheadCarSnapshotState.NO_TRIP,
       tripName = "No trip selected",
@@ -74,8 +74,8 @@ class TrailheadCarTemplateTest {
 
     assertTrue(template is MessageTemplate)
     val message = template as MessageTemplate
-    assertEquals("No trip selected", message.title.toString())
-    assertEquals("Choose a saved trip on your phone when parked.", message.message.toString())
+    assertEquals("Where to?", message.title.toString())
+    assertEquals("Say a destination to Google Assistant, or open a saved trip.", message.message.toString())
     assertEquals(Action.TYPE_APP_ICON, requireNotNull(message.headerAction).type)
   }
 
@@ -250,6 +250,12 @@ class TrailheadCarTemplateTest {
     override val mapSurface: TrailheadCarMapSurface = this@TrailheadCarTemplateTest.mapSurface
 
     override fun startGuidance() = Unit
+    override fun startNavigationRequest(
+      request: TrailheadCarNavigationRequest,
+      onResult: (TrailheadCarNavigationStartResult) -> Unit,
+    ) {
+      onResult(TrailheadCarNavigationStartResult.Started)
+    }
     override fun endGuidanceAndReturnHome() = Unit
     override fun continueAfterArrival(stopIndex: Int) = Unit
     override fun toggleMuted() = Unit

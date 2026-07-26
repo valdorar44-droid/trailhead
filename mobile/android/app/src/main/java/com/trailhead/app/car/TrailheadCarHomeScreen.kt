@@ -58,6 +58,10 @@ internal interface TrailheadCarSessionController {
   val mapSurface: TrailheadCarMapSurface
 
   fun startGuidance()
+  fun startNavigationRequest(
+    request: TrailheadCarNavigationRequest,
+    onResult: (TrailheadCarNavigationStartResult) -> Unit,
+  )
   fun endGuidanceAndReturnHome()
   fun continueAfterArrival(stopIndex: Int)
   fun toggleMuted()
@@ -159,8 +163,8 @@ internal class TrailheadCarHomeScreen(
 
   private fun stopsOnlyTemplate(snapshot: TrailheadCarSnapshot): Template {
     if (snapshot.stops.isEmpty()) {
-      return androidx.car.app.model.MessageTemplate.Builder("Open a saved trip on your phone before driving.")
-        .setTitle("No route selected")
+      return androidx.car.app.model.MessageTemplate.Builder("Say a destination to Google Assistant, or open a saved trip.")
+        .setTitle("Where to?")
         .setHeaderAction(Action.APP_ICON)
         .build()
     }
@@ -253,11 +257,11 @@ internal class TrailheadCarHomeScreen(
   }
 
   private fun unavailableTemplate(state: TrailheadCarSnapshotState): Template {
-    val title = if (state == TrailheadCarSnapshotState.UNAVAILABLE) "Trip unavailable" else "No trip selected"
+    val title = if (state == TrailheadCarSnapshotState.UNAVAILABLE) "Trip unavailable" else "Where to?"
     val message = if (state == TrailheadCarSnapshotState.UNAVAILABLE) {
-      "Open this trip again on your phone when parked."
+      "Say a destination to Google Assistant, or choose another saved stop."
     } else {
-      "Choose a saved trip on your phone when parked."
+      "Say a destination to Google Assistant, or open a saved trip."
     }
     return androidx.car.app.model.MessageTemplate.Builder(message)
       .setTitle(title)
@@ -271,13 +275,17 @@ internal class TrailheadCarNavigationRequestScreen(
   private val controller: TrailheadCarSessionController,
   private val request: TrailheadCarNavigationRequest,
 ) : Screen(carContext) {
+  private var building = false
+  private var error = ""
+
   override fun onGetTemplate(): Template {
     val matchesSavedRoute = requestMatchesCurrentRoute(request, controller.snapshot)
     val detail = when {
-      request.mode == TrailheadCarNavigationMode.ADD_A_STOP -> "Finish adding this stop on your phone when parked."
+      building -> "Building the route..."
+      error.isNotEmpty() -> error
+      request.mode == TrailheadCarNavigationMode.ADD_A_STOP && controller.navigating -> "Add this stop to the active route."
       matchesSavedRoute -> "This destination matches ${controller.snapshot.tripName}."
-      request.mode == TrailheadCarNavigationMode.DIRECTIONS -> "Choose a route on your phone when parked."
-      else -> "Finish this route on your phone when parked."
+      else -> "Route from your current location."
     }
     val pane = Pane.Builder()
       .addRow(
@@ -286,12 +294,33 @@ internal class TrailheadCarNavigationRequestScreen(
           .addText(detail)
           .build(),
       )
-    if (matchesSavedRoute && request.mode != TrailheadCarNavigationMode.ADD_A_STOP) {
+    if (!building) {
       pane.addAction(
         Action.Builder()
-          .setTitle(routeStartActionTitle(controller.snapshot.route))
+          .setTitle(
+            when {
+              matchesSavedRoute && request.mode != TrailheadCarNavigationMode.ADD_A_STOP ->
+                routeStartActionTitle(controller.snapshot.route)
+              request.mode == TrailheadCarNavigationMode.ADD_A_STOP && controller.navigating -> "Add stop"
+              else -> "Start route"
+            },
+          )
           .setBackgroundColor(TRAILHEAD_ACCENT)
-          .setOnClickListener(controller::startGuidance)
+          .setOnClickListener {
+            building = true
+            error = ""
+            invalidate()
+            controller.startNavigationRequest(request) { result ->
+              when (result) {
+                TrailheadCarNavigationStartResult.Started -> Unit
+                is TrailheadCarNavigationStartResult.Failed -> {
+                  building = false
+                  error = result.message
+                  invalidate()
+                }
+              }
+            }
+          }
           .build(),
       )
     }
@@ -320,15 +349,26 @@ private class TrailheadCarStopScreen(
     if (stop.description.isNotEmpty()) {
       pane.addRow(Row.Builder().setTitle(stop.description).build())
     }
-    if (controller.snapshot.route != null) {
-      pane.addAction(
-        Action.Builder()
-          .setTitle(routeStartActionTitle(controller.snapshot.route))
-          .setBackgroundColor(TRAILHEAD_ACCENT)
-          .setOnClickListener(controller::startGuidance)
-          .build(),
-      )
-    }
+    pane.addAction(
+      Action.Builder()
+        .setTitle("Navigate")
+        .setBackgroundColor(TRAILHEAD_ACCENT)
+        .setOnClickListener {
+          controller.startNavigationRequest(
+            TrailheadCarNavigationRequest(
+              label = stop.name,
+              lat = stop.lat,
+              lng = stop.lng,
+              mode = TrailheadCarNavigationMode.NAVIGATION,
+            ),
+          ) { result ->
+            if (result is TrailheadCarNavigationStartResult.Failed) {
+              CarToast.makeText(carContext, result.message, CarToast.LENGTH_LONG).show()
+            }
+          }
+        }
+        .build(),
+    )
     return PaneTemplate.Builder(pane.build())
       .setTitle(stop.name)
       .setHeaderAction(Action.BACK)

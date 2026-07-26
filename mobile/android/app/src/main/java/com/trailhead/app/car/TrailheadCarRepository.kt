@@ -120,6 +120,74 @@ object TrailheadCarRepository {
     return fromJson(tripRead.value, rigRead.value, state)
   }
 
+  fun saveGeneratedRoute(context: Context, snapshot: TrailheadCarSnapshot) {
+    val route = snapshot.route ?: return
+    val root = JSONObject()
+      .put("schemaVersion", 1)
+      .put("updatedAt", System.currentTimeMillis())
+      .put("mapboxAccessToken", snapshot.mapboxAccessToken)
+      .put("account", JSONObject()
+        .put("accountId", snapshot.account.accountId)
+        .put("signedIn", snapshot.account.signedIn)
+        .put("reportsEnabled", snapshot.account.reportsEnabled)
+        .put("reportsDisabledReason", snapshot.account.reportsDisabledReason))
+      .put("offlineReadiness", JSONObject()
+        .put("status", snapshot.offline.status)
+        .put("mapReady", snapshot.offline.mapReady)
+        .put("navigationReady", snapshot.offline.navigationReady)
+        .put("placesReady", snapshot.offline.placesReady)
+        .put("topoReady", snapshot.offline.topoReady)
+        .put("trailsReady", snapshot.offline.trailsReady)
+        .put("tripDownloadReady", snapshot.offline.tripDownloadReady)
+        .put("message", snapshot.offline.message))
+      .put("stops", JSONArray().also { output ->
+        snapshot.stops.forEach { stop ->
+          output.put(JSONObject()
+            .put("name", stop.name)
+            .put("description", stop.description)
+            .put("kindLabel", stop.kindLabel)
+            .put("type", stop.kind)
+            .put("day", stop.day)
+            .put("lat", stop.lat)
+            .put("lng", stop.lng))
+        }
+      })
+      .put("navigation", JSONObject()
+        .put("mode", "road_preview")
+        .put("routeId", route.routeId)
+        .put("title", route.title)
+        .put("summary", route.summary)
+        .put("source", route.source)
+        .put("totalDistanceM", route.totalDistanceM)
+        .put("totalDurationS", route.totalDurationS)
+        .put("coords", JSONArray().also { output ->
+          route.points.forEach { point -> output.put(JSONArray().put(point.lng).put(point.lat)) }
+        })
+        .put("steps", JSONArray().also { output ->
+          route.steps.forEach { step ->
+            output.put(JSONObject()
+              .put("type", step.type)
+              .put("modifier", step.modifier)
+              .put("name", step.name)
+              .put("instruction", step.instruction)
+              .put("verbalPre", step.verbalPre)
+              .put("verbalPost", step.verbalPost)
+              .put("distanceM", step.distanceM)
+              .put("durationS", step.durationS)
+              .put("lat", step.lat)
+              .put("lng", step.lng)
+              .put("roundaboutExit", step.roundaboutExit))
+          }
+        }))
+    val target = File(context.filesDir, CAR_SNAPSHOT_FILE)
+    val temporary = File(context.filesDir, "$CAR_SNAPSHOT_FILE.tmp")
+    temporary.writeText(root.toString())
+    if (!temporary.renameTo(target)) {
+      target.writeText(root.toString())
+      temporary.delete()
+    }
+  }
+
   internal fun fromCarJson(root: JSONObject): TrailheadCarSnapshot? {
     if (root.optInt("schemaVersion", 0) != 1) return null
     val navigation = root.optJSONObject("navigation")

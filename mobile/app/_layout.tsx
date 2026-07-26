@@ -60,6 +60,7 @@ import {
 import { useTrailheadFonts } from '@/lib/typography';
 import { withTrailheadTelemetry } from '@/lib/telemetry/sentry';
 import { appLinkDestinationFromUrl } from '@/lib/appLinks';
+import { disableNonessentialMapboxTelemetry } from '@/lib/privacy/mapboxTelemetry';
 
 const LAUNCH_LOADER_MIN_MS = 1200;
 const LAUNCH_LOADER_MAX_MS = 4500;
@@ -111,6 +112,10 @@ function RootLayout() {
   const navigationLinkSequence = useRef(0);
   const [fontsLoaded, fontError] = useTrailheadFonts();
   const fontsReady = fontsLoaded || Boolean(fontError);
+
+  useEffect(() => {
+    void disableNonessentialMapboxTelemetry();
+  }, []);
 
   useEffect(() => {
     if (!startupReady) return;

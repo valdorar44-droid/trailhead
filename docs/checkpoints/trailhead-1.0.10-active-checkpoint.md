@@ -1631,3 +1631,56 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Exact next action: commit this checkpoint, implement the source-owned privacy inventory and disclosure pages, then implement and test independent Android Auto destination routing.
 - Do not repeat: Camp Guide generation, Sheet/POI/Search crawls, Memory Gate, Layers, Yellowstone, NPS research, Originals lifecycle, current production OTA publication, or store screenshot work.
 - Task-owned background processes: none.
+
+## Google Play privacy audit and Android Auto implementation checkpoint
+
+- Timestamp: `2026-07-26T17:05:00-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; implementation base `5c6dd73`.
+- Protected Explore index SHA-256 remains `7E59E5E2273DBBE1A26D7BBD4D947FAA20935C51FB79C464EED8A17BABF4D8F4`.
+  `.cursor/`, `dashboard/explore_serving_index_v2.json`,
+  `docs/app-store-copy.md`, Android helper mode changes, and unrelated
+  Valhalla/NPS scripts remain excluded and unstaged.
+- The accepted Sheet/POI/Search production OTA remains active and unchanged for
+  the existing compatible `native-1.0.10-*.3` runtimes.
+- Google Play's current rejection was traced to Android Auto NF-6 behavior, not
+  the Data Safety form: an unmatched car-provided destination required the
+  driver to finish the route on the phone.
+- Android Auto now resolves a car-provided place or coordinate with Mapbox
+  Search Box, calculates its driving route with Mapbox Directions, persists the
+  generated route, and starts guidance on the car. Existing saved routes,
+  add-stop behavior, phone synchronization, guidance, maneuvers, voice,
+  compass, reporting, arrival, and End remain present.
+- The route request has bounded network and first-location timeouts and does
+  not log its token, query, origin, destination, or route. Android native
+  runtime advances to `native-1.0.10-android.4`; iOS remains
+  `native-1.0.10-ios.3`.
+- Privacy changes:
+  - Added a source-controlled Google Play Data Safety inventory and exact
+    provider matrix.
+  - Added dedicated public Privacy and account-deletion pages.
+  - Nonessential Mapbox telemetry and Branch deferred attribution default off;
+    manual first-party referral codes remain.
+  - Sentry remains allowlist-only with replay, PII, arbitrary messages, search,
+    location, routes, support, attachment, and payout data excluded.
+  - Added a verification-first encryption-at-rest roadmap; no unverified
+    encryption claim is made.
+- Focused verification passed:
+  - Android/Android Auto tests: `39/39`.
+  - Privacy page tests: `2/2`.
+  - Privacy control and referral policy tests.
+  - TypeScript, native/config drift, Python compile, and whitespace checks.
+- The Play form has not been submitted or silently changed. It still needs the
+  reviewed selections in `docs/google-play-data-safety-audit-2026-07.md`.
+- Open P0/P1: Android Auto still requires a new native candidate and a bounded
+  DHU/host proof before the AAB is uploaded. Data Safety remains a Play Console
+  action until the privacy/deletion deployment and candidate controls are
+  verified.
+- Exact next action: commit/push the privacy and Android Auto implementation,
+  deploy the public privacy/deletion pages, run the pre-preview gate once, then
+  build and validate the Android `.4` candidate before Play submission.
+- Do not repeat: Camp Guide generation, Sheet/POI/Search crawl, Memory Gate,
+  Layers, Yellowstone, NPS research, Originals lifecycle, current production
+  OTA publication, or store screenshot work.
+- Task-owned background processes: none. Gradle daemons exited after the
+  no-daemon tests; no Metro, Maestro, EAS publisher, or Railway deployment
+  remains running.

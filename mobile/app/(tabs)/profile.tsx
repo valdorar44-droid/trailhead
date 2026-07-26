@@ -66,6 +66,7 @@ import {
   getReferralAttributionEnabled,
   getPendingReferralCode,
   normalizeReferralCode,
+  referralAttributionIsAvailable,
   setReferralAttributionEnabled,
 } from '@/lib/referrals/branchAttribution';
 import {
@@ -2978,7 +2979,7 @@ export default function ProfileScreen() {
         </View>
         )}
 
-        {profileSection === 'settings' && (
+        {profileSection === 'settings' && referralAttributionIsAvailable() && (
         <View style={s.referralPrivacyCard}>
           <View style={s.referralPrivacyCopy}>
             <Text style={s.themeToggleLabel}>REFERRAL LINKS</Text>

@@ -24548,50 +24548,107 @@ a{color:#f97316;}
 
 @app.get("/privacy", response_class=HTMLResponse)
 async def privacy_policy():
-    return HTMLResponse("""<!DOCTYPE html><html lang="en"><head><title>Privacy Policy — Trailhead</title>
+    return HTMLResponse("""<!DOCTYPE html><html lang="en"><head><title>Privacy Policy - Trailhead</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
-body{font-family:system-ui,-apple-system,sans-serif;background:#0a0f18;color:#e2e8f0;max-width:720px;margin:0 auto;padding:32px 20px;line-height:1.7;}
-h1{color:#f97316;font-size:28px;margin-bottom:4px;}
-h2{color:#f1f5f9;font-size:18px;margin-top:32px;border-bottom:1px solid #1e2d3d;padding-bottom:8px;}
-p,li{color:#94a3b8;font-size:15px;}
-a{color:#f97316;}
-.updated{color:#4b5563;font-size:13px;margin-bottom:32px;}
+body{font-family:system-ui,-apple-system,sans-serif;background:#f7f8f6;color:#111412;max-width:760px;margin:0 auto;padding:32px 20px 64px;line-height:1.65;}
+h1{font-size:32px;margin:0 0 4px;}
+h2{font-size:20px;margin-top:34px;border-bottom:1px solid #d9ddd8;padding-bottom:8px;}
+h3{font-size:16px;margin:22px 0 4px;}
+p,li{color:#3f4742;font-size:15px;}
+a{color:#984f2f;}
+.updated{color:#6b736e;font-size:13px;margin-bottom:28px;}
+.notice{background:#fff;border:1px solid #d9ddd8;border-left:4px solid #ad5a33;border-radius:12px;padding:14px 16px;}
 </style></head>
 <body>
-<h1>Trailhead — Privacy Policy</h1>
-<p class="updated">Last updated: April 24, 2026</p>
+<h1>Trailhead Privacy Policy</h1>
+<p class="updated">Last updated: July 26, 2026</p>
+<p class="notice">Trailhead does not sell personal information. We use contracted processors only to provide requested features, operate Trailhead, and measure reliability.</p>
 
 <h2>1. Information We Collect</h2>
-<p>We collect information you provide directly: email address, username, and password (stored as a bcrypt hash). If you use Apple or Google sign in, we store the verified email address and provider account identifier needed to keep you signed in. When you use the app we collect location data (with your permission) to show nearby campsites, fuel stations, and community reports. We collect usage data such as trips planned, reports submitted, and credits earned or spent.</p>
+<h3>Account information</h3>
+<p>Email address, username, password hash, Trailhead user ID, and, when you choose Google or Apple sign-in, the verified email and provider account identifier. Optional profile data can include a display name, camping preferences, vehicle or rig details, referral status, and prize or payout workflow status.</p>
+<h3>Location and map requests</h3>
+<p>With device permission, Trailhead processes approximate or precise location, map viewport, route endpoints, and selected places to show maps, nearby results, weather and land layers, build routes, navigate, and trigger downloaded Original stories. Trailhead does not put raw coordinates or traveled routes into product analytics.</p>
+<h3>Content, purchases and communications</h3>
+<p>Saved trips, routes, stops, notes, packing lists, saved places, ratings, comments, reports, edits, optional photos, support messages and screenshots, subscription and credit history, purchase receipts, push tokens, and communication preferences. Trailhead does not receive or store full payment-card or bank credentials.</p>
+<h3>Optional voice features</h3>
+<p>If you start Co-Pilot voice assistant, microphone audio and conversation context are sent to OpenAI so the assistant can respond. Microphone access is optional and can be stopped at any time.</p>
+<h3>Diagnostics and app activity</h3>
+<p>Privacy-minimized app events, fixed error codes, stack frames, platform, app/build/runtime/update version, and static performance measurements. Sentry Session Replay is disabled. Search text, support content, payout information, raw coordinates, and traveled routes are excluded from Trailhead analytics and Sentry events.</p>
 
 <h2>2. How We Use Your Information</h2>
-<p>Your information is used to: provide and improve the Trailhead service; tailor trip plans to your vehicle and preferences; display nearby campsite and hazard data on the map; process credit purchases via Stripe; send service-related communications. We do not sell your personal data to third parties.</p>
+<p>We use this information to operate accounts; provide maps, Search, navigation, planning, offline downloads and Originals; personalize requested planning features; process purchases and credits; deliver notifications and support; protect the service; fix crashes; and measure reliability. We do not sell personal information or use private support messages, payout information, personal search text, raw coordinates, or traveled routes for advertising.</p>
 
-<h2>3. Location Data</h2>
-<p>Trailhead requests foreground location access to center the map and find nearby camps and reports. Background location is requested only to enable automatic audio guide narrations as you drive. You can disable location access in your device Settings at any time, which will disable navigation and nearby features.</p>
+<h2>3. Location and Background Use</h2>
+<p>Foreground location supports the map, nearby places, route building and navigation. Trailhead uses location in the background only after you explicitly start navigation or a Trailhead Original so guidance or stories can continue after the phone is locked or another app is open. Location use stops when you end navigation or the tour. You can change permission in device Settings.</p>
 
 <h2>4. Payment Data</h2>
-<p>Credit purchases and subscriptions are processed by Stripe, Apple, or Google Play depending on platform and purchase type. Trailhead never stores your full card number or payment details. Their privacy policies govern payment data handling.</p>
+<p>Apple, Google Play, Stripe, PayPal, Cash App, or a bank handles credentials in the applicable approved purchase or prize flow. Trailhead stores only purchase, entitlement, credit-ledger, payout-method label, and workflow status needed to provide the service or complete an award. Never send payout credentials in support chat.</p>
 
 <h2>5. Data Retention</h2>
-<p>Account data is retained while your account is active. Community reports expire automatically (typically within 24–72 hours). You may request account deletion by contacting us at the address below.</p>
+<p>Account and saved content remain while your account is active or until you delete the item. Operational community reports use the expiry shown by that feature; comments, ratings, edits, trips and support records are not covered by a short report-expiry window. Purchase, credit-ledger, fraud-prevention, security, and legal records may be retained only as required for those purposes.</p>
+<p>You can permanently delete your account in Trailhead under Profile after fresh password, Google, or Apple reauthentication. See the <a href="/delete-account">account deletion page</a>.</p>
 
-<h2>6. Third-Party Services</h2>
-<p>Trailhead uses: Mapbox for maps (see <a href="https://www.mapbox.com/legal/privacy">Mapbox Privacy Policy</a>); Anthropic for assisted trip planning; Cartesia for optional voice and audio guide generation; RIDB / Recreation.gov and National Park Service data for campsite and place information; Open-Meteo for weather data; Stripe, Apple, and Google Play for payments.</p>
+<h2>6. Service Providers and User-Requested Transfers</h2>
+<ul>
+<li><strong>Mapbox</strong> processes map viewport or location, route endpoints, Search text/session, and SDK metadata for maps, Search, directions and navigation. Nonessential Mapbox telemetry is disabled.</li>
+<li><strong>Sentry</strong> processes the privacy-minimized crash and performance fields described above.</li>
+<li><strong>OpenAI and Anthropic</strong> process relevant request and trip or campground context for Co-Pilot, planning and briefs. OpenAI also processes optional Co-Pilot audio.</li>
+<li><strong>Expo, Firebase Cloud Messaging and Apple Push Notification service</strong> process push tokens, notification payloads, platform metadata and update-delivery information.</li>
+<li><strong>Apple, Google and Stripe</strong> process sign-in or purchase information for the flow you choose.</li>
+<li><strong>Map, route, weather, land and content providers</strong>, including OpenTopoData, RainViewer, Avalanche.org, USFS, USGS, OpenStreetMap, NPS, RIDB/Recreation.gov, BLM and Wikimedia, process requested coordinates, tiles, routes or content identifiers.</li>
+<li><strong>ElevenLabs and Cartesia</strong> process Trailhead-authored narration scripts when Trailhead prepares Original audio.</li>
+<li><strong>Viator</strong> provides separately labelled guided-tour inventory and handles the external booking flow you choose.</li>
+<li><strong>Railway, content-delivery and object-storage providers</strong> host and deliver Trailhead accounts, APIs, downloads, content and attachments.</li>
+</ul>
+<p>These providers are restricted to processing for Trailhead or for the external action you request. Third-party deferred referral attribution is disabled; manual referral codes remain available.</p>
 
-<h2>7. Children's Privacy</h2>
+<h2>7. Your Choices and Security</h2>
+<p>You can change location, microphone, photo and notification permissions in device Settings; leave support diagnostic consent off; use manual referral codes; remove saved content; and delete your account. Production external traffic uses HTTPS encryption. Passwords are stored as one-way hashes. No system can guarantee absolute security.</p>
+
+<h2>8. Children's Privacy</h2>
 <p>Trailhead is not directed to children under 13 and we do not knowingly collect personal information from children under 13.</p>
 
-<h2>8. Changes to This Policy</h2>
-<p>We may update this policy from time to time. Continued use of the app after changes constitutes acceptance of the updated policy.</p>
+<h2>9. Changes to This Policy</h2>
+<p>We may update this policy as Trailhead or its providers change. The updated date will appear at the top of this page.</p>
 
-<h2>9. Contact</h2>
-<p>Questions or requests: <a href="mailto:hello@gettrailhead.app">hello@gettrailhead.app</a></p>
+<h2>10. Contact</h2>
+<p>Privacy questions or requests: <a href="mailto:hello@gettrailhead.app">hello@gettrailhead.app</a></p>
 </body></html>""")
 
 
 # ── Leaderboard ───────────────────────────────────────────────────────────────
+
+@app.get("/delete-account", response_class=HTMLResponse)
+async def delete_account_page():
+    return HTMLResponse("""<!DOCTYPE html><html lang="en"><head><title>Delete a Trailhead account</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+body{font-family:system-ui,-apple-system,sans-serif;background:#f7f8f6;color:#111412;max-width:680px;margin:0 auto;padding:32px 20px 64px;line-height:1.65;}
+h1{font-size:32px;margin:0 0 4px;}h2{font-size:20px;margin-top:30px;}p,li{color:#3f4742;font-size:15px;}a{color:#984f2f;}
+.updated{color:#6b736e;font-size:13px;margin-bottom:28px;}.card{background:#fff;border:1px solid #d9ddd8;border-radius:16px;padding:18px;margin:18px 0;}
+.button{display:inline-block;background:#ad5a33;color:#fff;text-decoration:none;font-weight:700;border-radius:12px;padding:12px 16px;}
+</style></head><body>
+<h1>Delete a Trailhead account</h1>
+<p class="updated">Trailhead by Trailhead - last updated July 26, 2026</p>
+<p>You can permanently delete your Trailhead account and its owned content from the app or request deletion by email.</p>
+<div class="card"><h2>Delete in the app</h2><ol>
+<li>Open Trailhead and select <strong>Profile</strong>.</li>
+<li>Open <strong>Account</strong>, then select <strong>Delete account</strong>.</li>
+<li>Reauthenticate with your password, Google, or Apple.</li>
+<li>Type the confirmation and approve permanent deletion.</li>
+</ol><p>Deleting the app from a device does not delete the Trailhead account.</p></div>
+<div class="card"><h2>Request deletion by email</h2>
+<p>If you cannot access the app, send the request from the email address on the Trailhead account. We verify account ownership before deletion.</p>
+<p><a class="button" href="mailto:hello@gettrailhead.app?subject=Delete%20my%20Trailhead%20account">Request account deletion</a></p></div>
+<h2>What is deleted</h2>
+<p>The account, profile, authentication identifiers, saved trips and routes, preferences, saved places, owned support content, push tokens, referral relationship, comments, ratings, reports, edits, and other account-owned records are deleted or de-identified as required by the deletion workflow.</p>
+<h2>Limited retention</h2>
+<p>Purchase, credit-ledger, anti-fraud, security, and legal records may be retained only where required for those purposes. Provider-side copies follow applicable provider retention and deletion obligations.</p>
+<p>Questions: <a href="mailto:hello@gettrailhead.app">hello@gettrailhead.app</a> · <a href="/privacy">Privacy Policy</a></p>
+</body></html>""")
+
 
 @app.get("/api/leaderboard")
 async def leaderboard():

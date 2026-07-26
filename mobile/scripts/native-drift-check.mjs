@@ -33,6 +33,9 @@ const androidManifest = source('android/app/src/main/AndroidManifest.xml');
 const androidGradle = source('android/app/build.gradle');
 const androidMainApplication = source('android/app/src/main/java/com/trailhead/app/MainApplication.kt');
 const androidMainActivity = source('android/app/src/main/java/com/trailhead/app/MainActivity.kt');
+const androidAutoService = source('android/app/src/main/java/com/trailhead/app/car/TrailheadCarAppService.kt');
+const androidAutoHome = source('android/app/src/main/java/com/trailhead/app/car/TrailheadCarHomeScreen.kt');
+const androidAutoRouter = source('android/app/src/main/java/com/trailhead/app/car/TrailheadCarDestinationRouter.kt');
 const iosInfo = source('ios/Trailhead/Info.plist');
 const iosProject = source('ios/Trailhead.xcodeproj/project.pbxproj');
 const iosEntitlements = source('ios/Trailhead/Trailhead.entitlements');
@@ -65,7 +68,7 @@ expect(pkg.version === '1.0.10', 'package.json must use marketing version 1.0.10
 expect(lockRoot?.version === '1.0.10', 'package-lock.json root version must use 1.0.10.');
 expect(config.version === '1.0.10', 'app.config.js must use marketing version 1.0.10.');
 expect(config.ios.runtimeVersion === 'native-1.0.10-ios.3', 'iOS runtime is not native-1.0.10-ios.3.');
-expect(config.android.runtimeVersion === 'native-1.0.10-android.3', 'Android runtime is not native-1.0.10-android.3.');
+expect(config.android.runtimeVersion === 'native-1.0.10-android.4', 'Android runtime is not native-1.0.10-android.4.');
 expect(pkg.dependencies.expo === '~54.0.36', 'Expo must remain pinned to ~54.0.36.');
 expect(pkg.dependencies['expo-updates'] === '~29.0.19', 'Expo Updates must remain pinned to ~29.0.19.');
 expect(pkg.dependencies['expo-sqlite'] === '~16.0.10', 'Expo SQLite must remain pinned to ~16.0.10.');
@@ -95,6 +98,22 @@ expect(!/LocationTaskService[^>]*tools:node="remove"/.test(androidManifest), 'An
 expect(/ACCESS_BACKGROUND_LOCATION" tools:node="remove"/.test(androidManifest), 'Android must continue blocking ACCESS_BACKGROUND_LOCATION.');
 expect(androidManifest.includes('.car.TrailheadCarAppService'), 'Android Auto CarAppService is missing.');
 expect(androidManifest.includes('androidx.car.app.category.NAVIGATION'), 'Android Auto navigation category is missing.');
+expect(
+  androidAutoRouter.includes('https://api.mapbox.com/search/searchbox/v1/forward')
+    && androidAutoRouter.includes('https://api.mapbox.com/directions/v5/mapbox/driving-traffic/'),
+  'Android Auto must resolve and route a car-provided destination without the phone.',
+);
+expect(
+  androidAutoService.includes('startNavigationRequest(')
+    && androidAutoHome.includes('Say a destination to Google Assistant'),
+  'Android Auto destination requests must be startable from the car.',
+);
+expect(
+  !androidAutoService.includes('Open a route on your phone first')
+    && !androidAutoHome.includes('Choose a route on your phone')
+    && !androidAutoHome.includes('Finish this route on your phone'),
+  'Android Auto must not require phone route selection for a car destination request.',
+);
 expect(androidManifest.includes('com.android.vending.INSTALL_REFERRER'), 'Play Install Referrer permission is missing.');
 expect(!androidManifest.includes('com.google.android.gms.permission.AD_ID'), 'Advertising ID permission must not be present.');
 expect(androidManifest.includes('${googleMapsApiKey}'), 'Google Maps key must use an environment-backed manifest placeholder.');
@@ -119,7 +138,7 @@ expect(
   !androidMainApplication.includes('RNBranchModule') && !androidMainActivity.includes('RNBranchModule'),
   'Do not duplicate Branch Expo adapter callbacks in Android app classes.',
 );
-contains('android/app/src/main/res/values/strings.xml', 'native-1.0.10-android.3', 'Android native runtime resource is stale.');
+contains('android/app/src/main/res/values/strings.xml', 'native-1.0.10-android.4', 'Android native runtime resource is stale.');
 
 expect(iosInfo.includes('<string>1.0.10</string>'), 'iOS Info.plist marketing version is stale.');
 expect(iosInfo.includes('<string>Automatic</string>'), 'iOS appearance must follow the app theme.');
@@ -190,6 +209,10 @@ const branchAttribution = source('lib/referrals/branchAttribution.ts');
 expect(!branchAttribution.includes('.setIdentity('), 'Branch must not receive Trailhead account identity.');
 expect(!branchAttribution.includes('.logEvent('), 'Branch purchase or behavioral events must not be emitted.');
 expect(!branchAttribution.includes('.userCompletedAction('), 'Branch custom behavioral events must not be emitted.');
+contains('app.config.js', "EXPO_PUBLIC_BRANCH_ATTRIBUTION_ENABLED || 'false'", 'Branch attribution must be disabled by default.');
+contains('lib/privacy/mapboxTelemetry.ts', 'setTelemetryEnabled(false)', 'Nonessential Mapbox telemetry must remain disabled.');
+expect(!source('lib/privacy/mapboxTelemetry.ts').includes('setTelemetryEnabled(true)'), 'Mapbox telemetry must not be enabled.');
+contains('app/_layout.tsx', 'disableNonessentialMapboxTelemetry()', 'Mapbox telemetry must be disabled during app startup.');
 contains('lib/referrals/referralLinks.ts', 'TRAILHEAD_HTTPS_HOSTS', 'Referral URL parsing must enforce trusted Trailhead hosts.');
 contains('lib/referrals/referralLinks.ts', 'APPROVED_CUSTOM_ROUTES', 'Referral URL parsing must enforce approved custom routes.');
 expect(

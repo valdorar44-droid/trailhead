@@ -19,6 +19,8 @@
     "test:release-identity": "node scripts/release-identity.test.mjs",
     "test:eas-build-evidence": "node scripts/eas-build-evidence.test.mjs",
     "test:eas-update-evidence": "node scripts/eas-update-evidence.test.mjs",
+    "test:native-ota-compatibility": "node scripts/native-ota-compatibility.test.mjs",
+    "test:production-runtime-matrix": "node scripts/production-runtime-matrix.test.mjs",
     "test:release-environment": "node scripts/release-environment.test.mjs",
     "audit:release-env": "node scripts/release-environment.mjs",
     "test:original-fixture": "node --import tsx scripts/original-route-fixture.test.ts",

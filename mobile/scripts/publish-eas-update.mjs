@@ -1,9 +1,17 @@
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
+import { resolve } from 'node:path';
 import { assertAuthoritativeWorktreeClean } from './release-worktree.mjs';
 import { validateReleaseEnvironment } from './release-environment.mjs';
+import { verifyJsOnlyProductionCompatibility } from './native-ota-compatibility.mjs';
+import {
+  productionRuntimeSnapshot,
+  runtimePlatformKey,
+  validateRuntimeMatrixCoverage,
+} from './production-runtime-matrix.mjs';
 import {
   combineUpdateViewPayloads,
   selectPairedUpdateGroups,
@@ -155,12 +163,12 @@ function assertProductionApproval() {
 
   const androidSha = requiredProductionValue('TRAILHEAD_ANDROID_PRODUCTION_BUILD_SHA');
   const iosSha = requiredProductionValue('TRAILHEAD_IOS_PRODUCTION_BUILD_SHA');
-  if (androidSha !== fullSha || iosSha !== fullSha) {
-    console.error(`Production OTA blocked. Both production build SHAs must equal ${fullSha}.`);
+  if (androidSha !== iosSha) {
+    console.error('Production OTA blocked. Android and iOS production builds must share one source SHA.');
     process.exit(2);
   }
-  requiredProductionValue('TRAILHEAD_ANDROID_PRODUCTION_BUILD_ID');
-  requiredProductionValue('TRAILHEAD_IOS_PRODUCTION_BUILD_ID');
+  const androidBuildId = requiredProductionValue('TRAILHEAD_ANDROID_PRODUCTION_BUILD_ID');
+  const iosBuildId = requiredProductionValue('TRAILHEAD_IOS_PRODUCTION_BUILD_ID');
 
   const androidRuntime = requiredProductionValue('TRAILHEAD_ANDROID_PRODUCTION_RUNTIME');
   const iosRuntime = requiredProductionValue('TRAILHEAD_IOS_PRODUCTION_RUNTIME');
@@ -168,12 +176,39 @@ function assertProductionApproval() {
     console.error('Production OTA blocked. Paired build runtime evidence does not match app.config.js.');
     process.exit(2);
   }
+  const compatibility = verifyJsOnlyProductionCompatibility({
+    buildSha: androidSha,
+    releaseSha: fullSha,
+    androidBuildId,
+    iosBuildId,
+    evidenceDir: resolve(tmpdir(), `trailhead-release-evidence-${fullSha.slice(0, 8)}`),
+    environment: process.env,
+  });
   run(process.execPath, ['scripts/verify-eas-build-evidence.mjs']);
+  return compatibility;
 }
 
 if (!dryRun) assertCommittedReleaseSource();
 if (!dryRun) validateReleaseEnvironment(process.env, { requirePreviewQa: target === 'preview' });
-if (target === 'production' && !dryRun) assertProductionApproval();
+const compatibilityEvidence = target === 'production' && !dryRun ? assertProductionApproval() : null;
+let productionSnapshot = null;
+if (target === 'production' && !dryRun) {
+  const { payload } = queryJsonWithRetry([
+    '--yes', 'eas-cli@21.0.2', 'channel:view', target, '--json', '--non-interactive',
+  ], 'Current production channel', payload => productionRuntimeSnapshot(payload, [
+    appConfig.android.runtimeVersion,
+    appConfig.ios.runtimeVersion,
+  ]));
+  productionSnapshot = productionRuntimeSnapshot(payload, [
+    appConfig.android.runtimeVersion,
+    appConfig.ios.runtimeVersion,
+  ]);
+  writeFileSync(
+    resolve(compatibilityEvidence.summaryPath, '..', 'production-channel-before.json'),
+    JSON.stringify(payload, null, 2),
+    'utf8',
+  );
+}
 
 const updateArgs = [
   '--yes', 'eas-cli@21.0.2', 'update',
@@ -216,6 +251,19 @@ run(process.execPath, ['scripts/upload-sentry-update-sourcemaps.mjs']);
 // Capture and intentionally ignore the publish command's unreliable JSON
 // stream. Authoritative evidence is queried from EAS after publication.
 run('npx', updateArgs, { capture: true });
+if (productionSnapshot) {
+  for (const group of productionSnapshot.groups) {
+    run('npx', [
+      '--yes', 'eas-cli@21.0.2', 'update:republish',
+      '--group', group,
+      '--destination-branch', candidateBranch,
+      '--platform', 'all',
+      '--message', `Preserve compatible production runtime ${group}`,
+      '--json',
+      '--non-interactive',
+    ], { capture: true });
+  }
+}
 // EAS CLI 21 can publish successfully without leaving its JSON result on the
 // wrapped stdout stream. Query the candidate branch after publication, then
 // inspect each server-owned update group before moving the channel pointer.
@@ -225,13 +273,26 @@ const expectedCandidate = {
   androidRuntime: appConfig.android.runtimeVersion,
   iosRuntime: appConfig.ios.runtimeVersion,
 };
-const { evidence: selectedGroups } = queryJsonWithRetry([
+const { payload: candidateListing, evidence: selectedGroups } = queryJsonWithRetry([
     '--yes', 'eas-cli@21.0.2', 'update:list',
     '--branch', candidateBranch,
-    '--limit', '20',
+    '--limit', '100',
     '--json',
     '--non-interactive',
   ], 'EAS candidate branch listing', payload => selectPairedUpdateGroups(payload, expectedCandidate));
+let productionCoverage = null;
+if (productionSnapshot) {
+  productionCoverage = validateRuntimeMatrixCoverage(candidateListing, [
+    ...productionSnapshot.keys,
+    runtimePlatformKey(appConfig.android.runtimeVersion, 'android'),
+    runtimePlatformKey(appConfig.ios.runtimeVersion, 'ios'),
+  ]);
+  writeFileSync(
+    resolve(compatibilityEvidence.summaryPath, '..', 'production-candidate-listing.json'),
+    JSON.stringify(candidateListing, null, 2),
+    'utf8',
+  );
+}
 const groupPayloads = [...new Set([selectedGroups.androidGroup, selectedGroups.iosGroup])]
   .map(group => queryJsonWithRetry([
     '--yes', 'eas-cli@21.0.2', 'update:view', group, '--json',
@@ -276,6 +337,9 @@ console.log(JSON.stringify({
   repositorySha: fullSha,
   target,
   candidateBranch,
+  compatibility: compatibilityEvidence,
+  productionSnapshot,
+  productionCoverage,
   promotion: promotionEvidence,
   ...updateEvidence,
 }));

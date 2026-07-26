@@ -256,6 +256,10 @@ for (const evidence of [
   expect(otaPublisher.includes(evidence), `Guarded publisher is missing production evidence: ${evidence}`);
 }
 contains('scripts/publish-eas-update.mjs', 'verify-eas-build-evidence.mjs', 'Production publisher must query EAS build evidence.');
+contains('scripts/publish-eas-update.mjs', 'verifyJsOnlyProductionCompatibility', 'Production publisher must verify JS-only native compatibility.');
+contains('scripts/publish-eas-update.mjs', 'productionRuntimeSnapshot', 'Production publisher must preserve the existing runtime matrix.');
+contains('scripts/publish-eas-update.mjs', "'update:republish'", 'Production publisher must carry compatible legacy groups forward.');
+contains('scripts/publish-eas-update.mjs', 'validateRuntimeMatrixCoverage', 'Production publisher must verify candidate runtime coverage.');
 contains('scripts/eas-build-evidence.mjs', "build?.status === 'FINISHED'", 'Production build evidence must require completed builds.');
 contains('scripts/eas-build-evidence.mjs', "build?.distribution === 'STORE'", 'Production build evidence must require store distributions.');
 contains('scripts/eas-build-evidence.mjs', "build?.buildProfile === 'production'", 'Production build evidence must require the production profile.');

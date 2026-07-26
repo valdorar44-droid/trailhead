@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { validateProductionBuild } from './eas-build-evidence.mjs';
+import { validateProductionBuild, verifyPairedProductionBuilds } from './eas-build-evidence.mjs';
 
 const sha = 'a'.repeat(40);
 const base = {
@@ -37,5 +37,21 @@ for (const [field, value, message] of [
 ]) {
   assert.throws(() => validateProductionBuild({ ...base, [field]: value }, expected), message);
 }
+
+assert.throws(() => verifyPairedProductionBuilds({
+  appConfig: {
+    extra: { eas: { projectId: 'project-1' } },
+    android: { runtimeVersion: 'native-1.0.10-android.1' },
+    ios: { runtimeVersion: 'native-1.0.10-ios.1' },
+  },
+  packageJson: { version: '1.0.10' },
+  environment: {
+    EXPO_PUBLIC_RELEASE_COMMIT_SHA: 'b'.repeat(40),
+    TRAILHEAD_ANDROID_PRODUCTION_BUILD_SHA: sha,
+    TRAILHEAD_IOS_PRODUCTION_BUILD_SHA: 'c'.repeat(40),
+    TRAILHEAD_ANDROID_PRODUCTION_BUILD_ID: 'android',
+    TRAILHEAD_IOS_PRODUCTION_BUILD_ID: 'ios',
+  },
+}), /share one source SHA/);
 
 console.log('EAS paired production-build evidence tests passed.');

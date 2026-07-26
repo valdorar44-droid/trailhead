@@ -62,14 +62,18 @@ export function fetchEasBuild(buildId) {
 }
 
 export function verifyPairedProductionBuilds({ appConfig, packageJson, environment = process.env }) {
-  const commitSha = requiredText(environment.EXPO_PUBLIC_RELEASE_COMMIT_SHA, 'release commit SHA');
-  if (!/^[a-f0-9]{40}$/i.test(commitSha)) throw new Error('Release commit SHA must be a full Git SHA.');
+  const releaseSha = requiredText(environment.EXPO_PUBLIC_RELEASE_COMMIT_SHA, 'release commit SHA');
+  if (!/^[a-f0-9]{40}$/i.test(releaseSha)) throw new Error('Release commit SHA must be a full Git SHA.');
+  const androidBuildSha = requiredText(environment.TRAILHEAD_ANDROID_PRODUCTION_BUILD_SHA, 'Android production build SHA');
+  const iosBuildSha = requiredText(environment.TRAILHEAD_IOS_PRODUCTION_BUILD_SHA, 'iOS production build SHA');
+  if (androidBuildSha !== iosBuildSha) throw new Error('Android and iOS production builds must share one source SHA.');
+  if (!/^[a-f0-9]{40}$/i.test(androidBuildSha)) throw new Error('Production build SHA must be a full Git SHA.');
   const projectId = requiredText(appConfig?.extra?.eas?.projectId, 'EAS project ID');
   const androidId = requiredText(environment.TRAILHEAD_ANDROID_PRODUCTION_BUILD_ID, 'Android production build ID');
   const iosId = requiredText(environment.TRAILHEAD_IOS_PRODUCTION_BUILD_ID, 'iOS production build ID');
   if (androidId === iosId) throw new Error('Android and iOS production build IDs must be distinct.');
 
-  const common = { appVersion: packageJson.version, commitSha, projectId };
+  const common = { appVersion: packageJson.version, commitSha: androidBuildSha, projectId };
   const android = validateProductionBuild(fetchEasBuild(androidId), {
     ...common,
     id: androidId,
@@ -82,5 +86,5 @@ export function verifyPairedProductionBuilds({ appConfig, packageJson, environme
     platform: 'IOS',
     runtimeVersion: appConfig.ios.runtimeVersion,
   });
-  return { android, ios };
+  return { android, ios, buildSha: androidBuildSha, releaseSha };
 }

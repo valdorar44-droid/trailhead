@@ -102,6 +102,18 @@ const checks = [
     args: ['scripts/eas-update-evidence.test.mjs'],
   },
   {
+    label: 'Native-compatible production OTA',
+    cwd: mobileRoot,
+    cmd: 'node',
+    args: ['scripts/native-ota-compatibility.test.mjs'],
+  },
+  {
+    label: 'Production runtime-matrix preservation',
+    cwd: mobileRoot,
+    cmd: 'node',
+    args: ['scripts/production-runtime-matrix.test.mjs'],
+  },
+  {
     label: 'Release environment contract',
     cwd: mobileRoot,
     cmd: 'node',

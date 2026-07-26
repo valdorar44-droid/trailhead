@@ -1568,3 +1568,32 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Exact next action: user reviews this paired preview. If accepted, promote this exact Sheet/POI/Search descendant through the compatible production OTA gate, then start the real saved/downloaded trip-map packet in the approved Figma system before implementation.
 - Do not repeat: Camp Guide generation or production promotion, broad Map/Search/sheet crawls, Memory Gate, Layers, Yellowstone, NPS rabbit-hole research, Android Auto, Originals lifecycle, final production-build validation, or store screenshots.
 - Task-owned background processes: none. Metro, the EAS publisher, Sentry upload, focused tests, and Railway deployment commands have exited. The existing ADB daemon and pre-existing Codex host Node process were not stopped or modified.
+
+## Sheet, POI, and Search - compatible production OTA
+
+- Timestamp: `2026-07-26T14:47:50-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; checkpoint HEAD before this documentation commit is `7bcf41f8d3dc9fcc254c869b63b2d6fd94893ca3`.
+- Exact production source: `5401f6b5a6a8cee9652e0374ef8c12a4cb352db3`, the Android-tested paired-preview source. Immutable annotated tag `v1.0.10-sheet-poi-search-ota1` resolves to that source and is pushed to origin.
+- Protected Explore index SHA-256 remains `7E59E5E2273DBBE1A26D7BBD4D947FAA20935C51FB79C464EED8A17BABF4D8F4`. `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, and unrelated worktree changes remained excluded and unstaged.
+- Native compatibility:
+  - Android production build `63`, build ID `7ab0f1bb-a742-4043-8a97-4d8986485e12`, runtime `native-1.0.10-android.3`, build source `f90c150d8801d0d2ba73cc6a52277ca9ef5978eb`.
+  - iOS production build `58`, build ID `464207e7-dfdf-47ab-bd36-6b32e97aa362`, runtime `native-1.0.10-ios.3`, build source `f90c150d8801d0d2ba73cc6a52277ca9ef5978eb`.
+  - Android fingerprint `60af3c45848a22f1ce3173738969ed10746bcff1`; iOS fingerprint `5aa15fca809fa2a731b6a7c40f26912d4794de48`.
+  - The guarded publisher accepted the descendant only after ancestry, runtime, paired-build evidence, and clean native-input fingerprint checks passed. No native project, dependency, permission, entitlement, plugin, bundled native asset, or runtime change was accepted.
+- Production delivery:
+  - Production candidate branch `production-candidate-5401f6b5a6a8cee9652e0374ef8c12a4cb352db3-ms27cjkt-71a35aa1dea200d4cd103621`, branch ID `019f9ff6-4b67-792b-9102-a25a57d7a389`.
+  - Production channel ID `019dc26b-268a-794b-8aa8-3497b4d38487`.
+  - Android update group `ba6972d5-9e85-4b4c-9676-0e2b16eff5e9`, update `019f9ff6-714c-7134-b779-af1e99bc910e`.
+  - iOS update group `33ee1637-84af-48f2-878f-250581f8e940`, update `019f9ff6-714c-7707-ba11-b3ff66734603`.
+  - Sentry debug IDs: Android `f5bfdfc5-806f-465e-8886-19866ee98628`; iOS `0ec52d46-378c-4958-872f-6a883168b7c7`; web `3870a1aa-1b2f-418f-b5d0-d7577ef36b41`; web index `b00385c3-7d12-44f9-bad8-981a08c5411c`.
+  - The publisher preserved every pre-existing legacy production runtime/platform group and replaced only the compatible Android/iOS `native-1.0.10-*.3` pair. Older binaries remain on their compatible updates.
+- Evidence:
+  - Native compatibility summary `/tmp/trailhead-release-evidence-5401f6b5/native-ota-compatibility.json`, SHA-256 `B15C8DADB206F2F4633263749C2FDBBBBB43A430CC96322DBF8B83B497C018A8`.
+  - Android fingerprint evidence SHA-256 `D096BC8BC8CBB2E10D9ACBFBF0C619AFD1736BEE498A43486F52412F1EA27B48`.
+  - iOS fingerprint evidence SHA-256 `10B5D97D59605C8BF5CEA2457201C8AD3C31B1BF35C55E3B8B81138B3ED24DC2`.
+  - Pre-promotion production channel snapshot SHA-256 `775CD8B3AD379957F4F97CCECEC917E810B235A74460E87E2F57ECFE0EB106D9`.
+  - Published candidate listing SHA-256 `B8A4951E4D7CC34A0346A9301BBC1090CE9A5B3F9872020B020E49EDFC2404A4`.
+- Open P0/P1: none in the accepted Sheet/POI/Search production packet. Google Play Data Safety rejection analysis is now the active audit; no policy declaration is inferred solely from Android permissions.
+- Exact next action: audit every active mobile SDK and server-bound user-data flow, reconcile the Play Data Safety form and privacy policy with actual collection/sharing, then begin the approved real saved/downloaded trip-map packet.
+- Do not repeat: Camp Guide generation, Sheet/POI broad crawl, service-query crawl, Memory Gate, Layers, Yellowstone, NPS rabbit-hole research, Android Auto, Originals lifecycle, final production-build validation, or store screenshots without new evidence.
+- Task-owned background processes: none. Production EAS export, Sentry upload, and publisher processes exited successfully.

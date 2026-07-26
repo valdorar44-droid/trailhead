@@ -85,6 +85,43 @@ class CampgroundPlanningBriefValidationTests(unittest.TestCase):
         changed = {**self.evidence, "site_types": ["Tent"]}
         self.assertIsNone(cached_campground_planning_brief(brief, changed, now=1_780_000_201))
 
+    def test_removes_process_wording_and_scopes_fcc_to_signal(self):
+        fcc_url = "https://broadbandmap.fcc.gov/data-download/nationwide-data"
+        evidence = {
+            **self.evidence,
+            "sources": [{"label": "FCC modeled coverage", "url": fcc_url}],
+        }
+        generated = {
+            "summary": {
+                "text": "The supplied evidence does not confirm site access.",
+                "source_urls": [fcc_url],
+            },
+            "best_time": {
+                "text": "Spring is the best time to visit.",
+                "source_urls": [fcc_url],
+            },
+            "access_and_rig": {"text": "", "source_urls": []},
+            "service_and_signal": {
+                "text": "Modeled mobile coverage is available for trip planning, but field conditions can differ.",
+                "source_urls": [fcc_url],
+            },
+            "look_out_for": [],
+            "preparation": [],
+            "nearby_context": [],
+        }
+
+        brief = build_campground_planning_brief(
+            generated,
+            evidence,
+            [],
+            now=1_780_000_200,
+        )
+
+        self.assertEqual(brief["summary"], "")
+        self.assertEqual(brief["best_time"], "")
+        self.assertIn("Modeled mobile coverage", brief["service_and_signal"])
+        self.assertEqual([source["url"] for source in brief["sources"]], [fcc_url])
+
 
 class CampgroundPlanningBriefOpenAITests(unittest.TestCase):
     def test_responses_request_uses_web_search_structured_output_and_no_storage(self):

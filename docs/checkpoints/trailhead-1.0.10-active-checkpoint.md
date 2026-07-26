@@ -1714,3 +1714,40 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
   values so a build cannot silently re-enable deferred attribution.
 - The replacement build must come from the new immutable descendant commit and
   use Android runtime `native-1.0.10-android.4`.
+
+### Android Auto and privacy candidate build checkpoint
+
+- Timestamp: `2026-07-26T18:05:00-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; exact HEAD
+  `ca9dd6a5c49a83fab964da7e4df327ec7dae71e0`.
+- Protected Explore index SHA-256 remains
+  `7E59E5E2273DBBE1A26D7BBD4D947FAA20935C51FB79C464EED8A17BABF4D8F4`.
+  `.cursor/`, `dashboard/explore_serving_index_v2.json`, and
+  `docs/app-store-copy.md` remain unstaged and unmodified by this packet.
+- The public privacy and deletion pages are live on Railway. The backend health
+  check and both public pages return HTTP `200`.
+- The correct Android production AAB is EAS build
+  `c706dd10-6dfe-4ec8-bf03-31e2b28df476`, remote build number `65`, runtime
+  `native-1.0.10-android.4`, source `ca9dd6a5`, and native fingerprint
+  `c141d6cad4a2f6b2fa896a1e996f5a969e1a260a`.
+- The matching internal APK is EAS build
+  `a934447a-ebdb-4967-a31f-5f2f8e3b6e84`, remote build number `66`, with the
+  same source, runtime, and native fingerprint.
+- Both correct builds remain `IN_PROGRESS`. Build `64`
+  (`11d6e37b-77c5-40fe-80db-273a4c9f6e3a`) is canceled and permanently
+  disqualified because it enabled Branch attribution.
+- Data minimization is verified in source: Branch deferred attribution and
+  nonessential Mapbox telemetry are off, manual referral entry remains, and
+  Sentry remains allowlist-only with no session replay or default PII.
+- Open P0/P1: none in focused automated coverage. Release evidence still needs
+  the internal APK installed on Android and one DHU destination-to-navigation
+  proof before build `65` can be uploaded to Play.
+- Exact next action: wait for builds `65` and `66`; install `66`; prove that a
+  destination can be selected and navigation started entirely in Android Auto;
+  then upload build `65`, answer the NF-6 policy response, and submit the
+  corrected Data Safety form.
+- Do not repeat: Camp Guide generation, Sheet/POI/Search crawl, Memory Gate,
+  Layers, Yellowstone, NPS research, Originals lifecycle, production Sheet/POI
+  OTA publication, or the full pre-preview suite.
+- Task-owned background processes: EAS cloud builds only. No local Metro,
+  Gradle, Maestro, Railway deployment, or publisher process is running.

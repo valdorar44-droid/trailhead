@@ -1331,3 +1331,20 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Exact next action: the user reviews the Android Camp Guide result. On acceptance, promote only the exact compatible preview-tested mobile source as appropriate, or begin the next forward-only `Sheet Action and POI Rabbit-Hole Audit` packet.
 - Do not repeat: model comparison, Camp Guide live generation, campground lifecycle, Memory Gate, broad Map/Search/sheet crawls, Layers, Yellowstone, NPS research, Android Auto, Originals lifecycle, production release validation, or store-screenshot work without new evidence.
 - Task-owned background processes: none. Temporary Camp Guide Railway deployment worktrees were removed; managed historical preview/deploy worktrees were left intact.
+
+## Camp Guide production OTA and Sheet/POI packet baseline
+
+- Timestamp: `2026-07-26T02:58:01-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; baseline HEAD `0df4859ebeafe157f4b88a3cfccb9c9eefcbe0ac`.
+- Accepted implementation: `3ebb84c66059a97eaa51df358a2e7625d6ceed37`; device-tested mobile baseline: `b9d4274d554ba43cb52e1da1bb866dd2d144c2ef`.
+- Protected Explore index SHA-256 remains `7E59E5E2273DBBE1A26D7BBD4D947FAA20935C51FB79C464EED8A17BABF4D8F4`. `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, Android helper mode changes, Valhalla files, and unrelated worktree changes remain excluded and unstaged.
+- Paired store-build evidence remains:
+  - Android build `63`, ID `7ab0f1bb-a742-4043-8a97-4d8986485e12`, runtime `native-1.0.10-android.3`, source `f90c150d8801d0d2ba73cc6a52277ca9ef5978eb`.
+  - iOS build `58`, ID `464207e7-dfdf-47ab-bd36-6b32e97aa362`, runtime `native-1.0.10-ios.3`, source `f90c150d8801d0d2ba73cc6a52277ca9ef5978eb`.
+- Current production channel `019dc26b-268a-794b-8aa8-3497b4d38487` points to `production-candidate-f90c150d-legacy-20260725035506`. Its complete legacy runtime/platform matrix must be copied into any replacement branch before channel promotion.
+- The guarded publisher currently requires OTA source SHA equality with the store-build SHA and does not automate legacy-group carry-forward. This packet will replace equality with an audited ancestor/native-compatibility gate and make legacy-matrix preservation mandatory.
+- A read-only EAS comparison against the accepted Android preview source reported expected build/local diagnostic differences in Expo release metadata, package scripts, and the local Android directory representation. Git confirms the Android native tree is unchanged between `f90c150` and `b9d4274`; the new gate must explain each fingerprint difference and reject every other native-impacting change.
+- Open P0/P1: none. Production remains unchanged until the compatibility and matrix tests pass.
+- Exact next action: implement and test the JS-only native-compatibility gate plus production runtime-matrix carry-forward, then publish and verify the Camp Guide production OTA before beginning Sheet/POI code.
+- Do not repeat: Camp Guide generation, broad app crawls, Memory Gate, Layers, Yellowstone, NPS research, Android Auto, Originals lifecycle, or store screenshot work.
+- Task-owned background processes: none.

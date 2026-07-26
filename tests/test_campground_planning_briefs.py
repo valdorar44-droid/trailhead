@@ -112,7 +112,11 @@ class CampgroundPlanningBriefOpenAITests(unittest.TestCase):
         )
         with (
             patch.object(planner.settings, "openai_api_key", "test-key"),
-            patch.object(planner.settings, "openai_planner_fast_model", "gpt-5.4-mini"),
+            patch.object(
+                planner.settings,
+                "openai_campground_brief_model",
+                "gpt-5.4-nano",
+            ),
             patch.object(planner.httpx, "post", return_value=response) as post,
         ):
             result = planner.generate_campground_planning_brief(
@@ -123,8 +127,12 @@ class CampgroundPlanningBriefOpenAITests(unittest.TestCase):
 
         payload = post.call_args.kwargs["json"]
         self.assertEqual(post.call_args.args[0], "https://api.openai.com/v1/responses")
+        self.assertEqual(payload["model"], "gpt-5.4-nano")
         self.assertFalse(payload["store"])
         self.assertEqual(payload["tools"][0]["type"], "web_search")
+        self.assertEqual(payload["tools"][0]["search_context_size"], "low")
+        self.assertEqual(payload["reasoning"], {"effort": "none"})
+        self.assertEqual(payload["max_output_tokens"], 1400)
         self.assertEqual(payload["text"]["format"]["type"], "json_schema")
         self.assertTrue(payload["text"]["format"]["strict"])
         self.assertEqual(payload["safety_identifier"], "safe-test-id")

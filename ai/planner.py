@@ -834,7 +834,7 @@ Rules:
 - Do not use markdown headings or repeat labels inside field text."""
 
     payload: dict[str, object] = {
-        "model": settings.openai_planner_fast_model,
+        "model": settings.openai_campground_brief_model,
         "input": [
             {
                 "role": "system",
@@ -847,6 +847,7 @@ Rules:
         ],
         "tools": [{
             "type": "web_search",
+            "search_context_size": "low",
             "filters": {
                 "blocked_domains": [
                     "reddit.com",
@@ -859,7 +860,7 @@ Rules:
         }],
         "tool_choice": "auto",
         "include": ["web_search_call.action.sources"],
-        "reasoning": {"effort": "low"},
+        "reasoning": {"effort": "none"},
         "text": {
             "format": {
                 "type": "json_schema",
@@ -868,7 +869,7 @@ Rules:
                 "schema": _CAMP_PLANNING_BRIEF_SCHEMA,
             },
         },
-        "max_output_tokens": 2200,
+        "max_output_tokens": 1400,
         "store": False,
         "safety_identifier": str(safety_identifier or "campground-brief")[:64],
     }

@@ -1348,3 +1348,43 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Exact next action: implement and test the JS-only native-compatibility gate plus production runtime-matrix carry-forward, then publish and verify the Camp Guide production OTA before beginning Sheet/POI code.
 - Do not repeat: Camp Guide generation, broad app crawls, Memory Gate, Layers, Yellowstone, NPS research, Android Auto, Originals lifecycle, or store screenshot work.
 - Task-owned background processes: none.
+
+## Camp Guide production OTA promotion - complete
+
+- Timestamp: `2026-07-26T03:34:06-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; immutable OTA source and pre-checkpoint HEAD `29e48a82e7c6bd605bfb31185b830f22b5101c83`, pushed to origin and tagged `v1.0.10-camp-guide-ota3`.
+- Accepted Camp Guide implementation remains `3ebb84c66059a97eaa51df358a2e7625d6ceed37`; device-tested mobile baseline remains `b9d4274d554ba43cb52e1da1bb866dd2d144c2ef`.
+- Protected Explore index SHA-256 remains `7E59E5E2273DBBE1A26D7BBD4D947FAA20935C51FB79C464EED8A17BABF4D8F4`. `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, Android helper mode changes, Valhalla scripts, and unrelated worktree changes remain excluded and unstaged.
+- Production-build evidence was verified before publication:
+  - Android build `63`, ID `7ab0f1bb-a742-4043-8a97-4d8986485e12`, source `f90c150d8801d0d2ba73cc6a52277ca9ef5978eb`, runtime `native-1.0.10-android.3`, fingerprint `60af3c45848a22f1ce3173738969ed10746bcff1`.
+  - iOS build `58`, ID `464207e7-dfdf-47ab-bd36-6b32e97aa362`, source `f90c150d8801d0d2ba73cc6a52277ca9ef5978eb`, runtime `native-1.0.10-ios.3`, fingerprint `5aa15fca809fa2a731b6a7c40f26912d4794de48`.
+- The guarded publisher proved the build SHA is an ancestor of the OTA SHA, Android/iOS Git native trees are unchanged, dependency fields are unchanged, and runtime identifiers match the paired builds. `eas fingerprint:compare` recorded only explained Expo-config, package-script, and local native-directory representation differences; no native-impacting source change was accepted.
+- Sentry source maps were uploaded before publication:
+  - Android debug ID `fb623db8-f8fd-4d13-bd3d-0c05f17140d7`.
+  - iOS debug ID `2449bdad-2558-4cb5-8ac8-1cef5963d985`.
+- The corrected isolated production candidate is:
+  - Branch `production-candidate-29e48a82e7c6bd605bfb31185b830f22b5101c83-ms1j9xwy-80ec0e74ff97c651e4fb571a`, ID `019f9d8d-d8b7-76ea-9a19-6a5e31fdd291`.
+  - Android group `d2d60b1d-b281-4372-8bc9-37bb41f0dd66`, update `019f9d8e-01e9-7ced-9aeb-d0e9b0ae40f5`, runtime `native-1.0.10-android.3`.
+  - iOS group `6687a196-6a4a-4fc6-805b-28b221fcc378`, update `019f9d8e-01e9-759a-bb14-b5a23a39086b`, runtime `native-1.0.10-ios.3`.
+- The first candidate attempt (`v1.0.10-camp-guide-ota2`) was rejected after post-publication evidence showed its legacy snapshot relied on the channel summary and carried only the most recently visible legacy group. Production was immediately restored to rollback branch `production-candidate-f90c150d-legacy-20260725035506`. No compatibility gate was weakened.
+- The corrected publisher snapshots the mapped production branch with `update:list --limit 50`, replaces only the paired 1.0.10 runtimes, and republishes every other runtime group. Candidate validation passed with exactly twelve platform keys:
+  - `native-1.0.10-android.3` Android and `native-1.0.10-ios.3` iOS.
+  - `native-1.0.9-car2-originals1` Android and `native-1.0.9-originals1` iOS.
+  - `native-1.0.8-car2-originals1` Android and `native-1.0.8-originals1` iOS.
+  - `native-1.0.7` Android and iOS.
+  - `native-20260614-sdk54-1` Android and iOS.
+  - `native-202607-mission-animator-1` Android and iOS.
+- Production channel `019dc26b-268a-794b-8aa8-3497b4d38487` now points atomically to the corrected candidate branch. Independent read-back confirmed nine groups containing the expected twelve platform keys. Existing 1.0.9 and older installs retain their prior compatible runtime groups.
+- Evidence:
+  - Publisher log: `\\wsl.localhost\Ubuntu\tmp\trailhead-camp-guide-production-ota.log`, SHA-256 `8FC7C8747454E3DE7A089579862855860CE024E5B57700CBFD312652AC256410`.
+  - Native compatibility summary: `\\wsl.localhost\Ubuntu\tmp\trailhead-release-evidence-29e48a82\native-ota-compatibility.json`, SHA-256 `40F0ABD6D78C52B40D938276D3D7B911B7A6D87A0AF9F6172074FEB19DA3AF90`.
+  - Android fingerprint evidence: `\\wsl.localhost\Ubuntu\tmp\trailhead-release-evidence-29e48a82\native-fingerprint-android.json`, SHA-256 `0AC92BE3D675A14351E67ADF84D7A0357801BE1861687E570820468A3CAE796A`.
+  - iOS fingerprint evidence: `\\wsl.localhost\Ubuntu\tmp\trailhead-release-evidence-29e48a82\native-fingerprint-ios.json`, SHA-256 `3033A3B97A084C01C3EE3460DEF94C8F8543B37ED91B3689D5EB781F09F15AF9`.
+  - Candidate listing: `\\wsl.localhost\Ubuntu\tmp\trailhead-release-evidence-29e48a82\production-candidate-listing.json`, SHA-256 `320CBABFFF06B290440D20B4F04DBF4BA5F5C73C41EA0591F790A8B9B7BBF372`.
+  - Independent production channel read-back: `\\wsl.localhost\Ubuntu\tmp\trailhead-release-evidence-29e48a82\production-channel-readback.json`, SHA-256 `51FBE01EF58326A732E822ABD320F26EEC90C216E706BA5AE4CFEFBEFF4D9776`.
+  - Independent production update read-back: `\\wsl.localhost\Ubuntu\tmp\trailhead-release-evidence-29e48a82\production-updates-readback.json`, SHA-256 `FA4350337EA0D0051F3AF276B02823078F4284CFBD5FB82070F3F37B3CE57F80`.
+- Railway health returned HTTP `200` with `{"status":"ok","service":"trailhead"}` after channel promotion. The already-deployed Camp Guide backend remains deployment `af9c808c-93ef-4d50-8cd6-19582c8e6d23`, digest `sha256:4931382560b67cf09d4e05a727839ca5aa33be896bd5afec5078cefaa40fa415`.
+- Open P0/P1: none. Apple review/build replacement was not restarted, and no new native binary was created.
+- Exact next action: commit and push this checkpoint, remove the three temporary production worktrees after evidence capture, then create the Sheet Action/POI baseline and implement only the capability registry plus canonical Recreation.gov campground routing before focused tests and one paired preview.
+- Do not repeat: Camp Guide generation/model comparison, Memory Gate, Layers, Yellowstone, NPS research, Android Auto, Originals lifecycle, broad Map/sheet crawls, final production-build validation, or store screenshot work.
+- Task-owned background processes: the corrected publisher has exited successfully. No Metro, EAS publisher, Sentry upload, Gradle, Maestro, or test process remains.

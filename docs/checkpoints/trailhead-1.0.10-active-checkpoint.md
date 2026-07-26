@@ -1449,3 +1449,53 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Exact next action: commit and push this checkpoint, publish one paired preview OTA from the resulting immutable SHA with Sentry maps, then run only the bounded Android sheet/POI delta and shared high-risk iOS spot checks.
 - Do not repeat: Camp Guide generation or production promotion, Memory Gate, Layers, Yellowstone, NPS rabbit-hole research, Android Auto, Originals lifecycle, broad Map/sheet crawls, final production-build validation, or store screenshots.
 - Task-owned background processes: none. Focused Node/TypeScript tests have exited; no Metro, Gradle, Maestro, EAS publisher, or Sentry upload remains running.
+
+## Sheet Action and POI packet - paired preview and Android evidence
+
+- Timestamp: `2026-07-26T04:38:32-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; preview source HEAD `b1649d12c2ef37674822b24871556ce6dffa2dcc`, pushed to origin.
+- Protected Explore index SHA-256 remains `7E59E5E2273DBBE1A26D7BBD4D947FAA20935C51FB79C464EED8A17BABF4D8F4`. `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, Android helper mode changes, Valhalla files, and unrelated worktree changes remain excluded and unstaged.
+- The accepted Camp Guide production OTA remains unchanged on source `29e48a82e7c6bd605bfb31185b830f22b5101c83`. This Sheet/POI packet has not been promoted to production.
+- Final paired preview:
+  - Candidate branch `preview-candidate-b1649d12c2ef37674822b24871556ce6dffa2dcc-ms1ldzam-97f336e9e8cb25696e5f7e60`, branch ID `019f9dc3-1915-76c3-baf2-ca1ee3c6b219`.
+  - Android group `b1c0307d-96e4-47d8-9f38-7d85f86e564e`, update `019f9dc3-43c8-79f9-9686-e46719cc590b`, runtime `native-1.0.10-android.3`.
+  - iOS group `bbe33769-4fd7-4492-bddf-ad1e5685dc66`, update `019f9dc3-43c8-7c0c-86eb-1cbc75ddd27d`, runtime `native-1.0.10-ios.3`.
+  - Sentry debug IDs: Android `a74e0a3c-a720-4be3-b1aa-44eb0a3c7e03`; iOS `47f11455-c985-407a-8ba3-05271fd8ce0a`.
+- Android identity was verified on the connected Samsung:
+  - App `1.0.10`, build `61`, channel `preview`.
+  - Source `b1649d12c2ef37674822b24871556ce6dffa2dcc`.
+  - Runtime `native-1.0.10-android.3`.
+  - Update `019f9dc3-43c8-79f9-9686-e46719cc590b`.
+- Device results:
+  - Canonical NPS/Recreation.gov Watchman and canonical RIDB Mather Search results opened the real campground Peek and Full sheets instead of a generic source hub.
+  - Campground identity, weather, source, trip, report, and existing detail modules remained intact.
+  - The visible Save action now reverses correctly: `Remove saved Watchman Campground` changed back to `Save Watchman Campground` after one press.
+  - A fuel Search result opened a nonblank service sheet with its map identity, address, Navigate, Share, and related-place modules. Temporary Mapbox results correctly omit persistence actions that their temporary-result policy cannot support.
+  - A Visitor Center result opened a nonblank place sheet. Opening its related trail produced the Trail Peek sheet; Android Back restored the exact Visitor Center parent sheet.
+  - Share opened the native share sheet and returned cleanly.
+  - The previous generic `Report` availability control was found to publish a fullness report immediately. The final candidate now exposes the distinct stable action `Report full` and requires a confirmation dialog before publication. Pressing Cancel on Mather left `Report full` visible and did not create a `REPORTED FULL` state.
+  - One Watchman fullness report was accidentally submitted while reproducing the old ambiguous action. A dispute was recorded; the server automatically expires the record at the next noon UTC boundary. No additional public submission was made.
+- Focused source verification after the two evidence-backed corrections:
+  - Camp Guide/camp flow/camp identity: `20/20`.
+  - Sheet action/coordinator: `8/8`.
+  - TypeScript and whitespace checks passed.
+  - The earlier complete Sheet/POI focused suite remains passed and was not broadly repeated.
+- POI discovery audit:
+  - `viewpoint near Moab` correctly returned Anticline Overlook and Needles Overlook.
+  - Named-location grocery and repair queries contained real Flagstaff results, but broad `fuel`, `gas station`, drinking-water, dump-station, repair, and parking queries can rank distant literal text matches above the intended nearby service inventory.
+  - This is recorded as an open Search V2 service-intent/proximity defect. No POIs, distances, or source modules were fabricated to hide it.
+- Evidence:
+  - Final QA identity: `C:\Users\User\AppData\Local\Temp\trailhead-sheet-poi-evidence\21-qa-final.xml`, SHA-256 `372027D19D9447A7FE8F12FC8DAC1CD7A46AAF1BD242E9D5D2BC24BF7EBD7141`.
+  - Canonical campground remove-save proof: `C:\Users\User\AppData\Local\Temp\trailhead-sheet-poi-evidence\26-watchman-removed-final.png`, SHA-256 `9A2CA859FCB39CAE1DC1216C790C9235FEF5E0A5B66C47F026DACB02926B9B26`.
+  - Service sheet: `C:\Users\User\AppData\Local\Temp\trailhead-sheet-poi-evidence\14-shell-service-sheet.png`, SHA-256 `35AD08F5A20BE7F914C39E505860230ED7E5C55F6EC43D081A116D0822921880`.
+  - Related-place Back restoration: `C:\Users\User\AppData\Local\Temp\trailhead-sheet-poi-evidence\20-related-back.xml`, SHA-256 `621098F0FC0CA92F2E9FAA93792DFEB10CDC1797AFA2711C5909F69BD6A5AEC4`.
+  - Report-full confirmation: `C:\Users\User\AppData\Local\Temp\trailhead-sheet-poi-evidence\33-mather-report-confirm.png`, SHA-256 `C3D4EA4D4BDB4A307A223EDA1FED885D278056FC16973A09BB114E9257A3D2CD`.
+  - Cancel/no-publication proof: `C:\Users\User\AppData\Local\Temp\trailhead-sheet-poi-evidence\34-mather-after-cancel.xml`, SHA-256 `E978340545E6128270A9CA343E741F0C188E173442DF17F1000B03076398E243`.
+  - Preview publisher stdout, SHA-256 `B879AD0468EBE49B5FC79B4A9D44223F8E58AC7E3BC0F1C866DF7E3167D58774`.
+  - Preview publisher stderr, SHA-256 `0CD1E43674D057DA73B1DCF856EC52500C12950FD41020904A91C28AA9FA18B5`.
+- Open defects:
+  - P1: service-intent Search V2 does not reliably bind broad fuel/water/grocery/dump/repair/parking queries to the current map, active route, or named locality before external fallback ranking.
+  - Physical iOS shared high-risk spot checks remain pending because only Android was connected. The iOS preview update was published successfully from the same SHA.
+- Exact next action: user reviews the Sheet/POI preview. Before production promotion, implement one bounded Search V2 service-intent/proximity correction, rerun only the affected service-query assertions on Android, and perform the short shared iOS spot check when the iPhone is connected.
+- Do not repeat: Camp Guide generation or production promotion, broad Map/Search/sheet crawls, Memory Gate, Layers, Yellowstone, NPS rabbit-hole research, Android Auto, Originals lifecycle, final production-build validation, or store screenshot work.
+- Task-owned background processes: none. The EAS publisher, Metro exporter, Sentry upload, and temporary preview worktree exited or were removed. The pre-existing long-running host Node process was not started or modified by this packet.

@@ -9,15 +9,18 @@ let configured = false;
  * production privacy declaration remains stable and avoids nonessential
  * third-party collection.
  */
-export async function disableNonessentialMapboxTelemetry(): Promise<void> {
+export async function disableNonessentialMapboxTelemetry(accessToken: string): Promise<void> {
   if (configured || (Platform.OS !== 'android' && Platform.OS !== 'ios')) return;
-  configured = true;
+  const token = accessToken.trim();
+  if (!token) return;
   try {
     const module = await import('@rnmapbox/maps');
+    await module.default.setAccessToken(token);
     module.default.setTelemetryEnabled(false);
+    configured = true;
   } catch {
     // Mapbox is not present on web and can be unavailable during isolated tests.
-    // Fail closed: no fallback telemetry implementation is started.
+    // Leave the guard retryable until a valid native token has been configured.
   }
 }
 

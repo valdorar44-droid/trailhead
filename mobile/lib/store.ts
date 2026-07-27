@@ -46,6 +46,7 @@ import {
   clearCarNavigationSnapshot,
   syncCarNavigationSnapshot,
 } from './carIntegration';
+import { disableNonessentialMapboxTelemetry } from './privacy/mapboxTelemetry';
 import {
   clearCarReportSession,
   requestCarReportFlush,
@@ -1144,6 +1145,7 @@ export const useStore = create<AppState>((set) => ({
     set({ userLoc: loc });
   },
   setMapboxToken: (token) => {
+    void disableNonessentialMapboxTelemetry(token);
     set({ mapboxToken: token });
     const current = useStore.getState();
     void syncCarNavigationSnapshot({

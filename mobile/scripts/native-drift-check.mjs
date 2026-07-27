@@ -242,7 +242,13 @@ expect(!branchAttribution.includes('.userCompletedAction('), 'Branch custom beha
 contains('app.config.js', "EXPO_PUBLIC_BRANCH_ATTRIBUTION_ENABLED || 'false'", 'Branch attribution must be disabled by default.');
 contains('lib/privacy/mapboxTelemetry.ts', 'setTelemetryEnabled(false)', 'Nonessential Mapbox telemetry must remain disabled.');
 expect(!source('lib/privacy/mapboxTelemetry.ts').includes('setTelemetryEnabled(true)'), 'Mapbox telemetry must not be enabled.');
-contains('app/_layout.tsx', 'disableNonessentialMapboxTelemetry()', 'Mapbox telemetry must be disabled during app startup.');
+expect(
+  source('lib/privacy/mapboxTelemetry.ts').indexOf('setAccessToken(token)')
+    < source('lib/privacy/mapboxTelemetry.ts').indexOf('setTelemetryEnabled(false)'),
+  'Mapbox access token must be configured before the native telemetry opt-out call.',
+);
+contains('lib/store.ts', 'disableNonessentialMapboxTelemetry(token)', 'Mapbox telemetry must be disabled after a valid token is loaded.');
+expect(!source('app/_layout.tsx').includes('disableNonessentialMapboxTelemetry('), 'Do not call the native Mapbox telemetry API before a token is loaded.');
 contains('lib/referrals/referralLinks.ts', 'TRAILHEAD_HTTPS_HOSTS', 'Referral URL parsing must enforce trusted Trailhead hosts.');
 contains('lib/referrals/referralLinks.ts', 'APPROVED_CUSTOM_ROUTES', 'Referral URL parsing must enforce approved custom routes.');
 expect(

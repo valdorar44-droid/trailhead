@@ -10,6 +10,7 @@ const read = path => readFileSync(join(mobileRoot, path), 'utf8');
 const appConfig = read('app.config.js');
 const easConfig = JSON.parse(read('eas.json'));
 const rootLayout = read('app/_layout.tsx');
+const store = read('lib/store.ts');
 const mapboxPrivacy = read('lib/privacy/mapboxTelemetry.ts');
 const branchAttribution = read('lib/referrals/branchAttribution.ts');
 const profile = read('app/(tabs)/profile.tsx');
@@ -35,6 +36,8 @@ assert.match(profile, /referralAttributionIsAvailable\(\) &&/);
 
 assert.match(mapboxPrivacy, /setTelemetryEnabled\(false\)/);
 assert.doesNotMatch(mapboxPrivacy, /setTelemetryEnabled\(true\)/);
-assert.match(rootLayout, /disableNonessentialMapboxTelemetry\(\)/);
+assert.doesNotMatch(rootLayout, /disableNonessentialMapboxTelemetry\(/);
+assert.match(store, /disableNonessentialMapboxTelemetry\(token\)/);
+assert.match(mapboxPrivacy, /setAccessToken\(token\)[\s\S]*setTelemetryEnabled\(false\)/);
 
 console.log('Nonessential third-party collection controls passed.');

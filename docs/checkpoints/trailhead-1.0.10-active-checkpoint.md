@@ -1751,3 +1751,76 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
   OTA publication, or the full pre-preview suite.
 - Task-owned background processes: EAS cloud builds only. No local Metro,
   Gradle, Maestro, Railway deployment, or publisher process is running.
+
+### Android Auto destination voice handoff and MapGPT audit
+
+- Timestamp: `2026-07-26T20:57:18-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; checkpoint HEAD
+  `2598d6cbecf19fa3ecc2585369f67cf7db0dfb08`; build source remains
+  `ca9dd6a5c49a83fab964da7e4df327ec7dae71e0`.
+- Protected Explore index SHA-256 remains
+  `7E59E5E2273DBBE1A26D7BBD4D947FAA20935C51FB79C464EED8A17BABF4D8F4`.
+  `.cursor/`, `dashboard/explore_serving_index_v2.json`,
+  `docs/app-store-copy.md`, and unrelated executable-bit changes remain
+  excluded and unstaged.
+- Samsung `RFCR408DA9B` is running Trailhead `1.0.10` build `66` from the
+  Android `.4` candidate. Windows DHU reached a live Trailhead Car App Library
+  session, displayed the saved Flagstaff-to-Moab route, started guidance,
+  accepted the official `AUTO_DRIVE` diagnostic command, rendered route
+  progress and the compass, and returned to route preview after End.
+- A live user voice attempt requested “Navigate to Arches National Park with
+  Trailhead.” Android logs confirm Gemini activated
+  (`GH.AssistantEdProvider ... USED_GEMINI`) but contain no subsequent
+  `androidx.car.app.action.NAVIGATE` delivery or Trailhead destination-routing
+  event. The unmatched-destination NF-6 host handoff is therefore not claimed
+  as passed. The user's remote-island location could prevent a later drivable
+  route calculation, but it does not explain the missing assistant-to-app
+  navigation intent.
+- Computer Use was stopped with the physical Escape key before the post-command
+  DHU screen could be captured. No additional DHU clicks or repeated voice
+  attempts were made after that stop.
+- Official Mapbox documentation review:
+  - MapGPT is enabled by default only after adopting the Mapbox Navigation UX
+    Framework and `DashNavigationFragment`; it is not a switch exposed by the
+    Maps token already used by Trailhead.
+  - The documented UX Framework is Public Preview beta software under Mapbox
+    evaluation terms, uses a separate Maven dependency and secret
+    `Downloads:Read` build credential, and Mapbox's product page still presents
+    MapGPT as request-access.
+  - Replacing Trailhead's existing React Native `NativeMap`, route state,
+    offline coordinator, Android Auto `CarAppService`, and Trailhead-owned
+    Co-Pilot with the complete UX Framework would be a native architecture
+    change, not an OTA-safe activation.
+- Recommended product boundary:
+  - Keep Gemini/Google Assistant navigation-intent support because Android car
+    quality criterion `VC-1` requires it.
+  - Add a Trailhead-owned Co-Pilot microphone action inside Trailhead's
+    `NavigationTemplate` using `CarAudioRecord`, explicit press-to-talk,
+    runtime microphone consent, transient exclusive audio focus, a visible
+    listening indicator, constrained driving-safe commands, and confirmation
+    before route/trip mutations.
+  - Reuse Trailhead's existing Realtime Co-Pilot, Mapbox Search/Directions
+    context, canonical camps/services/POIs, tool bridge, entitlements, command
+    ledger, and privacy controls. Do not replace the system Gemini button,
+    continuously listen, or show free-form chat while driving.
+  - Evaluate actual MapGPT only in an isolated flagged native spike after
+    Mapbox confirms consumer-mobile/Android-Auto support, commercial terms,
+    custom action/event access, data retention, and coexistence with
+    Trailhead's current renderer and route source of truth.
+- Open P0/P1:
+  - P1 release evidence: the system assistant did not deliver the requested
+    unmatched destination to Trailhead in this observed run.
+  - No crash, ANR, Trailhead car-service exception, or regression in saved-route
+    guidance was observed.
+- Exact next action: when Computer Use is available again, inspect the existing
+  DHU session once and run one bounded Gemini navigation request. If Trailhead
+  receives the destination, verify its car-only resolve/start path. If the
+  system sends the request to another navigation app or sends no intent, record
+  the default-navigation/host behavior once and use Trailhead's in-app
+  Co-Pilot microphone as the product path rather than looping.
+- Do not repeat: saved-route Start/AUTO_DRIVE/End, Memory Gate, Layers,
+  Yellowstone Search, NPS research, Camp Guide, Sheet/POI broad crawl,
+  Originals lifecycle, production OTA work, or store screenshots.
+- Task-owned background processes: Windows DHU PID `4168` and the existing ADB
+  server remain active for the connected device session. No Metro, Gradle,
+  Maestro, EAS publisher, Railway deployment, or test process is running.

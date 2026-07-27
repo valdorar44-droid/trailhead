@@ -240,13 +240,14 @@ expect(!branchAttribution.includes('.setIdentity('), 'Branch must not receive Tr
 expect(!branchAttribution.includes('.logEvent('), 'Branch purchase or behavioral events must not be emitted.');
 expect(!branchAttribution.includes('.userCompletedAction('), 'Branch custom behavioral events must not be emitted.');
 contains('app.config.js', "EXPO_PUBLIC_BRANCH_ATTRIBUTION_ENABLED || 'false'", 'Branch attribution must be disabled by default.');
-contains('lib/privacy/mapboxTelemetry.ts', 'setTelemetryEnabled(false)', 'Nonessential Mapbox telemetry must remain disabled.');
-expect(!source('lib/privacy/mapboxTelemetry.ts').includes('setTelemetryEnabled(true)'), 'Mapbox telemetry must not be enabled.');
+contains('lib/privacy/mapboxTelemetry.native.ts', 'setTelemetryEnabled(false)', 'Nonessential Mapbox telemetry must remain disabled.');
+expect(!source('lib/privacy/mapboxTelemetry.native.ts').includes('setTelemetryEnabled(true)'), 'Mapbox telemetry must not be enabled.');
 expect(
-  source('lib/privacy/mapboxTelemetry.ts').indexOf('setAccessToken(token)')
-    < source('lib/privacy/mapboxTelemetry.ts').indexOf('setTelemetryEnabled(false)'),
+  source('lib/privacy/mapboxTelemetry.native.ts').indexOf('setAccessToken(token)')
+    < source('lib/privacy/mapboxTelemetry.native.ts').indexOf('setTelemetryEnabled(false)'),
   'Mapbox access token must be configured before the native telemetry opt-out call.',
 );
+expect(!source('lib/privacy/mapboxTelemetry.web.ts').includes('@rnmapbox/maps'), 'Web must not import native Mapbox telemetry APIs.');
 contains('lib/store.ts', 'disableNonessentialMapboxTelemetry(token)', 'Mapbox telemetry must be disabled after a valid token is loaded.');
 expect(!source('app/_layout.tsx').includes('disableNonessentialMapboxTelemetry('), 'Do not call the native Mapbox telemetry API before a token is loaded.');
 contains('lib/referrals/referralLinks.ts', 'TRAILHEAD_HTTPS_HOSTS', 'Referral URL parsing must enforce trusted Trailhead hosts.');

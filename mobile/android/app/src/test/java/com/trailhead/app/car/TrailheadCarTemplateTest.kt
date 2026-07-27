@@ -36,6 +36,13 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], application = Application::class)
 class TrailheadCarTemplateTest {
+  @Test
+  fun copilotActionShowsDoneOnlyWhileListening() {
+    assertEquals("Done", copilotGuidanceActionLabel(TrailheadCarCopilotStatus.LISTENING))
+    assertEquals("Co-Pilot", copilotGuidanceActionLabel(TrailheadCarCopilotStatus.IDLE))
+    assertEquals("Co-Pilot", copilotGuidanceActionLabel(TrailheadCarCopilotStatus.PROCESSING))
+    assertEquals("Co-Pilot", copilotGuidanceActionLabel(TrailheadCarCopilotStatus.RESPONSE))
+  }
   private lateinit var application: Application
   private lateinit var carContext: TestCarContext
   private lateinit var mapSurface: TrailheadCarMapSurface

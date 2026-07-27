@@ -8,6 +8,7 @@ import android.location.Location
 import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
+import android.media.ToneGenerator
 import android.os.Build
 import android.os.FileObserver
 import android.os.Handler
@@ -81,6 +82,7 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
   private val destinationRouteExecutor = Executors.newSingleThreadExecutor()
   private val copilotExecutor = Executors.newSingleThreadExecutor()
   private var copilotAudio: TrailheadCarCopilotAudio? = null
+  private var copilotTone: ToneGenerator? = null
   private var copilotSessionId: String? = null
   private var copilotGeneration = 0L
   private var pendingCopilotAction: CarCopilotAction? = null
@@ -183,6 +185,8 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
         copilotGeneration += 1L
         copilotAudio?.release()
         copilotAudio = null
+        copilotTone?.release()
+        copilotTone = null
         copilotExecutor.shutdownNow()
         dismissCopilotAlert()
         activeSpeechId = null
@@ -435,11 +439,13 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
       status = TrailheadCarCopilotStatus.LISTENING,
       message = "Listening. Tap Done when finished.",
     )
-    showCopilotAlert("Listening", copilotState.message)
+    dismissCopilotAlert()
     invalidateGuidanceScreen()
-    if (copilotAudio?.start() != true) {
+    if (copilotAudio?.start() == true) {
+      playCopilotCue(ToneGenerator.TONE_PROP_BEEP)
+      CarToast.makeText(carContext, "Listening…", CarToast.LENGTH_SHORT).show()
+    } else if (copilotState.status == TrailheadCarCopilotStatus.LISTENING) {
       copilotState = TrailheadCarCopilotState()
-      dismissCopilotAlert()
       invalidateGuidanceScreen()
     }
   }
@@ -450,12 +456,14 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
 
   private fun submitCopilotAudio(audio: ByteArray) {
     if (destroyed) return
+    playCopilotCue(ToneGenerator.TONE_PROP_ACK)
     val generation = ++copilotGeneration
     copilotState = TrailheadCarCopilotState(
       status = TrailheadCarCopilotStatus.PROCESSING,
       message = "Checking Trailhead and the current route.",
     )
-    showCopilotAlert("Checking", copilotState.message)
+    dismissCopilotAlert()
+    CarToast.makeText(carContext, "Checking…", CarToast.LENGTH_SHORT).show()
     invalidateGuidanceScreen()
     val context = carCopilotContext()
     val routeId = snapshot.route?.routeId
@@ -682,7 +690,17 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
         message = message,
       )
       showCopilotAlert("Co-Pilot", message, dismissible = true)
+      CarToast.makeText(carContext, message, CarToast.LENGTH_LONG).show()
       invalidateGuidanceScreen()
+    }
+  }
+
+  private fun playCopilotCue(tone: Int) {
+    runCatching {
+      val generator = copilotTone ?: ToneGenerator(AudioManager.STREAM_MUSIC, 80).also {
+        copilotTone = it
+      }
+      generator.startTone(tone, COPILOT_CUE_DURATION_MILLIS)
     }
   }
 
@@ -1069,6 +1087,7 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
   }
 
   private companion object {
+    const val COPILOT_CUE_DURATION_MILLIS = 160
     const val TAG = "TrailheadCarSession"
     const val MAX_NAVIGATION_LOCATION_AGE_MS = 2L * 60L * 1_000L
     const val DESTINATION_LOCATION_TIMEOUT_MS = 15_000L

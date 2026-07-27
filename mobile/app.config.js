@@ -22,7 +22,7 @@ module.exports = {
     name: 'Trailhead',
     slug: 'trailhead',
     version: '1.0.10',
-    runtimeVersion: 'native-1.0.10-ios.4',
+    runtimeVersion: 'native-1.0.10-ios.5',
     newArchEnabled: true,
     updates: { url: 'https://u.expo.dev/92c016d2-6e63-480e-a483-a6898d7e77d5' },
     icon: './assets/icon.png',
@@ -34,7 +34,7 @@ module.exports = {
       backgroundColor: '#0c0f14',
     },
     ios: {
-      runtimeVersion: 'native-1.0.10-ios.4',
+      runtimeVersion: 'native-1.0.10-ios.5',
       supportsTablet: true,
       bundleIdentifier: 'com.trailhead.app',
       usesAppleSignIn: true,
@@ -58,7 +58,7 @@ module.exports = {
       },
     },
     android: {
-      runtimeVersion: 'native-1.0.10-android.5',
+      runtimeVersion: 'native-1.0.10-android.6',
       adaptiveIcon: {
         foregroundImage: './assets/adaptive-icon.png',
         backgroundColor: '#0c0f14',

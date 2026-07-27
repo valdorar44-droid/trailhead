@@ -418,13 +418,16 @@ internal class TrailheadCarGuidanceScreen(
   private fun guidanceActions(): ActionStrip {
     val actions = ActionStrip.Builder()
     if (controller.snapshot.account.copilotEnabled && carContext.carAppApiLevel >= 5) {
-      val listening = controller.copilotState.status == TrailheadCarCopilotStatus.LISTENING
       actions.addAction(
         Action.Builder()
-          .setTitle(if (listening) "Done" else "Co-Pilot")
+          .setTitle(copilotGuidanceActionLabel(controller.copilotState.status))
           .setIcon(carIcon(carContext, R.drawable.ic_car_copilot))
           .setOnClickListener {
-            if (listening) controller.stopCopilot() else controller.startCopilot()
+            if (controller.copilotState.status == TrailheadCarCopilotStatus.LISTENING) {
+              controller.stopCopilot()
+            } else {
+              controller.startCopilot()
+            }
             invalidate()
           }
           .build(),
@@ -458,6 +461,10 @@ internal class TrailheadCarGuidanceScreen(
     )
     return actions.build()
   }
+}
+
+internal fun copilotGuidanceActionLabel(status: TrailheadCarCopilotStatus): String {
+  return if (status == TrailheadCarCopilotStatus.LISTENING) "Done" else "Co-Pilot"
 }
 
 internal class TrailheadCarArrivalScreen(

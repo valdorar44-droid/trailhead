@@ -1,6 +1,6 @@
 """Trailhead FastAPI server. All API routes."""
 from __future__ import annotations
-import asyncio, os, sys, json, uuid, secrets, xml.etree.ElementTree as ET, time, hashlib, hmac, re, sqlite3, smtplib, html, base64, binascii, math, heapq, threading, functools, logging, contextvars, ipaddress, io
+import asyncio, os, sys, json, uuid, secrets, xml.etree.ElementTree as ET, time, hashlib, hmac, re, sqlite3, smtplib, html, base64, binascii, math, heapq, threading, functools, logging, contextvars, ipaddress, io, wave
 from concurrent.futures import Future as ConcurrentFuture, ThreadPoolExecutor
 from datetime import datetime, timezone
 from email.message import EmailMessage
@@ -7664,6 +7664,13 @@ class ExtremeCopilotMessageRequest(BaseModel):
     mode: str = "text"
     context: CopilotContext = Field(default_factory=CopilotContext)
     provider: str = "trailhead_openai"
+
+class CarCopilotTurnRequest(BaseModel):
+    session_id: Optional[str] = None
+    trip_id: Optional[str] = None
+    audio_l16_base64: str = Field(min_length=4, max_length=700_000)
+    sample_rate: int = 16_000
+    context: CopilotContext = Field(default_factory=CopilotContext)
 
 class ExtremeCopilotConfirmRequest(BaseModel):
     action_id: int
@@ -17823,6 +17830,228 @@ def extreme_copilot_session(body: ExtremeCopilotSessionRequest, user: dict = Dep
         "provider": "trailhead_openai",
         "voice_enabled": bool(config["feature_flags"]["voice"]),
         "ledger_id": event_id,
+    }
+
+def _car_copilot_wav_from_l16(encoded: str, sample_rate: int) -> bytes:
+    if sample_rate != 16_000:
+        raise HTTPException(400, {"code": "unsupported_audio_format", "message": "Use 16 kHz car microphone audio."})
+    try:
+        network_order_pcm = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(400, {"code": "invalid_audio", "message": "The microphone audio could not be read."})
+    if len(network_order_pcm) < 3_200:
+        raise HTTPException(400, {"code": "audio_too_short", "message": "Hold Co-Pilot while you speak."})
+    if len(network_order_pcm) > 480_000 or len(network_order_pcm) % 2:
+        raise HTTPException(413, {"code": "audio_too_large", "message": "Try a shorter request."})
+    # CarAudioRecord provides audio/l16: signed, mono, 16-bit network byte order.
+    little_endian_pcm = bytearray(len(network_order_pcm))
+    little_endian_pcm[0::2] = network_order_pcm[1::2]
+    little_endian_pcm[1::2] = network_order_pcm[0::2]
+    output = io.BytesIO()
+    with wave.open(output, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(sample_rate)
+        wav.writeframes(little_endian_pcm)
+    return output.getvalue()
+
+async def _transcribe_car_copilot_audio(wav_audio: bytes) -> str:
+    api_key = settings.openai_api_key or os.environ.get("OPENAI_API_KEY", "")
+    if not api_key:
+        raise HTTPException(503, {"code": "copilot_unavailable", "message": "Co-Pilot needs a connection right now."})
+    try:
+        async with httpx.AsyncClient(timeout=18.0, follow_redirects=False) as client:
+            response = await client.post(
+                "https://api.openai.com/v1/audio/transcriptions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                data={
+                    "model": os.environ.get("OPENAI_TRANSCRIBE_MODEL", "gpt-4o-mini-transcribe"),
+                    "response_format": "json",
+                    "language": "en",
+                    "prompt": "Trailhead navigation. Camps, fuel, trailheads, routes, public land, weather, and road conditions.",
+                },
+                files={"file": ("trailhead-copilot.wav", wav_audio, "audio/wav")},
+            )
+    except httpx.RequestError:
+        raise HTTPException(503, {"code": "copilot_offline", "message": "Co-Pilot needs a connection right now."})
+    if response.status_code >= 400:
+        raise HTTPException(503, {"code": "copilot_unavailable", "message": "Co-Pilot could not answer right now."})
+    try:
+        transcript = " ".join(str(response.json().get("text") or "").split())[:1_200]
+    except (ValueError, AttributeError):
+        transcript = ""
+    if not transcript:
+        raise HTTPException(422, {"code": "speech_not_recognized", "message": "I did not catch that. Try again."})
+    return transcript
+
+def _car_route_status_message(command: str, context: dict) -> str | None:
+    if not re.search(r"\b(eta|how (?:much )?longer|how far|time left|distance left|when will|arrival)\b", command.lower()):
+        return None
+    route = context.get("route") if isinstance(context.get("route"), dict) else {}
+    distance_m = _first_number(route.get("remaining_distance_m"))
+    duration_s = _first_number(route.get("remaining_duration_s"))
+    pieces: list[str] = []
+    if distance_m is not None and distance_m >= 0:
+        miles = distance_m / 1609.344
+        pieces.append(f"{miles:.1f} miles" if miles < 10 else f"{round(miles):.0f} miles")
+    if duration_s is not None and duration_s >= 0:
+        total_minutes = max(1, round(duration_s / 60))
+        hours, minutes = divmod(total_minutes, 60)
+        pieces.append(
+            f"{hours} hour{'s' if hours != 1 else ''}" +
+            (f" {minutes} minutes" if minutes else "")
+            if hours else f"{minutes} minutes"
+        )
+    return f"{' and '.join(pieces)} remaining." if pieces else "Route timing is not available yet."
+
+async def _car_copilot_grounded_message(map_action: dict, context: dict, user: dict) -> tuple[str, list[dict]]:
+    route_status = _car_route_status_message(str(map_action.get("_command") or ""), context)
+    if route_status:
+        return route_status, []
+    if map_action.get("action_type") != "searchPlaces":
+        return str(map_action.get("message") or "Co-Pilot is ready."), []
+    args = map_action.get("args") if isinstance(map_action.get("args"), dict) else {}
+    center_value = args.get("near")
+    center = _valid_context_point(center_value)
+    if not center:
+        return "I need your current map or route location to search nearby.", []
+    category = str(args.get("category") or "place")[:80]
+    query = str(args.get("query") or args.get("keyword") or "")[:120]
+    request = MapContextSearchRequest(
+        q=query,
+        category=category,
+        keyword=str(args.get("keyword") or "")[:80],
+        limit=3,
+        center=MapContextPoint(lat=float(center["lat"]), lng=float(center["lng"])),
+        metadata={"surface": "android_auto_copilot"},
+    )
+    features, _ = await _map_context_searchbox_features(request)
+    places = [
+        place for place in (
+            _map_context_normalize_mapbox_feature(
+                feature,
+                category=category,
+                center=request.center,
+                source="mapbox_search",
+            )
+            for feature in features[:3]
+        )
+        if place
+    ]
+    candidates = [
+        {
+            "id": str(place.get("id") or place.get("mapbox_id") or "")[:180],
+            "name": str(place.get("name") or place.get("title") or "")[:120],
+            "lat": _first_number(place.get("lat")),
+            "lng": _first_number(place.get("lng")),
+            "distance_m": _first_number(place.get("distance_m")),
+        }
+        for place in places[:3]
+        if isinstance(place, dict) and str(place.get("name") or place.get("title") or "").strip()
+    ]
+    names = [item["name"] for item in candidates]
+    if not names:
+        return f"I could not find {category} near this route.", []
+    if len(names) == 1:
+        return f"I found {names[0]}.", candidates
+    return f"I found {names[0]}, then {names[1]}." if len(names) == 2 else f"I found {names[0]}, {names[1]}, and {names[2]}.", candidates
+
+def _build_car_copilot_action(command: str, context: dict) -> dict:
+    navigation = re.search(
+        r"\b(?:navigate|start navigation|start guidance|route me|directions)\s+(?:to\s+)?(.{2,180})",
+        command,
+        flags=re.I,
+    )
+    if navigation:
+        destination = navigation.group(1).strip(" .")
+        action = _build_extreme_map_action("route me there", context, "trailhead_openai")
+        action.update({
+            "action_type": "buildRoute",
+            "args": {
+                "instruction": command[:240],
+                "query": destination[:180],
+                "destination": None,
+                "tool_bridge": {
+                    "tool": "trailhead.route_preview",
+                    "contract": TRAILHEAD_COPILOT_TOOL_CONTRACT_VERSION,
+                },
+            },
+            "message": f"Confirm to navigate to {destination}.",
+            "requires_confirmation": True,
+            "route_preview": {"status": "requires_confirmation", "instruction": command[:240]},
+        })
+        return action
+    action = _build_extreme_map_action(command, context, "trailhead_openai")
+    if action["action_type"] in {
+        "startNavigation",
+        "buildRoute",
+        "routeToSelectedPlace",
+        "modifyRoute",
+        "addRouteStop",
+        "removeRouteStop",
+    }:
+        action["requires_confirmation"] = True
+    return action
+
+@app.post("/api/explorer/copilot/car/turn")
+async def car_copilot_turn(body: CarCopilotTurnRequest, user: dict = Depends(_current_user)):
+    _require_extreme_copilot(user, voice=True)
+    wav_audio = _car_copilot_wav_from_l16(body.audio_l16_base64, body.sample_rate)
+    command = await _transcribe_car_copilot_audio(wav_audio)
+    context = _copilot_context_dict(body.context)
+    map_action = _build_car_copilot_action(command, context)
+    map_action["_command"] = command
+    clean_session = _clean_extreme_session_id(body.session_id)
+    trip_id = (body.trip_id or "").strip()[:120] or None
+    spoken_summary, candidates = await _car_copilot_grounded_message(map_action, context, user)
+    map_action.pop("_command", None)
+    stored_map_action = {
+        **map_action,
+        "args": {
+            key: value
+            for key, value in (map_action.get("args") or {}).items()
+            if key not in {"near", "location", "origin", "current_location"}
+        },
+    }
+    payload = {
+        "schema_version": 1,
+        "response": spoken_summary,
+        "requires_confirmation": bool(map_action["requires_confirmation"]),
+        "mode": "voice",
+        "provider": "trailhead_openai",
+        "map_action": stored_map_action,
+        "surface": "android_auto",
+    }
+    staged = stage_extreme_copilot_action(user["id"], "voice_command", map_action["action_type"], clean_session, trip_id, payload)
+    ledger_id = log_extreme_ledger_event(
+        user["id"],
+        "car_copilot_action_staged",
+        clean_session,
+        "android_auto",
+        trip_id,
+        {
+            "action_id": staged["id"],
+            "action_type": map_action["action_type"],
+            "result_status": "staged",
+            "cost_bucket": map_action["cost_class"],
+            "requires_confirmation": bool(map_action["requires_confirmation"]),
+            "candidate_count": len(candidates),
+        },
+    )
+    return {
+        "ok": True,
+        "session_id": clean_session,
+        "message": spoken_summary,
+        "spoken_summary": spoken_summary,
+        "requires_confirmation": bool(map_action["requires_confirmation"]),
+        "action": {
+            "id": staged["id"],
+            "action_type": map_action["action_type"],
+            "args": stored_map_action["args"],
+            "label": EXTREME_COPILOT_ACTIONS.get(map_action["action_type"], "Review"),
+        },
+        "candidates": candidates,
+        "ledger_id": ledger_id,
     }
 
 @app.post("/api/explorer/copilot/message")

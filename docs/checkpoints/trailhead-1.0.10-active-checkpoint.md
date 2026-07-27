@@ -1824,3 +1824,35 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Task-owned background processes: Windows DHU PID `4168` and the existing ADB
   server remain active for the connected device session. No Metro, Gradle,
   Maestro, EAS publisher, Railway deployment, or test process is running.
+
+### Deferred Phase 2: Co-Pilot voice reporting
+
+- Design source: Figma packet `25 · Android Auto Co-Pilot — Review 01`,
+  Phase 2 node `774:2406`.
+- Sequence is fixed: finish and validate the core press-to-talk Co-Pilot first,
+  then add voice reporting through the existing Trailhead report pipeline.
+- Waze behavior research confirmed the useful pattern: tap to talk, describe an
+  incident in natural language, capture the incident location when reporting
+  begins, ask one short follow-up only when needed, and apply reporting limits.
+- Trailhead will keep explicit confirmation before publishing a public report.
+  Example: “There is a tree down on the road at my location” becomes a Hazard
+  draft, followed by “Report a road hazard at your location?” with Confirm and
+  Cancel.
+- Initial voice phrases map only to existing canonical categories:
+  `hazard`, `road_closed`, `gate_closed`, `camp_full`, `no_fuel`, and `police`.
+  Tree, rock, debris, animal, and object-on-road phrases map to `hazard` until a
+  separately reviewed subtype contract exists.
+- The existing sign-in check, encrypted car-report session, exact-location
+  capture, duplicate protection, category TTL, offline queue, retry worker,
+  moderation, and backend submission remain authoritative. Voice reporting
+  must not create a second report store or bypass those controls.
+- Raw voice text is transient and must not enter analytics, Sentry, ordinary
+  logs, or the public report payload. Only the confirmed canonical category and
+  the existing report fields are persisted.
+- Exact next action after core Co-Pilot acceptance: add a constrained
+  voice-report draft classifier, one-question clarification path, explicit
+  car-template confirmation, and focused tests for police, tree/object hazard,
+  road/gate closure, camp full, no fuel, cancellation, duplicate detection,
+  offline queueing, and expiry.
+- Do not start this phase before the core Co-Pilot microphone, audio focus,
+  response, confirmation, interruption, offline, and privacy paths pass.

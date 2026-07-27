@@ -1897,3 +1897,78 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Task-owned background processes: the prior Windows DHU/ADB session may still
   exist; no new Metro, Gradle, Maestro, EAS, Railway, or test process was
   started for this checkpoint.
+## Android Auto Co-Pilot core implementation and paired native preview
+
+- Timestamp: `2026-07-26T22:05:36-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; exact implementation source
+  `b8c4fa308ee7f7848e2d1ec5d7dc5da59addc68f`, pushed to origin.
+- Intentional commits:
+  - `2c9d23b` — server-owned Android Auto transcription and action turn.
+  - `b8c4fa3` — bounded native press-to-talk client, secure session bridge,
+    Explorer entitlement sync, tests, and paired runtime advance.
+- Protected Explore index SHA-256 remains
+  `7E59E5E2273DBBE1A26D7BBD4D947FAA20935C51FB79C464EED8A17BABF4D8F4`.
+  `.cursor/`, `dashboard/explore_serving_index_v2.json`,
+  `docs/app-store-copy.md`, Android helper mode changes, and unrelated
+  Valhalla/NPS scripts remain excluded and unstaged.
+- Core behavior follows approved Figma node `773:2406`:
+  - Guidance exposes Co-Pilot as the fourth action only for Explorer members
+    and Car API 5+.
+  - Capture is explicit press-to-talk through `CarAudioRecord`, uses exclusive
+    transient focus, is bounded to 12 seconds/480 KB, and stops on focus loss,
+    screen/session teardown, or the Done action.
+  - The native client reuses the encrypted car session and calls Trailhead's
+    server only. It does not contain an OpenAI key or direct OpenAI endpoint.
+  - The server converts car `audio/l16` to a mono 16 kHz WAV, uses the existing
+    OpenAI server credential for transcription, grounds read-only route/search
+    answers in Trailhead/Mapbox, and stages mutations through the existing
+    confirmation ledger.
+  - Raw speech, transcripts, current coordinates, route geometry, search text,
+    tokens, and arbitrary error messages are not written to the ledger,
+    analytics, Sentry, or snapshots. Only fixed action/status/count fields are
+    retained.
+  - Navigation/route mutations require Confirm or Cancel. Confirmed navigation
+    reuses the existing Android Auto route and guidance controller.
+  - Wake words, continuous listening, a chat transcript, in-car purchases, and
+    voice reporting remain deliberately absent. Voice reporting remains the
+    separate later packet represented by Figma node `774:2406`.
+- Focused verification passed:
+  - Backend Co-Pilot and tool-bridge tests: `10/10`.
+  - Car entitlement integration tests.
+  - TypeScript.
+  - Privacy controls.
+  - User-facing copy audit (`165` files).
+  - Native/config drift, including microphone permission, bounded
+    `CarAudioRecord`, secure server bridge, no direct OpenAI call, and no
+    continuous/wake-word listener.
+  - Android app and secure native-module Kotlin compile and debug unit tests;
+    Gradle reported `BUILD SUCCESSFUL`.
+  - Python compile and whitespace checks.
+- Backend deployment
+  `ddfd366b-9b03-436c-8a7c-865415ae8710` succeeded on Railway from exact
+  `b8c4fa3`; image digest
+  `sha256:94a754b3404402da0c6b839a6a96d11ac9e0407dc559d72f93b9731b7cfe0fb3`.
+  `https://api.gettrailhead.app/api/health` returned
+  `{"status":"ok","service":"trailhead"}` and the new car-turn route returned
+  the expected unauthenticated `401`.
+- Paired preview builds were submitted from the same immutable source:
+  - Android build `67`, ID `6d288c80-cc72-422f-91e1-efe3cc4df5c6`,
+    runtime `native-1.0.10-android.5`, fingerprint
+    `ed0cd1593b5a6c881e6929f350d45bd496f0921f`.
+  - iOS build `59`, ID `37eb8419-9ee2-4cea-a84d-f75e65975b75`,
+    runtime `native-1.0.10-ios.4`, fingerprint
+    `eb049698c6e437df69cc8ac91451c712aa64f191`.
+  - Both builds were `IN_PROGRESS` at checkpoint time.
+- Open P0/P1: none in focused source/compile coverage. Native device and DHU
+  acceptance remain pending until Android build `67` completes.
+- Exact next action: wait for Android build `67`, install it, synchronize the
+  signed-in Explorer snapshot, and run one bounded DHU test covering Co-Pilot
+  availability, press-to-talk, route-status/search response, confirmation,
+  navigation reuse, audio focus, errors, and teardown. Test iOS build `59`
+  afterward only for paired identity/shared-app regression; the car feature is
+  Android Auto-only.
+- Do not repeat: Camp Guide, Sheet/POI/Search crawls, Memory Gate, Layers,
+  Yellowstone, NPS rabbit-hole research, Originals lifecycle, store
+  screenshots, broad Map regression, or voice-report implementation.
+- Task-owned background processes: EAS cloud builds `67` and `59` only. Local
+  Gradle, tests, Railway upload, and deployment commands have exited.

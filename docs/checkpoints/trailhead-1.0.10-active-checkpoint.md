@@ -1834,6 +1834,14 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
 - Waze behavior research confirmed the useful pattern: tap to talk, describe an
   incident in natural language, capture the incident location when reporting
   begins, ask one short follow-up only when needed, and apply reporting limits.
+- The report position is frozen at the initial Co-Pilot tap, before recording,
+  classification, clarification, confirmation, or upload. Use the best
+  sufficiently fresh qualified fix available at that instant; do not move the
+  report to where the vehicle is when speech or confirmation finishes.
+- If no sufficiently fresh qualified fix exists, begin location acquisition and
+  show `Waiting for location`; do not create or publish the report until a fix
+  is available. The frozen point may be map-matched to the active route segment
+  for road placement, but map matching must not advance it along the route.
 - Trailhead will keep explicit confirmation before publishing a public report.
   Example: “There is a tree down on the road at my location” becomes a Hazard
   draft, followed by “Report a road hazard at your location?” with Confirm and

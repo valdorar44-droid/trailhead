@@ -1864,3 +1864,36 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
   offline queueing, and expiry.
 - Do not start this phase before the core Co-Pilot microphone, audio focus,
   response, confirmation, interruption, offline, and privacy paths pass.
+
+## 2026-07-26T21:35:29-05:00 - Core Android Auto Co-Pilot baseline
+
+- Branch: `feat/trailhead-1.0.10-overhaul`.
+- Exact HEAD: `0883e37386799982e9267f6aec169d126d858023`.
+- Protected Explore index SHA-256:
+  `7E59E5E2273DBBE1A26D7BBD4D947FAA20935C51FB79C464EED8A17BABF4D8F4`.
+- Approved design source: Figma node `773:2406`.
+- Scope for this packet is limited to Android Auto press-to-talk Co-Pilot:
+  explicit microphone capture through `CarAudioRecord`, transient exclusive
+  audio focus, a first-party authenticated turn endpoint, concise spoken and
+  in-context responses, and Confirm/Cancel before route mutations.
+- The existing `NativeMap`, route state, compass, Report, Mute, End, Android
+  Auto service, secure car session, entitlements, and server tool bridge remain
+  authoritative.
+- No wake word, continuous listening, AI badge, consumer transcript, direct
+  device-to-provider request, new map engine, or in-car purchase flow is
+  allowed.
+- Deferred voice reporting remains out of scope until the core microphone,
+  interruption, response, confirmation, offline, and privacy paths pass.
+- Protected/unrelated worktree changes present and excluded from every task
+  commit: `.cursor/`, `dashboard/explore_serving_index_v2.json`,
+  `docs/app-store-copy.md`, and the existing mode-only/script changes listed by
+  `git status`.
+- Exact next action: add the constrained native audio/client/session bridge and
+  the server-owned Co-Pilot turn endpoint, then run only focused unit,
+  backend, Android compile, privacy, and car-template tests.
+- Do not repeat: Memory Gate, Layers, Yellowstone Search, NPS research, Camp
+  Guide, Sheet/POI broad crawl, Originals lifecycle, saved-route DHU evidence,
+  production OTA work, or store screenshots.
+- Task-owned background processes: the prior Windows DHU/ADB session may still
+  exist; no new Metro, Gradle, Maestro, EAS, Railway, or test process was
+  started for this checkpoint.

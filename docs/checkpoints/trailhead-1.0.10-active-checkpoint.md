@@ -1972,3 +1972,72 @@ Task-owned background-process state at this checkpoint: no Gradle, Metro, Expo, 
   screenshots, broad Map regression, or voice-report implementation.
 - Task-owned background processes: EAS cloud builds `67` and `59` only. Local
   Gradle, tests, Railway upload, and deployment commands have exited.
+
+## Android Auto Co-Pilot listening feedback and paired native candidate
+
+- Timestamp: `2026-07-27T00:47:51-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; exact source
+  `08debcceff098b2e19542591a6959301ea5b5b93`, committed and pushed.
+- Intentional commits after the prior checkpoint:
+  - `0e1f4cf` — initialize Mapbox before the Android telemetry opt-out.
+  - `70118e3` — isolate native Mapbox telemetry configuration by platform.
+  - `08debcc` — add Android Auto Co-Pilot listening and completion feedback.
+- Protected Explore index SHA-256 remains
+  `7E59E5E2273DBBE1A26D7BBD4D947FAA20935C51FB79C464EED8A17BABF4D8F4`.
+  `.cursor/`, `dashboard/explore_serving_index_v2.json`,
+  `docs/app-store-copy.md`, Android helper mode changes, and unrelated
+  Valhalla/NPS scripts remain excluded and unstaged.
+- The initial build-67 device launch exposed and then verified the Mapbox
+  initialization correction. A paired preview OTA from `70118e3` was
+  published successfully:
+  - Android update `019fa1cf-b7b5-70e9-a4ac-6c8aa3ee5000`, group
+    `21ecc613-3852-4074-b52b-3ca5f997c6e5`, runtime
+    `native-1.0.10-android.5`.
+  - iOS update `019fa1cf-b7b5-75e8-8c31-a20c8a908c41`, group
+    `546bc1e9-ae76-42b4-8277-738d23fb496f`, runtime
+    `native-1.0.10-ios.4`.
+- The bounded DHU run proved that Co-Pilot was recording, but its blocking
+  alert hid the guidance action strip and provided no perceivable listening
+  feedback. This was treated as one deterministic P1 rather than reopening a
+  broad Android Auto crawl.
+- `08debcc` replaces that alert with:
+  - A short start cue and `Listening…` car toast.
+  - A persistent `Done` guidance action and visible listening waveform.
+  - A completion cue and `Checking…` car toast.
+  - Existing server response, confirmation, audio focus, and teardown behavior
+    remain unchanged.
+- Focused verification passed before the paired build:
+  - Android app Kotlin compile and debug unit tests (`BUILD SUCCESSFUL`).
+  - TypeScript.
+  - Native/config drift.
+  - Privacy controls.
+  - User-facing copy audit (`165` files).
+  - Whitespace checks.
+- Paired preview binaries completed from the same immutable source:
+  - Android build `68`, ID `093378cc-0499-4ed7-9460-2db2e44ebe7e`,
+    runtime `native-1.0.10-android.6`, fingerprint
+    `956c20f23840c8a3916eb9dddadc27ad0dff6a52`.
+  - iOS build `60`, ID `ec7d6add-76eb-4eb0-8006-52d5654f0879`,
+    runtime `native-1.0.10-ios.5`, fingerprint
+    `96fb321cc49caa4ca2678c0c036ee6feb069cd7f`.
+- Android build `68` was installed in place on Samsung `RFCR408DA9B`.
+  Installed identity showed version `1.0.10`, version code `68`. The APK
+  SHA-256 is
+  `82C2D4B5DE3F7AE6B62BF30DA7DED0A6987BE77FDDE9CF1E4903D683483919B0`.
+- The narrow DHU verification passed the observable assertions:
+  - Starting Co-Pilot changed the action from `Co-Pilot` to `Done`.
+  - The listening waveform appeared without replacing the guidance screen.
+  - Ending capture returned a grounded Co-Pilot response (`Reports opened`).
+  - The response was dismissed and the test route was ended.
+- Open P0/P1: none in source, build, install, and visual DHU coverage. Human
+  confirmation that the two cues were audible in the physical audio path is
+  the only pending acceptance note.
+- Exact next action after the user's usage break: confirm the audible start and
+  completion cues once. If accepted, checkpoint the Android Auto Co-Pilot core
+  as complete before beginning the deferred voice-report packet.
+- Do not repeat: Memory Gate, Layers, Yellowstone Search, NPS research, Camp
+  Guide, Sheet/POI broad crawl, Originals lifecycle, saved-route DHU evidence,
+  production OTA work, or store screenshots.
+- Task-owned background processes: none. EAS builds, downloads, installs,
+  Gradle, tests, and the bounded DHU test have exited. The Codex Node REPL
+  helper is platform-owned and should not be treated as a task process.

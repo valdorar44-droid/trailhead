@@ -23541,7 +23541,7 @@ function MapScreen() {
       offlineMessage: trail.support.readinessLabel,
     }, {
       trip: carState.activeTrip,
-      account: buildCarAccountState(carState.user, Boolean(carState.token)),
+      account: buildCarAccountState(carState.user, Boolean(carState.token), Date.now(), carState.hasPlan),
       mapboxAccessToken: carState.mapboxToken,
     }).catch(() => {});
   }
@@ -23550,7 +23550,7 @@ function MapScreen() {
     const carState = useStore.getState();
     void clearCarTrailFollow({
       trip: carState.activeTrip,
-      account: buildCarAccountState(carState.user, Boolean(carState.token)),
+      account: buildCarAccountState(carState.user, Boolean(carState.token), Date.now(), carState.hasPlan),
       mapboxAccessToken: carState.mapboxToken,
     }).catch(() => {});
   }

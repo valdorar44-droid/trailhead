@@ -14,6 +14,11 @@ const now = 1_800_000_000_000;
 const account = buildCarAccountState({ id: 42 }, true, now);
 assert(account.accountId === '42', 'signed-in account ID is available to the car app');
 assert(account.reportsEnabled, 'reporting is enabled for an unrestricted signed-in account');
+assert(!account.copilotEnabled, 'Co-Pilot remains unavailable without Explorer');
+
+const explorerAccount = buildCarAccountState({ id: 42 }, true, now, true);
+assert(explorerAccount.copilotEnabled, 'Co-Pilot is available to a signed-in Explorer account');
+assert(explorerAccount.copilotDisabledReason === null, 'Explorer Co-Pilot has no disabled reason');
 
 const restricted = buildCarAccountState({
   id: 42,

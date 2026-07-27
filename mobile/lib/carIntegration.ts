@@ -12,6 +12,8 @@ export type CarNavigationMode =
 export type CarAccountState = {
   accountId: string | null;
   signedIn: boolean;
+  copilotEnabled: boolean;
+  copilotDisabledReason: 'signed_out' | 'explorer_required' | null;
   reportsEnabled: boolean;
   reportsDisabledReason: 'signed_out' | 'temporarily_restricted' | null;
 };
@@ -115,6 +117,8 @@ type ExpoFileSystem = typeof import('expo-file-system/legacy');
 const EMPTY_ACCOUNT: CarAccountState = {
   accountId: null,
   signedIn: false,
+  copilotEnabled: false,
+  copilotDisabledReason: 'signed_out',
   reportsEnabled: false,
   reportsDisabledReason: 'signed_out',
 };
@@ -168,6 +172,7 @@ export function buildCarAccountState(
   user: Pick<User, 'id' | 'reporting_restricted_until'> | null | undefined,
   signedIn: boolean,
   now = Date.now(),
+  hasExplorer = false,
 ): CarAccountState {
   const accountId = user && Number.isFinite(Number(user.id)) ? String(user.id) : null;
   const authenticated = signedIn && accountId != null;
@@ -176,6 +181,12 @@ export function buildCarAccountState(
   return {
     accountId: authenticated ? accountId : null,
     signedIn: authenticated,
+    copilotEnabled: authenticated && hasExplorer,
+    copilotDisabledReason: !authenticated
+      ? 'signed_out'
+      : hasExplorer
+        ? null
+        : 'explorer_required',
     reportsEnabled: authenticated && !restricted,
     reportsDisabledReason: !authenticated
       ? 'signed_out'

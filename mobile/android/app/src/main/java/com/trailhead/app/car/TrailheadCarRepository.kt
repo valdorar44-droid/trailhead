@@ -74,6 +74,8 @@ data class TrailheadCarOfflineReadiness(
 data class TrailheadCarAccount(
   val accountId: String? = null,
   val signedIn: Boolean = false,
+  val copilotEnabled: Boolean = false,
+  val copilotDisabledReason: String = "",
   val reportsEnabled: Boolean = false,
   val reportsDisabledReason: String = "",
 )
@@ -129,6 +131,8 @@ object TrailheadCarRepository {
       .put("account", JSONObject()
         .put("accountId", snapshot.account.accountId)
         .put("signedIn", snapshot.account.signedIn)
+        .put("copilotEnabled", snapshot.account.copilotEnabled)
+        .put("copilotDisabledReason", snapshot.account.copilotDisabledReason)
         .put("reportsEnabled", snapshot.account.reportsEnabled)
         .put("reportsDisabledReason", snapshot.account.reportsDisabledReason))
       .put("offlineReadiness", JSONObject()
@@ -404,6 +408,8 @@ object TrailheadCarRepository {
     return TrailheadCarAccount(
       accountId = clean(value.optString("accountId")).ifEmpty { null },
       signedIn = value.optBoolean("signedIn", false),
+      copilotEnabled = value.optBoolean("copilotEnabled", false),
+      copilotDisabledReason = clean(value.optString("copilotDisabledReason")),
       reportsEnabled = value.optBoolean("reportsEnabled", false),
       reportsDisabledReason = clean(value.optString("reportsDisabledReason")),
     )

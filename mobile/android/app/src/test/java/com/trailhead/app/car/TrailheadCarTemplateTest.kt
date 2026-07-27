@@ -47,6 +47,7 @@ class TrailheadCarTemplateTest {
       Manifest.permission.ACCESS_FINE_LOCATION,
       Manifest.permission.ACCESS_COARSE_LOCATION,
       Manifest.permission.POST_NOTIFICATIONS,
+      Manifest.permission.RECORD_AUDIO,
     )
     carContext = TestCarContext.createCarContext(application).apply {
       updateHandshakeInfo(HandshakeInfo("com.google.android.projection.gearhead", 7))
@@ -157,7 +158,7 @@ class TrailheadCarTemplateTest {
     assertTrue(guidance.navigationInfo is RoutingInfo)
     assertNotNull(guidance.destinationTravelEstimate)
     assertEquals(
-      listOf("Report", "Mute", "End"),
+      listOf("Co-Pilot", "Report", "Mute", "End"),
       requireNotNull(guidance.actionStrip).actions.map { it.title.toString() },
     )
     assertEquals(4, requireNotNull(guidance.mapActionStrip).actions.size)
@@ -247,6 +248,7 @@ class TrailheadCarTemplateTest {
     override val navigating: Boolean = false,
     override val muted: Boolean = false,
   ) : TrailheadCarSessionController {
+    override val copilotState = TrailheadCarCopilotState()
     override val mapSurface: TrailheadCarMapSurface = this@TrailheadCarTemplateTest.mapSurface
 
     override fun startGuidance() = Unit
@@ -259,6 +261,8 @@ class TrailheadCarTemplateTest {
     override fun endGuidanceAndReturnHome() = Unit
     override fun continueAfterArrival(stopIndex: Int) = Unit
     override fun toggleMuted() = Unit
+    override fun startCopilot() = Unit
+    override fun stopCopilot() = Unit
     override fun beginReportLocation() = Unit
     override fun endReportLocation() = Unit
     override fun report(categoryId: String): CarReportEnqueueStatus = CarReportEnqueueStatus.QUEUED
@@ -331,6 +335,7 @@ class TrailheadCarTemplateTest {
       account = TrailheadCarAccount(
         accountId = "account-42",
         signedIn = true,
+        copilotEnabled = true,
         reportsEnabled = true,
       ),
     )

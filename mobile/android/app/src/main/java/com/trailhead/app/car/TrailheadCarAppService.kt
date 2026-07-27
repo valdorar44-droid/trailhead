@@ -16,6 +16,7 @@ import android.os.SystemClock
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.util.Log
+import androidx.car.app.AppManager
 import androidx.car.app.CarAppService
 import androidx.car.app.CarToast
 import androidx.car.app.Screen
@@ -23,6 +24,9 @@ import androidx.car.app.ScreenManager
 import androidx.car.app.Session
 import androidx.car.app.SessionInfo
 import androidx.car.app.model.Distance
+import androidx.car.app.model.Action
+import androidx.car.app.model.Alert
+import androidx.car.app.model.CarText
 import androidx.car.app.navigation.NavigationManager
 import androidx.car.app.navigation.NavigationManagerCallback
 import androidx.car.app.navigation.model.Trip
@@ -32,10 +36,15 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import com.trailhead.app.BuildConfig
 import expo.modules.trailheadcarreports.CarReportEnqueueStatus
+import expo.modules.trailheadcarreports.CarCopilotAction
+import expo.modules.trailheadcarreports.CarCopilotDisposition
+import expo.modules.trailheadcarreports.CarCopilotManager
+import expo.modules.trailheadcarreports.CarCopilotTurnResult
 import expo.modules.trailheadcarreports.CarReportManager
 import java.io.File
 import java.util.Locale
 import java.util.concurrent.Executors
+import org.json.JSONObject
 
 class TrailheadCarAppService : CarAppService() {
   override fun createHostValidator(): HostValidator {
@@ -70,6 +79,11 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
   private var snapshotRemovalObserved = false
   private var routeReplacementRequestedUntilElapsedMs = 0L
   private val destinationRouteExecutor = Executors.newSingleThreadExecutor()
+  private val copilotExecutor = Executors.newSingleThreadExecutor()
+  private var copilotAudio: TrailheadCarCopilotAudio? = null
+  private var copilotSessionId: String? = null
+  private var copilotGeneration = 0L
+  private var pendingCopilotAction: CarCopilotAction? = null
   private var destinationRouteGeneration = 0L
   private var pendingNavigationRequest: PendingNavigationRequest? = null
   private val destinationLocationTimeout = Runnable {
@@ -108,6 +122,8 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
   override var navigating: Boolean = false
     private set
   override var muted: Boolean = false
+    private set
+  override var copilotState = TrailheadCarCopilotState()
     private set
   override lateinit var mapSurface: TrailheadCarMapSurface
     private set
@@ -164,6 +180,11 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
         destinationRouteGeneration += 1L
         pendingNavigationRequest = null
         destinationRouteExecutor.shutdownNow()
+        copilotGeneration += 1L
+        copilotAudio?.release()
+        copilotAudio = null
+        copilotExecutor.shutdownNow()
+        dismissCopilotAlert()
         activeSpeechId = null
         tts?.stop()
         runCatching { abandonSpeechAudioFocus() }
@@ -178,6 +199,11 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
     snapshot = TrailheadCarRepository.load(carContext)
     mapSurface = TrailheadCarMapSurface(carContext)
     mapSurface.setSnapshot(snapshot)
+    copilotAudio = TrailheadCarCopilotAudio(
+      carContext = carContext,
+      onCaptured = ::submitCopilotAudio,
+      onFailure = ::showCopilotError,
+    )
     guidanceScreen = newGuidanceScreen()
     navigationManager = carContext.getCarService(NavigationManager::class.java)
     navigationManager.setNavigationManagerCallback(navigationCallback)
@@ -319,6 +345,11 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
   }
 
   private fun endGuidance(refreshSnapshot: Boolean) {
+    copilotGeneration += 1L
+    copilotAudio?.stop(discard = true)
+    pendingCopilotAction = null
+    copilotState = TrailheadCarCopilotState()
+    dismissCopilotAlert()
     if (navigating) navigationManager.navigationEnded()
     navigating = false
     autoDriveEnabled = false
@@ -370,6 +401,298 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
     if (muted) {
       activeSpeechId = null
       tts?.stop()
+      abandonSpeechAudioFocus()
+    }
+  }
+
+  override fun startCopilot() {
+    if (!snapshot.account.copilotEnabled) {
+      showCopilotError(
+        if (snapshot.account.signedIn) {
+          "Co-Pilot is included with Explorer."
+        } else {
+          "Sign in on your phone to use Co-Pilot."
+        },
+      )
+      return
+    }
+    if (carContext.carAppApiLevel < 5) {
+      showCopilotError("Co-Pilot is not available on this car display.")
+      return
+    }
+    if (carContext.checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+      carContext.requestPermissions(listOf(Manifest.permission.RECORD_AUDIO)) { approved, _ ->
+        if (approved.contains(Manifest.permission.RECORD_AUDIO)) startCopilot()
+        else showCopilotError("Allow microphone access on your phone when parked.")
+      }
+      return
+    }
+    activeSpeechId = null
+    tts?.stop()
+    abandonSpeechAudioFocus()
+    pendingCopilotAction = null
+    copilotState = TrailheadCarCopilotState(
+      status = TrailheadCarCopilotStatus.LISTENING,
+      message = "Listening. Tap Done when finished.",
+    )
+    showCopilotAlert("Listening", copilotState.message)
+    invalidateGuidanceScreen()
+    if (copilotAudio?.start() != true) {
+      copilotState = TrailheadCarCopilotState()
+      dismissCopilotAlert()
+      invalidateGuidanceScreen()
+    }
+  }
+
+  override fun stopCopilot() {
+    copilotAudio?.stop(discard = false)
+  }
+
+  private fun submitCopilotAudio(audio: ByteArray) {
+    if (destroyed) return
+    val generation = ++copilotGeneration
+    copilotState = TrailheadCarCopilotState(
+      status = TrailheadCarCopilotStatus.PROCESSING,
+      message = "Checking Trailhead and the current route.",
+    )
+    showCopilotAlert("Checking", copilotState.message)
+    invalidateGuidanceScreen()
+    val context = carCopilotContext()
+    val routeId = snapshot.route?.routeId
+    copilotExecutor.execute {
+      val result = CarCopilotManager.turn(
+        context = carContext,
+        audioL16 = audio,
+        sessionId = copilotSessionId,
+        tripId = routeId,
+        routeContext = context,
+      )
+      mainHandler.post {
+        if (destroyed || generation != copilotGeneration) return@post
+        presentCopilotResult(result)
+      }
+    }
+  }
+
+  private fun presentCopilotResult(result: CarCopilotTurnResult) {
+    copilotSessionId = result.sessionId ?: copilotSessionId
+    if (result.disposition != CarCopilotDisposition.OK) {
+      showCopilotError(result.message)
+      return
+    }
+    val action = result.action
+    if (result.requiresConfirmation && action != null) {
+      pendingCopilotAction = action
+      copilotState = TrailheadCarCopilotState(
+        status = TrailheadCarCopilotStatus.CONFIRMATION,
+        message = result.message,
+        actionId = action.id,
+        actionType = action.type,
+        actionArgs = action.args.toString(),
+      )
+      showCopilotConfirmation(result.message)
+      speakCopilot(result.message)
+    } else {
+      pendingCopilotAction = null
+      copilotState = TrailheadCarCopilotState(
+        status = TrailheadCarCopilotStatus.RESPONSE,
+        message = result.message,
+      )
+      showCopilotAlert("Co-Pilot", result.message, dismissible = true)
+      speakCopilot(result.message)
+    }
+    invalidateGuidanceScreen()
+  }
+
+  private fun confirmCopilotAction(confirmed: Boolean) {
+    val action = pendingCopilotAction ?: return
+    val generation = ++copilotGeneration
+    pendingCopilotAction = null
+    copilotState = TrailheadCarCopilotState(
+      status = TrailheadCarCopilotStatus.PROCESSING,
+      message = if (confirmed) "Updating the route." else "Canceled.",
+    )
+    if (!confirmed) {
+      copilotExecutor.execute {
+        CarCopilotManager.confirm(carContext, action.id, false)
+        mainHandler.post {
+          if (!destroyed && generation == copilotGeneration) {
+            copilotState = TrailheadCarCopilotState()
+            dismissCopilotAlert()
+            invalidateGuidanceScreen()
+          }
+        }
+      }
+      return
+    }
+    showCopilotAlert("Working", "Updating the route.")
+    copilotExecutor.execute {
+      val accepted = CarCopilotManager.confirm(carContext, action.id, true)
+      mainHandler.post {
+        if (destroyed || generation != copilotGeneration) return@post
+        if (!accepted) {
+          showCopilotError("Co-Pilot could not confirm that change.")
+          return@post
+        }
+        executeCopilotAction(action)
+      }
+    }
+  }
+
+  private fun executeCopilotAction(action: CarCopilotAction) {
+    val destination = action.args.optJSONObject("destination")
+    val query = action.args.optString("query")
+      .ifBlank { destination?.optString("name").orEmpty() }
+      .ifBlank { action.args.optString("instruction") }
+      .replace(Regex("(?i)\\b(start|begin|preview|route me|directions|guidance|navigate|navigation|to|there)\\b"), " ")
+      .replace(Regex("\\s+"), " ")
+      .trim()
+      .take(240)
+    val lat = destination?.optionalCoordinate("lat")
+    val lng = destination?.optionalCoordinate("lng")
+    if (action.type == "startNavigation" && query.isBlank() && lat == null && lng == null) {
+      copilotState = TrailheadCarCopilotState()
+      dismissCopilotAlert()
+      startGuidance()
+      return
+    }
+    if (
+      action.type in setOf("startNavigation", "buildRoute", "routeToSelectedPlace", "modifyRoute", "addRouteStop") &&
+      (query.isNotBlank() || (lat != null && lng != null))
+    ) {
+      startNavigationRequest(
+        TrailheadCarNavigationRequest(
+          label = query.ifBlank { destination?.optString("name").orEmpty().ifBlank { "Destination" } },
+          lat = lat,
+          lng = lng,
+          mode = if (action.type == "addRouteStop") TrailheadCarNavigationMode.ADD_A_STOP else TrailheadCarNavigationMode.NAVIGATION,
+        ),
+      ) { result ->
+        when (result) {
+          TrailheadCarNavigationStartResult.Started -> {
+            copilotState = TrailheadCarCopilotState()
+            dismissCopilotAlert()
+          }
+          is TrailheadCarNavigationStartResult.Failed -> showCopilotError(result.message)
+        }
+        invalidateGuidanceScreen()
+      }
+      return
+    }
+    showCopilotError("Open Trailhead on your phone to finish that change.")
+  }
+
+  private fun carCopilotContext(): JSONObject {
+    val location = latestLocation()
+    val route = snapshot.route
+    val current = progress
+    val locationJson = if (location != null) {
+      JSONObject().put("lat", location.latitude).put("lng", location.longitude)
+    } else {
+      JSONObject.NULL
+    }
+    return JSONObject()
+      .put("user", JSONObject().put("location", locationJson))
+      .put(
+        "map",
+        JSONObject()
+          .put("center", locationJson)
+          .put("current_screen", "android_auto_navigation"),
+      )
+      .put(
+        "route",
+        JSONObject()
+          .put("active_route", navigating)
+          .put("route_id", route?.routeId ?: JSONObject.NULL)
+          .put("title", route?.title ?: JSONObject.NULL)
+          .put("destination", route?.points?.lastOrNull()?.let {
+            JSONObject().put("name", route.title).put("lat", it.lat).put("lng", it.lng)
+          } ?: JSONObject.NULL)
+          .put("remaining_distance_m", current?.remainingDistanceM ?: JSONObject.NULL)
+          .put("remaining_duration_s", current?.remainingDurationS ?: JSONObject.NULL)
+          .put("current_step", current?.currentStep?.name ?: JSONObject.NULL),
+      )
+      .put(
+        "trip",
+        JSONObject()
+          .put("active_trip", route?.routeId ?: JSONObject.NULL)
+          .put("current_screen", "navigation"),
+      )
+      .put("safety", JSONObject().put("driving", navigating))
+  }
+
+  private fun showCopilotConfirmation(message: String) {
+    if (carContext.carAppApiLevel < 5) return
+    val alert = Alert.Builder(COPILOT_ALERT_ID, CarText.create("Confirm route change"), Alert.DURATION_SHOW_INDEFINITELY.toLong())
+      .setSubtitle(CarText.create(message.take(240)))
+      .addAction(
+        Action.Builder()
+          .setTitle("Confirm")
+          .setBackgroundColor(TRAILHEAD_ACCENT)
+          .setOnClickListener { confirmCopilotAction(true) }
+          .build(),
+      )
+      .addAction(
+        Action.Builder()
+          .setTitle("Cancel")
+          .setOnClickListener { confirmCopilotAction(false) }
+          .build(),
+      )
+      .build()
+    runCatching { carContext.getCarService(AppManager::class.java).showAlert(alert) }
+  }
+
+  private fun showCopilotAlert(title: String, message: String, dismissible: Boolean = false) {
+    if (carContext.carAppApiLevel < 5) {
+      CarToast.makeText(carContext, message, CarToast.LENGTH_LONG).show()
+      return
+    }
+    val builder = Alert.Builder(
+      COPILOT_ALERT_ID,
+      CarText.create(title.take(80)),
+      if (dismissible) 12_000L else Alert.DURATION_SHOW_INDEFINITELY.toLong(),
+    ).setSubtitle(CarText.create(message.take(240)))
+    if (dismissible) {
+      builder.addAction(
+        Action.Builder()
+          .setTitle("Dismiss")
+          .setOnClickListener {
+            copilotState = TrailheadCarCopilotState()
+            dismissCopilotAlert()
+            invalidateGuidanceScreen()
+          }
+          .build(),
+      )
+    }
+    runCatching { carContext.getCarService(AppManager::class.java).showAlert(builder.build()) }
+  }
+
+  private fun dismissCopilotAlert() {
+    if (carContext.carAppApiLevel >= 5) {
+      runCatching { carContext.getCarService(AppManager::class.java).dismissAlert(COPILOT_ALERT_ID) }
+    }
+  }
+
+  private fun showCopilotError(message: String) {
+    mainHandler.post {
+      if (destroyed) return@post
+      pendingCopilotAction = null
+      copilotState = TrailheadCarCopilotState(
+        status = TrailheadCarCopilotStatus.ERROR,
+        message = message,
+      )
+      showCopilotAlert("Co-Pilot", message, dismissible = true)
+      invalidateGuidanceScreen()
+    }
+  }
+
+  private fun speakCopilot(message: String) {
+    if (!ttsReady || message.isBlank() || !requestSpeechAudioFocus()) return
+    val utteranceId = "trailhead-copilot-${SystemClock.elapsedRealtime()}"
+    activeSpeechId = utteranceId
+    val result = tts?.speak(message.take(320), TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+    if (result == TextToSpeech.ERROR) {
+      activeSpeechId = null
       abandonSpeechAudioFocus()
     }
   }
@@ -750,6 +1073,7 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
     const val MAX_NAVIGATION_LOCATION_AGE_MS = 2L * 60L * 1_000L
     const val DESTINATION_LOCATION_TIMEOUT_MS = 15_000L
     const val ROUTE_REPLACEMENT_WINDOW_MS = 10L * 60L * 1_000L
+    const val COPILOT_ALERT_ID = 10_109
   }
 
   private data class PendingNavigationRequest(
@@ -757,6 +1081,13 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
     val request: TrailheadCarNavigationRequest,
     val onResult: (TrailheadCarNavigationStartResult) -> Unit,
   )
+}
+
+private fun JSONObject.optionalCoordinate(name: String): Double? {
+  if (!has(name) || isNull(name)) return null
+  return optDouble(name, Double.NaN).takeIf { value ->
+    value.isFinite() && if (name == "lat") value in -90.0..90.0 else value in -180.0..180.0
+  }
 }
 
 internal fun routeReplacementRequestDeadline(

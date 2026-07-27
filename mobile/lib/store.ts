@@ -90,7 +90,7 @@ export function resumeAccountLocalWrites() {
     accountSet('trailhead_user', JSON.stringify(pending.user));
     void syncCarNavigationSnapshot({
       trip: useStore.getState().activeTrip,
-      account: buildCarAccountState(pending.user, Boolean(pending.token)),
+      account: buildCarAccountState(pending.user, Boolean(pending.token), Date.now(), useStore.getState().hasPlan),
       mapboxAccessToken: useStore.getState().mapboxToken,
     }).catch(() => {});
     void setCarReportSession(pending.user.id, pending.token, TRAILHEAD_API_BASE).catch(() => false);
@@ -917,7 +917,7 @@ export const useStore = create<AppState>((set) => ({
     if (accountLocalWriteBlockDepth === 0) {
       void syncCarNavigationSnapshot({
         trip: useStore.getState().activeTrip,
-        account: buildCarAccountState(user, Boolean(token)),
+        account: buildCarAccountState(user, Boolean(token), Date.now(), useStore.getState().hasPlan),
         mapboxAccessToken: useStore.getState().mapboxToken,
       }).catch(() => {});
       void setCarReportSession(user.id, token, TRAILHEAD_API_BASE)
@@ -1057,7 +1057,7 @@ export const useStore = create<AppState>((set) => ({
     const current = useStore.getState();
     void syncCarNavigationSnapshot({
       trip,
-      account: buildCarAccountState(current.user, Boolean(current.token)),
+      account: buildCarAccountState(current.user, Boolean(current.token), Date.now(), current.hasPlan),
       mapboxAccessToken: current.mapboxToken,
     }).catch(() => {});
     if (options?.mirrorRepository !== false) scheduleActiveTripMirror(trip, previousTripId);
@@ -1148,7 +1148,7 @@ export const useStore = create<AppState>((set) => ({
     const current = useStore.getState();
     void syncCarNavigationSnapshot({
       trip: current.activeTrip,
-      account: buildCarAccountState(current.user, Boolean(current.token)),
+      account: buildCarAccountState(current.user, Boolean(current.token), Date.now(), current.hasPlan),
       mapboxAccessToken: token,
     }).catch(() => {});
   },
@@ -1245,6 +1245,12 @@ export const useStore = create<AppState>((set) => ({
     if (!accountLocalMutationAllowed()) return;
     sd(PLAN_KEY);
     set({ hasPlan: active, planExpiresAt: expiresAt });
+    const current = useStore.getState();
+    void syncCarNavigationSnapshot({
+      trip: current.activeTrip,
+      account: buildCarAccountState(current.user, Boolean(current.token), Date.now(), active),
+      mapboxAccessToken: current.mapboxToken,
+    }).catch(() => {});
   },
   startGuidedTour: () => set(state => ({ guidedTourRunId: state.guidedTourRunId + 1, guidedTourActive: true })),
   setGuidedTourActive: (active) => set({ guidedTourActive: active }),
@@ -1480,7 +1486,7 @@ export async function restoreLegacyAccountState() {
     const current = useStore.getState();
     void syncCarNavigationSnapshot({
       trip: current.activeTrip,
-      account: buildCarAccountState(current.user, Boolean(current.token)),
+      account: buildCarAccountState(current.user, Boolean(current.token), Date.now(), current.hasPlan),
       mapboxAccessToken: current.mapboxToken,
     }).catch(() => {});
   } catch {}
@@ -1528,7 +1534,7 @@ export async function separateAnonymousLegacyState() {
       const current = useStore.getState();
       await syncCarNavigationSnapshot({
         trip: null,
-        account: buildCarAccountState(current.user, Boolean(current.token)),
+        account: buildCarAccountState(current.user, Boolean(current.token), Date.now(), current.hasPlan),
         mapboxAccessToken: current.mapboxToken,
       }).catch(() => {});
     } finally {

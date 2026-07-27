@@ -82,7 +82,7 @@ function currentCarTripContext() {
   const current = useStore.getState();
   return {
     trip: current.activeTrip,
-    account: buildCarAccountState(current.user, Boolean(current.token)),
+    account: buildCarAccountState(current.user, Boolean(current.token), Date.now(), current.hasPlan),
     mapboxAccessToken: current.mapboxToken,
   };
 }

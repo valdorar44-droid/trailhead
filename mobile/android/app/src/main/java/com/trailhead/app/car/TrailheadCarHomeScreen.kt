@@ -55,6 +55,7 @@ internal interface TrailheadCarSessionController {
   val progress: TrailheadCarProgress?
   val navigating: Boolean
   val muted: Boolean
+  val copilotState: TrailheadCarCopilotState
   val mapSurface: TrailheadCarMapSurface
 
   fun startGuidance()
@@ -65,6 +66,8 @@ internal interface TrailheadCarSessionController {
   fun endGuidanceAndReturnHome()
   fun continueAfterArrival(stopIndex: Int)
   fun toggleMuted()
+  fun startCopilot()
+  fun stopCopilot()
   fun beginReportLocation()
   fun endReportLocation()
   fun report(categoryId: String): CarReportEnqueueStatus
@@ -414,6 +417,19 @@ internal class TrailheadCarGuidanceScreen(
 
   private fun guidanceActions(): ActionStrip {
     val actions = ActionStrip.Builder()
+    if (controller.snapshot.account.copilotEnabled && carContext.carAppApiLevel >= 5) {
+      val listening = controller.copilotState.status == TrailheadCarCopilotStatus.LISTENING
+      actions.addAction(
+        Action.Builder()
+          .setTitle(if (listening) "Done" else "Co-Pilot")
+          .setIcon(carIcon(carContext, R.drawable.ic_car_copilot))
+          .setOnClickListener {
+            if (listening) controller.stopCopilot() else controller.startCopilot()
+            invalidate()
+          }
+          .build(),
+      )
+    }
     if (controller.snapshot.account.reportsEnabled) {
       actions.addAction(
         Action.Builder()

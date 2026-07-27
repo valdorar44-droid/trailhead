@@ -36,6 +36,9 @@ const androidMainActivity = source('android/app/src/main/java/com/trailhead/app/
 const androidAutoService = source('android/app/src/main/java/com/trailhead/app/car/TrailheadCarAppService.kt');
 const androidAutoHome = source('android/app/src/main/java/com/trailhead/app/car/TrailheadCarHomeScreen.kt');
 const androidAutoRouter = source('android/app/src/main/java/com/trailhead/app/car/TrailheadCarDestinationRouter.kt');
+const androidAutoCopilotAudio = source('android/app/src/main/java/com/trailhead/app/car/TrailheadCarCopilotAudio.kt');
+const androidAutoCopilotClient = source('../mobile/modules/car-reports/android/src/main/java/expo/modules/trailheadcarreports/CarCopilotHttpClient.kt');
+const androidAutoCopilotManager = source('../mobile/modules/car-reports/android/src/main/java/expo/modules/trailheadcarreports/CarCopilotManager.kt');
 const iosInfo = source('ios/Trailhead/Info.plist');
 const iosProject = source('ios/Trailhead.xcodeproj/project.pbxproj');
 const iosEntitlements = source('ios/Trailhead/Trailhead.entitlements');
@@ -67,8 +70,8 @@ const androidNativeCiJob = workflowJobSource(ciWorkflow, 'android-native');
 expect(pkg.version === '1.0.10', 'package.json must use marketing version 1.0.10.');
 expect(lockRoot?.version === '1.0.10', 'package-lock.json root version must use 1.0.10.');
 expect(config.version === '1.0.10', 'app.config.js must use marketing version 1.0.10.');
-expect(config.ios.runtimeVersion === 'native-1.0.10-ios.3', 'iOS runtime is not native-1.0.10-ios.3.');
-expect(config.android.runtimeVersion === 'native-1.0.10-android.4', 'Android runtime is not native-1.0.10-android.4.');
+expect(config.ios.runtimeVersion === 'native-1.0.10-ios.4', 'iOS runtime is not native-1.0.10-ios.4.');
+expect(config.android.runtimeVersion === 'native-1.0.10-android.5', 'Android runtime is not native-1.0.10-android.5.');
 expect(
   easConfig.build.preview.env.EXPO_PUBLIC_BRANCH_ATTRIBUTION_ENABLED === 'false'
     && easConfig.build.production.env.EXPO_PUBLIC_BRANCH_ATTRIBUTION_ENABLED === 'false',
@@ -101,6 +104,7 @@ expect(
 
 expect(!/LocationTaskService[^>]*tools:node="remove"/.test(androidManifest), 'Android removes Expo LocationTaskService.');
 expect(/ACCESS_BACKGROUND_LOCATION" tools:node="remove"/.test(androidManifest), 'Android must continue blocking ACCESS_BACKGROUND_LOCATION.');
+expect(androidManifest.includes('android.permission.RECORD_AUDIO'), 'Android Auto Co-Pilot requires RECORD_AUDIO.');
 expect(androidManifest.includes('.car.TrailheadCarAppService'), 'Android Auto CarAppService is missing.');
 expect(androidManifest.includes('androidx.car.app.category.NAVIGATION'), 'Android Auto navigation category is missing.');
 expect(
@@ -119,6 +123,27 @@ expect(
     && !androidAutoHome.includes('Finish this route on your phone'),
   'Android Auto must not require phone route selection for a car destination request.',
 );
+expect(
+  androidAutoCopilotAudio.includes('CarAudioRecord.create')
+    && androidAutoCopilotAudio.includes('AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE')
+    && androidAutoCopilotAudio.includes('MAX_RECORDING_MILLIS'),
+  'Android Auto Co-Pilot must remain explicit, bounded press-to-talk using CarAudioRecord.',
+);
+expect(
+  androidAutoHome.includes('R.drawable.ic_car_copilot')
+    && androidAutoHome.includes('copilotEnabled')
+    && androidAutoService.includes('override fun startCopilot()'),
+  'Android Auto Co-Pilot action or entitlement gate is missing.',
+);
+expect(
+  androidAutoCopilotClient.includes('/api/explorer/copilot/car/turn')
+    && androidAutoCopilotManager.includes('CarReportManager.sessionStore(context).read()'),
+  'Android Auto Co-Pilot must use the secure server-owned bridge.',
+);
+for (const copilotSource of [androidAutoCopilotAudio, androidAutoCopilotClient, androidAutoCopilotManager]) {
+  expect(!copilotSource.includes('api.openai.com'), 'Android Auto Co-Pilot must never call OpenAI directly.');
+  expect(!/wake\s*word|hotword|continuous(?:ly)?\s+listen/i.test(copilotSource), 'Android Auto Co-Pilot must not use wake-word or continuous listening.');
+}
 expect(androidManifest.includes('com.android.vending.INSTALL_REFERRER'), 'Play Install Referrer permission is missing.');
 expect(!androidManifest.includes('com.google.android.gms.permission.AD_ID'), 'Advertising ID permission must not be present.');
 expect(androidManifest.includes('${googleMapsApiKey}'), 'Google Maps key must use an environment-backed manifest placeholder.');
@@ -143,7 +168,7 @@ expect(
   !androidMainApplication.includes('RNBranchModule') && !androidMainActivity.includes('RNBranchModule'),
   'Do not duplicate Branch Expo adapter callbacks in Android app classes.',
 );
-contains('android/app/src/main/res/values/strings.xml', 'native-1.0.10-android.4', 'Android native runtime resource is stale.');
+contains('android/app/src/main/res/values/strings.xml', 'native-1.0.10-android.5', 'Android native runtime resource is stale.');
 
 expect(iosInfo.includes('<string>1.0.10</string>'), 'iOS Info.plist marketing version is stale.');
 expect(iosInfo.includes('<string>Automatic</string>'), 'iOS appearance must follow the app theme.');
@@ -179,7 +204,7 @@ for (const pathPattern of ['/originals/*', '/app/*', '/r/*', '/support/*', '/tri
   expect(siteProxyWorker.includes(`'${pathPattern}'`), `Cloudflare association path is missing: ${pathPattern}`);
 }
 expect(!applePaths.some(path => String(path).startsWith('/reset-password')), 'Password-reset web forms must not be captured by iOS.');
-contains('ios/Trailhead/Supporting/Expo.plist', 'native-1.0.10-ios.3', 'iOS native runtime resource is stale.');
+contains('ios/Trailhead/Supporting/Expo.plist', 'native-1.0.10-ios.4', 'iOS native runtime resource is stale.');
 contains('ios/Trailhead/Branch.json', '"checkPasteboardOnInstall": true', 'Branch NativeLink pasteboard setting is missing.');
 contains('.gitignore', '*.mobileprovision', 'Mobile provisioning profiles must stay ignored.');
 expect(!source('.gitignore').split(/\r?\n/).includes('/ios/'), 'The authoritative iOS project is still ignored.');

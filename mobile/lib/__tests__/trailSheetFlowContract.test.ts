@@ -38,6 +38,17 @@ test('linked trail and trailhead drilldowns retain the parent sheet and scroll',
   assert.match(mapSource, /setTrailSheetScrollRestore\(value => \(\{ key: value\.key \+ 1, y: parent\.scrollY \}\)\)/);
 });
 
+test('Back restores the trail discovery sheet, viewport, stage, and scroll while Close exits', () => {
+  assert.match(mapSource, /trailDiscoveryReturnRef = useRef/);
+  assert.match(mapSource, /stage: trailDiscoverySheetStage/);
+  assert.match(mapSource, /scrollY: trailDiscoveryScrollYRef\.current/);
+  assert.match(mapSource, /function restoreTrailDiscoveryReturn\(\)/);
+  assert.match(mapSource, /setShowDiscoveryPanel\(true\)/);
+  assert.match(mapSource, /nativeMapRef\.current\?\.fitCoordinates/);
+  assert.match(mapSource, /if \(restoreTrailDiscoveryReturn\(\)\) return true/);
+  assert.match(mapSource, /function closeSelectedTrailSheet\(\) \{\s*trailDiscoveryReturnRef\.current = null;/);
+});
+
 test('trail sheet parity retains planning, offline, community, source, and navigation capabilities', () => {
   assert.deepEqual(TRAIL_SHEET_PARITY_MODULES, [
     'photos', 'route_facts', 'surface_access', 'weather', 'nearby', 'community_reports', 'ratings',

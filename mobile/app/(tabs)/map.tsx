@@ -24,7 +24,7 @@ import CampgroundBriefSection from '@/components/map/CampgroundBriefSection';
 import CampNearbyPlacesSection from '@/components/map/CampNearbyPlacesSection';
 import CampReviewsSection from '@/components/map/CampReviewsSection';
 import CampEditSheet, { type CampEditDraft } from '@/components/map/CampEditSheet';
-import TrailheadSnapSheet from '@/components/map/TrailheadSnapSheet';
+import TrailheadSnapSheet, { type TrailheadSnapStage } from '@/components/map/TrailheadSnapSheet';
 import PlaceSheetShell, { PlaceSheetHeroChrome } from '@/components/map/PlaceSheetShell';
 import FirstPartyRatingSection from '@/components/map/FirstPartyRatingSection';
 import MapDrawerSheet from '@/components/map/MapDrawerSheet';
@@ -75,7 +75,7 @@ import * as Haptics from 'expo-haptics';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { applyBackendAcknowledgedActiveTrip, useStore, type WaterSpot, type CatchLog, type WaterRoute } from '@/lib/store';
 import {
   buildCarAccountState,
@@ -6364,6 +6364,17 @@ function MapScreen() {
   const [trailDiscoveryOrigin, setTrailDiscoveryOrigin] = useState<{ lat: number; lng: number } | null>(null);
   const [trailDiscoverySystems, setTrailDiscoverySystems] = useState<TrailDiscoveryItemV2[]>([]);
   const trailSystemSelectionGenerationRef = useRef(0);
+  const [trailDiscoverySheetStage, setTrailDiscoverySheetStage] = useState<TrailheadSnapStage>('peek');
+  const trailDiscoveryScrollYRef = useRef(0);
+  const [trailDiscoveryScrollRestore, setTrailDiscoveryScrollRestore] = useState({ key: 0, y: 0 });
+  const trailDiscoveryReturnRef = useRef<{
+    mode: DiscoveryMode;
+    scope: TrailDiscoveryScope;
+    origin: { lat: number; lng: number } | null;
+    viewport: { n: number; s: number; e: number; w: number; zoom: number } | null;
+    stage: TrailheadSnapStage;
+    scrollY: number;
+  } | null>(null);
   const [showDiscoveryPanel, setShowDiscoveryPanel] = useState(false);
   const [isSearchingTrails, setIsSearchingTrails] = useState(false);
   const [quickToast,    setQuickToast]    = useState('');
@@ -21505,6 +21516,7 @@ function MapScreen() {
   }
 
   function openTrailFeature(feature: TrailFeature) {
+    trailDiscoveryReturnRef.current = null;
     clearTrailMapOverlays();
     focusMapSelectionPoint({ lat: feature.lat, lng: feature.lng, name: feature.name }, 13, 'trail');
     setSelectedTrailProfile(null);
@@ -21875,7 +21887,7 @@ function MapScreen() {
     nativeMapRef.current?.flyTo(parent.trail.lat, parent.trail.lng, 12, parent.trail.name);
   }
 
-  function closeSelectedTrailSheet() {
+  function clearSelectedTrailSheetState() {
     trailParentSnapshotRef.current = null;
     setRelatedPlaceReturnStack([]);
     clearTrailMapOverlays();
@@ -21884,6 +21896,33 @@ function MapScreen() {
     setShowTrailFieldReportForm(false);
     setShowTrailEditForm(false);
     resetFieldReportForm();
+  }
+
+  function closeSelectedTrailSheet() {
+    trailDiscoveryReturnRef.current = null;
+    clearSelectedTrailSheetState();
+  }
+
+  function restoreTrailDiscoveryReturn() {
+    const snapshot = trailDiscoveryReturnRef.current;
+    if (!snapshot) return false;
+    trailDiscoveryReturnRef.current = null;
+    clearSelectedTrailSheetState();
+    setDiscoveryMode(snapshot.mode);
+    setTrailDiscoveryScope(snapshot.scope);
+    setTrailDiscoveryOrigin(snapshot.origin);
+    setTrailDiscoverySheetStage(snapshot.stage);
+    setTrailDiscoveryScrollRestore(value => ({ key: value.key + 1, y: snapshot.scrollY }));
+    setShowDiscoveryPanel(true);
+    if (snapshot.viewport) {
+      viewportRef.current = snapshot.viewport;
+      nativeMapRef.current?.fitCoordinates(
+        [[snapshot.viewport.w, snapshot.viewport.s], [snapshot.viewport.e, snapshot.viewport.n]],
+        [40, 40, 210, 40],
+        450,
+      );
+    }
+    return true;
   }
 
   useEffect(() => {
@@ -21904,8 +21943,8 @@ function MapScreen() {
     return () => subscription.remove();
   }, [selectedCamp?.id]);
 
-  useEffect(() => {
-    if (!selectedTrail) return;
+  useFocusEffect(useCallback(() => {
+    if (!selectedTrail) return undefined;
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
       if (trailParentSnapshotRef.current) {
         restoreTrailSheetParent();
@@ -21919,11 +21958,12 @@ function MapScreen() {
         restoreRelatedPlaceParent();
         return true;
       }
+      if (restoreTrailDiscoveryReturn()) return true;
       closeSelectedTrailSheet();
       return true;
     });
     return () => subscription.remove();
-  }, [selectedTrail?.id, placeSheetCoordinator.presentation, relatedPlaceReturnStack.length]);
+  }, [selectedTrail?.id, placeSheetCoordinator.presentation, relatedPlaceReturnStack.length]));
 
   useEffect(() => {
     if (!selectedCommunityPin) return;
@@ -22274,10 +22314,19 @@ function MapScreen() {
   }
 
   async function selectTrailFromDiscovery(trail: TrailFeature) {
+    const returnSnapshot = {
+      mode: discoveryMode,
+      scope: trailDiscoveryScope,
+      origin: trailDiscoveryOrigin ? { ...trailDiscoveryOrigin } : null,
+      viewport: viewportRef.current ? { ...viewportRef.current } : null,
+      stage: trailDiscoverySheetStage,
+      scrollY: trailDiscoveryScrollYRef.current,
+    };
     setShowDiscoveryPanel(false);
     setShowTrailList(false);
     setShowLayerSheet(false);
     openTrailFeature(trail);
+    trailDiscoveryReturnRef.current = returnSnapshot;
     const generation = ++trailSystemSelectionGenerationRef.current;
     if (!trail.system_v2_id) return;
     try {
@@ -25354,11 +25403,16 @@ function MapScreen() {
       {showCampDiscoverySheet && (
         <TrailheadSnapSheet
           initialStage="peek"
+          stage={trailDiscoverySheetStage}
+          onStageChange={setTrailDiscoverySheetStage}
           maxFullRatio={0.82}
           halfRatio={0.42}
           style={[s.campDiscoverySnap, { bottom: bottomInset + 52 }]}
           contentStyle={s.campDiscoverySnapContent}
           scrollContentStyle={s.campDiscoveryScrollContent}
+          initialScrollY={trailDiscoveryScrollRestore.y}
+          scrollRestoreKey={trailDiscoveryScrollRestore.key}
+          onScrollYChange={value => { trailDiscoveryScrollYRef.current = value; }}
           peekHeader={(
             <View style={s.campDiscoveryHeader}>
               <View style={s.campDiscoveryTitleWrap}>

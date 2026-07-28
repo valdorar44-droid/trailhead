@@ -1,6 +1,6 @@
 # Trailhead Trails Active Checkpoint
 
-Last updated: 2026-07-27 23:01 CDT (America/Winnipeg)
+Last updated: 2026-07-28 02:08 CDT (America/Winnipeg)
 
 ## Resume protocol
 
@@ -131,7 +131,7 @@ Verify the staged file list before every commit.
 
 ### T2 - Trail and trailhead sheets
 
-- Status: Android-first baseline audit in progress from repository HEAD `8ce8cb81e715b494a9f2a25cf0955ced517d45fb`; the user elected to defer the iOS T1 spot check and continue on Android.
+- Status: Android T2 is checkpointed with one unresolved P1; do not begin T3 or repeat the broad Trails crawl.
 - Pre-change checkpoint:
   - Existing code already uses `TrailheadSnapSheet`, `SheetCoordinator`, and `TrailPlaceSheetPeek` for Trail/Trailhead Peek and Full presentation.
   - Primary hydration is identity and request-generation bound, settles through `Promise.allSettled`, commits atomically, and falls back to a stable partial state after three seconds.
@@ -139,6 +139,19 @@ Verify the staged file list before every commit.
   - Existing parity registry includes photos, route facts, surface/access, weather, nearby support, reports, ratings, Offline, 3D, route building, edits, reporting, sources, linked trails, coordinates, and navigation.
   - No visual or API change is justified before Android evidence. The next action is a narrow device delta of Trail Peek to Full, Trailhead to linked trail to Back, primary/overflow actions, and identity stability. Only a reproducible gap will be changed.
   - Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; `.cursor/` and unrelated dirty files remain excluded.
+- Android implementation and evidence:
+  - Baseline checkpoint commit `8d86640` recorded the exact narrow scope. The first Android run on paired source `42b035cfe96351e6c6b324412cfb8a9b2b5d5858` found one deterministic Explore P1: `Yosemite Trails` advertised six trails but opened its Yosemite parent without carrying the trail list.
+  - Commit `42b035cfe96351e6c6b324412cfb8a9b2b5d5858` fixed the parent handoff, retained same-revision trail richness, and forced source-backed trail hydration when the active Trails module had no records. Focused Explore, sheet, Search V2, Offline, NPS/Viator, copy, privacy, and TypeScript gates passed.
+  - Guarded paired preview from `42b035c`: Android group `09e276c9-8eb2-4e91-b143-213beb56dc00`, update `019fa772-6605-7114-aafb-b14f34d9e3dc`, runtime `native-1.0.10-android.6`; iOS group `bbdd88f2-8cc3-477e-8800-54487c8563a3`, update `019fa772-6605-7dab-8f00-086778836515`, runtime `native-1.0.10-ios.5`.
+  - Device proof confirmed that Yosemite now opens with all six real trail records and that Mist Trail reaches the shared Trail Peek/Full flow. It also exposed one P1: the Explore-to-Map handoff opened Mist Trail over the restored world viewport and replaced its known `Easy` fact with the legacy `Scout first` fallback.
+  - One evidence-backed correction was made in commit `b64910a1b25db3e2c5d078b6543fdec1dda1a64b`: carry source-backed trail context through the handoff, defer consuming a cross-tab selection until the Map is active and ready, and remove the generic `Pick by distance...` hub sentence. New handoff contract tests passed `3/3`; Trail sheet flow passed `6/6`; Trail hydration passed `4/4`; TypeScript passed.
+  - Guarded paired preview from `b64910a`: candidate branch `preview-candidate-b64910a1b25db3e2c5d078b6543fdec1dda1a64b-ms4b26bo-22a72ce331ebde5aad9ff833`, branch ID `019fa789-ec76-7f03-b0f7-f1d2a92c28a7`; Android group `eb39b76d-39ad-4471-ab65-0eb26e72479d`, update `019fa78a-126e-7b09-8456-7cbbd7a09e79`, runtime `native-1.0.10-android.6`; iOS group `e06c36ac-aa45-46a8-b8cb-349bb7947f0d`, update `019fa78a-126e-7308-9792-583a732ea6a3`, runtime `native-1.0.10-ios.5`. Sentry accepted Android, iOS, and web source maps before the preview channel moved.
+  - Android QA identity matched build `68`, full source `b64910a1b25db3e2c5d078b6543fdec1dda1a64b`, and update `019fa78a-126e-7b09-8456-7cbbd7a09e79`.
+  - The single retest passed fact/copy preservation: Mist Trail Peek shows `Easy`, `3.2 mi`, and `Out & Back`; the generic hub sentence is gone. The map is still restored to the North America/world viewport instead of framing Yosemite, so the camera P1 remains after the one permitted correction. No second speculative OTA was published.
+  - Evidence directory: `C:\Users\User\Documents\Codex\evidence\trailhead\trails-t2-b64910a`. QA XML `01-qa.xml`, SHA-256 `b9f48d021ca3c244122a1e01cf949d723e4be033751f0890e15ee7215aa42ca8`; Yosemite hub XML `06-yosemite.xml`, SHA-256 `32406b6ae175241895caca076140249b986209d8eadf38e74c2af6c7f1a34679`; failed framing screenshot `09-mist-peek.png`, SHA-256 `c8b656b3f4df666eec59c0a50f27c961cec9b722cc99e698740ab0a4c756539b`.
+  - Live `/api/trails/v2/discover` returned no canonical system within the tested eight-mile Mist Trail query, so no complete geometry or Preview action was fabricated. The point selection and trusted curated facts remain valid while the catalog gap is handled separately.
+  - Open P1: determine which camera command follows the valid Trail selection focus and restores the world viewport. Capture one internal, coordinate-free command-order trace keyed by selection identity and map/style generation, fix the demonstrated owner, and rerun only Explore -> Yosemite Trails -> Mist Trail -> Map -> Peek/Full plus Back restoration.
+  - iOS T1/T2 spot checks remain deferred by the user's Android-first direction. Task-owned Metro, Expo export, publisher, Gradle, and Maestro processes: none.
 
 ### T3 - Unified Trail Builder and GPX
 
@@ -158,13 +171,16 @@ Verify the staged file list before every commit.
 
 ## Next exact packet
 
-1. Open the installed iOS preview online and allow it to load paired update `019fa73a-892e-7a75-a355-6110cbe82b32` from source `ddb5dd320e864a3af3af9f8bf2c253adb9543baf`.
-2. Run only the shared T1 spot check: one complete trail selection/highlight, one partial or point result with honest capability actions, Full to Peek Back restoration, and no invented trail facts.
-3. Record iOS identity/evidence and mark T1 accepted. Then begin T2 Trail and Trailhead Sheets; do not republish `ddb5dd3` or repeat Android T1.
+1. Resume from `b64910a1b25db3e2c5d078b6543fdec1dda1a64b`; verify the protected Explore-index hash before changing anything.
+2. Instrument one coordinate-free camera command-order trace for the failed Explore trail handoff. Do not run another broad crawl or publish before the overriding command is identified.
+3. Correct only the demonstrated camera owner/restoration path, run focused handoff and camera-ownership tests, and publish one paired preview OTA only if the assertion passes locally.
+4. On Android, rerun only Explore -> Yosemite Trails -> Mist Trail -> Map -> Peek/Full, verify Yosemite-scale framing, trusted facts, Back restoration, and Close. If it passes, finish the remaining Trailhead -> linked trail -> Back assertion and mark T2 accepted.
+5. Keep iOS deferred unless the user reconnects it. Do not begin T3 until the T2 P1 is closed.
 
 ## Do not repeat
 
 - Memory Gate, Layers audit, Yellowstone city/sheet crawl, NPS research, Originals lifecycle, Android Auto crawl, store screenshots, or the broad 1.0.10 regression.
 - Do not redesign approved Peek/Full sheets during T1.
 - Do not start T2-T6 before the preceding packet is accepted.
+- Do not republish `42b035c` or `b64910a`, rerun the six-trail hub fix, or perform another speculative camera retry.
 - Do not add speculative modules, generic photography, invented access facts, AI labels, random pills, or display zero for missing facts.

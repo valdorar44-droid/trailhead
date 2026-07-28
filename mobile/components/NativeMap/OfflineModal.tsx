@@ -197,6 +197,7 @@ type DeviceItem = {
   bytes: number;
   active: boolean;
   progress?: number;
+  diagnosticCode?: string;
   icon: IconName;
   onPress: () => void;
 };
@@ -516,7 +517,13 @@ function DeviceRow({ item, selected, selectionMode, onToggle }: {
       )}
       <View style={shared.deviceCopy}>
         <Text style={[shared.deviceTitle, { color: C.text }]} numberOfLines={1}>{item.title}</Text>
-        <Text style={[shared.deviceMeta, { color: statusColor(C, item.status) }]} numberOfLines={1}>
+        <Text
+          testID={item.diagnosticCode
+            ? `offline.downloads.status.${safePackId(item.id)}.${safePackId(item.diagnosticCode)}`
+            : `offline.downloads.status.${safePackId(item.id)}`}
+          style={[shared.deviceMeta, { color: statusColor(C, item.status) }]}
+          numberOfLines={1}
+        >
           {[item.status, item.bytes > 0 ? fmtBytes(item.bytes) : null].filter(Boolean).join(' · ')}
         </Text>
         {item.active && item.progress != null ? <ProgressBar progress={item.progress} /> : null}
@@ -1551,6 +1558,7 @@ export default function OfflineModal({
         kind: 'trail',
         title: job.label,
         status,
+        diagnosticCode: job.error?.code,
         bytes: job.status === 'ready' ? job.manifest?.required_storage_bytes ?? total : total,
         active,
         progress: active ? progress : undefined,

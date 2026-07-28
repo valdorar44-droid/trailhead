@@ -185,7 +185,7 @@ Verify the staged file list before every commit.
 
 ### T4 - Complete offline trail pack
 
-- Status: implementation is complete, but Android acceptance remains blocked. The captured native crash causes were corrected; the final exact candidate stays alive but the scoped trail bundle does not leave `Verifying`. Do not begin T5 or claim airplane-mode acceptance until a trail bundle reaches `Ready`.
+- Status: Android acceptance remains blocked on the first-attempt RNMapbox bootstrap path. Native crash causes and the non-settling `Verifying` state are corrected, and persisted packs recover to `Ready` in-process, but a newly requested trail pack still first presents `Download incomplete` with fixed code `RNMBXOfflineModule`. Do not begin T5 or claim airplane-mode acceptance until one new pack reaches `Ready` from the initial Download action.
 - Pre-change scope:
   - Extend the existing Offline V2 prepare/materialize/runtime path with a version-bound canonical trail scope; do not create another downloader or ownership store.
   - Keep all existing V1 region, selected-area, trip/corridor, PMTiles/vector, routing, trail, contour, saved-route, and six-family place downloads untouched.
@@ -223,6 +223,19 @@ Verify the staged file list before every commit.
   - Cleanup completed: the temporary QA account and its owned test records were deleted, its Railway SSH key and local credential/key files were removed, task worktrees were pruned, airplane mode was restored off, and the task-owned emulator was stopped.
   - Checkpoint timestamp `2026-07-28T14:39:33-05:00`; branch `feat/trailhead-1.0.10-overhaul`; exact HEAD `2b86400a5b2dc2d86f8271683a614b92631fc43c`; protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; task-owned Metro, Expo, Gradle, Maestro, publisher, and emulator processes: none.
 
+- RNMapbox persisted-pack recovery continuation (2026-07-28):
+  - Source `fa456a0` replaced the non-settling verification phases with bounded, observable RNMapbox readiness; source `8e08acd14920819c1e03d801ef312378d7e50539` repaired atomic promotion into a missing destination parent. Brumley Arch (Sz) then completed at `Ready offline · 5.2 MB`; Adit Extension recovered after a cold relaunch and completed at `Ready offline · 5.3 MB`. The existing Utah regional support download remained present at `Directions saved · 623.8 MB`.
+  - Source `d41a93165f3918a684eadbd4dfc4111dcccfbde2` added a pure native-pack recovery helper and immutable metadata validation. Guarded paired preview branch `preview-candidate-d41a93165f3918a684eadbd4dfc4111dcccfbde2-ms57f803-67a9c1be889684d22961b570`: Android group `97c948b8-1346-4629-ba82-2cd17af94014`, update `019faac7-54f2-7833-a5d3-b707d24a1af7`, runtime `native-1.0.10-android.6`; iOS group `f1248851-44ed-471d-9a84-1dcdcdc5512f`, update `019faac7-54f2-7d0b-8824-7b11bbed8fa4`, runtime `native-1.0.10-ios.5`.
+  - Android QA identity matched `1.0.10` build `68`, full source `d41a93165f3918a684eadbd4dfc4111dcccfbde2`, runtime and update. A new Brumley Creek Climbing Access pack first exposed `Download incomplete · 4.9 MB` with fixed code `RNMBXOfflineModule`; one explicit retry in the same process recovered the exact persisted pack to `Ready offline · 5.3 MB`, with all earlier downloads retained.
+  - Source `fad527c35f228eba42cf5929b32e7a109e94c1c8` added bounded registry polling without recreating the native pack and clears only the stale bootstrap error once the exact immutable pack is queryable. Offline V2, TypeScript, copy across `166` files, privacy, and whitespace gates passed. The clean three-file commit was pushed.
+  - Guarded paired preview branch `preview-candidate-fad527c35f228eba42cf5929b32e7a109e94c1c8-ms580kpk-76918bffd4a079009a99f647`: Android group `e52830bf-011a-404e-a79d-630728a79b36`, update `019faad6-8387-7df9-95e9-3ab413d758b4`, runtime `native-1.0.10-android.6`; iOS group `644d57f7-647a-47a1-90fd-c81fdacbf762`, update `019faad6-8387-746a-8948-0991b0decd92`, runtime `native-1.0.10-ios.5`. Android QA identity matched the full source and update.
+  - The one permitted fresh assertion still failed: new complete trail Brumley Loop reached `Download incomplete · 5.0 MB` with the same fixed `RNMBXOfflineModule` code after the initial Download action. The process remained alive and the prior four downloads were retained. This proves the native callback error arrives after the helper observes the pack or otherwise survives that bootstrap boundary; another speculative retry was not published.
+  - Per the no-loop rule, pause/resume and airplane-mode acceptance were not claimed. Airplane mode remains `off`, Wi-Fi remains enabled, and no current-candidate OOM/ANR/native crash occurred.
+  - Evidence: exact QA identity XML `C:\Users\User\Documents\Codex\evidence\trailhead\trails-t4-fad527c-qa.xml`, SHA-256 `2197e4de740dd0f40e89dd424384c07862f4446363314f4949017644dfa7d60d`; failed fresh-pack hierarchy `C:\Users\User\Documents\Codex\evidence\trailhead\trails-t4-fad527c-loop-download.xml`, SHA-256 `e3101887d8335e8ef8bb80fa19ac004d6ec64111ca627bfde1b40a96e5f89057`; screenshot SHA-256 `d405a3cd6cbe678bd7ca510dfc456ca62cd07d7b37a199921b7be58b572763ba`; prior same-process recovery hierarchy SHA-256 `950087a5aa855a7ac9bfc3beb03e0683c6cf049356091844fbbe26946a6fed31`.
+  - Exact next action: add a fixed, privacy-safe transition trace around create callback, registry visibility, immutable metadata, status percentage/progress and terminal callback ordering for one new pack. Treat a creation callback as transient only while the exact pack exists and makes forward progress; otherwise preserve the real error. Add one deterministic clock/state regression, make one correction, then run one new initial Download assertion. Only if that reaches `Ready` may T4 continue to pause/resume and airplane-mode map/search/sheet/geometry/support checks.
+  - Do not repeat the `d41a931` immediate-registry or `fad527c` bootstrap-clear approaches, broad Trails/Search/sheet crawls, resolved native crash signatures, or previously completed packs. Do not begin T5.
+  - Checkpoint timestamp `2026-07-28T17:29:00-05:00`; branch `feat/trailhead-1.0.10-overhaul`; exact HEAD `fad527c35f228eba42cf5929b32e7a109e94c1c8`; protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
+
 ### T5 - Drive-to-trailhead, Follow, and recording
 
 - Status: pending T4 acceptance; paired native candidates required.
@@ -233,11 +246,11 @@ Verify the staged file list before every commit.
 
 ## Next exact packet
 
-1. Resume from `2b86400a5b2dc2d86f8271683a614b92631fc43c`; verify the protected Explore-index hash before staging anything.
-2. Instrument the Offline V2 verification transition with fixed, privacy-safe artifact/error codes and inspect one newly created scoped trail pack. Do not reuse the deleted temporary QA account or infer a cause from the old stuck UI alone.
-3. Add one deterministic regression for the demonstrated non-settling consumer, make one evidence-backed correction, and run the focused Offline V2/runtime/parity/TypeScript gates.
-4. Publish one paired preview, create one fresh scoped pack, and require `Ready`. Only then run one interruption/resume and airplane-mode map/search/sheet/geometry/support check.
-5. Restore airplane mode off, record inventory parity, and accept or block T4. Keep iOS device testing and T5 deferred until Android T4 passes.
+1. Resume from `fad527c35f228eba42cf5929b32e7a109e94c1c8`; verify the protected Explore-index hash before staging anything.
+2. Add one fixed, privacy-safe RNMapbox transition trace for create callback, registry visibility, immutable identity, status progress and terminal ordering. Do not log bounds, routes, searches or account data.
+3. Add a deterministic fake-clock regression for a callback error that precedes a queryable, progressing exact pack. Make one state-machine correction: the callback remains transient only while that pack makes progress and becomes terminal when it stalls or disappears.
+4. Run focused Offline V2/runtime/parity/TypeScript/copy/privacy gates, publish one paired preview, and create one new complete trail pack. Require initial Download -> `Ready` without restart or manual retry.
+5. Only after that assertion passes, test pause/resume and airplane-mode map/search/sheet/geometry/support, restore device radios, record exact inventory parity, and accept or block T4. Keep iOS device testing and T5 deferred until Android T4 passes.
 
 ## Do not repeat
 
@@ -249,3 +262,4 @@ Verify the staged file list before every commit.
 - Do not reopen the accepted T3 flow or the parked T2 camera defect while implementing T4.
 - Do not repeat the two failed `526a263`/`31148fe` covered-map download runs or publish another speculative visual-work-only correction. Use the captured native stacks to choose the next renderer-safe change.
 - Do not repeat the resolved SQLite FTS-close or inactive-renderer crash runs. The only remaining T4 investigation is the non-settling `Verifying` transition on a fresh scoped pack.
+- Do not repeat the immediate registry-reload recovery from `d41a931` or the bootstrap-clear/poll correction from `fad527c`; the remaining boundary is callback-versus-forward-progress ordering.

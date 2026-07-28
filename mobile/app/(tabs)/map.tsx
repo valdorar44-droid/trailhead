@@ -43,6 +43,7 @@ import RouteActivityOfferSheet from '@/components/routeBuilder/RouteActivityOffe
 import PackingListSheet from '@/components/trip/PackingListSheet';
 import TripNotesSheet from '@/components/trips/TripNotesSheet';
 import TrailPreviewPlayer from '@/components/trails/TrailPreviewPlayer';
+import TrailBuilderLauncherSheet from '@/components/trails/TrailBuilderLauncherSheet';
 import TourTarget from '@/components/TourTarget';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
 import TrailheadPhotoGallery, { type TrailheadGalleryPhoto } from '@/components/TrailheadPhotoGallery';
@@ -74,6 +75,7 @@ import * as Speech from 'expo-speech';
 import * as Haptics from 'expo-haptics';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as FileSystem from 'expo-file-system/legacy';
+import * as DocumentPicker from 'expo-document-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { applyBackendAcknowledgedActiveTrip, useStore, type WaterSpot, type CatchLog, type WaterRoute } from '@/lib/store';
@@ -185,6 +187,22 @@ import {
   type TrailFeature,
 } from '@/lib/trailEngine';
 import { trailDiscoveryItemToFeature, trailSelectionMatches, trailSystemGeometry } from '@/lib/trailsV2';
+import {
+  appendTrailBuilderAnchor,
+  closeTrailBuilderLoop,
+  outAndBackTrailBuilderRoute,
+  redoTrailBuilderAnchor,
+  reviewTrailBuilderGpx,
+  reverseTrailBuilderRoute,
+  trailBuilderActivityLabel,
+  trailBuilderAccessMessage,
+  trailBuilderRoutingProfile,
+  trailBuilderUseState,
+  undoTrailBuilderAnchor,
+  TRAIL_BUILDER_USE_ORDER,
+  type TrailBuilderActivity,
+  type TrailBuilderMode,
+} from '@/lib/trailBuilderSession';
 import {
   normalizeTrailheadTrailProfile,
   trailFeatureSourceSummary,
@@ -7498,6 +7516,12 @@ function MapScreen() {
   const [trailSnapMode, setTrailSnapMode] = useState<TrailSnapMode>('trail');
   const [trailSnapFailureReason, setTrailSnapFailureReason] = useState('');
   const [trailBuildFinalized, setTrailBuildFinalized] = useState(false);
+  const [trailBuilderLauncherOpen, setTrailBuilderLauncherOpen] = useState(false);
+  const [trailBuilderMode, setTrailBuilderMode] = useState<TrailBuilderMode>('points');
+  const [trailBuilderActivity, setTrailBuilderActivity] = useState<TrailBuilderActivity>('hike');
+  const [trailBuilderPermittedUses, setTrailBuilderPermittedUses] = useState<string[]>([]);
+  const [trailBuilderDirty, setTrailBuilderDirty] = useState(false);
+  const [trailBuilderGpxSummary, setTrailBuilderGpxSummary] = useState('');
   const [trailTraceMode, setTrailTraceMode] = useState(false);
   const [trailTraceDraft, setTrailTraceDraft] = useState<[number, number][]>([]);
   const [trailTraceRoute, setTrailTraceRoute] = useState<[number, number][]>([]);
@@ -7505,6 +7529,7 @@ function MapScreen() {
   const [trailPinCaptureSeedName, setTrailPinCaptureSeedName] = useState('');
   const [trailCapturePins, setTrailCapturePins] = useState<[number, number][]>([]);
   const [trailCaptureAnchors, setTrailCaptureAnchors] = useState<TrailCaptureAnchor[]>([]);
+  const [trailCaptureRedoAnchors, setTrailCaptureRedoAnchors] = useState<TrailCaptureAnchor[]>([]);
   const [trailCaptureBusy, setTrailCaptureBusy] = useState(false);
   const [trailRouteSegmentStatus, setTrailRouteSegmentStatus] = useState<TrailRouteSegmentStatus[]>([]);
   const trailTraceDraftRef = useRef<[number, number][]>([]);
@@ -10228,11 +10253,20 @@ function MapScreen() {
       setSavedTrailRouteOpenId(saved.id);
       setTrailRoutePlans([plan]);
       setSelectedTrailRoutePlanId('capture');
+      setTrailBuilderMode(saved.builder?.mode ?? 'points');
+      setTrailBuilderActivity(saved.builder?.activity ?? 'hike');
+      setTrailBuilderPermittedUses([...(saved.trail.activities ?? [])]);
+      const emptyGeometry = { type: 'FeatureCollection' as const, features: [] };
+      const savedAnchors = (saved.builder?.anchors ?? []).map(coord => ({ coord: [coord[0], coord[1]] as [number, number], geometry: emptyGeometry }));
+      const savedRedo = (saved.builder?.redo ?? []).map(coord => ({ coord: [coord[0], coord[1]] as [number, number], geometry: emptyGeometry }));
+      setTrailCaptureAnchors(savedAnchors);
+      setTrailCaptureRedoAnchors(savedRedo);
+      setTrailCapturePins(savedAnchors.map(anchor => anchor.coord));
+      setTrailBuilderDirty(false);
       setTrailRouteBuilderError('');
       setTrailSnapFailureReason('');
       setTrailTraceRoute(coords);
       previewTrailRoutePlan(saved.trail, plan);
-      nativeMapRef.current?.flyTo(saved.trail.lat, saved.trail.lng, 13, saved.trail.name);
       setQuickToast('Saved trail route opened');
       setTimeout(() => setQuickToast(''), 2200);
     })();
@@ -21961,6 +21995,10 @@ function MapScreen() {
   useFocusEffect(useCallback(() => {
     if (!selectedTrail) return undefined;
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (trailRouteBuilderOpen || trailPinCaptureMode || trailTraceMode) {
+        requestTrailBuilderExit();
+        return true;
+      }
       if (trailParentSnapshotRef.current) {
         restoreTrailSheetParent();
         return true;
@@ -21978,7 +22016,40 @@ function MapScreen() {
       return true;
     });
     return () => subscription.remove();
-  }, [selectedTrail?.id, placeSheetCoordinator.presentation, relatedPlaceReturnStack.length]));
+  }, [
+    selectedTrail?.id,
+    placeSheetCoordinator.presentation,
+    relatedPlaceReturnStack.length,
+    trailBuilderDirty,
+    trailPinCaptureMode,
+    trailRouteBuilderOpen,
+    trailTraceMode,
+  ]));
+
+  useEffect(() => {
+    if (!trailBuilderLauncherOpen) return;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      setTrailBuilderLauncherOpen(false);
+      return true;
+    });
+    return () => subscription.remove();
+  }, [trailBuilderLauncherOpen]);
+
+  useEffect(() => {
+    if (!trailRouteBuilderOpen && !trailPinCaptureMode && !trailTraceMode) return;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      requestTrailBuilderExit();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [
+    trailBuilderDirty,
+    trailPinCaptureMode,
+    trailRouteBuilderOpen,
+    trailTraceMode,
+    selectedTrail?.id,
+    selectedTrailRoutePlanId,
+  ]);
 
   useEffect(() => {
     if (!selectedCommunityPin) return;
@@ -22574,9 +22645,10 @@ function MapScreen() {
   async function fetchMapboxPinnedTrailRoute(pins: [number, number][]) {
     if (!mapboxToken || pins.length < 2) return null;
     if (pins.length > 25) throw new Error('Mapbox can route up to 25 points at once. Undo a few pins and try again.');
+    const routingProfile = trailBuilderRoutingProfile(trailBuilderActivity);
     const pairs = pins.map(([lng, lat]) => `${lng.toFixed(6)},${lat.toFixed(6)}`);
     const radiuses = pins.map(() => '160').join(';');
-    const url = `https://api.mapbox.com/directions/v5/mapbox/walking/${pairs.join(';')}` +
+    const url = `https://api.mapbox.com/directions/v5/mapbox/${routingProfile.mapbox}/${pairs.join(';')}` +
       `?access_token=${encodeURIComponent(mapboxToken)}` +
       '&geometries=geojson&overview=full&steps=true&alternatives=false&continue_straight=false' +
       `&radiuses=${radiuses}`;
@@ -22622,7 +22694,7 @@ function MapScreen() {
         signal: ctrl.signal,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          profile: 'foot',
+          profile: trailBuilderRoutingProfile(trailBuilderActivity).graphhopper,
           points: legPins,
         }),
       }).then(async r => {
@@ -22690,7 +22762,7 @@ function MapScreen() {
       body: JSON.stringify({
         id: 'trailhead_pinned_route',
         locations,
-        costing: 'pedestrian',
+        costing: trailBuilderRoutingProfile(trailBuilderActivity).stadia,
         units: 'miles',
         format: 'osrm',
         shape_format: 'polyline6',
@@ -23056,6 +23128,7 @@ function MapScreen() {
     setTrailTraceDraft([]);
     trailTraceDraftRef.current = [];
     setTrailTraceRoute([]);
+    setTrailBuilderDirty(false);
   }
 
   function clearTrailRoutePreview() {
@@ -23071,9 +23144,13 @@ function MapScreen() {
     trailTraceDraftRef.current = [];
     setTrailCapturePins([]);
     setTrailCaptureAnchors([]);
+    setTrailCaptureRedoAnchors([]);
     setTrailPinCaptureMode(false);
     syncTrailCaptureModeToWeb(false);
     setTrailPinCaptureSeedName('');
+    setTrailBuilderPermittedUses([]);
+    setTrailBuilderGpxSummary('');
+    setTrailBuilderDirty(false);
     trailAutoBuildCountRef.current = 0;
     if (!navMode) {
       restoreCarTripSnapshot();
@@ -23089,7 +23166,7 @@ function MapScreen() {
     }
   }
 
-  function closeTrailRouteBuilderPanel() {
+  function discardTrailRouteBuilderPanel() {
     if (savedTrailRouteOpenId && selectedTrail && trailRoutePlans.length > 0) {
       setTrailRouteBuilderOpen(false);
       setTrailCardCollapsed(true);
@@ -23135,6 +23212,11 @@ function MapScreen() {
     setTrailTraceDraft([]);
     trailTraceDraftRef.current = [];
     setTrailTraceRoute([]);
+    setTrailBuilderMode('draw');
+    setTrailBuilderActivity('hike');
+    setTrailBuilderPermittedUses([]);
+    setTrailBuilderGpxSummary('');
+    setTrailBuilderDirty(false);
     setTrailTraceMode(true);
     setQuickToast('Trace a trail with your finger');
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
@@ -23148,6 +23230,7 @@ function MapScreen() {
       if (last && haversineKm(last[1], last[0], coord[1], coord[0]) * 1000 < 8) return base;
       const next = [...base, coord].slice(-900);
       trailTraceDraftRef.current = next;
+      if (next.length > 1) setTrailBuilderDirty(true);
       return next;
     });
   }
@@ -23223,6 +23306,7 @@ function MapScreen() {
         engine: graphSnapped ? 'Trail line' : 'Drawn line',
       });
     setSelectedTrail(feature);
+    setTrailBuilderDirty(true);
     setTrailTraceDraft(rough);
     trailTraceDraftRef.current = rough;
     setTrailTraceRoute(captured);
@@ -23235,7 +23319,7 @@ function MapScreen() {
     Haptics.notificationAsync(graphSnapped ? Haptics.NotificationFeedbackType.Success : Haptics.NotificationFeedbackType.Warning).catch(() => {});
   }
 
-  function clearTrailPinCapture() {
+  function discardTrailPinCapture() {
     nativeMapRef.current?.clearTrailHighlight();
     closeTrailPreview();
     setTrailPinCaptureMode(false);
@@ -23243,6 +23327,7 @@ function MapScreen() {
     setTrailPinCaptureSeedName('');
     setTrailCapturePins([]);
     setTrailCaptureAnchors([]);
+    setTrailCaptureRedoAnchors([]);
     setTrailCaptureBusy(false);
     setTrailTraceDraft([]);
     trailTraceDraftRef.current = [];
@@ -23253,6 +23338,151 @@ function MapScreen() {
     setTrailCardCollapsed(false);
     setTrailRouteBuilderOpen(false);
     clearTrailRoutePreview();
+  }
+
+  function discardTrailBuilder() {
+    setTrailBuilderDirty(false);
+    setTrailBuilderLauncherOpen(false);
+    if (trailTraceMode) {
+      clearTrailTrace();
+      return;
+    }
+    if (trailPinCaptureMode) {
+      discardTrailPinCapture();
+      return;
+    }
+    discardTrailRouteBuilderPanel();
+  }
+
+  function requestTrailBuilderExit() {
+    if (!trailBuilderDirty) {
+      discardTrailBuilder();
+      return;
+    }
+    const plan = trailRoutePlans.find(item => item.id === selectedTrailRoutePlanId) ?? trailRoutePlans[0];
+    const canSave = Boolean(selectedTrail && plan?.coords.length && plan.coords.length > 1);
+    const actions: any[] = [
+      { text: 'Keep editing', style: 'cancel' },
+      ...(canSave ? [{
+        text: 'Save draft',
+        onPress: () => {
+          if (!selectedTrail || !plan) return;
+          saveTrailRoutePlan(selectedTrail, plan)
+            .then(() => discardTrailBuilder())
+            .catch(() => Alert.alert('Draft not saved', 'Try again before closing Trail Builder.'));
+        },
+      }] : []),
+      { text: 'Discard', style: 'destructive', onPress: discardTrailBuilder },
+    ];
+    Alert.alert(
+      'Close Trail Builder?',
+      canSave ? 'Save this route as a draft or discard your changes.' : 'This route has not been built yet.',
+      actions,
+    );
+  }
+
+  function closeTrailRouteBuilderPanel() {
+    requestTrailBuilderExit();
+  }
+
+  async function importTrailBuilderGpx() {
+    setTrailBuilderLauncherOpen(false);
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['application/gpx+xml', 'application/xml', 'text/xml', 'text/plain', '*/*'],
+        copyToCacheDirectory: true,
+        multiple: false,
+      });
+      if (result.canceled) return;
+      const file = result.assets[0];
+      const content = await FileSystem.readAsStringAsync(file.uri, { encoding: FileSystem.EncodingType.UTF8 });
+      const review = reviewTrailBuilderGpx(content, file.name, Number(file.size) || undefined);
+      const coords = review.coords.map(([lng, lat]) => [lng, lat] as [number, number]);
+      const midpoint = coords[Math.floor(coords.length / 2)];
+      const distanceM = review.distanceMiles * 1609.344;
+      const feature: TrailFeature = {
+        id: `gpx:${Date.now()}`,
+        name: review.name,
+        subtitle: `${fmtTrailRouteDistance(distanceM)} · Imported GPX`,
+        type: 'trail',
+        source: 'trip',
+        lat: midpoint[1],
+        lng: midpoint[0],
+        score: 100,
+        support: buildTrailSupport(
+          { lat: midpoint[1], lng: midpoint[0] },
+          trailSupportCamps,
+          trailSupportFuel,
+          allMapPois,
+          mapReports,
+          offlineSaved,
+        ),
+      };
+      const plan: TrailRoutePlan = withTrailElevation({
+        id: 'capture',
+        title: review.name,
+        subtitle: `${fmtTrailRouteDistance(distanceM)} · GPX route`,
+        icon: 'cloud-upload-outline',
+        coords,
+        distanceM,
+        confidence: 'medium',
+        warnings: ['Imported track. Trail access is not included in the file.'],
+        engine: 'Imported GPX',
+      });
+      setSelectedCamp(null);
+      setSelectedCommunityPin(null);
+      setSelectedTrail(feature);
+      setTrailBuilderMode('gpx');
+      setTrailBuilderActivity('hike');
+      setTrailBuilderPermittedUses([]);
+      setTrailBuilderGpxSummary(`${review.sourcePointCount.toLocaleString()} points · ${fmtTrailRouteDistance(distanceM)}`);
+      setTrailPinCaptureMode(false);
+      setTrailTraceMode(false);
+      setTrailCaptureAnchors([]);
+      setTrailCaptureRedoAnchors([]);
+      setTrailCapturePins([]);
+      setTrailTraceDraft([]);
+      trailTraceDraftRef.current = [];
+      setTrailTraceRoute(coords);
+      setTrailRoutePlans([plan]);
+      setSelectedTrailRoutePlanId('capture');
+      setTrailBuildFinalized(true);
+      setTrailRouteBuilderOpen(true);
+      setTrailCardCollapsed(true);
+      setTrailBuilderDirty(true);
+      hydrateTrailRoutePlanElevation(plan);
+      previewTrailRoutePlan(feature, plan);
+    } catch (error: any) {
+      Alert.alert('GPX not imported', error?.message || 'Choose a valid GPX route and try again.');
+    }
+  }
+
+  function transformSelectedTrailRoute(kind: 'reverse' | 'out_back' | 'loop') {
+    const current = trailRoutePlans.find(item => item.id === selectedTrailRoutePlanId) ?? trailRoutePlans[0];
+    if (!current || current.coords.length < 2) return;
+    const coords = kind === 'reverse'
+      ? reverseTrailBuilderRoute(current.coords)
+      : kind === 'out_back'
+        ? outAndBackTrailBuilderRoute(current.coords)
+        : closeTrailBuilderLoop(current.coords);
+    const distanceM = trailCoordsDistanceM(coords);
+    const next: TrailRoutePlan = withTrailElevation({
+      ...current,
+      title: kind === 'reverse' ? 'Reversed route' : kind === 'out_back' ? 'Out and back' : 'Closed loop',
+      subtitle: `${fmtTrailRouteDistance(distanceM)} · ${trailBuilderActivityLabel(trailBuilderActivity)}`,
+      coords,
+      distanceM,
+      warnings: [
+        kind === 'loop'
+          ? 'The closing segment is a direct line until it is reviewed on the map.'
+          : (current.warnings[0] || 'Review the line before saving.'),
+      ],
+    });
+    setTrailRoutePlans([next]);
+    setSelectedTrailRoutePlanId(next.id);
+    setTrailTraceRoute(coords);
+    setTrailBuilderDirty(true);
+    if (selectedTrail) previewTrailRoutePlan(selectedTrail, next);
   }
 
   function beginTrailPinCapture() {
@@ -23280,7 +23510,13 @@ function MapScreen() {
     setTrailTraceRoute([]);
     setTrailCapturePins([]);
     setTrailCaptureAnchors([]);
+    setTrailCaptureRedoAnchors([]);
     setTrailPinCaptureSeedName('');
+    setTrailBuilderMode('points');
+    setTrailBuilderActivity('hike');
+    setTrailBuilderPermittedUses([]);
+    setTrailBuilderGpxSummary('');
+    setTrailBuilderDirty(false);
     setTrailTraceDraft([]);
     trailTraceDraftRef.current = [];
     setTrailPinCaptureMode(true);
@@ -23322,9 +23558,18 @@ function MapScreen() {
     setTrailTraceMode(false);
     setTrailTraceRoute([]);
     setTrailCaptureAnchors([anchor]);
+    setTrailCaptureRedoAnchors([]);
     trailAutoBuildCountRef.current = 0;
     setTrailCapturePins([seed]);
     setTrailPinCaptureSeedName(trail.name);
+    setTrailBuilderMode('canonical');
+    const permittedUses = [...(trail.activities ?? [])];
+    setTrailBuilderPermittedUses(permittedUses);
+    setTrailBuilderActivity(
+      TRAIL_BUILDER_USE_ORDER.find(activity => trailBuilderUseState(activity, permittedUses) === 'allowed') ?? 'hike',
+    );
+    setTrailBuilderGpxSummary('');
+    setTrailBuilderDirty(false);
     setTrailTraceDraft([seed]);
     trailTraceDraftRef.current = [seed];
     setTrailPinCaptureMode(true);
@@ -23356,10 +23601,18 @@ function MapScreen() {
         setTimeout(() => setQuickToast(''), 1800);
         return;
       }
-      const nextAnchors = [...trailCaptureAnchors, { coord: snapped, geometry: anchorGeometry }].slice(-24);
+      const nextHistory = appendTrailBuilderAnchor(
+        { anchors: trailCaptureAnchors, redo: trailCaptureRedoAnchors },
+        { coord: snapped, context: anchorGeometry },
+      );
+      const nextAnchors = nextHistory.anchors
+        .map(item => ({ coord: [item.coord[0], item.coord[1]] as [number, number], geometry: item.context as GeoJSON.FeatureCollection }))
+        .slice(-24);
       const pins = nextAnchors.map(anchor => anchor.coord);
       setTrailCaptureAnchors(nextAnchors);
+      setTrailCaptureRedoAnchors([]);
       setTrailCapturePins(pins);
+      setTrailBuilderDirty(true);
       setTrailTraceDraft([]);
       trailTraceDraftRef.current = [];
       setTrailTraceRoute([]);
@@ -23381,18 +23634,49 @@ function MapScreen() {
   }
 
   function undoTrailCapturePin() {
-    let nextAnchors: TrailCaptureAnchor[] = [];
     setTrailBuildFinalized(false);
-    setTrailCaptureAnchors(prev => {
-      const next = prev.slice(0, -1);
-      nextAnchors = next;
-      const pins = next.map(anchor => anchor.coord);
-      setTrailCapturePins(pins);
-      setTrailTraceDraft([]);
-      trailTraceDraftRef.current = [];
-      return next;
+    const nextHistory = undoTrailBuilderAnchor({
+      anchors: trailCaptureAnchors.map(anchor => ({ coord: anchor.coord, context: anchor.geometry })),
+      redo: trailCaptureRedoAnchors.map(anchor => ({ coord: anchor.coord, context: anchor.geometry })),
     });
+    const nextAnchors = nextHistory.anchors.map(item => ({
+      coord: [item.coord[0], item.coord[1]] as [number, number],
+      geometry: item.context as GeoJSON.FeatureCollection,
+    }));
+    const redoAnchors = nextHistory.redo.map(item => ({
+      coord: [item.coord[0], item.coord[1]] as [number, number],
+      geometry: item.context as GeoJSON.FeatureCollection,
+    }));
+    setTrailCaptureAnchors(nextAnchors);
+    setTrailCaptureRedoAnchors(redoAnchors);
+    setTrailCapturePins(nextAnchors.map(anchor => anchor.coord));
+    setTrailTraceDraft([]);
+    trailTraceDraftRef.current = [];
+    setTrailBuilderDirty(nextAnchors.length > 0 || redoAnchors.length > 0);
     setTrailTraceRoute([]);
+    if (nextAnchors.length >= 2) {
+      setTimeout(() => capturePinnedTrailRoute(nextAnchors, { previewOnly: true }), 0);
+    }
+  }
+
+  function redoTrailCapturePin() {
+    const nextHistory = redoTrailBuilderAnchor({
+      anchors: trailCaptureAnchors.map(anchor => ({ coord: anchor.coord, context: anchor.geometry })),
+      redo: trailCaptureRedoAnchors.map(anchor => ({ coord: anchor.coord, context: anchor.geometry })),
+    });
+    const nextAnchors = nextHistory.anchors.map(item => ({
+      coord: [item.coord[0], item.coord[1]] as [number, number],
+      geometry: item.context as GeoJSON.FeatureCollection,
+    }));
+    const redoAnchors = nextHistory.redo.map(item => ({
+      coord: [item.coord[0], item.coord[1]] as [number, number],
+      geometry: item.context as GeoJSON.FeatureCollection,
+    }));
+    setTrailBuildFinalized(false);
+    setTrailCaptureAnchors(nextAnchors);
+    setTrailCaptureRedoAnchors(redoAnchors);
+    setTrailCapturePins(nextAnchors.map(anchor => anchor.coord));
+    setTrailBuilderDirty(nextAnchors.length > 0);
     if (nextAnchors.length >= 2) {
       setTimeout(() => capturePinnedTrailRoute(nextAnchors, { previewOnly: true }), 0);
     }
@@ -23400,6 +23684,14 @@ function MapScreen() {
 
   async function capturePinnedTrailRoute(anchorOverride?: TrailCaptureAnchor[], opts: { previewOnly?: boolean } = {}) {
     if (trailCaptureBusy && !anchorOverride) return;
+    const useState = trailBuilderUseState(trailBuilderActivity, trailBuilderPermittedUses);
+    const accessMessage = trailBuilderAccessMessage(trailBuilderActivity, trailBuilderPermittedUses);
+    if (useState === 'not_allowed') {
+      setTrailSnapFailureReason(accessMessage);
+      setQuickToast(accessMessage);
+      setTimeout(() => setQuickToast(''), 4200);
+      return;
+    }
     const previewOnly = !!opts.previewOnly;
     const anchors = anchorOverride ?? trailCaptureAnchors;
     const pins = anchors.map(anchor => anchor.coord);
@@ -23424,7 +23716,7 @@ function MapScreen() {
     try {
       let clean: [number, number][] = [];
       let engineLabel = 'Trail route';
-      let engineWarning = 'Built from your pins. Review the line before saving.';
+      let engineWarning = accessMessage || 'Built from your points. Review the line before saving.';
       let engineConfidence: TrailRoutePlan['confidence'] = 'high';
       let segmentStatuses: TrailRouteSegmentStatus[] = [];
       let routedDistanceM = 0;
@@ -23439,7 +23731,7 @@ function MapScreen() {
           engine: 'Straight',
           message: 'Manual connector',
         }));
-        engineWarning = trailSnapModeHelp('straight');
+        engineWarning = [trailSnapModeHelp('straight'), accessMessage].filter(Boolean).join(' ');
       } else {
         try {
         const stadiaRoute = pins.length > 2
@@ -23469,7 +23761,7 @@ function MapScreen() {
             status: idx < segmentStatuses.length && segmentStatuses[idx].status === 'failed' ? 'fallback' : 'ok',
             engine: 'Adjusted',
           }));
-          engineWarning = 'Built with an adjusted route pass. Review the line before saving.';
+          engineWarning = accessMessage || 'Review the adjusted line before saving.';
         } catch (graphHopperErr: any) {
           try {
             const mapboxRoute = await fetchMapboxPinnedTrailRoute(pins);
@@ -23483,7 +23775,7 @@ function MapScreen() {
               status: idx < segmentStatuses.length && segmentStatuses[idx].status === 'failed' ? 'fallback' : 'ok',
               engine: 'Adjusted',
             }));
-            engineWarning = 'Add pins at tight bends if the line cuts corners.';
+            engineWarning = accessMessage || 'Add points at tight bends if the line cuts corners.';
           } catch (mapboxErr: any) {
             const captured: [number, number][] = [];
             const localStatuses: TrailRouteSegmentStatus[] = [];
@@ -23506,9 +23798,9 @@ function MapScreen() {
             engineLabel = usedManualFallback ? 'Manual line' : 'Trail route';
             engineConfidence = 'low';
             segmentStatuses = localStatuses;
-            engineWarning = usedManualFallback
+            engineWarning = accessMessage || (usedManualFallback
               ? 'Review the line before saving. Add points around bends and forks.'
-              : 'Add pins around curves if the line cuts corners.';
+              : 'Add points around curves if the line cuts corners.');
           }
         }
       }
@@ -23556,6 +23848,7 @@ function MapScreen() {
       }
       setTrailTraceRoute(clean);
       setTrailRoutePlans([plan]);
+      setTrailBuilderDirty(true);
       setSelectedTrailRoutePlanId('capture');
       setTrailRouteBuilderError('');
       setTrailSnapFailureReason('');
@@ -23595,6 +23888,7 @@ function MapScreen() {
     setIsRouted(true);
     syncTrailFollowWithCar('trail_follow_preview', trail, plan, steps, duration);
     nativeMapRef.current?.restoreRoute(plan.coords, steps, [steps], plan.distanceM, duration);
+    nativeMapRef.current?.fitCoordinates(plan.coords, [96, 42, 330, 42], 650);
     postWebMessage(JSON.stringify({
       type: 'restore_route',
       coords: plan.coords,
@@ -23731,6 +24025,13 @@ function MapScreen() {
       },
       savedAt: Date.now(),
       source: 'manual',
+      builder: {
+        schemaVersion: 1,
+        mode: trailBuilderMode,
+        activity: trailBuilderActivity,
+        anchors: trailCaptureAnchors.map(anchor => anchor.coord),
+        redo: trailCaptureRedoAnchors.map(anchor => anchor.coord),
+      },
     });
     addSavedPlace({
       id: `captured:${namedTrail.id}`,
@@ -23741,6 +24042,7 @@ function MapScreen() {
       note: `${fmtTrailRouteDistance(plan.distanceM)} · ${fmtTrailElevation(plan)} captured trail route`,
       createdAt: Date.now(),
     });
+    setTrailBuilderDirty(false);
     setQuickToast('Saved to Route Builder > Trails');
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
     setTimeout(() => setQuickToast(''), 2400);
@@ -25111,9 +25413,24 @@ function MapScreen() {
         onOpenFilters={() => openLayersAndFilters('filters', 'map_drawer')}
         onOpenOffline={() => setShowOfflineModal(true)}
         onOpenTrailBuilder={() => {
-          if (trailPinCaptureMode) clearTrailPinCapture();
-          else beginTrailPinCapture();
+          if (trailPinCaptureMode || trailTraceMode || trailRouteBuilderOpen) requestTrailBuilderExit();
+          else setTrailBuilderLauncherOpen(true);
         }}
+      />
+
+      <TrailBuilderLauncherSheet
+        visible={trailBuilderLauncherOpen && !navMode && !originalsMapExperience.active}
+        bottomInset={bottomInset}
+        onClose={() => setTrailBuilderLauncherOpen(false)}
+        onPlacePoints={() => {
+          setTrailBuilderLauncherOpen(false);
+          beginTrailPinCapture();
+        }}
+        onDraw={() => {
+          setTrailBuilderLauncherOpen(false);
+          beginTrailTrace();
+        }}
+        onImportGpx={() => { void importTrailBuilderGpx(); }}
       />
 
       {(() => {
@@ -25880,7 +26197,7 @@ function MapScreen() {
       {trailTraceMode && !navMode && !waterFollowActive && !mapMissionVisible && (
         <View style={s.traceHud} pointerEvents="auto">
           <View style={s.traceHudIcon}>
-            <Ionicons name="analytics-outline" size={18} color="#22c55e" />
+            <Ionicons name="analytics-outline" size={18} color={C.orange} />
           </View>
           <View style={{ flex: 1 }}>
             <Text style={s.traceHudTitle}>TRACE TRAIL</Text>
@@ -25888,7 +26205,7 @@ function MapScreen() {
               Draw from start to finish. Lift to clean up the line.
             </Text>
           </View>
-          <TouchableOpacity style={s.traceHudCancel} onPress={clearTrailTrace}>
+          <TouchableOpacity testID="trail.builder.draw.close" style={s.traceHudCancel} onPress={requestTrailBuilderExit}>
             <Ionicons name="close" size={16} color={OVR.text2} />
           </TouchableOpacity>
         </View>
@@ -25898,12 +26215,12 @@ function MapScreen() {
         <View style={s.trailRouteBuilderWrap} pointerEvents="auto">
           <TrailheadSheet contentStyle={s.trailCaptureSheetContent}>
             <View style={s.trailCompactMessage}>
-              <View style={[s.trailCompactIcon, { backgroundColor: '#22c55e22', borderColor: '#22c55e66' }]}>
-                <Ionicons name="git-branch-outline" size={15} color="#22c55e" />
+              <View style={[s.trailCompactIcon, { backgroundColor: C.orangeGlow, borderColor: `${C.orange}66` }]}>
+                <Ionicons name="git-branch-outline" size={15} color={C.orange} />
               </View>
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={s.trailCompactTitle} numberOfLines={1}>
-                  TRAIL BUILDER · {trailBuildFinalized ? 'BUILT' : trailTraceRoute.length > 1 ? 'PREVIEW SNAPPED' : trailCapturePins.length ? 'ADD NEXT POINT' : 'TAP START'}
+                  TRAIL BUILDER · {trailBuildFinalized ? 'ROUTE READY' : trailTraceRoute.length > 1 ? 'PREVIEW READY' : trailCapturePins.length ? 'ADD NEXT POINT' : 'TAP START'}
                 </Text>
                 <Text style={s.trailCompactText} numberOfLines={2}>
                   {trailBuildFinalized
@@ -25913,7 +26230,7 @@ function MapScreen() {
                     : 'Tap the next route point. Trailhead snaps the line.'}
                 </Text>
               </View>
-              <TouchableOpacity style={s.discoveryPanelClose} onPress={clearTrailPinCapture} disabled={trailCaptureBusy}>
+              <TouchableOpacity testID="trail.builder.points.close" style={s.discoveryPanelClose} onPress={requestTrailBuilderExit} disabled={trailCaptureBusy}>
                 <Ionicons name="close" size={15} color={OVR.text2} />
               </TouchableOpacity>
             </View>
@@ -25921,10 +26238,35 @@ function MapScreen() {
               metrics={[
                 { label: 'Distance', value: previewTrailDistanceM > 0 ? fmtTrailRouteDistance(previewTrailDistanceM) : 'Set route', icon: 'map-outline', tone: C.silverBright },
                 { label: 'Time', value: previewTrailDistanceM > 0 ? fmtTrailRouteTime(previewTrailDistanceM) : 'Pending', icon: 'time-outline', tone: C.silverBright },
-                { label: 'Points', value: trailCapturePins.length ? String(trailCapturePins.length) : 'Start', icon: 'radio-button-on-outline', tone: '#22c55e' },
+                { label: 'Points', value: trailCapturePins.length ? String(trailCapturePins.length) : 'Start', icon: 'radio-button-on-outline', tone: C.orange },
                 { label: trailElevationLabel(selectedTrailRoutePlan), value: fmtTrailElevation(selectedTrailRoutePlan), icon: 'trending-up-outline', tone: C.orange },
               ]}
             />
+            <View testID="trail.builder.activity" style={s.trailSnapModeStrip}>
+              {TRAIL_BUILDER_USE_ORDER.map(activity => {
+                const active = trailBuilderActivity === activity;
+                const unavailable = trailBuilderUseState(activity, trailBuilderPermittedUses) === 'not_allowed';
+                return (
+                  <TouchableOpacity
+                    key={activity}
+                    testID={`trail.builder.activity.${activity}`}
+                    activeOpacity={0.85}
+                    disabled={unavailable}
+                    style={[s.trailSnapModeBtn, active && s.trailSnapModeBtnActive, unavailable && { opacity: 0.34 }]}
+                    onPress={() => {
+                      setTrailBuilderActivity(activity);
+                      const message = trailBuilderAccessMessage(activity, trailBuilderPermittedUses);
+                      setTrailSnapFailureReason(message);
+                      if (trailCapturePins.length > 1) setTrailBuilderDirty(true);
+                    }}
+                  >
+                    <Text style={[s.trailSnapModeText, active && s.trailSnapModeTextActive]} numberOfLines={1}>
+                      {trailBuilderActivityLabel(activity)}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
             <View style={s.trailSnapModeStrip}>
               {TRAIL_SNAP_MODE_OPTIONS.map(mode => {
                 const active = trailSnapMode === mode.id;
@@ -25954,6 +26296,7 @@ function MapScreen() {
             )}
             <TrailheadButtonDock style={s.trailRouteBuilderActions}>
               <TrailheadButton
+                testID="trail.builder.points.undo"
                 label="Undo"
                 icon="arrow-undo-outline"
                 variant="secondary"
@@ -25962,6 +26305,16 @@ function MapScreen() {
                 style={{ flex: 1, minWidth: trailBuildFinalized ? '47%' as any : undefined }}
               />
               <TrailheadButton
+                testID="trail.builder.points.redo"
+                label="Redo"
+                icon="arrow-redo-outline"
+                variant="secondary"
+                onPress={redoTrailCapturePin}
+                disabled={trailCaptureBusy || trailCaptureRedoAnchors.length === 0}
+                style={{ flex: 1, minWidth: trailBuildFinalized ? '47%' as any : undefined }}
+              />
+              <TrailheadButton
+                testID="trail.builder.points.build"
                 label={trailBuildFinalized ? 'Rebuild' : 'Build'}
                 icon="checkmark"
                 variant="primary"
@@ -25973,6 +26326,7 @@ function MapScreen() {
               {trailBuildFinalized && (
                 <>
                   <TrailheadButton
+                    testID="trail.builder.points.save"
                     label="Save"
                     icon="bookmark-outline"
                     variant="secondary"
@@ -25981,6 +26335,7 @@ function MapScreen() {
                     style={{ flex: 1, minWidth: '47%' as any }}
                   />
                   <TrailheadButton
+                    testID="trail.builder.points.flyover"
                     label="Flyover"
                     icon="play-circle-outline"
                     variant="secondary"
@@ -25989,6 +26344,7 @@ function MapScreen() {
                     style={{ flex: 1, minWidth: '47%' as any }}
                   />
                   <TrailheadButton
+                    testID="trail.builder.points.start"
                     label="Start"
                     icon="navigate"
                     variant="primary"
@@ -26780,7 +27136,9 @@ function MapScreen() {
                 <Ionicons name="git-branch-outline" size={18} color={C.orange} />
               </View>
               <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={s.trailRouteEyebrow}>TRAIL BUILDER</Text>
+                <Text style={s.trailRouteEyebrow}>
+                  TRAIL BUILDER · {trailBuilderMode === 'gpx' ? 'GPX' : trailBuilderMode === 'canonical' ? 'KNOWN TRAIL' : trailBuilderMode === 'draw' ? 'DRAWN ROUTE' : 'ROUTE POINTS'}
+                </Text>
                 <Text style={s.trailRouteTitle} numberOfLines={1}>{selectedTrail.name}</Text>
               </View>
               <TouchableOpacity
@@ -26799,6 +27157,36 @@ function MapScreen() {
                 { label: trailElevationLabel(selectedTrailRoutePlan), value: fmtTrailElevation(selectedTrailRoutePlan), icon: 'trending-up-outline', tone: C.orange },
               ]}
             />
+            {!!trailBuilderGpxSummary && (
+              <View testID="trail.builder.gpx.summary" style={[s.trailRouteWarningBox, { marginBottom: 9 }]}>
+                <Ionicons name="document-outline" size={16} color={C.orange} />
+                <Text style={s.trailRouteWarningText}>{trailBuilderGpxSummary}</Text>
+              </View>
+            )}
+            <View testID="trail.builder.review.activity" style={s.trailSnapModeStrip}>
+              {TRAIL_BUILDER_USE_ORDER.map(activity => {
+                const active = trailBuilderActivity === activity;
+                const unavailable = trailBuilderUseState(activity, trailBuilderPermittedUses) === 'not_allowed';
+                return (
+                  <TouchableOpacity
+                    key={activity}
+                    testID={`trail.builder.review.activity.${activity}`}
+                    activeOpacity={0.85}
+                    disabled={unavailable}
+                    style={[s.trailSnapModeBtn, active && s.trailSnapModeBtnActive, unavailable && { opacity: 0.34 }]}
+                    onPress={() => {
+                      setTrailBuilderActivity(activity);
+                      setTrailSnapFailureReason(trailBuilderAccessMessage(activity, trailBuilderPermittedUses));
+                      setTrailBuilderDirty(true);
+                    }}
+                  >
+                    <Text style={[s.trailSnapModeText, active && s.trailSnapModeTextActive]} numberOfLines={1}>
+                      {trailBuilderActivityLabel(activity)}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
             <View style={s.trailSnapModeStrip}>
               {TRAIL_SNAP_MODE_OPTIONS.map(mode => {
                 const active = trailSnapMode === mode.id;
@@ -26873,6 +27261,33 @@ function MapScreen() {
                     );
                   })}
                 </View>
+
+                <TrailheadButtonDock style={s.trailRouteBuilderActions}>
+                  <TrailheadButton
+                    testID="trail.builder.route.reverse"
+                    label="Reverse"
+                    icon="swap-vertical-outline"
+                    variant="secondary"
+                    onPress={() => transformSelectedTrailRoute('reverse')}
+                    style={{ flex: 1 }}
+                  />
+                  <TrailheadButton
+                    testID="trail.builder.route.out-back"
+                    label="Out & back"
+                    icon="return-down-back-outline"
+                    variant="secondary"
+                    onPress={() => transformSelectedTrailRoute('out_back')}
+                    style={{ flex: 1 }}
+                  />
+                  <TrailheadButton
+                    testID="trail.builder.route.loop"
+                    label="Close loop"
+                    icon="sync-outline"
+                    variant="secondary"
+                    onPress={() => transformSelectedTrailRoute('loop')}
+                    style={{ flex: 1 }}
+                  />
+                </TrailheadButtonDock>
 
                 {!!trailRoutePlans.find(p => p.id === selectedTrailRoutePlanId)?.warnings.length && (
                   <View style={s.trailRouteWarningBox}>

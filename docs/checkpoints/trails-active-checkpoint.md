@@ -165,6 +165,15 @@ Verify the staged file list before every commit.
   - Demonstrated T3 gaps: no Trail Builder GPX entry/review, no redo after point undo, no unsaved-exit decision, and visible builder copy still contains broken separators and engine-oriented phrasing. These are the only initial implementation targets; recording remains T5.
   - Focused T3 proof: pure builder-session and GPX validation tests, existing route-builder/Trail sheet/Offline preservation/copy/privacy/TypeScript gates, then one Android delta covering known trail, pins, draw, GPX, undo/redo, exit recovery, save, and reopen.
   - Task-owned background processes: none.
+- T3 implementation checkpoint:
+  - The existing main-map Trail Builder now has one launcher for route points, free drawing, and local GPX import; known trails continue entering the same builder from their sheet.
+  - GPX parsing was split into a pure shared parser so Profile import and Trail Builder use the same validation. Trail Builder keeps imported coordinates local until explicit Save, omits timestamps/waypoint descriptions from its saved route, rejects empty, oversized, malformed, invalid-coordinate, and over-50,000-point tracks, and opens the longest valid track for review.
+  - Point building now has deterministic undo/redo. New edits clear redo. Back and Close protect unsaved work with Keep editing, Save draft, and Discard.
+  - Source-backed permitted uses constrain activity selection. Unsupported uses cannot build; missing permissions show an explicit review warning. Hike, bike, horse, OHV/4WD, and mixed-use selections choose matching route profiles without claiming legal access.
+  - Route review adds Reverse, Out & back, and Close loop transformations. Saved manual routes retain builder mode, activity, anchors, and redo history through the existing Offline Trail store; older saves remain compatible.
+  - The launcher and builder use the approved warm-white/near-black/orange system. No second renderer, provider label, AI label, generic photo, public GPX pin, native dependency, public API, or duplicate storage system was added.
+  - Focused gates passed: Trail Builder session/GPX `5/5`; Trail sheet flow `6/6`; mission/flyover smoke; sheet actions/coordinator; Offline V1/V2 preservation/runtime; copy audit across `166` files; privacy controls; and full TypeScript.
+  - Android preview publication and live device evidence remain next. Task-owned background processes: none.
 
 ### T4 - Complete offline trail pack
 

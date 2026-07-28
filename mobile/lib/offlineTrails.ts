@@ -1,6 +1,7 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import type { TrailFeature } from './trailEngine';
 import type { TrailPreviewManifest } from './api';
+import type { TrailBuilderActivity, TrailBuilderMode } from './trailBuilderSession';
 import { accountStorage } from './storage';
 
 export type OfflineTrail = {
@@ -10,6 +11,13 @@ export type OfflineTrail = {
   preview?: TrailPreviewManifest | null;
   savedAt: number;
   source: 'highlight' | 'graph_pack' | 'manual';
+  builder?: Readonly<{
+    schemaVersion: 1;
+    mode: TrailBuilderMode;
+    activity: TrailBuilderActivity;
+    anchors: readonly [number, number][];
+    redo: readonly [number, number][];
+  }>;
 };
 
 const TRAIL_DIR = `${FileSystem.documentDirectory}offline_trails/`;

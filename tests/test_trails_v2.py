@@ -182,6 +182,32 @@ class TrailsV2Tests(unittest.TestCase):
         self.assertIsNone(system.geometry)
         self.assertTrue(system.capabilities.preview)
 
+    def test_routed_catalog_trailhead_opens_as_trail_but_point_stays_trailhead(self):
+        routed = profile(
+            "trail:usfs:arch-coulee",
+            "Arch Coulee",
+            [[-109.0, 38.0], [-109.01, 38.01]],
+            source="usfs",
+            source_label="US Forest Service",
+        )
+        routed["provenance"]["catalog"]["feature_type"] = "trailhead"
+        point = profile(
+            "place:usfs:arch-coulee-trailhead",
+            "Arch Coulee Trailhead",
+            None,
+            source="usfs",
+            source_label="US Forest Service",
+        )
+        point["provenance"]["catalog"]["feature_type"] = "trailhead"
+
+        routed_system = build_trail_systems_v2([routed])[0]
+        point_system = build_trail_systems_v2([point])[0]
+
+        self.assertEqual(routed_system.geometry_status, "complete")
+        self.assertEqual(routed_system.kind, "trail")
+        self.assertEqual(point_system.geometry_status, "point")
+        self.assertEqual(point_system.kind, "trailhead")
+
     def test_geometry_shard_parser_verifies_hash_and_reads_named_routes(self):
         line = json.dumps({
             "id": "trail:usfs:rim",

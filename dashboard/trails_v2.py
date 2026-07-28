@@ -481,6 +481,12 @@ def build_trail_systems_v2(profiles: list[dict[str, Any]], *, limit: int = 80) -
             primary_id = _clean_text(primary.get("id"))
             system_id = _system_id(member_ids, primary_id)
             kind = _clean_text(((primary.get("provenance") or {}).get("catalog") or {}).get("feature_type") or primary.get("feature_type") or ("trail" if geometry else "trailhead")).lower() or "trail"
+            # Some agency catalogs label the access record as a trailhead even
+            # when that record carries the resolved route geometry. A routed
+            # system must open the trail experience; point semantics are only
+            # appropriate when there is no route to present.
+            if geometry_status != "point" and kind == "trailhead":
+                kind = "trail"
             trailheads: list[TrailheadReferenceV2] = []
             for member in members:
                 for trailhead in member.get("trailheads") or []:

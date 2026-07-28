@@ -1,6 +1,6 @@
 # Trailhead Trails Active Checkpoint
 
-Last updated: 2026-07-27 22:24 CDT (America/Winnipeg)
+Last updated: 2026-07-27 23:48 CDT (America/Winnipeg)
 
 ## Resume protocol
 
@@ -83,7 +83,7 @@ Verify the staged file list before every commit.
 
 ### T1 - Canonical discovery, cards, and highlighting
 
-- Status: approved by the user; implementation in progress from exact HEAD `79075b8594070b42e640822eb1df6ac93ea72912`.
+- Status: implementation complete at exact HEAD `06a45e0c73d2ca8b7796c73f4bf6fc49c7857cb8`; backend deployment and Android preview/device proof remain.
 - Scope: `TrailSystemV2`, `TrailDiscoveryItemV2`, additive v2 discovery/detail/preview APIs, canonical grouping, honest geometry status, capability-driven cards, complete-route resolution, and selected-route highlighting.
 - Design gate completed in Figma section `779:2406`, `25 · Trails T1 — Canonical Discovery + Highlighting — Review 01`:
   - Canonical discovery: `779:2412`.
@@ -100,6 +100,15 @@ Verify the staged file list before every commit.
 - Figma review URL: `https://www.figma.com/design/FJUcMWAfsNyjsguCEp2dBe?node-id=779-2406`.
 - Repository checkpoint entering the external Figma review: `3a5530a8c92adcccb0dc3ee204cb6309ec665bbf`; protected Explore index hash remained unchanged and all unrelated worktree changes remained excluded.
 - Required evidence after implementation: focused API/model tests, canonical grouping fixtures, stale A-to-B rejection, complete highlight across tile boundaries, clean copy/media fallbacks, Android device delta, then iOS from the same accepted SHA.
+- Implementation checkpoint:
+  - Added additive `/api/trails/v2/discover`, `/api/trails/v2/{id}`, and `/api/trails/v2/{id}/preview` contracts without changing legacy endpoints.
+  - Canonical discovery now keeps distant same-name trails separate, groups only connected fragments, lets authoritative complete geometry suppress only its own nearby fragments, removes generated/technical trail names, omits unsourced uses and facts, preserves measured zero values, and exposes only exact licensed media.
+  - Android/iOS shared map code now resolves selection by stable system ID and geometry revision, rejects stale A-to-B detail responses, mounts the complete selected route as a persistent warm-white/orange native line above map labels, and keeps partial/point records on honest `View details` behavior.
+  - No generic trail photography, inferred V2 difficulty, raw provider identifiers, AI labels, fabricated access copy, or zero-valued support pills were added.
+  - Trail V2 viewport coordinates are redacted from access logs; the in-memory geometry cache is bounded.
+  - Focused evidence passed: `9` Trails V2 backend tests; `64` legacy trail-catalog tests plus `4` subtests; `5` mobile V2 tests; existing trail sheet flow, hydration, action registry, Offline catalog/place-pack, TypeScript, copy, and privacy gates.
+  - Direct source-backed probes returned `12` clean results for both Moab and Yosemite, with complete/partial/point capability states and no raw way numbers.
+  - Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; unrelated worktree files remain excluded; task-owned background processes: none.
 
 ### T2 - Trail and trailhead sheets
 
@@ -123,9 +132,9 @@ Verify the staged file list before every commit.
 
 ## Next exact packet
 
-1. Implement only T1: additive models/APIs, canonical grouping, discovery/card adaptation, complete-geometry resolution, and map highlight ownership.
-2. Run focused tests, commit named files, publish Android preview first, and stop for live Android acceptance before iOS.
-3. Record Android evidence and the exact accepted SHA here; publish iOS only from that SHA.
+1. Push `06a45e0`, deploy the additive Trails V2 backend compatibility, and verify Railway health plus one read-only V2 discovery/detail response.
+2. Publish Android preview only from the immutable implementation/checkpoint SHA and run the narrow live delta: discovery cards, complete highlight, partial/point behavior, stale A-to-B rejection, and Back restoration.
+3. Record Android evidence and the exact accepted SHA here; publish iOS only after Android acceptance and only from that SHA.
 
 ## Do not repeat
 

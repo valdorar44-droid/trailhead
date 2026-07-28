@@ -1,5 +1,6 @@
 import MapboxGL from '@rnmapbox/maps';
 import type { OfflineRendererDownloadAdapter, OfflineTransferProgress } from './coordinator';
+import { createOrRecoverRnMapboxPack } from './rnMapboxPackRecovery';
 import { resolveRnMapboxOfflinePackReadiness } from './rnMapboxPackReadiness';
 import type { OfflineBundleManifestV2 } from './types';
 
@@ -95,32 +96,43 @@ export function createRnMapboxOfflineDownloadAdapter(): OfflineRendererDownloadA
         }
         await pack.resume();
       } else {
-        await MapboxGL.offlineManager.createPack({
-          name,
-          styleURL: manifest.renderer.style_uri,
-          bounds: [
-            [manifest.bounds.east, manifest.bounds.north],
-            [manifest.bounds.west, manifest.bounds.south],
-          ],
-          minZoom: manifest.min_zoom,
-          maxZoom: manifest.max_zoom,
-          metadata: {
-            schema_version: 2,
-            bundle_id: manifest.bundle_id,
-            revision: manifest.revision,
-            manifest_sha256: manifest.manifest_sha256,
-            style_id: manifest.renderer.style_id,
-            style_uri: manifest.renderer.style_uri,
-            style_revision: manifest.renderer.style_revision,
-            style_pack_id: manifest.renderer.style_pack_id,
-            tile_region_id: manifest.renderer.tile_region_id,
-          },
-        }, () => undefined, (_offlinePack, error) => {
-          nativeFailure = error?.message || 'RNMapbox could not complete the offline map.';
+        pack = await createOrRecoverRnMapboxPack({
+          create: () => MapboxGL.offlineManager.createPack({
+            name,
+            styleURL: manifest.renderer.style_uri,
+            bounds: [
+              [manifest.bounds.east, manifest.bounds.north],
+              [manifest.bounds.west, manifest.bounds.south],
+            ],
+            minZoom: manifest.min_zoom,
+            maxZoom: manifest.max_zoom,
+            metadata: {
+              schema_version: 2,
+              bundle_id: manifest.bundle_id,
+              revision: manifest.revision,
+              manifest_sha256: manifest.manifest_sha256,
+              style_id: manifest.renderer.style_id,
+              style_uri: manifest.renderer.style_uri,
+              style_revision: manifest.renderer.style_revision,
+              style_pack_id: manifest.renderer.style_pack_id,
+              tile_region_id: manifest.renderer.tile_region_id,
+            },
+          }, () => undefined, (_offlinePack, error) => {
+            nativeFailure = error?.message || 'RNMapbox could not complete the offline map.';
+          }),
+          // getPack refreshes RNMapbox's JavaScript registry from TileStore.
+          // This is required when native creation persisted before rejecting.
+          reload: () => MapboxGL.offlineManager.getPack(name),
         });
-        pack = await MapboxGL.offlineManager.getPack(name);
       }
       if (!pack) throw new Error('The RNMapbox offline pack is unavailable.');
+      const metadata = parseMetadata(pack.metadata);
+      if (metadata.manifest_sha256 !== manifest.manifest_sha256
+        || metadata.style_id !== manifest.renderer.style_id
+        || metadata.style_uri !== manifest.renderer.style_uri
+        || metadata.style_revision !== manifest.renderer.style_revision) {
+        throw new Error('The RNMapbox offline pack does not match this immutable manifest.');
+      }
       await waitForReady(manifest, options.signal, options.onProgress, () => nativeFailure);
       return Object.freeze({
         renderer: 'rnmapbox' as const,

@@ -85,7 +85,7 @@ import {
   setCarTrailFollow,
   type CarNavigationMode,
 } from '@/lib/carIntegration';
-import { api, ApiError, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, CampComment, Waypoint, TripResult, TrailProfile, MapCardResolveResponse, WaterNavigationLinesResponse, WaterConditionsResponse, WaterSpotCard, WaterSpotCardsResponse, FishingConditionsResponse, SuggestedWaterCorridorResponse, type BookableExperience, type BriefAndBackupV1, type CampgroundPlanningBriefV1, type GasStation, type GeocodePlace, type ExtremeConfig, type CopilotContext, type MapActionRequest, type MapSelectableFeature, type RouteCampWindowInput, type RouteCampWindowResult, type RouteScoutDayPlan, type RouteScoutState, type TrailPreviewManifest, type TrailDiscoveryItemV2, type TrailSystemV2, type DispersedLead, type MissionControlBrief, type SavedRouteGeometryPayload } from '@/lib/api';
+import { api, ApiError, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, CampComment, Waypoint, TripResult, TrailProfile, MapCardResolveResponse, WaterNavigationLinesResponse, WaterConditionsResponse, WaterSpotCard, WaterSpotCardsResponse, FishingConditionsResponse, SuggestedWaterCorridorResponse, type BookableExperience, type BriefAndBackupV1, type CampgroundPlanningBriefV1, type GasStation, type GeocodePlace, type ExtremeConfig, type CopilotContext, type MapActionRequest, type MapSelectableFeature, type RouteCampWindowInput, type RouteCampWindowResult, type RouteScoutDayPlan, type RouteScoutState, type TrailPreviewManifest, type TrailDiscoveryItemV2, type TrailSystemV2, type DispersedLead, type MissionControlBrief, type OfflineAssetType, type SavedRouteGeometryPayload } from '@/lib/api';
 import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
 import { trackPhase0Event, trackPhase0Once } from '@/lib/telemetry';
 import {
@@ -139,7 +139,11 @@ import { routeUnitsParam } from '@/lib/routeBuilder/units';
 import { shouldPersistTripRoute, type RoutePersistenceScope } from '@/lib/routePersistencePolicy';
 import type { RouteBuildPreviewStop } from '@/lib/routeBuildSession';
 import { loadOfflineTrail, saveOfflineTrail } from '@/lib/offlineTrails';
-import { trailRouteGraphLocalPath } from '@/lib/useOfflineFiles';
+import {
+  getOfflineFileStatesSnapshot,
+  trailRouteGraphLocalPath,
+  useOfflineFiles,
+} from '@/lib/useOfflineFiles';
 import { loadAllPlacePoints } from '@/lib/offlinePlacePacks';
 import { downloadedPlacePointToPoi } from '@/lib/downloadedPlacePoint';
 import {
@@ -155,6 +159,8 @@ import {
   offlineV2PlaceToCampPin,
 } from '@/lib/offlineV2/campDetail';
 import { resolveActiveOfflineRendererStyleId } from '@/lib/offlineV2/activeStyle';
+import { getExpoOfflineV2Runtime } from '@/lib/offlineV2/expoRuntime';
+import { createTrailPackRequestV2, trailPackClientRefV2 } from '@/lib/offlineV2/trailPack';
 import { setActiveNativeMapRenderer } from '@/lib/nativeMapRendererState';
 import {
   originalOwnsMapContext,
@@ -6147,6 +6153,7 @@ function MapScreen() {
   const router = useRouter();
   const screenActivity = useScreenActivity();
   const { features: productFeatures } = useProductFeatures(screenActivity.isActive);
+  const trailOfflineFiles = useOfflineFiles();
   const searchV2Enabled = productFeaturesAllowSearchV2(productFeatures);
   const activeTrip = useStore(st => st.activeTrip);
   const setActiveTrip = useStore(st => st.setActiveTrip);
@@ -7247,7 +7254,21 @@ function MapScreen() {
   const [selectedTrail, setSelectedTrail] = useState<TrailFeature | null>(null);
   const selectedTrailRef = useRef<TrailFeature | null>(null);
   selectedTrailRef.current = selectedTrail;
+  const pendingTrailOfflineReadyRef = useRef<{
+    regionIds: string[];
+    v2Ready: boolean;
+    checking: boolean;
+    maybeFinalize: () => void;
+  } | null>(null);
   const [selectedTrailProfile, setSelectedTrailProfile] = useState<TrailProfile | null>(null);
+
+  useEffect(() => {
+    pendingTrailOfflineReadyRef.current?.maybeFinalize();
+  }, [
+    trailOfflineFiles.routingStates,
+    trailOfflineFiles.contourStates,
+    trailOfflineFiles.trailStates,
+  ]);
   const [trailWeather, setTrailWeather] = useState<WeatherForecast | null>(null);
   const [trailHydrationAttempt, setTrailHydrationAttempt] = useState(0);
   const [trailSheetHydration, setTrailSheetHydration] = useState(EMPTY_TRAIL_SHEET_HYDRATION);
@@ -22882,14 +22903,25 @@ function MapScreen() {
             properties: { name: trail.name, fallback: true },
           }],
         };
-    await saveOfflineTrail({
+    const completeIdentity = Boolean(
+      trail.system_v2_id
+      && trail.geometry_revision
+      && trail.geometry_status === 'complete'
+      && trail.capabilities_v2?.download
+      && coords.length >= 2,
+    );
+    const persistTrail = async (offlineReady: boolean, readinessLabel: string) => saveOfflineTrail({
       id: `trail:${trail.id}`,
-      trail: { ...trail, support: { ...trail.support, offlineReady: coords.length >= 2, readinessLabel: coords.length >= 2 ? 'Trail is ready for offline follow' : 'Save this region for full trail follow' } },
+      trail: { ...trail, support: { ...trail.support, offlineReady, readinessLabel } },
       geometry: packGeometry,
       preview: trailPreviewManifest?.trail_id === trail.profile_id && trailPreviewManifest?.status === 'available' ? trailPreviewManifest : null,
       savedAt: Date.now(),
       source: coords.length >= 2 ? 'highlight' : 'manual',
     });
+    const localReadiness = completeIdentity
+      ? 'Trail saved. Preparing map, places, search, routing, and terrain.'
+      : 'Trail saved. Download its area for complete offline coverage.';
+    await persistTrail(false, localReadiness);
     addSavedPlace({
       id: `trail:${trail.id}`,
       name: trail.name,
@@ -22899,11 +22931,188 @@ function MapScreen() {
       note: coords.length >= 2 ? `Offline trail · ${coords.length} points` : 'Saved trailhead · download region for follow',
       createdAt: Date.now(),
     });
-    setSelectedTrail(prev => prev?.id === trail.id
-      ? { ...prev, support: { ...prev.support, offlineReady: coords.length >= 2, readinessLabel: coords.length >= 2 ? 'Trail saved for offline follow mode' : 'Trail saved. Download this region for full offline trail routing.' } }
-      : prev);
-    setQuickToast(coords.length >= 2 ? 'Trail saved for offline follow' : 'Trail saved. Download this region for full offline routing.');
-    setTimeout(() => setQuickToast(''), 2600);
+    setSelectedTrail(prev => prev?.id === trail.id ? {
+      ...prev,
+      support: { ...prev.support, offlineReady: false, readinessLabel: localReadiness },
+    } : prev);
+    if (!completeIdentity) {
+      setQuickToast('Trail saved. Complete downloads need a verified route.');
+      setTimeout(() => setQuickToast(''), 3000);
+      return;
+    }
+    if (!user) {
+      setQuickToast('Trail saved. Sign in to download the complete pack.');
+      setTimeout(() => setQuickToast(''), 3000);
+      return;
+    }
+    if (!productFeatures?.offline_bundle_v2) {
+      setQuickToast('Trail saved. Complete downloads are unavailable right now.');
+      setTimeout(() => setQuickToast(''), 3000);
+      return;
+    }
+    try {
+      const regionIds = Array.from(new Set(
+        coords
+          .map(([lng, lat]) => stateIdForTrailPoint(lat, lng))
+          .filter((value): value is string => Boolean(value)),
+      ));
+      const ensureRegionalDownload = (
+        id: string,
+        published: boolean,
+        state: { status: string },
+        assetType: OfflineAssetType,
+        label: string,
+        start: (regionId: string) => Promise<void>,
+        resume: (regionId: string) => Promise<void>,
+      ) => {
+        if (!published || state.status === 'complete' || state.status === 'downloading') return;
+        void (async () => {
+          if (state.status !== 'paused') {
+            await api.authorizeOfflineDownload(assetType, id, label);
+          }
+          const operation = state.status === 'paused' ? resume(id) : start(id);
+          void operation.catch(() => {});
+        })().catch(() => {});
+      };
+      regionIds.forEach(id => {
+        ensureRegionalDownload(
+          id,
+          trailOfflineFiles.isRoutingPublished(id),
+          trailOfflineFiles.getRoutingState(id),
+          'state_route',
+          `${trail.name} offline directions`,
+          trailOfflineFiles.startRoutingDownload,
+          trailOfflineFiles.resumeRoutingDownload,
+        );
+        ensureRegionalDownload(
+          id,
+          trailOfflineFiles.isContourPublished(id),
+          trailOfflineFiles.getContourState(id),
+          'state_contours',
+          `${trail.name} terrain`,
+          trailOfflineFiles.startContourDownload,
+          trailOfflineFiles.resumeContourDownload,
+        );
+        ensureRegionalDownload(
+          id,
+          trailOfflineFiles.isTrailPublished(id),
+          trailOfflineFiles.getTrailState(id),
+          'state_trails',
+          `${trail.name} trail graph`,
+          trailOfflineFiles.startTrailDownload,
+          trailOfflineFiles.resumeTrailDownload,
+        );
+      });
+      const ownerScope = `account:${String(user.id)}`;
+      const runtime = getExpoOfflineV2Runtime(ownerScope);
+      const clientRef = trailPackClientRefV2(String(trail.system_v2_id));
+      const existing = (await runtime.list(ownerScope)).find(job => job.client_ref === clientRef);
+      const finalizeReady = async () => {
+        const label = 'Trail, Outdoors map, places, search, routing, and terrain ready offline';
+        await persistTrail(true, label);
+        setSelectedTrail(prev => prev?.id === trail.id ? {
+          ...prev,
+          support: { ...prev.support, offlineReady: true, readinessLabel: label },
+        } : prev);
+        setQuickToast('Trail pack ready offline');
+        setTimeout(() => setQuickToast(''), 2800);
+      };
+      const pending = {
+        regionIds,
+        v2Ready: false,
+        checking: false,
+        maybeFinalize: () => {},
+      };
+      pending.maybeFinalize = () => {
+        if (!pending.v2Ready || pending.checking) return;
+        const snapshot = getOfflineFileStatesSnapshot();
+        const supportReady = pending.regionIds.every(id => (
+          (!trailOfflineFiles.isRoutingPublished(id) || snapshot.routingStates[id]?.status === 'complete')
+          && (!trailOfflineFiles.isContourPublished(id) || snapshot.contourStates[id]?.status === 'complete')
+          && (!trailOfflineFiles.isTrailPublished(id) || snapshot.trailStates[id]?.status === 'complete')
+        ));
+        if (!supportReady) return;
+        pending.checking = true;
+        void finalizeReady().finally(() => {
+          if (pendingTrailOfflineReadyRef.current === pending) {
+            pendingTrailOfflineReadyRef.current = null;
+          }
+        });
+      };
+      pendingTrailOfflineReadyRef.current = pending;
+      const markCoreReady = async () => {
+        pending.v2Ready = true;
+        pending.maybeFinalize();
+        if (pending.checking) return;
+        if (pendingTrailOfflineReadyRef.current !== pending) return;
+        const label = regionIds.length
+          ? 'Trail, Outdoors map, places, and search saved. Routing and terrain are still downloading.'
+          : 'Trail, Outdoors map, places, and search ready offline';
+        await persistTrail(regionIds.length === 0, label);
+        setSelectedTrail(prev => prev?.id === trail.id ? {
+          ...prev,
+          support: { ...prev.support, offlineReady: regionIds.length === 0, readinessLabel: label },
+        } : prev);
+        setQuickToast(regionIds.length ? 'Trail saved. Finishing routing and terrain.' : 'Trail pack ready offline');
+        setTimeout(() => setQuickToast(''), 2800);
+      };
+      if (existing?.status === 'ready') {
+        const inspected = await runtime.inspect(existing.job_id);
+        if (inspected.status === 'ready') await markCoreReady();
+        else setShowOfflineModal(true);
+        if (pendingTrailOfflineReadyRef.current === pending) setShowOfflineModal(true);
+        return;
+      }
+      if (existing && ['preparing', 'queued', 'downloading', 'verifying'].includes(existing.status)) {
+        setQuickToast('Trail download is already running');
+        setTimeout(() => setQuickToast(''), 2400);
+        setShowOfflineModal(true);
+        return;
+      }
+      const request = createTrailPackRequestV2({
+        trailId: String(trail.system_v2_id),
+        geometryRevision: String(trail.geometry_revision),
+        coords,
+      });
+      const started = existing ?? await runtime.create({
+            owner_scope: ownerScope,
+            client_ref: clientRef,
+            label: trail.name,
+            request,
+          });
+      let settled = false;
+      let unsubscribe = () => {};
+      const settle = (job: typeof started) => {
+        if (settled || job.job_id !== started.job_id) return;
+        if (job.status === 'ready') {
+          settled = true;
+          unsubscribe();
+          void markCoreReady();
+        } else if (job.status === 'error' || job.status === 'repair_required') {
+          settled = true;
+          unsubscribe();
+          setQuickToast('Trail download needs attention');
+          setTimeout(() => setQuickToast(''), 3000);
+        }
+      };
+      unsubscribe = runtime.subscribe(settle);
+      settle(started);
+      if (existing) void runtime.resume(existing.job_id).catch(() => {
+        if (settled) return;
+        settled = true;
+        unsubscribe();
+        setQuickToast('Trail download needs attention');
+        setTimeout(() => setQuickToast(''), 3000);
+      });
+      setQuickToast(existing ? 'Resuming trail download' : 'Preparing complete trail download');
+      setTimeout(() => setQuickToast(''), 2800);
+      setShowOfflineModal(true);
+    } catch (error) {
+      const message = error instanceof Error && error.message
+        ? error.message
+        : 'This trail could not be downloaded.';
+      Alert.alert('Download not started', message);
+    }
   }
 
   function saveSelectedTrailPlace(trail: TrailFeature) {
@@ -22963,7 +23172,7 @@ function MapScreen() {
         coordinates: true,
         savable: true,
         trip_edit: Boolean(activeTrip),
-        offline_download: true,
+        offline_download: canPreview,
         route_geometry: canPreview,
         official_url: Boolean(selectedTrailProfile?.official_url || selectedTrailProfile?.source_pack?.official_url),
         shareable: true,

@@ -302,6 +302,15 @@ const useOfflineFileStore = create<OfflineFileStore>((set) => ({
   setTrailStates: update => set(current => ({ trailStates: update(current.trailStates) })),
 }));
 
+export function getOfflineFileStatesSnapshot() {
+  const current = useOfflineFileStore.getState();
+  return {
+    routingStates: current.routingStates,
+    contourStates: current.contourStates,
+    trailStates: current.trailStates,
+  } as const;
+}
+
 // Downloads must outlive an individual screen. Keeping the resumable handles and
 // speed samples at module scope lets every useOfflineFiles() consumer observe and
 // control the same in-flight work.

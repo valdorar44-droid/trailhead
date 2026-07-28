@@ -44,6 +44,13 @@ export type OfflineBoundsV2 = Readonly<{
   north: number;
 }>;
 
+export type OfflineTrailScopeV2 = Readonly<{
+  kind: 'trail';
+  trail_id: string;
+  geometry_revision: string;
+  corridor_m: number;
+}>;
+
 export type OfflineBundleArtifactV2 = Readonly<{
   id: string;
   kind: OfflineArtifactKind;
@@ -89,6 +96,7 @@ export type OfflineBundleManifestV2 = Readonly<{
   bounds: OfflineBoundsV2;
   min_zoom: number;
   max_zoom: number;
+  scope?: OfflineTrailScopeV2;
   artifacts: readonly OfflineBundleArtifactV2[];
   capabilities: OfflineBundleCapabilitiesV2;
   required_storage_bytes: number;

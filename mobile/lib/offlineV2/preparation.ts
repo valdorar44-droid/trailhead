@@ -1,5 +1,5 @@
 import { validateOfflineBundleManifest } from './manifest';
-import type { OfflineBoundsV2, OfflineBundleManifestV2 } from './types';
+import type { OfflineBoundsV2, OfflineBundleManifestV2, OfflineTrailScopeV2 } from './types';
 
 export type OfflineBundlePrepareRequestV2 = Readonly<{
   bounds: OfflineBoundsV2;
@@ -7,6 +7,8 @@ export type OfflineBundlePrepareRequestV2 = Readonly<{
   max_zoom?: number;
   /** Approved identifier only. Clients never send an arbitrary style URI. */
   renderer_style_id?: string;
+  /** Identity only. The server resolves the trusted route and corridor. */
+  scope?: OfflineTrailScopeV2;
   options?: Readonly<{
     routing?: boolean;
     contours?: boolean;

@@ -65,6 +65,21 @@ class OfflineBundleOptionsV2(BaseModel):
     extended_media: bool = False
 
 
+class OfflineTrailScopeV2(BaseModel):
+    """Server-resolved identity for one complete canonical trail pack."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    kind: Literal["trail"] = "trail"
+    trail_id: str = Field(
+        min_length=3,
+        max_length=240,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9:._-]{2,239}$",
+    )
+    geometry_revision: str = Field(min_length=3, max_length=240)
+    corridor_m: int = Field(default=1200, ge=250, le=5000)
+
+
 class OfflineBundlePrepareRequestV2(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -79,6 +94,7 @@ class OfflineBundlePrepareRequestV2(BaseModel):
         max_length=64,
         pattern=r"^[a-z0-9][a-z0-9_-]{0,63}$",
     )
+    scope: OfflineTrailScopeV2 | None = None
     options: OfflineBundleOptionsV2 = Field(default_factory=OfflineBundleOptionsV2)
 
     @model_validator(mode="after")
@@ -163,6 +179,7 @@ class OfflineBundleManifestV2(BaseModel):
     bounds: OfflineBoundsV2
     min_zoom: int
     max_zoom: int
+    scope: OfflineTrailScopeV2 | None = None
     artifacts: tuple[OfflineBundleArtifactV2, ...]
     capabilities: OfflineBundleCapabilitiesV2
     required_storage_bytes: int = Field(ge=0)
@@ -264,7 +281,10 @@ _SOURCE_RIGHTS = {
     "openstreetmap": ("ODbL-1.0", "OpenStreetMap contributors"),
     "nps": ("US-FEDERAL-PUBLIC-DATA", "National Park Service"),
     "usfs": ("US-FEDERAL-PUBLIC-DATA", "U.S. Forest Service"),
+    "u.s. forest service": ("US-FEDERAL-PUBLIC-DATA", "U.S. Forest Service"),
     "blm": ("US-FEDERAL-PUBLIC-DATA", "Bureau of Land Management"),
+    "bureau of land management": ("US-FEDERAL-PUBLIC-DATA", "Bureau of Land Management"),
+    "national park service": ("US-FEDERAL-PUBLIC-DATA", "National Park Service"),
     "recreation.gov": ("US-FEDERAL-PUBLIC-DATA", "Recreation.gov"),
     "ridb": ("US-FEDERAL-PUBLIC-DATA", "Recreation.gov"),
     "trailhead": ("TRAILHEAD-FIRST-PARTY", "Trailhead"),
@@ -463,6 +483,151 @@ def _geometry_bounds(geometry: object) -> tuple[float, float, float, float] | No
     lngs = [point[0] for point in points]
     lats = [point[1] for point in points]
     return min(lngs), min(lats), max(lngs), max(lats)
+
+
+def _trail_line_geometry_v2(geometry: object) -> dict | None:
+    """Normalize trusted route GeoJSON to a valid line geometry artifact."""
+    lines: list[list[list[float]]] = []
+
+    def add(raw: object) -> None:
+        if not isinstance(raw, (list, tuple)):
+            return
+        points: list[list[float]] = []
+        for point in raw:
+            if not isinstance(point, (list, tuple)) or len(point) < 2:
+                continue
+            lng = _clean_coordinate(point[0], -180, 180)
+            lat = _clean_coordinate(point[1], -90, 90)
+            if lng is not None and lat is not None:
+                points.append([lng, lat])
+        if len(points) >= 2:
+            lines.append(points)
+
+    def visit(value: object) -> None:
+        if not isinstance(value, dict):
+            return
+        kind = value.get("type")
+        coordinates = value.get("coordinates")
+        if kind == "LineString":
+            add(coordinates)
+        elif kind == "MultiLineString" and isinstance(coordinates, list):
+            for line in coordinates:
+                add(line)
+        elif kind == "Feature":
+            visit(value.get("geometry"))
+        elif kind == "FeatureCollection":
+            for feature in value.get("features") or []:
+                visit(feature)
+
+    visit(geometry)
+    if not lines:
+        return None
+    return {
+        "type": "LineString" if len(lines) == 1 else "MultiLineString",
+        "coordinates": lines[0] if len(lines) == 1 else lines,
+    }
+
+
+def offline_trail_scope_catalog_item_v2(system: dict) -> OfflineCatalogItemV2:
+    """Build one licensed immutable catalog item from a trusted TrailSystemV2."""
+    trail_id = str(system.get("id") or "").strip()
+    name = str(system.get("name") or "").strip()
+    revision = str(system.get("geometry_revision") or "").strip()
+    if (
+        not trail_id or not name or not revision
+        or str(system.get("geometry_status") or "") != "complete"
+    ):
+        raise OfflineBundlePreparationError(
+            "offline_trail_incomplete",
+            "A complete verified trail route is required for this download.",
+        )
+    geometry = _trail_line_geometry_v2(system.get("geometry"))
+    spatial_bounds = _geometry_bounds(geometry)
+    center = system.get("center") if isinstance(system.get("center"), dict) else {}
+    lat = _clean_coordinate(center.get("lat"), -90, 90)
+    lng = _clean_coordinate(center.get("lng"), -180, 180)
+    if geometry is None or spatial_bounds is None or lat is None or lng is None:
+        raise OfflineBundlePreparationError(
+            "offline_trail_geometry_unavailable",
+            "The verified trail route is not available for offline use.",
+            http_status=503,
+        )
+    sources = system.get("sources") if isinstance(system.get("sources"), list) else []
+    source = next((item for item in sources if isinstance(item, dict)), {})
+    source_label = str(source.get("label") or "Trailhead").strip()
+    rights = _source_rights(source_label)
+    if rights is None:
+        raise OfflineBundlePreparationError(
+            "offline_trail_rights_unverified",
+            "This trail cannot be included until its offline data rights are verified.",
+            http_status=503,
+        )
+    facts = system.get("facts") if isinstance(system.get("facts"), dict) else {}
+    document = {
+        "id": trail_id,
+        "kind": "trail",
+        "name": name,
+        "lat": lat,
+        "lng": lng,
+        "primary_trail_id": str(system.get("primary_trail_id") or "").strip(),
+        "geometry_revision": revision,
+        "geometry_status": "complete",
+        "source_label": source_label,
+        "attribution": rights[1],
+    }
+    for key in (
+        "distance_mi", "elevation_gain_ft", "estimated_time", "difficulty",
+        "route_shape", "surface", "season",
+    ):
+        value = facts.get(key)
+        if isinstance(value, (str, int, float, bool)) and value != "":
+            document[key] = value
+    for key in ("activities", "permitted_uses", "member_trail_ids"):
+        values = system.get(key)
+        if isinstance(values, list):
+            document[key] = [
+                value for value in values[:100]
+                if isinstance(value, (str, int, float, bool))
+            ]
+    trailheads = []
+    for item in system.get("trailheads") or []:
+        if not isinstance(item, dict):
+            continue
+        item_lat = _clean_coordinate(item.get("lat"), -90, 90)
+        item_lng = _clean_coordinate(item.get("lng"), -180, 180)
+        if item_lat is None or item_lng is None:
+            continue
+        trailheads.append({
+            **({"name": str(item.get("name")).strip()} if item.get("name") else {}),
+            "lat": item_lat,
+            "lng": item_lng,
+            **({"source": str(item.get("source")).strip()} if item.get("source") else {}),
+        })
+    if trailheads:
+        document["trailheads"] = trailheads[:24]
+    summary = str(system.get("summary") or "").strip()
+    if summary:
+        document["summary"] = summary[:1200]
+    return OfflineCatalogItemV2(
+        item_id=trail_id,
+        kind="trail",
+        lat=lat,
+        lng=lng,
+        source_label=source_label,
+        license_id=rights[0],
+        attribution=rights[1],
+        spatial_bounds=spatial_bounds,
+        title=name[:240],
+        subtitle=summary[:500],
+        category="trail",
+        aliases=tuple(
+            str(value).strip()[:120]
+            for value in [*(system.get("activities") or []), *(system.get("permitted_uses") or [])]
+            if str(value or "").strip()
+        )[:80],
+        document=document,
+        geometry=geometry,
+    )
 
 
 def _bounds_intersect(
@@ -1207,6 +1372,7 @@ def prepare_offline_bundle_manifest_v2(
         "bounds": request.bounds.model_dump(mode="json"),
         "min_zoom": request.min_zoom,
         "max_zoom": request.max_zoom,
+        **({"scope": request.scope.model_dump(mode="json")} if request.scope else {}),
     }
     bundle_hash = hashlib.sha256(
         json.dumps(identity_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
@@ -1333,6 +1499,7 @@ def prepare_offline_bundle_manifest_v2(
         "bounds": request.bounds.model_dump(mode="json"),
         "min_zoom": request.min_zoom,
         "max_zoom": request.max_zoom,
+        **({"scope": request.scope.model_dump(mode="json")} if request.scope else {}),
         "artifacts": [artifact.model_dump(mode="json", exclude_none=True) for artifact in artifacts],
         "capabilities": OfflineBundleCapabilitiesV2(
             map=True,

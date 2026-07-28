@@ -6,6 +6,7 @@ const source = fs.readFileSync(path.resolve('components/NativeMap/OfflineModal.t
 const mapSource = fs.readFileSync(path.resolve('app/(tabs)/map.tsx'), 'utf8');
 const nativeManagerSource = fs.readFileSync(path.resolve('components/NativeMap/offlineManager.ts'), 'utf8');
 const tripsSource = fs.readFileSync(path.resolve('app/(tabs)/trips.tsx'), 'utf8');
+const trailPackSource = fs.readFileSync(path.resolve('lib/offlineV2/trailPack.ts'), 'utf8');
 
 const tripV2Start = source.indexOf('if (v2BoundsSupported) {');
 const tripV2End = source.indexOf('const key = tripPackKey(target);', tripV2Start);
@@ -42,6 +43,9 @@ assert.doesNotMatch(
 assert.match(source, /v2ConsumerKindsReady\(v2Job, offlineV2OwnerScope, \['search_index'\]\)/);
 assert.match(source, /job\.manifest\.renderer\.style_id === activeRendererStyleId/);
 assert.match(source, /renderer_style_id: activeRendererStyleId!/);
+assert.match(source, /isTrailPackClientRefV2\(job\.client_ref\)/);
+assert.match(source, /id: `trailpack:\$\{job\.job_id\}`/);
+assert.match(source, /job\.manifest\) await runtime\.remove\(job\.manifest\.bundle_id\)/);
 assert.match(source, /getInstalledPacks\('maplibre'\)/);
 assert.match(source, /getInstalledPacks\('rnmapbox'\)/);
 assert.match(source, /!pack\.name\.startsWith\('trailhead-original:'\)/);
@@ -75,6 +79,14 @@ for (const existingArtifact of [
 assert.match(tripsSource, /setPendingOfflineReturnContext\(\{[\s\S]*source: 'plan',[\s\S]*section: 'downloads',[\s\S]*scrollY: planScrollYRef\.current,/);
 assert.match(mapSource, /planDownloadsReturnRequest\(pendingOfflineReturnContext, reason\)/);
 assert.match(mapSource, /return_scroll_y: String\(destination\.scrollY\)/);
+assert.match(mapSource, /createTrailPackRequestV2\(\{/);
+assert.match(trailPackSource, /renderer_style_id:\s*TRAIL_PACK_STYLE_ID/);
+assert.match(trailPackSource, /routing:\s*false,\s*contours:\s*false/);
+assert.match(mapSource, /api\.authorizeOfflineDownload\(assetType, id, label\)/);
+assert.match(mapSource, /trailOfflineFiles\.startRoutingDownload/);
+assert.match(mapSource, /trailOfflineFiles\.startContourDownload/);
+assert.match(mapSource, /trailOfflineFiles\.startTrailDownload/);
+assert.match(source, /Finishing routing and terrain/);
 assert.match(source, /onClose\('dismiss'\)/, 'dismissing the manager can restore its Plan origin');
 assert.match(source, /onClose\('open_map'\)/, 'opening downloaded content intentionally remains on Map');
 

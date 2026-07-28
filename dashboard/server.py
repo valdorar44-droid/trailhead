@@ -92,11 +92,15 @@ from dashboard.search_v2 import (
     _external_result_for_request,
 )
 from dashboard.offline_bundles_v2 import (
+    OfflineBoundsV2,
     OfflineBundleManifestV2,
     OfflineBundlePreparationV2,
     OfflineBundlePrepareRequestV2,
     OfflineBundlePreparationError,
+    load_offline_catalog_snapshot_v2,
     load_offline_renderer_config_v2,
+    merge_offline_catalog_snapshot_v2,
+    offline_trail_scope_catalog_item_v2,
     prepare_offline_bundle_manifest_v2,
 )
 from dashboard.offline_materializer_v2 import (
@@ -24645,6 +24649,85 @@ async def offline_authorize(body: OfflineAuthorizeRequest, user: dict = Depends(
     }
 
 
+def _offline_trail_corridor_bounds_v2(
+    system: TrailSystemV2,
+    corridor_m: int,
+) -> OfflineBoundsV2:
+    if not system.bounds:
+        raise OfflineBundlePreparationError(
+            "offline_trail_geometry_unavailable",
+            "The verified trail route is not available for offline use.",
+            http_status=503,
+        )
+    center_lat = (float(system.bounds.north) + float(system.bounds.south)) / 2
+    lat_delta = corridor_m / 110_540
+    lng_delta = corridor_m / max(
+        30_000,
+        111_320 * math.cos(math.radians(max(-85, min(85, center_lat)))),
+    )
+    try:
+        return OfflineBoundsV2(
+            west=max(-180, float(system.bounds.west) - lng_delta),
+            south=max(-90, float(system.bounds.south) - lat_delta),
+            east=min(180, float(system.bounds.east) + lng_delta),
+            north=min(90, float(system.bounds.north) + lat_delta),
+        )
+    except ValidationError as exc:
+        raise OfflineBundlePreparationError(
+            "offline_trail_area_too_large",
+            "This trail is too large for one reliable offline pack.",
+        ) from exc
+
+
+async def _resolve_offline_trail_scope_v2(
+    request: OfflineBundlePrepareRequestV2,
+) -> tuple[OfflineBundlePrepareRequestV2, TrailSystemV2 | None]:
+    scope = request.scope
+    if scope is None:
+        return request, None
+    if request.renderer_style_id not in {None, "outdoors"}:
+        raise OfflineBundlePreparationError(
+            "offline_trail_style_mismatch",
+            "Trail downloads use the Trailhead Outdoors map.",
+        )
+    system = await _trail_system_for_detail_v2(
+        _clean_trail_system_id_v2(scope.trail_id),
+    )
+    if not system:
+        raise OfflineBundlePreparationError(
+            "offline_trail_not_found", "This trail is no longer available.", http_status=404,
+        )
+    if (
+        system.id != scope.trail_id
+        or system.geometry_status != "complete"
+        or not system.geometry
+        or not system.geometry_revision
+    ):
+        raise OfflineBundlePreparationError(
+            "offline_trail_incomplete",
+            "A complete verified trail route is required for this download.",
+        )
+    if system.geometry_revision != scope.geometry_revision:
+        raise OfflineBundlePreparationError(
+            "offline_trail_revision_changed",
+            "This trail changed. Refresh its details before downloading.",
+            http_status=409,
+        )
+    effective = request.model_copy(update={
+        "bounds": _offline_trail_corridor_bounds_v2(system, scope.corridor_m),
+        "renderer_style_id": "outdoors",
+    })
+    return effective, system
+
+
+def _resolve_offline_trail_scope_for_worker_v2(
+    request: OfflineBundlePrepareRequestV2,
+) -> tuple[OfflineBundlePrepareRequestV2, TrailSystemV2 | None]:
+    if request.scope is None:
+        return request, None
+    return asyncio.run(_resolve_offline_trail_scope_v2(request))
+
+
 def _run_offline_bundle_preparation_v2(
     preparation_id: str,
     user_id: int,
@@ -24675,9 +24758,20 @@ def _run_offline_bundle_preparation_v2(
     heartbeat_thread.start()
     try:
         request = OfflineBundlePrepareRequestV2.model_validate(request_payload)
+        request, scoped_trail = _resolve_offline_trail_scope_for_worker_v2(request)
+        snapshot = None
+        if scoped_trail is not None:
+            snapshot = merge_offline_catalog_snapshot_v2(
+                load_offline_catalog_snapshot_v2(),
+                (offline_trail_scope_catalog_item_v2(
+                    trail_v2_public(scoped_trail),
+                ),),
+            )
         result = materialize_offline_bundle_v2(
             preparation_id,
             request,
+            snapshot=snapshot,
+            include_place_packs=True if scoped_trail is not None else None,
             progress_callback=lambda value: (
                 update_offline_bundle_preparation_progress_v2(
                     preparation_id, user_id, value,
@@ -24809,6 +24903,13 @@ async def api_prepare_offline_bundle_v2(
 ):
     """Return a cached manifest or queue one server-owned preparation job."""
     _require_product_feature("OFFLINE_BUNDLE_V2_ENABLED", user)
+    try:
+        body, _scoped_trail = await _resolve_offline_trail_scope_v2(body)
+    except OfflineBundlePreparationError as exc:
+        raise HTTPException(exc.http_status, {
+            "code": exc.code,
+            "message": exc.message,
+        }) from None
     # Keep absent optional additions out of the deterministic hash so legacy
     # clients continue to address their existing default-style preparation.
     request_payload = body.model_dump(mode="json", exclude_none=True)

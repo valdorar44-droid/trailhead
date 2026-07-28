@@ -57,6 +57,7 @@ import { useProductFeatures } from '@/lib/useProductFeatures';
 import { getExpoOfflineV2Runtime } from '@/lib/offlineV2/expoRuntime';
 import type { OfflineBundleDownloadJobV2 } from '@/lib/offlineV2/jobStore';
 import type { OfflineArtifactKind } from '@/lib/offlineV2/types';
+import { isTrailPackClientRefV2 } from '@/lib/offlineV2/trailPack';
 import {
   offlineV2ArtifactsConsumed,
   subscribeOfflineV2Consumption,
@@ -189,7 +190,7 @@ type TripRuntime = {
 
 type DeviceItem = {
   id: string;
-  kind: 'region' | 'trip' | 'area' | 'map' | 'places';
+  kind: 'region' | 'trip' | 'area' | 'trail' | 'map' | 'places';
   title: string;
   status: string;
   bytes: number;
@@ -1501,6 +1502,90 @@ export default function OfflineModal({
         setView('area');
       },
     }));
+    offlineV2Jobs.filter(job => isTrailPackClientRefV2(job.client_ref)).forEach(job => {
+      const states = Object.values(job.artifact_states ?? {});
+      const total = states.reduce((sum, state) => sum + state.total_bytes, 0);
+      const received = states.reduce((sum, state) => sum + state.received_bytes, 0);
+      const bounds = job.manifest?.bounds;
+      const regionIds = bounds ? offlineRegionIdsForPoints([
+        { lat: bounds.south, lng: bounds.west },
+        { lat: bounds.north, lng: bounds.east },
+        { lat: (bounds.south + bounds.north) / 2, lng: (bounds.west + bounds.east) / 2 },
+      ], FILE_REGIONS) : [];
+      const supportStates = regionIds.flatMap(id => [
+        isRoutingPublished(id) ? { kind: 'routing' as const, id, state: routingStates[id] ?? getRoutingState(id) } : null,
+        isContourPublished(id) ? { kind: 'contour' as const, id, state: contourStates[id] ?? getContourState(id) } : null,
+        isTrailPublished(id) ? { kind: 'trail' as const, id, state: trailStates[id] ?? getTrailState(id) } : null,
+      ].filter((value): value is NonNullable<typeof value> => Boolean(value)));
+      const v2Active = ['preparing', 'queued', 'downloading', 'verifying'].includes(job.status);
+      const supportActive = supportStates.some(item => item.state.status === 'downloading');
+      const active = v2Active || supportActive;
+      const v2Progress = total > 0 ? received / total * 100 : job.preparation?.progress ?? 0;
+      const supportProgress = supportStates.length
+        ? supportStates.reduce((sum, item) => sum + item.state.progress, 0) / supportStates.length
+        : 100;
+      const progress = v2Active ? v2Progress : supportActive ? supportProgress : v2Progress;
+      const supportReady = supportStates.every(item => item.state.status === 'complete');
+      const supportPaused = supportStates.some(item => item.state.status === 'paused');
+      const status = job.status === 'ready' && supportReady
+        ? 'Ready offline'
+        : job.status === 'ready' && supportActive
+          ? `Finishing routing and terrain ${Math.round(supportProgress)}%`
+          : job.status === 'ready' && supportPaused
+            ? 'Routing and terrain paused'
+            : job.status === 'ready'
+              ? 'Routing or terrain needs attention'
+        : job.status === 'paused'
+          ? 'Paused'
+          : job.status === 'verifying'
+            ? 'Verifying'
+            : job.status === 'repair_required'
+              ? 'Repair required'
+              : job.status === 'error'
+                ? 'Download incomplete'
+                : `Downloading ${Math.round(progress)}%`;
+      rows.push({
+        id: `trailpack:${job.job_id}`,
+        kind: 'trail',
+        title: job.label,
+        status,
+        bytes: job.status === 'ready' ? job.manifest?.required_storage_bytes ?? total : total,
+        active,
+        progress: active ? progress : undefined,
+        icon: 'trail-sign-outline',
+        onPress: () => {
+          const runtime = getExpoOfflineV2Runtime(offlineV2OwnerScope);
+          const supportOperations: Promise<unknown>[] = [];
+          if (active) {
+            supportStates.forEach(item => {
+              if (item.state.status !== 'downloading') return;
+              if (item.kind === 'routing') supportOperations.push(pauseRoutingDownload(item.id));
+              if (item.kind === 'contour') supportOperations.push(pauseContourDownload(item.id));
+              if (item.kind === 'trail') supportOperations.push(pauseTrailDownload(item.id));
+            });
+          } else if (supportPaused) {
+            supportStates.forEach(item => {
+              if (item.state.status !== 'paused') return;
+              if (item.kind === 'routing') supportOperations.push(resumeRoutingDownload(item.id));
+              if (item.kind === 'contour') supportOperations.push(resumeContourDownload(item.id));
+              if (item.kind === 'trail') supportOperations.push(resumeTrailDownload(item.id));
+            });
+          }
+          const v2Operation = v2Active
+            ? runtime.pause(job.job_id)
+            : job.status === 'ready'
+              ? runtime.inspect(job.job_id)
+              : runtime.resume(job.job_id);
+          const operation = Promise.all([v2Operation, ...supportOperations]);
+          void operation
+            .then(() => reloadOfflineV2Jobs())
+            .catch(error => Alert.alert(
+              'Download unavailable',
+              error instanceof Error && error.message ? error.message : 'Try again.',
+            ));
+        },
+      });
+    });
     mlnPacks.filter(pack => !linkedPackNames.has(pack.name)).forEach(pack => rows.push({
       id: `map:${pack.renderer}:${encodeURIComponent(pack.name)}`,
       kind: 'map',
@@ -1533,10 +1618,28 @@ export default function OfflineModal({
     linkedPackNames,
     mlnPacks,
     offlineTrips,
+    offlineV2Jobs,
+    offlineV2OwnerScope,
     onSelectArea,
+    contourStates,
+    getContourState,
+    getRoutingState,
+    getTrailState,
+    isContourPublished,
+    isRoutingPublished,
+    isTrailPublished,
+    pauseContourDownload,
+    pauseRoutingDownload,
+    pauseTrailDownload,
     placePacks,
     placeStorageBytes,
     regionSummaries,
+    reloadOfflineV2Jobs,
+    resumeContourDownload,
+    resumeRoutingDownload,
+    resumeTrailDownload,
+    routingStates,
+    trailStates,
     tripRuntime,
   ]);
 
@@ -1679,6 +1782,15 @@ export default function OfflineModal({
       if (area) return removeAreaDownloadNow(area);
       return;
     }
+    if (kind === 'trailpack') {
+      const job = offlineV2Jobs.find(item => item.job_id === value);
+      if (!job) return;
+      const runtime = getExpoOfflineV2Runtime(offlineV2OwnerScope);
+      if (job.manifest) await runtime.remove(job.manifest.bundle_id);
+      else await runtime.cancel(job.job_id);
+      await reloadOfflineV2Jobs();
+      return;
+    }
     if (kind === 'map') {
       const rendererSeparator = value.indexOf(':');
       const renderer = value.slice(0, rendererSeparator) as NativeOfflineRenderer;
@@ -1693,7 +1805,7 @@ export default function OfflineModal({
       await reloadPlacePacks(currentOfflineAccountScope());
       onOfflinePlacesChanged?.();
     }
-  }, [deleteMlnPack, offlineTrips, onOfflinePlacesChanged, reloadPlacePacks, removeAreaDownloadNow, removeRegionNow, removeTripNow, savedAreas]);
+  }, [deleteMlnPack, offlineTrips, offlineV2Jobs, offlineV2OwnerScope, onOfflinePlacesChanged, reloadOfflineV2Jobs, reloadPlacePacks, removeAreaDownloadNow, removeRegionNow, removeTripNow, savedAreas]);
 
   const removeConfirmedItems = useCallback(async () => {
     const pending = confirmRemoval;

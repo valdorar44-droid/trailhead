@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import io
 import json
@@ -9,7 +10,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import ANY, patch
+from unittest.mock import ANY, AsyncMock, patch
 
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
@@ -30,8 +31,10 @@ from dashboard.offline_bundles_v2 import (
     _tile_count,
     load_offline_renderer_config_v2,
     offline_manifest_sha256_v2,
+    offline_trail_scope_catalog_item_v2,
     prepare_offline_bundle_manifest_v2,
 )
+from dashboard.trails_v2 import TrailSystemV2
 from dashboard.offline_materializer_v2 import (
     OFFLINE_PLACE_PACK_FAMILIES_V2,
     _database_catalog_items_v2,
@@ -92,6 +95,43 @@ def _request(
         "max_zoom": 14,
         **({"renderer_style_id": renderer_style_id} if renderer_style_id else {}),
         "options": options or {},
+    })
+
+
+def _trail_system() -> TrailSystemV2:
+    return TrailSystemV2.model_validate({
+        "id": "trail-system:trail:usfs:moab-short:abc123",
+        "primary_trail_id": "trail:usfs:moab-short",
+        "name": "Moab Short Trail",
+        "kind": "trail",
+        "center": {"lat": 38.58, "lng": -109.55},
+        "geometry_status": "complete",
+        "geometry_revision": "canonical-7:trail:usfs:moab-short",
+        "activities": ["Hiking"],
+        "permitted_uses": ["Hiking"],
+        "facts": {"distance_mi": 2.4, "elevation_gain_ft": 340},
+        "trailheads": [{"name": "South Trailhead", "lat": 38.57, "lng": -109.56, "source": "USFS"}],
+        "media": [],
+        "sources": [{"label": "USFS", "kind": "official"}],
+        "freshness": {"checked_at": NOW_EPOCH - 100},
+        "capabilities": {
+            "details": True, "save": True, "navigate": True,
+            "highlight": True, "preview": True, "download": True,
+            "build_route": True,
+        },
+        "summary": "A short source-backed trail.",
+        "detail_ref": "/api/trails/v2/trail-system:trail:usfs:moab-short:abc123",
+        "preview_ref": "/api/trails/v2/trail-system:trail:usfs:moab-short:abc123/preview",
+        "member_trail_ids": ["trail:usfs:moab-short"],
+        "geometry": {
+            "type": "FeatureCollection",
+            "features": [{
+                "type": "Feature",
+                "geometry": {"type": "LineString", "coordinates": [[-109.56, 38.57], [-109.54, 38.59]]},
+                "properties": {},
+            }],
+        },
+        "bounds": {"west": -109.56, "south": 38.57, "east": -109.54, "north": 38.59},
     })
 
 
@@ -215,6 +255,66 @@ class OfflineBundleV2ManifestTests(unittest.TestCase):
         self.assertIn("U.S. Forest Service", first.source_attribution)
         self.assertIn("MAPBOX-MOBILE-OFFLINE", first.license_ids)
         self.assertIn("US-FEDERAL-PUBLIC-DATA", first.license_ids)
+
+    def test_trail_scope_is_version_bound_and_legacy_request_stays_unchanged(self):
+        system = _trail_system()
+        scope = {
+            "kind": "trail",
+            "trail_id": system.id,
+            "geometry_revision": system.geometry_revision,
+            "corridor_m": 1200,
+        }
+        scoped_request = OfflineBundlePrepareRequestV2.model_validate(
+            {**_request().model_dump(mode="json"), "scope": scope},
+        )
+        scoped_item = offline_trail_scope_catalog_item_v2(
+            system.model_dump(mode="json", exclude_none=True),
+        )
+        snapshot = OfflineCatalogSnapshotV2(
+            revision="b" * 64,
+            generated_at=_snapshot().generated_at,
+            items=(*_snapshot().items, scoped_item),
+        )
+        manifest = prepare_offline_bundle_manifest_v2(
+            scoped_request,
+            snapshot=snapshot,
+            materialized_artifacts=_materialized(self.root, trail_count=2),
+            renderer=_renderer(),
+            now_epoch=NOW_EPOCH,
+        )
+        legacy = _prepare(self.root)
+
+        self.assertEqual(manifest.scope.trail_id, system.id)
+        self.assertEqual(manifest.scope.geometry_revision, system.geometry_revision)
+        self.assertNotEqual(manifest.bundle_id, legacy.bundle_id)
+        self.assertIsNone(legacy.scope)
+        self.assertEqual(scoped_item.geometry["type"], "LineString")
+        self.assertEqual(scoped_item.document["trailheads"][0]["name"], "South Trailhead")
+        self.assertEqual(
+            manifest.manifest_sha256,
+            offline_manifest_sha256_v2(manifest.model_dump(mode="json", exclude_none=True)),
+        )
+
+    def test_trail_scope_rejects_unlicensed_or_incomplete_routes(self):
+        incomplete = _trail_system().model_copy(update={
+            "geometry_status": "partial",
+            "geometry": None,
+        })
+        with self.assertRaises(OfflineBundlePreparationError) as incomplete_error:
+            offline_trail_scope_catalog_item_v2(
+                incomplete.model_dump(mode="json", exclude_none=True),
+            )
+        self.assertEqual(incomplete_error.exception.code, "offline_trail_incomplete")
+
+        unlicensed = TrailSystemV2.model_validate({
+            **_trail_system().model_dump(mode="json"),
+            "sources": [{"label": "Unknown provider", "kind": "open"}],
+        })
+        with self.assertRaises(OfflineBundlePreparationError) as rights_error:
+            offline_trail_scope_catalog_item_v2(
+                unlicensed.model_dump(mode="json", exclude_none=True),
+            )
+        self.assertEqual(rights_error.exception.code, "offline_trail_rights_unverified")
 
     def test_catalog_or_option_edit_changes_revision_without_changing_bundle_identity(self):
         base = _prepare(self.root)
@@ -1168,6 +1268,61 @@ class OfflineBundleV2ApiTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.json()["detail"]["code"], "offline_style_not_allowed")
+        authorize.assert_not_called()
+
+    def test_trail_scope_uses_server_route_bounds_and_outdoors_style(self):
+        system = _trail_system()
+        request = OfflineBundlePrepareRequestV2.model_validate({
+            **_request().model_dump(mode="json"),
+            "scope": {
+                "kind": "trail",
+                "trail_id": system.id,
+                "geometry_revision": system.geometry_revision,
+                "corridor_m": 1200,
+            },
+        })
+        with patch.object(
+            server,
+            "_trail_system_for_detail_v2",
+            new=AsyncMock(return_value=system),
+        ):
+            resolved, resolved_system = asyncio.run(
+                server._resolve_offline_trail_scope_v2(request),
+            )
+
+        self.assertEqual(resolved.renderer_style_id, "outdoors")
+        self.assertEqual(resolved_system.id, system.id)
+        self.assertLess(resolved.bounds.west, system.bounds.west)
+        self.assertGreater(resolved.bounds.east, system.bounds.east)
+        self.assertNotEqual(resolved.bounds, request.bounds)
+
+    def test_trail_scope_rejects_stale_revision_before_authorization(self):
+        system = _trail_system()
+        body = {
+            **_request().model_dump(mode="json", exclude_none=True),
+            "scope": {
+                "kind": "trail",
+                "trail_id": system.id,
+                "geometry_revision": "stale-revision",
+                "corridor_m": 1200,
+            },
+        }
+        with (
+            patch.dict(os.environ, {"OFFLINE_BUNDLE_V2_ENABLED": "1"}),
+            patch.object(
+                server,
+                "_trail_system_for_detail_v2",
+                new=AsyncMock(return_value=system),
+            ),
+            patch.object(server, "authorize_offline_download") as authorize,
+        ):
+            response = self.client.post("/api/offline/bundles/prepare", json=body)
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(
+            response.json()["detail"]["code"],
+            "offline_trail_revision_changed",
+        )
         authorize.assert_not_called()
 
     def test_enabled_endpoint_preserves_free_entitlement_and_returns_no_user_data(self):

@@ -115,6 +115,18 @@ export function validateOfflineBundleManifest(input: OfflineBundleManifestV2): O
     || input.min_zoom < 0 || input.max_zoom > 24 || input.min_zoom > input.max_zoom) {
     throw new OfflineBundleManifestError('min_zoom and max_zoom must define a valid 0-24 range.');
   }
+  if (input.scope) {
+    if (input.scope.kind !== 'trail'
+      || !/^[A-Za-z0-9][A-Za-z0-9:._-]{2,239}$/.test(input.scope.trail_id)
+      || typeof input.scope.geometry_revision !== 'string'
+      || input.scope.geometry_revision.length < 3
+      || input.scope.geometry_revision.length > 240
+      || !Number.isInteger(input.scope.corridor_m)
+      || input.scope.corridor_m < 250
+      || input.scope.corridor_m > 5000) {
+      throw new OfflineBundleManifestError('scope must identify one valid versioned trail corridor.');
+    }
+  }
   if (!Array.isArray(input.artifacts) || !input.artifacts.length) {
     throw new OfflineBundleManifestError('artifacts must contain at least one item.');
   }

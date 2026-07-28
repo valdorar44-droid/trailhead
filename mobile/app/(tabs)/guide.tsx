@@ -37,6 +37,7 @@ import {
   getExploreTrailCards,
   isExploreThinOpenReference,
   mergeCuratedExplorePlaces,
+  mergeExploreTrailChildIntoParent,
   type ExploreCategoryKey,
   type ExploreDetailNavigationState,
   type ExploreDetailTab,
@@ -4745,14 +4746,20 @@ function GuideScreenContent() {
       const parentHub = enrichedExplorePlaces.find(item => item.id === parentHubId)
         ?? explorePlaces.find(item => item.id === parentHubId);
       if (parentHub) {
-        await openExplorePlace(parentHub, parentTab);
+        const parentWithTrailList = parentTab === 'trails'
+          ? mergeExploreTrailChildIntoParent(parentHub, place)
+          : parentHub;
+        await openExplorePlace(parentWithTrailList, parentTab);
         return;
       }
     }
     if (resolvesBeforeOpen) {
       const resolvedParentHub = await resolveExploreParentHubForChild(place);
       if (resolvedParentHub && resolvedParentHub.id !== place.id) {
-        await openExplorePlace(resolvedParentHub, parentTab);
+        const parentWithTrailList = parentTab === 'trails'
+          ? mergeExploreTrailChildIntoParent(resolvedParentHub, place)
+          : resolvedParentHub;
+        await openExplorePlace(parentWithTrailList, parentTab);
         return;
       }
     }
@@ -4766,21 +4773,27 @@ function GuideScreenContent() {
       if (!exploreSheetRequestIsCurrent(sheetRequest) || selectedExploreRef.current?.id !== place.id) return;
       setExplorePlaces(prev => prev.map(item => item.id === detail.id ? detail : item));
       const hydrated = exploreTrailAreasById[detail.id] ?? detail;
+      const retainedTrailArea = hasExploreTrailCards(local) && !hasExploreTrailCards(hydrated)
+        ? mergeDynamicTrailArea(hydrated, local)
+        : hydrated;
       setSelectedExplore(current => {
         if (current?.id !== place.id) return current;
         if (exploreTrailAreasById[detail.id]) return exploreTrailAreasById[detail.id];
-        if (hasExploreTrailCards(current) && !hasExploreTrailCards(detail)) {
-          return mergeDynamicTrailArea(detail, current);
-        }
-        return hydrated;
+        return retainedTrailArea;
       });
       setProfileReadMode(initialTab);
-      if (!exploreWeatherById[hydrated.id] && exploreWeatherLoadingId !== hydrated.id) {
-        fetchExploreWeather(hydrated).catch(() => {});
+      if (!exploreWeatherById[retainedTrailArea.id] && exploreWeatherLoadingId !== retainedTrailArea.id) {
+        fetchExploreWeather(retainedTrailArea).catch(() => {});
       }
-      if (shouldHydrateExploreTrailArea(hydrated)) hydrateExploreTrailArea(hydrated).catch(() => {});
+      if (initialTab === 'trails' && !hasExploreTrailCards(retainedTrailArea)) {
+        hydrateExploreTrailArea(retainedTrailArea, true).catch(() => {});
+      } else if (shouldHydrateExploreTrailArea(retainedTrailArea)) {
+        hydrateExploreTrailArea(retainedTrailArea).catch(() => {});
+      }
     } catch {
-      if (exploreSheetRequestIsCurrent(sheetRequest) && shouldHydrateExploreTrailArea(local)) {
+      if (exploreSheetRequestIsCurrent(sheetRequest) && initialTab === 'trails' && !hasExploreTrailCards(local)) {
+        hydrateExploreTrailArea(local, true).catch(() => {});
+      } else if (exploreSheetRequestIsCurrent(sheetRequest) && shouldHydrateExploreTrailArea(local)) {
         hydrateExploreTrailArea(local).catch(() => {});
       }
     }

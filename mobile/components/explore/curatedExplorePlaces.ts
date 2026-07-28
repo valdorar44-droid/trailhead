@@ -1399,6 +1399,15 @@ export function mergeCuratedExplorePlaces(places: ExplorePlaceProfile[]) {
   return merged;
 }
 
+export function mergeExploreTrailChildIntoParent(
+  parent: ExplorePlaceProfile,
+  child: ExplorePlaceProfile,
+): ExplorePlaceProfile {
+  const childTrails = Array.isArray((child as any).trails) ? (child as any).trails : [];
+  if (!childTrails.length) return parent;
+  return withTrailAreaDetails(parent, child);
+}
+
 function curatedTrailAreaForPlace(place: ExplorePlaceProfile) {
   if (isYosemiteTrailPlace(place)) return YOSEMITE_TRAIL_AREA;
   const titleState = `${normalizeTitle(String(place.summary.title || ''))}:${String(place.summary.state || '').toUpperCase()}`;

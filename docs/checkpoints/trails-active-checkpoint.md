@@ -131,7 +131,14 @@ Verify the staged file list before every commit.
 
 ### T2 - Trail and trailhead sheets
 
-- Status: pending T1 acceptance.
+- Status: Android-first baseline audit in progress from repository HEAD `8ce8cb81e715b494a9f2a25cf0955ced517d45fb`; the user elected to defer the iOS T1 spot check and continue on Android.
+- Pre-change checkpoint:
+  - Existing code already uses `TrailheadSnapSheet`, `SheetCoordinator`, and `TrailPlaceSheetPeek` for Trail/Trailhead Peek and Full presentation.
+  - Primary hydration is identity and request-generation bound, settles through `Promise.allSettled`, commits atomically, and falls back to a stable partial state after three seconds.
+  - Parent trailhead/trail identity, stage, viewport, and scroll restoration already have characterization coverage.
+  - Existing parity registry includes photos, route facts, surface/access, weather, nearby support, reports, ratings, Offline, 3D, route building, edits, reporting, sources, linked trails, coordinates, and navigation.
+  - No visual or API change is justified before Android evidence. The next action is a narrow device delta of Trail Peek to Full, Trailhead to linked trail to Back, primary/overflow actions, and identity stability. Only a reproducible gap will be changed.
+  - Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; `.cursor/` and unrelated dirty files remain excluded.
 
 ### T3 - Unified Trail Builder and GPX
 

@@ -1,6 +1,6 @@
 # Trailhead Trails Active Checkpoint
 
-Last updated: 2026-07-27 22:48 CDT (America/Winnipeg)
+Last updated: 2026-07-27 23:01 CDT (America/Winnipeg)
 
 ## Resume protocol
 
@@ -83,7 +83,7 @@ Verify the staged file list before every commit.
 
 ### T1 - Canonical discovery, cards, and highlighting
 
-- Status: implementation and backend artifact deployment complete through `aa3135d674c14ceef318d5bfc2407da8ecc07a2e`; Android preview/device proof remains.
+- Status: implementation, backend artifact deployment, and paired preview publication complete through immutable checkpoint source `9b0c7dc94ed8e18f6af60f06dc4eb9bb004c0626`; Android device proof remains.
 - Scope: `TrailSystemV2`, `TrailDiscoveryItemV2`, additive v2 discovery/detail/preview APIs, canonical grouping, honest geometry status, capability-driven cards, complete-route resolution, and selected-route highlighting.
 - Design gate completed in Figma section `779:2406`, `25 · Trails T1 — Canonical Discovery + Highlighting — Review 01`:
   - Canonical discovery: `779:2412`.
@@ -114,6 +114,9 @@ Verify the staged file list before every commit.
   - A sampled shard matched its declared byte size, SHA-256, and `714`-row count. The abandoned nested upload was deleted, and the existing public Offline trail-pack manifest was restored to its original `147` entries with no canonical geometry artifacts mixed into Downloads.
   - Live Moab verification returned `100` systems: `79` complete and `21` partial. A complete system hydrated to the same identity with a version-bound route geometry; a partial system exposed no preview route.
   - Final focused gates passed: `12` backend Trails V2 tests; mobile Trails V2 `5/5`; trail sheet flow `5/5`; trail hydration `4/4`; action registry `6/6`; Offline catalog preservation; TypeScript; copy audit across `165` files; and privacy controls.
+  - Guarded preview publication succeeded from `9b0c7dc94ed8e18f6af60f06dc4eb9bb004c0626` on branch `preview-candidate-9b0c7dc94ed8e18f6af60f06dc4eb9bb004c0626-ms44fn9j-57ee2e887938134d4a853e94`; Android update `019fa6df-d091-7ae2-bb8d-dc092fa2f395`, group `1334727a-a122-4dbf-ac5d-2795a30836f8`, runtime `native-1.0.10-android.6`; paired iOS update `019fa6df-d091-7150-a199-52ddb798f1a2`, group `926ad6b1-baab-4882-b54c-74c2131deb63`, runtime `native-1.0.10-ios.5`.
+  - Sentry artifact bundles were accepted for Android, iOS, and web before the preview channel moved. The first local wrapper timed out during export but did not move the channel; one guarded retry completed successfully. Do not republish this SHA.
+  - Samsung `RFCR408DA9B` is connected, but its keyguard is at the PIN screen. No Android T1 acceptance claim has been made. The next session must unlock the device and continue the existing narrow delta rather than publishing again.
 
 ### T2 - Trail and trailhead sheets
 
@@ -137,9 +140,9 @@ Verify the staged file list before every commit.
 
 ## Next exact packet
 
-1. Commit this completion checkpoint and publish the guarded preview update from that immutable SHA. The publisher emits both platform bundles, but Android is the only acceptance surface until its delta passes.
-2. Run the narrow Android live delta: discovery cards, complete highlight, partial/point behavior, stale A-to-B rejection, and Back restoration.
-3. Record Android evidence and the exact accepted SHA here. Only then install and review the paired iOS update from that same SHA.
+1. Unlock Samsung `RFCR408DA9B`, leave Trailhead visible, and verify the installed QA identity resolves to source `9b0c7dc94ed8e18f6af60f06dc4eb9bb004c0626` and Android update `019fa6df-d091-7ae2-bb8d-dc092fa2f395`.
+2. Run the narrow Android live delta: discovery cards, complete highlight, partial/point behavior, stale A-to-B rejection, and Back restoration. Do not republish.
+3. Record Android evidence and the exact accepted SHA here. Only then install and review paired iOS update `019fa6df-d091-7150-a199-52ddb798f1a2` from that same SHA.
 
 ## Do not repeat
 

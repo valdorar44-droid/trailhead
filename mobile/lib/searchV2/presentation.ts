@@ -126,6 +126,7 @@ export type SearchV2LegacyPlace = {
   source_attribution?: string;
   detail_ref?: string;
   profile_id?: string;
+  system_v2_id?: string;
 };
 
 export type SearchV2DisplayPlace = Omit<SearchV2LegacyPlace, 'lat' | 'lng'> & {
@@ -172,6 +173,25 @@ export function cleanSearchResultContextV2(result: SearchResultV2): string {
   return '';
 }
 
+export function searchResultTrailSystemIdV2(result: SearchResultV2): string | undefined {
+  const kind = cleanKind(result.kind || result.categories?.[0] || 'place');
+  if (kind !== 'trail' && kind !== 'trailhead') return undefined;
+
+  const canonicalId = String(result.canonical_place_id || '').trim();
+  if (canonicalId.startsWith('trail:')) return canonicalId;
+
+  const detailRef = String(result.detail_ref || '').trim();
+  if (detailRef.startsWith('trail:')) return detailRef;
+  const match = detailRef.match(/^\/api\/trails\/v2\/([^/?#]+)(?:\/preview)?(?:[?#].*)?$/i);
+  if (!match?.[1]) return undefined;
+  try {
+    const decoded = decodeURIComponent(match[1]);
+    return decoded.startsWith('trail:') ? decoded : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function searchResultV2ToDisplayPlace(result: SearchResultV2): SearchV2DisplayPlace {
   const lat = typeof result.coordinates?.lat === 'number' && Number.isFinite(result.coordinates.lat)
     ? result.coordinates.lat
@@ -181,6 +201,7 @@ export function searchResultV2ToDisplayPlace(result: SearchResultV2): SearchV2Di
     : undefined;
   const sourceLabel = cleanLabel(result.provenance?.source_label) || cleanLabel(result.kind) || 'Place';
   const normalizedKind = cleanKind(result.kind || result.categories?.[0] || 'place');
+  const trailSystemId = searchResultTrailSystemIdV2(result);
   const displayContext = cleanSearchResultContextV2(result);
   return {
     name: result.title,
@@ -204,8 +225,9 @@ export function searchResultV2ToDisplayPlace(result: SearchResultV2): SearchV2Di
     provider_result_id: result.provenance.provider_result_id || undefined,
     source_attribution: result.provenance.attribution || undefined,
     detail_ref: result.detail_ref || undefined,
+    system_v2_id: trailSystemId,
     profile_id: normalizedKind === 'trail' || normalizedKind === 'trailhead'
-      ? result.canonical_place_id || result.detail_ref || undefined
+      ? trailSystemId ? undefined : result.canonical_place_id || result.detail_ref || undefined
       : undefined,
     resolution_required: lat == null || lng == null,
   };

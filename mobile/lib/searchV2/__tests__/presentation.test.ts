@@ -10,6 +10,7 @@ import {
   searchPlaceIsTemporary,
   searchResultV2ToDisplayPlace,
   searchResultV2ToLegacyPlace,
+  searchResultTrailSystemIdV2,
   searchV2ShouldShowEmptyState,
 } from '../presentation';
 import type { SearchResultV2 } from '../types';
@@ -188,6 +189,28 @@ test('presentation adapter rejects unresolved coordinates and keeps stable ident
   assert.equal(place?.persistence_policy, 'canonical');
   assert.equal(place?.temporary_use_only, false);
   assert.equal(place?.profile_id, 'place-1');
+});
+
+test('canonical trail results preserve their Trail System V2 identity for sheet hydration', () => {
+  const result: SearchResultV2 = {
+    result_id: 'canonical-trail-result',
+    title: 'Brumley Arch Trail',
+    kind: 'trail',
+    categories: ['hiking'],
+    coordinates: { lat: 38.121, lng: -109.326 },
+    detail_ref: '/api/trails/v2/trail%3Ausfs%3A2102352010602',
+    provenance: { provider: 'trailhead', source_label: 'US Forest Service', temporary_use_only: false },
+    persistence_policy: 'canonical',
+    score: 100,
+    match_reason: 'exact',
+  };
+
+  const display = searchResultV2ToDisplayPlace(result);
+  const legacy = searchResultV2ToLegacyPlace(result);
+  assert.equal(searchResultTrailSystemIdV2(result), 'trail:usfs:2102352010602');
+  assert.equal(display.system_v2_id, 'trail:usfs:2102352010602');
+  assert.equal(display.profile_id, undefined);
+  assert.equal(legacy?.system_v2_id, 'trail:usfs:2102352010602');
 });
 
 test('presentation cleans repeated result titles and formats compact jurisdictions', () => {

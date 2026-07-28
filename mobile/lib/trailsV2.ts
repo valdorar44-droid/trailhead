@@ -59,3 +59,20 @@ export function trailSystemGeometry(system: TrailSystemV2): GeoJSON.FeatureColle
 export function trailSelectionMatches(feature: TrailFeature, system: TrailSystemV2): boolean {
   return feature.system_v2_id === system.id && feature.geometry_revision === system.geometry_revision;
 }
+
+export function hydrateTrailFeatureFromSystem(feature: TrailFeature, system: TrailSystemV2): TrailFeature {
+  if (feature.system_v2_id !== system.id) return feature;
+  return {
+    ...feature,
+    name: system.name || feature.name,
+    geometry_status: system.geometry_status,
+    geometry_revision: system.geometry_revision,
+    capabilities_v2: system.capabilities,
+    facts_v2: system.facts,
+    length_mi: system.facts.distance_mi,
+    difficulty: system.facts.difficulty,
+    surface: system.facts.surface,
+    summary: system.summary || feature.summary,
+    photo_url: system.media[0]?.url ?? feature.photo_url,
+  };
+}

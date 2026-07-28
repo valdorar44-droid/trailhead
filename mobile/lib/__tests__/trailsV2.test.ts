@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 
 import type { TrailDiscoveryItemV2, TrailSystemV2 } from '../api';
-import { trailDiscoveryItemToFeature, trailSelectionMatches, trailSystemGeometry } from '../trailsV2';
+import { featureFromPoi } from '../trailEngine';
+import { hydrateTrailFeatureFromSystem, trailDiscoveryItemToFeature, trailSelectionMatches, trailSystemGeometry } from '../trailsV2';
 
 const mobileRoot = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const mapSource = readFileSync(join(mobileRoot, 'app/(tabs)/map.tsx'), 'utf8');
@@ -87,12 +88,39 @@ test('only complete resolved geometry can become the selected map route', () => 
   assert.equal(trailSelectionMatches(trailDiscoveryItemToFeature(item({ geometry_revision: 'sha256:old' }), support), complete), false);
 });
 
+test('search POIs keep canonical Trail System identity and hydrate only a matching system', () => {
+  const feature = featureFromPoi({
+    id: 'search:brumley',
+    name: 'Brumley Arch Trail',
+    lat: 38.121,
+    lng: -109.326,
+    type: 'trail',
+    source: 'trailhead_search',
+    system_v2_id: 'trail:usfs:2102352010602',
+  }, support, 'trailhead');
+  assert.equal(feature?.system_v2_id, 'trail:usfs:2102352010602');
+
+  const system = {
+    ...item({ id: 'trail:usfs:2102352010602', name: 'Brumley Arch Trail' }),
+    member_trail_ids: ['trail:usfs:2102352010602'],
+    geometry: {
+      type: 'FeatureCollection',
+      features: [{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [[-109.326, 38.121], [-109.32, 38.13]] } }],
+    },
+  } as TrailSystemV2;
+  const hydrated = hydrateTrailFeatureFromSystem(feature!, system);
+  assert.equal(hydrated.geometry_status, 'complete');
+  assert.equal(hydrated.capabilities_v2?.download, true);
+  assert.equal(hydrateTrailFeatureFromSystem({ ...feature!, system_v2_id: 'trail:other' }, system).geometry_revision, undefined);
+});
+
 test('map selection rejects stale systems and mounts the resolved GeoJSON layer', () => {
   assert.match(mapSource, /selectedTrailRef\.current = feature;\s*setSelectedTrail\(feature\)/);
   assert.match(mapSource, /trailSystemSelectionGenerationRef/);
   assert.match(mapSource, /generation !== trailSystemSelectionGenerationRef\.current/);
   assert.match(mapSource, /trailSelectionMatches\(trail, system\)/);
   assert.match(mapSource, /highlightResolvedTrail\(geometry/);
+  assert.match(mapSource, /api\.getTrailSystem\(trail\.system_v2_id\)/);
   assert.match(nativeMapSource, /id="trailhead-selected-trail"/);
   assert.match(nativeMapSource, /lineColor: '#AD5A33'/);
   assert.match(nativeMapSource, /\.\.\.mapboxTopSlotProps/);

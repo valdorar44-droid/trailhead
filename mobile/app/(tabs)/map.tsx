@@ -192,7 +192,7 @@ import {
   trailSourceLabel,
   type TrailFeature,
 } from '@/lib/trailEngine';
-import { trailDiscoveryItemToFeature, trailSelectionMatches, trailSystemGeometry } from '@/lib/trailsV2';
+import { hydrateTrailFeatureFromSystem, trailDiscoveryItemToFeature, trailSelectionMatches, trailSystemGeometry } from '@/lib/trailsV2';
 import {
   appendTrailBuilderAnchor,
   closeTrailBuilderLoop,
@@ -7452,7 +7452,9 @@ function MapScreen() {
     setTrailSheetHydration(beginTrailSheetHydration(key, attempt));
     setTrailWeather(null);
 
-    const current = () => placeSheetRequestIsCurrent(request) && selectedTrailRef.current?.id === trail.id;
+    const current = () => placeSheetRequestIsCurrent(request)
+      && selectedTrailRef.current?.id === trail.id
+      && (!trail.system_v2_id || selectedTrailRef.current?.system_v2_id === trail.system_v2_id);
     const reportId = trailReportId(trail);
     const tasks: Promise<unknown>[] = [
       api.getTrailFieldReports(reportId)
@@ -7460,7 +7462,20 @@ function MapScreen() {
       api.getTrailFieldReportSummary(reportId)
         .then(summary => { if (current()) setTrailFieldReportSummary(summary); }),
     ];
-    if (trail.profile_id) {
+    if (trail.system_v2_id) {
+      tasks.push(api.getTrailSystem(trail.system_v2_id).then(system => {
+        if (!current() || system.id !== trail.system_v2_id) return;
+        const geometry = trailSystemGeometry(system);
+        if (geometry) {
+          nativeMapRef.current?.highlightResolvedTrail(geometry, {
+            fit: true,
+            trailId: system.id,
+            geometryRevision: system.geometry_revision,
+          });
+        }
+        setSelectedTrail(value => value ? hydrateTrailFeatureFromSystem(value, system) : value);
+      }));
+    } else if (trail.profile_id) {
       tasks.push(api.getTrailProfile(trail.profile_id).then(profile => {
         if (!current()) return;
         setSelectedTrailProfile(profile);
@@ -7496,6 +7511,7 @@ function MapScreen() {
     placeSheetCoordinator.requestGeneration,
     selectedTrail?.id,
     selectedTrail?.profile_id,
+    selectedTrail?.system_v2_id,
     selectedTrail?.lat,
     selectedTrail?.lng,
     selectedTrailSheetModel?.identity.entityId,

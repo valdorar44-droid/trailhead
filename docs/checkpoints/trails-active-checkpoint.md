@@ -237,6 +237,11 @@ Verify the staged file list before every commit.
   - Do not repeat the `d41a931` immediate-registry or `fad527c` bootstrap-clear approaches, broad Trails/Search/sheet crawls, resolved native crash signatures, or previously completed packs. Do not begin T5.
   - Checkpoint timestamp `2026-07-28T17:29:00-05:00`; branch `feat/trailhead-1.0.10-overhaul`; exact HEAD `fad527c35f228eba42cf5929b32e7a109e94c1c8`; protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
 
+  - RNMapbox forward-progress correction checkpoint (2026-07-28): source `89c7e10` replaces immediate callback failure with a deterministic exact-pack lifecycle. It records only fixed phase codes and numeric progress buckets, never pack identity, bounds, routes, search text, account data, or raw native messages. A callback error remains transient only if the same registered pack advances; completion wins, while a missing or eight-second-stalled pack returns a fixed terminal code.
+  - Deterministic coverage now includes canceled/native error classification, callback-before-progress recovery, exact-pack disappearance, no-progress stall, completion, and abort/pause. The full Offline V2 suite passed, including account isolation, V1 catalog preservation, active renderer, preparation/runtime, scope cleanup, place search, Offline manager parity, and trail-pack requests. TypeScript, copy audit across `166` files, privacy controls, and whitespace checks passed.
+  - The only next assertion is a fresh complete trail Download on Android from the paired preview of `89c7e10`: it must reach `Ready` on the initial action without restart or manual retry. If it passes, run one pause/resume and one radio-disabled offline map/search/sheet/geometry/support check, restore radios, and accept T4. If it fails, record the fixed lifecycle code and stop without another speculative correction.
+  - Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; unrelated dirty files remain excluded; task-owned background processes: none.
+
 ### T5 - Drive-to-trailhead, Follow, and recording
 
 - Status: pending T4 acceptance; paired native candidates required.

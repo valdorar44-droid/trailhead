@@ -1,6 +1,6 @@
 # Trailhead Trails Active Checkpoint
 
-Last updated: 2026-07-27 23:48 CDT (America/Winnipeg)
+Last updated: 2026-07-27 22:48 CDT (America/Winnipeg)
 
 ## Resume protocol
 
@@ -83,7 +83,7 @@ Verify the staged file list before every commit.
 
 ### T1 - Canonical discovery, cards, and highlighting
 
-- Status: implementation complete at exact HEAD `06a45e0c73d2ca8b7796c73f4bf6fc49c7857cb8`; backend deployment and Android preview/device proof remain.
+- Status: implementation and backend artifact deployment complete through `aa3135d674c14ceef318d5bfc2407da8ecc07a2e`; Android preview/device proof remains.
 - Scope: `TrailSystemV2`, `TrailDiscoveryItemV2`, additive v2 discovery/detail/preview APIs, canonical grouping, honest geometry status, capability-driven cards, complete-route resolution, and selected-route highlighting.
 - Design gate completed in Figma section `779:2406`, `25 · Trails T1 — Canonical Discovery + Highlighting — Review 01`:
   - Canonical discovery: `779:2412`.
@@ -109,6 +109,11 @@ Verify the staged file list before every commit.
   - Focused evidence passed: `9` Trails V2 backend tests; `64` legacy trail-catalog tests plus `4` subtests; `5` mobile V2 tests; existing trail sheet flow, hydration, action registry, Offline catalog/place-pack, TypeScript, copy, and privacy gates.
   - Direct source-backed probes returned `12` clean results for both Moab and Yosemite, with complete/partial/point capability states and no raw way numbers.
   - Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; unrelated worktree files remain excluded; task-owned background processes: none.
+  - Railway deployment `1e579fd3-d658-479c-8af9-4604fef97bb0` succeeded from clean backend commit `c1653a047b7ccc616b84a2ff724adf2e70941f9b`; image digest `sha256:4c77c9ecb09113b833eb6fce67bfa9d0b7f22cfcd81e7f91eb4339e25b4d5529`.
+  - Canonical geometry artifact revision `sha256:4e4aaab503cec42eedf4cb3762e754b7bb396f779e419295111c00040f595fab` contains all `43,296` published canonical trails in `64` private, hash-verified R2 shards. Railway reads these with its existing private R2 credentials; no public bucket access was added.
+  - A sampled shard matched its declared byte size, SHA-256, and `714`-row count. The abandoned nested upload was deleted, and the existing public Offline trail-pack manifest was restored to its original `147` entries with no canonical geometry artifacts mixed into Downloads.
+  - Live Moab verification returned `100` systems: `79` complete and `21` partial. A complete system hydrated to the same identity with a version-bound route geometry; a partial system exposed no preview route.
+  - Final focused gates passed: `12` backend Trails V2 tests; mobile Trails V2 `5/5`; trail sheet flow `5/5`; trail hydration `4/4`; action registry `6/6`; Offline catalog preservation; TypeScript; copy audit across `165` files; and privacy controls.
 
 ### T2 - Trail and trailhead sheets
 
@@ -132,9 +137,9 @@ Verify the staged file list before every commit.
 
 ## Next exact packet
 
-1. Push `06a45e0`, deploy the additive Trails V2 backend compatibility, and verify Railway health plus one read-only V2 discovery/detail response.
-2. Publish Android preview only from the immutable implementation/checkpoint SHA and run the narrow live delta: discovery cards, complete highlight, partial/point behavior, stale A-to-B rejection, and Back restoration.
-3. Record Android evidence and the exact accepted SHA here; publish iOS only after Android acceptance and only from that SHA.
+1. Commit this completion checkpoint and publish the guarded preview update from that immutable SHA. The publisher emits both platform bundles, but Android is the only acceptance surface until its delta passes.
+2. Run the narrow Android live delta: discovery cards, complete highlight, partial/point behavior, stale A-to-B rejection, and Back restoration.
+3. Record Android evidence and the exact accepted SHA here. Only then install and review the paired iOS update from that same SHA.
 
 ## Do not repeat
 

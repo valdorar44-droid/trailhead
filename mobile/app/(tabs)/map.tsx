@@ -6365,6 +6365,11 @@ function MapScreen() {
   const [trailDiscoverySystems, setTrailDiscoverySystems] = useState<TrailDiscoveryItemV2[]>([]);
   const trailSystemSelectionGenerationRef = useRef(0);
   const [trailDiscoverySheetStage, setTrailDiscoverySheetStage] = useState<TrailheadSnapStage>('peek');
+  const trailDiscoverySheetStageRef = useRef<TrailheadSnapStage>('peek');
+  const handleTrailDiscoverySheetStageChange = useCallback((stage: TrailheadSnapStage) => {
+    trailDiscoverySheetStageRef.current = stage;
+    setTrailDiscoverySheetStage(stage);
+  }, []);
   const trailDiscoveryScrollYRef = useRef(0);
   const [trailDiscoveryScrollRestore, setTrailDiscoveryScrollRestore] = useState({ key: 0, y: 0 });
   const trailDiscoveryReturnRef = useRef<{
@@ -21911,6 +21916,7 @@ function MapScreen() {
     setDiscoveryMode(snapshot.mode);
     setTrailDiscoveryScope(snapshot.scope);
     setTrailDiscoveryOrigin(snapshot.origin);
+    trailDiscoverySheetStageRef.current = snapshot.stage;
     setTrailDiscoverySheetStage(snapshot.stage);
     setTrailDiscoveryScrollRestore(value => ({ key: value.key + 1, y: snapshot.scrollY }));
     setShowDiscoveryPanel(true);
@@ -22319,7 +22325,7 @@ function MapScreen() {
       scope: trailDiscoveryScope,
       origin: trailDiscoveryOrigin ? { ...trailDiscoveryOrigin } : null,
       viewport: viewportRef.current ? { ...viewportRef.current } : null,
-      stage: trailDiscoverySheetStage,
+      stage: trailDiscoverySheetStageRef.current,
       scrollY: trailDiscoveryScrollYRef.current,
     };
     setShowDiscoveryPanel(false);
@@ -25404,7 +25410,7 @@ function MapScreen() {
         <TrailheadSnapSheet
           initialStage="peek"
           stage={trailDiscoverySheetStage}
-          onStageChange={setTrailDiscoverySheetStage}
+          onStageChange={handleTrailDiscoverySheetStageChange}
           maxFullRatio={0.82}
           halfRatio={0.42}
           style={[s.campDiscoverySnap, { bottom: bottomInset + 52 }]}

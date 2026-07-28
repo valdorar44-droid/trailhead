@@ -40,7 +40,10 @@ test('linked trail and trailhead drilldowns retain the parent sheet and scroll',
 
 test('Back restores the trail discovery sheet, viewport, stage, and scroll while Close exits', () => {
   assert.match(mapSource, /trailDiscoveryReturnRef = useRef/);
-  assert.match(mapSource, /stage: trailDiscoverySheetStage/);
+  assert.match(mapSource, /trailDiscoverySheetStageRef = useRef/);
+  assert.match(mapSource, /stage: trailDiscoverySheetStageRef\.current/);
+  assert.match(mapSource, /trailDiscoverySheetStageRef\.current = snapshot\.stage/);
+  assert.match(mapSource, /onStageChange=\{handleTrailDiscoverySheetStageChange\}/);
   assert.match(mapSource, /scrollY: trailDiscoveryScrollYRef\.current/);
   assert.match(mapSource, /function restoreTrailDiscoveryReturn\(\)/);
   assert.match(mapSource, /setShowDiscoveryPanel\(true\)/);

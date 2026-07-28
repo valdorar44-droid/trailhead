@@ -1,6 +1,9 @@
 import asyncio
+import gzip
+import hashlib
+import json
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import dashboard.server as server
 from dashboard.trails_v2 import build_trail_systems_v2, model_public
@@ -159,6 +162,40 @@ class TrailsV2Tests(unittest.TestCase):
 
         self.assertEqual([item.name for item in systems], ["Rim Trail"])
 
+    def test_osm_relation_geometry_is_a_complete_named_route(self):
+        relation = profile("osm:relation:3", "Rim Trail", [[-109.0, 38.0], [-109.01, 38.01]])
+
+        system = build_trail_systems_v2([relation])[0]
+
+        self.assertEqual(system.geometry_status, "complete")
+        self.assertTrue(system.capabilities.preview)
+
+    def test_canonical_geometry_hint_is_complete_without_embedding_discovery_geometry(self):
+        canonical = profile("trail:usfs:rim", "Rim Trail", None, source="usfs", source_label="US Forest Service")
+        canonical["geometry_status_hint"] = "complete"
+        canonical["geometry_revision"] = "sha256:artifact:trail:usfs:rim"
+
+        system = build_trail_systems_v2([canonical])[0]
+
+        self.assertEqual(system.geometry_status, "complete")
+        self.assertEqual(system.geometry_revision, "sha256:artifact:trail:usfs:rim")
+        self.assertIsNone(system.geometry)
+        self.assertTrue(system.capabilities.preview)
+
+    def test_geometry_shard_parser_verifies_hash_and_reads_named_routes(self):
+        line = json.dumps({
+            "id": "trail:usfs:rim",
+            "geometry": {"type": "LineString", "coordinates": [[-109.0, 38.0], [-109.01, 38.01]]},
+        }, separators=(",", ":")).encode() + b"\n"
+        payload = gzip.compress(line, mtime=0)
+        digest = hashlib.sha256(payload).hexdigest()
+
+        parsed = server._parse_canonical_trail_geometry_shard_v2(payload, digest)
+
+        self.assertEqual(parsed["trail:usfs:rim"]["type"], "LineString")
+        with self.assertRaises(ValueError):
+            server._parse_canonical_trail_geometry_shard_v2(payload, "0" * 64)
+
     def test_only_exact_attributed_media_is_exposed(self):
         item = profile(
             "trail:usfs:rim",
@@ -199,9 +236,9 @@ class TrailsV2Tests(unittest.TestCase):
             allowed_uses="Hiking",
         )
         server._trail_system_v2_cache.clear()
-        with patch.object(server, "_canonical_trail_profiles_near_v2", return_value=[official]), patch.object(
-            server, "list_trail_profiles_near", return_value=[]
-        ):
+        with patch.object(server, "_canonical_trail_geometry_revision_v2", new=AsyncMock(return_value="sha256:test")), patch.object(
+            server, "_canonical_trail_profiles_near_v2", return_value=[official]
+        ), patch.object(server, "list_trail_profiles_near", return_value=[]):
             discovery = asyncio.run(server.trails_discover_v2(lat=38.0, lng=-109.0, limit=20))
             trail_id = discovery["trails"][0]["id"]
             detail = asyncio.run(server.trail_system_v2(trail_id))

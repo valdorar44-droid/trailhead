@@ -238,9 +238,11 @@ def _source_is_authoritative(profile: dict[str, Any]) -> bool:
 
 def _geometry_status(profile: dict[str, Any], lines: list[list[list[float]]]) -> TrailGeometryStatusV2:
     if not lines:
+        if _clean_text(profile.get("geometry_status_hint")).lower() == "complete" and _clean_text(profile.get("geometry_revision")):
+            return "complete"
         return "point"
     profile_id = _clean_text(profile.get("id"))
-    if _source_is_authoritative(profile) or "osm_relation" in profile_id:
+    if _source_is_authoritative(profile) or "osm_relation" in profile_id or ":relation:" in profile_id:
         return "complete"
     return "partial"
 
@@ -507,7 +509,7 @@ def build_trail_systems_v2(profiles: list[dict[str, Any]], *, limit: int = 80) -
                     if not any(existing.label == source.label and existing.url == source.url for existing in source_records):
                         source_records.append(source)
             media = _verified_media(primary)
-            geometry_revision = _geometry_revision(geometry)
+            geometry_revision = _clean_text(primary.get("geometry_revision")) or _geometry_revision(geometry)
             capabilities = TrailCapabilitiesV2(
                 navigate=bool(trailheads) or kind == "trailhead",
                 highlight=geometry_status == "complete",

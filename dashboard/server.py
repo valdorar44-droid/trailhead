@@ -1,6 +1,6 @@
 """Trailhead FastAPI server. All API routes."""
 from __future__ import annotations
-import asyncio, os, sys, json, uuid, secrets, xml.etree.ElementTree as ET, time, hashlib, hmac, re, sqlite3, smtplib, html, base64, binascii, math, heapq, threading, functools, logging, contextvars, ipaddress, io, wave
+import asyncio, os, sys, json, uuid, secrets, xml.etree.ElementTree as ET, time, hashlib, hmac, re, sqlite3, smtplib, html, base64, binascii, math, heapq, threading, functools, logging, contextvars, ipaddress, io, wave, gzip
 from concurrent.futures import Future as ConcurrentFuture, ThreadPoolExecutor
 from datetime import datetime, timezone
 from email.message import EmailMessage
@@ -23041,13 +23041,68 @@ async def _seed_open_trail_profiles(lat: float, lng: float, radius_mi: float, li
 
 
 _trail_system_v2_cache: dict[str, TrailSystemV2] = {}
+_trail_geometry_manifest_v2_cache: tuple[float, dict] | None = None
+_trail_geometry_shard_v2_cache: dict[str, dict[str, dict]] = {}
+_trail_geometry_r2_client_v2_cache: Any = None
+TRAIL_GEOMETRY_ARTIFACT_BASE_V2 = str(os.getenv(
+    "TRAIL_GEOMETRY_ARTIFACT_BASE_V2",
+    "https://tiles.gettrailhead.app/api/trail-packs",
+)).rstrip("/")
+
+
+def _trail_geometry_r2_client_v2():
+    """Use the private artifact bucket when the backend has R2 credentials."""
+    global _trail_geometry_r2_client_v2_cache
+    if _trail_geometry_r2_client_v2_cache is False:
+        return None
+    if _trail_geometry_r2_client_v2_cache is not None:
+        return _trail_geometry_r2_client_v2_cache
+    if not (
+        settings.r2_account_id
+        and settings.r2_access_key_id
+        and settings.r2_secret_access_key
+        and settings.r2_bucket
+    ):
+        _trail_geometry_r2_client_v2_cache = False
+        return None
+    try:
+        import boto3
+        from botocore.config import Config
+
+        _trail_geometry_r2_client_v2_cache = boto3.client(
+            "s3",
+            endpoint_url=f"https://{settings.r2_account_id}.r2.cloudflarestorage.com",
+            aws_access_key_id=settings.r2_access_key_id,
+            aws_secret_access_key=settings.r2_secret_access_key,
+            config=Config(signature_version="s3v4"),
+            region_name="auto",
+        )
+    except Exception:
+        _trail_geometry_r2_client_v2_cache = False
+        return None
+    return _trail_geometry_r2_client_v2_cache
+
+
+async def _read_trail_geometry_artifact_v2(key: str, public_url: str) -> bytes:
+    client = _trail_geometry_r2_client_v2()
+    if client is not None:
+        obj = await asyncio.to_thread(
+            client.get_object,
+            Bucket=settings.r2_bucket,
+            Key=f"trails/{key.lstrip('/')}",
+        )
+        return await asyncio.to_thread(obj["Body"].read)
+    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as http_client:
+        response = await http_client.get(public_url)
+        response.raise_for_status()
+        return response.content
 
 
 def _clean_trail_system_id_v2(value: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_.:-]", "", value or "")[:260]
 
 
-def _trail_profile_from_canonical_v2(item: dict, generated_at: int) -> dict | None:
+def _trail_profile_from_canonical_v2(item: dict, generated_at: int, geometry_revision: str = "") -> dict | None:
     try:
         lat = float(item.get("lat"))
         lng = float(item.get("lng"))
@@ -23078,6 +23133,8 @@ def _trail_profile_from_canonical_v2(item: dict, generated_at: int) -> dict | No
         "activities": [canonical_public_trail_activity(item)] if canonical_public_trail_activity(item) else [],
         "land_manager": source_label,
         "geometry": None,
+        "geometry_status_hint": "complete" if geometry_revision else "point",
+        "geometry_revision": f"{geometry_revision}:{trail_id}" if geometry_revision else "",
         "trailheads": [{"name": name, "lat": lat, "lng": lng, "source": source_label}],
         "official_url": "",
         "photos": [],
@@ -23138,6 +23195,7 @@ def _canonical_trail_profiles_near_v2(
     *,
     bbox: dict[str, float] | None = None,
     limit: int = 180,
+    geometry_revision: str = "",
 ) -> list[dict]:
     items, generated_at = _load_canonical_trail_index()
     candidates: list[tuple[float, float, dict]] = []
@@ -23162,10 +23220,91 @@ def _canonical_trail_profiles_near_v2(
     profiles: list[dict] = []
     for item in selected:
         trail_id = str(item.get("id") or "")
-        profile = detailed.get(trail_id) or _trail_profile_from_canonical_v2(item, generated_at)
+        profile = detailed.get(trail_id) or _trail_profile_from_canonical_v2(item, generated_at, geometry_revision)
         if profile:
             profiles.append(profile)
     return profiles
+
+
+async def _canonical_trail_geometry_manifest_v2() -> dict:
+    global _trail_geometry_manifest_v2_cache
+    now = time.time()
+    if _trail_geometry_manifest_v2_cache and _trail_geometry_manifest_v2_cache[0] > now:
+        return _trail_geometry_manifest_v2_cache[1]
+    key = "canonical-geometries-v1-manifest.json"
+    url = f"{TRAIL_GEOMETRY_ARTIFACT_BASE_V2}/{key}"
+    try:
+        payload = await _read_trail_geometry_artifact_v2(key, url)
+        manifest = json.loads(payload.decode("utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(manifest, dict) or manifest.get("schema_version") != 1:
+        return {}
+    revision = str(manifest.get("revision") or "").strip()
+    shards = manifest.get("shards")
+    if not revision.startswith("sha256:") or not isinstance(shards, dict):
+        return {}
+    _trail_geometry_manifest_v2_cache = (now + 3600, manifest)
+    return manifest
+
+
+async def _canonical_trail_geometry_revision_v2() -> str:
+    manifest = await _canonical_trail_geometry_manifest_v2()
+    return str(manifest.get("revision") or "").strip()
+
+
+def _canonical_trail_geometry_shard_key_v2(trail_id: str, shard_count: int) -> str:
+    value = int(hashlib.sha256(trail_id.encode()).hexdigest()[:8], 16) % shard_count
+    width = max(2, len(f"{shard_count - 1:x}"))
+    return f"{value:0{width}x}"
+
+
+def _parse_canonical_trail_geometry_shard_v2(payload: bytes, expected_sha256: str) -> dict[str, dict]:
+    if expected_sha256 and hashlib.sha256(payload).hexdigest() != expected_sha256:
+        raise ValueError("Canonical trail geometry shard hash mismatch")
+    decoded = gzip.decompress(payload).decode("utf-8")
+    geometries: dict[str, dict] = {}
+    for raw_line in decoded.splitlines():
+        if not raw_line.strip():
+            continue
+        item = json.loads(raw_line)
+        trail_id = str(item.get("id") or "").strip() if isinstance(item, dict) else ""
+        geometry = item.get("geometry") if isinstance(item, dict) else None
+        if trail_id and isinstance(geometry, dict) and geometry.get("type") in {"LineString", "MultiLineString"}:
+            geometries[trail_id] = geometry
+    return geometries
+
+
+async def _canonical_trail_geometry_v2(trail_id: str) -> tuple[dict | None, str]:
+    manifest = await _canonical_trail_geometry_manifest_v2()
+    revision = str(manifest.get("revision") or "").strip()
+    try:
+        shard_count = int(manifest.get("shard_count") or 0)
+    except Exception:
+        shard_count = 0
+    if not revision or shard_count < 1:
+        return None, ""
+    key = _canonical_trail_geometry_shard_key_v2(trail_id, shard_count)
+    cached = _trail_geometry_shard_v2_cache.get(key)
+    if cached is not None:
+        return cached.get(trail_id), revision
+    shard_meta = (manifest.get("shards") or {}).get(key)
+    if not isinstance(shard_meta, dict):
+        return None, revision
+    path = str(shard_meta.get("path") or f"{key}.jsonl.gz").strip().lstrip("/")
+    expected_sha256 = str(shard_meta.get("sha256") or "").strip()
+    try:
+        payload = await _read_trail_geometry_artifact_v2(
+            path,
+            f"{TRAIL_GEOMETRY_ARTIFACT_BASE_V2}/{path}",
+        )
+        geometries = _parse_canonical_trail_geometry_shard_v2(payload, expected_sha256)
+    except Exception:
+        return None, revision
+    _trail_geometry_shard_v2_cache[key] = geometries
+    while len(_trail_geometry_shard_v2_cache) > 8:
+        _trail_geometry_shard_v2_cache.pop(next(iter(_trail_geometry_shard_v2_cache)))
+    return geometries.get(trail_id), revision
 
 
 def _cache_trail_systems_v2(systems: list[TrailSystemV2]) -> None:
@@ -23182,20 +23321,35 @@ def _trail_system_primary_id_v2(system_id: str) -> str:
     return value.rsplit(":", 1)[0] if ":" in value else value
 
 
-def _trail_system_for_detail_v2(system_id: str) -> TrailSystemV2 | None:
+async def _trail_system_for_detail_v2(system_id: str) -> TrailSystemV2 | None:
     cached = _trail_system_v2_cache.get(system_id)
-    if cached:
+    if cached and (cached.geometry_status != "complete" or cached.geometry):
         return cached
     primary_id = _trail_system_primary_id_v2(system_id)
     primary = _trail_profile_for_detail(primary_id)
     if not primary:
         items, generated_at = _load_canonical_trail_index()
         canonical = next((item for item in items if str(item.get("id") or "") == primary_id), None)
-        primary = _trail_profile_from_canonical_v2(canonical, generated_at) if canonical else None
+        revision = await _canonical_trail_geometry_revision_v2()
+        primary = _trail_profile_from_canonical_v2(canonical, generated_at, revision) if canonical else None
     if not primary:
         return None
+    if not _trail_profile_line_coords(primary) and primary_id.startswith("trail:usfs:"):
+        geometry, revision = await _canonical_trail_geometry_v2(primary_id)
+        if geometry:
+            primary = dict(primary)
+            primary["geometry"] = geometry
+            primary["geometry_status_hint"] = "complete"
+            primary["geometry_revision"] = f"{revision}:{primary_id}"
     nearby = list_trail_profiles_near(float(primary["lat"]), float(primary["lng"]), 5, 100)
-    nearby.extend(_canonical_trail_profiles_near_v2(float(primary["lat"]), float(primary["lng"]), 5, limit=120))
+    revision = await _canonical_trail_geometry_revision_v2()
+    nearby.extend(_canonical_trail_profiles_near_v2(
+        float(primary["lat"]),
+        float(primary["lng"]),
+        5,
+        limit=120,
+        geometry_revision=revision,
+    ))
     nearby.append(primary)
     systems = build_trail_systems_v2(nearby, limit=120)
     _cache_trail_systems_v2(systems)
@@ -23239,7 +23393,15 @@ async def trails_discover_v2(
     if lat is None or lng is None:
         raise HTTPException(400, "lat/lng or n/s/e/w bounds are required")
     limit = max(1, min(int(limit), 100))
-    canonical_profiles = _canonical_trail_profiles_near_v2(float(lat), float(lng), float(radius), bbox=bbox, limit=max(160, limit * 3))
+    geometry_revision = await _canonical_trail_geometry_revision_v2()
+    canonical_profiles = _canonical_trail_profiles_near_v2(
+        float(lat),
+        float(lng),
+        float(radius),
+        bbox=bbox,
+        limit=max(160, limit * 3),
+        geometry_revision=geometry_revision,
+    )
     cached_profiles = list_trail_profiles_near(float(lat), float(lng), float(radius), max(100, limit * 2), bbox=bbox, mode=mode)
     systems = build_trail_systems_v2(canonical_profiles + cached_profiles, limit=limit)
     _cache_trail_systems_v2(systems)
@@ -23252,15 +23414,17 @@ async def trails_discover_v2(
 
 @app.get("/api/trails/v2/{trail_id}")
 async def trail_system_v2(trail_id: str):
-    system = _trail_system_for_detail_v2(_clean_trail_system_id_v2(trail_id))
+    system = await _trail_system_for_detail_v2(_clean_trail_system_id_v2(trail_id))
     if not system:
         raise HTTPException(404, "Trail not found")
+    if system.geometry_status == "complete" and system.capabilities.preview and not system.geometry:
+        raise HTTPException(503, "Trail route is temporarily unavailable")
     return trail_v2_public(system)
 
 
 @app.get("/api/trails/v2/{trail_id}/preview")
 async def trail_preview_v2(trail_id: str):
-    system = _trail_system_for_detail_v2(_clean_trail_system_id_v2(trail_id))
+    system = await _trail_system_for_detail_v2(_clean_trail_system_id_v2(trail_id))
     if not system:
         raise HTTPException(404, "Trail not found")
     if not system.capabilities.preview or not system.geometry:

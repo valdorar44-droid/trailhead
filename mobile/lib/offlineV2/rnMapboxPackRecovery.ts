@@ -10,14 +10,34 @@ export type RecoverableRnMapboxPack = Readonly<{
 export async function createOrRecoverRnMapboxPack<T extends RecoverableRnMapboxPack>(input: Readonly<{
   create(): Promise<void>;
   reload(): Promise<T | undefined>;
+  onPackReady?(): void;
+  reloadDelaysMs?: readonly number[];
+  sleep?(milliseconds: number): Promise<void>;
 }>): Promise<T | undefined> {
+  const reload = async () => {
+    const delays = input.reloadDelaysMs ?? [0, 100, 250, 500, 1_000];
+    for (const delay of delays) {
+      if (delay > 0) {
+        await (input.sleep ?? (milliseconds => new Promise<void>(resolve => {
+          setTimeout(resolve, milliseconds);
+        })))(delay);
+      }
+      const pack = await input.reload().catch(() => undefined);
+      if (pack) {
+        input.onPackReady?.();
+        return pack;
+      }
+    }
+    return undefined;
+  };
+
   try {
     await input.create();
   } catch (creationError) {
-    const recovered = await input.reload().catch(() => undefined);
+    const recovered = await reload();
     if (!recovered) throw creationError;
     await recovered.resume();
     return recovered;
   }
-  return input.reload();
+  return reload();
 }

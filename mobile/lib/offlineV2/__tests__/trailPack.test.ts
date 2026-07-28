@@ -37,18 +37,29 @@ assert.throws(() => createTrailPackRequestV2({
 
 async function verifyNativePackRecovery() {
   const createdPack = { async resume() { throw new Error('a newly created pack must not resume'); } };
+  let bootstrapFailure = 'RNMBXOfflineModule';
   assert.equal(await createOrRecoverRnMapboxPack({
-    async create() {},
+    async create() { bootstrapFailure = 'RNMBXOfflineModule'; },
     async reload() { return createdPack; },
+    onPackReady() { bootstrapFailure = ''; },
   }), createdPack);
+  assert.equal(bootstrapFailure, '', 'a queryable immutable pack clears only its stale bootstrap error');
 
   let recoveredResumeCount = 0;
+  let reloadCount = 0;
+  const waits: number[] = [];
   const recoveredPack = { async resume() { recoveredResumeCount += 1; } };
   assert.equal(await createOrRecoverRnMapboxPack({
     async create() { throw new Error('native creation promise failed'); },
-    async reload() { return recoveredPack; },
+    async reload() {
+      reloadCount += 1;
+      return reloadCount >= 3 ? recoveredPack : undefined;
+    },
+    reloadDelaysMs: [0, 50, 100],
+    async sleep(milliseconds) { waits.push(milliseconds); },
   }), recoveredPack);
   assert.equal(recoveredResumeCount, 1, 'a native-persisted pack resumes without restarting the app');
+  assert.deepEqual(waits, [50, 100], 'native registry recovery is bounded and never recreates the pack');
 
   const unrecoverableCreationError = new Error('native creation failed before persistence');
   await assert.rejects(

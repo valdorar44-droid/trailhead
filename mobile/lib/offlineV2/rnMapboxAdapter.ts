@@ -123,6 +123,11 @@ export function createRnMapboxOfflineDownloadAdapter(): OfflineRendererDownloadA
           // getPack refreshes RNMapbox's JavaScript registry from TileStore.
           // This is required when native creation persisted before rejecting.
           reload: () => MapboxGL.offlineManager.getPack(name),
+          // RNMapbox can deliver a creation callback error before the matching
+          // native pack appears in its JavaScript registry. Once the exact
+          // immutable pack is queryable, that bootstrap error is stale. Any
+          // later native error is still observed by waitForReady below.
+          onPackReady: () => { nativeFailure = ''; },
         });
       }
       if (!pack) throw new Error('The RNMapbox offline pack is unavailable.');

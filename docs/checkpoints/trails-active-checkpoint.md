@@ -1,6 +1,6 @@
 # Trailhead Trails Active Checkpoint
 
-Last updated: 2026-07-27 21:33 CDT (America/Winnipeg)
+Last updated: 2026-07-27 21:47 CDT (America/Winnipeg)
 
 ## Resume protocol
 
@@ -83,9 +83,22 @@ Verify the staged file list before every commit.
 
 ### T1 - Canonical discovery, cards, and highlighting
 
-- Status: design delta in progress; implementation not started.
+- Status: Figma review packet complete and awaiting user approval; implementation not started.
 - Scope: `TrailSystemV2`, `TrailDiscoveryItemV2`, additive v2 discovery/detail/preview APIs, canonical grouping, honest geometry status, capability-driven cards, complete-route resolution, and selected-route highlighting.
-- Design gate: add discovery, complete-route, partial/point-only, overlapping-candidate, loading/empty/error, and light/dark states to the existing Figma page. Material changes require user approval before code.
+- Design gate completed in Figma section `779:2406`, `25 · Trails T1 — Canonical Discovery + Highlighting — Review 01`:
+  - Canonical discovery: `779:2412`.
+  - Complete route selected: `779:2459`.
+  - Partial route with honest actions: `779:2499`.
+  - Trailhead-only result: `779:3027`.
+  - Overlapping named-route chooser: `779:3067`.
+  - Recovery and dark mode: `779:3107`.
+  - Identity/discovery/card/highlight contracts: `780:2934`, `780:2937`, `780:2940`, `780:2943`.
+  - Loading/empty/error/stale-selection contract: `780:2946`.
+- The visual delta reuses the existing Trail Discovery Card, Place Sheet Header, Sheet Action Button, Trailhead V2 semantic/layout variables, Barlow Condensed editorial headings, and Inter product copy. Approved Peek and Full sheets were not redesigned.
+- Visual QA passed: six complete device frames, no inherited placeholders, no section overflow, no unsupported zero metrics, no AI labels, raw enums, provider slugs, confidence copy, generic generated summary, `Extreme`, or `check local rules` wording.
+- Final review render: `C:\Temp\trailhead-t1\t1-section-v3.png`, SHA-256 `fd6f5cffa18828c6eaa20a5109fe7b8e2f0b6234a49f9084ecfd76b9b0f238e2`.
+- Figma review URL: `https://www.figma.com/design/FJUcMWAfsNyjsguCEp2dBe?node-id=779-2406`.
+- Repository checkpoint entering the external Figma review: `3a5530a8c92adcccb0dc3ee204cb6309ec665bbf`; protected Explore index hash remained unchanged and all unrelated worktree changes remained excluded.
 - Required evidence after implementation: focused API/model tests, canonical grouping fixtures, stale A-to-B rejection, complete highlight across tile boundaries, clean copy/media fallbacks, Android device delta, then iOS from the same accepted SHA.
 
 ### T2 - Trail and trailhead sheets
@@ -110,10 +123,10 @@ Verify the staged file list before every commit.
 
 ## Next exact packet
 
-1. Inspect existing on-canvas components, variables, fonts, and approved trail frames in Figma.
-2. Add the T1 review packet to the existing Trailhead design page without changing approved screens.
-3. Render and verify the packet, record its node IDs here, and stop for user approval.
-4. After approval, implement only T1, run focused tests, publish Android preview first, and stop for live Android acceptance before iOS.
+1. Obtain user approval for Figma section `779:2406`. Do not begin T1 code before approval.
+2. After approval, implement only T1: additive models/APIs, canonical grouping, discovery/card adaptation, complete-geometry resolution, and map highlight ownership.
+3. Run focused tests, commit named files, publish Android preview first, and stop for live Android acceptance before iOS.
+4. Record Android evidence and the exact accepted SHA here; publish iOS only from that SHA.
 
 ## Do not repeat
 

@@ -1,6 +1,6 @@
 # Trailhead Trails Active Checkpoint
 
-Last updated: 2026-07-27 21:47 CDT (America/Winnipeg)
+Last updated: 2026-07-27 22:24 CDT (America/Winnipeg)
 
 ## Resume protocol
 
@@ -83,7 +83,7 @@ Verify the staged file list before every commit.
 
 ### T1 - Canonical discovery, cards, and highlighting
 
-- Status: Figma review packet complete and awaiting user approval; implementation not started.
+- Status: approved by the user; implementation in progress from exact HEAD `79075b8594070b42e640822eb1df6ac93ea72912`.
 - Scope: `TrailSystemV2`, `TrailDiscoveryItemV2`, additive v2 discovery/detail/preview APIs, canonical grouping, honest geometry status, capability-driven cards, complete-route resolution, and selected-route highlighting.
 - Design gate completed in Figma section `779:2406`, `25 · Trails T1 — Canonical Discovery + Highlighting — Review 01`:
   - Canonical discovery: `779:2412`.
@@ -123,10 +123,9 @@ Verify the staged file list before every commit.
 
 ## Next exact packet
 
-1. Obtain user approval for Figma section `779:2406`. Do not begin T1 code before approval.
-2. After approval, implement only T1: additive models/APIs, canonical grouping, discovery/card adaptation, complete-geometry resolution, and map highlight ownership.
-3. Run focused tests, commit named files, publish Android preview first, and stop for live Android acceptance before iOS.
-4. Record Android evidence and the exact accepted SHA here; publish iOS only from that SHA.
+1. Implement only T1: additive models/APIs, canonical grouping, discovery/card adaptation, complete-geometry resolution, and map highlight ownership.
+2. Run focused tests, commit named files, publish Android preview first, and stop for live Android acceptance before iOS.
+3. Record Android evidence and the exact accepted SHA here; publish iOS only from that SHA.
 
 ## Do not repeat
 

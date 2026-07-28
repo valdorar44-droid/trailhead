@@ -5,6 +5,11 @@ import {
   trailPackClientRefV2,
 } from '../trailPack';
 import { createOrRecoverRnMapboxPack } from '../rnMapboxPackRecovery';
+import {
+  awaitRnMapboxOfflinePackReady,
+  classifyRnMapboxNativeFailure,
+  getLastRnMapboxOfflineLifecycleTrace,
+} from '../rnMapboxPackLifecycle';
 
 const trailId = 'trail-system:trail:usfs:moab-short:abc123';
 const request = createTrailPackRequestV2({
@@ -72,6 +77,82 @@ async function verifyNativePackRecovery() {
 }
 
 verifyNativePackRecovery().catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+});
+
+async function verifyNativePackLifecycle() {
+  assert.equal(classifyRnMapboxNativeFailure('Tile region load was Canceled'), 'canceled');
+  assert.equal(classifyRnMapboxNativeFailure('network timeout'), 'network');
+  assert.equal(classifyRnMapboxNativeFailure('style resource unavailable'), 'resource');
+  assert.equal(classifyRnMapboxNativeFailure('RNMBXOfflineModule'), 'other');
+
+  let clock = 0;
+  let statusIndex = 0;
+  const pack = {};
+  const statuses = [
+    { percentage: 0, completedResourceSize: 0, completedResourceCount: 0 },
+    { percentage: 15, completedResourceSize: 15, completedResourceCount: 1 },
+    { percentage: 100, completedResourceSize: 100, completedResourceCount: 2 },
+  ];
+  assert.equal(await awaitRnMapboxOfflinePackReady({
+    async getPack() { return pack; },
+    async readStatus() { return statuses[Math.min(statusIndex++, statuses.length - 1)]; },
+    getNativeFailure() { return { sequence: 1, category: 'canceled' }; },
+    expectedBytes: 100,
+    now: () => clock,
+    async sleep(milliseconds) { clock += milliseconds; },
+    pollIntervalMs: 400,
+    nativeErrorStallMs: 800,
+  }), pack, 'a native callback error is transient while the exact pack advances');
+  assert.ok(getLastRnMapboxOfflineLifecycleTrace().some(event => event.phase === 'native_error_recovered'));
+  assert.equal(getLastRnMapboxOfflineLifecycleTrace().at(-1)?.phase, 'complete');
+
+  clock = 0;
+  await assert.rejects(
+    awaitRnMapboxOfflinePackReady({
+      async getPack() { return undefined; },
+      async readStatus() { return {}; },
+      getNativeFailure() { return { sequence: 1, category: 'resource' }; },
+      expectedBytes: 100,
+      now: () => clock,
+      async sleep(milliseconds) { clock += milliseconds; },
+    }),
+    (error: unknown) => (error as { code?: string }).code === 'rnmapbox_resource_pack_missing',
+  );
+
+  clock = 0;
+  await assert.rejects(
+    awaitRnMapboxOfflinePackReady({
+      async getPack() { return pack; },
+      async readStatus() { return { percentage: 0, completedResourceSize: 0, completedResourceCount: 0 }; },
+      getNativeFailure() { return { sequence: 1, category: 'canceled' }; },
+      expectedBytes: 100,
+      now: () => clock,
+      async sleep(milliseconds) { clock += milliseconds; },
+      pollIntervalMs: 400,
+      nativeErrorStallMs: 800,
+    }),
+    (error: unknown) => (error as { code?: string }).code === 'rnmapbox_canceled_pack_stalled',
+  );
+
+  const controller = new AbortController();
+  controller.abort();
+  let paused = false;
+  await assert.rejects(
+    awaitRnMapboxOfflinePackReady({
+      async getPack() { return pack; },
+      async readStatus() { return {}; },
+      async pause() { paused = true; },
+      signal: controller.signal,
+      expectedBytes: 100,
+    }),
+    (error: unknown) => (error as { name?: string }).name === 'AbortError',
+  );
+  assert.equal(paused, true, 'canceling a wait pauses the exact native pack');
+}
+
+verifyNativePackLifecycle().catch(error => {
   console.error(error);
   process.exitCode = 1;
 });

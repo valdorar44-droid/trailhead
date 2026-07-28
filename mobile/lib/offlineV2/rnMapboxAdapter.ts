@@ -1,5 +1,11 @@
 import MapboxGL from '@rnmapbox/maps';
 import type { OfflineRendererDownloadAdapter, OfflineTransferProgress } from './coordinator';
+import {
+  awaitRnMapboxOfflinePackReady,
+  classifyRnMapboxNativeFailure,
+  RnMapboxOfflineLifecycleError,
+  type RnMapboxNativeFailureSnapshot,
+} from './rnMapboxPackLifecycle';
 import { createOrRecoverRnMapboxPack } from './rnMapboxPackRecovery';
 import { resolveRnMapboxOfflinePackReadiness } from './rnMapboxPackReadiness';
 import type { OfflineBundleManifestV2 } from './types';
@@ -10,12 +16,6 @@ function safe(value: string) {
 
 export function rnMapboxPackName(manifest: Pick<OfflineBundleManifestV2, 'bundle_id' | 'revision'>) {
   return `trailhead-v2-${safe(manifest.bundle_id)}-${safe(manifest.revision)}`.slice(0, 110);
-}
-
-function abortError() {
-  const error = new Error('Offline map download paused.');
-  error.name = 'AbortError';
-  return error;
 }
 
 function parseMetadata(value: unknown): Record<string, unknown> {
@@ -29,52 +29,26 @@ function parseMetadata(value: unknown): Record<string, unknown> {
   }
 }
 
-function sleep(milliseconds: number, signal?: AbortSignal) {
-  if (signal?.aborted) return Promise.reject(abortError());
-  return new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(resolve, milliseconds);
-    const cancel = () => {
-      clearTimeout(timer);
-      reject(abortError());
-    };
-    signal?.addEventListener('abort', cancel, { once: true });
-    setTimeout(() => signal?.removeEventListener('abort', cancel), milliseconds + 1);
-  });
-}
-
 export function createRnMapboxOfflineDownloadAdapter(): OfflineRendererDownloadAdapter {
   const waitForReady = async (
     manifest: OfflineBundleManifestV2,
     signal?: AbortSignal,
     onProgress?: (progress: OfflineTransferProgress) => void,
-    nativeError?: () => string,
+    nativeError?: () => RnMapboxNativeFailureSnapshot | undefined,
   ) => {
     const name = rnMapboxPackName(manifest);
-    const startedAt = Date.now();
-    while (true) {
-      if (signal?.aborted) {
-        await MapboxGL.offlineManager.getPack(name).then(pack => pack?.pause()).catch(() => undefined);
-        throw abortError();
-      }
-      const nativeFailure = nativeError?.();
-      if (nativeFailure) throw new Error(nativeFailure);
-      if (Date.now() - startedAt > 6 * 60 * 60 * 1000) {
-        throw new Error('The RNMapbox offline map did not finish within six hours.');
-      }
-      const pack = await MapboxGL.offlineManager.getPack(name);
-      if (!pack) throw new Error('The RNMapbox offline pack was not created.');
-      const status = await pack.status();
-      const percentage = Math.max(0, Math.min(100, Number(status.percentage) || 0));
-      const expected = manifest.artifacts
-        .filter(artifact => artifact.storage !== 'file')
-        .reduce((sum, artifact) => sum + artifact.bytes, 0);
-      onProgress?.({
-        received_bytes: Math.min(expected, Math.max(0, Number(status.completedResourceSize) || Math.round(expected * percentage / 100))),
-        total_bytes: expected,
-      });
-      if (percentage >= 100) return pack;
-      await sleep(400, signal);
-    }
+    const expected = manifest.artifacts
+      .filter(artifact => artifact.storage !== 'file')
+      .reduce((sum, artifact) => sum + artifact.bytes, 0);
+    return awaitRnMapboxOfflinePackReady({
+      getPack: () => MapboxGL.offlineManager.getPack(name),
+      readStatus: pack => pack.status(),
+      pause: pack => pack.pause(),
+      signal,
+      expectedBytes: expected,
+      onProgress,
+      getNativeFailure: nativeError,
+    });
   };
 
   return {
@@ -84,7 +58,8 @@ export function createRnMapboxOfflineDownloadAdapter(): OfflineRendererDownloadA
         throw new Error('The offline manifest does not use RNMapbox.');
       }
       const name = rnMapboxPackName(manifest);
-      let nativeFailure = '';
+      let nativeFailure: RnMapboxNativeFailureSnapshot | undefined;
+      let nativeFailureSequence = 0;
       let pack = await MapboxGL.offlineManager.getPack(name);
       if (pack) {
         const metadata = parseMetadata(pack.metadata);
@@ -96,39 +71,50 @@ export function createRnMapboxOfflineDownloadAdapter(): OfflineRendererDownloadA
         }
         await pack.resume();
       } else {
-        pack = await createOrRecoverRnMapboxPack({
-          create: () => MapboxGL.offlineManager.createPack({
-            name,
-            styleURL: manifest.renderer.style_uri,
-            bounds: [
-              [manifest.bounds.east, manifest.bounds.north],
-              [manifest.bounds.west, manifest.bounds.south],
-            ],
-            minZoom: manifest.min_zoom,
-            maxZoom: manifest.max_zoom,
-            metadata: {
-              schema_version: 2,
-              bundle_id: manifest.bundle_id,
-              revision: manifest.revision,
-              manifest_sha256: manifest.manifest_sha256,
-              style_id: manifest.renderer.style_id,
-              style_uri: manifest.renderer.style_uri,
-              style_revision: manifest.renderer.style_revision,
-              style_pack_id: manifest.renderer.style_pack_id,
-              tile_region_id: manifest.renderer.tile_region_id,
-            },
-          }, () => undefined, (_offlinePack, error) => {
-            nativeFailure = error?.message || 'RNMapbox could not complete the offline map.';
-          }),
-          // getPack refreshes RNMapbox's JavaScript registry from TileStore.
-          // This is required when native creation persisted before rejecting.
-          reload: () => MapboxGL.offlineManager.getPack(name),
-          // RNMapbox can deliver a creation callback error before the matching
-          // native pack appears in its JavaScript registry. Once the exact
-          // immutable pack is queryable, that bootstrap error is stale. Any
-          // later native error is still observed by waitForReady below.
-          onPackReady: () => { nativeFailure = ''; },
-        });
+        try {
+          pack = await createOrRecoverRnMapboxPack({
+            create: () => MapboxGL.offlineManager.createPack({
+              name,
+              styleURL: manifest.renderer.style_uri,
+              bounds: [
+                [manifest.bounds.east, manifest.bounds.north],
+                [manifest.bounds.west, manifest.bounds.south],
+              ],
+              minZoom: manifest.min_zoom,
+              maxZoom: manifest.max_zoom,
+              metadata: {
+                schema_version: 2,
+                bundle_id: manifest.bundle_id,
+                revision: manifest.revision,
+                manifest_sha256: manifest.manifest_sha256,
+                style_id: manifest.renderer.style_id,
+                style_uri: manifest.renderer.style_uri,
+                style_revision: manifest.renderer.style_revision,
+                style_pack_id: manifest.renderer.style_pack_id,
+                tile_region_id: manifest.renderer.tile_region_id,
+              },
+            }, () => undefined, (_offlinePack, error) => {
+              nativeFailure = Object.freeze({
+                sequence: ++nativeFailureSequence,
+                category: classifyRnMapboxNativeFailure(error?.message),
+              });
+            }),
+            // getPack refreshes RNMapbox's JavaScript registry from TileStore.
+            // This is required when native creation persisted before rejecting.
+            reload: () => MapboxGL.offlineManager.getPack(name),
+            // RNMapbox can deliver a creation callback error before the matching
+            // native pack appears in its JavaScript registry. Once the exact
+            // immutable pack is queryable, that bootstrap error is stale. Any
+            // later native error is still observed by waitForReady below.
+            onPackReady: () => { nativeFailure = undefined; },
+          });
+        } catch (error) {
+          const category = classifyRnMapboxNativeFailure((error as { message?: unknown } | null)?.message);
+          throw new RnMapboxOfflineLifecycleError(
+            `rnmapbox_${category}_before_registration`,
+            'The offline map could not be created. Try again.',
+          );
+        }
       }
       if (!pack) throw new Error('The RNMapbox offline pack is unavailable.');
       const metadata = parseMetadata(pack.metadata);

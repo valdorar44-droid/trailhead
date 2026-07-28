@@ -98,6 +98,12 @@ async function recover(storage: OfflineBundleStorageAdapter, path: string) {
 }
 
 async function promote(storage: OfflineBundleStorageAdapter, prepared: string, live: string) {
+  // Expo FileSystem.moveAsync does not create the destination parent. File
+  // promotions already reach this helper through writeAtomically, which
+  // creates it first, but immutable bundle-directory promotion calls promote
+  // directly from the staging tree. Keep both paths atomic by creating only
+  // the parent before the rename.
+  await storage.ensureDirectory(parentPath(live));
   await recover(storage, live);
   const backup = `${live}.bak`;
   await storage.remove(backup).catch(() => undefined);

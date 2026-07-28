@@ -152,7 +152,22 @@ async function main() {
 }
 
 {
-  const files = createMemoryOriginalFileAdapter();
+  const memoryFiles = createMemoryOriginalFileAdapter();
+  const files = {
+    ...memoryFiles,
+    async move(from: string, to: string) {
+      const clean = to.replace(/\/+$/, '');
+      const slash = clean.lastIndexOf('/');
+      const destinationParent = slash > 0 ? clean.slice(0, slash) : clean;
+      const parentInfo = await memoryFiles.info(destinationParent);
+      if (!parentInfo.exists || !parentInfo.isDirectory) {
+        const error = new Error('The destination parent does not exist.');
+        (error as Error & { code?: string }).code = 'ERR_FILE_SYSTEM_CANNOT_MOVE_FILE';
+        throw error;
+      }
+      await memoryFiles.move(from, to);
+    },
+  };
   const repository = createOfflineBundleManifestRepository(files, undefined, () => 1000);
   const first = manifest();
   const savedPath = await repository.saveManifest(first);

@@ -155,7 +155,7 @@ Verify the staged file list before every commit.
 
 ### T3 - Unified Trail Builder and GPX
 
-- Status: in progress by explicit Android-first user direction; the recorded T2 viewport P1 remains parked and is not being reopened in this packet.
+- Status: Android accepted from source `dbb22f2fb5f2d0dad30a57632e9e5ba56ed86b78`; iOS remains deferred by explicit Android-first direction. The recorded T2 viewport P1 remains parked and is not being reopened in this packet.
 - Pre-change checkpoint (2026-07-28):
   - Branch `feat/trailhead-1.0.10-overhaul`; exact HEAD `480c0783db0d7423bf0d23da70003e428c9a732c`.
   - Android Samsung `RFCR408DA9B` is connected and unlocked with Trailhead `1.0.10` build `68`; airplane mode was `off` before testing.
@@ -178,10 +178,20 @@ Verify the staged file list before every commit.
   - Android delta passed the unified launcher, point placement, route metrics, undo/redo, build/review, Save draft guard, GPX picker/import, exact route framing, and Reverse transform using the local five-point `Moab short trail check` fixture. No navigation or Follow session was started.
   - One deterministic T3 P1 was captured: Discard closed the GPX builder but left the unsaved imported `selectedTrail` active, allowing the next touch to open a normal Trail sheet with unavailable preview. The evidence-backed correction now snapshots the invoking trail selection/collapse state, restores it on Discard/launcher close, and exposes the three route transforms from finalized point routes through one compact Route options action. Characterization coverage increased to `6/6`; Trail sheet `6/6`, Offline V1/V2, copy, and TypeScript gates pass. One corrected Android assertion remains before T3 acceptance.
   - Evidence directory: `C:\Users\User\Documents\Codex\evidence\trailhead\trails-t3-486ef1f`. Task-owned background processes: none.
+  - Corrected source `dbb22f2fb5f2d0dad30a57632e9e5ba56ed86b78` published to Android update `019fa7e1-f78c-74de-b95b-6111d116c71a`, group `708f3226-1b55-4e9d-a2ef-1b00a9392486`, runtime `native-1.0.10-android.6`; paired iOS update `019fa7e1-f78c-7cf0-9ec8-9f5f07becbff`, group `97640ef8-059d-47bf-a817-ea5bb2b782d8`, runtime `native-1.0.10-ios.5`.
+  - Samsung QA identity matched the corrected source and Android update. The one permitted retest passed GPX import -> route transform -> Discard: the builder closed, the unsaved selection was cleared, and the normal Map returned without a blank or stale Trail sheet.
+  - Corrected evidence: `C:\Users\User\Documents\Codex\evidence\trailhead\trails-t3-dbb22f2-discard.png`; QA hierarchy `C:\Users\User\Documents\Codex\evidence\trailhead\trails-t3-dbb22f2-qa.xml`; GPX review `C:\Users\User\Documents\Codex\evidence\trailhead\trails-t3-dbb22f2-gpx.png`.
+  - Android T3 acceptance timestamp: `2026-07-28`; protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; airplane mode was restored off; task-owned background processes: none.
 
 ### T4 - Complete offline trail pack
 
-- Status: pending T3 acceptance.
+- Status: in progress by explicit Android-first user direction from accepted T3 source `dbb22f2fb5f2d0dad30a57632e9e5ba56ed86b78`.
+- Pre-change scope:
+  - Extend the existing Offline V2 prepare/materialize/runtime path with a version-bound canonical trail scope; do not create another downloader or ownership store.
+  - Keep all existing V1 region, selected-area, trip/corridor, PMTiles/vector, routing, trail, contour, saved-route, and six-family place downloads untouched.
+  - A complete pack must include the Mapbox Outdoors style/tile region plus exact canonical trail geometry/profile, trailheads/access, nearby camps/services/support, routing graph edges, contours/elevation context, and local SQLite trail/place search. Optional media is shown offline only when a licensed hashed artifact exists.
+  - Android proof is limited to two small canonical trail packs: one normal, one interrupted and resumed; then airplane-mode map, search, sheet, geometry, and support-place checks. Existing downloads are inventoried before and after and are never cleared.
+  - The recorded T2 camera/world-viewport P1 remains parked and cannot expand this packet.
 
 ### T5 - Drive-to-trailhead, Follow, and recording
 
@@ -193,11 +203,12 @@ Verify the staged file list before every commit.
 
 ## Next exact packet
 
-1. Resume from `b64910a1b25db3e2c5d078b6543fdec1dda1a64b`; verify the protected Explore-index hash before changing anything.
-2. Instrument one coordinate-free camera command-order trace for the failed Explore trail handoff. Do not run another broad crawl or publish before the overriding command is identified.
-3. Correct only the demonstrated camera owner/restoration path, run focused handoff and camera-ownership tests, and publish one paired preview OTA only if the assertion passes locally.
-4. On Android, rerun only Explore -> Yosemite Trails -> Mist Trail -> Map -> Peek/Full, verify Yosemite-scale framing, trusted facts, Back restoration, and Close. If it passes, finish the remaining Trailhead -> linked trail -> Back assertion and mark T2 accepted.
-5. Keep iOS deferred unless the user reconnects it. Do not begin T3 until the T2 P1 is closed.
+1. Resume from `dbb22f2fb5f2d0dad30a57632e9e5ba56ed86b78`; verify the protected Explore-index hash before staging anything.
+2. Add a backward-compatible server-owned trail scope to Offline V2, binding pack identity to canonical trail ID and geometry revision and deriving trusted corridor coverage from resolved geometry.
+3. Connect Trail sheet Download to that scope through the existing Expo SQLite/RNMapbox Offline V2 runtime and show the job in the existing Downloads manager.
+4. Run focused backend/mobile Offline V1/V2, trail-pack, copy/privacy, and TypeScript gates; deploy additive backend compatibility; publish one Android preview from the accepted SHA.
+5. On Samsung, inventory existing downloads, complete one normal trail pack, interrupt and resume a second, verify both in airplane mode, restore airplane mode off, and record exact evidence without deleting or migrating pre-existing downloads.
+6. Keep iOS deferred until Android T4 is accepted.
 
 ## Do not repeat
 
@@ -206,3 +217,4 @@ Verify the staged file list before every commit.
 - Do not start T2-T6 before the preceding packet is accepted.
 - Do not republish `42b035c` or `b64910a`, rerun the six-trail hub fix, or perform another speculative camera retry.
 - Do not add speculative modules, generic photography, invented access facts, AI labels, random pills, or display zero for missing facts.
+- Do not reopen the accepted T3 flow or the parked T2 camera defect while implementing T4.

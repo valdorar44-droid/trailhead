@@ -185,7 +185,7 @@ Verify the staged file list before every commit.
 
 ### T4 - Complete offline trail pack
 
-- Status: implementation is complete, but Android acceptance is blocked by a reproducible Samsung native RenderThread crash. Do not begin T5 or repeat this device run until the crash has an evidence-backed native/rendering fix.
+- Status: implementation is complete, but Android acceptance remains blocked. The captured native crash causes were corrected; the final exact candidate stays alive but the scoped trail bundle does not leave `Verifying`. Do not begin T5 or claim airplane-mode acceptance until a trail bundle reaches `Ready`.
 - Pre-change scope:
   - Extend the existing Offline V2 prepare/materialize/runtime path with a version-bound canonical trail scope; do not create another downloader or ownership store.
   - Keep all existing V1 region, selected-area, trip/corridor, PMTiles/vector, routing, trail, contour, saved-route, and six-family place downloads untouched.
@@ -210,6 +210,19 @@ Verify the staged file list before every commit.
   - Evidence directory: `C:\\Users\\User\\Documents\\Codex\\evidence\\trailhead\\trails-t4-526a263`. QA identity XML SHA-256 `140d1619664d34b04738a0c45b4929cdf5f98a5ca34dc2ab056d137217a98f16`; corrected manager screenshot SHA-256 `e6dfe9f8fcdd08314efc9659c5dc976b96f68a9ea293d9e64017a8123374a238`; verifying/paused evidence SHA-256 `e018a959431c32fdcb39f1264d4d4c62703baf254a36f54f5b7b39b0583d4031`; crash log SHA-256 `bab4f9fd8d08bdd95d6aedf39310ed218ac14f17be9f1fb9b5b4266765f00051`; exit-info SHA-256 `b24a81dbec4cd946fc0ad98d5cd2026144ad6fd4f3543082324599bc0964259f`.
   - Checkpoint timestamp `2026-07-28T05:40:48-05:00`; branch `feat/trailhead-1.0.10-overhaul`; exact HEAD `31148fea593405ade8a7fe27b8eb3644b10515e1`; protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; airplane mode is `off`; task-owned Metro, Expo, Gradle, Maestro, and publisher processes: none.
 
+- Forward continuation and final block (2026-07-28):
+  - Renderer lifecycle source `c4e500a31f00498bcd5b4f059050ffae8ee66b9a` separated paused visual work from mounted map state. Canonical trail identity source `2731a202ef1681aa56a96dbaf723d45043583b89` preserved `system_v2_id`, hydrated the exact Trail System after explicit selection, and exposed the real Preview/Download capabilities for `Brumley Arch (Sz)`.
+  - The canonical identity preview proved Search -> Trail Peek -> Full -> Download without a blank sheet or provider fallback. Android update `019faa0f-0197-7925-a71e-397d5dd3679c`, group `65a73596-152b-47ff-b5a7-a6c51c0d6b30`; paired iOS update `019faa0f-0197-7dc0-8517-e0fbfe7b0522`, group `ba9695b2-44e5-4729-bbae-26f3d4993ba8`.
+  - That emulator run found a deterministic Expo SQLite FTS close abort in `libexpo-sqlite.so`/`exsqlite3_finalize`. Source `495ff7e29f988b33cc4686091efc13d9d678c6ef` applies Expo's documented FTS workaround, `finalizeUnusedStatementsBeforeClosing: false`, with a regression assertion. Offline V2, Trails V2, Trail Builder, Search V2, and TypeScript gates passed. Its paired preview used Android update `019faa24-3d49-778c-b669-2b76a32317e6`, group `fa3b6fbb-b67e-47d4-9126-d01dd5472446`; iOS update `019faa24-3d49-7fc5-ba63-68e39fa0e212`, group `b04e584e-86b3-4303-98aa-b509af862a12`.
+  - The SQLite signature did not recur. Opening Downloads then exposed a different deterministic native abort: MapLibre `FileSource.initialize` received an invalid tile-server object because the manager enumerated MapLibre and RNMapbox packs concurrently even though only one renderer was mounted.
+  - Final source `2b86400a5b2dc2d86f8271683a614b92631fc43c` inventories only `activeNativeRenderer`. Inactive V1 packs remain on disk and are enumerated when their renderer is active; no pack is migrated or deleted. Offline parity, map lifecycle, Offline V2, and TypeScript gates passed.
+  - Final guarded paired preview: Android update `019faa31-5877-740b-9c58-0e5e02731acf`, group `dce1e4d7-e96e-406f-89e6-f4957606cf88`, runtime `native-1.0.10-android.6`; iOS update `019faa31-5877-700a-bf22-4b0e52873db5`, group `70d38a66-ff09-4231-8b21-d88423210609`, runtime `native-1.0.10-ios.5`. Emulator identity exactly matched Android build `68`, source, runtime, and update.
+  - The final assertion no longer crashes: Downloads opened, the original Utah support download remained visible at `Directions saved · 623.8 MB`, and Brumley remained present at `Verifying · 4.8 MB`. The app stayed alive for the complete two-minute bounded window. Brumley never advanced to `Ready`, so the second interrupted pack and airplane-mode map/search/sheet/geometry/support assertions were not run or claimed.
+  - Evidence directory: `C:\Users\User\Documents\Codex\evidence\trailhead\trails-t4-c4e500a`. Exact identity XML SHA-256 `3472c6cc4b26e57e7fe3003508573612acf7e9c0e27c3008943f69860354bd98`; initial final-manager screenshot SHA-256 `bb2b69a98b55be93bca862bbf6cd8eed1f0dfb27dbd029c0a8b2105f32586148`; two-minute hierarchy SHA-256 `56f029b73b7b9e4a29af0f93c0d79a3990e598589ff7067601e4acd70c1b771a`; two-minute screenshot SHA-256 `b87e2a049301c7e727c46f4ed8e76e8d7094b6013bb1c50b9e80162f8ab64eb0`.
+  - Open P1: trace the Offline V2 verification state machine once, using fixed job/error codes and artifact-state transitions only, to identify which consumer never settles. Add one deterministic regression, make one evidence-backed correction, then create one fresh scoped pack and run Ready -> interruption/resume -> airplane-mode acceptance. Do not reopen Search, Trail sheets, renderer lifecycle, or the two resolved native crash signatures without new evidence.
+  - Cleanup completed: the temporary QA account and its owned test records were deleted, its Railway SSH key and local credential/key files were removed, task worktrees were pruned, airplane mode was restored off, and the task-owned emulator was stopped.
+  - Checkpoint timestamp `2026-07-28T14:39:33-05:00`; branch `feat/trailhead-1.0.10-overhaul`; exact HEAD `2b86400a5b2dc2d86f8271683a614b92631fc43c`; protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; task-owned Metro, Expo, Gradle, Maestro, publisher, and emulator processes: none.
+
 ### T5 - Drive-to-trailhead, Follow, and recording
 
 - Status: pending T4 acceptance; paired native candidates required.
@@ -220,11 +233,11 @@ Verify the staged file list before every commit.
 
 ## Next exact packet
 
-1. Resume from `31148fea593405ade8a7fe27b8eb3644b10515e1`; verify the protected Explore-index hash before staging anything.
-2. Diagnose the Samsung HWUI/RenderThread lifecycle crash from the two captured native stacks. Determine whether the full-screen manager must fully detach the map surface, avoid display-list churn while covered, or use a renderer-safe native visibility adapter. Do not alter the Offline data contract or clear the persisted downloads.
-3. Apply one reviewed rendering/lifecycle correction, run focused lifecycle and Offline tests, and publish one Android preview from the corrected SHA.
-4. Rerun only the blocked assertion: reopen the persisted Brumley pack, resume verification, keep the process alive, and reach Ready. Then complete one interrupted second trail pack and the airplane-mode map/search/sheet/geometry/support checks.
-5. Restore airplane mode off, record exact evidence and inventory parity, and accept or block T4. Keep iOS and T5 deferred until Android T4 passes.
+1. Resume from `2b86400a5b2dc2d86f8271683a614b92631fc43c`; verify the protected Explore-index hash before staging anything.
+2. Instrument the Offline V2 verification transition with fixed, privacy-safe artifact/error codes and inspect one newly created scoped trail pack. Do not reuse the deleted temporary QA account or infer a cause from the old stuck UI alone.
+3. Add one deterministic regression for the demonstrated non-settling consumer, make one evidence-backed correction, and run the focused Offline V2/runtime/parity/TypeScript gates.
+4. Publish one paired preview, create one fresh scoped pack, and require `Ready`. Only then run one interruption/resume and airplane-mode map/search/sheet/geometry/support check.
+5. Restore airplane mode off, record inventory parity, and accept or block T4. Keep iOS device testing and T5 deferred until Android T4 passes.
 
 ## Do not repeat
 
@@ -235,3 +248,4 @@ Verify the staged file list before every commit.
 - Do not add speculative modules, generic photography, invented access facts, AI labels, random pills, or display zero for missing facts.
 - Do not reopen the accepted T3 flow or the parked T2 camera defect while implementing T4.
 - Do not repeat the two failed `526a263`/`31148fe` covered-map download runs or publish another speculative visual-work-only correction. Use the captured native stacks to choose the next renderer-safe change.
+- Do not repeat the resolved SQLite FTS-close or inactive-renderer crash runs. The only remaining T4 investigation is the non-settling `Verifying` transition on a fresh scoped pack.

@@ -155,7 +155,16 @@ Verify the staged file list before every commit.
 
 ### T3 - Unified Trail Builder and GPX
 
-- Status: pending T2 acceptance.
+- Status: in progress by explicit Android-first user direction; the recorded T2 viewport P1 remains parked and is not being reopened in this packet.
+- Pre-change checkpoint (2026-07-28):
+  - Branch `feat/trailhead-1.0.10-overhaul`; exact HEAD `480c0783db0d7423bf0d23da70003e428c9a732c`.
+  - Android Samsung `RFCR408DA9B` is connected and unlocked with Trailhead `1.0.10` build `68`; airplane mode was `off` before testing.
+  - Installed preview identity remains Android runtime `native-1.0.10-android.6`, update `019fa78a-126e-7b09-8456-7cbbd7a09e79`, source `b64910a1b25db3e2c5d078b6543fdec1dda1a64b` until this packet publishes a replacement.
+  - Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; `.cursor/` and every unrelated dirty file listed above remain excluded.
+  - Characterization found one existing main-map builder with canonical-trail seeding, tap-to-route, free drawing, graph/online/manual fallbacks, route review, elevation, save, follow, and flyover. The existing `gpxImport` parser validates coordinates and persists imported route geometry, but its UI entry lives in Profile rather than Trail Builder.
+  - Demonstrated T3 gaps: no Trail Builder GPX entry/review, no redo after point undo, no unsaved-exit decision, and visible builder copy still contains broken separators and engine-oriented phrasing. These are the only initial implementation targets; recording remains T5.
+  - Focused T3 proof: pure builder-session and GPX validation tests, existing route-builder/Trail sheet/Offline preservation/copy/privacy/TypeScript gates, then one Android delta covering known trail, pins, draw, GPX, undo/redo, exit recovery, save, and reopen.
+  - Task-owned background processes: none.
 
 ### T4 - Complete offline trail pack
 

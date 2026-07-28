@@ -585,6 +585,14 @@ export interface SavedPlace {
   trailId?: string;
   geometryRef?: string;
   sourceLabel?: string;
+  trailContext?: {
+    difficulty?: string;
+    distanceMi?: number;
+    routeType?: string;
+    summary?: string;
+    photoUrl?: string;
+    sourceUrl?: string;
+  };
   createdAt: number;
 }
 

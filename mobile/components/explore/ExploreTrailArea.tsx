@@ -54,9 +54,6 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
         <Text style={[styles.introTitle, { color: C.text }]}>
           Trails near {areaTitle}
         </Text>
-        <Text style={[styles.introText, { color: C.text2 }]}>
-          Pick by distance, climb, grade, and current access.
-        </Text>
       </View>
 
       <View style={styles.sectionTop}>

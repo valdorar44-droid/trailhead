@@ -10252,7 +10252,7 @@ function MapScreen() {
   }, [pendingNavigatePlace, userLoc?.lat, userLoc?.lng]);
 
   useEffect(() => {
-    if (!pendingMapSelection) return;
+    if (!pendingMapSelection || !screenActivity.isActive || (useNativeMapSurface && !mapSurfaceReady)) return;
     setPendingMapSelection(null);
     setShowSearch(false);
     setSearchRouteCard(null);
@@ -10342,6 +10342,7 @@ function MapScreen() {
     const isExploreArea = String(place.id || '').startsWith('explore-area:');
     const isExploreTrail = isTrailSelection || String(place.id || '').startsWith('explore-trail:');
     if (isTrailSelection) {
+      const trailContext = place.trailContext;
       const trailFeature: TrailFeature = {
         id: place.trailId || place.id,
         name: place.name,
@@ -10349,11 +10350,19 @@ function MapScreen() {
         lng: place.lng,
         type: 'trail',
         source: 'trailhead',
-        subtitle: place.note || 'Explore trail',
+        subtitle: place.note || place.sourceLabel || 'Trail',
         score: 100,
         profile_id: place.trailId,
         source_label: place.sourceLabel || 'Explore trail',
-        summary: place.note || 'Trail selected from the map.',
+        summary: trailContext?.summary || place.note,
+        photo_url: trailContext?.photoUrl || null,
+        length_mi: trailContext?.distanceMi,
+        difficulty: trailContext?.difficulty,
+        facts_v2: trailContext ? {
+          distance_mi: trailContext.distanceMi,
+          difficulty: trailContext.difficulty,
+          route_shape: trailContext.routeType,
+        } : undefined,
         support: {
           campsNearby: 0,
           fuelNearby: 0,
@@ -10386,7 +10395,7 @@ function MapScreen() {
     });
     const zoom = isExploreTrail ? 13 : 12;
     focusMapSelectionPoint({ lat: place.lat, lng: place.lng, name: place.name }, zoom, isExploreTrail ? 'trail' : 'place');
-  }, [pendingMapSelection, setPendingMapSelection, weatherUnitMode]);
+  }, [mapSurfaceReady, pendingMapSelection, screenActivity.isActive, setPendingMapSelection, useNativeMapSurface, weatherUnitMode]);
 
   useEffect(() => {
     if (!pendingOpenOfflineModal) return;

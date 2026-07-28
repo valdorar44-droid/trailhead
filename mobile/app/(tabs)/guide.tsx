@@ -4573,7 +4573,7 @@ function GuideScreenContent() {
       if (trail.source_url) Linking.openURL(trail.source_url).catch(() => {});
       return;
     }
-    const distance = fmtMi(trail.distance_mi) || 'Check route';
+    const distance = fmtMi(trail.distance_mi);
     setPendingMapSelection({
       kind: 'trail',
       trail: {
@@ -4586,6 +4586,14 @@ function GuideScreenContent() {
         trailId: trail.trail_id || trail.id,
         geometryRef: trail.geometry_ref,
         sourceLabel: trail.source_label || trail.source_pack?.primary,
+        trailContext: {
+          difficulty: trail.difficulty || undefined,
+          distanceMi: Number.isFinite(trail.distance_mi) ? trail.distance_mi : undefined,
+          routeType: trail.route_type || undefined,
+          summary: trail.description || trail.summary || undefined,
+          photoUrl: trail.image_url || trail.photos?.[0]?.url,
+          sourceUrl: trail.source_url,
+        },
         createdAt: Date.now(),
       },
     });

@@ -42,6 +42,19 @@ export function mapVisualWorkShouldRun(
 }
 
 /**
+ * A full-screen manager may pause Map requests and gestures without deleting
+ * the native Mapbox layer tree underneath it. Keeping that tree stable avoids
+ * racing Android HWUI/Mapbox display-list destruction while the manager is
+ * animating or verifying downloads.
+ */
+export function mapVisualTreeShouldRemainMounted(
+  visualWorkActive: boolean,
+  visuallyCovered: boolean,
+) {
+  return visualWorkActive || visuallyCovered;
+}
+
+/**
  * Viewport work is generation-bound so a request started before Map blur can
  * never commit after a later focus transition.
  */

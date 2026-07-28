@@ -4,6 +4,7 @@ import {
   boundedRetainedScrollOffset,
   createMapVisualRefreshCoordinator,
   mapLocationWatchShouldRun,
+  mapVisualTreeShouldRemainMounted,
   mapVisualWorkShouldRun,
   screenIsActive,
   visualWorkRequestIsCurrent,
@@ -49,6 +50,12 @@ test('hidden Map pauses visual layers without stopping the navigation runtime', 
   assert.equal(mapVisualWorkShouldRun(false, true, true), false);
   assert.equal(mapVisualWorkShouldRun(false, false, true), false);
   assert.equal(mapLocationWatchShouldRun(false, true), true);
+});
+
+test('a full-screen manager pauses work without tearing down the native layer tree', () => {
+  assert.equal(mapVisualTreeShouldRemainMounted(true, false), true);
+  assert.equal(mapVisualTreeShouldRemainMounted(false, true), true);
+  assert.equal(mapVisualTreeShouldRemainMounted(false, false), false);
 });
 
 test('visual work requests cannot commit across blur and refocus generations', () => {

@@ -237,6 +237,7 @@ import { completeLegacyMapSearch } from '@/lib/legacyMapSearchPolicy';
 import { useScreenActivity } from '@/lib/screenActivity';
 import {
   mapLocationWatchShouldRun,
+  mapVisualTreeShouldRemainMounted,
   mapVisualWorkShouldRun,
   visualWorkRequestIsCurrent,
 } from '@/lib/screenActivityState';
@@ -7706,6 +7707,10 @@ function MapScreen() {
     screenActivity.isActive,
     screenActivity.isAppActive,
     navMode,
+    showOfflineModal,
+  );
+  const mapVisualTreeMounted = mapVisualTreeShouldRemainMounted(
+    mapVisualWorkActive,
     showOfflineModal,
   );
   const mapVisualWorkActiveRef = useRef(mapVisualWorkActive);
@@ -25182,6 +25187,7 @@ function MapScreen() {
         <NativeMapSurface
           ref={nativeMapRef}
           visualWorkActive={mapVisualWorkActive}
+          visualTreeMounted={mapVisualTreeMounted}
           cameraOwnership={mapCameraOwnership}
           onMapStyleLoaded={() => {
             setMapStyleGeneration(generation => generation + 1);

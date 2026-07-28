@@ -181,6 +181,7 @@ test('Map lazy-loads the renderer once and keeps the mounted presentation on war
 
 test('hidden Native Map pauses renderer work without erasing route or selection semantics', () => {
   assert.match(mapSource, /visualWorkActive=\{mapVisualWorkActive\}/);
+  assert.match(mapSource, /visualTreeMounted=\{mapVisualTreeMounted\}/);
   assert.match(mapSource, /waypoints=\{waypoints\}/);
   assert.match(mapSource, /searchMarker=\{!mapMissionVisible && searchRouteCard/);
   assert.match(mapSource, /routeBuildCoords=\{routeBuildSession\?\.routeCoords \?\? \[\]\}/);
@@ -189,8 +190,9 @@ test('hidden Native Map pauses renderer work without erasing route or selection 
   assert.doesNotMatch(mapSource, /searchMarker=\{mapVisualWorkActive/);
 
   assert.match(nativeMapSource, /visualWorkActive\?: boolean;/);
+  assert.match(nativeMapSource, /visualTreeMounted\?: boolean;/);
   assert.match(nativeMapSource, /preferredFramesPerSecond=\{visualWorkActive \? 60 : 1\}/);
-  assert.match(nativeMapSource, /\{visualWorkActive \? \(\s*<>[\s\S]*id="camps"/);
+  assert.match(nativeMapSource, /\{visualTreeMounted \? \(\s*<>[\s\S]*id="camps"/);
   assert.match(nativeMapSource, /if \(!visualWorkActiveRef\.current \|\| !feat\?\.properties \|\| !mapRef\.current\) return;/);
   assert.match(nativeMapSource, /tileProbeSeqRef\.current \+= 1;/);
   assert.match(nativeMapSource, /mvumFetchAbortRef\.current\?\.abort\(\);/);

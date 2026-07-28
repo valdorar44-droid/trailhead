@@ -279,6 +279,8 @@ export interface NativeMapHandle {
 export interface NativeMapProps {
   /** The Map remains mounted while hidden, but renderer-owned visual work pauses. */
   visualWorkActive?: boolean;
+  /** Preserve native Mapbox children while a full-screen manager covers the Map. */
+  visualTreeMounted?: boolean;
   /** The active experience owns camera initialization without replacing the map. */
   cameraOwnership?: MapCameraOwnership;
   /** Optional first-frame bounds for embedded route maps. Later camera ownership still applies. */
@@ -910,6 +912,7 @@ async function probeTileCdn(timeoutMs = 1500): Promise<boolean> {
 const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const {
     visualWorkActive = true,
+    visualTreeMounted: visualTreeMountedProp,
     cameraOwnership = BROWSE_MAP_CAMERA_OWNERSHIP,
     initialCameraBounds,
     waypoints, camps, gas, pois, offlineTrailFeatures = emptyFC(), waterNavLines, waterSpotCards = [], waterCorridor = null, waterFollowRoute = null, reports, communityPins, searchMarker,
@@ -928,6 +931,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     onRouteReady, onRoutePersist, onOffRoute, onOffRouteWarn, onBackOnRoute, onRouteProgress,
     onTraceStart, onTraceMove, onTraceEnd, onDebugEvent, onError, onFireOverlayStatusChange,
   } = props;
+
+  const visualTreeMounted = visualTreeMountedProp ?? visualWorkActive;
 
   const mapRef = useRef<any>(null);
   const camRef = useRef<any>(null);
@@ -3402,7 +3407,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             config={mapboxStyleImportConfig}
           />
         ) : null}
-        {visualWorkActive && isExtremeMapbox && showTerrain && MapGL.RasterDemSource && MapGL.Terrain ? (
+        {visualTreeMounted && isExtremeMapbox && showTerrain && MapGL.RasterDemSource && MapGL.Terrain ? (
           <MapGL.RasterDemSource
             id="trailhead-mapbox-dem"
             tileUrlTemplates={[`https://api.mapbox.com/raster/v1/mapbox.mapbox-terrain-dem-v1/{z}/{x}/{y}.webp?access_token=${mapboxToken}`]}
@@ -3419,7 +3424,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       <MapGL.Camera
         ref={camRef}
         defaultSettings={initialBoundsCameraDefaultRef.current ?? freeCameraDefaultRef.current}
-        followUserLocation={!!(visualWorkActive && navMode && navCameraFollow)}
+        followUserLocation={!!(visualTreeMounted && navMode && navCameraFollow)}
         followUserMode={(navSpeed ?? 0) > 1.2 ? MapGL.UserTrackingMode.FollowWithCourse : MapGL.UserTrackingMode.FollowWithHeading}
         followZoomLevel={(navSpeed ?? 0) > 20 ? 15.5 : (navSpeed ?? 0) > 9 ? 16.2 : 17}
         followPitch={showTerrain ? 62 : (navSpeed ?? 0) > 2.2 ? 45 : 0}
@@ -3435,17 +3440,17 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         }}
       />
 
-      {visualWorkActive ? (
+      {visualTreeMounted ? (
         <>
       {/* ── User location ─────────────────────────────────────────────── */}
-      {visualWorkActive && navMode && navCameraFollow ? (
+      {visualTreeMounted && navMode && navCameraFollow ? (
         <MapGL.UserLocation
           visible={!!userLoc}
           renderMode="normal"
           showsUserHeadingIndicator
           animated
         />
-      ) : visualWorkActive && userLoc ? (
+      ) : visualTreeMounted && userLoc ? (
         <MapGL.ShapeSource id="trailhead-user-location" shape={userLocationShape}>
           <MapGL.CircleLayer
             id="trailhead-user-location-halo"
@@ -4624,7 +4629,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       )}
 
       {/* ── Community pins ────────────────────────────────────────────── */}
-      {visualWorkActive && communityPins.slice(0, 150).map((pin, i) => {
+      {visualTreeMounted && communityPins.slice(0, 150).map((pin, i) => {
         const visual = communityPinVisual(pin.type);
         return (
           <MapGL.MarkerView
@@ -4642,14 +4647,14 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       })}
 
       {/* ── Radar (RainViewer) ───────────────────────────────────────── */}
-      {visualWorkActive && showRadar && radarUrl && (
+      {visualTreeMounted && showRadar && radarUrl && (
         <MapGL.RasterSource id="radar-overlay" tileUrlTemplates={[radarUrl]} tileSize={256}>
           <MapGL.RasterLayer id="radar-layer" style={{ rasterOpacity: 0.65 }} />
         </MapGL.RasterSource>
       )}
 
       {/* ── Active wildfires (USFS) ───────────────────────────────────── */}
-      {visualWorkActive && showFire && fireData && (
+      {visualTreeMounted && showFire && fireData && (
         <MapGL.ShapeSource id="fire-overlay" shape={fireData}>
           <MapGL.FillLayer
             id="fire-fill"
@@ -4670,7 +4675,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       )}
 
       {/* ── Avalanche danger zones ────────────────────────────────────── */}
-      {visualWorkActive && showAva && avaData && (
+      {visualTreeMounted && showAva && avaData && (
         <MapGL.ShapeSource id="ava-overlay" shape={avaData}>
           <MapGL.FillLayer
             id="ava-fill"
@@ -4685,7 +4690,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       )}
 
       {/* ── MVUM — USFS Motor Vehicle Use Map ────────────────────────── */}
-      {visualWorkActive && showMvum && mvumRoads && (
+      {visualTreeMounted && showMvum && mvumRoads && (
         <MapGL.ShapeSource id="mvum-roads" shape={mvumRoads}>
           <MapGL.LineLayer
             id="mvum-roads-line"
@@ -4700,7 +4705,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           />
         </MapGL.ShapeSource>
       )}
-      {visualWorkActive && showMvum && mvumTrails && (
+      {visualTreeMounted && showMvum && mvumTrails && (
         <MapGL.ShapeSource id="mvum-trails" shape={mvumTrails}>
           <MapGL.LineLayer
             id="mvum-trails-line"
@@ -4710,7 +4715,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       )}
 
       {/* ── Public land ownership overlay ─────────────────────────────── */}
-      {visualWorkActive && showLandOverlay && (
+      {visualTreeMounted && showLandOverlay && (
         <MapGL.RasterSource
           key={`public-land-overlay-${publicLandLayerPlacementKey}`}
           id="public-land-overlay"
@@ -4733,7 +4738,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       )}
 
       {/* ── USGS Topo overlay ─────────────────────────────────────────── */}
-      {visualWorkActive && showUsgsOverlay && (
+      {visualTreeMounted && showUsgsOverlay && (
         <MapGL.RasterSource
           id="usgs-overlay"
           tileUrlTemplates={['https://basemap.nationalmap.gov/arcgis/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}']}
@@ -4749,14 +4754,14 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       )}
 
       {/* ── Report markers ────────────────────────────────────────────── */}
-      {visualWorkActive && reports.map(r => (
+      {visualTreeMounted && reports.map(r => (
         <MapGL.MarkerView key={`rep-${r.id}`} id={`rep-${r.id}`} coordinate={[r.lng, r.lat]}>
           <ReportDot type={r.type} subtype={r.subtype} />
         </MapGL.MarkerView>
       ))}
 
       {/* ── Search marker ─────────────────────────────────────────────── */}
-      {visualWorkActive && searchMarker && (
+      {visualTreeMounted && searchMarker && (
         <MapGL.MarkerView id="search" coordinate={[searchMarker.lng, searchMarker.lat]}>
           <View style={styles.searchMarker}>
             <View style={styles.searchPin} />
@@ -4808,14 +4813,14 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         </>
       ) : null}
       </MapGL.MapView>
-      {visualWorkActive && traceMode && (
+      {visualTreeMounted && traceMode && (
         <View
           style={StyleSheet.absoluteFillObject}
           pointerEvents="auto"
           {...tracePanResponder.panHandlers}
         />
       )}
-      {visualWorkActive && showMapStatusBadge && (
+      {visualTreeMounted && showMapStatusBadge && (
         <View pointerEvents="none" style={styles.tileDebugWrap}>
           <View style={[styles.tileDebug, localTiles ? styles.tileDebugLocal : styles.tileDebugRemote]}>
             <Ionicons

@@ -92,24 +92,6 @@ def main() -> int:
         CacheControl="no-cache, max-age=0",
         Metadata={"revision": str(manifest["revision"]).split(":", 1)[1]},
     )
-    public_manifest_key = f"{args.prefix.rstrip('/')}/manifest.json"
-    try:
-        current = client.get_object(Bucket=args.bucket, Key=public_manifest_key)
-        public_manifest = json.loads(current["Body"].read().decode("utf-8"))
-        if not isinstance(public_manifest, dict):
-            public_manifest = {}
-    except Exception:
-        public_manifest = {}
-    for item in (manifest.get("shards") or {}).values():
-        public_manifest[str(item["path"])] = {"size": int(item["size"])}
-    public_manifest["canonical-geometries-v1-manifest.json"] = {"size": len(manifest_bytes)}
-    client.put_object(
-        Bucket=args.bucket,
-        Key=public_manifest_key,
-        Body=(json.dumps(public_manifest, indent=2, sort_keys=True) + "\n").encode("utf-8"),
-        ContentType="application/json",
-        CacheControl="no-cache, max-age=0",
-    )
     print(json.dumps({
         "bucket": args.bucket,
         "prefix": args.prefix,
@@ -117,7 +99,6 @@ def main() -> int:
         "published_count": manifest.get("published_count"),
         "uploaded_shards": uploaded,
         "unchanged_shards": skipped,
-        "public_manifest_entries": len(public_manifest),
     }, indent=2))
     return 0
 

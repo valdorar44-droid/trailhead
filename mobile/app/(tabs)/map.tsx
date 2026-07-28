@@ -7706,6 +7706,7 @@ function MapScreen() {
     screenActivity.isActive,
     screenActivity.isAppActive,
     navMode,
+    showOfflineModal,
   );
   const mapVisualWorkActiveRef = useRef(mapVisualWorkActive);
   const mapVisualWorkGenerationRef = useRef(0);

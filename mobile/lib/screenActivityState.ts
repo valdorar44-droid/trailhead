@@ -36,8 +36,9 @@ export function mapVisualWorkShouldRun(
   screenActive: boolean,
   _appActive: boolean,
   _navigationActive: boolean,
+  visuallyCovered = false,
 ) {
-  return screenActive;
+  return screenActive && !visuallyCovered;
 }
 
 /**

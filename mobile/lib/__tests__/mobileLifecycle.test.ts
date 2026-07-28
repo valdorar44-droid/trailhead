@@ -44,6 +44,7 @@ test('idle Map sensing pauses on blur/background while active navigation continu
 
 test('hidden Map pauses visual layers without stopping the navigation runtime', () => {
   assert.equal(mapVisualWorkShouldRun(true, true, false), true);
+  assert.equal(mapVisualWorkShouldRun(true, true, false, true), false);
   assert.equal(mapVisualWorkShouldRun(false, true, false), false);
   assert.equal(mapVisualWorkShouldRun(false, true, true), false);
   assert.equal(mapVisualWorkShouldRun(false, false, true), false);

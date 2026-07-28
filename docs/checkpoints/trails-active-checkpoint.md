@@ -185,13 +185,30 @@ Verify the staged file list before every commit.
 
 ### T4 - Complete offline trail pack
 
-- Status: in progress by explicit Android-first user direction from accepted T3 source `dbb22f2fb5f2d0dad30a57632e9e5ba56ed86b78`.
+- Status: implementation is complete, but Android acceptance is blocked by a reproducible Samsung native RenderThread crash. Do not begin T5 or repeat this device run until the crash has an evidence-backed native/rendering fix.
 - Pre-change scope:
   - Extend the existing Offline V2 prepare/materialize/runtime path with a version-bound canonical trail scope; do not create another downloader or ownership store.
   - Keep all existing V1 region, selected-area, trip/corridor, PMTiles/vector, routing, trail, contour, saved-route, and six-family place downloads untouched.
   - A complete pack must include the Mapbox Outdoors style/tile region plus exact canonical trail geometry/profile, trailheads/access, nearby camps/services/support, routing graph edges, contours/elevation context, and local SQLite trail/place search. Optional media is shown offline only when a licensed hashed artifact exists.
   - Android proof is limited to two small canonical trail packs: one normal, one interrupted and resumed; then airplane-mode map, search, sheet, geometry, and support-place checks. Existing downloads are inventoried before and after and are never cleared.
   - The recorded T2 camera/world-viewport P1 remains parked and cannot expand this packet.
+- Implementation and deployment:
+  - Source `526a26354112943c58382daf21bcf380ca28d745` added an optional trusted canonical-trail scope to Offline V2 without changing legacy bundle identity when the scope is absent.
+  - The server resolves the exact canonical trail and geometry revision, rejects stale revisions, derives a trusted 1.2 km corridor from complete geometry, and binds the pack to Mapbox Outdoors. The worker re-resolves the trail before materialization.
+  - Mobile uses the existing Offline V2 coordinator and existing regional routing/contour/trail repositories. Trail Download saves the local trail, requires complete canonical V2 geometry, creates or resumes the scoped V2 job, and starts the existing regional support pack. No V1 download is migrated or deleted.
+  - Focused backend and mobile Offline/Trails/sheet/copy/privacy/TypeScript gates passed before publication. Railway deployment `4b3c126f-538f-4b1d-8942-6c1589afc3fd` succeeded with image digest `sha256:b5bbd1f96f1ee20b9bc43adbd998be5889fe03c6c187300cfef4a29e13bd1753`.
+  - The implementation preview published Android update `019fa818-ac77-75b4-8752-288b7d6ac366`, group `edb758aa-c85c-4db4-ad5a-95bc15560eb5`, runtime `native-1.0.10-android.6`; paired iOS update `019fa818-ac77-766e-824d-7dcba61adf77`, group `2b726c34-830a-4b83-921f-3380d2b4ac26`, runtime `native-1.0.10-ios.5`.
+- Android evidence and blocking defect:
+  - Samsung `RFCR408DA9B`, Trailhead `1.0.10` build `68`, successfully discovered authoritative V2 trails through Map -> Search -> Trails. Complete trail `Brumley Arch (Sz)` opened the shared full sheet and exposed the capability-driven Download action.
+  - The existing manager retained the same inventory and showed the scoped trail plus the required Utah regional support pack. Utah reached `Directions saved` at `623.8 MB`; the trail pack reached `Verifying` at `4.8 MB`. No pre-existing download was cleared.
+  - The first run crashed natively at `2026-07-28 05:14:49 -05:00` with `SIGSEGV` in Android HWUI/EGL/Mali RenderThread code while the full-screen Offline manager covered the active map; exit evidence recorded approximately `713 MB` PSS and `729 MB` RSS.
+  - One evidence-backed JS correction, source `31148fea593405ade8a7fe27b8eb3644b10515e1`, suspended map visual work behind the full-screen Offline manager while preserving map/controllers and background navigation/audio. Focused lifecycle tests passed `9/9`, TypeScript passed, and the clean commit was pushed.
+  - Guarded paired correction preview: candidate branch `preview-candidate-31148fea593405ade8a7fe27b8eb3644b10515e1-ms4ihq1f-95bacb48543c95d3394b831a`; Android group `a9500255-9a46-46bc-bf91-e35c2da783a7`, update `019fa849-16d0-7277-9bb0-e7026476d6be`, runtime `native-1.0.10-android.6`; iOS group `e821aacf-3d1e-4342-8a45-35bc5222b043`, update `019fa849-16d0-7e58-80d5-b2a6e29395a6`, runtime `native-1.0.10-ios.5`. Sentry source maps were accepted before the preview channel moved.
+  - QA identity matched full source `31148fea593405ade8a7fe27b8eb3644b10515e1`, build `68`, runtime, and Android update. Reopening the persisted manager kept the process alive at approximately `528 MB` PSS and preserved both downloads.
+  - The single permitted corrected assertion still failed: after the scoped pack remained at `Verifying`, pausing and resuming it produced another native `SIGSEGV` at `2026-07-28 05:39:20 -05:00`, approximately `588 MB` PSS/RSS. The second stack is in Android HWUI display-list destruction (`SkPaint`, `RenderNode::destroyHardwareResources`), not a JavaScript exception or a simple memory-cap crossing.
+  - Per the no-loop rule, no second speculative correction, OTA, second trail download, or airplane-mode acceptance run was attempted. T4 remains blocked until the covered-map rendering/lifecycle interaction is corrected and this one assertion passes.
+  - Evidence directory: `C:\\Users\\User\\Documents\\Codex\\evidence\\trailhead\\trails-t4-526a263`. QA identity XML SHA-256 `140d1619664d34b04738a0c45b4929cdf5f98a5ca34dc2ab056d137217a98f16`; corrected manager screenshot SHA-256 `e6dfe9f8fcdd08314efc9659c5dc976b96f68a9ea293d9e64017a8123374a238`; verifying/paused evidence SHA-256 `e018a959431c32fdcb39f1264d4d4c62703baf254a36f54f5b7b39b0583d4031`; crash log SHA-256 `bab4f9fd8d08bdd95d6aedf39310ed218ac14f17be9f1fb9b5b4266765f00051`; exit-info SHA-256 `b24a81dbec4cd946fc0ad98d5cd2026144ad6fd4f3543082324599bc0964259f`.
+  - Checkpoint timestamp `2026-07-28T05:40:48-05:00`; branch `feat/trailhead-1.0.10-overhaul`; exact HEAD `31148fea593405ade8a7fe27b8eb3644b10515e1`; protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; airplane mode is `off`; task-owned Metro, Expo, Gradle, Maestro, and publisher processes: none.
 
 ### T5 - Drive-to-trailhead, Follow, and recording
 
@@ -203,12 +220,11 @@ Verify the staged file list before every commit.
 
 ## Next exact packet
 
-1. Resume from `dbb22f2fb5f2d0dad30a57632e9e5ba56ed86b78`; verify the protected Explore-index hash before staging anything.
-2. Add a backward-compatible server-owned trail scope to Offline V2, binding pack identity to canonical trail ID and geometry revision and deriving trusted corridor coverage from resolved geometry.
-3. Connect Trail sheet Download to that scope through the existing Expo SQLite/RNMapbox Offline V2 runtime and show the job in the existing Downloads manager.
-4. Run focused backend/mobile Offline V1/V2, trail-pack, copy/privacy, and TypeScript gates; deploy additive backend compatibility; publish one Android preview from the accepted SHA.
-5. On Samsung, inventory existing downloads, complete one normal trail pack, interrupt and resume a second, verify both in airplane mode, restore airplane mode off, and record exact evidence without deleting or migrating pre-existing downloads.
-6. Keep iOS deferred until Android T4 is accepted.
+1. Resume from `31148fea593405ade8a7fe27b8eb3644b10515e1`; verify the protected Explore-index hash before staging anything.
+2. Diagnose the Samsung HWUI/RenderThread lifecycle crash from the two captured native stacks. Determine whether the full-screen manager must fully detach the map surface, avoid display-list churn while covered, or use a renderer-safe native visibility adapter. Do not alter the Offline data contract or clear the persisted downloads.
+3. Apply one reviewed rendering/lifecycle correction, run focused lifecycle and Offline tests, and publish one Android preview from the corrected SHA.
+4. Rerun only the blocked assertion: reopen the persisted Brumley pack, resume verification, keep the process alive, and reach Ready. Then complete one interrupted second trail pack and the airplane-mode map/search/sheet/geometry/support checks.
+5. Restore airplane mode off, record exact evidence and inventory parity, and accept or block T4. Keep iOS and T5 deferred until Android T4 passes.
 
 ## Do not repeat
 
@@ -218,3 +234,4 @@ Verify the staged file list before every commit.
 - Do not republish `42b035c` or `b64910a`, rerun the six-trail hub fix, or perform another speculative camera retry.
 - Do not add speculative modules, generic photography, invented access facts, AI labels, random pills, or display zero for missing facts.
 - Do not reopen the accepted T3 flow or the parked T2 camera defect while implementing T4.
+- Do not repeat the two failed `526a263`/`31148fe` covered-map download runs or publish another speculative visual-work-only correction. Use the captured native stacks to choose the next renderer-safe change.

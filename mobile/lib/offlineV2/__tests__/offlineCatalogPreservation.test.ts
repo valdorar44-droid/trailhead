@@ -435,6 +435,11 @@ async function main() {
   assert.match(catalogSource, /trailGeometryRepresentativePointV2\(feature\.geometry, manifest\.bounds\)/);
   assert.match(sqliteSource, /LIMIT \? OFFSET \?/);
   assert.match(sqliteSource, /d\.title, d\.result_id/);
+  assert.match(
+    sqliteSource,
+    /finalizeUnusedStatementsBeforeClosing:\s*false/,
+    'FTS5 index handles must not trigger Expo SQLite orphan-statement finalization on close',
+  );
   assert.match(mapSource, /resolveDownloadedSearchResultPoi\([\s\S]*offlineV2Catalog\.places[\s\S]*offlinePlacePois/);
   assert.match(mapSource, /setCampDetail\(offlineV2CampPinToDetail\(downloadedCamp\)\)/);
   assert.match(guideSource, /accountInventoryRequiresCleanup\([\s\S]*previousExploreAccountInventoryScopeRef\.current/);

@@ -24,7 +24,12 @@ function pathParts(path: string) {
 
 async function openIndex(path: string) {
   const { directory, name } = pathParts(path);
-  const database = await SQLite.openDatabaseAsync(name, { useNewConnection: true }, directory);
+  const database = await SQLite.openDatabaseAsync(name, {
+    useNewConnection: true,
+    // FTS5 owns internal statements that Expo must not finalize a second time
+    // while closeAsync tears down this short-lived verification/search handle.
+    finalizeUnusedStatementsBeforeClosing: false,
+  }, directory);
   await database.execAsync('PRAGMA query_only = ON;');
   return database;
 }

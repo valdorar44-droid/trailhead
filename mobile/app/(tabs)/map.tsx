@@ -26416,7 +26416,7 @@ function MapScreen() {
         const routeType = trailRouteTypeLabel(selectedTrailProfile, selectedTrail);
         const difficulty = model.difficulty_label && model.difficulty_label !== 'Unrated'
           ? model.difficulty_label
-          : trailDifficultyText(selectedTrail);
+          : selectedTrail.system_v2_id ? '' : trailDifficultyText(selectedTrail);
         const summary = String(selectedTrailProfile?.summary || selectedTrailProfile?.description || selectedTrail.summary || '').trim();
         const canPreviewTrail = selectedTrail.system_v2_id
           ? selectedTrail.capabilities_v2?.preview === true

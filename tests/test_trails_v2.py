@@ -110,6 +110,18 @@ class TrailsV2Tests(unittest.TestCase):
         self.assertEqual(len(one.geometry["features"]), 2)
         self.assertEqual(one.permitted_uses, [])
 
+    def test_legacy_ui_fallbacks_are_not_exposed_as_trail_facts(self):
+        item = profile("osm:way:1", "Above Abyss", [[-109.0, 38.0], [-109.001, 38.001]], length_mi=0.36)
+        item["difficulty"] = "Scout first"
+        item["route_type"] = "Mapped route"
+        item["provenance"]["catalog"]["route_type"] = "Mapped route"
+
+        system = build_trail_systems_v2([item])[0]
+
+        self.assertIsNone(system.facts.difficulty)
+        self.assertIsNone(system.facts.route_shape)
+        self.assertEqual(system.facts.distance_mi, 0.36)
+
     def test_complete_authority_suppresses_same_name_fragments(self):
         official = profile(
             "trail:usfs:mill-creek",

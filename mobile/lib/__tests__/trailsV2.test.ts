@@ -101,5 +101,6 @@ test('map selection rejects stale systems and mounts the resolved GeoJSON layer'
 test('trail cards do not use generic destination photography or inferred v2 difficulty', () => {
   assert.doesNotMatch(mapSource, /TRAIL_FALLBACK_IMAGE/);
   assert.match(mapSource, /trail\.difficulty \|\| \(!trail\.system_v2_id \? trailDifficultyText\(trail\) : ''\)/);
+  assert.match(mapSource, /selectedTrail\.system_v2_id \? '' : trailDifficultyText\(selectedTrail\)/);
   assert.match(mapSource, /trail\.capabilities_v2\?\.preview \? 'Preview route' : 'View details'/);
 });

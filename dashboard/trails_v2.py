@@ -118,6 +118,16 @@ def _clean_text(value: object) -> str:
     return re.sub(r"\s+", " ", str(value or "")).strip()
 
 
+def _source_fact(value: object, *, generic: set[str] | None = None) -> str | None:
+    """Return source-owned trail facts while omitting legacy UI fallbacks."""
+    text = _clean_text(value)
+    if not text:
+        return None
+    if text.casefold() in {item.casefold() for item in (generic or set())}:
+        return None
+    return text
+
+
 def _normalized_name(value: object) -> str:
     text = _clean_text(value).lower()
     text = re.sub(r"\([^)]*\)", " ", text)
@@ -538,8 +548,11 @@ def build_trail_systems_v2(profiles: list[dict[str, Any]], *, limit: int = 80) -
                     distance_mi=distance,
                     elevation_gain_ft=_integer(primary.get("elevation_gain_ft")),
                     estimated_time=_clean_text(primary.get("typical_time")) or None,
-                    difficulty=_clean_text(primary.get("difficulty")) or None,
-                    route_shape=_clean_text(primary.get("route_type") or ((primary.get("provenance") or {}).get("catalog") or {}).get("route_type")) or None,
+                    difficulty=_source_fact(primary.get("difficulty"), generic={"Scout first", "Check access", "Unrated", "Unknown"}),
+                    route_shape=_source_fact(
+                        primary.get("route_type") or ((primary.get("provenance") or {}).get("catalog") or {}).get("route_type"),
+                        generic={"Mapped route", "Trail route", "Point or route", "Unknown"},
+                    ),
                     surface=_clean_text(primary.get("surface") or ((primary.get("provenance") or {}).get("catalog") or {}).get("surface")) or None,
                     season=_clean_text(primary.get("season_window") or primary.get("best_season")) or None,
                 ),

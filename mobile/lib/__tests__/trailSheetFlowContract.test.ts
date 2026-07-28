@@ -39,11 +39,22 @@ test('linked trail and trailhead drilldowns retain the parent sheet and scroll',
 });
 
 test('Back restores the trail discovery sheet, viewport, stage, and scroll while Close exits', () => {
+  const campDiscoverySheet = mapSource.slice(
+    mapSource.indexOf('{showCampDiscoverySheet && ('),
+    mapSource.indexOf('{showDiscoveryPanel && !navMode'),
+  );
+  const trailDiscoverySheet = mapSource.slice(
+    mapSource.indexOf('{showDiscoveryPanel && !navMode'),
+    mapSource.indexOf('{/* Route alerts */}'),
+  );
   assert.match(mapSource, /trailDiscoveryReturnRef = useRef/);
   assert.match(mapSource, /trailDiscoverySheetStageRef = useRef/);
   assert.match(mapSource, /stage: trailDiscoverySheetStageRef\.current/);
   assert.match(mapSource, /trailDiscoverySheetStageRef\.current = snapshot\.stage/);
-  assert.match(mapSource, /onStageChange=\{handleTrailDiscoverySheetStageChange\}/);
+  assert.match(trailDiscoverySheet, /stage=\{trailDiscoverySheetStage\}/);
+  assert.match(trailDiscoverySheet, /onStageChange=\{handleTrailDiscoverySheetStageChange\}/);
+  assert.match(trailDiscoverySheet, /onScrollYChange=\{value => \{ trailDiscoveryScrollYRef\.current = value; \}\}/);
+  assert.doesNotMatch(campDiscoverySheet, /trailDiscoverySheetStage|trailDiscoveryScroll/);
   assert.match(mapSource, /scrollY: trailDiscoveryScrollYRef\.current/);
   assert.match(mapSource, /function restoreTrailDiscoveryReturn\(\)/);
   assert.match(mapSource, /setShowDiscoveryPanel\(true\)/);

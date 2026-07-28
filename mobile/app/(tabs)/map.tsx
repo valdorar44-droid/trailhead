@@ -25409,16 +25409,11 @@ function MapScreen() {
       {showCampDiscoverySheet && (
         <TrailheadSnapSheet
           initialStage="peek"
-          stage={trailDiscoverySheetStage}
-          onStageChange={handleTrailDiscoverySheetStageChange}
           maxFullRatio={0.82}
           halfRatio={0.42}
           style={[s.campDiscoverySnap, { bottom: bottomInset + 52 }]}
           contentStyle={s.campDiscoverySnapContent}
           scrollContentStyle={s.campDiscoveryScrollContent}
-          initialScrollY={trailDiscoveryScrollRestore.y}
-          scrollRestoreKey={trailDiscoveryScrollRestore.key}
-          onScrollYChange={value => { trailDiscoveryScrollYRef.current = value; }}
           peekHeader={(
             <View style={s.campDiscoveryHeader}>
               <View style={s.campDiscoveryTitleWrap}>
@@ -26930,11 +26925,16 @@ function MapScreen() {
       {showDiscoveryPanel && !navMode && !selectedCamp && !selectedCommunityPin && !selectedTrail && !originalsMapExperience.active && (
         <TrailheadSnapSheet
           initialStage="peek"
+          stage={trailDiscoverySheetStage}
+          onStageChange={handleTrailDiscoverySheetStageChange}
           maxFullRatio={0.82}
           halfRatio={0.42}
           style={[s.campDiscoverySnap, { bottom: bottomInset + 52 }]}
           contentStyle={s.campDiscoverySnapContent}
           scrollContentStyle={s.campDiscoveryScrollContent}
+          initialScrollY={trailDiscoveryScrollRestore.y}
+          scrollRestoreKey={trailDiscoveryScrollRestore.key}
+          onScrollYChange={value => { trailDiscoveryScrollYRef.current = value; }}
           peekHeader={(
             <View style={s.campDiscoveryHeader}>
               <View style={s.campDiscoveryTitleWrap}>

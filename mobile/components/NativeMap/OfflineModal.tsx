@@ -670,16 +670,17 @@ export default function OfflineModal({
   const wasVisible = useRef(false);
 
   const reloadNativePacks = useCallback(async () => {
-    const [mapLibrePacks, rnMapboxPacks] = await Promise.all([
-      getInstalledPacks('maplibre').catch(() => []),
-      getInstalledPacks('rnmapbox').catch(() => []),
-    ]);
+    // Each native SDK initializes process-wide offline state when getPacks is
+    // called. Querying the inactive renderer can race its unmounted map and,
+    // on Android, abort in MapLibre FileSource initialization. Preserve every
+    // pack on disk, but enumerate it only while its renderer is active.
+    const activePacks = await getInstalledPacks(activeNativeRenderer).catch(() => []);
     // Originals owns its immutable map packs and removal/repair lifecycle.
     // Do not expose those raw native packs as generic maps here.
-    setMlnPacks([...mapLibrePacks, ...rnMapboxPacks].filter(
+    setMlnPacks(activePacks.filter(
       pack => !pack.name.startsWith('trailhead-original:'),
     ));
-  }, []);
+  }, [activeNativeRenderer]);
 
   const reloadPlacePacks = useCallback(async (scope = currentOfflineAccountScope()) => {
     const [packs, bytes] = await Promise.all([

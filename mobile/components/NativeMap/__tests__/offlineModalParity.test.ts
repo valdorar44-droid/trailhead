@@ -46,8 +46,12 @@ assert.match(source, /renderer_style_id: activeRendererStyleId!/);
 assert.match(source, /isTrailPackClientRefV2\(job\.client_ref\)/);
 assert.match(source, /id: `trailpack:\$\{job\.job_id\}`/);
 assert.match(source, /job\.manifest\) await runtime\.remove\(job\.manifest\.bundle_id\)/);
-assert.match(source, /getInstalledPacks\('maplibre'\)/);
-assert.match(source, /getInstalledPacks\('rnmapbox'\)/);
+assert.match(source, /getInstalledPacks\(activeNativeRenderer\)/);
+assert.doesNotMatch(
+  source,
+  /Promise\.all\(\[\s*getInstalledPacks\('maplibre'\)[\s\S]*getInstalledPacks\('rnmapbox'\)/,
+  'opening Downloads must not initialize the inactive native renderer just to inventory its packs',
+);
 assert.match(source, /!pack\.name\.startsWith\('trailhead-original:'\)/);
 assert.match(source, /activeNativeRenderer,\s*\n\s*\);/);
 assert.match(mapSource, /activeNativeRenderer=\{mapRendererMode === 'mapbox' \? 'rnmapbox' : 'maplibre'\}/);

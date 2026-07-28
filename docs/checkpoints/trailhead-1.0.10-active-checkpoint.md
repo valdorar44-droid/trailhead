@@ -1,5 +1,7 @@
 # Trailhead 1.0.10 Active Checkpoint
 
+Active Trails packet: [`trails-active-checkpoint.md`](./trails-active-checkpoint.md). Read that checkpoint first for Trails work; it owns packet scope, protected files, Figma references, and the forward-only resume point.
+
 Last updated: 2026-07-23 09:51:01 CDT (America/Winnipeg)
 
 ## Resume protocol

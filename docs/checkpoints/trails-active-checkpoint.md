@@ -174,6 +174,10 @@ Verify the staged file list before every commit.
   - The launcher and builder use the approved warm-white/near-black/orange system. No second renderer, provider label, AI label, generic photo, public GPX pin, native dependency, public API, or duplicate storage system was added.
   - Focused gates passed: Trail Builder session/GPX `5/5`; Trail sheet flow `6/6`; mission/flyover smoke; sheet actions/coordinator; Offline V1/V2 preservation/runtime; copy audit across `166` files; privacy controls; and full TypeScript.
   - Android preview publication and live device evidence remain next. Task-owned background processes: none.
+  - Implementation source `486ef1f40acd5cad1ef853549c16fb696e5087ea` published to Android update `019fa7cc-8cbc-792e-ad15-705a86381437`, group `f8b1af08-5d1d-4e9a-9666-95bc71c9a1e0`, runtime `native-1.0.10-android.6`; paired iOS update `019fa7cc-8cbc-7411-bb57-43eae342d8b8`, group `ef32a2fa-4b90-480a-8a9c-c16bf17fe4a2`, runtime `native-1.0.10-ios.5`. Samsung QA identity matched build `68`, full source, runtime, and Android update.
+  - Android delta passed the unified launcher, point placement, route metrics, undo/redo, build/review, Save draft guard, GPX picker/import, exact route framing, and Reverse transform using the local five-point `Moab short trail check` fixture. No navigation or Follow session was started.
+  - One deterministic T3 P1 was captured: Discard closed the GPX builder but left the unsaved imported `selectedTrail` active, allowing the next touch to open a normal Trail sheet with unavailable preview. The evidence-backed correction now snapshots the invoking trail selection/collapse state, restores it on Discard/launcher close, and exposes the three route transforms from finalized point routes through one compact Route options action. Characterization coverage increased to `6/6`; Trail sheet `6/6`, Offline V1/V2, copy, and TypeScript gates pass. One corrected Android assertion remains before T3 acceptance.
+  - Evidence directory: `C:\Users\User\Documents\Codex\evidence\trailhead\trails-t3-486ef1f`. Task-owned background processes: none.
 
 ### T4 - Complete offline trail pack
 

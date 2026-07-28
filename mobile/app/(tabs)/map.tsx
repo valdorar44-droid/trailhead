@@ -7522,6 +7522,10 @@ function MapScreen() {
   const [trailBuilderPermittedUses, setTrailBuilderPermittedUses] = useState<string[]>([]);
   const [trailBuilderDirty, setTrailBuilderDirty] = useState(false);
   const [trailBuilderGpxSummary, setTrailBuilderGpxSummary] = useState('');
+  const trailBuilderReturnContextRef = useRef<{
+    selectedTrail: TrailFeature | null;
+    trailCardCollapsed: boolean;
+  } | null>(null);
   const [trailTraceMode, setTrailTraceMode] = useState(false);
   const [trailTraceDraft, setTrailTraceDraft] = useState<[number, number][]>([]);
   const [trailTraceRoute, setTrailTraceRoute] = useState<[number, number][]>([]);
@@ -23131,6 +23135,21 @@ function MapScreen() {
     setTrailBuilderDirty(false);
   }
 
+  function rememberTrailBuilderReturnContext() {
+    if (trailBuilderReturnContextRef.current) return;
+    trailBuilderReturnContextRef.current = {
+      selectedTrail,
+      trailCardCollapsed,
+    };
+  }
+
+  function restoreTrailBuilderReturnContext() {
+    const context = trailBuilderReturnContextRef.current;
+    trailBuilderReturnContextRef.current = null;
+    setSelectedTrail(context?.selectedTrail ?? null);
+    setTrailCardCollapsed(context?.trailCardCollapsed ?? false);
+  }
+
   function clearTrailRoutePreview() {
     setTrailRouteBuilderOpen(false);
     setSavedTrailRouteOpenId(null);
@@ -23195,6 +23214,7 @@ function MapScreen() {
 
   function beginTrailTrace() {
     if (navMode) return;
+    rememberTrailBuilderReturnContext();
     setSavedTrailRouteOpenId(null);
     setSelectedCamp(null);
     setSelectedCommunityPin(null);
@@ -23345,13 +23365,16 @@ function MapScreen() {
     setTrailBuilderLauncherOpen(false);
     if (trailTraceMode) {
       clearTrailTrace();
+      restoreTrailBuilderReturnContext();
       return;
     }
     if (trailPinCaptureMode) {
       discardTrailPinCapture();
+      restoreTrailBuilderReturnContext();
       return;
     }
     discardTrailRouteBuilderPanel();
+    restoreTrailBuilderReturnContext();
   }
 
   function requestTrailBuilderExit() {
@@ -23386,6 +23409,7 @@ function MapScreen() {
   }
 
   async function importTrailBuilderGpx() {
+    rememberTrailBuilderReturnContext();
     setTrailBuilderLauncherOpen(false);
     try {
       const result = await DocumentPicker.getDocumentAsync({
@@ -23485,7 +23509,17 @@ function MapScreen() {
     if (selectedTrail) previewTrailRoutePlan(selectedTrail, next);
   }
 
+  function openTrailBuilderRouteOptions() {
+    Alert.alert('Route options', 'Choose how to reshape this route.', [
+      { text: 'Reverse', onPress: () => transformSelectedTrailRoute('reverse') },
+      { text: 'Out & back', onPress: () => transformSelectedTrailRoute('out_back') },
+      { text: 'Close loop', onPress: () => transformSelectedTrailRoute('loop') },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  }
+
   function beginTrailPinCapture() {
+    rememberTrailBuilderReturnContext();
     if (navMode) return;
     nativeMapRef.current?.clearTrailHighlight();
     closeTrailPreview();
@@ -23527,6 +23561,7 @@ function MapScreen() {
   }
 
   async function seedTrailPinCaptureFromTrail(trail: TrailFeature, geometry?: GeoJSON.FeatureCollection | null) {
+    rememberTrailBuilderReturnContext();
     if (navMode) return;
     nativeMapRef.current?.clearTrailHighlight();
     closeTrailPreview();
@@ -25414,14 +25449,20 @@ function MapScreen() {
         onOpenOffline={() => setShowOfflineModal(true)}
         onOpenTrailBuilder={() => {
           if (trailPinCaptureMode || trailTraceMode || trailRouteBuilderOpen) requestTrailBuilderExit();
-          else setTrailBuilderLauncherOpen(true);
+          else {
+            rememberTrailBuilderReturnContext();
+            setTrailBuilderLauncherOpen(true);
+          }
         }}
       />
 
       <TrailBuilderLauncherSheet
         visible={trailBuilderLauncherOpen && !navMode && !originalsMapExperience.active}
         bottomInset={bottomInset}
-        onClose={() => setTrailBuilderLauncherOpen(false)}
+        onClose={() => {
+          setTrailBuilderLauncherOpen(false);
+          restoreTrailBuilderReturnContext();
+        }}
         onPlacePoints={() => {
           setTrailBuilderLauncherOpen(false);
           beginTrailPinCapture();
@@ -26230,6 +26271,17 @@ function MapScreen() {
                     : 'Tap the next route point. Trailhead snaps the line.'}
                 </Text>
               </View>
+              {trailBuildFinalized && (
+                <TouchableOpacity
+                  testID="trail.builder.points.route-options"
+                  accessibilityLabel="Route options"
+                  style={s.discoveryPanelClose}
+                  onPress={openTrailBuilderRouteOptions}
+                  disabled={trailCaptureBusy}
+                >
+                  <Ionicons name="ellipsis-horizontal" size={16} color={OVR.text2} />
+                </TouchableOpacity>
+              )}
               <TouchableOpacity testID="trail.builder.points.close" style={s.discoveryPanelClose} onPress={requestTrailBuilderExit} disabled={trailCaptureBusy}>
                 <Ionicons name="close" size={15} color={OVR.text2} />
               </TouchableOpacity>

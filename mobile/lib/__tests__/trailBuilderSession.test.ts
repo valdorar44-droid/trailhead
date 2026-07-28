@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
 import {
@@ -67,4 +68,14 @@ test('GPX review rejects empty routes, oversized files, and excessive point coun
     () => reviewTrailBuilderGpx(`<gpx version="1.1"><trk><trkseg>${points}</trkseg></trk></gpx>`, 'dense.gpx'),
     /too many track points/i,
   );
+});
+
+test('builder discard restores its invoking trail context and exposes route transforms', () => {
+  const mapSource = readFileSync('app/(tabs)/map.tsx', 'utf8');
+  assert.match(mapSource, /trailBuilderReturnContextRef/);
+  assert.match(mapSource, /restoreTrailBuilderReturnContext\(\)/);
+  assert.match(mapSource, /testID="trail\.builder\.points\.route-options"/);
+  assert.match(mapSource, /transformSelectedTrailRoute\('reverse'\)/);
+  assert.match(mapSource, /transformSelectedTrailRoute\('out_back'\)/);
+  assert.match(mapSource, /transformSelectedTrailRoute\('loop'\)/);
 });

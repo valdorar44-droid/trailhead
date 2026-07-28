@@ -8,6 +8,7 @@ import {
   createOfflineBundleRuntimeV2,
   createOfflineDownloadCoordinator,
   offlineFtsPrefixQuery,
+  resolveRnMapboxOfflinePackReadiness,
   type OfflineArtifactTransferAdapter,
   type OfflineBundleDownloadJobV2,
   type OfflineBundleManifestV2,
@@ -141,6 +142,8 @@ function createHarness(options: {
   corruptFirstTransfer?: boolean;
   freeBytes?: number;
   failRendererRemoval?: boolean;
+  stallRendererInspection?: boolean;
+  verificationTimeoutMs?: number;
 } = {}) {
   const files = createMemoryOriginalFileAdapter();
   const repository = createOfflineBundleManifestRepository(files, 'memory://runtime/repository');
@@ -183,6 +186,9 @@ function createHarness(options: {
       };
     },
     async inspect() {
+      if (options.stallRendererInspection) {
+        await new Promise<never>(() => undefined);
+      }
       return {
         renderer: 'rnmapbox', ready: true, style_ready: true,
         tiles_ready: true, render_probe_ready: true, diagnostics: [],
@@ -211,6 +217,7 @@ function createHarness(options: {
   const runtime = createOfflineBundleRuntimeV2({
     ownerScope: 'account:7', preparation, coordinator, repository, jobs, transfer, renderer,
     storage: { freeDiskBytes: async () => options.freeBytes ?? 100_000_000 },
+    verification_timeout_ms: options.verificationTimeoutMs,
   });
   return {
     files, repository, jobs, runtime,
@@ -218,6 +225,29 @@ function createHarness(options: {
     preparationCalls() { return { prepare: prepareCalls, resume: resumeCalls }; },
     transferCalls() { return transferCalls; },
   };
+}
+
+{
+  const value = manifest('native-pack-proof');
+  const readiness = resolveRnMapboxOfflinePackReadiness({
+    manifest: value,
+    installation: {
+      renderer: 'rnmapbox',
+      style_pack_id: value.renderer.style_pack_id,
+      tile_region_id: value.renderer.tile_region_id,
+    },
+    pack_exists: true,
+    percentage: 100,
+    metadata: {
+      manifest_sha256: value.manifest_sha256,
+      style_id: value.renderer.style_id,
+      style_uri: value.renderer.style_uri,
+      style_revision: value.renderer.style_revision,
+    },
+  });
+  assert.equal(readiness.ready, true);
+  assert.equal(readiness.render_probe_ready, true);
+  assert.deepEqual(readiness.diagnostics, []);
 }
 
 {
@@ -320,6 +350,26 @@ function createHarness(options: {
   });
   const failed = await waitForJob(harness.runtime, created.job_id, 'error');
   assert.equal(failed.error?.code, 'insufficient_storage');
+}
+
+{
+  const harness = createHarness({
+    stallRendererInspection: true,
+    verificationTimeoutMs: 20,
+  });
+  const phases: string[] = [];
+  const unsubscribe = harness.runtime.subscribe(job => {
+    if (job.verification?.phase_code) phases.push(job.verification.phase_code);
+  });
+  const created = await harness.runtime.create({
+    owner_scope: 'account:7', label: 'Stalled renderer probe', request: { bounds: manifest().bounds },
+  });
+  const failed = await waitForJob(harness.runtime, created.job_id, 'error');
+  unsubscribe();
+  assert.equal(failed.error?.code, 'offline_verification_timeout');
+  assert.equal(failed.verification?.phase_code, 'renderer_probe');
+  assert.ok(phases.includes('manifest'));
+  assert.ok(phases.includes('renderer_probe'));
 }
 
 {

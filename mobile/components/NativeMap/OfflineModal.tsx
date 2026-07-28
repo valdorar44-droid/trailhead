@@ -57,6 +57,7 @@ import { useProductFeatures } from '@/lib/useProductFeatures';
 import { getExpoOfflineV2Runtime } from '@/lib/offlineV2/expoRuntime';
 import type { OfflineBundleDownloadJobV2 } from '@/lib/offlineV2/jobStore';
 import type { OfflineArtifactKind } from '@/lib/offlineV2/types';
+import { offlineVerificationLabel } from '@/lib/offlineV2/verification';
 import { isTrailPackClientRefV2 } from '@/lib/offlineV2/trailPack';
 import {
   offlineV2ArtifactsConsumed,
@@ -1482,7 +1483,7 @@ export default function OfflineModal({
       status: item.v2Job?.status === 'paused'
         ? 'Paused'
         : item.v2Job?.status === 'verifying'
-          ? 'Verifying'
+          ? offlineVerificationLabel(item.v2Job.verification)
           : item.v2Job?.status === 'repair_required'
             ? 'Repair required'
             : item.v2Job?.status === 'error'
@@ -1539,7 +1540,7 @@ export default function OfflineModal({
         : job.status === 'paused'
           ? 'Paused'
           : job.status === 'verifying'
-            ? 'Verifying'
+            ? offlineVerificationLabel(job.verification)
             : job.status === 'repair_required'
               ? 'Repair required'
               : job.status === 'error'

@@ -17,6 +17,10 @@ import type {
   OfflineBundlePreparationV2,
   OfflineBundlePrepareRequestV2,
 } from './preparation';
+import {
+  awaitOfflineVerificationV1,
+  type OfflineVerificationPhaseCodeV1,
+} from './verification';
 
 export type OfflineBundleRuntimeStorageV2 = Readonly<{
   freeDiskBytes(): Promise<number | null>;
@@ -137,6 +141,7 @@ export function createOfflineBundleRuntimeV2(input: Readonly<{
   storage: OfflineBundleRuntimeStorageV2;
   validateSearchIndex?: (path: string, expectedRecords?: number) => Promise<void>;
   canOperate?: () => boolean;
+  verification_timeout_ms?: number;
   now?: () => number;
 }>): OfflineBundleRuntimeV2 {
   const now = input.now ?? Date.now;
@@ -172,6 +177,25 @@ export function createOfflineBundleRuntimeV2(input: Readonly<{
     updated_at_ms: now(),
   });
 
+  const noteVerification = (
+    current: OfflineBundleDownloadJobV2,
+    phaseCode: OfflineVerificationPhaseCodeV1,
+    artifactKind?: OfflineBundleArtifactV2['kind'],
+  ) => {
+    const next = replace(current, {
+      status: 'verifying',
+      verification: Object.freeze({
+        phase_code: phaseCode,
+        ...(artifactKind ? { artifact_kind: artifactKind } : {}),
+        started_at_ms: now(),
+      }),
+    });
+    memory.set(next.job_id, next);
+    listeners.forEach(listener => listener(next));
+    void input.jobs.save(next);
+    return next;
+  };
+
   const run = async (initial: OfflineBundleDownloadJobV2) => {
     assertCanOperate();
     let job = initial;
@@ -180,7 +204,9 @@ export function createOfflineBundleRuntimeV2(input: Readonly<{
     pauseRequested.delete(job.job_id);
     try {
       if (!job.manifest) {
-        job = await publish(replace(job, { status: 'preparing', error: undefined }));
+        job = await publish(replace(job, {
+          status: 'preparing', error: undefined, verification: undefined,
+        }));
         const preparationOptions = {
           signal: controller.signal,
           onPreparation: (preparation: OfflineBundlePreparationV2) => {
@@ -197,6 +223,7 @@ export function createOfflineBundleRuntimeV2(input: Readonly<{
         job = await publish(replace(job, {
           manifest,
           status: 'queued',
+          verification: undefined,
           artifact_states: input.coordinator.createInitialState(manifest),
         }));
       }
@@ -215,6 +242,7 @@ export function createOfflineBundleRuntimeV2(input: Readonly<{
             artifact_states: inspection.artifact_states,
             renderer_installation: current.renderer,
             error: undefined,
+            verification: undefined,
           }));
         }
         // A committed stage is moved into its immutable live directory. If a
@@ -227,6 +255,7 @@ export function createOfflineBundleRuntimeV2(input: Readonly<{
           artifact_states: input.coordinator.createInitialState(manifest),
           resume_tokens: Object.freeze({}),
           renderer_installation: undefined,
+          verification: undefined,
           error: inspection.diagnostics[0]
             ? Object.freeze({
                 code: inspection.status === 'repair_required'
@@ -251,6 +280,7 @@ export function createOfflineBundleRuntimeV2(input: Readonly<{
           start,
           artifact_states: start.artifact_states,
           status: 'queued',
+          verification: undefined,
         }));
       }
 
@@ -264,10 +294,18 @@ export function createOfflineBundleRuntimeV2(input: Readonly<{
         if (previous?.status === 'verifying') {
           try {
             if (artifact.kind === 'search_index' && input.validateSearchIndex) {
-              await input.validateSearchIndex(destination, artifact.record_count);
+              job = noteVerification(job, 'search_index', artifact.kind);
+              await awaitOfflineVerificationV1(
+                input.validateSearchIndex(destination, artifact.record_count),
+                { signal: controller.signal, timeout_ms: input.verification_timeout_ms },
+              );
             }
             continue;
-          } catch {
+          } catch (error) {
+            if (isAbort(error)
+              || (error as { code?: unknown } | null)?.code === 'offline_verification_timeout') {
+              throw error;
+            }
             // Semantic SQLite validation is as authoritative as byte/hash
             // validation. Redownload instead of retrying a corrupt resume token.
             job = await publish(replace(job, {
@@ -285,6 +323,7 @@ export function createOfflineBundleRuntimeV2(input: Readonly<{
         }
         job = await publish(replace(job, {
           status: 'downloading',
+          verification: undefined,
           artifact_states: markDownloading(job.artifact_states, artifact, now()),
           error: undefined,
         }));
@@ -326,13 +365,18 @@ export function createOfflineBundleRuntimeV2(input: Readonly<{
             : job.resume_tokens,
         }));
         if (artifact.kind === 'search_index' && input.validateSearchIndex) {
-          await input.validateSearchIndex(destination, artifact.record_count);
+          job = noteVerification(job, 'search_index', artifact.kind);
+          await awaitOfflineVerificationV1(
+            input.validateSearchIndex(destination, artifact.record_count),
+            { signal: controller.signal, timeout_ms: input.verification_timeout_ms },
+          );
         }
       }
 
       if (controller.signal.aborted) throw abortError();
       job = await publish(replace(job, {
         status: 'downloading',
+        verification: undefined,
         artifact_states: setRendererArtifactStatus(job, 'downloading', now()),
       }));
       const rendererInstallation = await input.renderer.prepare(manifest, {
@@ -362,12 +406,21 @@ export function createOfflineBundleRuntimeV2(input: Readonly<{
         && current.bundle_id === manifest.bundle_id
         && current.revision === manifest.revision
         && current.manifest_sha256 === manifest.manifest_sha256);
-      const committed = await input.coordinator.commit(start, rendererInstallation, { repair });
+      const committed = await awaitOfflineVerificationV1(
+        input.coordinator.commit(start, rendererInstallation, {
+          repair,
+          on_verification_phase: (phase, kind) => {
+            job = noteVerification(job, phase, kind);
+          },
+        }),
+        { signal: controller.signal, timeout_ms: input.verification_timeout_ms },
+      );
       job = await publish(replace(job, {
         status: 'ready',
         artifact_states: committed.installation.artifacts,
         renderer_installation: committed.installation.renderer,
         error: undefined,
+        verification: undefined,
       }));
       return job;
     } catch (error) {
@@ -379,7 +432,9 @@ export function createOfflineBundleRuntimeV2(input: Readonly<{
             states = updateArtifact(states, artifact, 'paused', { updated_at_ms: now() });
           }
         }
-        return publish(replace(job, { status: 'paused', artifact_states: states, error: undefined }));
+        return publish(replace(job, {
+          status: 'paused', artifact_states: states, error: undefined, verification: undefined,
+        }));
       }
       const record = errorRecord(error);
       const needsRepair = repairRequired(record.code);

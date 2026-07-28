@@ -1,5 +1,6 @@
 import MapboxGL from '@rnmapbox/maps';
 import type { OfflineRendererDownloadAdapter, OfflineTransferProgress } from './coordinator';
+import { resolveRnMapboxOfflinePackReadiness } from './rnMapboxPackReadiness';
 import type { OfflineBundleManifestV2 } from './types';
 
 function safe(value: string) {
@@ -38,23 +39,6 @@ function sleep(milliseconds: number, signal?: AbortSignal) {
     signal?.addEventListener('abort', cancel, { once: true });
     setTimeout(() => signal?.removeEventListener('abort', cancel), milliseconds + 1);
   });
-}
-
-async function renderProbe(manifest: OfflineBundleManifestV2) {
-  const center: [number, number] = [
-    (manifest.bounds.west + manifest.bounds.east) / 2,
-    (manifest.bounds.south + manifest.bounds.north) / 2,
-  ];
-  const result = await MapboxGL.snapshotManager.takeSnap({
-    centerCoordinate: center,
-    width: 32,
-    height: 32,
-    zoomLevel: Math.min(manifest.max_zoom, Math.max(manifest.min_zoom, 10)),
-    styleURL: manifest.renderer.style_uri,
-    withLogo: false,
-    writeToDisk: false,
-  });
-  return typeof result === 'string' && result.length > 0;
 }
 
 export function createRnMapboxOfflineDownloadAdapter(): OfflineRendererDownloadAdapter {
@@ -157,30 +141,20 @@ export function createRnMapboxOfflineDownloadAdapter(): OfflineRendererDownloadA
       const pack = await MapboxGL.offlineManager.getPack(name).catch(() => undefined);
       const status = pack ? await pack.status().catch(() => null) : null;
       const metadata = parseMetadata(pack?.metadata);
-      const identityReady = Boolean(pack
-        && metadata.manifest_sha256 === manifest.manifest_sha256
-        && metadata.style_id === manifest.renderer.style_id
-        && metadata.style_uri === manifest.renderer.style_uri
-        && metadata.style_revision === manifest.renderer.style_revision);
-      const resourcesReady = identityReady && Number(status?.percentage || 0) >= 100;
-      const styleReady = resourcesReady
-        && installation.style_pack_id === manifest.renderer.style_pack_id;
-      const tilesReady = resourcesReady
-        && installation.tile_region_id === manifest.renderer.tile_region_id;
-      if (!identityReady) diagnostics.push('The RNMapbox pack identity does not match the manifest.');
-      else if (!resourcesReady) diagnostics.push('The RNMapbox offline map is incomplete.');
-      if (!styleReady) diagnostics.push('The RNMapbox style pack is incomplete.');
-      if (!tilesReady) diagnostics.push('The RNMapbox tile region is incomplete.');
-      const probeReady = styleReady && tilesReady
-        ? await renderProbe(manifest).catch(() => false)
-        : false;
-      if (styleReady && tilesReady && !probeReady) diagnostics.push('The RNMapbox render probe failed.');
+      const readiness = resolveRnMapboxOfflinePackReadiness({
+        manifest,
+        installation,
+        pack_exists: Boolean(pack),
+        percentage: Number(status?.percentage || 0),
+        metadata,
+      });
+      diagnostics.push(...readiness.diagnostics);
       return {
         renderer: 'rnmapbox',
-        ready: styleReady && tilesReady && probeReady,
-        style_ready: styleReady,
-        tiles_ready: tilesReady,
-        render_probe_ready: probeReady,
+        ready: readiness.ready,
+        style_ready: readiness.style_ready,
+        tiles_ready: readiness.tiles_ready,
+        render_probe_ready: readiness.render_probe_ready,
         diagnostics,
       };
     },

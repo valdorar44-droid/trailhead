@@ -19,6 +19,7 @@ import {
   validateOfflineArtifactFile,
   type OfflineArtifactValidationAdapter,
 } from './validation';
+import type { OfflineVerificationPhaseCodeV1 } from './verification';
 
 export type OfflineTransferProgress = Readonly<{
   received_bytes: number;
@@ -73,7 +74,13 @@ export interface OfflineDownloadCoordinator {
   commit(
     start: OfflineBundleStartV2,
     rendererInstallation: OfflineBundleInstallationV2['renderer'],
-    options?: Readonly<{ repair?: boolean }>,
+    options?: Readonly<{
+      repair?: boolean;
+      on_verification_phase?: (
+        phase: OfflineVerificationPhaseCodeV1,
+        artifactKind?: OfflineBundleArtifactV2['kind'],
+      ) => void;
+    }>,
   ): Promise<Readonly<{
     installation: OfflineBundleInstallationV2;
     receipt: OfflineBundleCommitReceiptV2;
@@ -177,6 +184,7 @@ export function createOfflineDownloadCoordinator(input: Readonly<{
     },
 
     async commit(start, rendererInstallation, options = {}) {
+      options.on_verification_phase?.('manifest');
       const manifest = validateOfflineBundleManifest(start.manifest);
       await input.repository.verifyManifest(manifest);
       if (start.stage.bundle_id !== manifest.bundle_id || start.stage.revision !== manifest.revision) {
@@ -188,6 +196,7 @@ export function createOfflineDownloadCoordinator(input: Readonly<{
       }
       const rendererAdapter = input.rendererAdapters[manifest.renderer.id];
       if (!rendererAdapter) throw new Error(`No ${manifest.renderer.id} offline adapter is available.`);
+      options.on_verification_phase?.('renderer_probe');
       const rendererReadiness = await rendererAdapter.inspect(manifest, rendererInstallation);
       if (!rendererReadiness.ready
         || !rendererReadiness.style_ready
@@ -207,6 +216,7 @@ export function createOfflineDownloadCoordinator(input: Readonly<{
           });
           continue;
         }
+        options.on_verification_phase?.('artifact_integrity', artifact.kind);
         const stagedPath = input.repository.artifactPath(start.stage, artifact.id);
         const result = await validateOfflineArtifactFile(input.files, artifact, stagedPath);
         if (!result.valid) {
@@ -250,6 +260,7 @@ export function createOfflineDownloadCoordinator(input: Readonly<{
         installed_at_ms: verifiedAt,
         verified_at_ms: verifiedAt,
       });
+      options.on_verification_phase?.('promote');
       await input.repository.commitStage(start.stage, installation, receipt, options);
       return Object.freeze({ installation, receipt });
     },

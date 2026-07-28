@@ -5,6 +5,7 @@ import { useTheme } from '@/lib/design';
 import { createExpoOfflineV2Persistence } from '@/lib/offlineV2/expoAdapters';
 import type { OfflineBundleDownloadJobV2 } from '@/lib/offlineV2/jobStore';
 import type { OfflineBundleInstallationV2 } from '@/lib/offlineV2/types';
+import { offlineVerificationLabel } from '@/lib/offlineV2/verification';
 
 function formatBytes(bytes: number) {
   if (!Number.isFinite(bytes) || bytes <= 0) return 'Size unavailable';
@@ -16,7 +17,7 @@ function formatBytes(bytes: number) {
 function statusLabel(job: OfflineBundleDownloadJobV2) {
   if (job.status === 'preparing') return `Preparing${job.preparation ? ` ${Math.round(job.preparation.progress)}%` : ''}`;
   if (job.status === 'downloading') return 'Downloading';
-  if (job.status === 'verifying') return 'Verifying';
+  if (job.status === 'verifying') return offlineVerificationLabel(job.verification);
   if (job.status === 'paused') return 'Paused';
   if (job.status === 'ready') return 'Ready offline';
   if (job.status === 'repair_required') return 'Repair required';

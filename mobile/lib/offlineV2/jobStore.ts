@@ -9,6 +9,7 @@ import type {
   OfflineBundlePreparationV2,
   OfflineBundlePrepareRequestV2,
 } from './preparation';
+import type { OfflineVerificationProgressV1 } from './verification';
 
 export type OfflineBundleJobStatusV2 =
   | 'preparing'
@@ -34,6 +35,7 @@ export type OfflineBundleDownloadJobV2 = Readonly<{
   artifact_states: Readonly<Record<string, OfflineArtifactStateV2>>;
   resume_tokens: Readonly<Record<string, string>>;
   renderer_installation?: OfflineBundleInstallationV2['renderer'];
+  verification?: OfflineVerificationProgressV1;
   error?: Readonly<{ code: string; message: string }>;
   created_at_ms: number;
   updated_at_ms: number;

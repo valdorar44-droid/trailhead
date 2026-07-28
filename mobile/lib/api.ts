@@ -1421,6 +1421,17 @@ export const api = {
     if (params.refresh) qs.set('refresh', 'true');
     return req<TrailDiscoverResponse>(`/api/trails/discover?${qs.toString()}`);
   },
+  discoverTrailSystems: (params: TrailDiscoverParams) => {
+    const qs = new URLSearchParams({ mode: params.mode ?? 'nearby', limit: String(params.limit ?? 60) });
+    if (params.lat != null) qs.set('lat', String(params.lat));
+    if (params.lng != null) qs.set('lng', String(params.lng));
+    if (params.radius != null) qs.set('radius', String(params.radius));
+    if (params.n != null) qs.set('n', String(params.n));
+    if (params.s != null) qs.set('s', String(params.s));
+    if (params.e != null) qs.set('e', String(params.e));
+    if (params.w != null) qs.set('w', String(params.w));
+    return req<TrailDiscoverResponseV2>(`/api/trails/v2/discover?${qs.toString()}`);
+  },
   discoverTrailArea: (params: TrailDiscoverParams) => {
     const qs = new URLSearchParams({ limit: String(params.limit ?? 24) });
     if (params.lat != null) qs.set('lat', String(params.lat));
@@ -1430,6 +1441,10 @@ export const api = {
   },
   getTrailProfile: (trailId: string) =>
     req<TrailProfile>(`/api/trails/${encodeURIComponent(trailId)}`),
+  getTrailSystem: (trailId: string) =>
+    req<TrailSystemV2>(`/api/trails/v2/${encodeURIComponent(trailId)}`),
+  getTrailSystemPreview: (trailId: string) =>
+    req<TrailPreviewResponseV2>(`/api/trails/v2/${encodeURIComponent(trailId)}/preview`),
   getTrailPreview: (trailId: string) =>
     req<TrailPreviewManifest>(`/api/trails/${encodeURIComponent(trailId)}/preview`),
   suggestTrailEdit: (trailId: string, data: TrailEditSuggestionPayload) =>
@@ -3934,6 +3949,78 @@ export interface TrailProfile {
   field_report_summary?: FieldReportSummary;
   preview_available?: boolean;
   preview_status?: string;
+}
+export type TrailGeometryStatusV2 = 'complete' | 'partial' | 'point';
+export interface TrailCapabilitiesV2 {
+  details: boolean;
+  save: boolean;
+  navigate: boolean;
+  highlight: boolean;
+  preview: boolean;
+  download: boolean;
+  build_route: boolean;
+}
+export interface TrailFactsV2 {
+  distance_mi?: number;
+  elevation_gain_ft?: number;
+  estimated_time?: string;
+  difficulty?: string;
+  route_shape?: string;
+  surface?: string;
+  season?: string;
+}
+export interface TrailDiscoveryItemV2 {
+  version: 2;
+  id: string;
+  primary_trail_id: string;
+  name: string;
+  kind: string;
+  center: { lat: number; lng: number };
+  geometry_status: TrailGeometryStatusV2;
+  geometry_revision?: string;
+  activities: string[];
+  permitted_uses: string[];
+  facts: TrailFactsV2;
+  trailheads: Array<{ name?: string; lat: number; lng: number; source?: string }>;
+  media: Array<{
+    kind: 'image';
+    url: string;
+    thumbnail_url?: string;
+    caption?: string;
+    attribution: string;
+    license: string;
+    source_url: string;
+  }>;
+  sources: Array<{ label: string; url?: string; kind?: string }>;
+  freshness: { checked_at?: number; label?: string };
+  capabilities: TrailCapabilitiesV2;
+  summary?: string;
+  detail_ref: string;
+  preview_ref?: string;
+}
+export interface TrailSystemV2 extends TrailDiscoveryItemV2 {
+  member_trail_ids: string[];
+  geometry?: GeoJSON.FeatureCollection;
+  bounds?: { north: number; south: number; east: number; west: number };
+}
+export interface TrailDiscoverResponseV2 {
+  version: 2;
+  mode: 'nearby' | 'view';
+  source: string;
+  offline: boolean;
+  trails: TrailDiscoveryItemV2[];
+}
+export interface TrailPreviewResponseV2 {
+  version: 2;
+  status: 'available' | 'unavailable';
+  system_id: string;
+  trail_name?: string;
+  geometry_status: TrailGeometryStatusV2;
+  geometry_revision?: string;
+  preview_available: boolean;
+  geometry?: GeoJSON.FeatureCollection;
+  bounds?: { north: number; south: number; east: number; west: number };
+  style?: { route_color?: string; context_tone?: string };
 }
 export interface TrailDiscoverParams {
   lat?: number;

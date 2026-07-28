@@ -34,6 +34,8 @@ class _SearchV2AccessLogPrivacyFilter(logging.Filter):
             return True
         if path.startswith("/api/search/v2/"):
             redacted_path = path.split("?", 1)[0] + "?query=redacted"
+        elif path.startswith("/api/trails/v2/discover"):
+            redacted_path = path.split("?", 1)[0] + "?area=redacted"
         elif path.startswith("/api/conditions/fire-perimeters"):
             # Viewport coordinates are operational input, not telemetry.
             redacted_path = path.split("?", 1)[0] + "?viewport=redacted"
@@ -101,6 +103,13 @@ from dashboard.offline_materializer_v2 import (
     materialize_offline_bundle_v2,
     offline_artifact_root_v2,
     offline_r2_client_v2,
+)
+from dashboard.trails_v2 import (
+    TrailDiscoveryResponseV2,
+    TrailSystemV2,
+    build_trail_systems_v2,
+    discovery_item_v2,
+    model_public as trail_v2_public,
 )
 from scripts.explore_sources.travel.ranking import rank_experiences
 from scripts.explore_sources.travel.viator.client import ViatorClient, config_from_env as viator_config_from_env
@@ -22278,6 +22287,8 @@ def _official_trail_profile_from_row(row: sqlite3.Row | dict) -> dict | None:
         "lng": round(float(lng), 7),
         "length_mi": item["distance_mi"],
         "difficulty": item["difficulty"],
+        "allowed_uses": item["allowed_uses"],
+        "permitted_uses": item["allowed_uses"],
         "activities": [item["activity"]] if item.get("activity") else [],
         "land_manager": source_label,
         "geometry": route_geometry,
@@ -23027,6 +23038,251 @@ async def _seed_open_trail_profiles(lat: float, lng: float, radius_mi: float, li
             if len(profiles) >= limit:
                 return profiles
     return profiles
+
+
+_trail_system_v2_cache: dict[str, TrailSystemV2] = {}
+
+
+def _clean_trail_system_id_v2(value: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_.:-]", "", value or "")[:260]
+
+
+def _trail_profile_from_canonical_v2(item: dict, generated_at: int) -> dict | None:
+    try:
+        lat = float(item.get("lat"))
+        lng = float(item.get("lng"))
+    except Exception:
+        return None
+    trail_id = _clean_trail_profile_id(str(item.get("id") or ""))
+    name = canonical_public_trail_title(item.get("name"))
+    if not trail_id or not name:
+        return None
+    source_label = str(item.get("source_label") or "Official trail source").strip()
+    source = source_label.lower().replace(" ", "_")
+    allowed_uses = canonical_public_trail_uses(item.get("allowed_uses"))
+    return {
+        "id": trail_id,
+        "name": name,
+        "summary": str(item.get("summary") or "").strip(),
+        "description": "",
+        "lat": lat,
+        "lng": lng,
+        "length_mi": item.get("distance_mi"),
+        "distance_mi": item.get("distance_mi"),
+        "elevation_gain_ft": item.get("elevation_gain_ft"),
+        "difficulty": canonical_clean_optional_label(item.get("difficulty")),
+        "route_type": canonical_clean_optional_label(item.get("route_shape")),
+        "surface": canonical_clean_optional_label(item.get("surface")),
+        "allowed_uses": allowed_uses,
+        "permitted_uses": allowed_uses,
+        "activities": [canonical_public_trail_activity(item)] if canonical_public_trail_activity(item) else [],
+        "land_manager": source_label,
+        "geometry": None,
+        "trailheads": [{"name": name, "lat": lat, "lng": lng, "source": source_label}],
+        "official_url": "",
+        "photos": [],
+        "source": source,
+        "source_label": source_label,
+        "provenance": {
+            "activities": {"source": source_label, "last_checked": generated_at},
+            "catalog": {
+                "quality": "official",
+                "geometry_ref": str(item.get("geometry_ref") or trail_id),
+                "route_type": canonical_clean_optional_label(item.get("route_shape")),
+                "surface": canonical_clean_optional_label(item.get("surface")),
+            },
+        },
+        "last_checked": int(generated_at or 0),
+    }
+
+
+def _official_trail_profiles_from_cache_ids_v2(trail_ids: list[str]) -> dict[str, dict]:
+    clean_ids = list(dict.fromkeys(_clean_trail_profile_id(value) for value in trail_ids if _clean_trail_profile_id(value)))
+    if not clean_ids or not _official_cache_enabled():
+        return {}
+    try:
+        db = _official_cache_connect()
+    except Exception:
+        return {}
+    rows: list[sqlite3.Row] = []
+    try:
+        for start in range(0, len(clean_ids), 300):
+            chunk = clean_ids[start:start + 300]
+            placeholders = ",".join("?" for _ in chunk)
+            rows.extend(db.execute(
+                f"""SELECT id, name, managing_agency, attribution_text, route_geom, start_geom,
+                           distance_m, elevation_gain_m, difficulty, allowed_uses, surface,
+                           season_text, last_verified_at
+                    FROM trail
+                    WHERE id IN ({placeholders})""",
+                chunk,
+            ).fetchall())
+    except Exception:
+        return {}
+    finally:
+        db.close()
+    profiles: dict[str, dict] = {}
+    for row in rows:
+        profile = _official_trail_profile_from_row(row)
+        if profile:
+            profile["allowed_uses"] = canonical_public_trail_uses(dict(row).get("allowed_uses"))
+            profile["permitted_uses"] = profile["allowed_uses"]
+            profiles[str(profile["id"])] = profile
+    return profiles
+
+
+def _canonical_trail_profiles_near_v2(
+    lat: float,
+    lng: float,
+    radius: float,
+    *,
+    bbox: dict[str, float] | None = None,
+    limit: int = 180,
+) -> list[dict]:
+    items, generated_at = _load_canonical_trail_index()
+    candidates: list[tuple[float, float, dict]] = []
+    for item in items:
+        if item.get("review_only"):
+            continue
+        try:
+            item_lat = float(item.get("lat"))
+            item_lng = float(item.get("lng"))
+        except Exception:
+            continue
+        if bbox:
+            if not (bbox["s"] <= item_lat <= bbox["n"] and bbox["w"] <= item_lng <= bbox["e"]):
+                continue
+        distance_mi = _haversine_m(lat, lng, item_lat, item_lng) / 1609.344
+        if not bbox and distance_mi > radius:
+            continue
+        candidates.append((distance_mi, -float(item.get("quality_score") or 0), item))
+    candidates.sort(key=lambda value: (value[0], value[1], str(value[2].get("name") or "")))
+    selected = [item for _, _, item in candidates[:max(1, limit)]]
+    detailed = _official_trail_profiles_from_cache_ids_v2([str(item.get("id") or "") for item in selected])
+    profiles: list[dict] = []
+    for item in selected:
+        trail_id = str(item.get("id") or "")
+        profile = detailed.get(trail_id) or _trail_profile_from_canonical_v2(item, generated_at)
+        if profile:
+            profiles.append(profile)
+    return profiles
+
+
+def _cache_trail_systems_v2(systems: list[TrailSystemV2]) -> None:
+    for system in systems:
+        _trail_system_v2_cache[system.id] = system
+    while len(_trail_system_v2_cache) > 600:
+        _trail_system_v2_cache.pop(next(iter(_trail_system_v2_cache)))
+
+
+def _trail_system_primary_id_v2(system_id: str) -> str:
+    if not system_id.startswith("trail-system:"):
+        return system_id
+    value = system_id[len("trail-system:"):]
+    return value.rsplit(":", 1)[0] if ":" in value else value
+
+
+def _trail_system_for_detail_v2(system_id: str) -> TrailSystemV2 | None:
+    cached = _trail_system_v2_cache.get(system_id)
+    if cached:
+        return cached
+    primary_id = _trail_system_primary_id_v2(system_id)
+    primary = _trail_profile_for_detail(primary_id)
+    if not primary:
+        items, generated_at = _load_canonical_trail_index()
+        canonical = next((item for item in items if str(item.get("id") or "") == primary_id), None)
+        primary = _trail_profile_from_canonical_v2(canonical, generated_at) if canonical else None
+    if not primary:
+        return None
+    nearby = list_trail_profiles_near(float(primary["lat"]), float(primary["lng"]), 5, 100)
+    nearby.extend(_canonical_trail_profiles_near_v2(float(primary["lat"]), float(primary["lng"]), 5, limit=120))
+    nearby.append(primary)
+    systems = build_trail_systems_v2(nearby, limit=120)
+    _cache_trail_systems_v2(systems)
+    exact = next((system for system in systems if system.id == system_id), None)
+    if exact:
+        return exact
+    fallback = next((system for system in systems if system.primary_trail_id == primary_id), None)
+    if not fallback:
+        return None
+    if system_id != fallback.id:
+        values = trail_v2_public(fallback)
+        values.update({
+            "id": system_id,
+            "detail_ref": f"/api/trails/v2/{system_id}",
+            "preview_ref": f"/api/trails/v2/{system_id}/preview" if fallback.capabilities.preview else None,
+        })
+        fallback = TrailSystemV2(**values)
+        _trail_system_v2_cache[system_id] = fallback
+    return fallback
+
+
+@app.get("/api/trails/v2/discover")
+async def trails_discover_v2(
+    lat: float | None = None,
+    lng: float | None = None,
+    radius: float = 45,
+    n: float | None = None,
+    s: float | None = None,
+    e: float | None = None,
+    w: float | None = None,
+    mode: str = "nearby",
+    limit: int = 60,
+):
+    mode = "view" if mode == "view" else "nearby"
+    bbox = None
+    if mode == "view" and None not in (n, s, e, w):
+        bbox = {"n": float(n), "s": float(s), "e": float(e), "w": float(w)}
+        lat = (bbox["n"] + bbox["s"]) / 2
+        lng = (bbox["e"] + bbox["w"]) / 2
+        radius = max(3, min(80, max(abs(bbox["n"] - bbox["s"]) * 69, abs(bbox["e"] - bbox["w"]) * 69) / 2 + 3))
+    if lat is None or lng is None:
+        raise HTTPException(400, "lat/lng or n/s/e/w bounds are required")
+    limit = max(1, min(int(limit), 100))
+    canonical_profiles = _canonical_trail_profiles_near_v2(float(lat), float(lng), float(radius), bbox=bbox, limit=max(160, limit * 3))
+    cached_profiles = list_trail_profiles_near(float(lat), float(lng), float(radius), max(100, limit * 2), bbox=bbox, mode=mode)
+    systems = build_trail_systems_v2(canonical_profiles + cached_profiles, limit=limit)
+    _cache_trail_systems_v2(systems)
+    response = TrailDiscoveryResponseV2(
+        mode=mode,
+        trails=[discovery_item_v2(system) for system in systems],
+    )
+    return trail_v2_public(response)
+
+
+@app.get("/api/trails/v2/{trail_id}")
+async def trail_system_v2(trail_id: str):
+    system = _trail_system_for_detail_v2(_clean_trail_system_id_v2(trail_id))
+    if not system:
+        raise HTTPException(404, "Trail not found")
+    return trail_v2_public(system)
+
+
+@app.get("/api/trails/v2/{trail_id}/preview")
+async def trail_preview_v2(trail_id: str):
+    system = _trail_system_for_detail_v2(_clean_trail_system_id_v2(trail_id))
+    if not system:
+        raise HTTPException(404, "Trail not found")
+    if not system.capabilities.preview or not system.geometry:
+        return {
+            "version": 2,
+            "status": "unavailable",
+            "system_id": system.id,
+            "geometry_status": system.geometry_status,
+            "preview_available": False,
+        }
+    return {
+        "version": 2,
+        "status": "available",
+        "system_id": system.id,
+        "trail_name": system.name,
+        "geometry_status": system.geometry_status,
+        "geometry_revision": system.geometry_revision,
+        "preview_available": True,
+        "geometry": system.geometry,
+        "bounds": trail_v2_public(system.bounds) if system.bounds else None,
+        "style": {"route_color": "#AD5A33", "context_tone": "neutral"},
+    }
 
 @app.get("/api/trails/discover")
 async def trails_discover(

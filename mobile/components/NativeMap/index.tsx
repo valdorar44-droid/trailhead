@@ -261,6 +261,7 @@ export interface NativeMapHandle {
   resetRoute:     () => void;
   stopNavigation: () => void;
   highlightTrail: (lat: number, lng: number, name?: string) => void;
+  highlightResolvedTrail: (geometry: GeoJSON.FeatureCollection, options?: { fit?: boolean; padding?: [number, number, number, number]; duration?: number; trailId?: string; geometryRevision?: string }) => void;
   clearTrailHighlight: () => void;
   getTrailHighlight: () => GeoJSON.FeatureCollection;
   captureTrailAt: (lat: number, lng: number, name?: string) => Promise<GeoJSON.FeatureCollection>;
@@ -511,6 +512,33 @@ function pointFC(features: GeoJSON.Feature[]) {
 }
 function emptyFC() {
   return { type: 'FeatureCollection' as const, features: [] as GeoJSON.Feature[] };
+}
+
+function resolvedTrailFeatureCollection(value: GeoJSON.FeatureCollection): GeoJSON.FeatureCollection {
+  const features: GeoJSON.Feature[] = [];
+  for (const feature of value?.features ?? []) {
+    const geometry: any = feature?.geometry;
+    if (geometry?.type === 'LineString') {
+      const coords = cleanLineCoords(geometry.coordinates as [number, number][]);
+      if (coords.length >= 2) features.push({ ...feature, geometry: { ...geometry, coordinates: coords } } as GeoJSON.Feature);
+    } else if (geometry?.type === 'MultiLineString') {
+      const lines = (geometry.coordinates ?? []).map((line: [number, number][]) => cleanLineCoords(line)).filter((line: [number, number][]) => line.length >= 2);
+      if (lines.length) features.push({ ...feature, geometry: { ...geometry, coordinates: lines } } as GeoJSON.Feature);
+    }
+  }
+  return pointFC(features);
+}
+
+function resolvedTrailCoordinates(value: GeoJSON.FeatureCollection): [number, number][] {
+  const coords: [number, number][] = [];
+  for (const feature of value.features ?? []) {
+    const geometry: any = feature?.geometry;
+    if (geometry?.type === 'LineString') coords.push(...cleanLineCoords(geometry.coordinates));
+    if (geometry?.type === 'MultiLineString') {
+      for (const line of geometry.coordinates ?? []) coords.push(...cleanLineCoords(line));
+    }
+  }
+  return coords;
 }
 
 function trailLineDistanceM(a: [number, number], b: [number, number]) {
@@ -2144,7 +2172,33 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         }
       }, 340);
     },
+    highlightResolvedTrail(geometry, options = {}) {
+      const resolved = resolvedTrailFeatureCollection(geometry);
+      const coords = resolvedTrailCoordinates(resolved);
+      if (!resolved.features.length || coords.length < 2) {
+        setTrailHighlight(emptyFC());
+        return;
+      }
+      trailHighlightRef.current = resolved;
+      setTrailHighlight(resolved);
+      emitDebugEvent('trail:highlight:resolved', {
+        trailId: options.trailId ?? null,
+        geometryRevision: options.geometryRevision ?? null,
+        features: resolved.features.length,
+        points: coords.length,
+      });
+      if (options.fit === false) return;
+      const lngs = coords.map(coord => coord[0]);
+      const lats = coords.map(coord => coord[1]);
+      const ne: [number, number] = [Math.max(...lngs), Math.max(...lats)];
+      const sw: [number, number] = [Math.min(...lngs), Math.min(...lats)];
+      const duration = options.duration ?? 720;
+      lastCamRef.current = Date.now();
+      programmaticCameraUntilRef.current = Date.now() + duration + 450;
+      camRef.current?.fitBounds(ne, sw, options.padding ?? [86, 36, 250, 36], Platform.OS === 'web' ? 0 : duration);
+    },
     clearTrailHighlight() {
+      trailHighlightRef.current = emptyFC();
       setTrailHighlight(emptyFC());
     },
     getTrailHighlight() {
@@ -4725,6 +4779,32 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           />
         </MapGL.MarkerView>
       ))}
+      {trailHighlight.features.length > 0 && !trailPreviewVisual.active && (
+        <MapGL.ShapeSource id="trailhead-selected-trail" shape={trailHighlight}>
+          <MapGL.LineLayer
+            id="trailhead-selected-trail-casing"
+            {...mapboxTopSlotProps}
+            style={{
+              lineColor: 'rgba(247,248,246,0.94)',
+              lineWidth: ['interpolate', ['linear'], ['zoom'], 8, 6, 13, 10, 16, 14],
+              lineOpacity: 0.98,
+              lineCap: 'round',
+              lineJoin: 'round',
+            } as any}
+          />
+          <MapGL.LineLayer
+            id="trailhead-selected-trail-line"
+            {...mapboxTopSlotProps}
+            style={{
+              lineColor: '#AD5A33',
+              lineWidth: ['interpolate', ['linear'], ['zoom'], 8, 2.8, 13, 5, 16, 7],
+              lineOpacity: 1,
+              lineCap: 'round',
+              lineJoin: 'round',
+            } as any}
+          />
+        </MapGL.ShapeSource>
+      )}
         </>
       ) : null}
       </MapGL.MapView>

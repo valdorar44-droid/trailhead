@@ -43,6 +43,7 @@ export interface NativeMapHandle {
   resetRoute:     () => void;
   stopNavigation: () => void;
   highlightTrail: (lat: number, lng: number, name?: string) => void;
+  highlightResolvedTrail: (geometry: GeoJSON.FeatureCollection, options?: { fit?: boolean; padding?: [number, number, number, number]; duration?: number; trailId?: string; geometryRevision?: string }) => void;
   clearTrailHighlight: () => void;
   getTrailHighlight: () => GeoJSON.FeatureCollection;
   captureTrailAt: (lat: number, lng: number, name?: string) => Promise<GeoJSON.FeatureCollection>;
@@ -1231,6 +1232,28 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         trailHighlightRef.current = webTrailHighlightFromFeatures(features, lng, lat, name);
         syncWebTrailHighlight(map, trailHighlightRef.current);
       }, 320);
+    },
+    highlightResolvedTrail: (geometry, options = {}) => {
+      const features = (geometry?.features ?? []).filter(feature => feature?.geometry?.type === 'LineString' || feature?.geometry?.type === 'MultiLineString');
+      const resolved: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features };
+      trailHighlightRef.current = resolved;
+      const map = mapRef.current;
+      syncWebTrailHighlight(map, resolved);
+      if (!map || options.fit === false || features.length === 0) return;
+      const coords: [number, number][] = [];
+      features.forEach(feature => {
+        const featureGeometry: any = feature.geometry;
+        if (featureGeometry.type === 'LineString') coords.push(...featureGeometry.coordinates);
+        if (featureGeometry.type === 'MultiLineString') featureGeometry.coordinates.forEach((line: [number, number][]) => coords.push(...line));
+      });
+      if (coords.length < 2) return;
+      const lngs = coords.map(coord => Number(coord[0])).filter(Number.isFinite);
+      const lats = coords.map(coord => Number(coord[1])).filter(Number.isFinite);
+      if (!lngs.length || !lats.length) return;
+      map.fitBounds(
+        [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]],
+        { padding: 64, duration: options.duration ?? 720 },
+      );
     },
     clearTrailHighlight: () => {
       trailHighlightRef.current = emptyTrailHighlight();

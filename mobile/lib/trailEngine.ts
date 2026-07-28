@@ -1,4 +1,4 @@
-import type { CampsitePin, OsmPoi, Pin, Report } from './api';
+import type { CampsitePin, OsmPoi, Pin, Report, TrailCapabilitiesV2, TrailFactsV2, TrailGeometryStatusV2 } from './api';
 
 export type TrailFeatureType = 'trailhead' | 'viewpoint' | 'peak' | 'hot_spring' | 'trail' | 'road';
 
@@ -32,6 +32,11 @@ export type TrailFeature = {
   elevation?: string;
   distanceMi?: number;
   profile_id?: string;
+  system_v2_id?: string;
+  geometry_status?: TrailGeometryStatusV2;
+  geometry_revision?: string;
+  capabilities_v2?: TrailCapabilitiesV2;
+  facts_v2?: TrailFactsV2;
   source_label?: string;
   photo_url?: string | null;
   length_mi?: number | null;

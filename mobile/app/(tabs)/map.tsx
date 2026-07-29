@@ -75,6 +75,7 @@ import * as Speech from 'expo-speech';
 import * as Haptics from 'expo-haptics';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -207,6 +208,7 @@ import {
   resumeLocalTrailRecording,
   startLocalTrailRecording,
 } from '@/lib/trailRecordingRuntime';
+import { exportTrailRecordingGpx } from '@/lib/trailRecordingRepository';
 import { recordingElapsedMs, type TrailRecordingSessionV1 } from '@/lib/trailRecordingSession';
 import TrailFollowHud from '@/components/trails/TrailFollowHud';
 import {
@@ -24576,8 +24578,36 @@ function MapScreen() {
     setTrailFollowSession(null);
     trailFollowCueRef.current = '';
     endNavigation();
-    setQuickToast(completed?.pointCount ? 'Trail recording saved on this device' : 'Trail Follow ended');
-    setTimeout(() => setQuickToast(''), 2600);
+    if (completed?.pointCount) {
+      Alert.alert(
+        'Recording saved',
+        'This trail recording stays on this device unless you export it.',
+        [
+          { text: 'Done', style: 'cancel' },
+          {
+            text: 'Export GPX',
+            onPress: () => {
+              exportTrailRecordingGpx(completed.id)
+                .then(async path => {
+                  if (!(await Sharing.isAvailableAsync())) {
+                    Alert.alert('Export unavailable', 'Sharing is not available on this device.');
+                    return;
+                  }
+                  await Sharing.shareAsync(path, {
+                    dialogTitle: `Export ${completed.trailName}`,
+                    mimeType: 'application/gpx+xml',
+                    UTI: 'com.topografix.gpx',
+                  });
+                })
+                .catch(() => Alert.alert('Export unavailable', 'Trailhead could not prepare this GPX file.'));
+            },
+          },
+        ],
+      );
+    } else {
+      setQuickToast('Trail Follow ended');
+      setTimeout(() => setQuickToast(''), 2600);
+    }
   }
 
   function requestStartTrailRecording() {

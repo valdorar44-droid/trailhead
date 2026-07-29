@@ -225,6 +225,7 @@ export function featureFromPoi(
     elevation: poi.elevation,
     profile_id: poi.profile_id,
     system_v2_id: poi.system_v2_id,
+    geometry_revision: poi.geometry_revision,
     source_label: poi.source_label,
     photo_url: poi.photo_url,
     length_mi: poi.length_mi,

@@ -82,6 +82,7 @@ function documentToPoi(
     source_label: String(document.source_label || 'Downloaded').trim() || 'Downloaded',
     source_badge: String(document.source_badge || document.source_label || 'Downloaded').trim() || 'Downloaded',
     profile_id: fallbackType === 'trail' ? id : String(document.profile_id || '').trim() || undefined,
+    system_v2_id: fallbackType === 'trail' ? id : String(document.system_v2_id || '').trim() || undefined,
     raw: document,
     offline_entity_kind: fallbackType === 'trail' ? 'trail_profile' : 'place',
   } as ExpoOfflineV2Poi;

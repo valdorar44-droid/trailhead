@@ -95,7 +95,18 @@ export function resolveDownloadedSearchResultPoi(
   if (!ids.size) return null;
   const canonicalMatch = canonical.find(place => ids.has(String(place.id || ''))) || null;
   const fallbackMatch = fallback.find(place => ids.has(String(place.id || ''))) || null;
-  return mergeDownloadedSearchResultPoi(canonicalMatch, fallbackMatch);
+  const merged = mergeDownloadedSearchResultPoi(canonicalMatch, fallbackMatch);
+  if (!merged) return null;
+  const canonicalTrailId = [...ids].find(id => id.startsWith('trail:'));
+  const isTrail = merged.offline_entity_kind === 'trail_profile'
+    || merged.type === 'trail'
+    || merged.type === 'trailhead';
+  if (!canonicalTrailId || !isTrail) return merged;
+  return {
+    ...merged,
+    profile_id: merged.profile_id || canonicalTrailId,
+    system_v2_id: merged.system_v2_id || canonicalTrailId,
+  };
 }
 
 /**

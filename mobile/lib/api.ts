@@ -3251,6 +3251,7 @@ export interface OsmPoi {
   profile_id?: string;
   detail_ref?: string;
   system_v2_id?: string;
+  geometry_revision?: string;
   photo_url?: string | null;
   primary_image?: string | null;
   other_images?: string[];

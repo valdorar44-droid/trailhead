@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 import type { OsmPoi } from '../../api';
+import { featureFromPoi } from '../../trailEngine';
 import type { SearchV2Client } from '../../searchV2/client';
 import { SearchV2SessionController } from '../../searchV2/session';
 import {
@@ -244,6 +245,44 @@ async function main() {
     resolveDownloadedSearchResultPoi(crossingFiltered[0], [crossingTrail]),
     crossingTrail,
     'the crossing trail rejoins its canonical downloaded document',
+  );
+
+  const downloadedShortPoint = {
+    id: 'trail:usfs:671010431',
+    name: 'Short Point',
+    lat: 38.5637932,
+    lng: -108.6117177,
+    type: 'trail',
+    source: 'trailhead_offline_v2',
+    profile_id: 'trail:usfs:671010431',
+    geometry_revision: 'canonical-7:trail:usfs:671010431',
+    offline_entity_kind: 'trail_profile',
+  } as OsmPoi & {
+    geometry_revision: string;
+    offline_entity_kind: 'trail_profile';
+  };
+  const resolvedShortPoint = resolveDownloadedSearchResultPoi({
+    result_id: 'trail:usfs:671010431',
+    canonical_place_id: 'trail:usfs:671010431',
+  }, [downloadedShortPoint]);
+  assert.equal(
+    resolvedShortPoint?.system_v2_id,
+    'trail:usfs:671010431',
+    'rejoining a canonical Search V2 trail must preserve its Trail System identity',
+  );
+  const selectedShortPoint = featureFromPoi(resolvedShortPoint!, {
+    campsNearby: 0,
+    fuelNearby: 0,
+    waterNearby: 0,
+    reportsNearby: 0,
+    offlineReady: true,
+    readinessLabel: 'Ready offline',
+  }, 'trailhead');
+  assert.equal(selectedShortPoint?.system_v2_id, 'trail:usfs:671010431');
+  assert.equal(
+    selectedShortPoint?.geometry_revision,
+    'canonical-7:trail:usfs:671010431',
+    'the selected TrailFeature must retain the immutable geometry revision',
   );
 
   const decoyRows = Array.from({ length: 600 }, (_, index) => ({

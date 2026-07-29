@@ -188,7 +188,33 @@ export async function awaitRnMapboxOfflinePackReady<TPack>(input: Readonly<{
       emit('pack_registered');
     }
 
-    const status = await input.readStatus(pack);
+    let status: RnMapboxOfflinePackStatus;
+    try {
+      status = await input.readStatus(pack);
+    } catch (error) {
+      if (!pendingFailure) {
+        const category = classifyRnMapboxNativeFailure(
+          (error as { message?: unknown } | null)?.message,
+        );
+        pendingFailure = Object.freeze({
+          category,
+          observedAt: now(),
+          baseline: previous,
+        });
+        emit(`native_error_${category}` as RnMapboxOfflineLifecyclePhase, previous.percentage);
+      }
+      if (now() - Math.max(pendingFailure.observedAt, lastProgressAt) >= nativeErrorStallMs) {
+        emit('pack_stalled', previous.percentage);
+        const code = `rnmapbox_${pendingFailure.category}_pack_stalled`;
+        recordRnMapboxOfflineLifecycleTerminalCode(code);
+        throw new RnMapboxOfflineLifecycleError(
+          code,
+          'The offline map stopped before it was ready. Try again.',
+        );
+      }
+      await sleep(pollIntervalMs);
+      continue;
+    }
     const current = metric(status);
     const didAdvance = advanced(current, previous);
     if (didAdvance) {

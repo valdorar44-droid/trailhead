@@ -10,6 +10,7 @@ import {
   classifyRnMapboxNativeFailure,
   getLastRnMapboxOfflineLifecycleDiagnostics,
   getLastRnMapboxOfflineLifecycleTrace,
+  type RnMapboxOfflinePackStatus,
 } from '../rnMapboxPackLifecycle';
 
 const trailId = 'trail-system:trail:usfs:moab-short:abc123';
@@ -109,6 +110,45 @@ async function verifyNativePackLifecycle() {
   assert.ok(getLastRnMapboxOfflineLifecycleTrace().some(event => event.phase === 'native_error_recovered'));
   assert.equal(getLastRnMapboxOfflineLifecycleTrace().at(-1)?.phase, 'complete');
   assert.equal(getLastRnMapboxOfflineLifecycleDiagnostics().terminal_code, null);
+
+  clock = 0;
+  statusIndex = 0;
+  const statusReadResults: Array<RnMapboxOfflinePackStatus | Error> = [
+    new Error('RNMBXOfflineModule'),
+    { percentage: 25, completedResourceSize: 25, completedResourceCount: 1 },
+    { percentage: 100, completedResourceSize: 100, completedResourceCount: 2 },
+  ];
+  assert.equal(await awaitRnMapboxOfflinePackReady({
+    async getPack() { return pack; },
+    async readStatus() {
+      const result = statusReadResults[Math.min(statusIndex++, statusReadResults.length - 1)];
+      if (result instanceof Error) throw result;
+      return result;
+    },
+    expectedBytes: 100,
+    now: () => clock,
+    async sleep(milliseconds) { clock += milliseconds; },
+    pollIntervalMs: 400,
+    nativeErrorStallMs: 800,
+  }), pack, 'a transient native status-read error recovers when the exact pack advances');
+  assert.ok(getLastRnMapboxOfflineLifecycleTrace().some(event => event.phase === 'native_error_other'));
+  assert.ok(getLastRnMapboxOfflineLifecycleTrace().some(event => event.phase === 'native_error_recovered'));
+  assert.equal(getLastRnMapboxOfflineLifecycleDiagnostics().terminal_code, null);
+
+  clock = 0;
+  await assert.rejects(
+    awaitRnMapboxOfflinePackReady({
+      async getPack() { return pack; },
+      async readStatus() { throw new Error('RNMBXOfflineModule'); },
+      expectedBytes: 100,
+      now: () => clock,
+      async sleep(milliseconds) { clock += milliseconds; },
+      pollIntervalMs: 400,
+      nativeErrorStallMs: 800,
+    }),
+    (error: unknown) => (error as { code?: string }).code === 'rnmapbox_other_pack_stalled',
+  );
+  assert.equal(getLastRnMapboxOfflineLifecycleDiagnostics().terminal_code, 'rnmapbox_other_pack_stalled');
 
   clock = 0;
   await assert.rejects(

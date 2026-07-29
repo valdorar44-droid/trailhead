@@ -1732,6 +1732,27 @@ function trailCoordsDistanceM(coords: [number, number][]) {
   }, 0);
 }
 
+function trailRoutePlanFromSystem(
+  trail: TrailFeature,
+  system: TrailSystemV2,
+  geometry: GeoJSON.FeatureCollection,
+): TrailRoutePlan | null {
+  const coords = primaryTrailLine(geometry, [trail.lng, trail.lat]);
+  if (coords.length < 2) return null;
+  const distanceM = trailCoordsDistanceM(coords);
+  return {
+    id: 'capture',
+    title: system.name || trail.name,
+    subtitle: `${fmtTrailRouteDistance(distanceM)} · verified route`,
+    icon: 'walk-outline',
+    coords,
+    distanceM,
+    confidence: 'high',
+    warnings: [],
+    engine: system.sources[0]?.label || 'Trailhead',
+  };
+}
+
 function trailBearingDeg(a: [number, number], b: [number, number]) {
   const lat1 = a[1] * Math.PI / 180;
   const lat2 = b[1] * Math.PI / 180;
@@ -7500,20 +7521,8 @@ function MapScreen() {
             trailId: system.id,
             geometryRevision: system.geometry_revision,
           });
-          const coords = primaryTrailLine(geometry, [trail.lng, trail.lat]);
-          if (coords.length >= 2) {
-            const distanceM = trailCoordsDistanceM(coords);
-            const plan: TrailRoutePlan = {
-              id: 'capture',
-              title: system.name || trail.name,
-              subtitle: `${fmtTrailRouteDistance(distanceM)} · verified route`,
-              icon: 'walk-outline',
-              coords,
-              distanceM,
-              confidence: 'high',
-              warnings: [],
-              engine: system.sources[0]?.label || 'Trailhead',
-            };
+          const plan = trailRoutePlanFromSystem(trail, system, geometry);
+          if (plan) {
             setTrailRoutePlans(existing => existing.length ? existing : [plan]);
             setSelectedTrailRoutePlanId(existing => existing ?? plan.id);
           }
@@ -24513,6 +24522,39 @@ function MapScreen() {
     focusNavigationCamera();
   }
 
+  async function startSelectedTrailNavigation(trail: TrailFeature) {
+    const readyPlan = trailRoutePlans.find(plan => plan.id === selectedTrailRoutePlanId) ?? trailRoutePlans[0] ?? null;
+    if (readyPlan) {
+      startTrailRoutePlan(trail, readyPlan);
+      return;
+    }
+    if (!trail.system_v2_id) {
+      navigateToCamp(trail);
+      return;
+    }
+    const selectedId = trail.id;
+    try {
+      const system = await api.getTrailSystem(trail.system_v2_id);
+      if (selectedTrailRef.current?.id !== selectedId || !trailSelectionMatches(trail, system)) return;
+      const geometry = trailSystemGeometry(system);
+      const plan = geometry ? trailRoutePlanFromSystem(trail, system, geometry) : null;
+      if (!geometry || !plan) {
+        Alert.alert('Trail Follow unavailable', 'A complete route is needed before Trail Follow can start.');
+        return;
+      }
+      const hydrated = hydrateTrailFeatureFromSystem(trail, system);
+      selectedTrailRef.current = hydrated;
+      setSelectedTrail(current => current?.id === selectedId ? hydrated : current);
+      setTrailRoutePlans([plan]);
+      setSelectedTrailRoutePlanId(plan.id);
+      startTrailRoutePlan(hydrated, plan);
+    } catch {
+      if (selectedTrailRef.current?.id === selectedId) {
+        Alert.alert('Trail Follow unavailable', 'Trail details could not load. Try again when you have a connection.');
+      }
+    }
+  }
+
   function stopTrailFollowOnly() {
     setTrailFollowEndVisible(false);
     if (trailRecordingSession && trailRecordingSession.status !== 'complete') {
@@ -27601,8 +27643,8 @@ function MapScreen() {
                 primaryLabel={isTrailhead ? 'Directions' : 'Navigate'}
                 saved={selectedTrail.support.offlineReady}
                 onPrimary={() => {
-                  if (!isTrailhead && selectedTrailRoutePlan) {
-                    startTrailRoutePlan(selectedTrail, selectedTrailRoutePlan);
+                  if (!isTrailhead) {
+                    startSelectedTrailNavigation(selectedTrail);
                     return;
                   }
                   navigateToCamp(selectedTrail);

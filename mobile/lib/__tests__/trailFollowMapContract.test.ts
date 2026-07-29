@@ -17,6 +17,12 @@ assert.match(map, /async function startSelectedTrailNavigation\(trail: TrailFeat
 assert.match(map, /const system = await api\.getTrailSystem\(trail\.system_v2_id\)/);
 assert.match(map, /startSelectedTrailNavigation\(selectedTrail\)/);
 assert.match(map, /nativeMapRef\.current\?\.restoreRoute\(plan\.coords/);
+assert.match(map, /const presentTrailFollowRoute = useCallback/);
+assert.match(map, /presentTrailFollowRoute\(trailFollowSession, true\)/);
+assert.match(map, /onOpenRoute=\{\(\) => \{[\s\S]*presentTrailFollowRoute\(session, true\)/);
+assert.match(map, /!trailFollowSession && routeFromCache && navMode/);
+assert.match(map, /!trailFollowSession && !!routeDebug && !isRouted/);
+assert.match(map, /handoffRouteUnavailable: trailFollowSession\.phase === 'handoff'/);
 assert.match(map, /<TrailFollowHud/);
 assert.match(map, /End & save|onEndAndSave/);
 assert.match(map, /exportTrailRecordingGpx\(completed\.id\)/);

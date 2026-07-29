@@ -8540,24 +8540,58 @@ function MapScreen() {
     return () => { cancelled = true; };
   }, []);
 
-  useEffect(() => {
-    if (!mapSurfaceReady || !trailFollowSession || trailFollowSession.phase !== 'recovery') return;
-    const steps = routeStepsForTrailPlan(trailFollowSession.trail, trailFollowSession.plan.coords, trailFollowSession.plan.distanceM);
+  const presentTrailFollowRoute = useCallback((session: ActiveTrailFollow, fitRoute: boolean) => {
+    if (session.plan.coords.length < 2 || session.phase === 'handoff') return;
+    const steps = routeStepsForTrailPlan(session.trail, session.plan.coords, session.plan.distanceM);
+    const duration = Math.max(60, session.plan.distanceM / 1.35);
+    setRouteFromCache(true);
+    setRouteDebug('Trail Follow active');
     setRouteSteps(steps);
+    routeStepsRef.current = steps;
     setRouteLegs([steps]);
-    setLastRouteCoords(trailFollowSession.plan.coords);
-    lastRouteCoordsRef.current = trailFollowSession.plan.coords;
+    setLastRouteCoords(session.plan.coords);
+    lastRouteCoordsRef.current = session.plan.coords;
+    routeCumulativeRef.current = routeCumulativeDistances(session.plan.coords);
     setIsRouted(true);
     nativeMapRef.current?.restoreRoute(
-      trailFollowSession.plan.coords,
+      session.plan.coords,
       steps,
       [steps],
-      trailFollowSession.plan.distanceM,
-      Math.max(60, trailFollowSession.plan.distanceM / 1.35),
+      session.plan.distanceM,
+      duration,
     );
-    setNavMode(true);
-    setNavCameraFollow(true);
-  }, [mapSurfaceReady, trailFollowSession?.phase]);
+    postWebMessage(JSON.stringify({
+      type: 'restore_route',
+      coords: session.plan.coords,
+      steps,
+      legs: [steps],
+      total_distance: session.plan.distanceM,
+      total_duration: duration,
+    }));
+    if (fitRoute) {
+      nativeMapRef.current?.fitCoordinates(
+        session.plan.coords,
+        [Math.max(insets.top + 112, 144), 32, Math.min(Math.round(windowHeight * 0.34), 310), 32],
+        650,
+      );
+    }
+  }, [insets.top, windowHeight]);
+
+  useEffect(() => {
+    if (!mapSurfaceReady || !trailFollowSession) return;
+    if (trailFollowSession.phase !== 'follow' && trailFollowSession.phase !== 'recovery') return;
+    presentTrailFollowRoute(trailFollowSession, true);
+    if (trailFollowSession.phase === 'recovery') {
+      setNavMode(true);
+      setNavCameraFollow(true);
+    }
+  }, [
+    mapStyleGeneration,
+    mapSurfaceReady,
+    presentTrailFollowRoute,
+    trailFollowSession?.phase,
+    trailFollowSession?.plan.id,
+  ]);
 
   useEffect(() => {
     navRef.current.active = navMode;
@@ -26080,6 +26114,7 @@ function MapScreen() {
             phase: trailFollowSession.phase,
             trailName: trailFollowSession.trail.name,
             trailheadName: trailFollowSession.trailhead?.name,
+            handoffRouteUnavailable: trailFollowSession.phase === 'handoff' && !!routeDebug && !isRouted,
             metrics: trailFollowSession.metrics,
           }}
           recording={trailRecordingSession?.status === 'complete' ? null : trailRecordingSession}
@@ -26091,7 +26126,10 @@ function MapScreen() {
           onStartRecording={requestStartTrailRecording}
           onPauseRecording={pauseTrailRecordingFromMap}
           onResumeRecording={resumeTrailRecordingFromMap}
-          onOpenRoute={() => focusNavigationCamera()}
+          onOpenRoute={() => {
+            const session = trailFollowSessionRef.current;
+            if (session) presentTrailFollowRoute(session, true);
+          }}
           onReport={() => {
             setQuickTypeIdx(null);
             setQuickReport(true);
@@ -26324,19 +26362,19 @@ function MapScreen() {
           <Text style={s.offlineCacheBannerText}>Using cached trip data — offline mode</Text>
         </View>
       )}
-      {!mapSearchChromeActive && routeFromCache && navMode && isActuallyOffline && (
+      {!mapSearchChromeActive && !trailFollowSession && routeFromCache && navMode && isActuallyOffline && (
         <View style={[s.offlineCacheBanner, topChromeLaneStyle, { backgroundColor: 'rgba(234,179,8,0.15)' }]}>
           <Ionicons name="navigate-outline" size={12} color="#eab308" />
           <Text style={[s.offlineCacheBannerText, { color: '#eab308' }]}>Offline — using cached route · re-routing disabled</Text>
         </View>
       )}
-      {!mapSearchChromeActive && routeFromCache && navMode && !isActuallyOffline && (
+      {!mapSearchChromeActive && !trailFollowSession && routeFromCache && navMode && !isActuallyOffline && (
         <View style={[s.offlineCacheBanner, topChromeLaneStyle, { backgroundColor: 'rgba(59,130,246,0.12)' }]}>
           <Ionicons name="checkmark-circle-outline" size={12} color="#60a5fa" />
           <Text style={[s.offlineCacheBannerText, { color: '#60a5fa' }]}>Using cached route</Text>
         </View>
       )}
-      {!mapSearchChromeActive && !!routeDebug && !isRouted && (
+      {!mapSearchChromeActive && !trailFollowSession && !!routeDebug && !isRouted && (
         <View style={[s.noRouteCard, topChromeLaneStyle]}>
           <View style={s.noRouteTop}>
             <Ionicons name="alert-circle-outline" size={14} color={C.red} />

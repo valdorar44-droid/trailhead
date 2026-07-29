@@ -11,6 +11,7 @@ export type TrailFollowPresentation = Readonly<{
   phase: 'handoff' | 'follow' | 'recovery' | 'recording_only' | 'complete';
   trailName: string;
   trailheadName?: string | null;
+  handoffRouteUnavailable?: boolean;
   metrics?: TrailFollowMetrics | null;
 }>;
 
@@ -74,6 +75,7 @@ export default function TrailFollowHud({
   const recordingPaused = recording?.status === 'paused';
 
   if (presentation.phase === 'handoff') {
+    const routeUnavailable = presentation.handoffRouteUnavailable === true;
     return (
       <View style={[styles.topWrap, { top: insets.top + 10 }]} pointerEvents="box-none">
         <View style={[styles.cueCard, { backgroundColor: C.s1, borderColor: C.border2 }]} testID="trail.follow.handoff">
@@ -81,11 +83,15 @@ export default function TrailFollowHud({
             <Ionicons name="trail-sign-outline" size={24} color={C.orange} />
           </View>
           <View style={styles.flex}>
-            <Text style={[styles.kicker, { color: C.orange }]}>DRIVE TO TRAILHEAD</Text>
+            <Text style={[styles.kicker, { color: C.orange }]}>
+              {routeUnavailable ? 'DIRECTIONS UNAVAILABLE' : 'DRIVE TO TRAILHEAD'}
+            </Text>
             <Text style={[styles.cueTitle, { color: C.text }]} numberOfLines={2}>
               {presentation.trailheadName || 'Sourced trailhead'}
             </Text>
-            <Text style={[styles.support, { color: C.text2 }]} numberOfLines={1}>{presentation.trailName}</Text>
+            <Text style={[styles.support, { color: C.text2 }]} numberOfLines={1}>
+              {routeUnavailable ? `Start Follow when near ${presentation.trailName}` : presentation.trailName}
+            </Text>
           </View>
           <TouchableOpacity
             style={[styles.nearbyButton, { borderColor: C.border2 }]}

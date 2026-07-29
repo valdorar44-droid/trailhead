@@ -82,6 +82,18 @@ OFFLINE_PLACE_PACK_FAMILIES_V2 = (
     "trek_places",
 )
 
+# Trail-scoped bundles include only practical, source-backed support inventory.
+# Scenic and editorial POIs remain online unless they are selected through a
+# normal area bundle. This keeps remote trail packs useful without turning a
+# narrow route download into an unbounded destination catalog.
+TRAIL_SUPPORT_PLACE_CATEGORIES_V2 = frozenset({
+    "camp", "campground", "dump", "dump_station", "food", "fuel",
+    "gas", "gas_station", "grocery", "laundromat", "lodging", "mechanic",
+    "medical", "parking", "propane", "repair", "restroom", "shower",
+    "trailhead", "visitor_center", "visitor_centre", "water",
+})
+TRAIL_SUPPORT_PLACE_LIMIT_V2 = 2_500
+
 # These rows are Trailhead-curated fallbacks, but their checked-in V1 packs do
 # not carry a redistribution license. Do not silently omit them and issue a
 # misleading Ready bundle. Preparation fails explicitly until their rights are
@@ -475,8 +487,12 @@ def load_offline_place_pack_items_v2(
 def _selected_items_v2(
     snapshot: OfflineCatalogSnapshotV2,
     bounds: OfflineBoundsV2,
+    *,
+    place_bounds: OfflineBoundsV2 | None = None,
+    trail_support_only: bool = False,
 ) -> tuple[OfflineCatalogItemV2, ...]:
-    selected = []
+    selected: list[OfflineCatalogItemV2] = []
+    selected_place_bounds = place_bounds or bounds
     for item in snapshot.items:
         if item.kind == "trail":
             if item.spatial_bounds is None:
@@ -484,9 +500,46 @@ def _selected_items_v2(
             west, south, east, north = item.spatial_bounds
             if east < bounds.west or west > bounds.east or north < bounds.south or south > bounds.north:
                 continue
-        elif not (bounds.west <= item.lng <= bounds.east and bounds.south <= item.lat <= bounds.north):
-            continue
+        else:
+            if not (
+                selected_place_bounds.west <= item.lng <= selected_place_bounds.east
+                and selected_place_bounds.south <= item.lat <= selected_place_bounds.north
+            ):
+                continue
+            if trail_support_only:
+                document = item.document if isinstance(item.document, dict) else {}
+                category_values = {
+                    str(value or "").strip().lower().replace("-", " ").replace(" ", "_")
+                    for value in (
+                        item.category,
+                        document.get("category"),
+                        document.get("type"),
+                        document.get("subtype"),
+                    )
+                    if str(value or "").strip()
+                }
+                tokens = {
+                    token
+                    for value in category_values
+                    for token in re.split(r"[^a-z0-9_]+", value)
+                    if token
+                }
+                if not (
+                    category_values & TRAIL_SUPPORT_PLACE_CATEGORIES_V2
+                    or tokens & TRAIL_SUPPORT_PLACE_CATEGORIES_V2
+                ):
+                    continue
         selected.append(item)
+    if trail_support_only:
+        trails = [item for item in selected if item.kind == "trail"]
+        places = [item for item in selected if item.kind == "place"]
+        center_lat = (selected_place_bounds.south + selected_place_bounds.north) / 2
+        center_lng = (selected_place_bounds.west + selected_place_bounds.east) / 2
+        places.sort(key=lambda item: (
+            (item.lat - center_lat) ** 2 + (item.lng - center_lng) ** 2,
+            item.item_id,
+        ))
+        selected = [*trails, *places[:TRAIL_SUPPORT_PLACE_LIMIT_V2]]
     return tuple(sorted(selected, key=lambda item: item.item_id))
 
 
@@ -1015,6 +1068,7 @@ def materialize_offline_bundle_v2(
     include_database: bool = True,
     include_place_packs: bool | None = None,
     place_pack_root: Path | None = None,
+    place_selection_bounds: OfflineBoundsV2 | None = None,
     progress_callback: ProgressCallbackV2 | None = None,
 ) -> OfflineMaterializationResultV2:
     """Build, verify, persist, and bind all immutable artifacts for one job."""
@@ -1026,14 +1080,15 @@ def materialize_offline_bundle_v2(
     snapshot = snapshot or load_offline_catalog_snapshot_v2()
     if include_place_packs is None:
         include_place_packs = not caller_supplied_snapshot
+    catalog_place_bounds = place_selection_bounds or request.bounds
     if include_place_packs:
         snapshot = merge_offline_catalog_snapshot_v2(
             snapshot,
-            load_offline_place_pack_items_v2(request.bounds, root=place_pack_root),
+            load_offline_place_pack_items_v2(catalog_place_bounds, root=place_pack_root),
         )
     if include_database:
         snapshot = merge_offline_catalog_snapshot_v2(
-            snapshot, _database_catalog_items_v2(request.bounds),
+            snapshot, _database_catalog_items_v2(catalog_place_bounds),
         )
     renderer = renderer or load_offline_renderer_config_v2(request.renderer_style_id)
     if request.renderer_style_id and renderer.style_id != request.renderer_style_id:
@@ -1045,7 +1100,12 @@ def materialize_offline_bundle_v2(
     (renderer_probe or verify_rnmapbox_provisioning_v2)(request, renderer)
     if progress_callback:
         progress_callback(12)
-    selected = _selected_items_v2(snapshot, request.bounds)
+    selected = _selected_items_v2(
+        snapshot,
+        request.bounds,
+        place_bounds=catalog_place_bounds,
+        trail_support_only=request.scope is not None,
+    )
     if progress_callback:
         progress_callback(20)
     root = offline_artifact_root_v2()
@@ -1117,6 +1177,7 @@ def materialize_offline_bundle_v2(
         manifest = prepare_offline_bundle_manifest_v2(
             request,
             snapshot=snapshot,
+            selected_items=selected,
             materialized_artifacts=tuple(materialized),
             renderer=renderer,
         )

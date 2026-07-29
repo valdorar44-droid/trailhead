@@ -97,6 +97,7 @@ from dashboard.offline_bundles_v2 import (
     OfflineBundlePreparationV2,
     OfflineBundlePrepareRequestV2,
     OfflineBundlePreparationError,
+    OfflineRendererConfigV2,
     load_offline_catalog_snapshot_v2,
     load_offline_renderer_config_v2,
     merge_offline_catalog_snapshot_v2,
@@ -24679,6 +24680,38 @@ def _offline_trail_corridor_bounds_v2(
         ) from exc
 
 
+# Map tiles stay close to the trail. Practical support inventory needs a wider
+# access area because remote water, camps and services are commonly several
+# kilometres beyond the route itself.
+_OFFLINE_TRAIL_SUPPORT_RADIUS_M_V2 = 25_000
+_OFFLINE_TRAIL_SUPPORT_REVISION_V2 = "trail-support-2026-07-28.1"
+
+
+def _offline_trail_support_bounds_v2(
+    system: TrailSystemV2,
+    corridor_m: int,
+) -> OfflineBoundsV2:
+    return _offline_trail_corridor_bounds_v2(
+        system,
+        max(corridor_m, _OFFLINE_TRAIL_SUPPORT_RADIUS_M_V2),
+    )
+
+
+def _offline_bundle_cache_binding_v2(
+    request: OfflineBundlePrepareRequestV2,
+    renderer: OfflineRendererConfigV2,
+) -> dict[str, str]:
+    binding = {
+        "renderer": renderer.id,
+        "style_id": renderer.style_id,
+        "style_uri": renderer.style_uri,
+        "style_revision": renderer.style_revision,
+    }
+    if request.scope is not None:
+        binding["trail_support_revision"] = _OFFLINE_TRAIL_SUPPORT_REVISION_V2
+    return binding
+
+
 async def _resolve_offline_trail_scope_v2(
     request: OfflineBundlePrepareRequestV2,
 ) -> tuple[OfflineBundlePrepareRequestV2, TrailSystemV2 | None]:
@@ -24772,6 +24805,14 @@ def _run_offline_bundle_preparation_v2(
             request,
             snapshot=snapshot,
             include_place_packs=True if scoped_trail is not None else None,
+            place_selection_bounds=(
+                _offline_trail_support_bounds_v2(
+                    scoped_trail,
+                    request.scope.corridor_m,
+                )
+                if scoped_trail is not None and request.scope is not None
+                else None
+            ),
             progress_callback=lambda value: (
                 update_offline_bundle_preparation_progress_v2(
                     preparation_id, user_id, value,
@@ -24922,12 +24963,7 @@ async def api_prepare_offline_bundle_v2(
             "code": exc.code,
             "message": exc.message,
         }) from None
-    cache_binding = {
-        "renderer": selected_renderer.id,
-        "style_id": selected_renderer.style_id,
-        "style_uri": selected_renderer.style_uri,
-        "style_revision": selected_renderer.style_revision,
-    }
+    cache_binding = _offline_bundle_cache_binding_v2(body, selected_renderer)
     preparation, _created = create_or_get_offline_bundle_preparation_v2(
         int(user["id"]), request_payload, cache_binding=cache_binding,
     )

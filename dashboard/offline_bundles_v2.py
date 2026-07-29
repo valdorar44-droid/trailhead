@@ -1306,6 +1306,7 @@ def prepare_offline_bundle_manifest_v2(
     request: OfflineBundlePrepareRequestV2,
     *,
     snapshot: OfflineCatalogSnapshotV2 | None = None,
+    selected_items: tuple[OfflineCatalogItemV2, ...] | None = None,
     materialized_artifacts: tuple[OfflineMaterializedArtifactV2, ...] | None = None,
     renderer: OfflineRendererConfigV2 | None = None,
     now_epoch: int | None = None,
@@ -1326,13 +1327,26 @@ def prepare_offline_bundle_manifest_v2(
         )
     sources = _read_materialized_artifacts(materialized_artifacts)
 
-    selected = tuple(item for item in snapshot.items if (
-        _bounds_intersect(item.spatial_bounds, request.bounds)
-        if item.kind == "trail" and item.spatial_bounds is not None
-        else item.kind == "place"
-        and request.bounds.west <= item.lng <= request.bounds.east
-        and request.bounds.south <= item.lat <= request.bounds.north
-    ))
+    if selected_items is None:
+        selected = tuple(item for item in snapshot.items if (
+            _bounds_intersect(item.spatial_bounds, request.bounds)
+            if item.kind == "trail" and item.spatial_bounds is not None
+            else item.kind == "place"
+            and request.bounds.west <= item.lng <= request.bounds.east
+            and request.bounds.south <= item.lat <= request.bounds.north
+        ))
+    else:
+        snapshot_items = {item.item_id: item for item in snapshot.items}
+        if (
+            len({item.item_id for item in selected_items}) != len(selected_items)
+            or any(snapshot_items.get(item.item_id) != item for item in selected_items)
+        ):
+            raise OfflineBundlePreparationError(
+                "offline_catalog_selection_invalid",
+                "The selected offline catalog records are invalid.",
+                http_status=503,
+            )
+        selected = selected_items
     places = tuple(item for item in selected if item.kind == "place")
     trails = tuple(item for item in selected if item.kind == "trail")
     expected_counts = {

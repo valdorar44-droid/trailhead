@@ -135,7 +135,11 @@ def _trail_system() -> TrailSystemV2:
     })
 
 
-def _renderer(renderer: str = "rnmapbox") -> OfflineRendererConfigV2:
+def _renderer(
+    renderer: str = "rnmapbox",
+    *,
+    style_id: str = "server_default",
+) -> OfflineRendererConfigV2:
     return OfflineRendererConfigV2(
         id=renderer,
         style_uri=(
@@ -144,7 +148,7 @@ def _renderer(renderer: str = "rnmapbox") -> OfflineRendererConfigV2:
             else "https://maps.gettrailhead.app/styles/outdoors-v2.json"
         ),
         style_revision="style-test-7",
-        style_id="server_default",
+        style_id=style_id,
     )
 
 
@@ -1295,6 +1299,120 @@ class OfflineBundleV2ApiTests(unittest.TestCase):
         self.assertLess(resolved.bounds.west, system.bounds.west)
         self.assertGreater(resolved.bounds.east, system.bounds.east)
         self.assertNotEqual(resolved.bounds, request.bounds)
+
+        support = server._offline_trail_support_bounds_v2(
+            system, request.scope.corridor_m,
+        )
+        self.assertLess(support.west, resolved.bounds.west)
+        self.assertGreater(support.east, resolved.bounds.east)
+        self.assertLess(support.south, resolved.bounds.south)
+        self.assertGreater(support.north, resolved.bounds.north)
+
+        scoped_binding = server._offline_bundle_cache_binding_v2(
+            resolved,
+            _renderer(style_id="outdoors"),
+        )
+        legacy_binding = server._offline_bundle_cache_binding_v2(
+            _request(),
+            _renderer(),
+        )
+        self.assertEqual(
+            scoped_binding["trail_support_revision"],
+            server._OFFLINE_TRAIL_SUPPORT_REVISION_V2,
+        )
+        self.assertNotIn("trail_support_revision", legacy_binding)
+
+    def test_trail_materialization_keeps_tiles_narrow_and_adds_support_places(self):
+        system = _trail_system()
+        scoped_request = OfflineBundlePrepareRequestV2.model_validate({
+            "bounds": {
+                "west": -109.575,
+                "south": 38.555,
+                "east": -109.525,
+                "north": 38.605,
+            },
+            "min_zoom": 8,
+            "max_zoom": 14,
+            "renderer_style_id": "outdoors",
+            "scope": {
+                "kind": "trail",
+                "trail_id": system.id,
+                "geometry_revision": system.geometry_revision,
+                "corridor_m": 1200,
+            },
+            "options": {},
+        })
+        trail_item = offline_trail_scope_catalog_item_v2(
+            system.model_dump(mode="json", exclude_none=True),
+        )
+        snapshot = OfflineCatalogSnapshotV2(
+            revision="c" * 64,
+            generated_at=NOW_EPOCH,
+            items=(trail_item,),
+        )
+        pack_root = self.root / "trail-support-packs"
+        pack_root.mkdir()
+        (pack_root / "ut-camps.json").write_text(json.dumps({
+            "schema_version": 1,
+            "pack_id": "ut-camps",
+            "region_id": "ut",
+            "generated_at": NOW_EPOCH,
+            "points": [{
+                "id": "osm_camp_node_support",
+                "name": "Access Camp",
+                "lat": 38.72,
+                "lng": -109.55,
+                "category": "camp",
+                "source": "osm",
+            }],
+        }), encoding="utf-8")
+        (pack_root / "ut-outdoors.json").write_text(json.dumps({
+            "schema_version": 1,
+            "pack_id": "ut-outdoors",
+            "region_id": "ut",
+            "generated_at": NOW_EPOCH,
+            "points": [{
+                "id": "osm_viewpoint_not_support",
+                "name": "Scenic View",
+                "lat": 38.70,
+                "lng": -109.55,
+                "category": "viewpoint",
+                "source": "osm",
+            }],
+        }), encoding="utf-8")
+        support_bounds = server._offline_trail_support_bounds_v2(system, 1200)
+
+        with patch.dict(os.environ, {
+            "TRAILHEAD_OFFLINE_ARTIFACT_ROOT": str(self.root),
+            "TRAILHEAD_OFFLINE_ARTIFACT_STORE": "local",
+        }):
+            result = materialize_offline_bundle_v2(
+                "offprep_trail_support_test_001",
+                scoped_request,
+                snapshot=snapshot,
+                renderer=_renderer(style_id="outdoors"),
+                renderer_probe=lambda _request, _renderer: None,
+                include_database=False,
+                include_place_packs=True,
+                place_pack_root=pack_root,
+                place_selection_bounds=support_bounds,
+            )
+
+        by_kind = {artifact.kind: artifact for artifact in result.manifest.artifacts}
+        self.assertEqual(by_kind["places"].record_count, 1)
+        self.assertEqual(by_kind["trails"].record_count, 1)
+        self.assertEqual(by_kind["search_index"].record_count, 2)
+        self.assertEqual(
+            by_kind["map_tiles"].record_count,
+            _tile_count(
+                scoped_request.bounds,
+                scoped_request.min_zoom,
+                scoped_request.max_zoom,
+            ),
+        )
+        stored = {artifact.kind: artifact for artifact in result.artifacts}
+        payload = json.loads(Path(stored["places"].storage_path).read_text())
+        self.assertEqual([place["name"] for place in payload["places"]], ["Access Camp"])
 
     def test_trail_scope_rejects_stale_revision_before_authorization(self):
         system = _trail_system()

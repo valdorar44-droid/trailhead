@@ -22,7 +22,7 @@ module.exports = {
     name: 'Trailhead',
     slug: 'trailhead',
     version: '1.0.10',
-    runtimeVersion: 'native-1.0.10-ios.5',
+    runtimeVersion: 'native-1.0.10-ios.6',
     newArchEnabled: true,
     updates: { url: 'https://u.expo.dev/92c016d2-6e63-480e-a483-a6898d7e77d5' },
     icon: './assets/icon.png',
@@ -34,7 +34,7 @@ module.exports = {
       backgroundColor: '#0c0f14',
     },
     ios: {
-      runtimeVersion: 'native-1.0.10-ios.5',
+      runtimeVersion: 'native-1.0.10-ios.6',
       supportsTablet: true,
       bundleIdentifier: 'com.trailhead.app',
       usesAppleSignIn: true,
@@ -45,8 +45,8 @@ module.exports = {
       ],
       infoPlist: {
         NSLocationWhenInUseUsageDescription: 'Trailhead uses your location to show your position on the map, provide turn-by-turn navigation, find nearby campsites, and alert you to road hazard reports near your current position.',
-        NSLocationAlwaysAndWhenInUseUsageDescription: 'Trailhead uses location in the background so navigation and Original stories can continue after you lock your phone or switch apps. Location stops when you end navigation or the tour.',
-        NSLocationAlwaysUsageDescription: 'Trailhead uses location in the background so navigation and Original stories can continue after you lock your phone or switch apps. Location stops when you end navigation or the tour.',
+        NSLocationAlwaysAndWhenInUseUsageDescription: 'Trailhead uses location in the background so navigation, Original stories, and an active trail recording can continue after you lock your phone or switch apps. Location stops when you end navigation or the tour, or pause or end recording.',
+        NSLocationAlwaysUsageDescription: 'Trailhead uses location in the background so navigation, Original stories, and an active trail recording can continue after you lock your phone or switch apps. Location stops when you end navigation or the tour, or pause or end recording.',
         NSMicrophoneUsageDescription: 'Trailhead uses your microphone only when you choose the Co-Pilot voice assistant.',
         NSCameraUsageDescription: 'Trailhead uses your camera to take photos for field reports. For example, you can photograph a washed-out road, a campsite condition, or a trail hazard to warn other overlanders.',
         NSPhotoLibraryUsageDescription: 'Trailhead uses your photo library to attach existing photos to field reports. For example, you can select a photo of a trail condition, campsite, or road hazard to share with the overlanding community.',
@@ -58,7 +58,7 @@ module.exports = {
       },
     },
     android: {
-      runtimeVersion: 'native-1.0.10-android.6',
+      runtimeVersion: 'native-1.0.10-android.7',
       adaptiveIcon: {
         foregroundImage: './assets/adaptive-icon.png',
         backgroundColor: '#0c0f14',
@@ -124,8 +124,8 @@ module.exports = {
       [
         'expo-location',
         {
-          locationAlwaysAndWhenInUsePermission: 'Trailhead uses location in the background so navigation and Original stories can continue after you lock your phone or switch apps. Location stops when you end navigation or the tour.',
-          locationAlwaysPermission: 'Trailhead uses location in the background so navigation and Original stories can continue after you lock your phone or switch apps. Location stops when you end navigation or the tour.',
+          locationAlwaysAndWhenInUsePermission: 'Trailhead uses location in the background so navigation, Original stories, and an active trail recording can continue after you lock your phone or switch apps. Location stops when you end navigation or the tour, or pause or end recording.',
+          locationAlwaysPermission: 'Trailhead uses location in the background so navigation, Original stories, and an active trail recording can continue after you lock your phone or switch apps. Location stops when you end navigation or the tour, or pause or end recording.',
           isAndroidBackgroundLocationEnabled: false,
           isAndroidForegroundServiceEnabled: true,
         },

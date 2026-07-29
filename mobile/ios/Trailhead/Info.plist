@@ -50,9 +50,9 @@
     <key>NSCameraUsageDescription</key>
     <string>Trailhead uses your camera to take photos for field reports. For example, you can photograph a washed-out road, a campsite condition, or a trail hazard to warn other overlanders.</string>
     <key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
-    <string>Trailhead uses location in the background so navigation and Original stories can continue after you lock your phone or switch apps. Location stops when you end navigation or the tour.</string>
+    <string>Trailhead uses location in the background so navigation, Original stories, and an active trail recording can continue after you lock your phone or switch apps. Location stops when you end navigation or the tour, or pause or end recording.</string>
     <key>NSLocationAlwaysUsageDescription</key>
-    <string>Trailhead uses location in the background so navigation and Original stories can continue after you lock your phone or switch apps. Location stops when you end navigation or the tour.</string>
+    <string>Trailhead uses location in the background so navigation, Original stories, and an active trail recording can continue after you lock your phone or switch apps. Location stops when you end navigation or the tour, or pause or end recording.</string>
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>Trailhead uses your location to show your position on the map, provide turn-by-turn navigation, find nearby campsites, and alert you to road hazard reports near your current position.</string>
     <key>NSMicrophoneUsageDescription</key>

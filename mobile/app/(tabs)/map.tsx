@@ -194,6 +194,22 @@ import {
 } from '@/lib/trailEngine';
 import { hydrateTrailFeatureFromSystem, trailDiscoveryItemToFeature, trailSelectionMatches, trailSystemGeometry } from '@/lib/trailsV2';
 import {
+  evaluateTrailFollow,
+  resolveTrailFollowStart,
+  type SourcedTrailhead,
+  type TrailFollowMetrics,
+} from '@/lib/trailFollowSession';
+import {
+  endLocalTrailRecording,
+  endTrailFollowWithoutStoppingRecording,
+  getActiveTrailRecording,
+  pauseLocalTrailRecording,
+  resumeLocalTrailRecording,
+  startLocalTrailRecording,
+} from '@/lib/trailRecordingRuntime';
+import { recordingElapsedMs, type TrailRecordingSessionV1 } from '@/lib/trailRecordingSession';
+import TrailFollowHud from '@/components/trails/TrailFollowHud';
+import {
   appendTrailBuilderAnchor,
   closeTrailBuilderLoop,
   outAndBackTrailBuilderRoute,
@@ -1139,6 +1155,13 @@ type TrailRoutePlan = {
   elevationConfidence?: 'high' | 'estimated' | 'unavailable';
   warnings: string[];
   engine?: string;
+};
+type ActiveTrailFollow = {
+  phase: 'handoff' | 'follow' | 'recovery' | 'recording_only' | 'complete';
+  trail: TrailFeature;
+  plan: TrailRoutePlan;
+  trailhead?: SourcedTrailhead | null;
+  metrics?: TrailFollowMetrics | null;
 };
 type TrailCaptureAnchor = {
   coord: [number, number];
@@ -6412,6 +6435,11 @@ function MapScreen() {
   const [quickTypeIdx,  setQuickTypeIdx]  = useState<number | null>(null);
   const [navMode,   setNavMode]   = useState(false);
   const [navCameraFollow, setNavCameraFollow] = useState(false);
+  const [trailFollowSession, setTrailFollowSession] = useState<ActiveTrailFollow | null>(null);
+  const [trailFollowVoiceEnabled, setTrailFollowVoiceEnabled] = useState(true);
+  const [trailRecordingSession, setTrailRecordingSession] = useState<TrailRecordingSessionV1 | null>(null);
+  const [trailRecordingClock, setTrailRecordingClock] = useState(Date.now());
+  const [trailFollowEndVisible, setTrailFollowEndVisible] = useState(false);
   const [navIdx,    setNavIdx]    = useState(0);
   const [routeSteps,  setRouteSteps]  = useState<RouteStep[]>([]);
   const [isRouted,    setIsRouted]    = useState(false);
@@ -7623,6 +7651,10 @@ function MapScreen() {
   const lastAndroidHeadingRef = useRef<{ at: number; raw: number; smooth: number } | null>(null);
   const navModeStateRef  = useRef(navMode);
   const navCameraFollowStateRef = useRef(navCameraFollow);
+  const trailFollowSessionRef = useRef<ActiveTrailFollow | null>(trailFollowSession);
+  const trailFollowVoiceEnabledRef = useRef(trailFollowVoiceEnabled);
+  const beginTrailFollowRef = useRef<(() => void) | null>(null);
+  const trailFollowCueRef = useRef('');
   const lastNavMapGestureRef = useRef(0);
   const lastAndroidLocationDebugRef = useRef<{ at: number; lat: number; lng: number } | null>(null);
   const discoverRef  = useRef<CampsitePin[]>([]);
@@ -8423,6 +8455,83 @@ function MapScreen() {
 
   // Keep refs in sync
   useEffect(() => {
+    trailFollowSessionRef.current = trailFollowSession;
+  }, [trailFollowSession]);
+
+  useEffect(() => {
+    trailFollowVoiceEnabledRef.current = trailFollowVoiceEnabled;
+  }, [trailFollowVoiceEnabled]);
+
+  useEffect(() => {
+    if (!trailRecordingSession || trailRecordingSession.status === 'complete') return;
+    const timer = setInterval(() => setTrailRecordingClock(Date.now()), 1_000);
+    return () => clearInterval(timer);
+  }, [trailRecordingSession?.id, trailRecordingSession?.status]);
+
+  useEffect(() => {
+    let cancelled = false;
+    getActiveTrailRecording().then(recording => {
+      if (cancelled || !recording) return;
+      setTrailRecordingSession(recording);
+      setTrailRecordingClock(Date.now());
+      if (recording.routeCoordinates.length < 2 || trailFollowSessionRef.current) return;
+      const coords = recording.routeCoordinates.map(point => [point[0], point[1]] as [number, number]);
+      const distanceM = trailCoordsDistanceM(coords);
+      const trail: TrailFeature = {
+        id: recording.trailId,
+        name: recording.trailName,
+        lat: coords[0][1],
+        lng: coords[0][0],
+        type: 'trail',
+        source: 'trip',
+        subtitle: 'Saved recording',
+        score: 1,
+        geometry_revision: recording.routeRevision ?? undefined,
+        support: {
+          campsNearby: 0,
+          fuelNearby: 0,
+          waterNearby: 0,
+          reportsNearby: 0,
+          offlineReady: false,
+          readinessLabel: 'Recording on this device',
+        },
+      };
+      const plan: TrailRoutePlan = {
+        id: 'capture',
+        title: recording.trailName,
+        subtitle: 'Recovered trail route',
+        icon: 'walk-outline',
+        coords,
+        distanceM,
+        confidence: 'high',
+        warnings: [],
+        engine: 'Saved route',
+      };
+      setTrailFollowSession({ phase: recording.followActive ? 'recovery' : 'recording_only', trail, plan, metrics: null });
+    }).catch(() => null);
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    if (!mapSurfaceReady || !trailFollowSession || trailFollowSession.phase !== 'recovery') return;
+    const steps = routeStepsForTrailPlan(trailFollowSession.trail, trailFollowSession.plan.coords, trailFollowSession.plan.distanceM);
+    setRouteSteps(steps);
+    setRouteLegs([steps]);
+    setLastRouteCoords(trailFollowSession.plan.coords);
+    lastRouteCoordsRef.current = trailFollowSession.plan.coords;
+    setIsRouted(true);
+    nativeMapRef.current?.restoreRoute(
+      trailFollowSession.plan.coords,
+      steps,
+      [steps],
+      trailFollowSession.plan.distanceM,
+      Math.max(60, trailFollowSession.plan.distanceM / 1.35),
+    );
+    setNavMode(true);
+    setNavCameraFollow(true);
+  }, [mapSurfaceReady, trailFollowSession?.phase]);
+
+  useEffect(() => {
     navRef.current.active = navMode;
     // Keep screen alive during navigation — phone would otherwise sleep in 15s
     if (navMode) {
@@ -8796,10 +8905,48 @@ function MapScreen() {
             postWebMessage(JSON.stringify({ type: 'track_point', lat: pos.lat, lng: pos.lng }));
           }
 
+          const follow = trailFollowSessionRef.current;
+          if (follow && follow.phase !== 'handoff' && follow.phase !== 'recording_only' && follow.phase !== 'complete') {
+            const metrics = evaluateTrailFollow({
+              lat: pos.lat,
+              lng: pos.lng,
+              accuracyM: pos.accuracy,
+              speedMps: rawSpeed,
+              headingDeg: hdg >= 0 ? hdg : null,
+              timestampMs: Number(loc.timestamp ?? Date.now()),
+            }, follow.plan.coords);
+            if (metrics) {
+              const phase = metrics.complete ? 'complete' : metrics.gps === 'weak' ? 'recovery' : 'follow';
+              setTrailFollowSession(current => current && current.trail.id === follow.trail.id
+                ? { ...current, phase, metrics }
+                : current);
+              const cueDue = metrics.gps === 'good'
+                && !metrics.complete
+                && (metrics.offRoute || (metrics.nextCueDistanceM != null && metrics.nextCueDistanceM <= 65));
+              const cueKey = `${metrics.offRoute ? 'off-route' : metrics.nextCue}:${Math.round((metrics.nextCueDistanceM ?? 0) / 20)}`;
+              if (cueDue && trailFollowCueRef.current !== cueKey) {
+                trailFollowCueRef.current = cueKey;
+                Haptics.notificationAsync(
+                  metrics.offRoute
+                    ? Haptics.NotificationFeedbackType.Warning
+                    : Haptics.NotificationFeedbackType.Success,
+                ).catch(() => {});
+                playTrailheadCue('trailGuidance').catch(() => {});
+                if (trailFollowVoiceEnabledRef.current) {
+                  safeSpeech(metrics.offRoute ? 'Return to the trail.' : metrics.nextCue, {
+                    rate: 0.9,
+                    pitch: 1.02,
+                    language: 'en-US',
+                  });
+                }
+              }
+            }
+          }
+
           if (!active) return;
 
           // ── Step advancement + two-phase speed-based announcements ──────
-          {
+          if (!trailFollowSessionRef.current || trailFollowSessionRef.current.phase === 'handoff') {
             const steps = routeStepsRef.current;
             const si    = stepIdxRef.current;
             const cur   = steps[si];
@@ -8936,11 +9083,22 @@ function MapScreen() {
 
           // Single-destination nav (from search) — no trip waypoints
           const singleDest = navDestRef.current;
+          if (trailFollowSessionRef.current?.phase === 'handoff' && singleDest) {
+            const distM = haversineKm(pos.lat, pos.lng, singleDest.lat, singleDest.lng) * 1000;
+            const arriveM = Math.max(35, Math.min(70, (pos.accuracy ?? 20) + 20));
+            setIsApproaching(distM < 800);
+            if (distM < arriveM) beginTrailFollowRef.current?.();
+            return;
+          }
           if (!wps[idx] && singleDest) {
             const distM = haversineKm(pos.lat, pos.lng, singleDest.lat, singleDest.lng) * 1000;
             const arriveM = Math.max(35, Math.min(70, (pos.accuracy ?? 20) + 20));
             setIsApproaching(distM < 800);
             if (distM < arriveM) {
+              if (trailFollowSessionRef.current?.phase === 'handoff') {
+                beginTrailFollowRef.current?.();
+                return;
+              }
               safeSpeech(`You have arrived at ${singleDest.name}.`, { rate: 0.88, pitch: 1.05, language: 'en-US' });
               setTimeout(() => setNavMode(false), 3000);
             }
@@ -10944,7 +11102,17 @@ function MapScreen() {
       setIsRerouting(false);
       focusNavigationCamera(userLoc);
       const dest = navDestRef.current;
-      if (dest && waypoints.length === 0) {
+      const follow = trailFollowSessionRef.current;
+      if (follow && follow.phase !== 'handoff') {
+        // Trail Follow already restored its exact route. It owns guidance and
+        // avoids the ordinary road-navigation route request and startup copy.
+        setRouteLegOffset(0);
+        setNavCameraFollow(true);
+      } else if (follow?.phase === 'handoff' && dest) {
+        const dist = userLoc ? haversineKm(userLoc.lat, userLoc.lng, dest.lat, dest.lng) : null;
+        const distStr = dist && dist > 0.5 ? `, ${speakDistanceKm(dist)} away` : '';
+        safeSpeech(`Heading to ${dest.name}${distStr}.`, { rate: 0.9, pitch: 1.03, language: 'en-US' });
+      } else if (dest && waypoints.length === 0) {
         // Single-destination nav (from search) — route already drawn by route_to_search
         const dist = userLoc ? haversineKm(userLoc.lat, userLoc.lng, dest.lat, dest.lng) : null;
         const distStr = dist && dist > 0.5 ? `, ${speakDistanceKm(dist)} away` : '';
@@ -10989,7 +11157,7 @@ function MapScreen() {
       setRouteLegOffset(0);
       // Restore search card so user can re-navigate without retyping
       const prevDest = navDestRef.current;
-      if (prevDest && waypoints.length === 0) {
+      if (!trailFollowSessionRef.current && prevDest && waypoints.length === 0) {
         const dist = userLoc ? haversineKm(userLoc.lat, userLoc.lng, prevDest.lat, prevDest.lng) : null;
         setSearchRouteCard({ lat: prevDest.lat, lng: prevDest.lng, name: prevDest.name, dist });
         setSearchMode('route_pick');
@@ -21283,7 +21451,9 @@ function MapScreen() {
 
   // ── Nav HUD values ──────────────────────────────────────────────────────────
 
-  const navTarget = navMode ? (waypoints[navIdx] ?? navDest ?? null) : null;
+  const navTarget = navMode
+    ? (trailFollowSession?.phase === 'handoff' ? navDest : (waypoints[navIdx] ?? navDest ?? null))
+    : null;
   const distKm    = userLoc && navTarget ? haversineKm(userLoc.lat, userLoc.lng, navTarget.lat, navTarget.lng) : null;
   const bearing   = userLoc && navTarget ? calcBearing(userLoc.lat, userLoc.lng, navTarget.lat, navTarget.lng) : null;
   const speedMph  = userSpeed !== null && userSpeed > 0 ? userSpeed * 2.237 : null;
@@ -24201,27 +24371,195 @@ function MapScreen() {
     await seedTrailPinCaptureFromTrail(trail);
   }
 
-  function startTrailRoutePlan(trail: TrailFeature, plan: TrailRoutePlan) {
+  function activateTrailFollow(trail: TrailFeature, plan: TrailRoutePlan, phase: ActiveTrailFollow['phase'] = 'follow') {
     const steps = routeStepsForTrailPlan(trail, plan.coords, plan.distanceM);
     const duration = Math.max(60, plan.distanceM / 1.35);
     const last = plan.coords[plan.coords.length - 1];
-    if (navMode) endNavigation();
+    trailFollowCueRef.current = '';
     setRouteProgress(null);
     setRouteFromCache(true);
-    setRouteDebug(`confirmed trail follow: ${plan.title}`);
+    setRouteDebug('Trail Follow active');
     setRouteSteps(steps);
+    routeStepsRef.current = steps;
     setRouteLegs([steps]);
     setLastRouteCoords(plan.coords);
+    lastRouteCoordsRef.current = plan.coords;
+    routeCumulativeRef.current = routeCumulativeDistances(plan.coords);
     setIsRouted(true);
     navDestRef.current = { lat: last[1], lng: last[0], name: trail.name, day: 0, type: 'trail' };
     setNavDest(navDestRef.current);
     nativeMapRef.current?.restoreRoute(plan.coords, steps, [steps], plan.distanceM, duration);
     syncTrailFollowWithCar('trail_follow_active', trail, plan, steps, duration);
+    setTrailFollowSession({ phase, trail, plan, metrics: null });
     setSelectedTrail(null);
     setTrailRouteBuilderOpen(false);
     setTrailCardCollapsed(false);
     setNavMode(true);
+    navRef.current.active = true;
     focusNavigationCamera();
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+    playTrailheadCue('trailGuidance').catch(() => {});
+  }
+
+  beginTrailFollowRef.current = () => {
+    const pending = trailFollowSessionRef.current;
+    if (!pending || pending.phase !== 'handoff') return;
+    activateTrailFollow(pending.trail, pending.plan);
+  };
+
+  function sourceBackedTrailheads(trail: TrailFeature): SourcedTrailhead[] {
+    const profileMatches = selectedTrailProfile && (
+      selectedTrailProfile.id === trail.profile_id
+      || selectedTrailProfile.id === trail.system_v2_id
+      || selectedTrailProfile.name === trail.name
+    );
+    if (!profileMatches) return [];
+    const profileSource = selectedTrailProfile.source_label || selectedTrailProfile.source;
+    return (selectedTrailProfile.trailheads ?? []).map(trailhead => ({
+      ...trailhead,
+      source: trailhead.source || profileSource,
+    }));
+  }
+
+  function startTrailRoutePlan(trail: TrailFeature, plan: TrailRoutePlan) {
+    const decision = resolveTrailFollowStart({
+      fix: userLoc ? {
+        lat: userLoc.lat,
+        lng: userLoc.lng,
+        accuracyM: userLoc.accuracy,
+        speedMps: userSpeed,
+        headingDeg: userHeading,
+        timestampMs: Date.now(),
+      } : null,
+      route: plan.coords,
+      trailheads: sourceBackedTrailheads(trail),
+    });
+    if (decision.kind === 'needs_location') {
+      Alert.alert('Location needed', 'Turn on location to start Trail Follow.');
+      return;
+    }
+    if (decision.kind === 'unavailable') {
+      Alert.alert(
+        'Trail Follow unavailable',
+        decision.reason === 'source_backed_trailhead_missing'
+          ? 'Trailhead directions are not available from a verified source for this route.'
+          : 'A complete route is needed before Trail Follow can start.',
+      );
+      return;
+    }
+    if (decision.kind === 'follow') {
+      activateTrailFollow(trail, plan);
+      return;
+    }
+
+    const trailhead = decision.trailhead;
+    setTrailFollowSession({ phase: 'handoff', trail, plan, trailhead, metrics: null });
+    setSelectedTrail(null);
+    setTrailRouteBuilderOpen(false);
+    setTrailCardCollapsed(false);
+    setRouteProgress(null);
+    setRouteSteps([]);
+    setRouteLegs([]);
+    setIsRouted(false);
+    navDestRef.current = {
+      lat: trailhead.lat,
+      lng: trailhead.lng,
+      name: trailhead.name || `${trail.name} trailhead`,
+      day: 0,
+      type: 'trailhead',
+    };
+    setNavDest(navDestRef.current);
+    if (userLoc) {
+      nativeMapRef.current?.routeToSearch(
+        trailhead.lat,
+        trailhead.lng,
+        navDestRef.current.name,
+        userLoc.lat,
+        userLoc.lng,
+      );
+      postWebMessage(JSON.stringify({
+        type: 'route_to_search',
+        lat: trailhead.lat,
+        lng: trailhead.lng,
+        name: navDestRef.current.name,
+        userLat: userLoc.lat,
+        userLng: userLoc.lng,
+      }));
+    }
+    setNavMode(true);
+    navRef.current.active = true;
+    focusNavigationCamera();
+  }
+
+  function stopTrailFollowOnly() {
+    setTrailFollowEndVisible(false);
+    if (trailRecordingSession && trailRecordingSession.status !== 'complete') {
+      endTrailFollowWithoutStoppingRecording().then(session => {
+        if (session) setTrailRecordingSession(session);
+      }).catch(() => null);
+      setTrailFollowSession(current => current ? { ...current, phase: 'recording_only', metrics: null } : current);
+    } else {
+      setTrailFollowSession(null);
+    }
+    trailFollowCueRef.current = '';
+    endNavigation();
+  }
+
+  async function stopTrailFollowAndSave() {
+    setTrailFollowEndVisible(false);
+    const completed = await endLocalTrailRecording().catch(() => null);
+    if (completed) setTrailRecordingSession(completed);
+    setTrailFollowSession(null);
+    trailFollowCueRef.current = '';
+    endNavigation();
+    setQuickToast(completed?.pointCount ? 'Trail recording saved on this device' : 'Trail Follow ended');
+    setTimeout(() => setQuickToast(''), 2600);
+  }
+
+  function requestStartTrailRecording() {
+    const follow = trailFollowSessionRef.current;
+    if (!follow) return;
+    Alert.alert(
+      'Record this trail?',
+      'Trailhead uses location in the background to record this trail after you lock your phone or switch apps. Recording stops when you pause or end it. Your track stays on this device unless you export it.',
+      [
+        { text: 'Not now', style: 'cancel' },
+        {
+          text: 'Agree & continue',
+          onPress: () => {
+            startLocalTrailRecording({
+              trailId: follow.trail.id,
+              trailName: follow.trail.name,
+              routeRevision: follow.trail.geometry_revision ?? null,
+              routeCoordinates: follow.plan.coords,
+            }).then(recording => {
+              setTrailRecordingSession(recording);
+              setTrailRecordingClock(Date.now());
+            }).catch((error: any) => {
+              Alert.alert(
+                'Recording unavailable',
+                String(error?.message || '').includes('permission')
+                  ? 'Location permission is needed to record this trail.'
+                  : 'Trailhead could not start this recording.',
+              );
+            });
+          },
+        },
+      ],
+    );
+  }
+
+  async function pauseTrailRecordingFromMap() {
+    const paused = await pauseLocalTrailRecording().catch(() => null);
+    if (paused) setTrailRecordingSession(paused);
+  }
+
+  async function resumeTrailRecordingFromMap() {
+    const resumed = await resumeLocalTrailRecording().catch(() => null);
+    if (resumed) {
+      setTrailRecordingSession(resumed);
+      setTrailRecordingClock(Date.now());
+    }
   }
 
   function syncTrailFollowWithCar(
@@ -24922,29 +25260,37 @@ function MapScreen() {
     (!!selectedTrail && !trailCardCollapsed)
   );
   const trailToolPanelActive = trailPinCaptureMode || trailTraceMode || trailRouteBuilderOpen;
+  const trailFollowReportActive = Boolean(trailFollowSession && quickReport);
   const showQuickMapMessage = Boolean(
     (!!quickToast || quickReport) &&
     userLoc &&
-    !navMode &&
-    !safeWaterPlanningActive &&
-    !waterFollowActive &&
-    !androidInlineSearchKeyboardActive &&
-    !scopedMapSearchActive &&
-    !showSearch &&
-    !showMapDrawer &&
     (
-      trailToolPanelActive ||
+      trailFollowReportActive ||
       (
-        !showDiscoveryPanel &&
-        !selectedCamp &&
-        !selectedPlace &&
-        !tappedPoi &&
-        !selectedTrail &&
-        !selectedCommunityPin
+        !navMode &&
+        !safeWaterPlanningActive &&
+        !waterFollowActive &&
+        !androidInlineSearchKeyboardActive &&
+        !scopedMapSearchActive &&
+        !showSearch &&
+        !showMapDrawer &&
+        (
+          trailToolPanelActive ||
+          (
+            !showDiscoveryPanel &&
+            !selectedCamp &&
+            !selectedPlace &&
+            !tappedPoi &&
+            !selectedTrail &&
+            !selectedCommunityPin
+          )
+        )
       )
     )
   );
-  const quickMapMessagePosition = trailToolPanelActive
+  const quickMapMessagePosition = trailFollowReportActive
+    ? { top: Math.max(compassTop + 104, insets.top + 120), left: 16, right: 16 }
+    : trailToolPanelActive
     ? { top: Math.max(compassTop + 56, insets.top + 72), left: 16, right: 16 }
     : { bottom: bottomInset + 78, left: 16, right: 16 };
   const discoveryCamps = useMemo(() => {
@@ -25023,7 +25369,8 @@ function MapScreen() {
     ])
     : activeTripCampPins as unknown as CampsitePin[];
 
-  const nativeNavigationPanel = navMode ? (
+  const trailFollowOwnsHud = Boolean(trailFollowSession && trailFollowSession.phase !== 'handoff');
+  const nativeNavigationPanel = navMode && !trailFollowOwnsHud ? (
     <Animated.View
       testID="map.navigation.hud"
       pointerEvents="box-none"
@@ -25143,7 +25490,7 @@ function MapScreen() {
     </Animated.View>
   ) : null;
 
-  const nativeTurnListPanel = navMode && showSteps && routeSteps.length > 0 ? (
+  const nativeTurnListPanel = navMode && !trailFollowOwnsHud && showSteps && routeSteps.length > 0 ? (
     <View style={s.navTurnsSheet} pointerEvents="auto">
       <View style={s.navTurnsHeader}>
         <View>
@@ -25178,7 +25525,7 @@ function MapScreen() {
     </View>
   ) : null;
 
-  const navLocateButton = navMode && userLoc ? (
+  const navLocateButton = navMode && userLoc && !trailFollowOwnsHud ? (
     <TouchableOpacity
       style={[s.navLocateBtn, navCameraFollow && s.navLocateBtnFollowing]}
       onPress={() => focusNavigationCamera(userLoc)}
@@ -25633,6 +25980,35 @@ function MapScreen() {
         onClose={closeTrailPreview}
         onProgress={setTrailPreviewProgress}
       />
+      {trailFollowSession ? (
+        <TrailFollowHud
+          presentation={{
+            phase: trailFollowSession.phase,
+            trailName: trailFollowSession.trail.name,
+            trailheadName: trailFollowSession.trailhead?.name,
+            metrics: trailFollowSession.metrics,
+          }}
+          recording={trailRecordingSession?.status === 'complete' ? null : trailRecordingSession}
+          elapsedMs={trailRecordingSession ? recordingElapsedMs(trailRecordingSession, trailRecordingClock) : 0}
+          voiceEnabled={trailFollowVoiceEnabled}
+          compass={<ThreeNeedleCompass heading={userHeading} bearing={trailFollowSession.metrics?.bearingDeg ?? null} compact />}
+          onStartNearby={() => beginTrailFollowRef.current?.()}
+          onToggleVoice={() => setTrailFollowVoiceEnabled(enabled => !enabled)}
+          onStartRecording={requestStartTrailRecording}
+          onPauseRecording={pauseTrailRecordingFromMap}
+          onResumeRecording={resumeTrailRecordingFromMap}
+          onOpenRoute={() => focusNavigationCamera()}
+          onReport={() => {
+            setQuickTypeIdx(null);
+            setQuickReport(true);
+          }}
+          onEnd={() => setTrailFollowEndVisible(true)}
+          endVisible={trailFollowEndVisible}
+          onDismissEnd={() => setTrailFollowEndVisible(false)}
+          onEndAndSave={stopTrailFollowAndSave}
+          onEndFollowOnly={stopTrailFollowOnly}
+        />
+      ) : null}
       {nativeNavigationPanel}
       {nativeTurnListPanel}
       {navLocateButton}
@@ -30151,7 +30527,7 @@ function MapScreen() {
       </Modal>
 
       {/* ── Navigation HUD ── */}
-      {!useNativeMapSurface && navMode && (
+      {!useNativeMapSurface && navMode && !trailFollowOwnsHud && (
         <View style={s.navHud} pointerEvents="auto" testID="map.navigation.hud">
 
         {/* Turn instruction strip — arriving / rerouting / proceed-to-route / normal */}

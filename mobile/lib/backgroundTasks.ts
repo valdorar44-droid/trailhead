@@ -8,8 +8,22 @@ import * as Notifications from 'expo-notifications';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
 import { accountStorage, storage } from './storage';
+import { appendTrailRecordingPoint } from './trailRecordingRepository';
+import { recordingPointFromLocation } from './trailRecordingSession';
+import { TRAIL_RECORDING_LOCATION_TASK } from './trailRecordingRuntime';
 
 export const AUDIO_LOCATION_TASK = 'trailhead-audio-watch';
+
+if (Platform.OS !== 'web' && !TaskManager.isTaskDefined(TRAIL_RECORDING_LOCATION_TASK)) {
+  TaskManager.defineTask(TRAIL_RECORDING_LOCATION_TASK, async ({ data, error }: any) => {
+    if (error) return;
+    const locations = Array.isArray(data?.locations) ? data.locations : [];
+    for (const location of locations) {
+      if (!location?.coords) continue;
+      await appendTrailRecordingPoint(recordingPointFromLocation(location)).catch(() => null);
+    }
+  });
+}
 
 // Minimum interval (ms) between notifications for the same waypoint
 const RENOTIFY_INTERVAL_MS = 30 * 60 * 1000;

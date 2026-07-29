@@ -177,7 +177,7 @@ const ACCOUNT_LOCAL_KEYS = [
 ];
 const ANONYMOUS_LEGACY_STASH_KEY = 'trailhead_anonymous_legacy_stash_v1';
 const ANONYMOUS_LEGACY_STASH_DIR = 'anonymous_legacy_stash_v1';
-const PRIVATE_DIRECTORIES = ['offline_trips', 'offline_routes', 'offline_place_packs', 'offline_trails', 'routes'];
+const PRIVATE_DIRECTORIES = ['offline_trips', 'offline_routes', 'offline_place_packs', 'offline_trails', 'routes', 'trail_recordings'];
 
 function isPrivateRootFile(name: string) {
   return name === 'active_trip.json'

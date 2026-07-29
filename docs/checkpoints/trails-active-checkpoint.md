@@ -350,3 +350,23 @@ Verify the staged file list before every commit.
 3. Add concise chime/haptic guidance, optional voice, GPS/off-route confidence gates, durable local pause/resume, explicit End semantics and user-initiated GPX export.
 4. Update the Android foreground-service and iOS location-purpose disclosure only as required for explicit trail recording, increment both runtime suffixes, and build Android first from one immutable SHA.
 5. Do not repeat T1-T4, Layers, Memory Gate, NPS, Originals, Android Auto, Camp Guide, Search or store-screenshot work.
+
+### T5 implementation ready for Android candidate (2026-07-29T01:10:26-05:00)
+
+- Branch `feat/trailhead-1.0.10-overhaul`; implementation parent HEAD `c6d4d5f6808eda9e2ccfee7e23bb8e06a51d3061`. Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4` and remains excluded with `.cursor/` and every unrelated dirty file.
+- The consumer Follow, recording, recovery and handoff UI remains on the existing `NativeMap`. There is no second renderer or trail map. The shared route, main-map compass, Mapbox style, offline artifacts and Android Auto state remain authoritative.
+- Added a pure source-backed start resolver and Follow state evaluation. Starts near the canonical route enter Follow; distant Starts route to a sourced trailhead; absent sourced access produces an honest unavailable state. Good GPS is required for confident fork/off-route cues.
+- Added one map HUD for handoff, Follow, weak-GPS recovery and recording-only states. It provides the approved compact route cue, compass, progress, concise haptic/chime guidance, optional voice, Record/Pause/Resume, Route, Report and explicit End choices.
+- Added local-only `TrailRecordingSessionV1` storage using Expo SQLite. Raw track points never enter APIs or telemetry, are cleared by the existing private-storage cleanup, and leave the device only through an explicit GPX export. The explicit Android recording task uses a foreground notification; iOS requests background access only after the recording disclosure and action.
+- Durable recovery preserves canonical route revision and recording status. `End Follow only` persists `follow_active=0`, so a reopened app remains recording-only rather than silently restarting Follow. `End & save` stops recording/location and completes the local track.
+- Fixed the active-trip handoff boundary: while the Follow controller owns handoff, its sourced trailhead destination takes precedence over trip waypoints and arrival transitions once into Follow.
+- Native/runtime inputs now target Android `native-1.0.10-android.7` and iOS `native-1.0.10-ios.6`; background-use strings include active trail recording. The existing installed paired preview remains Android build `68`, runtime `.6`, update `019fac0c-d0b8-78cb-8dcb-c3c64115c515`, and iOS runtime `.5`, update `019fac0c-d0b8-75fe-b676-6c402aded4b5`; it cannot receive this native packet through OTA.
+- Focused verification passed: Follow/recording/map contract; Trails V2 `6/6`; Trail sheet flow `6/6`; Trail hydration `4/4`; Trail Builder `6/6`; TypeScript; native drift; privacy controls; whitespace; Android `testDebugUnitTest`; Android `assembleDebug`. Missing external build values in the local privacy run were warnings only and are required in EAS. Debug APK SHA-256 `b8aebb5863a39b0299b9c4d2fb4ad138152dea2ca221e48d31737c71c88c2ccd`.
+- Connected Android device is Samsung `SM-A326U1`, serial `RFCR408DA9B`. Task-owned Metro, Gradle, Maestro, Expo publisher, emulator and test processes: none. Shared Codex/MCP/ADB processes are not task-owned.
+- Open gate: commit and push only the named T5 files, create the Android `.7` preview build from that immutable SHA, install it without clearing the user's data, and run the bounded physical delta: sourced handoff, explicit Nearby transition, Follow compass/cues, weak GPS, Record/Home/lock/notification, pause/resume, End Follow only recovery, End & save, GPX export, and process survival. iOS `.6` is built from the exact accepted SHA only after Android passes.
+
+#### Do not repeat after this checkpoint
+
+- Do not reopen T1-T4, Offline acceptance, style switching, Layers, Memory Gate, Yellowstone, NPS, Originals, Android Auto, Camp Guide, Search or store screenshots without new evidence.
+- Do not introduce another map, renderer, progress store or cloud track sync. Do not log coordinates, route geometry, search text or recording points.
+- Do not publish an OTA to the old `.6`/`.5` runtimes. T5 is a paired native packet.

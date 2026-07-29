@@ -184,7 +184,7 @@ export async function preloadTrailheadVoice(text: string, mode: VoiceMode = 'fly
   }
 }
 
-export async function playTrailheadCue(name: 'copilotListening') {
+export async function playTrailheadCue(name: 'copilotListening' | 'trailGuidance') {
   const requestId = cueRequestId + 1;
   cueRequestId = requestId;
   try {
@@ -212,7 +212,7 @@ export async function playTrailheadCue(name: 'copilotListening') {
       await releaseCueAudioFocus(requestId);
       return;
     }
-    const cueSource = { copilotListening: COPILOT_LISTENING_CUE }[name];
+    const cueSource = { copilotListening: COPILOT_LISTENING_CUE, trailGuidance: COPILOT_LISTENING_CUE }[name];
     let cueSound: Audio.Sound | null = null;
     const created = await Audio.Sound.createAsync(
       cueSource,

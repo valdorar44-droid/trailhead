@@ -124,6 +124,9 @@ test('map selection rejects stale systems and mounts the resolved GeoJSON layer'
   assert.match(mapSource, /highlightResolvedTrail\(geometry/);
   assert.match(mapSource, /api\.getTrailSystem\(trail\.system_v2_id\)/);
   assert.match(nativeMapSource, /id="trailhead-selected-trail"/);
+  assert.match(nativeMapSource, /id="trailhead-selected-trail-finish-diamond"/);
+  assert.match(nativeMapSource, /id="trailhead-follow-finish-diamond"/);
+  assert.match(nativeMapSource, /textColor: '#F5C84B'/);
   assert.match(nativeMapSource, /lineColor: '#AD5A33'/);
   assert.match(nativeMapSource, /\.\.\.mapboxTopSlotProps/);
 });

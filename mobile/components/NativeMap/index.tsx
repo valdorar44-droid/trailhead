@@ -308,6 +308,8 @@ export interface NativeMapProps {
   userLoc:     { lat: number; lng: number; accuracy?: number | null } | null;
   navMode:     boolean;
   navCameraFollow?: boolean;
+  /** Show trail-only route affordances while Trail Follow owns navigation. */
+  trailFollowActive?: boolean;
   nativeNavEngineActive?: boolean;
   navIdx:      number;
   navHeading:  number | null;
@@ -916,7 +918,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     cameraOwnership = BROWSE_MAP_CAMERA_OWNERSHIP,
     initialCameraBounds,
     waypoints, camps, gas, pois, offlineTrailFeatures = emptyFC(), waterNavLines, waterSpotCards = [], waterCorridor = null, waterFollowRoute = null, reports, communityPins, searchMarker,
-    userLoc, navMode, navCameraFollow = false, nativeNavEngineActive = false, navIdx, navHeading, navSpeed,
+    userLoc, navMode, navCameraFollow = false, trailFollowActive = false, nativeNavEngineActive = false, navIdx, navHeading, navSpeed,
     mapLayer, routeProviderMode = 'trailhead', routeOpts, rendererMode,
     traceMode = false, traceDraftCoords = [], traceRouteCoords = [], tracePinCoords = [],
     trailPreviewCoords = [], trailPreviewProgress = 0, trailPreviewTone = 'cyan',
@@ -2788,6 +2790,27 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     };
   }, [trailPreviewCoords, trailPreviewProgress, trailPreviewTone]);
 
+  const trailHighlightFinish = useMemo(() => {
+    const coords = resolvedTrailCoordinates(trailHighlight);
+    const finish = coords[coords.length - 1];
+    if (!finish) return emptyFC();
+    return pointFC([{
+      type: 'Feature' as const,
+      geometry: { type: 'Point' as const, coordinates: finish },
+      properties: { role: 'finish' },
+    }]);
+  }, [trailHighlight]);
+
+  const trailFollowFinish = useMemo(() => {
+    const finish = routeCoords[routeCoords.length - 1];
+    if (!trailFollowActive || !finish) return emptyFC();
+    return pointFC([{
+      type: 'Feature' as const,
+      geometry: { type: 'Point' as const, coordinates: finish },
+      properties: { role: 'finish' },
+    }]);
+  }, [routeCoords, trailFollowActive]);
+
   const routeBuildVisual = useMemo(() => {
     const split = splitLineAtProgress(routeBuildCoords, routeBuildReveal);
     return {
@@ -3924,6 +3947,24 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           />
         </MapGL.ShapeSource>
       )}
+      {trailFollowFinish.features.length > 0 && !waterRouteVisualActive && !routeBuildActive && !originalsRouteVisual.active ? (
+        <MapGL.ShapeSource id="trailhead-follow-finish" shape={trailFollowFinish}>
+          <MapGL.SymbolLayer
+            id="trailhead-follow-finish-diamond"
+            {...mapboxTopSlotProps}
+            style={{
+              textField: '◆',
+              textSize: ['interpolate', ['linear'], ['zoom'], 8, 14, 13, 20, 16, 25],
+              textColor: '#F5C84B',
+              textHaloColor: '#111412',
+              textHaloWidth: 2,
+              textFont: ['Open Sans Bold'],
+              textAllowOverlap: true,
+              textIgnorePlacement: true,
+            } as any}
+          />
+        </MapGL.ShapeSource>
+      ) : null}
 
       {/* ── Mission briefing overlays ─────────────────────────────────── */}
       {missionBriefActive && missionBriefFullRoute.length > 1 && (
@@ -4792,30 +4833,49 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         </MapGL.MarkerView>
       ))}
       {trailHighlight.features.length > 0 && !trailPreviewVisual.active && (
-        <MapGL.ShapeSource id="trailhead-selected-trail" shape={trailHighlight}>
-          <MapGL.LineLayer
-            id="trailhead-selected-trail-casing"
-            {...mapboxTopSlotProps}
-            style={{
-              lineColor: 'rgba(247,248,246,0.94)',
-              lineWidth: ['interpolate', ['linear'], ['zoom'], 8, 6, 13, 10, 16, 14],
-              lineOpacity: 0.98,
-              lineCap: 'round',
-              lineJoin: 'round',
-            } as any}
-          />
-          <MapGL.LineLayer
-            id="trailhead-selected-trail-line"
-            {...mapboxTopSlotProps}
-            style={{
-              lineColor: '#AD5A33',
-              lineWidth: ['interpolate', ['linear'], ['zoom'], 8, 2.8, 13, 5, 16, 7],
-              lineOpacity: 1,
-              lineCap: 'round',
-              lineJoin: 'round',
-            } as any}
-          />
-        </MapGL.ShapeSource>
+        <>
+          <MapGL.ShapeSource id="trailhead-selected-trail" shape={trailHighlight}>
+            <MapGL.LineLayer
+              id="trailhead-selected-trail-casing"
+              {...mapboxTopSlotProps}
+              style={{
+                lineColor: 'rgba(247,248,246,0.94)',
+                lineWidth: ['interpolate', ['linear'], ['zoom'], 8, 6, 13, 10, 16, 14],
+                lineOpacity: 0.98,
+                lineCap: 'round',
+                lineJoin: 'round',
+              } as any}
+            />
+            <MapGL.LineLayer
+              id="trailhead-selected-trail-line"
+              {...mapboxTopSlotProps}
+              style={{
+                lineColor: '#AD5A33',
+                lineWidth: ['interpolate', ['linear'], ['zoom'], 8, 2.8, 13, 5, 16, 7],
+                lineOpacity: 1,
+                lineCap: 'round',
+                lineJoin: 'round',
+              } as any}
+            />
+          </MapGL.ShapeSource>
+          {trailHighlightFinish.features.length > 0 ? (
+            <MapGL.ShapeSource id="trailhead-selected-trail-finish" shape={trailHighlightFinish}>
+              <MapGL.SymbolLayer
+                id="trailhead-selected-trail-finish-diamond"
+                {...mapboxTopSlotProps}
+                style={{
+                  textField: '◆',
+                  textSize: ['interpolate', ['linear'], ['zoom'], 8, 14, 13, 20, 16, 25],
+                  textColor: '#F5C84B',
+                  textHaloColor: '#111412',
+                  textHaloWidth: 2,
+                  textAllowOverlap: true,
+                  textIgnorePlacement: true,
+                } as any}
+              />
+            </MapGL.ShapeSource>
+          ) : null}
+        </>
       )}
         </>
       ) : null}

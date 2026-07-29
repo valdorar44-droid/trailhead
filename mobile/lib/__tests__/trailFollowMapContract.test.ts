@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { trailFollowCameraAction, transitionTrailFollowCamera } from '../trailFollowCameraOwnership';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const map = fs.readFileSync(path.resolve(here, '../../app/(tabs)/map.tsx'), 'utf8');
@@ -21,8 +22,11 @@ assert.match(map, /const presentTrailFollowRoute = useCallback/);
 assert.match(map, /const presentTrailFollowHandoffContext = useCallback/);
 assert.match(map, /nativeMapRef\.current\?\.highlightResolvedTrail\(geometry/);
 assert.match(map, /if \(handoff\?\.phase === 'handoff'\)[\s\S]*presentTrailFollowHandoffContext\(handoff\)/);
-assert.match(map, /presentTrailFollowRoute\(trailFollowSession, true\)/);
-assert.match(map, /onOpenRoute=\{\(\) => \{[\s\S]*presentTrailFollowRoute\(session, true\)/);
+assert.match(map, /presentTrailFollowRoute\(trailFollowSession, trailFollowCameraMode === 'route_overview'\)/);
+assert.match(map, /onOpenRoute=\{\(\) => \{[\s\S]*transitionTrailFollowCamera\(trailFollowCameraModeRef\.current, 'route_button'\)/);
+assert.match(map, /navCameraFollowStateRef\.current = false;\s*setNavCameraFollow\(false\)/);
+assert.match(map, /cameraMode=\{trailFollowCameraMode\}/);
+assert.match(map, /trailFollowActive=\{trailFollowSession\?\.phase === 'follow'/);
 assert.match(map, /!trailFollowSession && routeFromCache && navMode/);
 assert.match(map, /!trailFollowSession && !!routeDebug && !isRouted/);
 assert.match(map, /handoffRouteUnavailable: trailFollowSession\.phase === 'handoff'/);
@@ -50,5 +54,10 @@ assert.doesNotMatch(repository, /fetch\(|api\.|analytics|telemetry/i);
 
 assert.match(config, /isAndroidBackgroundLocationEnabled: false/);
 assert.match(config, /active trail recording can continue/);
+
+assert.equal(transitionTrailFollowCamera('follow', 'route_button'), 'route_overview');
+assert.equal(transitionTrailFollowCamera('route_overview', 'gesture'), 'free');
+assert.equal(transitionTrailFollowCamera('free', 'route_button'), 'follow');
+assert.deepEqual(trailFollowCameraAction('route_overview'), { label: 'Recenter', icon: 'locate-outline' });
 
 console.log('trail follow map contract tests passed');

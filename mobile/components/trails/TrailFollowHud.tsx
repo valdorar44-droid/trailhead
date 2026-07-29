@@ -6,6 +6,7 @@ import { useTheme } from '@/lib/design';
 import { trailheadFonts } from '@/lib/typography';
 import type { TrailFollowMetrics } from '@/lib/trailFollowSession';
 import type { TrailRecordingSessionV1 } from '@/lib/trailRecordingSession';
+import { trailFollowCameraAction, type TrailFollowCameraMode } from '@/lib/trailFollowCameraOwnership';
 
 export type TrailFollowPresentation = Readonly<{
   phase: 'handoff' | 'follow' | 'recovery' | 'recording_only' | 'complete';
@@ -20,6 +21,7 @@ type Props = Readonly<{
   recording: TrailRecordingSessionV1 | null;
   elapsedMs: number;
   voiceEnabled: boolean;
+  cameraMode: TrailFollowCameraMode;
   compass: ReactNode;
   onStartNearby: () => void;
   onToggleVoice: () => void;
@@ -53,6 +55,7 @@ export default function TrailFollowHud({
   recording,
   elapsedMs,
   voiceEnabled,
+  cameraMode,
   compass,
   onStartNearby,
   onToggleVoice,
@@ -73,6 +76,7 @@ export default function TrailFollowHud({
   const weakGps = metrics?.gps === 'weak';
   const recordingActive = recording?.status === 'recording';
   const recordingPaused = recording?.status === 'paused';
+  const cameraAction = trailFollowCameraAction(cameraMode);
 
   if (presentation.phase === 'handoff') {
     const routeUnavailable = presentation.handoffRouteUnavailable === true;
@@ -178,7 +182,7 @@ export default function TrailFollowHud({
           <View style={styles.secondaryRow}>
             {[
               { id: 'sound', label: voiceEnabled ? 'Sound on' : 'Sound off', icon: voiceEnabled ? 'volume-high-outline' : 'volume-mute-outline', press: onToggleVoice },
-              { id: 'route', label: 'Route', icon: 'map-outline', press: onOpenRoute },
+              { id: 'route', label: cameraAction.label, icon: cameraAction.icon, press: onOpenRoute },
               { id: 'report', label: 'Report', icon: 'alert-circle-outline', press: onReport },
             ].map(action => (
               <TouchableOpacity

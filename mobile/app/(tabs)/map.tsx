@@ -201,6 +201,10 @@ import {
   type TrailFollowMetrics,
 } from '@/lib/trailFollowSession';
 import {
+  transitionTrailFollowCamera,
+  type TrailFollowCameraMode,
+} from '@/lib/trailFollowCameraOwnership';
+import {
   endLocalTrailRecording,
   endTrailFollowWithoutStoppingRecording,
   getActiveTrailRecording,
@@ -6460,6 +6464,7 @@ function MapScreen() {
   const [navCameraFollow, setNavCameraFollow] = useState(false);
   const [trailFollowSession, setTrailFollowSession] = useState<ActiveTrailFollow | null>(null);
   const [trailFollowVoiceEnabled, setTrailFollowVoiceEnabled] = useState(true);
+  const [trailFollowCameraMode, setTrailFollowCameraMode] = useState<TrailFollowCameraMode>('follow');
   const [trailRecordingSession, setTrailRecordingSession] = useState<TrailRecordingSessionV1 | null>(null);
   const [trailRecordingClock, setTrailRecordingClock] = useState(Date.now());
   const [trailFollowEndVisible, setTrailFollowEndVisible] = useState(false);
@@ -7680,6 +7685,7 @@ function MapScreen() {
   const navModeStateRef  = useRef(navMode);
   const navCameraFollowStateRef = useRef(navCameraFollow);
   const trailFollowSessionRef = useRef<ActiveTrailFollow | null>(trailFollowSession);
+  const trailFollowCameraModeRef = useRef<TrailFollowCameraMode>(trailFollowCameraMode);
   const trailFollowVoiceEnabledRef = useRef(trailFollowVoiceEnabled);
   const beginTrailFollowRef = useRef<(() => void) | null>(null);
   const trailFollowCueRef = useRef('');
@@ -8031,6 +8037,10 @@ function MapScreen() {
   useEffect(() => {
     navCameraFollowStateRef.current = navCameraFollow;
   }, [navCameraFollow]);
+
+  useEffect(() => {
+    trailFollowCameraModeRef.current = trailFollowCameraMode;
+  }, [trailFollowCameraMode]);
 
   useEffect(() => {
     offlineAreaBoxRef.current = offlineAreaBox;
@@ -8609,10 +8619,10 @@ function MapScreen() {
       return;
     }
     if (trailFollowSession.phase !== 'follow' && trailFollowSession.phase !== 'recovery') return;
-    presentTrailFollowRoute(trailFollowSession, true);
+    presentTrailFollowRoute(trailFollowSession, trailFollowCameraMode === 'route_overview');
     if (trailFollowSession.phase === 'recovery') {
       setNavMode(true);
-      setNavCameraFollow(true);
+      if (trailFollowCameraMode === 'follow') setNavCameraFollow(true);
     }
   }, [
     mapStyleGeneration,
@@ -8621,6 +8631,7 @@ function MapScreen() {
     presentTrailFollowHandoffContext,
     presentTrailFollowRoute,
     routeDebug,
+    trailFollowCameraMode,
     trailFollowSession?.phase,
     trailFollowSession?.plan.id,
   ]);
@@ -21652,6 +21663,7 @@ function MapScreen() {
 
   function focusNavigationCamera(loc = userLoc) {
     if (!loc) return;
+    navCameraFollowStateRef.current = true;
     setNavCameraFollow(true);
     const hdg = smoothedHdgRef.current ?? userHeading ?? -1;
     postWebMessage(JSON.stringify({
@@ -24485,6 +24497,8 @@ function MapScreen() {
     nativeMapRef.current?.restoreRoute(plan.coords, steps, [steps], plan.distanceM, duration);
     syncTrailFollowWithCar('trail_follow_active', trail, plan, steps, duration);
     setTrailFollowSession({ phase, trail, plan, metrics: null });
+    trailFollowCameraModeRef.current = 'follow';
+    setTrailFollowCameraMode('follow');
     setSelectedTrail(null);
     setTrailRouteBuilderOpen(false);
     setTrailCardCollapsed(false);
@@ -24625,6 +24639,8 @@ function MapScreen() {
 
   function stopTrailFollowOnly() {
     setTrailFollowEndVisible(false);
+    trailFollowCameraModeRef.current = 'follow';
+    setTrailFollowCameraMode('follow');
     if (trailRecordingSession && trailRecordingSession.status !== 'complete') {
       endTrailFollowWithoutStoppingRecording().then(session => {
         if (session) setTrailRecordingSession(session);
@@ -24639,6 +24655,8 @@ function MapScreen() {
 
   async function stopTrailFollowAndSave() {
     setTrailFollowEndVisible(false);
+    trailFollowCameraModeRef.current = 'follow';
+    setTrailFollowCameraMode('follow');
     const completed = await endLocalTrailRecording().catch(() => null);
     if (completed) setTrailRecordingSession(completed);
     setTrailFollowSession(null);
@@ -25732,6 +25750,7 @@ function MapScreen() {
           userLoc={userLoc}
           navMode={navMode}
           navCameraFollow={navCameraFollow}
+          trailFollowActive={trailFollowSession?.phase === 'follow' || trailFollowSession?.phase === 'recovery'}
           nativeNavEngineActive={USE_IOS_NATIVE_NAV_ENGINE}
           navIdx={navRef.current.idx}
           navHeading={smoothedHdgRef.current}
@@ -25838,6 +25857,11 @@ function MapScreen() {
               setMapSearchAreaDirty(true);
             }
             if (trailPreviewOpen) setTrailPreviewPauseSignal(v => v + 1);
+            if (trailFollowSessionRef.current && trailFollowSessionRef.current.phase !== 'handoff') {
+              const next = transitionTrailFollowCamera(trailFollowCameraModeRef.current, 'gesture');
+              trailFollowCameraModeRef.current = next;
+              setTrailFollowCameraMode(next);
+            }
             if (navModeStateRef.current) {
               const recentlyHandled = now - lastNavMapGestureRef.current < 1200;
               if (navCameraFollowStateRef.current && !recentlyHandled) {
@@ -26163,6 +26187,7 @@ function MapScreen() {
           recording={trailRecordingSession?.status === 'complete' ? null : trailRecordingSession}
           elapsedMs={trailRecordingSession ? recordingElapsedMs(trailRecordingSession, trailRecordingClock) : 0}
           voiceEnabled={trailFollowVoiceEnabled}
+          cameraMode={trailFollowCameraMode}
           compass={<ThreeNeedleCompass heading={userHeading} bearing={trailFollowSession.metrics?.bearingDeg ?? null} compact />}
           onStartNearby={() => beginTrailFollowRef.current?.()}
           onToggleVoice={() => setTrailFollowVoiceEnabled(enabled => !enabled)}
@@ -26171,7 +26196,16 @@ function MapScreen() {
           onResumeRecording={resumeTrailRecordingFromMap}
           onOpenRoute={() => {
             const session = trailFollowSessionRef.current;
-            if (session) presentTrailFollowRoute(session, true);
+            if (!session) return;
+            const next = transitionTrailFollowCamera(trailFollowCameraModeRef.current, 'route_button');
+            trailFollowCameraModeRef.current = next;
+            setTrailFollowCameraMode(next);
+            if (next === 'follow') {
+              focusNavigationCamera(userLoc);
+              return;
+            }
+            navCameraFollowStateRef.current = false;
+            setNavCameraFollow(false);
           }}
           onReport={() => {
             setQuickTypeIdx(null);

@@ -3,6 +3,7 @@ import type { OfflineRendererDownloadAdapter, OfflineTransferProgress } from './
 import {
   awaitRnMapboxOfflinePackReady,
   classifyRnMapboxNativeFailure,
+  recordRnMapboxOfflineLifecycleTerminalCode,
   RnMapboxOfflineLifecycleError,
   type RnMapboxNativeFailureSnapshot,
 } from './rnMapboxPackLifecycle';
@@ -110,8 +111,10 @@ export function createRnMapboxOfflineDownloadAdapter(): OfflineRendererDownloadA
           });
         } catch (error) {
           const category = classifyRnMapboxNativeFailure((error as { message?: unknown } | null)?.message);
+          const code = `rnmapbox_${category}_before_registration`;
+          recordRnMapboxOfflineLifecycleTerminalCode(code);
           throw new RnMapboxOfflineLifecycleError(
-            `rnmapbox_${category}_before_registration`,
+            code,
             'The offline map could not be created. Try again.',
           );
         }

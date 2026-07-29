@@ -37,6 +37,14 @@ export type QaDiagnosticsSnapshotV1 = {
     pointCountUnknownPackCount: number;
     storageBytes: number;
   };
+  offlineRendererLifecycle: {
+    terminalCode: string | null;
+    events: Array<{
+      phase: string;
+      elapsedMs: number;
+      progressBucket?: number;
+    }>;
+  };
   runtimeMemory: {
     jsHeapTotalBytes: number;
     jsHeapUsedBytes: number;
@@ -69,7 +77,12 @@ export type QaDiagnosticsSnapshotV1 = {
   original: { packId: string; version: number } | null;
 };
 
-type QaDiagnosticsInputV1 = Omit<QaDiagnosticsSnapshotV1, 'schema'> & Record<string, unknown>;
+type QaDiagnosticsInputV1 = Omit<
+  QaDiagnosticsSnapshotV1,
+  'schema' | 'offlineRendererLifecycle'
+> & {
+  offlineRendererLifecycle?: unknown;
+} & Record<string, unknown>;
 
 function boundedCount(value: unknown): number {
   const count = Number(value);
@@ -96,6 +109,55 @@ function originalsStage(value: unknown): 'off' | 'internal' | 'public_beta' | 'p
   return ['off', 'internal', 'public_beta', 'public'].includes(String(value))
     ? value as 'off' | 'internal' | 'public_beta' | 'public'
     : 'off';
+}
+
+const OFFLINE_RENDERER_PHASES = new Set([
+  'waiting_for_pack',
+  'pack_registered',
+  'progress_observed',
+  'native_error_canceled',
+  'native_error_network',
+  'native_error_resource',
+  'native_error_other',
+  'native_error_recovered',
+  'pack_missing',
+  'pack_stalled',
+  'complete',
+  'paused',
+  'timed_out',
+]);
+
+const OFFLINE_RENDERER_TERMINAL_CODES = new Set([
+  'rnmapbox_pack_timed_out',
+  'rnmapbox_pack_missing',
+  ...['canceled', 'network', 'resource', 'other'].flatMap(category => [
+    `rnmapbox_${category}_before_registration`,
+    `rnmapbox_${category}_pack_missing`,
+    `rnmapbox_${category}_pack_stalled`,
+  ]),
+]);
+
+function offlineRendererLifecycle(value: any): QaDiagnosticsSnapshotV1['offlineRendererLifecycle'] {
+  const terminalCode = OFFLINE_RENDERER_TERMINAL_CODES.has(String(value?.terminal_code))
+    ? String(value.terminal_code)
+    : null;
+  const events = (Array.isArray(value?.events) ? value.events : [])
+    .slice(-24)
+    .flatMap((event: any) => {
+      const phase = String(event?.phase || '');
+      if (!OFFLINE_RENDERER_PHASES.has(phase)) return [];
+      const elapsedMs = Math.min(24 * 60 * 60 * 1_000, boundedCount(event?.elapsed_ms));
+      const rawBucket = Number(event?.progress_bucket);
+      const progressBucket = Number.isFinite(rawBucket)
+        ? Math.max(0, Math.min(100, Math.floor(rawBucket / 10) * 10))
+        : undefined;
+      return [{
+        phase,
+        elapsedMs,
+        ...(progressBucket === undefined ? {} : { progressBucket }),
+      }];
+    });
+  return { terminalCode, events };
 }
 
 export function buildQaDiagnosticsSnapshotV1(input: QaDiagnosticsInputV1): QaDiagnosticsSnapshotV1 {
@@ -142,6 +204,7 @@ export function buildQaDiagnosticsSnapshotV1(input: QaDiagnosticsInputV1): QaDia
       ),
       storageBytes: boundedBytes(input.offlinePlacePacksV1?.storageBytes),
     },
+    offlineRendererLifecycle: offlineRendererLifecycle(input.offlineRendererLifecycle),
     runtimeMemory: {
       jsHeapTotalBytes: boundedBytes(input.runtimeMemory?.jsHeapTotalBytes),
       jsHeapUsedBytes: boundedBytes(input.runtimeMemory?.jsHeapUsedBytes),

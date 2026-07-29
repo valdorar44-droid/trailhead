@@ -18,6 +18,7 @@ import { api } from '@/lib/api';
 import { useTheme } from '@/lib/design';
 import { getOfflinePlacePackDiagnosticsInventory } from '@/lib/offlinePlacePacks';
 import { createExpoOfflineV2Persistence } from '@/lib/offlineV2/expoAdapters';
+import { getLastRnMapboxOfflineLifecycleDiagnostics } from '@/lib/offlineV2/rnMapboxPackLifecycle';
 import { useOriginalsRuntime } from '@/lib/originals/runtime';
 import {
   buildQaDiagnosticsSnapshotV1,
@@ -154,6 +155,7 @@ export default function TelemetryQaScreen() {
         },
         offlineBundles,
         offlinePlacePacksV1,
+        offlineRendererLifecycle: getLastRnMapboxOfflineLifecycleDiagnostics(),
         runtimeMemory: {
           jsHeapTotalBytes: jsMemory?.totalJSHeapSize,
           jsHeapUsedBytes: jsMemory?.usedJSHeapSize,

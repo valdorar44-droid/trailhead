@@ -8,6 +8,7 @@ import { createOrRecoverRnMapboxPack } from '../rnMapboxPackRecovery';
 import {
   awaitRnMapboxOfflinePackReady,
   classifyRnMapboxNativeFailure,
+  getLastRnMapboxOfflineLifecycleDiagnostics,
   getLastRnMapboxOfflineLifecycleTrace,
 } from '../rnMapboxPackLifecycle';
 
@@ -107,6 +108,7 @@ async function verifyNativePackLifecycle() {
   }), pack, 'a native callback error is transient while the exact pack advances');
   assert.ok(getLastRnMapboxOfflineLifecycleTrace().some(event => event.phase === 'native_error_recovered'));
   assert.equal(getLastRnMapboxOfflineLifecycleTrace().at(-1)?.phase, 'complete');
+  assert.equal(getLastRnMapboxOfflineLifecycleDiagnostics().terminal_code, null);
 
   clock = 0;
   await assert.rejects(
@@ -135,6 +137,11 @@ async function verifyNativePackLifecycle() {
     }),
     (error: unknown) => (error as { code?: string }).code === 'rnmapbox_canceled_pack_stalled',
   );
+  assert.equal(
+    getLastRnMapboxOfflineLifecycleDiagnostics().terminal_code,
+    'rnmapbox_canceled_pack_stalled',
+  );
+  assert.equal(getLastRnMapboxOfflineLifecycleDiagnostics().events.at(-1)?.phase, 'pack_stalled');
 
   const controller = new AbortController();
   controller.abort();

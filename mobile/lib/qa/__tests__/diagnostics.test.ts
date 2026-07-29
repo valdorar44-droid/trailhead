@@ -32,6 +32,17 @@ const snapshot = buildQaDiagnosticsSnapshotV1({
     packIds: ['private-pack-id'],
     names: ['Private campsite pack'],
   },
+  offlineRendererLifecycle: {
+    terminal_code: 'rnmapbox_other_pack_stalled',
+    events: [
+      { phase: 'waiting_for_pack', elapsed_ms: 0 },
+      { phase: 'native_error_other', elapsed_ms: 100, progress_bucket: 17 },
+      { phase: 'pack_stalled', elapsed_ms: 8_200, progress_bucket: 17 },
+      { phase: 'unknown_private_phase', elapsed_ms: 8_300, progress_bucket: 17, rawMessage: 'private native message' },
+    ],
+    rawMessage: 'private native message',
+    packName: 'private pack name',
+  },
   runtimeMemory: {
     jsHeapTotalBytes: 120_000_000,
     jsHeapUsedBytes: 80_000_000,
@@ -74,6 +85,14 @@ assert.deepEqual(snapshot.runtimeMemory, {
   jsHeapTotalBytes: 120_000_000,
   jsHeapUsedBytes: 80_000_000,
 });
+assert.deepEqual(snapshot.offlineRendererLifecycle, {
+  terminalCode: 'rnmapbox_other_pack_stalled',
+  events: [
+    { phase: 'waiting_for_pack', elapsedMs: 0 },
+    { phase: 'native_error_other', elapsedMs: 100, progressBucket: 10 },
+    { phase: 'pack_stalled', elapsedMs: 8_200, progressBucket: 10 },
+  ],
+});
 assert.deepEqual(snapshot.tripRepository, {
   stateFileBytes: 44_000_000,
   tripCount: 52,
@@ -112,6 +131,10 @@ for (const forbidden of [
   'private-trip-id',
   'routeCoordinates',
   '-109.5',
+  'rawMessage',
+  'private native message',
+  'packName',
+  'private pack name',
 ]) {
   assert.equal(serialized.includes(forbidden), false, `diagnostics retained ${forbidden}`);
 }

@@ -370,3 +370,5 @@ Verify the staged file list before every commit.
 - Do not reopen T1-T4, Offline acceptance, style switching, Layers, Memory Gate, Yellowstone, NPS, Originals, Android Auto, Camp Guide, Search or store screenshots without new evidence.
 - Do not introduce another map, renderer, progress store or cloud track sync. Do not log coordinates, route geometry, search text or recording points.
 - Do not publish an OTA to the old `.6`/`.5` runtimes. T5 is a paired native packet.
+
+- Implementation commit created: `eacf397e064fac45c21e09ee03e151e1b25d71ee`. The Android candidate and later paired iOS candidate must be built from this commit or a descendant containing checkpoint documentation only; no functional amend is permitted between platform candidates.

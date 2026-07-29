@@ -372,3 +372,27 @@ Verify the staged file list before every commit.
 - Do not publish an OTA to the old `.6`/`.5` runtimes. T5 is a paired native packet.
 
 - Implementation commit created: `eacf397e064fac45c21e09ee03e151e1b25d71ee`. The Android candidate and later paired iOS candidate must be built from this commit or a descendant containing checkpoint documentation only; no functional amend is permitted between platform candidates.
+
+### T5 Android candidate reachability checkpoint (2026-07-29T02:50:36-05:00)
+
+- Branch `feat/trailhead-1.0.10-overhaul`; functional HEAD `91aa9bae0fe40a59e0bf4cac36486c9a22f4cdc3`. Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. `.cursor/`, `dashboard/explore_serving_index_v2.json`, and `docs/app-store-copy.md` remained excluded from every commit.
+- Android native preview build `69`, build ID `3da6ed72-0eff-49f7-9cb5-e192d55a26ce`, runtime `native-1.0.10-android.7`, was installed on Samsung `SM-A326U1` without clearing user data. APK SHA-256 is `7e753c2a1233625e7633ed0ac92fe9938cb07e8a85eab66a25c58d1cd3ca63d5`.
+- Final guarded paired preview source is `91aa9bae0fe40a59e0bf4cac36486c9a22f4cdc3`: Android group `7a09de96-fa01-4c64-99ab-c04b81470fe6`, update `019facd5-3a93-72c1-b987-cbab9e43c53c`, runtime `.7`; iOS group `ccd0138d-7a6f-433c-9939-e3da29e3eddd`, update `019facd5-3a93-74b7-a062-2248294369c9`, runtime `.6`. Sentry accepted Android, iOS, and web source maps before the preview channel moved. Android QA identity matched version `1.0.10`, build `69`, full source SHA, runtime, and update.
+- The guarded publisher exposed a real Expo SQLite web-export gap before channel promotion. Commit `a38656c6fd96dd993b3ec286b80293f609e5ec4f` adds Expo's documented Metro WebAssembly asset support and a native-drift assertion. Native drift, TypeScript, Trails V2 `6/6`, Follow/recording contracts, and whitespace checks pass. No native runtime or permission input changed.
+- Canonical `Short Point` search, Peek, Full, source-backed facts, and route highlighting remained nonblank and stable. Temporary mock location and Android coarse/fine permissions were used only for this bounded test, then removed; both app location permissions are denied again and the shell mock-location app-op is restored to its original deny state. The bounded log tail contained no fatal, ANR, or native-crash signature.
+- Open P1: `Navigate` from the Search-origin canonical Trail sheet still enters the older generic `Route preview` instead of the T5 source-backed trailhead handoff. The final action-time resolver is present and tested, so the observed fallback proves that this Search-origin `TrailFeature` reaches the sheet without the canonical `system_v2_id` needed to resolve the authoritative route. Do not repeat the device flow until that identity boundary has a deterministic regression.
+- Evidence directory: `C:\Users\User\Documents\Codex\evidence\trailhead\trails-t5-5b4ebf8`. QA screenshot `09-qa-a38656c.png`, SHA-256 `9665b8dbb9facc6c589a730ceb7e1d6333e82fff9f587bf632dba43efc0a66d7`; first generic-route reproduction `10-t5-handoff.png`, SHA-256 `b2b554800e3567832b139493bead0f2638c0acb7d66c4027601595ea974be5fe`; final deterministic reproduction `12-t5-handoff-final.png`, SHA-256 `2bf63d9ea561f25489f1e918a0c66dc6b8c7a9221d160a876b2d7bd496b1ef18`.
+- No iOS native build was started because Android has not accepted T5. No production update was published. The task-owned detached worktree, pulled preview environment file, Metro/export/publisher, tests, Gradle, and mock-location provider were cleaned up.
+
+#### Exact next action
+
+1. Characterize the Search V2 canonical-trail conversion from `SearchResultV2` through result resolution, `featureFromPoi`, selection, and `SheetCoordinator`; assert that stable Trail System identity and geometry revision survive into `selectedTrailRef`.
+2. Make one identity-preservation correction only. Do not change the Follow controller, map renderer, Figma-approved HUD, Offline, trail data, or sheet layout.
+3. Publish one paired preview from the corrected immutable SHA and rerun only Search -> Short Point -> Full -> Navigate. Require the source-backed handoff HUD rather than generic `Route preview`.
+4. If that assertion passes, continue the bounded Android T5 delta: explicit Nearby -> Follow, compass/cues, weak-GPS recovery, Record/Home/lock/notification, pause/resume, `End Follow only` durable recording-only recovery, `End & save`, and explicit GPX export. If it fails once, checkpoint it as blocked again; do not loop.
+5. Build iOS runtime `.6` from the exact Android-accepted SHA only after the complete Android T5 delta passes.
+
+#### Do not repeat after this checkpoint
+
+- Do not repeat T1-T4, Offline, style switching, Layers, Memory Gate, Yellowstone, NPS, Originals, Android Auto, Camp Guide, broad Search, or screenshots.
+- Do not rebuild Android build `69`, republish `a38656c`, rerun the generic-route reproduction, or alter memory thresholds. The only open boundary is Search-origin canonical Trail System identity.

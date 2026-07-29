@@ -8577,8 +8577,37 @@ function MapScreen() {
     }
   }, [insets.top, windowHeight]);
 
+  const presentTrailFollowHandoffContext = useCallback((session: ActiveTrailFollow) => {
+    if (session.phase !== 'handoff' || session.plan.coords.length < 2) return;
+    const geometry: GeoJSON.FeatureCollection = {
+      type: 'FeatureCollection',
+      features: [{
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: session.plan.coords },
+        properties: {
+          name: session.trail.name,
+          trail_id: session.trail.id,
+          geometry_revision: session.trail.geometry_revision ?? null,
+        },
+      }],
+    };
+    nativeMapRef.current?.resetRoute();
+    nativeMapRef.current?.highlightResolvedTrail(geometry, {
+      fit: true,
+      padding: [Math.max(insets.top + 122, 154), 32, Math.min(Math.round(windowHeight * 0.3), 280), 32],
+      duration: 650,
+      trailId: session.trail.id,
+      geometryRevision: session.trail.geometry_revision,
+    });
+    setNavCameraFollow(false);
+  }, [insets.top, windowHeight]);
+
   useEffect(() => {
     if (!mapSurfaceReady || !trailFollowSession) return;
+    if (trailFollowSession.phase === 'handoff' && !!routeDebug && !isRouted) {
+      presentTrailFollowHandoffContext(trailFollowSession);
+      return;
+    }
     if (trailFollowSession.phase !== 'follow' && trailFollowSession.phase !== 'recovery') return;
     presentTrailFollowRoute(trailFollowSession, true);
     if (trailFollowSession.phase === 'recovery') {
@@ -8588,7 +8617,10 @@ function MapScreen() {
   }, [
     mapStyleGeneration,
     mapSurfaceReady,
+    isRouted,
+    presentTrailFollowHandoffContext,
     presentTrailFollowRoute,
+    routeDebug,
     trailFollowSession?.phase,
     trailFollowSession?.plan.id,
   ]);
@@ -21420,7 +21452,7 @@ function MapScreen() {
     mapMissionVisible,
     returnFromMissionToTripOverview,
   ]);
-  const canOpenMapDrawer = !navMode && !waterFollowActive && !showSearch && !inlineSearchOpen && !mapSearchSession;
+  const canOpenMapDrawer = !trailFollowSession && !navMode && !waterFollowActive && !showSearch && !inlineSearchOpen && !mapSearchSession;
   const openMapDrawer = useCallback(() => {
     if (!canOpenMapDrawer) return;
     setShowMapDrawer(true);
@@ -25341,6 +25373,7 @@ function MapScreen() {
     showFullMapSearch
   );
   const showInlineMapSearch = Boolean(
+    !trailFollowSession &&
     !trailPinCaptureMode &&
     !navMode &&
     !waterFollowActive &&
@@ -25381,6 +25414,7 @@ function MapScreen() {
     ? Math.max(128, windowHeight - inlineSearchTop - 28)
     : undefined;
   const mapControlsBlocked = Boolean(
+    !!trailFollowSession ||
     navMode ||
     mapSearchChromeActive ||
     safeWaterSheetOwnsPage ||
@@ -25497,7 +25531,7 @@ function MapScreen() {
     ])
     : activeTripCampPins as unknown as CampsitePin[];
 
-  const trailFollowOwnsHud = Boolean(trailFollowSession && trailFollowSession.phase !== 'handoff');
+  const trailFollowOwnsHud = Boolean(trailFollowSession);
   const nativeNavigationPanel = navMode && !trailFollowOwnsHud ? (
     <Animated.View
       testID="map.navigation.hud"
@@ -25958,6 +25992,15 @@ function MapScreen() {
               if (keptExistingRoute) {
                 setQuickToast('Could not refresh the route. Keeping your current route.');
                 setTimeout(() => setQuickToast(''), 6500);
+                return;
+              }
+              const handoff = trailFollowSessionRef.current;
+              if (handoff?.phase === 'handoff') {
+                setNavMode(true);
+                navRef.current.active = true;
+                setNavCameraFollow(false);
+                setQuickToast('');
+                presentTrailFollowHandoffContext(handoff);
                 return;
               }
               const longOffline = result.debug.includes('confidence limit');
@@ -26704,7 +26747,7 @@ function MapScreen() {
         </View>
       )}
 
-      {!trailPinCaptureMode && !navMode && (scopedMapSearchActive || !activeTrip) && !safeWaterPlanningActive && !waterFollowActive && userHeading !== null && !showSearch && !inlineSearchOpen && (
+      {!trailFollowSession && !trailPinCaptureMode && !navMode && (scopedMapSearchActive || !activeTrip) && !safeWaterPlanningActive && !waterFollowActive && userHeading !== null && !showSearch && !inlineSearchOpen && (
         <View
           style={[s.compassPill, mapChrome.toast, { top: compassTop, left: 68 }]}
           testID="map.compass"

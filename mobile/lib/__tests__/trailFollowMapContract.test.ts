@@ -18,11 +18,17 @@ assert.match(map, /const system = await api\.getTrailSystem\(trail\.system_v2_id
 assert.match(map, /startSelectedTrailNavigation\(selectedTrail\)/);
 assert.match(map, /nativeMapRef\.current\?\.restoreRoute\(plan\.coords/);
 assert.match(map, /const presentTrailFollowRoute = useCallback/);
+assert.match(map, /const presentTrailFollowHandoffContext = useCallback/);
+assert.match(map, /nativeMapRef\.current\?\.highlightResolvedTrail\(geometry/);
+assert.match(map, /if \(handoff\?\.phase === 'handoff'\)[\s\S]*presentTrailFollowHandoffContext\(handoff\)/);
 assert.match(map, /presentTrailFollowRoute\(trailFollowSession, true\)/);
 assert.match(map, /onOpenRoute=\{\(\) => \{[\s\S]*presentTrailFollowRoute\(session, true\)/);
 assert.match(map, /!trailFollowSession && routeFromCache && navMode/);
 assert.match(map, /!trailFollowSession && !!routeDebug && !isRouted/);
 assert.match(map, /handoffRouteUnavailable: trailFollowSession\.phase === 'handoff'/);
+assert.match(map, /const trailFollowOwnsHud = Boolean\(trailFollowSession\)/);
+assert.match(map, /const canOpenMapDrawer = !trailFollowSession/);
+assert.match(map, /const showInlineMapSearch = Boolean\(\s*!trailFollowSession/);
 assert.match(map, /<TrailFollowHud/);
 assert.match(map, /End & save|onEndAndSave/);
 assert.match(map, /exportTrailRecordingGpx\(completed\.id\)/);

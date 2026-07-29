@@ -38,6 +38,7 @@ export type TrailFeature = {
   capabilities_v2?: TrailCapabilitiesV2;
   facts_v2?: TrailFactsV2;
   source_label?: string;
+  trailheads_v2?: Array<{ name?: string; lat: number; lng: number; source?: string }>;
   photo_url?: string | null;
   length_mi?: number | null;
   activities?: string[];

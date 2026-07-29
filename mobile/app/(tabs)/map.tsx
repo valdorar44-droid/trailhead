@@ -7500,6 +7500,23 @@ function MapScreen() {
             trailId: system.id,
             geometryRevision: system.geometry_revision,
           });
+          const coords = primaryTrailLine(geometry, [trail.lng, trail.lat]);
+          if (coords.length >= 2) {
+            const distanceM = trailCoordsDistanceM(coords);
+            const plan: TrailRoutePlan = {
+              id: 'capture',
+              title: system.name || trail.name,
+              subtitle: `${fmtTrailRouteDistance(distanceM)} · verified route`,
+              icon: 'walk-outline',
+              coords,
+              distanceM,
+              confidence: 'high',
+              warnings: [],
+              engine: system.sources[0]?.label || 'Trailhead',
+            };
+            setTrailRoutePlans(existing => existing.length ? existing : [plan]);
+            setSelectedTrailRoutePlanId(existing => existing ?? plan.id);
+          }
         }
         setSelectedTrail(value => value ? hydrateTrailFeatureFromSystem(value, system) : value);
       }));
@@ -24408,6 +24425,11 @@ function MapScreen() {
   };
 
   function sourceBackedTrailheads(trail: TrailFeature): SourcedTrailhead[] {
+    if (trail.trailheads_v2?.length) {
+      return trail.trailheads_v2
+        .filter(trailhead => Number.isFinite(trailhead.lat) && Number.isFinite(trailhead.lng) && !!trailhead.source)
+        .map(trailhead => ({ ...trailhead }));
+    }
     const profileMatches = selectedTrailProfile && (
       selectedTrailProfile.id === trail.profile_id
       || selectedTrailProfile.id === trail.system_v2_id
@@ -27578,7 +27600,13 @@ function MapScreen() {
                 model={selectedTrailSheetModel!}
                 primaryLabel={isTrailhead ? 'Directions' : 'Navigate'}
                 saved={selectedTrail.support.offlineReady}
-                onPrimary={() => navigateToCamp(selectedTrail)}
+                onPrimary={() => {
+                  if (!isTrailhead && selectedTrailRoutePlan) {
+                    startTrailRoutePlan(selectedTrail, selectedTrailRoutePlan);
+                    return;
+                  }
+                  navigateToCamp(selectedTrail);
+                }}
                 onSave={() => saveSelectedTrailPlace(selectedTrail)}
                 onMore={() => openSelectedTrailMoreActions(selectedTrail, canPreviewTrail)}
               />

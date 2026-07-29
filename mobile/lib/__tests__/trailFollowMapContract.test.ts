@@ -11,6 +11,9 @@ const config = fs.readFileSync(path.resolve(here, '../../app.config.js'), 'utf8'
 
 assert.match(map, /resolveTrailFollowStart\(\{/);
 assert.match(map, /sourceBackedTrailheads\(trail\)/);
+assert.match(map, /trail\.trailheads_v2\?\.length/);
+assert.match(map, /setTrailRoutePlans\(existing => existing\.length \? existing : \[plan\]\)/);
+assert.match(map, /!isTrailhead && selectedTrailRoutePlan/);
 assert.match(map, /nativeMapRef\.current\?\.restoreRoute\(plan\.coords/);
 assert.match(map, /<TrailFollowHud/);
 assert.match(map, /End & save|onEndAndSave/);

@@ -34,7 +34,7 @@ function item(overrides: Partial<TrailDiscoveryItemV2> = {}): TrailDiscoveryItem
     activities: ['Hiking'],
     permitted_uses: ['Hiking'],
     facts: { distance_mi: 0, elevation_gain_ft: 0, route_shape: 'Loop' },
-    trailheads: [],
+    trailheads: [{ name: 'Rim Trailhead', lat: 38, lng: -109, source: 'US Forest Service' }],
     media: [],
     sources: [{ label: 'US Forest Service', kind: 'official' }],
     freshness: { checked_at: 123 },
@@ -53,6 +53,7 @@ test('discovery adapter keeps stable identity and genuine zero facts', () => {
   assert.equal(feature.system_v2_id, 'trail:usfs:rim');
   assert.equal(feature.length_mi, 0);
   assert.equal(feature.facts_v2?.elevation_gain_ft, 0);
+  assert.deepEqual(feature.trailheads_v2, [{ name: 'Rim Trailhead', lat: 38, lng: -109, source: 'US Forest Service' }]);
   assert.equal(feature.subtitle, '0 mi · Loop · Hiking');
   assert.equal(feature.photo_url, null);
 });
@@ -111,6 +112,7 @@ test('search POIs keep canonical Trail System identity and hydrate only a matchi
   const hydrated = hydrateTrailFeatureFromSystem(feature!, system);
   assert.equal(hydrated.geometry_status, 'complete');
   assert.equal(hydrated.capabilities_v2?.download, true);
+  assert.deepEqual(hydrated.trailheads_v2, system.trailheads);
   assert.equal(hydrateTrailFeatureFromSystem({ ...feature!, system_v2_id: 'trail:other' }, system).geometry_revision, undefined);
 });
 

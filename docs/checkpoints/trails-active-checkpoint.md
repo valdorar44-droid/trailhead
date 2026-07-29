@@ -269,3 +269,14 @@ Verify the staged file list before every commit.
 - Do not repeat the two failed `526a263`/`31148fe` covered-map download runs or publish another speculative visual-work-only correction. Use the captured native stacks to choose the next renderer-safe change.
 - Do not repeat the resolved SQLite FTS-close or inactive-renderer crash runs. The only remaining T4 investigation is the non-settling `Verifying` transition on a fresh scoped pack.
 - Do not repeat the immediate registry-reload recovery from `d41a931` or the bootstrap-clear/poll correction from `fad527c`; the remaining boundary is callback-versus-forward-progress ordering.
+
+### Mapbox Outdoors style-switch P1 (2026-07-28T19:08:31-05:00)
+
+- User-reported issue was reproduced once on Samsung `RFCR408DA9B`, Trailhead `1.0.10` build `68`, source `e3ffd3e96d22c3cc906dea2a577b0bbeb7337b54`, Android update `019fab0e-9b86-7ae1-a1ee-038bb896a568`, runtime `native-1.0.10-android.6`.
+- Standard displayed correctly. Selecting Outdoors produced a blank white native map. Logcat showed `RNMBXLineLayerManager.setSlot` failing while the mounted layer changed from the Mapbox Standard `top` slot to no slot, followed by missing-source errors. This is a renderer placement-transition fault, not a missing layer or slow style download.
+- Evidence directory: `C:\Users\User\Documents\Codex\evidence\trailhead\trails-t4-e3ffd3e`; primary screenshot `35-outdoors-selected.png`; deterministic log `35-outdoors-logcat.txt`.
+- Functional fix commit `01ae928056e467689a44156014fc701f4923203d` classifies Mapbox styles as `standard-slots` or `classic` and remounts the RNMapbox surface only when crossing those placement families. Styles inside one family still update in place. The camera, layer registry, compass, Offline systems, Trails, and Originals contracts are unchanged.
+- Focused gates passed: Mapbox placement transition `2/2`; layer registry parity `2/2`; Trails V2 `6/6`; Originals/map-camera renderer suite; and full mobile TypeScript.
+- Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. Only the five named functional/test files were staged. Existing unrelated dirty files and `.cursor/` remain excluded.
+- Exact next action: publish one paired preview from the clean checkpoint SHA; on Android test Standard -> Outdoors -> Standard once, verify map/camp/trail overlays and camera retention, then resume the single fresh T4 trail-pack assertion. Do not rerun the broad Layers audit.
+- Task-owned Metro, Expo export, publisher, Gradle, Maestro, and test processes: none. The shared ADB server remains available for the connected device.

@@ -214,6 +214,7 @@ for (const font of ['assets/fonts/BarlowCondensed-SemiBold.ttf', 'assets/fonts/B
 }
 contains('assets/fonts/OFL.txt', 'SIL OPEN FONT LICENSE', 'Barlow Condensed OFL license is missing.');
 contains('metro.config.js', 'includeWebReplay: false', 'Sentry Metro config must exclude Session Replay.');
+contains('metro.config.js', "assetExts.includes('wasm')", 'Expo SQLite web exports must register WebAssembly assets with Metro.');
 contains('lib/telemetry/sentry.ts', 'sendDefaultPii: false', 'Sentry must keep default PII collection disabled.');
 contains('lib/telemetry/sentry.ts', 'beforeSendTransaction:', 'Sentry performance transactions must pass the privacy scrubber.');
 contains('lib/telemetry/sentry.ts', 'maxBreadcrumbs: 0', 'Sentry breadcrumbs must remain disabled.');

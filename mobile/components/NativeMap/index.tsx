@@ -26,7 +26,7 @@ import {
   type MapCameraOwnership,
 } from '@/lib/mapCameraOwnership';
 
-import { buildMapStyle, MapMode } from './mapStyle';
+import { buildMapStyle, mapboxStylePlacementFamily, MapMode } from './mapStyle';
 import type { ContourSourceMode, PremiumMapStyle, TrailSourceMode } from './mapStyle';
 import { fetchRoute, buildFallbackRoute } from './routing';
 import type { RouteProviderMode, RouteResult, RouteStep, RouteOpts, MapBounds, WP } from './types';
@@ -1855,9 +1855,15 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const mapboxStyleURL = customMapFallback
     ? MAPBOX_STYLE_URLS.outdoors
     : MAPBOX_STYLE_URLS[premiumStyle] ?? MAPBOX_STYLE_URLS.standard;
-  const isMapboxStandardStyle = isExtremeMapbox && (
-    premiumStyle === 'standard' || premiumStyle === 'standard_satellite' || premiumStyle === 'dawn' || premiumStyle === 'dusk' || premiumStyle === 'night'
-  );
+  const mapboxPlacementFamily = mapboxStylePlacementFamily(premiumStyle);
+  const isMapboxStandardStyle = isExtremeMapbox && mapboxPlacementFamily === 'standard-slots';
+  // RNMapbox Android cannot safely update an already-mounted layer from a
+  // Standard-style slot to a classic style with no slot. Remount the native
+  // surface only when that placement contract changes. Styles within the same
+  // family continue to update in place, so normal camera state is retained.
+  const mapSurfacePlacementKey = isExtremeMapbox
+    ? `rnmapbox-${mapboxPlacementFamily}`
+    : 'maplibre-classic';
   const mapboxStyleImportConfig = useMemo(() => {
     const lightPreset = MAPBOX_LIGHT_PRESETS[premiumStyle] ?? (showTerrain ? 'day' : 'day');
     return {
@@ -3346,6 +3352,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   return (
     <View style={styles.mapRoot}>
       <MapGL.MapView
+        key={mapSurfacePlacementKey}
         ref={mapRef}
         style={StyleSheet.absoluteFillObject}
         {...(isExtremeMapbox

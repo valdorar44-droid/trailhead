@@ -22,6 +22,18 @@ export type PremiumMapStyle =
   | 'dusk'
   | 'night';
 
+export type MapboxStylePlacementFamily = 'standard-slots' | 'classic';
+
+export function mapboxStylePlacementFamily(style: PremiumMapStyle): MapboxStylePlacementFamily {
+  return style === 'standard'
+    || style === 'standard_satellite'
+    || style === 'dawn'
+    || style === 'dusk'
+    || style === 'night'
+    ? 'standard-slots'
+    : 'classic';
+}
+
 const TILE_BASE = 'https://tiles.gettrailhead.app';
 const API_BASE = 'https://api.gettrailhead.app';
 const GLYPH_URL = `${TILE_BASE}/api/fonts/{fontstack}/{range}.pbf`;

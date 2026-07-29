@@ -42,6 +42,7 @@
     "test:android-map-memory": "node scripts/android-memory-gate-v3.test.mjs && node scripts/android-map-memory-gate.test.mjs",
     "test:explore-memory-guard": "node scripts/explore-memory-guard.test.mjs && node scripts/explore-image-policy-usage.test.mjs",
     "test:fire-overlay": "node --import tsx lib/__tests__/fireOverlay.test.ts",
+    "test:mapbox-style-switch": "node --import tsx components/NativeMap/__tests__/mapboxStyleSwitch.test.ts",
     "test:nps-hub-preservation": "node --import tsx lib/__tests__/npsHubPreservation.test.ts && node --import tsx lib/__tests__/exploreDetailNavigation.test.ts && node --import tsx lib/__tests__/exploreDetailScrollContract.test.ts",
     "audit:prepreview": "node scripts/pre-preview-check.mjs",
     "pretest:originals": "npm run test:originals-renderer",

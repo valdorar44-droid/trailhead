@@ -176,6 +176,12 @@ const checks = [
     args: ['--import', 'tsx', 'lib/__tests__/mapLayerRegistry.test.ts'],
   },
   {
+    label: 'Mapbox style placement transition tests',
+    cwd: mobileRoot,
+    cmd: 'npm',
+    args: ['run', 'test:mapbox-style-switch'],
+  },
+  {
     label: 'Camp sheet enrichment identity tests',
     cwd: mobileRoot,
     cmd: 'node',

@@ -330,3 +330,23 @@ Verify the staged file list before every commit.
 - T4 is accepted on Android. Existing V1/V2 downloads were retained. No broad crawl, Layers audit, style-switch audit, memory gate, NPS research, Originals lifecycle, Android Auto, or iOS packet was repeated. Task-owned Metro, Gradle, Maestro, Expo publisher, test, Railway login, and emulator processes: none.
 - Temporary QA admin access was still active when the device assertion finished and must be removed during cleanup before T5 device work. Do not delete the user’s downloads merely to clean QA state.
 - Exact next packet: remove temporary QA admin access, commit and push this checkpoint, then begin T5 design/implementation only after the approved Follow/recording Figma states are confirmed. T5 is a paired native packet; Android build and physical test remain first, with iOS from the identical accepted SHA afterward.
+
+### T5 Figma design gate ready (2026-07-29T00:14:57-05:00)
+
+- Branch `feat/trailhead-1.0.10-overhaul`; exact repository HEAD `f105e448f6b02d4ff4fa64d42e28ad573312d987`. Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
+- Added the focused Figma section `26 · Trails T5 — Follow + Recording — Review 01` in file `FJUcMWAfsNyjsguCEp2dBe`, section node `786:2438`. It reuses the approved map, navigation, trail-detail and three-needle-compass language instead of creating a second trail UI.
+- Review screens: drive-to-trailhead handoff `788:2438`; on-trail Follow `788:2507`; Follow plus local recording `788:2527`; GPS recovery `788:2551`; End trail session `788:2572`. The implementation contract is node `790:2677`.
+- The handoff uses a source-backed trailhead and ordinary navigation before Follow. Follow keeps the exact route and compass visible. Recording is explicit and local-only. Weak GPS pauses confident guidance without discarding the route. End offers `Keep going`, `End & save`, and `End Follow only`.
+- Visual evidence: `C:\Users\User\Documents\Codex\trails-t5-figma-review-v2.png`, SHA-256 `088c49368fdb092d55f1ba61617f2c9d306f18d3dcbe2e16c9dd192af5dbce54`; End-state proof `C:\Users\User\Documents\Codex\trails-t5-end-review.png`, SHA-256 `7d660e26df7e11ba73e60cfeffa41b68d55a8875cbdd3e27d8d75c9cd2fa686e`.
+- No repository implementation, native project, permission, runtime, preview OTA or production change was made during this design gate. T4 remains accepted; its backend and mobile evidence are not reopened.
+- Open review gate: obtain user approval for the T5 packet before implementation. T5 then requires paired native candidates: Android build and physical background/lock test first, iOS from the identical SHA afterward.
+- Temporary disposable QA admin access remains elevated from the T4 diagnostic step. Do not change that permission without explicit user confirmation; remove it before T5 device work.
+- Task-owned Metro, Gradle, Maestro, Expo publisher, Railway login, test and emulator processes: none. The shared ADB and MCP runtimes are not task-owned.
+
+#### Next exact action after T5 design approval
+
+1. Create `TrailRecordingSessionV1` and the shared Trail Follow state controller around the existing `NativeMap`; do not create another renderer or progress store.
+2. Route distant Starts to the best source-backed trailhead, then transition to Follow only after arrival or an explicit nearby action.
+3. Add concise chime/haptic guidance, optional voice, GPS/off-route confidence gates, durable local pause/resume, explicit End semantics and user-initiated GPX export.
+4. Update the Android foreground-service and iOS location-purpose disclosure only as required for explicit trail recording, increment both runtime suffixes, and build Android first from one immutable SHA.
+5. Do not repeat T1-T4, Layers, Memory Gate, NPS, Originals, Android Auto, Camp Guide, Search or store-screenshot work.

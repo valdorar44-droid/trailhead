@@ -3,6 +3,7 @@ import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'rea
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/lib/design';
+import { visibleExploreCategoryLabel } from '@/lib/exploreDestinationRegistry';
 import { EXPLORE_CATEGORY_CHIPS, type ExploreCategoryKey } from './exploreDisplay';
 
 type Props = {
@@ -17,7 +18,7 @@ export function ExploreCategoryFilterSheet({ visible, selected, counts, onSelect
   const C = useTheme();
   const insets = useSafeAreaInsets();
   const categories = EXPLORE_CATEGORY_CHIPS.filter(item => {
-    if (item.key === 'nearby' || item.key === 'tours') return false;
+    if (item.key === 'nearby' || item.key === 'tours' || item.key === 'things' || item.key === 'land') return false;
     if (item.key === 'all' || item.key === selected || item.key === 'fuel' || item.key === 'resupply') return true;
     return Number(counts[item.key] ?? 0) > 0;
   });
@@ -53,7 +54,9 @@ export function ExploreCategoryFilterSheet({ visible, selected, counts, onSelect
                   <View style={[styles.icon, { backgroundColor: item.color + '14' }]}>
                     <Ionicons name={item.icon as any} size={19} color={item.color} />
                   </View>
-                  <Text style={[styles.label, { color: C.text }]}>{item.key === 'all' ? 'All places' : item.label}</Text>
+                  <Text style={[styles.label, { color: C.text }]}>
+                    {item.key === 'all' ? 'All places' : visibleExploreCategoryLabel(item.key) ?? item.label}
+                  </Text>
                   <Text style={[styles.count, { color: C.text3 }]}>{formatCount(count)}</Text>
                   {active ? <Ionicons name="checkmark" size={19} color={C.orange} /> : <View style={styles.checkSpace} />}
                 </TouchableOpacity>

@@ -2,6 +2,7 @@ import React from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/lib/design';
+import { EXPLORE_VISIBLE_PRIMARY_CATEGORIES } from '@/lib/exploreDestinationRegistry';
 import { EXPLORE_CATEGORY_CHIPS, type ExploreCategoryKey } from './exploreDisplay';
 
 type Props = {
@@ -35,7 +36,7 @@ const CATEGORY_PRIORITY: ExploreCategoryKey[] = [
   'nearby',
 ];
 
-const PRIMARY_KEYS: ExploreCategoryKey[] = ['all', 'guided', 'camp', 'trails', 'parks', 'water', 'things'];
+const PRIMARY_KEYS: ExploreCategoryKey[] = [...EXPLORE_VISIBLE_PRIMARY_CATEGORIES];
 const DYNAMIC_KEYS = new Set<ExploreCategoryKey>(['fuel', 'resupply']);
 
 export function ExploreCategoryChips({ selected, mode, counts, onSelect, onMore }: Props) {
@@ -46,7 +47,7 @@ export function ExploreCategoryChips({ selected, mode, counts, onSelect, onMore 
     return Number(counts?.[key] ?? 0) > 0;
   });
   const visibleKeys = PRIMARY_KEYS.filter(key => availableKeys.includes(key));
-  if (selected !== 'nearby' && !visibleKeys.includes(selected)) visibleKeys.push(selected);
+  if (selected !== 'all' && selected !== 'nearby' && !visibleKeys.includes(selected)) visibleKeys.push(selected);
   const hasMore = availableKeys.some(key => key !== 'nearby' && !visibleKeys.includes(key));
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>

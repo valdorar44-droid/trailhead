@@ -329,6 +329,7 @@ def _backfill_embedded_trip_payloads(db: sqlite3.Connection) -> None:
 
 
 TRAILHEAD_V110_BACKEND_MIGRATION = "trailhead_1_0_10_backend_contracts_v1"
+EXPLORE_COMMUNITY_TRAILS_MIGRATION = "explore_community_trails_v1"
 
 
 def _table_columns(db: sqlite3.Connection, table: str) -> set[str]:
@@ -560,6 +561,203 @@ def _migrate_trailhead_v110_backend_contracts(db: sqlite3.Connection) -> None:
     except Exception:
         db.rollback()
         raise
+
+
+def _migrate_explore_community_trails(db: sqlite3.Connection) -> None:
+    """Install private route ownership and moderated trail publication.
+
+    Community submissions deliberately live outside ``trail_profiles`` until
+    moderation has approved a public Community route. This keeps Trailhead's
+    verified catalog, community routes, and private builder work distinct.
+    """
+    db.commit()
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        db.execute(
+            """CREATE TABLE IF NOT EXISTS schema_migrations (
+                migration_id TEXT PRIMARY KEY,
+                applied_at   INTEGER NOT NULL
+            )"""
+        )
+        schema_sql = """
+            CREATE TABLE IF NOT EXISTS owned_trail_routes_v1 (
+                id                    TEXT PRIMARY KEY,
+                user_id               INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                origin                TEXT NOT NULL CHECK(origin IN ('builder','gpx','recording')),
+                title                 TEXT NOT NULL,
+                description           TEXT,
+                activity              TEXT,
+                route_shape           TEXT,
+                geometry_json         TEXT NOT NULL,
+                geometry_revision     INTEGER NOT NULL DEFAULT 1,
+                geometry_sha256       TEXT NOT NULL,
+                trailheads_json       TEXT NOT NULL DEFAULT '[]',
+                permitted_uses_json   TEXT NOT NULL DEFAULT '[]',
+                source_evidence_json  TEXT NOT NULL DEFAULT '[]',
+                photos_json           TEXT NOT NULL DEFAULT '[]',
+                visibility            TEXT NOT NULL DEFAULT 'private'
+                                          CHECK(visibility IN ('private','unlisted')),
+                share_token_hash      TEXT UNIQUE,
+                share_revision        INTEGER NOT NULL DEFAULT 0,
+                privacy_reviewed_at   INTEGER,
+                created_at            INTEGER NOT NULL,
+                updated_at            INTEGER NOT NULL,
+                deleted_at            INTEGER
+            );
+            CREATE INDEX IF NOT EXISTS idx_owned_trail_routes_owner
+                ON owned_trail_routes_v1(user_id, updated_at DESC);
+
+            CREATE TABLE IF NOT EXISTS trail_submissions_v1 (
+                id                    TEXT PRIMARY KEY,
+                route_id              TEXT REFERENCES owned_trail_routes_v1(id) ON DELETE SET NULL,
+                user_id               INTEGER REFERENCES users(id) ON DELETE SET NULL,
+                legacy_profile_id     TEXT UNIQUE,
+                route_revision        INTEGER NOT NULL,
+                geometry_sha256       TEXT NOT NULL,
+                submitter_handle      TEXT,
+                snapshot_json         TEXT NOT NULL,
+                status                TEXT NOT NULL DEFAULT 'submitted'
+                                          CHECK(status IN ('draft','submitted','changes_requested',
+                                                           'approved_community','rejected','withdrawn','archived')),
+                moderation_note       TEXT,
+                duplicate_json        TEXT NOT NULL DEFAULT '{}',
+                access_review_json    TEXT NOT NULL DEFAULT '{}',
+                moderator_history_json TEXT NOT NULL DEFAULT '[]',
+                submitted_at          INTEGER,
+                updated_at            INTEGER NOT NULL,
+                moderated_at          INTEGER,
+                UNIQUE(route_id, route_revision)
+            );
+            CREATE INDEX IF NOT EXISTS idx_trail_submissions_owner
+                ON trail_submissions_v1(user_id, updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_trail_submissions_status
+                ON trail_submissions_v1(status, updated_at DESC);
+
+            CREATE TABLE IF NOT EXISTS community_trails_v1 (
+                id                    TEXT PRIMARY KEY,
+                submission_id         TEXT NOT NULL UNIQUE REFERENCES trail_submissions_v1(id),
+                publication_revision  INTEGER NOT NULL DEFAULT 1,
+                snapshot_json         TEXT NOT NULL,
+                status                TEXT NOT NULL DEFAULT 'active'
+                                          CHECK(status IN ('active','taken_down','promoted','archived')),
+                promoted_trail_id     TEXT,
+                created_at            INTEGER NOT NULL,
+                updated_at            INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_community_trails_status
+                ON community_trails_v1(status, updated_at DESC);
+
+            CREATE TABLE IF NOT EXISTS trail_contribution_credit_awards_v1 (
+                submission_id         TEXT PRIMARY KEY REFERENCES trail_submissions_v1(id),
+                user_id               INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                credits               INTEGER NOT NULL,
+                awarded_at            INTEGER NOT NULL
+            );
+        """
+        for statement in schema_sql.split(";"):
+            if statement.strip():
+                db.execute(statement)
+        required_tables = {
+            "owned_trail_routes_v1": {
+                "id", "user_id", "geometry_sha256", "visibility", "share_token_hash",
+            },
+            "trail_submissions_v1": {
+                "id", "route_id", "user_id", "geometry_sha256", "snapshot_json", "status",
+            },
+            "community_trails_v1": {
+                "id", "submission_id", "snapshot_json", "status", "promoted_trail_id",
+            },
+            "trail_contribution_credit_awards_v1": {
+                "submission_id", "user_id", "credits", "awarded_at",
+            },
+        }
+        for table, columns in required_tables.items():
+            _require_table_columns(db, table, columns)
+        db.execute(
+            "INSERT OR REPLACE INTO schema_migrations (migration_id,applied_at) VALUES (?,?)",
+            (EXPLORE_COMMUNITY_TRAILS_MIGRATION, int(time.time())),
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+
+def _queue_legacy_community_trail_profiles(db: sqlite3.Connection) -> int:
+    """Move legacy instant-public community trails into review without deleting them."""
+    if not _table_columns(db, "trail_profiles") or not _table_columns(db, "trail_submissions_v1"):
+        return 0
+    rows = db.execute(
+        """SELECT * FROM trail_profiles
+           WHERE lower(source_label)='trailhead community'
+              OR lower(source)='trailhead community'"""
+    ).fetchall()
+    queued = 0
+    now = int(time.time())
+    def decode_json(raw: object, fallback: object) -> object:
+        try:
+            parsed = json.loads(str(raw or ""))
+        except Exception:
+            return fallback
+        return parsed
+    for row in rows:
+        raw = dict(row)
+        try:
+            provenance = json.loads(raw.get("provenance") or "{}")
+        except Exception:
+            provenance = {}
+        try:
+            geometry = json.loads(raw.get("geometry") or "null")
+        except Exception:
+            geometry = None
+        if not isinstance(geometry, dict):
+            continue
+        owner_id = provenance.get("submitted_by_id")
+        try:
+            owner_id = int(owner_id) if owner_id is not None else None
+        except (TypeError, ValueError):
+            owner_id = None
+        if owner_id is not None and not db.execute(
+            "SELECT 1 FROM users WHERE id=?", (owner_id,),
+        ).fetchone():
+            owner_id = None
+        geometry_payload = json.dumps(geometry, separators=(",", ":"), sort_keys=True)
+        geometry_sha256 = hashlib.sha256(geometry_payload.encode("utf-8")).hexdigest()
+        snapshot = {
+            "version": 1,
+            "legacy_profile_id": raw["id"],
+            "title": raw.get("name"),
+            "description": raw.get("description") or None,
+            "geometry": geometry,
+            "geometry_sha256": geometry_sha256,
+            "activity_claims": decode_json(raw.get("activities"), []),
+            "trailheads": decode_json(raw.get("trailheads"), []),
+            "photos": decode_json(raw.get("photos"), []),
+            "submitted_by_handle": provenance.get("submitted_by"),
+            "legacy_review_status": provenance.get("review_status"),
+        }
+        submission_id = "trail_submission_legacy_" + hashlib.sha256(
+            str(raw["id"]).encode("utf-8")
+        ).hexdigest()[:24]
+        cursor = db.execute(
+            """INSERT OR IGNORE INTO trail_submissions_v1
+               (id,route_id,user_id,legacy_profile_id,route_revision,geometry_sha256,
+                submitter_handle,snapshot_json,status,submitted_at,updated_at)
+               VALUES (?,NULL,?,?,?,?,?,?,'submitted',?,?)""",
+            (
+                submission_id,
+                owner_id,
+                str(raw["id"]),
+                1,
+                geometry_sha256,
+                str(provenance.get("submitted_by") or "").strip()[:80] or None,
+                json.dumps(snapshot, separators=(",", ":"), sort_keys=True),
+                int(raw.get("updated_at") or raw.get("last_checked") or now),
+                now,
+            ),
+        )
+        queued += int(cursor.rowcount or 0)
+    return queued
 
 def init_db():
     db = _conn()
@@ -2508,6 +2706,8 @@ def init_db():
     )
     _backfill_embedded_trip_payloads(db)
     _migrate_trailhead_v110_backend_contracts(db)
+    _migrate_explore_community_trails(db)
+    _queue_legacy_community_trail_profiles(db)
     db.commit()
     db.close()
     try:
@@ -14380,6 +14580,193 @@ def list_trail_profiles_near(lat: float, lng: float, radius_mi: float = 50, limi
     else:
         profiles.sort(key=lambda p: (_sort_distance(p), p["name"]))
     return profiles[:limit]
+
+
+OWNED_TRAIL_ROUTE_JSON_FIELDS = {
+    "geometry_json": "geometry",
+    "trailheads_json": "trailheads",
+    "permitted_uses_json": "permitted_uses",
+    "source_evidence_json": "source_evidence",
+    "photos_json": "photos",
+}
+
+
+def _decode_owned_trail_route(row: sqlite3.Row | dict) -> dict:
+    raw = dict(row)
+    for stored_key, public_key in OWNED_TRAIL_ROUTE_JSON_FIELDS.items():
+        try:
+            raw[public_key] = json.loads(raw.pop(stored_key) or ("{}" if public_key == "geometry" else "[]"))
+        except Exception:
+            raw[public_key] = {} if public_key == "geometry" else []
+    raw["share_enabled"] = bool(raw.pop("share_token_hash", None))
+    return raw
+
+
+def _decode_trail_submission(row: sqlite3.Row | dict, *, include_snapshot: bool = True) -> dict:
+    raw = dict(row)
+    try:
+        snapshot = json.loads(raw.pop("snapshot_json") or "{}")
+    except Exception:
+        snapshot = {}
+    for key in ("duplicate_json", "access_review_json", "moderator_history_json"):
+        public_key = key.removesuffix("_json")
+        try:
+            raw[public_key] = json.loads(raw.pop(key) or ("[]" if key == "moderator_history_json" else "{}"))
+        except Exception:
+            raw[public_key] = [] if key == "moderator_history_json" else {}
+    if include_snapshot:
+        raw["snapshot"] = snapshot
+    else:
+        raw["title"] = snapshot.get("title")
+    return raw
+
+
+def create_owned_trail_route_v1(
+    user_id: int,
+    *,
+    origin: str,
+    title: str,
+    geometry: dict,
+    description: str | None = None,
+    activity: str | None = None,
+    route_shape: str | None = None,
+    trailheads: list[dict] | None = None,
+    permitted_uses: list[str] | None = None,
+    source_evidence: list[dict] | None = None,
+    photos: list[dict] | None = None,
+) -> dict:
+    origin = str(origin or "").strip().lower()
+    if origin not in {"builder", "gpx", "recording"}:
+        raise ValueError("Invalid trail route origin")
+    clean_title = re.sub(r"\s+", " ", str(title or "")).strip()[:140]
+    if len(clean_title) < 3:
+        raise ValueError("Trail name must be at least 3 characters")
+    geometry_payload = json.dumps(geometry, separators=(",", ":"), sort_keys=True)
+    geometry_sha256 = hashlib.sha256(geometry_payload.encode("utf-8")).hexdigest()
+    route_id = f"trail_route_{secrets.token_hex(16)}"
+    now = int(time.time())
+    db = _conn()
+    db.execute(
+        """INSERT INTO owned_trail_routes_v1
+           (id,user_id,origin,title,description,activity,route_shape,geometry_json,
+            geometry_revision,geometry_sha256,trailheads_json,permitted_uses_json,
+            source_evidence_json,photos_json,visibility,privacy_reviewed_at,created_at,updated_at)
+           VALUES (?,?,?,?,?,?,?,?,1,?,?,?,?,?,'private',NULL,?,?)""",
+        (
+            route_id,
+            user_id,
+            origin,
+            clean_title,
+            re.sub(r"\s+", " ", str(description or "")).strip()[:2000] or None,
+            re.sub(r"\s+", " ", str(activity or "")).strip()[:60] or None,
+            re.sub(r"\s+", " ", str(route_shape or "")).strip()[:60] or None,
+            geometry_payload,
+            geometry_sha256,
+            json.dumps(trailheads or [], separators=(",", ":"), sort_keys=True),
+            json.dumps(permitted_uses or [], separators=(",", ":"), sort_keys=True),
+            json.dumps(source_evidence or [], separators=(",", ":"), sort_keys=True),
+            json.dumps(photos or [], separators=(",", ":"), sort_keys=True),
+            now,
+            now,
+        ),
+    )
+    row = db.execute("SELECT * FROM owned_trail_routes_v1 WHERE id=?", (route_id,)).fetchone()
+    db.commit(); db.close()
+    return _decode_owned_trail_route(row)
+
+
+def get_owned_trail_route_v1(user_id: int, route_id: str) -> dict | None:
+    db = _conn()
+    row = db.execute(
+        """SELECT * FROM owned_trail_routes_v1
+           WHERE id=? AND user_id=? AND deleted_at IS NULL""",
+        (route_id, user_id),
+    ).fetchone()
+    db.close()
+    return _decode_owned_trail_route(row) if row else None
+
+
+def create_trail_submission_v1(user_id: int, route_id: str, submitter_handle: str | None) -> dict:
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        route = db.execute(
+            """SELECT * FROM owned_trail_routes_v1
+               WHERE id=? AND user_id=? AND deleted_at IS NULL""",
+            (route_id, user_id),
+        ).fetchone()
+        if not route:
+            raise KeyError("Trail route not found")
+        decoded = _decode_owned_trail_route(route)
+        trailheads = decoded.get("trailheads") or []
+        source_evidence = decoded.get("source_evidence") or []
+        if not trailheads and not source_evidence:
+            raise ValueError("Add a trailhead or access evidence before submitting")
+        snapshot = {
+            "version": 1,
+            "route_id": decoded["id"],
+            "route_revision": int(decoded["geometry_revision"]),
+            "title": decoded["title"],
+            "description": decoded.get("description"),
+            "origin": decoded["origin"],
+            "activity": decoded.get("activity"),
+            "route_shape": decoded.get("route_shape"),
+            "geometry": decoded["geometry"],
+            "geometry_sha256": decoded["geometry_sha256"],
+            "trailheads": trailheads,
+            "permitted_uses": decoded.get("permitted_uses") or [],
+            "source_evidence": source_evidence,
+            "photos": decoded.get("photos") or [],
+        }
+        submission_id = f"trail_submission_{secrets.token_hex(16)}"
+        now = int(time.time())
+        db.execute(
+            """INSERT INTO trail_submissions_v1
+               (id,route_id,user_id,route_revision,geometry_sha256,submitter_handle,
+                snapshot_json,status,submitted_at,updated_at)
+               VALUES (?,?,?,?,?,?,?,'submitted',?,?)""",
+            (
+                submission_id,
+                route_id,
+                user_id,
+                int(decoded["geometry_revision"]),
+                decoded["geometry_sha256"],
+                re.sub(r"\s+", " ", str(submitter_handle or "")).strip()[:80] or None,
+                json.dumps(snapshot, separators=(",", ":"), sort_keys=True),
+                now,
+                now,
+            ),
+        )
+        row = db.execute("SELECT * FROM trail_submissions_v1 WHERE id=?", (submission_id,)).fetchone()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    return _decode_trail_submission(row)
+
+
+def list_trail_submissions_v1(
+    *, user_id: int | None = None, status: str | None = None, limit: int = 100,
+) -> list[dict]:
+    clauses: list[str] = []
+    params: list = []
+    if user_id is not None:
+        clauses.append("user_id=?")
+        params.append(user_id)
+    if status:
+        clauses.append("status=?")
+        params.append(status)
+    params.append(max(1, min(int(limit), 200)))
+    where = " WHERE " + " AND ".join(clauses) if clauses else ""
+    db = _conn()
+    rows = db.execute(
+        f"SELECT * FROM trail_submissions_v1{where} ORDER BY updated_at DESC,id DESC LIMIT ?",
+        params,
+    ).fetchall()
+    db.close()
+    return [_decode_trail_submission(row, include_snapshot=user_id is not None) for row in rows]
 
 def _distance_miles(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     r = 3958.8

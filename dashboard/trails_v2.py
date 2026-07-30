@@ -77,6 +77,7 @@ class TrailDiscoveryItemV2(BaseModel):
     id: str
     primary_trail_id: str
     name: str
+    catalog: Literal["verified", "community"] = "verified"
     kind: str = "trail"
     center: TrailCenterV2
     geometry_status: TrailGeometryStatusV2
@@ -244,6 +245,21 @@ def _source_is_authoritative(profile: dict[str, Any]) -> bool:
     source = _source_family(profile)
     profile_id = _clean_text(profile.get("id"))
     return source in {"usfs", "nps", "blm", "ridb", "official"} or (profile_id.startswith("trail:") and not profile_id.startswith("trail:osm:"))
+
+
+def _catalog_lane(profile: dict[str, Any]) -> Literal["verified", "community"] | None:
+    """Keep unreviewed legacy submissions out of public trail discovery."""
+    provenance = profile.get("provenance") if isinstance(profile.get("provenance"), dict) else {}
+    source = _clean_text(profile.get("source_label") or profile.get("source")).lower()
+    review_status = _clean_text(provenance.get("review_status")).lower()
+    is_legacy_community = source == "trailhead community" or _clean_text(profile.get("id")).startswith("trailhead:")
+    if not is_legacy_community:
+        return "verified"
+    if review_status in {"approved_community", "approved", "community_approved"}:
+        return "community"
+    if review_status in {"verified", "promoted"}:
+        return "verified"
+    return None
 
 
 def _geometry_status(profile: dict[str, Any], lines: list[list[list[float]]]) -> TrailGeometryStatusV2:
@@ -452,6 +468,8 @@ def build_trail_systems_v2(profiles: list[dict[str, Any]], *, limit: int = 80) -
     unique: dict[str, dict[str, Any]] = {}
     for raw_profile in profiles:
         profile = dict(raw_profile or {})
+        if _catalog_lane(profile) is None:
+            continue
         profile_id = _clean_text(profile.get("id"))
         name = _clean_text(profile.get("name"))
         lines = _profile_lines(profile)
@@ -538,6 +556,7 @@ def build_trail_systems_v2(profiles: list[dict[str, Any]], *, limit: int = 80) -
                 id=system_id,
                 primary_trail_id=primary_id,
                 name=_clean_text(primary.get("name")),
+                catalog=_catalog_lane(primary) or "verified",
                 kind=kind,
                 center=TrailCenterV2(lat=round(lat, 7), lng=round(lng, 7)),
                 geometry_status=geometry_status,

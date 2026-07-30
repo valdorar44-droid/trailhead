@@ -297,6 +297,23 @@ class TrailsV2Tests(unittest.TestCase):
         self.assertNotIn("distance_mi", payload["facts"])
         self.assertNotIn("route_shape", payload["facts"])
 
+    def test_unreviewed_legacy_community_route_is_not_verified_discovery(self):
+        legacy = profile(
+            "trailhead:legacy:route",
+            "Legacy Community Route",
+            [[-109.0, 38.0], [-109.01, 38.01]],
+            source="trailhead",
+            source_label="Trailhead community",
+            allowed_uses="Hiking",
+        )
+        legacy["provenance"]["review_status"] = "community"
+
+        self.assertEqual(build_trail_systems_v2([legacy]), [])
+
+        legacy["provenance"]["review_status"] = "approved_community"
+        approved = build_trail_systems_v2([legacy])[0]
+        self.assertEqual(approved.catalog, "community")
+
 
 if __name__ == "__main__":
     unittest.main()

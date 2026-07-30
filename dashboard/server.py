@@ -267,6 +267,8 @@ from db.store import (
     upsert_route_intelligence_places, list_cached_places_near_samples,
     submit_trail_field_report, get_trail_field_reports, get_trail_field_report_summary,
     upsert_trail_profile, get_trail_profile, list_trail_profiles_near,
+    create_owned_trail_route_v1, create_trail_submission_v1,
+    get_owned_trail_route_v1, list_trail_submissions_v1,
     add_trail_edit_suggestion, get_trail_edit_suggestions,
     update_trail_edit_suggestion_status, set_trail_profile_admin_update,
     get_camp_profile_override, set_camp_profile_override, add_camp_edit_suggestion,
@@ -23616,12 +23618,6 @@ async def submit_community_trail(body: CommunityTrailPayload, user: dict = Depen
             clean_coords.append([round(lng, 7), round(lat, 7)])
     if len(clean_coords) < 2:
         raise HTTPException(400, "Trail geometry has no valid coordinates")
-    length_m = 0.0
-    for idx in range(1, len(clean_coords)):
-        a, b = clean_coords[idx - 1], clean_coords[idx]
-        length_m += _haversine_m(a[1], a[0], b[1], b[0])
-    mid = clean_coords[len(clean_coords) // 2]
-    trail_id = _clean_trail_profile_id(f"trailhead:{user['id']}:{uuid.uuid4().hex[:12]}")
     clean_trailheads = []
     for item in body.trailheads[:8]:
         if not isinstance(item, dict):
@@ -23638,41 +23634,45 @@ async def submit_community_trail(body: CommunityTrailPayload, user: dict = Depen
                 "lng": round(th_lng, 7),
                 "role": str(item.get("role") or "access").strip()[:40],
             })
-    profile = upsert_trail_profile({
-        "id": trail_id,
-        "name": name,
-        "summary": (body.summary or f"Community trail route submitted by {user.get('username') or 'a Trailhead user'}.").strip()[:700],
-        "description": (body.description or body.source_note or "User-pinned route. Verify legality, closures, and conditions before driving.").strip()[:4000],
-        "lat": float(body.lat) if body.lat is not None else mid[1],
-        "lng": float(body.lng) if body.lng is not None else mid[0],
-        "length_mi": round(length_m / 1609.344, 2),
-        "difficulty": (body.difficulty or "Unrated").strip()[:80],
-        "activities": [str(a).strip()[:40] for a in body.activities[:12] if str(a).strip()] or ["overland", "trail"],
-        "land_manager": (body.land_manager or "Verify locally").strip()[:180],
-        "geometry": {"type": "FeatureCollection", "features": [{
-            "type": "Feature",
-            "properties": {"name": name, "source": "Trailhead community"},
-            "geometry": {"type": "LineString", "coordinates": clean_coords},
-        }]},
-        "trailheads": clean_trailheads,
-        "official_url": None,
-        "photos": body.photos[:12],
-        "source": "trailhead",
-        "source_label": "Trailhead community",
-        "provenance": {
-            "submitted_by": user.get("username"),
-            "submitted_by_id": user.get("id"),
-            "source_note": (body.source_note or "").strip()[:500],
-            "review_status": "community",
-        },
-        "last_checked": int(time.time()),
-        "admin_edited": False,
-        "updated_at": int(time.time()),
-    })
-    credits_earned = 5
-    add_credits(user["id"], credits_earned, f"Community trail: {name[:80]}")
+    source_note = re.sub(r"\s+", " ", str(body.source_note or "")).strip()[:500]
+    if not clean_trailheads and not source_note:
+        raise HTTPException(400, "Add a trailhead or explain the public access point")
+    clean_photos = []
+    for photo in body.photos[:12]:
+        if not isinstance(photo, dict):
+            continue
+        clean = {
+            key: photo.get(key)
+            for key in ("url", "caption", "credit", "license", "source_url", "ownership_confirmed")
+            if photo.get(key) not in (None, "")
+        }
+        if clean:
+            clean_photos.append(clean)
+    geometry_snapshot = {"type": "LineString", "coordinates": clean_coords}
+    try:
+        route = create_owned_trail_route_v1(
+            user["id"],
+            origin="builder",
+            title=name,
+            description=(body.description or body.summary or "").strip()[:2000] or None,
+            geometry=geometry_snapshot,
+            activity=next((str(a).strip()[:60] for a in body.activities if str(a).strip()), None),
+            trailheads=clean_trailheads,
+            permitted_uses=[str(a).strip()[:60] for a in body.activities[:12] if str(a).strip()],
+            source_evidence=[{"note": source_note}] if source_note else [],
+            photos=clean_photos,
+        )
+        submission = create_trail_submission_v1(user["id"], route["id"], user.get("username"))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     fresh = get_user_by_id(user["id"])
-    return {"ok": True, "profile": profile, "credits_earned": credits_earned, "new_balance": fresh["credits"] if fresh else user.get("credits", 0)}
+    return {
+        "ok": True,
+        "route": route,
+        "submission": submission,
+        "credits_earned": 0,
+        "new_balance": fresh["credits"] if fresh else user.get("credits", 0),
+    }
 
 @app.get("/api/admin/trail-edit-suggestions")
 async def admin_trail_edit_suggestions(status: Optional[str] = "pending",

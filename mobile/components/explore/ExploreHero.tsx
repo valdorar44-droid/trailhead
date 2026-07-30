@@ -2,26 +2,11 @@ import React from 'react';
 import { ActivityIndicator, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { EXPLORE_VISIBLE_PRIMARY_CATEGORIES } from '@/lib/exploreDestinationRegistry';
 import { EXPLORE_CATEGORY_CHIPS, type ExploreCategoryKey, type ExploreMode } from './exploreDisplay';
 
 const DEFAULT_HERO_IMAGE = require('@/assets/explore-hero-welcome-mountains.jpg');
-const HERO_CATEGORY_KEYS: ExploreCategoryKey[] = [
-  'all',
-  'guided',
-  'parks',
-  'camp',
-  'trails',
-  'things',
-  'views',
-  'waterfalls',
-  'peaks',
-  'trailheads',
-  'water',
-  'fuel',
-  'resupply',
-  'huts',
-  'nearby',
-];
+const HERO_CATEGORY_KEYS: ExploreCategoryKey[] = [...EXPLORE_VISIBLE_PRIMARY_CATEGORIES];
 
 type HeroWeather = {
   loading: boolean;
@@ -217,11 +202,10 @@ export function ExploreHero({
 }
 
 function heroCategoryLabel(key: ExploreCategoryKey, fallback: string) {
-  if (key === 'parks') return 'National Parks';
+  if (key === 'parks') return 'Parks & Land';
   if (key === 'camp') return 'Camps';
   if (key === 'huts') return 'Cabins';
   if (key === 'peaks') return 'Mountains';
-  if (key === 'things') return 'Things';
   if (key === 'resupply') return 'Supplies';
   if (key === 'nearby') return 'Nearby';
   return fallback;
@@ -234,11 +218,11 @@ function heroCategoryIcon(key: ExploreCategoryKey, fallback: string) {
 }
 
 function heroCategoryWidth(key: ExploreCategoryKey) {
-  if (key === 'parks') return 96;
+  if (key === 'parks') return 104;
   if (key === 'camp') return 82;
   if (key === 'waterfalls' || key === 'trailheads' || key === 'glamping' || key === 'peaks') return 84;
   if (key === 'resupply' || key === 'guided') return 74;
-  if (key === 'things' || key === 'nearby') return 70;
+  if (key === 'nearby') return 70;
   return 64;
 }
 

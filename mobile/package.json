@@ -63,6 +63,7 @@
     "test:trail-follow": "node --import tsx lib/__tests__/trailFollowSession.test.ts && node --import tsx lib/__tests__/trailRecordingSession.test.ts && node --import tsx lib/__tests__/trailFollowMapContract.test.ts",
     "test:trail-builder": "node --import tsx lib/__tests__/trailBuilderSession.test.ts && node --import tsx lib/__tests__/trailBuilderPresentation.test.ts && node --import tsx lib/__tests__/trailRoutePlanOwnership.test.ts",
     "test:trail-preview": "node --import tsx lib/__tests__/trailPreviewPlayback.test.ts",
+    "test:explore-trails": "node --import tsx lib/__tests__/exploreDestinationRegistry.test.ts && node --import tsx lib/__tests__/exploreDetailModuleRegistry.test.ts",
     "test:referrals": "node --import tsx lib/referrals/__tests__/referralLinks.test.ts && node scripts/branch-native-lifecycle.test.mjs",
     "test:telemetry": "node --import tsx lib/telemetry/__tests__/sanitize.test.ts && node --import tsx lib/telemetry/__tests__/sampling.test.ts && node --import tsx lib/telemetry/__tests__/qaPolicy.test.ts && node --import tsx lib/telemetry/__tests__/qaAccess.test.ts && node --import tsx lib/qa/__tests__/diagnostics.test.ts && node --import tsx lib/__tests__/offlinePlacePackDiagnostics.test.ts && node --import tsx lib/tripRepository/__tests__/qaInstrumentation.test.ts",
     "test:privacy-controls": "node scripts/privacy-controls.test.mjs",

@@ -69,10 +69,10 @@ export const EXPLORE_CATEGORY_CHIPS: Array<{
   color: string;
 }> = [
   { key: 'all', label: 'All', icon: 'grid-outline', color: '#64748b' },
-  { key: 'camp', label: 'Camp', icon: 'bonfire-outline', color: '#16a34a' },
+  { key: 'camp', label: 'Camps', icon: 'bonfire-outline', color: '#AD5A33' },
   { key: 'glamping', label: 'Glamping', icon: 'sparkles-outline', color: '#0ea5e9' },
   { key: 'huts', label: 'Cabins', icon: 'home-outline', color: '#6366f1' },
-  { key: 'trails', label: 'Trails', icon: 'walk-outline', color: '#f97316' },
+  { key: 'trails', label: 'Trails', icon: 'walk-outline', color: '#984F2F' },
   { key: 'trailheads', label: 'Trailheads', icon: 'trail-sign-outline', color: '#f59e0b' },
   { key: 'views', label: 'Views', icon: 'binoculars-outline', color: '#0f766e' },
   { key: 'peaks', label: 'Mountains', icon: 'triangle-outline', color: '#2563eb' },
@@ -80,13 +80,13 @@ export const EXPLORE_CATEGORY_CHIPS: Array<{
   { key: 'springs', label: 'Springs', icon: 'thermometer-outline', color: '#dc2626' },
   { key: 'climb', label: 'Climb', icon: 'fitness-outline', color: '#9333ea' },
   { key: 'water', label: 'Water', icon: 'water-outline', color: '#0ea5e9' },
-  { key: 'scenic', label: 'Scenic', icon: 'camera-outline', color: '#ca8a04' },
-  { key: 'parks', label: 'Parks', icon: 'leaf-outline', color: '#22c55e' },
+  { key: 'scenic', label: 'Scenic', icon: 'camera-outline', color: '#984F2F' },
+  { key: 'parks', label: 'Parks & Land', icon: 'map-outline', color: '#111412' },
   { key: 'land', label: 'Land', icon: 'map-outline', color: '#84cc16' },
   { key: 'fuel', label: 'Fuel', icon: 'car-outline', color: '#ea580c' },
   { key: 'resupply', label: 'Supplies', icon: 'basket-outline', color: '#7c3aed' },
   { key: 'things', label: 'Things', icon: 'compass-outline', color: '#0f766e' },
-  { key: 'guided', label: 'Guided', icon: 'ticket-outline', color: '#d97706' },
+  { key: 'guided', label: 'Guided', icon: 'ticket-outline', color: '#AD5A33' },
   { key: 'nearby', label: 'Near', icon: 'locate-outline', color: '#a855f7' },
 ];
 

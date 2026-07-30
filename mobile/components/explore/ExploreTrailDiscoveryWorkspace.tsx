@@ -80,6 +80,7 @@ export function ExploreTrailDiscoveryWorkspace({
   const [error, setError] = useState('');
   const generationRef = useRef(0);
   const listRef = useRef<FlatList<TrailDiscoveryItemV2>>(null);
+  const listOffsetRef = useRef(0);
 
   const requestParams = useCallback((nextCursor?: string): TrailDiscoverParams => ({
     mode: scope,
@@ -134,6 +135,19 @@ export function ExploreTrailDiscoveryWorkspace({
   useEffect(() => {
     if (scope === 'along_trip' && (!signedIn || !activeTripId)) setScope('nearby');
   }, [activeTripId, scope, signedIn]);
+
+  useEffect(() => {
+    listOffsetRef.current = 0;
+    listRef.current?.scrollToOffset({ offset: 0, animated: false });
+  }, [filters, query, scope]);
+
+  useEffect(() => {
+    if (!visible || !items.length || listOffsetRef.current <= 0) return;
+    const frame = requestAnimationFrame(() => {
+      listRef.current?.scrollToOffset({ offset: listOffsetRef.current, animated: false });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [items.length, visible]);
 
   const resultLabel = useMemo(() => {
     if (loading) return 'Finding trails';
@@ -262,6 +276,8 @@ export function ExploreTrailDiscoveryWorkspace({
             )}
             onEndReached={() => { if (cursor && !loadingMore) void load(cursor); }}
             onEndReachedThreshold={0.4}
+            onScroll={event => { listOffsetRef.current = event.nativeEvent.contentOffset.y; }}
+            scrollEventThrottle={120}
             ListFooterComponent={loadingMore ? <ActivityIndicator style={styles.more} color={C.orange} /> : null}
           />
         )}

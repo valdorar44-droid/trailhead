@@ -1,11 +1,17 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import type { TrailDiscoveryItemV2 } from '../api';
 import {
   completeTrailDiscoveryItems,
   mergeTrailDiscoveryItems,
   trailDiscoveryResponseIsCurrent,
 } from '../trailDiscoveryWorkspace';
+
+const mobileRoot = join(dirname(fileURLToPath(import.meta.url)), '../..');
+const workspaceSource = readFileSync(join(mobileRoot, 'components/explore/ExploreTrailDiscoveryWorkspace.tsx'), 'utf8');
 
 function item(id: string, geometry_status: TrailDiscoveryItemV2['geometry_status'] = 'complete'): TrailDiscoveryItemV2 {
   return {
@@ -43,4 +49,10 @@ test('primary list eligibility requires complete geometry', () => {
     completeTrailDiscoveryItems([item('route'), item('fragment', 'partial'), item('point', 'point')]).map(value => value.id),
     ['route'],
   );
+});
+
+test('workspace preserves list offset across a focus-gated Map return', () => {
+  assert.match(workspaceSource, /listOffsetRef = useRef\(0\)/);
+  assert.match(workspaceSource, /onScroll=\{event => \{ listOffsetRef\.current = event\.nativeEvent\.contentOffset\.y; \}\}/);
+  assert.match(workspaceSource, /scrollToOffset\(\{ offset: listOffsetRef\.current, animated: false \}\)/);
 });

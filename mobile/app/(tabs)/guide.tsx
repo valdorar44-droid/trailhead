@@ -5503,7 +5503,6 @@ function GuideScreenContent() {
       filters: request.filters,
       tripId: request.tripId,
     });
-    setExploreTrailDiscoveryOpen(false);
     router.push('/(tabs)/map');
   }
 
@@ -5531,7 +5530,6 @@ function GuideScreenContent() {
         createdAt: Date.now(),
       },
     });
-    setExploreTrailDiscoveryOpen(false);
     router.push('/(tabs)/map');
   }
 
@@ -6460,7 +6458,7 @@ function GuideScreenContent() {
       </ScrollView>
 
       <ExploreTrailDiscoveryWorkspace
-        visible={exploreTrailDiscoveryOpen}
+        visible={exploreTrailDiscoveryOpen && screenActivity.isActive}
         location={userLoc}
         signedIn={Boolean(user)}
         activeTripId={activeTrip?.trip_id}

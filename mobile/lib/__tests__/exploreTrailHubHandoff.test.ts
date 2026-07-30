@@ -74,3 +74,12 @@ test('Explore resolves trail wrappers with data and forces a real lookup only wh
   assert.match(guideSource, /initialTab === 'trails' && !hasExploreTrailCards\(retainedTrailArea\)/);
   assert.match(guideSource, /hydrateExploreTrailArea\(retainedTrailArea, true\)/);
 });
+
+test('Trail Discovery map handoffs retain the mounted workspace and focus-gate its modal', () => {
+  const start = guideSource.indexOf('function openTrailDiscoveryMap');
+  const end = guideSource.indexOf('async function requestTrailDiscoveryLocation', start);
+  assert.ok(start >= 0 && end > start);
+  const handoff = guideSource.slice(start, end);
+  assert.doesNotMatch(handoff, /setExploreTrailDiscoveryOpen\(false\)/);
+  assert.match(guideSource, /visible=\{exploreTrailDiscoveryOpen && screenActivity\.isActive\}/);
+});

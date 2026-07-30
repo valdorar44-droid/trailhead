@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { trailFollowCameraAction, transitionTrailFollowCamera } from '../trailFollowCameraOwnership';
+import { trailRoutePlanMatchesOwner } from '../trailRoutePlanOwnership';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const map = fs.readFileSync(path.resolve(here, '../../app/(tabs)/map.tsx'), 'utf8');
@@ -15,6 +16,7 @@ assert.match(map, /sourceBackedTrailheads\(trail\)/);
 assert.match(map, /trail\.trailheads_v2\?\.length/);
 assert.match(map, /setTrailRoutePlans\(existing => existing\.length \? existing : \[plan\]\)/);
 assert.match(map, /async function startSelectedTrailNavigation\(trail: TrailFeature\)/);
+assert.match(map, /trailRoutePlanMatchesOwner\(candidatePlan, trail\)/);
 assert.match(map, /const system = await api\.getTrailSystem\(trail\.system_v2_id\)/);
 assert.match(map, /startSelectedTrailNavigation\(selectedTrail\)/);
 assert.match(map, /nativeMapRef\.current\?\.restoreRoute\(plan\.coords/);
@@ -59,5 +61,19 @@ assert.equal(transitionTrailFollowCamera('follow', 'route_button'), 'route_overv
 assert.equal(transitionTrailFollowCamera('route_overview', 'gesture'), 'free');
 assert.equal(transitionTrailFollowCamera('free', 'route_button'), 'follow');
 assert.deepEqual(trailFollowCameraAction('route_overview'), { label: 'Recenter', icon: 'locate-outline' });
+assert.equal(
+  trailRoutePlanMatchesOwner(
+    { trailId: 'trail:short-point', geometryRevision: 'sha256:short' },
+    { id: 'trail:short-point', geometry_revision: 'sha256:short' },
+  ),
+  true,
+);
+assert.equal(
+  trailRoutePlanMatchesOwner(
+    { trailId: 'trail:island', geometryRevision: 'sha256:island' },
+    { id: 'trail:short-point', geometry_revision: 'sha256:short' },
+  ),
+  false,
+);
 
 console.log('trail follow map contract tests passed');

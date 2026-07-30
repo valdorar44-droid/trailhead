@@ -204,6 +204,7 @@ import {
   transitionTrailFollowCamera,
   type TrailFollowCameraMode,
 } from '@/lib/trailFollowCameraOwnership';
+import { trailRoutePlanMatchesOwner } from '@/lib/trailRoutePlanOwnership';
 import {
   endLocalTrailRecording,
   endTrailFollowWithoutStoppingRecording,
@@ -1150,6 +1151,8 @@ type TrailSnapMode = 'trail' | 'road' | 'dirt' | 'straight' | 'hybrid';
 type TrailRouteIntent = 'segment' | 'out_back' | 'loop' | 'far_end' | 'capture';
 type TrailRoutePlan = {
   id: TrailRouteIntent;
+  trailId?: string;
+  geometryRevision?: string | null;
   title: string;
   subtitle: string;
   icon: keyof typeof Ionicons.glyphMap;
@@ -1748,6 +1751,8 @@ function trailRoutePlanFromSystem(
   const distanceM = trailCoordsDistanceM(coords);
   return {
     id: 'capture',
+    trailId: trail.id,
+    geometryRevision: system.geometry_revision,
     title: system.name || trail.name,
     subtitle: `${fmtTrailRouteDistance(distanceM)} · verified route`,
     icon: 'walk-outline',
@@ -23572,6 +23577,8 @@ function MapScreen() {
     ].filter(Boolean);
     const plans: TrailRoutePlan[] = [withTrailElevation({
       id: 'segment',
+      trailId: trail.id,
+      geometryRevision: trail.geometry_revision ?? null,
       title: 'Visible segment',
       subtitle: 'Follow the selected line exactly',
       icon: 'git-commit-outline',
@@ -23585,6 +23592,8 @@ function MapScreen() {
     const reversed = clean.slice(0, -1).reverse();
     plans.push(withTrailElevation({
       id: 'out_back',
+      trailId: trail.id,
+      geometryRevision: trail.geometry_revision ?? null,
       title: 'Out and back',
       subtitle: 'Return on the same selected line',
       icon: 'return-down-back-outline',
@@ -23598,6 +23607,8 @@ function MapScreen() {
     if (trailEndpointDistanceM(clean) <= 350 && clean.length >= 8) {
       plans.push(withTrailElevation({
         id: 'loop',
+        trailId: trail.id,
+        geometryRevision: trail.geometry_revision ?? null,
         title: 'Loop direction',
         subtitle: 'Start and finish on the selected loop',
         icon: 'sync-outline',
@@ -23611,6 +23622,8 @@ function MapScreen() {
 
     plans.push(withTrailElevation({
       id: 'far_end',
+      trailId: trail.id,
+      geometryRevision: trail.geometry_revision ?? null,
       title: 'To far end',
       subtitle: 'One-way to the end of this segment',
       icon: 'flag-outline',
@@ -24605,12 +24618,17 @@ function MapScreen() {
   }
 
   async function startSelectedTrailNavigation(trail: TrailFeature) {
-    const readyPlan = trailRoutePlans.find(plan => plan.id === selectedTrailRoutePlanId) ?? trailRoutePlans[0] ?? null;
+    const candidatePlan = trailRoutePlans.find(plan => plan.id === selectedTrailRoutePlanId) ?? trailRoutePlans[0] ?? null;
+    const readyPlan = candidatePlan && trailRoutePlanMatchesOwner(candidatePlan, trail) ? candidatePlan : null;
     if (readyPlan) {
       startTrailRoutePlan(trail, readyPlan);
       return;
     }
     if (!trail.system_v2_id) {
+      if (candidatePlan) {
+        startTrailRoutePlan(trail, candidatePlan);
+        return;
+      }
       navigateToCamp(trail);
       return;
     }

@@ -247,3 +247,48 @@ Verify `git diff --cached --name-only` before every commit.
 - Do not repeat E2/E3 discovery, filter, Yellowstone search, destination trails, broad sheets, NPS research, Trails T1–T6, Offline, Layers, Memory, Originals, Android Auto, or screenshot crawls without new evidence.
 - Do not expose private or unlisted geometry, publish Community routes, or award contribution credits before the E4/E5 authorization, privacy, moderation, and idempotency gates pass.
 - Do not repeat E2 search ranking, filters, broad trail sheets, Trails T1–T6, NPS research, Layers, Memory, Originals, Android Auto, or broad Map crawls without new evidence.
+
+## E4/E5 Figma design gate — 2026-07-30 18:13 CDT
+
+- Branch: `feat/trailhead-1.0.10-overhaul`.
+- Repository checkpoint source before this documentation update: `d3d11d13e6cd502493fce5940a0d4797eb5c2e01`.
+- Protected Explore-index working-file Git object remains `f39f30fdbb33477dacd8fcf5016612a8729dc69e`; its tracked baseline is `1b33aa4dee09df19a22a8a2c0134345f30881b99`.
+- `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, Valhalla work, Android Auto scripts, and every unrelated dirty file remained unstaged and unchanged by this packet.
+- No mobile, backend, public API, native project, runtime, preview OTA, production update, entitlement, credit, or public-discovery behavior changed.
+
+### Figma delta
+
+- File: `FJUcMWAfsNyjsguCEp2dBe`.
+- New section: `E4–E5 · Private to Published · Flow Delta` (`812:3334`).
+- Added 27 connected phone states covering:
+  - Private-route privacy review, start/finish cropping, unlisted link creation, immutable shared revisions, link updates, and revocation.
+  - Valid, signed-out, offline, expired, and revoked recipient states.
+  - Suggestion form, review, under-review, changes-requested, resubmitted, approved, rejected, withdrawn, and archived outcomes.
+  - Community-route Peek (`818:3182`) and Full (`814:3348`) variants with contributor and moderation context, never a Verified label.
+  - Moderator queue, duplicate comparison, access/source/photo review, decision reasons, approval confirmation, exactly-once credit receipt, Verified promotion, and takedown review.
+- Repaired the existing entry points so `Share` and `Suggest as a trail` no longer jump to the same recycled status screen.
+- Community discovery now follows card → Community Peek → Community Full instead of opening the generic Verified Trail Peek.
+- Moderator entry points now route through queue, duplicate/evidence review, decision, and confirmation states rather than generic Trail Full.
+- All new prototype hotspots were rebuilt with explicit destinations; no new frame is unlinked.
+- Small-screen visual QA removed wrapped top actions, clipped filter labels, and overlapping condition-card copy.
+- Copy audit found no AI labels, provider wording, confidence percentages, `safe route`, `verified access`, or generic `check local rules` text.
+
+### References and evidence
+
+- Approved Trailhead sources reused: Trail Discovery `779:2412`, cards `514:769`, filters `518:858`, Trail Peek `407:162`, Trail Full `520:782`, and Trailhead Full `520:872`.
+- Mobbin/behavior references: AllTrails custom routes, explicit `Suggest as a trail`, Strava privacy cropping, Komoot contribution evidence, and AllTrails moderation guidance. No external branding or imagery was copied.
+- Visual evidence directory: `C:\Users\User\Documents\Codex\evidence\trailhead\figma-e4-e5-delta`.
+- Representative screenshots cover privacy review, link ready, suggestion, submission review, approval, Community detail, Community Peek, moderator queue, duplicate/evidence review, approval confirmation, Verified promotion, and link revocation.
+
+### Gate and next exact action
+
+- E3 remains accepted with no open P0/P1. The native-only `Source · Trailhead` copy row remains the recorded P2 for the next accepted JS packet.
+- The E4/E5 design blocker is resolved. Stop here for user review of the focused Figma delta.
+- After explicit approval, implement E4 private routes and unlisted sharing first: contain legacy exposure, repair account-deletion cleanup, add rollout flags, harden geometry/revision/idempotency, implement token hashing/revocation/privacy review, then add the approved mobile flow.
+- E4 receives focused tests and one Android-first paired preview. Do not begin E5 public moderation or award contribution credits until E4 is accepted.
+- Task-owned Metro, Gradle, Maestro, publisher, and test processes: none.
+
+### Do not repeat
+
+- Do not repeat E2/E3 discovery, Yellowstone, NPS, Trails T1–T6, Offline, Layers, Memory, Originals, Android Auto, broad Map crawls, or Figma research without new evidence.
+- Do not expose private or unlisted geometry, enable Community discovery from unreviewed records, create a Verified route, or issue contribution credits before the corresponding authorization, moderation, and idempotency tests pass.

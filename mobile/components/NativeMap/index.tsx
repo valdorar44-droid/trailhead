@@ -3636,7 +3636,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               />
             </MapGL.ShapeSource>
           )}
-          {trailPreviewVisual.marker && (
+          {trailPreviewVisual.marker && trailPreviewProgress < 0.995 && (
             <MapGL.ShapeSource
               id="trail-preview-marker"
               shape={pointFC([{

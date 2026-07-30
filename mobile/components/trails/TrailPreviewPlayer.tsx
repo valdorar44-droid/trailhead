@@ -160,8 +160,9 @@ export default function TrailPreviewPlayer({
   const available = manifest?.status === 'available' && frames.length >= 2;
   if (!loading && !available) return null;
 
-  const distanceM = activeFrame?.cumulative_distance_m
-    ?? (manifest?.distance_m ? Math.round(manifest.distance_m * progress) : undefined);
+  const distanceM = manifest?.distance_m
+    ? Math.round(manifest.distance_m * progress)
+    : activeFrame?.cumulative_distance_m;
   const bearing = Number.isFinite(Number(activeFrame?.bearing)) ? Number(activeFrame?.bearing) : null;
   const currentTime = trailPreviewClockLabel(totalDuration * progress);
   const totalTime = trailPreviewClockLabel(totalDuration);

@@ -80,4 +80,6 @@ test('canonical Trails V2 preview consumes the identity-bound resolved route pla
 test('the preview route keeps its yellow finish diamond on the native map', () => {
   assert.match(nativeMapSource, /id="trail-preview-finish-diamond"/);
   assert.match(nativeMapSource, /textColor:\s*'#F5C84B'/);
+  assert.match(nativeMapSource, /trailPreviewVisual\.marker && trailPreviewProgress < 0\.995/);
+  assert.match(playerSource, /Math\.round\(manifest\.distance_m \* progress\)/);
 });

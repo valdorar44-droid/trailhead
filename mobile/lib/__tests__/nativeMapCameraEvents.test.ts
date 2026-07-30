@@ -1,8 +1,21 @@
 import assert from 'node:assert/strict';
 import {
+  shouldQueueFreeCameraCommand,
   shouldNotifyRegionGestureBreakaway,
   shouldNotifyTrackingModeBreakaway,
 } from '../nativeMapCameraEvents';
+
+assert.equal(
+  shouldQueueFreeCameraCommand({ navigationActive: true }),
+  true,
+  'route overview waits for the native navigation camera to detach before fitting the trail',
+);
+
+assert.equal(
+  shouldQueueFreeCameraCommand({ navigationActive: false }),
+  false,
+  'ordinary browse fits remain immediate',
+);
 
 assert.equal(
   shouldNotifyTrackingModeBreakaway({

@@ -11,6 +11,21 @@ export type RegionGestureBreakawayInput = Readonly<{
   programmaticUntilMs: number;
 }>;
 
+export type FreeCameraCommandInput = Readonly<{
+  navigationActive: boolean;
+}>;
+
+/**
+ * A free-camera command issued while navigation owns the map must wait for the
+ * native tracking camera to detach. iOS can otherwise accept the command and
+ * immediately replace it with the final live-location tracking frame.
+ */
+export function shouldQueueFreeCameraCommand({
+  navigationActive,
+}: FreeCameraCommandInput): boolean {
+  return navigationActive;
+}
+
 /**
  * RNMapbox can report tracking-mode changes for both camera commands and
  * touch gestures. Only a recent real touch may break Trail Follow away from

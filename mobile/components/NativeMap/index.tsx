@@ -26,6 +26,7 @@ import {
   type MapCameraOwnership,
 } from '@/lib/mapCameraOwnership';
 import {
+  shouldQueueFreeCameraCommand,
   shouldNotifyRegionGestureBreakaway,
   shouldNotifyTrackingModeBreakaway,
 } from '@/lib/nativeMapCameraEvents';
@@ -2029,10 +2030,22 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       const lats = clean.map(coord => coord[1]);
       const ne: [number, number] = [Math.max(...lngs), Math.max(...lats)];
       const sw: [number, number] = [Math.min(...lngs), Math.min(...lats)];
-      lastCamRef.current = Date.now();
-      programmaticCameraUntilRef.current = Date.now() + Math.max(900, duration + 450);
-      emitDebugEvent('camera:set:fitCoordinates', { points: clean.length, ne, sw, padding, duration });
-      camRef.current?.fitBounds(ne, sw, padding, Platform.OS === 'web' ? 0 : duration);
+      const applyFit = () => {
+        lastCamRef.current = Date.now();
+        programmaticCameraUntilRef.current = Date.now() + Math.max(900, duration + 450);
+        emitDebugEvent('camera:set:fitCoordinates', { points: clean.length, ne, sw, padding, duration });
+        camRef.current?.fitBounds(ne, sw, padding, Platform.OS === 'web' ? 0 : duration);
+      };
+      if (shouldQueueFreeCameraCommand({ navigationActive: navMode })) {
+        pendingFreeCameraRef.current = applyFit;
+        setFreeCameraRevision(value => value + 1);
+        emitDebugEvent('camera:queue:fitCoordinates', {
+          points: clean.length,
+          reason: 'navigation-tracking-detach',
+        });
+        return;
+      }
+      applyFit();
     },
     async setZoom(zoom, focus) {
       const nextZoom = clampMapZoom(Number(zoom), 12);

@@ -616,3 +616,24 @@ Verify the staged file list before every commit.
 #### Do not repeat after this checkpoint
 
 - Do not repeat T5 iOS camera toggles, disclosure, permission, locked trace, database inspection, pause/resume, process recovery, End, GPX share, or teardown without new evidence. Do not repeat any T1-T6 Android work, Offline packs, Layers/styles, Memory Gate, Yellowstone, NPS, Originals, Android Auto, Camp Guide, broad Search, screenshots, or production work.
+
+### Paired Trails complete — iOS T6 Back and metric clipping accepted (2026-07-30T02:45:17-05:00)
+
+- Branch `feat/trailhead-1.0.10-overhaul`; exact functional HEAD `7aa2465949ef746b2e9704de42b40632e4466b67`. Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, and unrelated worktree files remained excluded.
+- iOS T6 Back was physically accepted on the real Short Point preview: Back removed the flyover player, restored the exact Short Point Peek and selected route, retained the yellow finish diamond, and exposed no stale preview controls or competing underlay. Flyover evidence SHA-256 is `05571BEE3E6524D846E0747A4F6492F24ABF9C22866EA321B5AB7F9798DF00D9`; Back-restored evidence SHA-256 is `5C34DBEC9125112DE0A259B659A2B66246F4D9A8EB2A55B35DFA5DC7FEAB39F3`.
+- The Back-restored sheet exposed one narrow P2 polish defect: `SURFACE / Natural surface` was truncated. Commit `7aa2465949ef746b2e9704de42b40632e4466b67` normalizes the redundant value to `Natural` and permits all metric values to wrap instead of ellipsizing. It changes no trail facts, route geometry, sheet ownership, native configuration, or runtime.
+- Focused checks passed: trail metric presentation, Trail Preview `7/7`, complete Trail Follow and recording suites, full mobile TypeScript, copy audit across `167` files, privacy controls, native drift, and whitespace. Native-drift warnings were limited to external release secrets not present in the local shell.
+- Guarded paired preview source `7aa2465949ef746b2e9704de42b40632e4466b67`: Android group `65f55513-267d-46d9-9681-22aacbc775cf`, update `019fb1eb-8720-733e-9e5c-7565da82639e`, runtime `native-1.0.10-android.7`; iOS group `565d8ccb-4701-4c32-a6d0-b31528421dc6`, update `019fb1eb-8720-7a16-877f-bd743b2aac22`, runtime `native-1.0.10-ios.6`. Candidate branch is `preview-candidate-7aa2465949ef746b2e9704de42b40632e4466b67-ms76qfuf-6477b4d598086025229bef9e`; Sentry accepted Android, iOS, and web source maps before preview promotion.
+- The iPhone Expo database proves the exact iOS update is Ready and launched successfully once with zero failures. Its first interrupted asset fetch left a pending row; one targeted preview-update reset allowed the built-in updater to refetch the same immutable update. Account, trips, downloads, recordings, and application data were not cleared.
+- Physical iPhone proof shows `ROUTE / Trail`, `DISTANCE / 11 mi`, and `SURFACE / Natural` fully visible with no clipping. Screenshot `C:\Users\User\Documents\Codex\evidence\trailhead\trails-ios-c7159a8\7aa2465-short-point-metrics-fixed.png`, SHA-256 `C4563AE16982F659998A036F9B639A2EC1AFD9D3AE8D104346066D77B575290B`. Update database evidence is `expo-v11-7aa2465-refetched.db` in the same directory.
+- T1 through T6 are complete and accepted on Android and iOS with no open P0/P1 in the Trails packet. No production update or build was published. Task-owned Metro, Gradle, Maestro, Expo/EAS publisher, oslog, simulator, and test processes are none after cleanup.
+
+#### Exact next action
+
+1. Treat Trails T1-T6 as closed. Choose the next bounded product packet or separately authorize production promotion of the accepted compatible source.
+2. Do not reopen Trails without new evidence. If a later packet touches shared Map, sheets, Offline, or route state, run only the directly affected Trails smoke assertion.
+
+#### Do not repeat after this checkpoint
+
+- Do not repeat T1-T6 discovery, sheets, Builder, GPX, Offline packs, Follow, recording, flyover, camera, Back, Close, endpoint, or metric work without new evidence.
+- Do not repeat Layers/styles, Memory Gate, Yellowstone, NPS, Originals, Android Auto, Camp Guide, broad Search, store screenshots, or production work as part of this closed packet.

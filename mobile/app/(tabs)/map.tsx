@@ -44,14 +44,20 @@ import PackingListSheet from '@/components/trip/PackingListSheet';
 import TripNotesSheet from '@/components/trips/TripNotesSheet';
 import TrailPreviewPlayer from '@/components/trails/TrailPreviewPlayer';
 import TrailBuilderLauncherSheet from '@/components/trails/TrailBuilderLauncherSheet';
+import {
+  TrailBuilderAddPointsSheet,
+  TrailBuilderDrawSheet,
+  TrailBuilderRouteOptionsSheet,
+  TrailBuilderRouteReadySheet,
+  TrailBuilderRoutingSheet,
+  type TrailBuilderChoice,
+  type TrailBuilderRouteChoice,
+} from '@/components/trails/TrailBuilderPanel';
 import TourTarget from '@/components/TourTarget';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
 import TrailheadPhotoGallery, { type TrailheadGalleryPhoto } from '@/components/TrailheadPhotoGallery';
 import {
-  TrailheadButton,
-  TrailheadButtonDock,
   TrailheadCardSkeleton,
-  TrailheadMetricRow,
   TrailheadSheet,
   TrailheadSkeletonLine,
 } from '@/components/TrailheadUI';
@@ -1185,10 +1191,10 @@ type TrailRouteSegmentStatus = {
 };
 const TRAIL_SNAP_MODE_OPTIONS: Array<{ id: TrailSnapMode; label: string; icon: keyof typeof Ionicons.glyphMap; sub: string }> = [
   { id: 'trail', label: 'Trail', icon: 'git-branch-outline', sub: 'Best trail line' },
-  { id: 'road', label: 'Road', icon: 'car-outline', sub: 'Connector routing' },
-  { id: 'dirt', label: '4WD', icon: 'trail-sign-outline', sub: 'Track-style review' },
-  { id: 'hybrid', label: 'Hybrid', icon: 'git-compare-outline', sub: 'Road + trail' },
-  { id: 'straight', label: 'Line', icon: 'analytics-outline', sub: 'Manual fallback' },
+  { id: 'road', label: 'Roads', icon: 'car-outline', sub: 'Connector routing' },
+  { id: 'dirt', label: '4WD roads', icon: 'trail-sign-outline', sub: 'Track-style review' },
+  { id: 'hybrid', label: 'Hybrid · trails and roads', icon: 'git-compare-outline', sub: 'Road + trail' },
+  { id: 'straight', label: 'Straight line', icon: 'analytics-outline', sub: 'Manual fallback' },
 ];
 
 function trailSnapModeHelp(mode: TrailSnapMode) {
@@ -1922,11 +1928,6 @@ function withTrailElevation(plan: TrailRoutePlan): TrailRoutePlan {
 function fmtTrailElevation(plan?: Pick<TrailRoutePlan, 'elevationGainFt' | 'elevationLossFt' | 'elevationConfidence'> | null) {
   if (!plan || plan.elevationConfidence === 'unavailable' || plan.elevationGainFt == null || plan.elevationLossFt == null) return 'Elev unavailable';
   return `+${Math.round(plan.elevationGainFt).toLocaleString()} / -${Math.round(plan.elevationLossFt).toLocaleString()} ft`;
-}
-
-function trailElevationLabel(plan?: Pick<TrailRoutePlan, 'elevationConfidence'> | null) {
-  if (!plan?.elevationConfidence || plan.elevationConfidence === 'unavailable') return 'Elevation sample unavailable';
-  return plan.elevationConfidence === 'high' ? 'Elevation' : 'Est. elevation';
 }
 
 function dedupeTrailCoords(coords: [number, number][]) {
@@ -7657,6 +7658,9 @@ function MapScreen() {
   const [selectedTrailRoutePlanId, setSelectedTrailRoutePlanId] = useState<TrailRouteIntent | null>(null);
   const [trailRouteBuilderError, setTrailRouteBuilderError] = useState('');
   const [trailSnapMode, setTrailSnapMode] = useState<TrailSnapMode>('trail');
+  const [trailRoutingPickerOpen, setTrailRoutingPickerOpen] = useState(false);
+  const [trailRouteOptionsOpen, setTrailRouteOptionsOpen] = useState(false);
+  const [trailRoutingDraft, setTrailRoutingDraft] = useState<TrailSnapMode>('trail');
   const [trailSnapFailureReason, setTrailSnapFailureReason] = useState('');
   const [trailBuildFinalized, setTrailBuildFinalized] = useState(false);
   const [trailBuilderLauncherOpen, setTrailBuilderLauncherOpen] = useState(false);
@@ -7671,6 +7675,7 @@ function MapScreen() {
   } | null>(null);
   const [trailTraceMode, setTrailTraceMode] = useState(false);
   const [trailTraceDraft, setTrailTraceDraft] = useState<[number, number][]>([]);
+  const [trailTraceUndoStack, setTrailTraceUndoStack] = useState<[number, number][][]>([]);
   const [trailTraceRoute, setTrailTraceRoute] = useState<[number, number][]>([]);
   const [trailPinCaptureMode, setTrailPinCaptureMode] = useState(false);
   const [trailPinCaptureSeedName, setTrailPinCaptureSeedName] = useState('');
@@ -21607,8 +21612,6 @@ function MapScreen() {
   const distKm    = userLoc && navTarget ? haversineKm(userLoc.lat, userLoc.lng, navTarget.lat, navTarget.lng) : null;
   const bearing   = userLoc && navTarget ? calcBearing(userLoc.lat, userLoc.lng, navTarget.lat, navTarget.lng) : null;
   const speedMph  = userSpeed !== null && userSpeed > 0 ? userSpeed * 2.237 : null;
-  const selectedTrailRoutePlan = trailRoutePlans.find(p => p.id === selectedTrailRoutePlanId) ?? trailRoutePlans[0] ?? null;
-  const previewTrailDistanceM = selectedTrailRoutePlan?.distanceM ?? (trailTraceRoute.length > 1 ? trailCoordsDistanceM(trailTraceRoute) : 0);
   const elevationHydrationRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     trailRoutePlans.forEach(plan => {
@@ -22455,7 +22458,9 @@ function MapScreen() {
     trailPreviewOpen,
     trailBuilderDirty,
     trailPinCaptureMode,
+    trailRouteOptionsOpen,
     trailRouteBuilderOpen,
+    trailRoutingPickerOpen,
     trailTraceMode,
   ]));
 
@@ -22478,7 +22483,9 @@ function MapScreen() {
   }, [
     trailBuilderDirty,
     trailPinCaptureMode,
+    trailRouteOptionsOpen,
     trailRouteBuilderOpen,
+    trailRoutingPickerOpen,
     trailTraceMode,
     selectedTrail?.id,
     selectedTrailRoutePlanId,
@@ -23755,6 +23762,7 @@ function MapScreen() {
   function clearTrailTrace() {
     setTrailTraceMode(false);
     setTrailTraceDraft([]);
+    setTrailTraceUndoStack([]);
     trailTraceDraftRef.current = [];
     setTrailTraceRoute([]);
     setTrailBuilderDirty(false);
@@ -23782,9 +23790,13 @@ function MapScreen() {
     setSelectedTrailRoutePlanId(null);
     setTrailRouteBuilderError('');
     setTrailSnapFailureReason('');
+    setTrailRoutingPickerOpen(false);
+    setTrailRouteOptionsOpen(false);
+    setTrailRoutingDraft(trailSnapMode);
     setTrailRouteSegmentStatus([]);
     setTrailTraceRoute([]);
     setTrailTraceDraft([]);
+    setTrailTraceUndoStack([]);
     trailTraceDraftRef.current = [];
     setTrailCapturePins([]);
     setTrailCaptureAnchors([]);
@@ -23853,8 +23865,11 @@ function MapScreen() {
     setSelectedTrailRoutePlanId(null);
     setTrailRouteBuilderError('');
     setTrailSnapFailureReason('');
+    setTrailRoutingPickerOpen(false);
+    setTrailRoutingDraft(trailSnapMode);
     setTrailRouteSegmentStatus([]);
     setTrailTraceDraft([]);
+    setTrailTraceUndoStack([]);
     trailTraceDraftRef.current = [];
     setTrailTraceRoute([]);
     setTrailBuilderMode('draw');
@@ -23878,6 +23893,46 @@ function MapScreen() {
       if (next.length > 1) setTrailBuilderDirty(true);
       return next;
     });
+  }
+
+  function beginTrailTraceStroke(coord: [number, number]) {
+    const previous = trailTraceDraftRef.current;
+    setTrailTraceUndoStack(stack => [...stack, previous].slice(-10));
+    appendTrailTracePoint(coord, true);
+  }
+
+  function finishTrailTraceStroke() {
+    if (trailTraceDraftRef.current.length < 2) {
+      setQuickToast('Draw a longer line');
+      setTimeout(() => setQuickToast(''), 1800);
+      return;
+    }
+    setTrailBuilderDirty(true);
+    Haptics.selectionAsync().catch(() => {});
+  }
+
+  function undoTrailTraceStroke() {
+    setTrailTraceUndoStack(stack => {
+      if (stack.length === 0) {
+        setTrailTraceDraft([]);
+        trailTraceDraftRef.current = [];
+        setTrailBuilderDirty(false);
+        return stack;
+      }
+      const previous = stack[stack.length - 1] ?? [];
+      setTrailTraceDraft(previous);
+      trailTraceDraftRef.current = previous;
+      setTrailBuilderDirty(previous.length > 1);
+      return stack.slice(0, -1);
+    });
+  }
+
+  function clearTrailTraceDraft() {
+    const current = trailTraceDraftRef.current;
+    if (current.length > 0) setTrailTraceUndoStack(stack => [...stack, current].slice(-10));
+    setTrailTraceDraft([]);
+    trailTraceDraftRef.current = [];
+    setTrailBuilderDirty(false);
   }
 
   async function routeTraceWithGraph(coords: [number, number][]) {
@@ -24003,6 +24058,14 @@ function MapScreen() {
   }
 
   function requestTrailBuilderExit() {
+    if (trailRouteOptionsOpen) {
+      setTrailRouteOptionsOpen(false);
+      return;
+    }
+    if (trailRoutingPickerOpen) {
+      setTrailRoutingPickerOpen(false);
+      return;
+    }
     if (!trailBuilderDirty) {
       discardTrailBuilder();
       return;
@@ -24138,12 +24201,67 @@ function MapScreen() {
   }
 
   function openTrailBuilderRouteOptions() {
-    Alert.alert('Route options', 'Choose how to reshape this route.', [
-      { text: 'Reverse', onPress: () => transformSelectedTrailRoute('reverse') },
-      { text: 'Out & back', onPress: () => transformSelectedTrailRoute('out_back') },
-      { text: 'Close loop', onPress: () => transformSelectedTrailRoute('loop') },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
+    setTrailRoutingPickerOpen(false);
+    setTrailRouteOptionsOpen(true);
+  }
+
+  function chooseTrailRoutePlan(id: string) {
+    const plan = trailRoutePlans.find(item => item.id === id);
+    if (!plan || !selectedTrail) return;
+    setSelectedTrailRoutePlanId(plan.id);
+    previewTrailRoutePlan(selectedTrail, plan);
+  }
+
+  function applyTrailRouteShape(kind: 'reverse' | 'out_back' | 'loop') {
+    transformSelectedTrailRoute(kind);
+    setTrailRouteOptionsOpen(false);
+  }
+
+  function openTrailRoutingPicker() {
+    setTrailRoutingDraft(trailSnapMode);
+    setTrailRoutingPickerOpen(true);
+  }
+
+  async function applyTrailRouting() {
+    const nextMode = trailRoutingDraft;
+    setTrailSnapMode(nextMode);
+    setTrailRoutingPickerOpen(false);
+    setTrailSnapFailureReason('');
+    setTrailBuildFinalized(false);
+    if (trailCaptureAnchors.length >= 2) {
+      setTrailBuilderDirty(true);
+      await capturePinnedTrailRoute(trailCaptureAnchors, { previewOnly: true, snapMode: nextMode });
+    }
+  }
+
+  function editSelectedTrailRoutePoints() {
+    const plan = trailRoutePlans.find(item => item.id === selectedTrailRoutePlanId) ?? trailRoutePlans[0];
+    if (!plan || plan.coords.length < 2) return;
+    const desiredCount = Math.min(8, Math.max(2, Math.ceil(plan.coords.length / 80)));
+    const indices = Array.from({ length: desiredCount }, (_, index) => (
+      Math.round((index / Math.max(1, desiredCount - 1)) * (plan.coords.length - 1))
+    ));
+    const emptyGeometry: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
+    const anchors = [...new Set(indices)].map(index => ({
+      coord: [plan.coords[index][0], plan.coords[index][1]] as [number, number],
+      geometry: emptyGeometry,
+    }));
+    setTrailCaptureAnchors(anchors);
+    setTrailCaptureRedoAnchors([]);
+    setTrailCapturePins(anchors.map(anchor => anchor.coord));
+    setTrailTraceRoute(plan.coords);
+    setTrailBuilderMode('points');
+    setTrailRouteBuilderOpen(false);
+    setTrailBuildFinalized(false);
+    setTrailRoutingPickerOpen(false);
+    setTrailRouteOptionsOpen(false);
+    setTrailPinCaptureSeedName(selectedTrail?.name ?? 'Trail route');
+    setTrailPinCaptureMode(true);
+    syncTrailCaptureModeToWeb(true);
+    setTrailBuilderDirty(true);
+    setQuickToast('Tap the map to adjust the route points');
+    setTimeout(() => setQuickToast(''), 2200);
+    Haptics.selectionAsync().catch(() => {});
   }
 
   function beginTrailPinCapture() {
@@ -24165,6 +24283,9 @@ function MapScreen() {
     setSelectedTrailRoutePlanId(null);
     setTrailRouteBuilderError('');
     setTrailSnapFailureReason('');
+    setTrailRoutingPickerOpen(false);
+    setTrailRouteOptionsOpen(false);
+    setTrailRoutingDraft(trailSnapMode);
     setTrailBuildFinalized(false);
     setTrailRouteSegmentStatus([]);
     trailAutoBuildCountRef.current = 0;
@@ -24180,6 +24301,7 @@ function MapScreen() {
     setTrailBuilderGpxSummary('');
     setTrailBuilderDirty(false);
     setTrailTraceDraft([]);
+    setTrailTraceUndoStack([]);
     trailTraceDraftRef.current = [];
     setTrailPinCaptureMode(true);
     syncTrailCaptureModeToWeb(true);
@@ -24217,6 +24339,9 @@ function MapScreen() {
     setSelectedTrailRoutePlanId(null);
     setTrailRouteBuilderError('');
     setTrailSnapFailureReason('');
+    setTrailRoutingPickerOpen(false);
+    setTrailRouteOptionsOpen(false);
+    setTrailRoutingDraft(trailSnapMode);
     setTrailBuildFinalized(false);
     setTrailTraceMode(false);
     setTrailTraceRoute([]);
@@ -24234,6 +24359,7 @@ function MapScreen() {
     setTrailBuilderGpxSummary('');
     setTrailBuilderDirty(false);
     setTrailTraceDraft([seed]);
+    setTrailTraceUndoStack([]);
     trailTraceDraftRef.current = [seed];
     setTrailPinCaptureMode(true);
     syncTrailCaptureModeToWeb(true);
@@ -24345,7 +24471,10 @@ function MapScreen() {
     }
   }
 
-  async function capturePinnedTrailRoute(anchorOverride?: TrailCaptureAnchor[], opts: { previewOnly?: boolean } = {}) {
+  async function capturePinnedTrailRoute(
+    anchorOverride?: TrailCaptureAnchor[],
+    opts: { previewOnly?: boolean; snapMode?: TrailSnapMode } = {},
+  ) {
     if (trailCaptureBusy && !anchorOverride) return;
     const useState = trailBuilderUseState(trailBuilderActivity, trailBuilderPermittedUses);
     const accessMessage = trailBuilderAccessMessage(trailBuilderActivity, trailBuilderPermittedUses);
@@ -24356,6 +24485,7 @@ function MapScreen() {
       return;
     }
     const previewOnly = !!opts.previewOnly;
+    const routeMode = opts.snapMode ?? trailSnapMode;
     const anchors = anchorOverride ?? trailCaptureAnchors;
     const pins = anchors.map(anchor => anchor.coord);
     if (anchors.length < 2) {
@@ -24383,7 +24513,7 @@ function MapScreen() {
       let engineConfidence: TrailRoutePlan['confidence'] = 'high';
       let segmentStatuses: TrailRouteSegmentStatus[] = [];
       let routedDistanceM = 0;
-      if (trailSnapMode === 'straight') {
+      if (routeMode === 'straight') {
         clean = dedupeTrailCoords(pins);
         routedDistanceM = trailCoordsDistanceM(clean);
         engineLabel = 'Straight line';
@@ -24520,7 +24650,7 @@ function MapScreen() {
       setTrailRouteSegmentStatus(segmentStatuses);
       hydrateTrailRoutePlanElevation(plan);
       if (previewOnly) {
-        setQuickToast('Preview snapped. Add another point or tap BUILD.');
+        setQuickToast('Preview snapped. Add another point or build the route.');
         setTimeout(() => setQuickToast(''), 2600);
       } else {
         setTrailBuildFinalized(true);
@@ -24530,7 +24660,7 @@ function MapScreen() {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
       }
     } catch (err: any) {
-      const message = normalizeTrailSnapFailure(err, trailSnapMode);
+      const message = normalizeTrailSnapFailure(err, routeMode);
       setTrailRouteBuilderError(message);
       setTrailSnapFailureReason(message);
       setQuickToast(message);
@@ -25830,6 +25960,40 @@ function MapScreen() {
     </View>
   ) : null;
 
+  const trailBuilderActivityChoices: TrailBuilderChoice[] = TRAIL_BUILDER_USE_ORDER.map(activity => ({
+    id: activity,
+    label: trailBuilderActivityLabel(activity),
+    disabled: trailBuilderUseState(activity, trailBuilderPermittedUses) === 'not_allowed',
+  }));
+  const trailBuilderRoutingChoices: TrailBuilderChoice[] = TRAIL_SNAP_MODE_OPTIONS.map(option => ({
+    id: option.id,
+    label: option.label,
+    icon: option.icon,
+  }));
+  const selectedTrailBuilderPlan = trailRoutePlans.find(plan => plan.id === selectedTrailRoutePlanId) ?? trailRoutePlans[0] ?? null;
+  const trailBuilderRouteChoices: TrailBuilderRouteChoice[] = trailRoutePlans.map(plan => ({
+    id: plan.id,
+    title: plan.title,
+    subtitle: plan.subtitle,
+    selected: plan.id === selectedTrailBuilderPlan?.id,
+  }));
+  const selectedTrailRoutingLabel = TRAIL_SNAP_MODE_OPTIONS.find(option => option.id === trailSnapMode)?.label ?? 'Trail';
+  const selectedTrailBuilderMetrics = selectedTrailBuilderPlan ? [
+    { label: 'Distance', value: fmtTrailRouteDistance(selectedTrailBuilderPlan.distanceM) },
+    { label: 'Time', value: fmtTrailRouteTime(selectedTrailBuilderPlan.distanceM) },
+    {
+      label: 'Gain',
+      value: selectedTrailBuilderPlan.elevationGainFt == null
+        ? 'Not listed'
+        : `${Math.round(selectedTrailBuilderPlan.elevationGainFt).toLocaleString()} ft`,
+    },
+  ] : [];
+  const trailBuilderReadyNote = trailRouteBuilderError
+    || trailSnapFailureReason
+    || trailBuilderGpxSummary
+    || selectedTrailBuilderPlan?.warnings[0]
+    || '';
+
   const navLocateButton = navMode && userLoc && !trailFollowOwnsHud ? (
     <TouchableOpacity
       style={[s.navLocateBtn, navCameraFollow && s.navLocateBtnFollowing]}
@@ -26198,9 +26362,9 @@ function MapScreen() {
             if (isReroutingRef.current) return;
             setRouteProgress(progress);
           }}
-          onTraceStart={coord => appendTrailTracePoint(coord, true)}
+          onTraceStart={beginTrailTraceStroke}
           onTraceMove={coord => appendTrailTracePoint(coord)}
-          onTraceEnd={finishTrailTrace}
+          onTraceEnd={finishTrailTraceStroke}
           onError={() => {
             setMapSurfaceReady(false);
             setMapLoadFailed(true);
@@ -27190,178 +27354,86 @@ function MapScreen() {
       )}
 
       {trailTraceMode && !trailPreviewOpen && !navMode && !waterFollowActive && !mapMissionVisible && (
-        <View style={s.traceHud} pointerEvents="auto">
-          <View style={s.traceHudIcon}>
-            <Ionicons name="analytics-outline" size={18} color={C.orange} />
-          </View>
-          <View style={{ flex: 1 }}>
-            <Text style={s.traceHudTitle}>TRACE TRAIL</Text>
-            <Text style={s.traceHudText}>
-              Draw from start to finish. Lift to clean up the line.
-            </Text>
-          </View>
-          <TouchableOpacity testID="trail.builder.draw.close" style={s.traceHudCancel} onPress={requestTrailBuilderExit}>
-            <Ionicons name="close" size={16} color={OVR.text2} />
-          </TouchableOpacity>
+        <View style={s.trailRouteBuilderWrap} pointerEvents="auto">
+          <TrailBuilderDrawSheet
+            distanceLabel={trailTraceDraft.length > 1 ? fmtTrailRouteDistance(trailCoordsDistanceM(trailTraceDraft)) : ''}
+            pointCount={trailTraceDraft.length}
+            canReview={trailTraceDraft.length > 1}
+            canUndo={trailTraceDraft.length > 0 || trailTraceUndoStack.length > 0}
+            busy={trailRouteBuilding}
+            onClose={requestTrailBuilderExit}
+            onUndo={undoTrailTraceStroke}
+            onClear={clearTrailTraceDraft}
+            onReview={() => { void finishTrailTrace(); }}
+          />
         </View>
       )}
 
       {trailPinCaptureMode && !trailPreviewOpen && !navMode && !waterFollowActive && !mapMissionVisible && (
         <View style={s.trailRouteBuilderWrap} pointerEvents="auto">
-          <TrailheadSheet contentStyle={s.trailCaptureSheetContent}>
-            <View style={s.trailCompactMessage}>
-              <View style={[s.trailCompactIcon, { backgroundColor: C.orangeGlow, borderColor: `${C.orange}66` }]}>
-                <Ionicons name="git-branch-outline" size={15} color={C.orange} />
-              </View>
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={s.trailCompactTitle} numberOfLines={1}>
-                  TRAIL BUILDER · {trailBuildFinalized ? 'ROUTE READY' : trailTraceRoute.length > 1 ? 'PREVIEW READY' : trailCapturePins.length ? 'ADD NEXT POINT' : 'TAP START'}
-                </Text>
-                <Text style={s.trailCompactText} numberOfLines={2}>
-                  {trailBuildFinalized
-                    ? 'Route ready. Save it or start following.'
-                    : trailCapturePins.length < 2
-                    ? 'Tap any trail start.'
-                    : 'Tap the next route point. Trailhead snaps the line.'}
-                </Text>
-              </View>
-              {trailBuildFinalized && (
-                <TouchableOpacity
-                  testID="trail.builder.points.route-options"
-                  accessibilityLabel="Route options"
-                  style={s.discoveryPanelClose}
-                  onPress={openTrailBuilderRouteOptions}
-                  disabled={trailCaptureBusy}
-                >
-                  <Ionicons name="ellipsis-horizontal" size={16} color={OVR.text2} />
-                </TouchableOpacity>
-              )}
-              <TouchableOpacity testID="trail.builder.points.close" style={s.discoveryPanelClose} onPress={requestTrailBuilderExit} disabled={trailCaptureBusy}>
-                <Ionicons name="close" size={15} color={OVR.text2} />
-              </TouchableOpacity>
-            </View>
-            <TrailheadMetricRow
-              metrics={[
-                { label: 'Distance', value: previewTrailDistanceM > 0 ? fmtTrailRouteDistance(previewTrailDistanceM) : 'Set route', icon: 'map-outline', tone: C.silverBright },
-                { label: 'Time', value: previewTrailDistanceM > 0 ? fmtTrailRouteTime(previewTrailDistanceM) : 'Pending', icon: 'time-outline', tone: C.silverBright },
-                { label: 'Points', value: trailCapturePins.length ? String(trailCapturePins.length) : 'Start', icon: 'radio-button-on-outline', tone: C.orange },
-                { label: trailElevationLabel(selectedTrailRoutePlan), value: fmtTrailElevation(selectedTrailRoutePlan), icon: 'trending-up-outline', tone: C.orange },
-              ]}
+          {trailRouteOptionsOpen ? (
+            <TrailBuilderRouteOptionsSheet
+              routeChoices={trailBuilderRouteChoices}
+              onChooseRoute={chooseTrailRoutePlan}
+              onReverse={() => applyTrailRouteShape('reverse')}
+              onOutAndBack={() => applyTrailRouteShape('out_back')}
+              onCloseLoop={() => applyTrailRouteShape('loop')}
+              onClose={() => setTrailRouteOptionsOpen(false)}
             />
-            <View testID="trail.builder.activity" style={s.trailSnapModeStrip}>
-              {TRAIL_BUILDER_USE_ORDER.map(activity => {
-                const active = trailBuilderActivity === activity;
-                const unavailable = trailBuilderUseState(activity, trailBuilderPermittedUses) === 'not_allowed';
-                return (
-                  <TouchableOpacity
-                    key={activity}
-                    testID={`trail.builder.activity.${activity}`}
-                    activeOpacity={0.85}
-                    disabled={unavailable}
-                    style={[s.trailSnapModeBtn, active && s.trailSnapModeBtnActive, unavailable && { opacity: 0.34 }]}
-                    onPress={() => {
-                      setTrailBuilderActivity(activity);
-                      const message = trailBuilderAccessMessage(activity, trailBuilderPermittedUses);
-                      setTrailSnapFailureReason(message);
-                      if (trailCapturePins.length > 1) setTrailBuilderDirty(true);
-                    }}
-                  >
-                    <Text style={[s.trailSnapModeText, active && s.trailSnapModeTextActive]} numberOfLines={1}>
-                      {trailBuilderActivityLabel(activity)}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-            <View style={s.trailSnapModeStrip}>
-              {TRAIL_SNAP_MODE_OPTIONS.map(mode => {
-                const active = trailSnapMode === mode.id;
-                return (
-                  <TouchableOpacity
-                    key={mode.id}
-                    activeOpacity={0.85}
-                    style={[s.trailSnapModeBtn, active && s.trailSnapModeBtnActive]}
-                    onPress={() => {
-                      setTrailSnapMode(mode.id);
-                      setTrailSnapFailureReason('');
-                      setQuickToast(trailSnapModeHelp(mode.id));
-                      setTimeout(() => setQuickToast(''), 2800);
-                    }}
-                  >
-                    <Ionicons name={mode.icon as any} size={13} color={active ? '#fff' : OVR.text2} />
-                    <Text style={[s.trailSnapModeText, active && s.trailSnapModeTextActive]} numberOfLines={1}>{mode.label}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-            {!!trailSnapFailureReason && (
-              <View style={s.trailRouteWarningBox}>
-                <Ionicons name="information-circle-outline" size={16} color={C.orange} />
-                <Text style={s.trailRouteWarningText} numberOfLines={3}>{trailSnapFailureReason}</Text>
-              </View>
-            )}
-            <TrailheadButtonDock style={s.trailRouteBuilderActions}>
-              <TrailheadButton
-                testID="trail.builder.points.undo"
-                label="Undo"
-                icon="arrow-undo-outline"
-                variant="secondary"
-                onPress={undoTrailCapturePin}
-                disabled={trailCaptureBusy || trailCapturePins.length === 0}
-                style={{ flex: 1, minWidth: trailBuildFinalized ? '47%' as any : undefined }}
-              />
-              <TrailheadButton
-                testID="trail.builder.points.redo"
-                label="Redo"
-                icon="arrow-redo-outline"
-                variant="secondary"
-                onPress={redoTrailCapturePin}
-                disabled={trailCaptureBusy || trailCaptureRedoAnchors.length === 0}
-                style={{ flex: 1, minWidth: trailBuildFinalized ? '47%' as any : undefined }}
-              />
-              <TrailheadButton
-                testID="trail.builder.points.build"
-                label={trailBuildFinalized ? 'Rebuild' : 'Build'}
-                icon="checkmark"
-                variant="primary"
-                loading={trailCaptureBusy}
-                onPress={() => capturePinnedTrailRoute()}
-                disabled={trailCapturePins.length < 2}
-                style={{ flex: 1, minWidth: trailBuildFinalized ? '47%' as any : undefined }}
-              />
-              {trailBuildFinalized && (
-                <>
-                  <TrailheadButton
-                    testID="trail.builder.points.save"
-                    label="Save"
-                    icon="bookmark-outline"
-                    variant="secondary"
-                    onPress={() => selectedTrail && selectedTrailRoutePlan && nameAndSaveTrailRoutePlan(selectedTrail, selectedTrailRoutePlan)}
-                    disabled={!selectedTrail || !selectedTrailRoutePlan}
-                    style={{ flex: 1, minWidth: '47%' as any }}
-                  />
-                  <TrailheadButton
-                    testID="trail.builder.points.flyover"
-                    label="Flyover"
-                    icon="play-circle-outline"
-                    variant="secondary"
-                    onPress={() => selectedTrail && selectedTrailRoutePlan && flyTrailRoutePlan(selectedTrail, selectedTrailRoutePlan)}
-                    disabled={!selectedTrail || !selectedTrailRoutePlan}
-                    style={{ flex: 1, minWidth: '47%' as any }}
-                  />
-                  <TrailheadButton
-                    testID="trail.builder.points.start"
-                    label="Start"
-                    icon="navigate"
-                    variant="primary"
-                    onPress={() => selectedTrail && selectedTrailRoutePlan && startTrailRoutePlan(selectedTrail, selectedTrailRoutePlan)}
-                    disabled={!selectedTrail || !selectedTrailRoutePlan}
-                    style={{ flex: 1, minWidth: '47%' as any }}
-                  />
-                </>
-              )}
-            </TrailheadButtonDock>
-          </TrailheadSheet>
+          ) : trailRoutingPickerOpen ? (
+            <TrailBuilderRoutingSheet
+              choices={trailBuilderRoutingChoices}
+              selectedID={trailRoutingDraft}
+              onSelect={id => setTrailRoutingDraft(id as TrailSnapMode)}
+              onApply={() => { void applyTrailRouting(); }}
+              onClose={() => setTrailRoutingPickerOpen(false)}
+            />
+          ) : trailBuildFinalized && selectedTrail && selectedTrailBuilderPlan ? (
+            <TrailBuilderRouteReadySheet
+              testIDPrefix="trail.builder.points"
+              name={selectedTrail.name || 'Trail route'}
+              activityLabel={trailBuilderActivityLabel(trailBuilderActivity)}
+              metrics={selectedTrailBuilderMetrics}
+              note={trailBuilderReadyNote}
+              canSave
+              canPreview3d
+              canStart
+              busy={trailCaptureBusy || trailRouteBuilding}
+              onClose={requestTrailBuilderExit}
+              onEditPoints={editSelectedTrailRoutePoints}
+              onSave={() => { void nameAndSaveTrailRoutePlan(selectedTrail, selectedTrailBuilderPlan); }}
+              onPreview3d={() => { void flyTrailRoutePlan(selectedTrail, selectedTrailBuilderPlan); }}
+              onOptions={openTrailBuilderRouteOptions}
+              onStart={() => { void startTrailRoutePlan(selectedTrail, selectedTrailBuilderPlan); }}
+            />
+          ) : (
+            <TrailBuilderAddPointsSheet
+              subtitle={trailCapturePins.length === 0
+                ? 'Tap the map to add a start point.'
+                : trailCapturePins.length === 1
+                  ? 'Add a finish point.'
+                  : 'Add another point or build the route.'}
+              activityChoices={trailBuilderActivityChoices}
+              activityID={trailBuilderActivity}
+              routingLabel={selectedTrailRoutingLabel}
+              canBuild={trailCapturePins.length >= 2}
+              canUndo={trailCapturePins.length > 0}
+              canRedo={trailCaptureRedoAnchors.length > 0}
+              busy={trailCaptureBusy || trailRouteBuilding}
+              notice={trailSnapFailureReason || trailRouteBuilderError}
+              onClose={requestTrailBuilderExit}
+              onSelectActivity={id => {
+                const activity = id as TrailBuilderActivity;
+                setTrailBuilderActivity(activity);
+                setTrailSnapFailureReason(trailBuilderAccessMessage(activity, trailBuilderPermittedUses));
+                if (trailCapturePins.length > 1) setTrailBuilderDirty(true);
+              }}
+              onOpenRouting={openTrailRoutingPicker}
+              onUndo={undoTrailCapturePin}
+              onRedo={redoTrailCapturePin}
+              onBuild={() => { void capturePinnedTrailRoute(); }}
+            />
+          )}
         </View>
       )}
 
@@ -28142,221 +28214,44 @@ function MapScreen() {
 
       {selectedTrail && !navMode && !trailPinCaptureMode && trailRouteBuilderOpen && !mapMissionVisible && (
         <View testID="trail.builder.review" style={s.trailRouteBuilderWrap}>
-          <TrailheadSheet contentStyle={s.trailRouteBuilderBlur}>
-            <View style={s.trailRouteBuilderHeader}>
-              <View style={[s.trailIconBadge, { backgroundColor: C.orangeGlow, borderColor: C.orange + '66' }]}>
-                <Ionicons name="git-branch-outline" size={18} color={C.orange} />
-              </View>
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={s.trailRouteEyebrow}>
-                  TRAIL BUILDER · {trailBuilderMode === 'gpx' ? 'GPX' : trailBuilderMode === 'canonical' ? 'KNOWN TRAIL' : trailBuilderMode === 'draw' ? 'DRAWN ROUTE' : 'ROUTE POINTS'}
-                </Text>
-                <Text style={s.trailRouteTitle} numberOfLines={1}>{selectedTrail.name}</Text>
-              </View>
-              <TouchableOpacity
-                style={s.discoveryPanelClose}
-                onPress={closeTrailRouteBuilderPanel}
-              >
-                <Ionicons name="close" size={15} color={OVR.text2} />
-              </TouchableOpacity>
-            </View>
-
-            <TrailheadMetricRow
-              style={{ marginBottom: 10 }}
-              metrics={[
-                { label: 'Distance', value: selectedTrailRoutePlan ? fmtTrailRouteDistance(selectedTrailRoutePlan.distanceM) : 'Set route', icon: 'map-outline', tone: C.silverBright },
-                { label: 'Time', value: selectedTrailRoutePlan ? fmtTrailRouteTime(selectedTrailRoutePlan.distanceM) : 'Pending', icon: 'time-outline', tone: C.silverBright },
-                { label: trailElevationLabel(selectedTrailRoutePlan), value: fmtTrailElevation(selectedTrailRoutePlan), icon: 'trending-up-outline', tone: C.orange },
-              ]}
+          {trailRouteOptionsOpen ? (
+            <TrailBuilderRouteOptionsSheet
+              routeChoices={trailBuilderRouteChoices}
+              onChooseRoute={chooseTrailRoutePlan}
+              onReverse={() => applyTrailRouteShape('reverse')}
+              onOutAndBack={() => applyTrailRouteShape('out_back')}
+              onCloseLoop={() => applyTrailRouteShape('loop')}
+              onClose={() => setTrailRouteOptionsOpen(false)}
             />
-            {!!trailBuilderGpxSummary && (
-              <View testID="trail.builder.gpx.summary" style={[s.trailRouteWarningBox, { marginBottom: 9 }]}>
-                <Ionicons name="document-outline" size={16} color={C.orange} />
-                <Text style={s.trailRouteWarningText}>{trailBuilderGpxSummary}</Text>
-              </View>
-            )}
-            <View testID="trail.builder.review.activity" style={s.trailSnapModeStrip}>
-              {TRAIL_BUILDER_USE_ORDER.map(activity => {
-                const active = trailBuilderActivity === activity;
-                const unavailable = trailBuilderUseState(activity, trailBuilderPermittedUses) === 'not_allowed';
-                return (
-                  <TouchableOpacity
-                    key={activity}
-                    testID={`trail.builder.review.activity.${activity}`}
-                    activeOpacity={0.85}
-                    disabled={unavailable}
-                    style={[s.trailSnapModeBtn, active && s.trailSnapModeBtnActive, unavailable && { opacity: 0.34 }]}
-                    onPress={() => {
-                      setTrailBuilderActivity(activity);
-                      setTrailSnapFailureReason(trailBuilderAccessMessage(activity, trailBuilderPermittedUses));
-                      setTrailBuilderDirty(true);
-                    }}
-                  >
-                    <Text style={[s.trailSnapModeText, active && s.trailSnapModeTextActive]} numberOfLines={1}>
-                      {trailBuilderActivityLabel(activity)}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-            <View style={s.trailSnapModeStrip}>
-              {TRAIL_SNAP_MODE_OPTIONS.map(mode => {
-                const active = trailSnapMode === mode.id;
-                return (
-                  <TouchableOpacity
-                    key={mode.id}
-                    activeOpacity={0.85}
-                    style={[s.trailSnapModeBtn, active && s.trailSnapModeBtnActive]}
-                    onPress={() => {
-                      setTrailSnapMode(mode.id);
-                      setTrailSnapFailureReason('');
-                      setQuickToast(trailSnapModeHelp(mode.id));
-                      setTimeout(() => setQuickToast(''), 2800);
-                    }}
-                  >
-                    <Ionicons name={mode.icon as any} size={13} color={active ? '#fff' : OVR.text2} />
-                    <Text style={[s.trailSnapModeText, active && s.trailSnapModeTextActive]} numberOfLines={1}>{mode.label}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-            {!!trailSnapFailureReason && (
-              <View style={[s.trailRouteWarningBox, { marginBottom: 9 }]}>
-                <Ionicons name="information-circle-outline" size={16} color={C.orange} />
-                <Text style={s.trailRouteWarningText} numberOfLines={3}>{trailSnapFailureReason}</Text>
-              </View>
-            )}
-
-            {trailRouteBuilding ? (
-              <View style={s.trailRouteLoading}>
-                <ActivityIndicator color={C.orange} />
-                <Text style={s.trailRouteLoadingText}>Building trail route</Text>
-              </View>
-            ) : trailRouteBuilderError ? (
-              <View style={s.trailRouteError}>
-                <Ionicons name="alert-circle-outline" size={18} color={C.orange} />
-                <Text style={s.trailRouteErrorText}>{trailRouteBuilderError}</Text>
-              </View>
-            ) : (
-              <>
-                <View style={s.trailRoutePlanList}>
-                  {trailRoutePlans.map(plan => {
-                    const active = selectedTrailRoutePlanId === plan.id;
-                    const status = trailRoutePlanStatus(plan);
-                    const tone = active ? C.orange : status.color;
-                    return (
-                      <TouchableOpacity
-                        key={plan.id}
-                        activeOpacity={0.86}
-                        style={[s.trailRoutePlanCard, active && { borderColor: C.orange, backgroundColor: C.orangeGlow }]}
-                        onPress={() => {
-                          setSelectedTrailRoutePlanId(plan.id);
-                          previewTrailRoutePlan(selectedTrail, plan);
-                        }}
-                      >
-                        <View style={[s.trailRoutePlanIcon, { borderColor: tone + '66', backgroundColor: active ? C.orangeGlow : tone + '14' }]}>
-                          <Ionicons name={status.icon as any} size={17} color={tone} />
-                        </View>
-                        <View style={{ flex: 1, minWidth: 0 }}>
-                          <View style={s.trailRoutePlanTop}>
-                            <Text style={s.trailRoutePlanTitle} numberOfLines={1}>{plan.title}</Text>
-                            <Text style={s.trailRoutePlanDistance}>{fmtTrailRouteDistance(plan.distanceM)}</Text>
-                          </View>
-                          <Text style={s.trailRoutePlanSub} numberOfLines={1}>{plan.subtitle}</Text>
-                          <View style={s.trailRoutePlanMetaRow}>
-                            <Text style={[s.trailRoutePlanConfidence, { color: tone }]}>{status.label}</Text>
-                            <Text style={s.trailRoutePlanEngine} numberOfLines={1}>{fmtTrailElevation(plan)}</Text>
-                          </View>
-                        </View>
-                        {active && <Ionicons name="checkmark-circle" size={18} color={C.orange} />}
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-
-                <TrailheadButtonDock style={s.trailRouteBuilderActions}>
-                  <TrailheadButton
-                    testID="trail.builder.route.reverse"
-                    label="Reverse"
-                    icon="swap-vertical-outline"
-                    variant="secondary"
-                    onPress={() => transformSelectedTrailRoute('reverse')}
-                    style={{ flex: 1 }}
-                  />
-                  <TrailheadButton
-                    testID="trail.builder.route.out-back"
-                    label="Out & back"
-                    icon="return-down-back-outline"
-                    variant="secondary"
-                    onPress={() => transformSelectedTrailRoute('out_back')}
-                    style={{ flex: 1 }}
-                  />
-                  <TrailheadButton
-                    testID="trail.builder.route.loop"
-                    label="Close loop"
-                    icon="sync-outline"
-                    variant="secondary"
-                    onPress={() => transformSelectedTrailRoute('loop')}
-                    style={{ flex: 1 }}
-                  />
-                </TrailheadButtonDock>
-
-                {!!trailRoutePlans.find(p => p.id === selectedTrailRoutePlanId)?.warnings.length && (
-                  <View style={s.trailRouteWarningBox}>
-                    <Ionicons name="information-circle-outline" size={16} color={C.silverBright} />
-                    <Text style={s.trailRouteWarningText} numberOfLines={4}>
-                      {trailRoutePlans.find(p => p.id === selectedTrailRoutePlanId)?.warnings[0]}
-                    </Text>
-                  </View>
-                )}
-
-                <View style={s.trailRouteBuilderActions}>
-                  <TouchableOpacity
-                    testID="trail.builder.route.back"
-                    style={s.trailRouteSecondaryBtn}
-                    onPress={closeTrailRouteBuilderPanel}
-                  >
-                    <Ionicons name="chevron-back" size={14} color={OVR.text2} />
-                    <Text style={s.trailRouteSecondaryText}>BACK</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={s.trailRouteSecondaryBtn}
-                    disabled={!selectedTrailRoutePlanId}
-                    onPress={() => {
-                      const plan = trailRoutePlans.find(p => p.id === selectedTrailRoutePlanId);
-                      if (plan) nameAndSaveTrailRoutePlan(selectedTrail, plan);
-                    }}
-                  >
-                    <Ionicons name="bookmark-outline" size={14} color={OVR.text2} />
-                    <Text style={s.trailRouteSecondaryText}>SAVE</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    testID="trail.builder.route.flyover"
-                    style={s.trailRouteSecondaryBtn}
-                    disabled={!selectedTrailRoutePlanId}
-                    onPress={() => {
-                      const plan = trailRoutePlans.find(p => p.id === selectedTrailRoutePlanId);
-                      if (plan) flyTrailRoutePlan(selectedTrail, plan).catch(() => null);
-                    }}
-                  >
-                    <Ionicons name="play-circle-outline" size={14} color={OVR.text2} />
-                    <Text style={s.trailRouteSecondaryText}>FLYOVER</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[s.trailRouteStartBtn, !selectedTrailRoutePlanId && { opacity: 0.55 }]}
-                    disabled={!selectedTrailRoutePlanId}
-                    onPress={() => {
-                      const plan = trailRoutePlans.find(p => p.id === selectedTrailRoutePlanId);
-                      if (plan) startTrailRoutePlan(selectedTrail, plan);
-                    }}
-                  >
-                    <Ionicons name="navigate" size={15} color="#fff" />
-                    <Text style={s.trailRouteStartText}>START FOLLOW</Text>
-                  </TouchableOpacity>
-                </View>
-              </>
-            )}
-          </TrailheadSheet>
+          ) : (
+            <TrailBuilderRouteReadySheet
+            testIDPrefix="trail.builder.route"
+            name={selectedTrail.name || selectedTrailBuilderPlan?.title || 'Trail route'}
+            activityLabel={trailBuilderActivityLabel(trailBuilderActivity)}
+            metrics={selectedTrailBuilderMetrics.length > 0 ? selectedTrailBuilderMetrics : [
+              { label: 'Distance', value: 'Pending' },
+              { label: 'Time', value: 'Pending' },
+              { label: 'Gain', value: 'Not listed' },
+            ]}
+            note={trailBuilderReadyNote}
+            canSave={Boolean(selectedTrailBuilderPlan)}
+            canPreview3d={Boolean(selectedTrailBuilderPlan)}
+            canStart={Boolean(selectedTrailBuilderPlan)}
+            busy={trailRouteBuilding}
+            onClose={closeTrailRouteBuilderPanel}
+            onEditPoints={editSelectedTrailRoutePoints}
+            onSave={() => {
+              if (selectedTrailBuilderPlan) void nameAndSaveTrailRoutePlan(selectedTrail, selectedTrailBuilderPlan);
+            }}
+            onPreview3d={() => {
+              if (selectedTrailBuilderPlan) void flyTrailRoutePlan(selectedTrail, selectedTrailBuilderPlan);
+            }}
+            onOptions={openTrailBuilderRouteOptions}
+            onStart={() => {
+              if (selectedTrailBuilderPlan) void startTrailRoutePlan(selectedTrail, selectedTrailBuilderPlan);
+            }}
+            />
+          )}
         </View>
       )}
 
@@ -32805,44 +32700,6 @@ const makeStyles = (C: ColorPalette) => {
     alignItems: 'center', justifyContent: 'center', marginLeft: 4,
     zIndex: 900, elevation: 8,
   },
-  traceHud: {
-    position: 'absolute',
-    top: 190,
-    left: 18,
-    right: 18,
-    zIndex: 850,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-    padding: 16,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(229,231,235,0.18)',
-    backgroundColor: 'rgba(10, 15, 13, 0.94)',
-  },
-  traceHudIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#22c55e18',
-    borderWidth: 1,
-    borderColor: '#22c55e55',
-  },
-  traceHudTitle: { color: '#22c55e', fontSize: 9, fontFamily: mono, fontWeight: '900' },
-  traceHudText: { color: OVR.text2, fontSize: 11, lineHeight: 15, marginTop: 2 },
-  traceHudMeta: { color: OVR.text3, fontSize: 10, fontFamily: mono, marginTop: 5 },
-  traceHudCancel: {
-    width: 34,
-    height: 34,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.07)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.11)',
-  },
   pinCaptureReticle: {
     position: 'absolute',
     left: '50%',
@@ -35842,167 +35699,6 @@ const makeStyles = (C: ColorPalette) => {
     zIndex: 10020,
     elevation: 120,
   },
-  trailRouteBuilderBlur: {
-    borderRadius: 24,
-    overflow: 'hidden',
-    padding: 10,
-    backgroundColor: OVR.bg,
-    borderWidth: 1,
-    borderColor: OVR.border,
-    shadowColor: '#000',
-    shadowOpacity: 0.48,
-    shadowRadius: 28,
-    shadowOffset: { width: 0, height: 16 },
-  },
-  trailRouteBuilderHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 8 },
-  trailCaptureSheetContent: { gap: 7, padding: 9, paddingBottom: 12 },
-  trailCompactMessage: {
-    minHeight: 56,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 9,
-  },
-  trailCompactIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 12,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  trailCompactTitle: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.7 },
-  trailCompactText: { color: C.text2, fontSize: 10.5, lineHeight: 14, marginTop: 2 },
-  trailRouteEyebrow: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
-  trailRouteTitle: { color: OVR.text, fontSize: 16, fontWeight: '900', marginTop: 2 },
-  trailRouteStatusRow: { flexDirection: 'row', gap: 8, marginBottom: 10 },
-  trailRouteStatusPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.11)',
-    backgroundColor: 'rgba(255,255,255,0.055)',
-    borderRadius: 999,
-    paddingHorizontal: 9,
-    paddingVertical: 6,
-  },
-  trailRouteStatusText: { color: OVR.text2, fontSize: 10, fontFamily: mono, fontWeight: '800' },
-  trailSnapModeStrip: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginBottom: 7,
-  },
-  trailSnapModeBtn: {
-    minHeight: 32,
-    flexGrow: 1,
-    flexBasis: '30%' as any,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-    backgroundColor: 'rgba(255,255,255,0.045)',
-    paddingHorizontal: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 5,
-  },
-  trailSnapModeBtnActive: {
-    backgroundColor: C.orange,
-    borderColor: C.orange,
-  },
-  trailSnapModeText: { color: OVR.text2, fontSize: 9, fontFamily: mono, fontWeight: '900' },
-  trailSnapModeTextActive: { color: '#fff' },
-  trailRouteLoading: {
-    minHeight: 138,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 17,
-    backgroundColor: 'rgba(255,255,255,0.04)',
-  },
-  trailRouteLoadingText: { color: OVR.text2, fontSize: 11, fontFamily: mono, fontWeight: '800' },
-  trailRouteError: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-    padding: 12,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: C.orange + '55',
-    backgroundColor: C.orange + '14',
-  },
-  trailRouteErrorText: { color: OVR.text2, fontSize: 12, lineHeight: 17, flex: 1 },
-  trailRoutePlanList: { gap: 8, maxHeight: 210 },
-  trailRoutePlanCard: {
-    minHeight: 72,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    backgroundColor: 'rgba(255,255,255,0.045)',
-    borderRadius: 17,
-    padding: 10,
-  },
-  trailRoutePlanIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-  },
-  trailRoutePlanTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
-  trailRoutePlanTitle: { color: OVR.text, fontSize: 13, fontWeight: '900', flex: 1 },
-  trailRoutePlanDistance: { color: C.silverBright, fontSize: 11, fontFamily: mono, fontWeight: '900' },
-  trailRoutePlanSub: { color: OVR.text3, fontSize: 10.5, marginTop: 2 },
-  trailRoutePlanMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 5 },
-  trailRoutePlanConfidence: { fontSize: 8.5, fontFamily: mono, fontWeight: '900' },
-  trailRoutePlanEngine: { color: OVR.text3, fontSize: 8.5, fontFamily: mono, fontWeight: '800', flex: 1 },
-  trailRouteWarningBox: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-    marginTop: 9,
-    padding: 10,
-    borderRadius: 14,
-    backgroundColor: 'rgba(255,255,255,0.045)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-  },
-  trailRouteWarningText: { color: OVR.text2, fontSize: 10.5, lineHeight: 15, flex: 1 },
-  trailRouteBuilderActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 9 },
-  trailRouteSecondaryBtn: {
-    flex: 0.8,
-    minHeight: 44,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-    backgroundColor: 'rgba(255,255,255,0.045)',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-  },
-  trailRouteSecondaryText: { color: OVR.text2, fontSize: 10.5, fontFamily: mono, fontWeight: '900' },
-  trailRouteStartBtn: {
-    flex: 1.25,
-    minHeight: 44,
-    borderRadius: 14,
-    backgroundColor: C.orange,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 7,
-    shadowColor: C.orange,
-    shadowOpacity: 0.25,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 5 },
-  },
-  trailRouteStartText: { color: '#fff', fontSize: 10.5, fontFamily: mono, fontWeight: '900' },
   pinIconBadge: {
     width: 34, height: 34, borderRadius: 17,
     alignItems: 'center', justifyContent: 'center',

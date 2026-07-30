@@ -17,6 +17,7 @@ import {
 
 const mobileRoot = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const playerSource = readFileSync(join(mobileRoot, 'components/trails/TrailPreviewPlayer.tsx'), 'utf8');
+const builderPanelSource = readFileSync(join(mobileRoot, 'components/trails/TrailBuilderPanel.tsx'), 'utf8');
 const mapSource = readFileSync(join(mobileRoot, 'app/(tabs)/map.tsx'), 'utf8');
 const nativeMapSource = readFileSync(join(mobileRoot, 'components/NativeMap/index.tsx'), 'utf8');
 
@@ -88,7 +89,8 @@ test('Trail Builder uses the shared T6 player and restores the builder through B
   assert.match(mapSource, /async function openTrailPreview\(trail: TrailFeature, routePlanOverride: TrailRoutePlan \| null = null\)/);
   assert.match(mapSource, /const candidatePlan = routePlanOverride\s*\?\?/);
   assert.match(mapSource, /testID="trail\.builder\.review"/);
-  assert.match(mapSource, /testID="trail\.builder\.route\.flyover"/);
+  assert.match(mapSource, /testIDPrefix="trail\.builder\.route"/);
+  assert.match(builderPanelSource, /\$\{testIDPrefix\}\.flyover/);
   assert.match(mapSource, /setTrailRouteBuilderOpen\(context\.trailRouteBuilderOpen\)/);
   assert.match(mapSource, /setTrailPinCaptureMode\(context\.trailPinCaptureMode\)/);
   assert.match(mapSource, /setTrailTraceMode\(context\.trailTraceMode\)/);

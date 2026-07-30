@@ -72,10 +72,13 @@ test('GPX review rejects empty routes, oversized files, and excessive point coun
 
 test('builder discard restores its invoking trail context and exposes route transforms', () => {
   const mapSource = readFileSync('app/(tabs)/map.tsx', 'utf8');
+  const panelSource = readFileSync('components/trails/TrailBuilderPanel.tsx', 'utf8');
   assert.match(mapSource, /trailBuilderReturnContextRef/);
   assert.match(mapSource, /restoreTrailBuilderReturnContext\(\)/);
-  assert.match(mapSource, /testID="trail\.builder\.points\.route-options"/);
-  assert.match(mapSource, /transformSelectedTrailRoute\('reverse'\)/);
-  assert.match(mapSource, /transformSelectedTrailRoute\('out_back'\)/);
-  assert.match(mapSource, /transformSelectedTrailRoute\('loop'\)/);
+  assert.match(mapSource, /testIDPrefix="trail\.builder\.points"/);
+  assert.match(panelSource, /\$\{testIDPrefix\}\.route-options/);
+  assert.match(mapSource, /applyTrailRouteShape\('reverse'\)/);
+  assert.match(mapSource, /applyTrailRouteShape\('out_back'\)/);
+  assert.match(mapSource, /applyTrailRouteShape\('loop'\)/);
+  assert.match(panelSource, /trail\.builder\.route-shape\.\$\{action\.id\}/);
 });

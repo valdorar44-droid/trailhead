@@ -675,3 +675,24 @@ Verify the staged file list before every commit.
 
 - Do not reopen the approved routing label or redesign the four approved states without new user feedback.
 - Do not repeat completed Trails discovery, sheet, Offline, recording, or flyover crawls; test only behavior directly touched by the Builder presentation implementation.
+
+### Trail Builder visual-polish implementation ready for Android (2026-07-30T04:12:31-05:00)
+
+- Branch `feat/trailhead-1.0.10-overhaul`; exact implementation baseline `4494a54022ea6be576ae7d90f32e89126e263e0c`. Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, Valhalla work, Android Auto scripts, and every unrelated dirty file remain excluded.
+- Implemented approved Figma section `794:2477` using its four reviewed states: Add points, Routing options, Route ready, and Draw a line. The new `TrailBuilderPanel` uses the shared white/black/orange Trailhead sheet treatment, Barlow Condensed only for display metrics, system body typography, 48 dp actions, a horizontal activity rail, focused routing choices, and plain-language `Trail` routing copy.
+- Preserved tap-to-route, known-trail, free draw, GPX, permitted-use checks, all five routing modes, undo/redo, route variants, Reverse, Out and back, Close loop, Save, 3D preview, Edit points, Start Follow, Back/Close state, immutable geometry ownership, compass, one-map flyover, Offline, recording, and Follow. `More options` now uses the same controlled Trailhead sheet instead of a platform alert.
+- Draw mode no longer builds immediately when the finger lifts. The traced stroke remains visible for Undo, Clear, or explicit Review line. Changing a routing mode rebuilds with that exact selected mode and rejects stale state rather than relying on an asynchronous React update.
+- Focused verification passed: mobile TypeScript; Trail Builder `11/11` across session, presentation, and ownership tests; complete Trail Follow and recording suites; Trail Preview `7/7`; Map copy audit; privacy controls; automation-selector contract; and whitespace. No native project, dependency, permission, API, database, backend, build, or runtime changed.
+- Current installed/paired preview before publication remains source `7aa2465949ef746b2e9704de42b40632e4466b67`: Android update `019fb1eb-8720-733e-9e5c-7565da82639e`, runtime `native-1.0.10-android.7`; iOS update `019fb1eb-8720-7a16-877f-bd743b2aac22`, runtime `native-1.0.10-ios.6`.
+- No open P0/P1 exists in source verification. No production update or build was published. No task-owned Metro, Gradle, Maestro, Expo/EAS publisher, test, or mock-location process remains; long-running host/Codex and ADB processes were not started or modified by this packet.
+
+#### Exact next action
+
+1. Commit only the named Trail Builder implementation, tests, package script, and this checkpoint; push the branch.
+2. Publish one Android-compatible preview update from the immutable implementation SHA, verify update identity on Samsung `SM-A326U1`, then run only Add points, routing modes, Draw/Undo/Clear/Review, Route ready, More options, Edit points, Save, 3D Back, and near/far Start Follow.
+3. Stop for Android acceptance before applying the exact source to iOS. Do not publish production.
+
+#### Do not repeat after this checkpoint
+
+- Do not repeat T1-T6 discovery, sheets, Offline packs, recording lifecycle, broad Follow, flyover endpoint/camera, Layers, Memory Gate, Yellowstone, NPS, Originals, Android Auto, Camp Guide, broad Search, or screenshots.
+- Do not redesign the approved Builder states, reintroduce the control matrix/native options alert, remove a preserved capability, or publish iOS/production before Android acceptance.

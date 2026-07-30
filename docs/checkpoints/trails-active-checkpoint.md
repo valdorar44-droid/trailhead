@@ -500,3 +500,24 @@ Verify the staged file list before every commit.
 
 - Do not repeat T5 Android Search, handoff, route-plan identity, recording lifecycle, or camera proof. Do not repeat T1-T4, Offline packs, styles/Layers, Memory Gate, Yellowstone, NPS, Originals, Android Auto, Camp Guide, broad Search, screenshots, or production work without new evidence.
 - Do not republish `06596fe`. The Android camera P1 is closed; iOS shares the update but remains physically unaccepted.
+
+### T6 Android pre-change checkpoint (2026-07-29T21:04:35-05:00)
+
+- Branch `feat/trailhead-1.0.10-overhaul`; exact starting HEAD `8a913411870a6d03635dfe1676a51bc82e6635d9`. Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
+- Connected stress-reference device is Samsung `SM-A326U1`, serial `RFCR408DA9B`. The accepted Android candidate remains build `69`, runtime `native-1.0.10-android.7`, source `06596fef7fdabf2b29e3f6e0a46227dc4a363a65`, update `019fb0ba-a4e3-716d-b0cc-7e31bafbf06c`.
+- T6 design-to-code contract was read from Figma file `FJUcMWAfsNyjsguCEp2dBe`, node `652:2020`. Required behavior is one silent deterministic route preview on the existing `NativeMap`, with Close, Back, play/pause, scrub, restart, recenter, dominant exact-route progress, and return-state restoration.
+- The current implementation is characterized before edits: `TrailPreviewPlayer` uses the same `NativeMap` and deterministic manifest keyframes, but still presents the older dark cyan/gold controls, auto-starts, has no scrub/recenter/Back contract, and does not restore the invoking sheet/builder state. `NativeMap` already renders restrained yellow finish diamonds for selected trails and Follow, but the selected-trail marker is hidden while trail preview is active and the preview layer has no equivalent endpoint marker.
+- Exact narrow scope: replace only the T6 preview presentation/state contract, add the preview finish diamond at the verified manifest endpoint, and validate Back/Close plus repeated open/close. Do not change trail identity, discovery, sheets, builder geometry, Offline, Follow, recording, route-plan ownership, map styles, or native dependencies.
+- Current unrelated dirty files remain user-owned and excluded: `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, Valhalla scripts, Android Auto scripts, Gradle wrapper mode/content, and Maestro installer/config files.
+- Task-owned Metro, Gradle, Maestro, Expo/EAS publisher, test, mock-location, and emulator processes: none. The connected ADB server and Codex/MCP Node runtimes are shared, not task-owned.
+
+#### Exact next action
+
+1. Add deterministic characterization tests for preview progress, camera interpolation, pause/scrub/restart/recenter, finish endpoint visibility, and return-context restoration.
+2. Adapt approved Figma node `652:2020` to the existing React Native tokens/components without adding Tailwind, assets, a second renderer, narration, or speculative facts.
+3. Publish one Android-first preview from an immutable SHA, run only the T6 delta on Short Point, and checkpoint the result before any iOS or production action.
+
+#### Do not repeat after this checkpoint
+
+- Do not repeat T1-T5 Android, Offline acceptance, Layers/styles, Memory Gate, Yellowstone, NPS, Originals, Android Auto, Camp Guide, broad Search, screenshots, or production work.
+- Do not redesign Trail Peek/Full, Trailhead Full, Follow, recording, or Trail Builder in T6. Do not introduce a second map or random/orbit camera behavior.

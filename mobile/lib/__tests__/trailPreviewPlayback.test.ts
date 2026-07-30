@@ -93,6 +93,8 @@ test('Trail Builder uses the shared T6 player and restores the builder through B
   assert.match(mapSource, /setTrailPinCaptureMode\(context\.trailPinCaptureMode\)/);
   assert.match(mapSource, /setTrailTraceMode\(context\.trailTraceMode\)/);
   assert.match(mapSource, /syncTrailCaptureModeToWeb\(context\.trailPinCaptureMode\)/);
+  assert.match(mapSource, /\[\[viewport\.w, viewport\.s\], \[viewport\.e, viewport\.n\]\]/);
+  assert.match(mapSource, /fitCoordinates\([\s\S]*?\[0, 0, 0, 0\],[\s\S]*?450/);
   assert.match(mapSource, /setTrailPinCaptureMode\(false\);\s*setTrailTraceMode\(false\);\s*syncTrailCaptureModeToWeb\(false\)/);
   assert.match(mapSource, /trailTraceMode && !trailPreviewOpen && !navMode/);
   assert.match(mapSource, /trailPinCaptureMode && !trailPreviewOpen && !navMode/);

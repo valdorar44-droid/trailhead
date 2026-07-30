@@ -21824,6 +21824,16 @@ function MapScreen() {
     if (context) {
       setMap3dEnabled(context.map3dEnabled);
       viewportRef.current = context.viewport;
+      if (context.viewport) {
+        const viewport = context.viewport;
+        requestAnimationFrame(() => {
+          nativeMapRef.current?.fitCoordinates(
+            [[viewport.w, viewport.s], [viewport.e, viewport.n]],
+            [0, 0, 0, 0],
+            450,
+          );
+        });
+      }
     }
   }
 

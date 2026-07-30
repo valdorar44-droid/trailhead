@@ -67,6 +67,8 @@ test('T6 remains a silent same-map preview with explicit controls and return sem
   assert.match(playerSource, /testID="trail\.preview\.recenter"/);
   assert.match(playerSource, /testID="trail\.preview\.back"/);
   assert.match(playerSource, /testID="trail\.preview\.close"/);
+  assert.match(mapSource, /selectedTrail && !trailPreviewOpen && !navMode && !trailPinCaptureMode && trailCardCollapsed/);
+  assert.match(mapSource, /selectedTrail && !trailPreviewOpen && !navMode && !trailPinCaptureMode && !trailCardCollapsed/);
   assert.doesNotMatch(playerSource, /Speech|voice|narrat/i);
 });
 

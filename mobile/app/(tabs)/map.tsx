@@ -27723,7 +27723,7 @@ function MapScreen() {
         </View>
       )}
 
-      {selectedTrail && !navMode && !trailPinCaptureMode && trailCardCollapsed && !trailRouteBuilderOpen && (
+      {selectedTrail && !trailPreviewOpen && !navMode && !trailPinCaptureMode && trailCardCollapsed && !trailRouteBuilderOpen && (
         <View style={s.trailCollapsedWrap}>
           <TouchableOpacity
             style={s.trailCollapsedTab}
@@ -27744,7 +27744,7 @@ function MapScreen() {
         </View>
       )}
 
-      {selectedTrail && !navMode && !trailPinCaptureMode && !trailCardCollapsed && !trailRouteBuilderOpen && (() => {
+      {selectedTrail && !trailPreviewOpen && !navMode && !trailPinCaptureMode && !trailCardCollapsed && !trailRouteBuilderOpen && (() => {
         const model = normalizeTrailheadTrailProfile(selectedTrailProfile, selectedTrail);
         const isTrailhead = selectedTrail.type === 'trailhead';
         const elevation = trailElevationDisplay(selectedTrailProfile, selectedTrail);

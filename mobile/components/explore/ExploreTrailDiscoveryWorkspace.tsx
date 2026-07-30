@@ -78,6 +78,7 @@ export function ExploreTrailDiscoveryWorkspace({
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
+  const [retainedListOffset, setRetainedListOffset] = useState(0);
   const generationRef = useRef(0);
   const listRef = useRef<FlatList<TrailDiscoveryItemV2>>(null);
   const listOffsetRef = useRef(0);
@@ -140,6 +141,7 @@ export function ExploreTrailDiscoveryWorkspace({
 
   useEffect(() => {
     listOffsetRef.current = 0;
+    setRetainedListOffset(0);
     restorePendingRef.current = false;
     if (restoreTimerRef.current) clearTimeout(restoreTimerRef.current);
     listRef.current?.scrollToOffset({ offset: 0, animated: false });
@@ -184,6 +186,7 @@ export function ExploreTrailDiscoveryWorkspace({
 
   function prepareMapReturn() {
     restorePendingRef.current = listOffsetRef.current > 0;
+    setRetainedListOffset(listOffsetRef.current);
   }
 
   function openMap(request: TrailDiscoveryMapRequestV2) {
@@ -304,6 +307,7 @@ export function ExploreTrailDiscoveryWorkspace({
             data={items}
             keyExtractor={item => item.id}
             contentContainerStyle={styles.list}
+            contentOffset={{ x: 0, y: retainedListOffset }}
             renderItem={({ item }) => (
               <TrailDiscoveryCard item={item} onPress={() => selectTrail(item)} testID={`explore.trails.result.${item.id}`} />
             )}

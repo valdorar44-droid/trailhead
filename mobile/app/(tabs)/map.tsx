@@ -231,6 +231,7 @@ import {
   reverseTrailBuilderRoute,
   trailBuilderActivityLabel,
   trailBuilderAccessMessage,
+  trailBuilderEditAnchorIndices,
   trailBuilderRoutingProfile,
   trailBuilderUseState,
   undoTrailBuilderAnchor,
@@ -24237,12 +24238,9 @@ function MapScreen() {
   function editSelectedTrailRoutePoints() {
     const plan = trailRoutePlans.find(item => item.id === selectedTrailRoutePlanId) ?? trailRoutePlans[0];
     if (!plan || plan.coords.length < 2) return;
-    const desiredCount = Math.min(8, Math.max(2, Math.ceil(plan.coords.length / 80)));
-    const indices = Array.from({ length: desiredCount }, (_, index) => (
-      Math.round((index / Math.max(1, desiredCount - 1)) * (plan.coords.length - 1))
-    ));
+    const indices = trailBuilderEditAnchorIndices(plan.coords.length);
     const emptyGeometry: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
-    const anchors = [...new Set(indices)].map(index => ({
+    const anchors = indices.map(index => ({
       coord: [plan.coords[index][0], plan.coords[index][1]] as [number, number],
       geometry: emptyGeometry,
     }));

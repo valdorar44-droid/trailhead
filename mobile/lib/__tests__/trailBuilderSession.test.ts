@@ -10,6 +10,7 @@ import {
   reviewTrailBuilderGpx,
   reverseTrailBuilderRoute,
   trailBuilderAccessMessage,
+  trailBuilderEditAnchorIndices,
   trailBuilderRoutingProfile,
   trailBuilderUseState,
   undoTrailBuilderAnchor,
@@ -34,6 +35,17 @@ test('route transformations keep exact coordinates and produce reviewable shapes
   assert.deepEqual(outAndBackTrailBuilderRoute(route), [route[0], route[1], route[2], route[1], route[0]]);
   assert.deepEqual(closeTrailBuilderLoop(route), [route[0], route[1], route[2], route[0]]);
   assert.deepEqual(route, [[-109.5, 38.5], [-109.4, 38.6], [-109.3, 38.7]], 'source geometry is immutable');
+});
+
+test('editing short and closed routes keeps an interior turning anchor', () => {
+  assert.deepEqual(trailBuilderEditAnchorIndices(2), [0, 1]);
+  assert.deepEqual(
+    trailBuilderEditAnchorIndices(3),
+    [0, 1, 2],
+    'an out-and-back start, turn, start route must not collapse to two identical endpoints',
+  );
+  assert.deepEqual(trailBuilderEditAnchorIndices(161), [0, 80, 160]);
+  assert.equal(trailBuilderEditAnchorIndices(10_000).length, 8);
 });
 
 test('source-backed permitted uses block unsupported activity without inventing access', () => {

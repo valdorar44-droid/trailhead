@@ -145,6 +145,17 @@ export function closeTrailBuilderLoop(coords: readonly [number, number][]): [num
   return [...coords.map(([lng, lat]) => [lng, lat] as [number, number]), [first[0], first[1]]];
 }
 
+export function trailBuilderEditAnchorIndices(coordCount: number, maxAnchors = 8): number[] {
+  const count = Math.max(0, Math.floor(coordCount));
+  const limit = Math.max(2, Math.floor(maxAnchors));
+  if (count === 0) return [];
+  if (count === 1) return [0];
+  const desiredCount = Math.min(limit, count, Math.max(3, Math.ceil(count / 80)));
+  return [...new Set(Array.from({ length: desiredCount }, (_, index) => (
+    Math.round((index / Math.max(1, desiredCount - 1)) * (count - 1))
+  )))];
+}
+
 export function reviewTrailBuilderGpx(
   content: string,
   fileName: string,

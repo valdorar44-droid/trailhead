@@ -1,9 +1,30 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import { ActivityIndicator, AppState, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
+import {
+  ActivityIndicator,
+  AppState,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+  type GestureResponderEvent,
+  type LayoutChangeEvent,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+
 import type { NativeMapHandle } from '@/components/NativeMap';
-import type { TrailPreviewKeyframe, TrailPreviewManifest } from '@/lib/api';
+import type { TrailPreviewManifest } from '@/lib/api';
+import {
+  interpolateTrailPreviewFrame,
+  isFiniteTrailPreviewCoordinate,
+  normalizeTrailPreviewKeyframes,
+  normalizeTrailPreviewProgress,
+  trailPreviewCardinalDirection,
+  trailPreviewClockLabel,
+  trailPreviewDurationMs,
+  trailPreviewProgressFromPointer,
+} from '@/lib/trailPreviewPlayback';
 import type { TrailFeature } from '@/lib/trailEngine';
+import { trailheadFonts } from '@/lib/typography';
 
 type Props = {
   visible: boolean;
@@ -11,63 +32,12 @@ type Props = {
   manifest: TrailPreviewManifest | null;
   loading: boolean;
   mapRef: RefObject<NativeMapHandle | null>;
-  tone: 'cyan' | 'gold';
   pauseSignal?: number;
+  renderCompass?: (bearing: number | null) => ReactNode;
+  onBack: () => void;
   onClose: () => void;
   onProgress: (progress: number) => void;
 };
-
-function isFiniteCoord(coord?: [number, number] | null): coord is [number, number] {
-  return Array.isArray(coord)
-    && coord.length >= 2
-    && Number.isFinite(coord[0])
-    && Number.isFinite(coord[1]);
-}
-
-function normalizeKeyframes(manifest: TrailPreviewManifest | null): TrailPreviewKeyframe[] {
-  const raw = manifest?.keyframes ?? [];
-  return raw
-    .filter(frame => Number.isFinite(frame.progress) && isFiniteCoord(frame.coordinate))
-    .sort((a, b) => a.progress - b.progress);
-}
-
-function lerp(a: number, b: number, t: number) {
-  return a + (b - a) * t;
-}
-
-function interpolateFrame(frames: TrailPreviewKeyframe[], progress: number): TrailPreviewKeyframe | null {
-  if (!frames.length) return null;
-  if (frames.length === 1 || progress <= frames[0].progress) return frames[0];
-  for (let idx = 1; idx < frames.length; idx += 1) {
-    const prev = frames[idx - 1];
-    const next = frames[idx];
-    if (progress <= next.progress) {
-      const span = Math.max(0.0001, next.progress - prev.progress);
-      const t = Math.max(0, Math.min(1, (progress - prev.progress) / span));
-      const coord: [number, number] = [
-        lerp(prev.coordinate[0], next.coordinate[0], t),
-        lerp(prev.coordinate[1], next.coordinate[1], t),
-      ];
-      const look = isFiniteCoord(prev.look_at) && isFiniteCoord(next.look_at)
-        ? [lerp(prev.look_at[0], next.look_at[0], t), lerp(prev.look_at[1], next.look_at[1], t)] as [number, number]
-        : next.look_at;
-      return {
-        ...next,
-        coordinate: coord,
-        look_at: look,
-        bearing: lerp(Number(prev.bearing ?? next.bearing ?? 0), Number(next.bearing ?? prev.bearing ?? 0), t),
-        pitch: lerp(Number(prev.pitch ?? next.pitch ?? 62), Number(next.pitch ?? prev.pitch ?? 62), t),
-        zoom: lerp(Number(prev.zoom ?? next.zoom ?? 15), Number(next.zoom ?? prev.zoom ?? 15), t),
-        cumulative_distance_m: Math.round(lerp(Number(prev.cumulative_distance_m ?? 0), Number(next.cumulative_distance_m ?? 0), t)),
-      };
-    }
-  }
-  return frames[frames.length - 1];
-}
-
-function durationFor(frames: TrailPreviewKeyframe[]) {
-  return Math.max(5200, frames.reduce((sum, frame) => sum + Math.max(650, Number(frame.duration_ms ?? 1200)), 0));
-}
 
 function fmtDistance(meters?: number) {
   if (!Number.isFinite(meters ?? NaN)) return '--';
@@ -75,24 +45,61 @@ function fmtDistance(meters?: number) {
   return miles >= 10 ? `${miles.toFixed(0)} mi` : `${miles.toFixed(1)} mi`;
 }
 
-export default function TrailPreviewPlayer({ visible, trail, manifest, loading, mapRef, tone, pauseSignal = 0, onClose, onProgress }: Props) {
-  const frames = useMemo(() => normalizeKeyframes(manifest), [manifest]);
-  const totalDuration = useMemo(() => durationFor(frames), [frames]);
+export default function TrailPreviewPlayer({
+  visible,
+  trail,
+  manifest,
+  loading,
+  mapRef,
+  pauseSignal = 0,
+  renderCompass,
+  onBack,
+  onClose,
+  onProgress,
+}: Props) {
+  const frames = useMemo(() => normalizeTrailPreviewKeyframes(manifest), [manifest]);
+  const totalDuration = useMemo(() => trailPreviewDurationMs(frames), [frames]);
   const [playing, setPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [scrubberWidth, setScrubberWidth] = useState(0);
   const startedAtRef = useRef(0);
   const rafRef = useRef<number | null>(null);
   const lastCameraAtRef = useRef(0);
-  const accent = tone === 'gold' ? '#f5c84b' : '#22d3ee';
-  const secondary = tone === 'gold' ? '#22d3ee' : '#f5c84b';
-  const activeFrame = useMemo(() => interpolateFrame(frames, progress), [frames, progress]);
+  const scrubWasPlayingRef = useRef(false);
+  const activeFrame = useMemo(
+    () => interpolateTrailPreviewFrame(frames, progress),
+    [frames, progress],
+  );
+
+  const applyCameraAtProgress = useCallback((nextProgress: number, duration = 230) => {
+    const frame = interpolateTrailPreviewFrame(frames, nextProgress);
+    if (!frame) return;
+    mapRef.current?.flyToCamera({
+      lat: frame.coordinate[1],
+      lng: frame.coordinate[0],
+      zoom: frame.zoom ?? 15,
+      pitch: frame.pitch ?? 64,
+      bearing: frame.bearing ?? 0,
+      duration,
+      mode: 'easeTo',
+    });
+  }, [frames, mapRef]);
+
+  const commitProgress = useCallback((rawProgress: number, moveCamera = true) => {
+    const nextProgress = normalizeTrailPreviewProgress(rawProgress);
+    setProgress(nextProgress);
+    onProgress(nextProgress);
+    startedAtRef.current = Date.now() - nextProgress * totalDuration;
+    if (moveCamera) applyCameraAtProgress(nextProgress, 120);
+  }, [applyCameraAtProgress, onProgress, totalDuration]);
 
   useEffect(() => {
     if (!visible) return;
     setProgress(0);
     onProgress(0);
+    lastCameraAtRef.current = 0;
     const center = manifest?.intro?.center ?? frames[0]?.coordinate;
-    if (isFiniteCoord(center)) {
+    if (isFiniteTrailPreviewCoordinate(center)) {
       mapRef.current?.flyToCamera({
         lat: center[1],
         lng: center[0],
@@ -119,18 +126,9 @@ export default function TrailPreviewPlayer({ visible, trail, manifest, loading, 
       const nextProgress = Math.min(1, elapsed / totalDuration);
       setProgress(nextProgress);
       onProgress(nextProgress);
-      const frame = interpolateFrame(frames, nextProgress);
-      if (frame && now - lastCameraAtRef.current > 180) {
+      if (now - lastCameraAtRef.current > 180) {
         lastCameraAtRef.current = now;
-        mapRef.current?.flyToCamera({
-          lat: frame.coordinate[1],
-          lng: frame.coordinate[0],
-          zoom: frame.zoom ?? 15,
-          pitch: frame.pitch ?? 64,
-          bearing: frame.bearing ?? 0,
-          duration: 230,
-          mode: 'easeTo',
-        });
+        applyCameraAtProgress(nextProgress);
       }
       if (nextProgress >= 1) {
         setPlaying(false);
@@ -143,14 +141,14 @@ export default function TrailPreviewPlayer({ visible, trail, manifest, loading, 
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     };
-  }, [frames, mapRef, onProgress, playing, totalDuration, visible]);
+  }, [applyCameraAtProgress, frames.length, onProgress, playing, totalDuration, visible]);
 
   useEffect(() => {
     if (!visible) return undefined;
-    const sub = AppState.addEventListener('change', state => {
+    const subscription = AppState.addEventListener('change', state => {
       if (state !== 'active') setPlaying(false);
     });
-    return () => sub.remove();
+    return () => subscription.remove();
   }, [visible]);
 
   useEffect(() => {
@@ -160,69 +158,161 @@ export default function TrailPreviewPlayer({ visible, trail, manifest, loading, 
   if (!visible) return null;
 
   const available = manifest?.status === 'available' && frames.length >= 2;
-  const distanceM = activeFrame?.cumulative_distance_m ?? (manifest?.distance_m ? Math.round(manifest.distance_m * progress) : undefined);
   if (!loading && !available) return null;
 
+  const distanceM = activeFrame?.cumulative_distance_m
+    ?? (manifest?.distance_m ? Math.round(manifest.distance_m * progress) : undefined);
+  const bearing = Number.isFinite(Number(activeFrame?.bearing)) ? Number(activeFrame?.bearing) : null;
+  const currentTime = trailPreviewClockLabel(totalDuration * progress);
+  const totalTime = trailPreviewClockLabel(totalDuration);
+  const currentDistanceLabel = fmtDistance(distanceM);
+  const totalDistanceLabel = fmtDistance(manifest?.distance_m);
+  const progressLabel = totalDistanceLabel === '--'
+    ? currentDistanceLabel === '--' ? 'Route preview' : currentDistanceLabel
+    : `${currentDistanceLabel === '--' ? '0.0 mi' : currentDistanceLabel} of ${totalDistanceLabel}`;
+
+  const seekFromEvent = (event: GestureResponderEvent) => {
+    commitProgress(trailPreviewProgressFromPointer(event.nativeEvent.locationX, scrubberWidth));
+  };
+
+  const handleScrubStart = (event: GestureResponderEvent) => {
+    scrubWasPlayingRef.current = playing;
+    setPlaying(false);
+    seekFromEvent(event);
+  };
+
+  const handleScrubEnd = (event: GestureResponderEvent) => {
+    const nextProgress = trailPreviewProgressFromPointer(event.nativeEvent.locationX, scrubberWidth);
+    commitProgress(nextProgress);
+    if (scrubWasPlayingRef.current && nextProgress < 1) {
+      startedAtRef.current = Date.now() - nextProgress * totalDuration;
+      setPlaying(true);
+    }
+    scrubWasPlayingRef.current = false;
+  };
+
+  const handleScrubberLayout = (event: LayoutChangeEvent) => {
+    setScrubberWidth(event.nativeEvent.layout.width);
+  };
+
   return (
-    <View style={styles.wrap} pointerEvents="box-none">
-      <View style={styles.topBar} pointerEvents="auto">
-        <TouchableOpacity style={styles.iconBtn} onPress={onClose} hitSlop={12}>
-          <Ionicons name="close" size={18} color="#f8fafc" />
-        </TouchableOpacity>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={styles.kicker}>Preview</Text>
-          <Text style={styles.title} numberOfLines={1}>{manifest?.trail_name || trail?.name || 'Trail'}</Text>
-        </View>
-        <View style={[styles.livePill, { borderColor: accent + '88', backgroundColor: accent + '1f' }]}>
-          <Text style={[styles.livePillText, { color: accent }]}>{available ? '3D' : 'Loading'}</Text>
-        </View>
+    <View style={styles.wrap} pointerEvents="box-none" testID="trail.preview.player">
+      <View style={styles.topScrim} pointerEvents="none" />
+
+      <TouchableOpacity
+        testID="trail.preview.close"
+        accessibilityRole="button"
+        accessibilityLabel="Close trail preview"
+        style={styles.closeButton}
+        onPress={onClose}
+        hitSlop={8}
+      >
+        <Ionicons name="close" size={25} color="#111412" />
+      </TouchableOpacity>
+
+      <View style={styles.titleBlock} pointerEvents="none">
+        <Text style={styles.kicker}>3D PREVIEW</Text>
+        <Text style={styles.title} numberOfLines={1}>{manifest?.trail_name || trail?.name || 'Trail'}</Text>
+        <Text style={styles.subtitle} numberOfLines={1}>{progressLabel}</Text>
       </View>
+
+      <TouchableOpacity
+        testID="trail.preview.recenter"
+        accessibilityRole="button"
+        accessibilityLabel="Recenter trail preview"
+        style={styles.compassButton}
+        onPress={() => applyCameraAtProgress(progress, 480)}
+      >
+        {renderCompass?.(bearing)}
+        <View style={styles.compassTextBlock}>
+          <Text style={styles.compassDirection}>{trailPreviewCardinalDirection(bearing)}</Text>
+          <Text style={styles.compassDegrees}>{bearing == null ? '--' : `${Math.round(bearing)}°`}</Text>
+        </View>
+      </TouchableOpacity>
 
       <View style={styles.bottomCard} pointerEvents="auto">
         {loading ? (
           <View style={styles.loadingRow}>
-            <ActivityIndicator color={accent} />
+            <ActivityIndicator color="#AD5A33" />
             <Text style={styles.loadingText}>Preparing preview</Text>
           </View>
-        ) : available ? (
+        ) : (
           <>
-            <View style={styles.progressTrack}>
-              <View style={[styles.progressFill, { width: `${Math.max(2, progress * 100)}%`, backgroundColor: accent }]} />
+            <View style={styles.timelineRow}>
+              <Text style={styles.timeLabel}>{currentTime}</Text>
+              <View
+                testID="trail.preview.scrubber"
+                accessible
+                accessibilityRole="adjustable"
+                accessibilityLabel="Trail preview progress"
+                accessibilityValue={{ min: 0, max: 100, now: Math.round(progress * 100) }}
+                accessibilityActions={[{ name: 'increment' }, { name: 'decrement' }]}
+                onAccessibilityAction={event => {
+                  const delta = event.nativeEvent.actionName === 'increment' ? 0.05 : -0.05;
+                  commitProgress(progress + delta);
+                }}
+                style={styles.scrubberTouch}
+                onLayout={handleScrubberLayout}
+                onStartShouldSetResponder={() => true}
+                onMoveShouldSetResponder={() => true}
+                onResponderGrant={handleScrubStart}
+                onResponderMove={seekFromEvent}
+                onResponderRelease={handleScrubEnd}
+                onResponderTerminate={handleScrubEnd}
+              >
+                <View style={styles.progressTrack}>
+                  <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
+                </View>
+              </View>
+              <Text style={[styles.timeLabel, styles.timeLabelRight]}>{totalTime}</Text>
             </View>
+
             <View style={styles.controlRow}>
               <TouchableOpacity
-                style={[styles.playBtn, { backgroundColor: accent }]}
+                testID="trail.preview.restart"
+                accessibilityRole="button"
+                accessibilityLabel="Restart trail preview"
+                style={styles.restartButton}
                 onPress={() => {
-                  if (progress >= 0.99) {
-                    setProgress(0);
-                    onProgress(0);
-                    startedAtRef.current = Date.now();
-                  } else if (!playing) {
-                    startedAtRef.current = Date.now() - progress * totalDuration;
-                  }
-                  setPlaying(v => !v || progress >= 0.99);
-                }}
-              >
-                <Ionicons name={playing ? 'pause' : 'play'} size={18} color="#061018" />
-              </TouchableOpacity>
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={styles.statValue}>{fmtDistance(distanceM)}</Text>
-                <Text style={styles.statLabel} numberOfLines={1}>route progress</Text>
-              </View>
-              <TouchableOpacity
-                style={styles.restartBtn}
-                onPress={() => {
+                  commitProgress(0);
                   startedAtRef.current = Date.now();
-                  setProgress(0);
-                  onProgress(0);
                   setPlaying(true);
                 }}
               >
-                <Ionicons name="refresh" size={16} color={secondary} />
+                <Ionicons name="refresh" size={25} color="#111412" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                testID="trail.preview.play-pause"
+                accessibilityRole="button"
+                accessibilityLabel={playing ? 'Pause trail preview' : 'Play trail preview'}
+                style={styles.playButton}
+                onPress={() => {
+                  if (progress >= 0.99) {
+                    commitProgress(0);
+                    startedAtRef.current = Date.now();
+                    setPlaying(true);
+                    return;
+                  }
+                  if (!playing) startedAtRef.current = Date.now() - progress * totalDuration;
+                  setPlaying(value => !value);
+                }}
+              >
+                <Ionicons name={playing ? 'pause' : 'play'} size={19} color="#FFFFFF" />
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                testID="trail.preview.back"
+                accessibilityRole="button"
+                accessibilityLabel="Back to trail details"
+                style={styles.backButton}
+                onPress={onBack}
+              >
+                <Text style={styles.backText}>Back</Text>
               </TouchableOpacity>
             </View>
           </>
-        ) : null}
+        )}
       </View>
     </View>
   );
@@ -234,81 +324,101 @@ const styles = StyleSheet.create({
     zIndex: 970,
     elevation: 80,
   },
-  topBar: {
+  topScrim: {
     position: 'absolute',
-    top: 54,
-    left: 14,
-    right: 14,
-    minHeight: 58,
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: 'rgba(5, 10, 14, 0.78)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: 120,
+    backgroundColor: 'rgba(17,20,18,0.34)',
   },
-  iconBtn: {
-    width: 38,
-    height: 38,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.08)',
-  },
-  kicker: { color: '#cbd5e1', fontSize: 9, fontWeight: '900', letterSpacing: 0 },
-  title: { color: '#f8fafc', fontSize: 16, fontWeight: '900', marginTop: 2 },
-  livePill: {
-    minWidth: 46,
-    minHeight: 28,
-    borderRadius: 999,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 9,
-  },
-  livePillText: { fontSize: 10, fontWeight: '900', letterSpacing: 0 },
-  bottomCard: {
+  closeButton: {
     position: 'absolute',
+    top: 42,
     left: 14,
-    right: 14,
-    bottom: 30,
-    borderRadius: 16,
-    padding: 14,
-    backgroundColor: 'rgba(5, 10, 14, 0.86)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.13)',
-  },
-  loadingRow: { minHeight: 54, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  loadingText: { color: '#e2e8f0', fontSize: 13, fontWeight: '800' },
-  progressTrack: {
-    height: 5,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    overflow: 'hidden',
-    marginBottom: 14,
-  },
-  progressFill: { height: '100%', borderRadius: 999 },
-  controlRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  playBtn: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  restartBtn: {
-    width: 42,
-    height: 42,
+    width: 44,
+    height: 44,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#D8DCD8',
   },
-  statValue: { color: '#f8fafc', fontSize: 19, fontWeight: '900' },
-  statLabel: { color: '#94a3b8', fontSize: 11, fontWeight: '800', marginTop: 2 },
-  unavailable: { minHeight: 70, flexDirection: 'row', alignItems: 'center', gap: 12 },
-  unavailableTitle: { color: '#f8fafc', fontSize: 15, fontWeight: '900' },
-  unavailableText: { color: '#cbd5e1', fontSize: 12, lineHeight: 17, marginTop: 3 },
+  titleBlock: {
+    position: 'absolute',
+    top: 45,
+    left: 69,
+    right: 112,
+  },
+  kicker: {
+    color: '#FFFFFF',
+    fontSize: 12,
+    lineHeight: 17,
+    fontWeight: '700',
+  },
+  title: {
+    color: '#FFFFFF',
+    fontSize: 25,
+    lineHeight: 31,
+    fontFamily: trailheadFonts.displayBold,
+  },
+  subtitle: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '600',
+  },
+  compassButton: {
+    position: 'absolute',
+    top: 43,
+    right: 14,
+    width: 84,
+    height: 52,
+    borderRadius: 26,
+    paddingHorizontal: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#D8DCD8',
+  },
+  compassTextBlock: { flex: 1, minWidth: 0 },
+  compassDirection: { color: '#111412', fontSize: 13, lineHeight: 16, fontWeight: '700' },
+  compassDegrees: { color: '#4F5752', fontSize: 12, lineHeight: 15 },
+  bottomCard: {
+    position: 'absolute',
+    left: 17,
+    right: 17,
+    bottom: 34,
+    minHeight: 98,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    paddingBottom: 10,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: '#D8DCD8',
+  },
+  loadingRow: { minHeight: 76, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12 },
+  loadingText: { color: '#4F5752', fontSize: 14, fontWeight: '600' },
+  timelineRow: { height: 32, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  timeLabel: { width: 38, color: '#4F5752', fontSize: 12, fontWeight: '600' },
+  timeLabelRight: { textAlign: 'right' },
+  scrubberTouch: { flex: 1, height: 32, justifyContent: 'center' },
+  progressTrack: { height: 4, borderRadius: 2, overflow: 'hidden', backgroundColor: '#D9DEDA' },
+  progressFill: { height: '100%', borderRadius: 2, backgroundColor: '#AD5A33' },
+  controlRow: { minHeight: 48, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  restartButton: { width: 54, height: 44, alignItems: 'center', justifyContent: 'center' },
+  playButton: {
+    width: 54,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#AD5A33',
+  },
+  backButton: { width: 78, height: 44, alignItems: 'center', justifyContent: 'center' },
+  backText: { color: '#984F2F', fontSize: 14, fontWeight: '700' },
 });

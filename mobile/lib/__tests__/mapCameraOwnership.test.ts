@@ -23,6 +23,7 @@ test('only browse may restore and persist the recent viewport', () => {
   const original = createMapCameraOwnership('originals', 'originals:moab:1');
   assert.equal(original.blocksRecentViewport, true);
   assert.equal(original.restoreBrowseCameraOnRelease, true);
+  assert.equal(createMapCameraOwnership('preview3d', 'trail:short-point:preview').restoreBrowseCameraOnRelease, true);
   assert.equal(createMapCameraOwnership('navigation', 'navigation:trip-1').restoreBrowseCameraOnRelease, false);
 });
 

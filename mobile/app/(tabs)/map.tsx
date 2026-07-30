@@ -315,6 +315,7 @@ import {
   sheetCoordinatorReducer,
   sheetRequestIsCurrent,
   type SheetIdentity,
+  type SheetPresentation,
 } from '@/lib/sheetCoordinator';
 import {
   resolveSheetActionDescriptorsV1,
@@ -7608,7 +7609,16 @@ function MapScreen() {
   const [trailPreviewManifest, setTrailPreviewManifest] = useState<TrailPreviewManifest | null>(null);
   const [trailPreviewProgress, setTrailPreviewProgress] = useState(0);
   const [trailPreviewPauseSignal, setTrailPreviewPauseSignal] = useState(0);
-  const trailPreviewTone = useMemo<'cyan' | 'gold'>(() => 'cyan', []);
+  const trailPreviewReturnContextRef = useRef<{
+    trail: TrailFeature | null;
+    trailCardCollapsed: boolean;
+    showTrailList: boolean;
+    trailRouteBuilderOpen: boolean;
+    presentation: SheetPresentation;
+    scrollY: number;
+    map3dEnabled: boolean;
+    viewport: { n: number; s: number; e: number; w: number; zoom: number } | null;
+  } | null>(null);
   const [trailCardCollapsed, setTrailCardCollapsed] = useState(false);
   const [showTrailList, setShowTrailList] = useState(false);
   const [trailRouteBuilderOpen, setTrailRouteBuilderOpen] = useState(false);
@@ -7763,8 +7773,9 @@ function MapScreen() {
       && !panelCollapsed
       && !routeBuildSession
       && !mapMissionVisible
+      && !trailPreviewOpen
     ),
-    preview3dActive: mapMissionVisible,
+    preview3dActive: mapMissionVisible || trailPreviewOpen,
     traceActive: trailTraceMode || trailPinCaptureMode,
     routeBuildStatus: routeBuildSession?.status ?? null,
   });
@@ -7775,7 +7786,7 @@ function MapScreen() {
       : mapExperienceMode === 'navigation'
         ? `navigation:${activeTrip?.trip_id ?? navDest?.name ?? 'active'}`
         : mapExperienceMode === 'preview3d'
-          ? `preview3d:${activeTrip?.trip_id ?? 'active'}`
+        ? `preview3d:${trailPreviewManifest?.route_id ?? activeTrip?.trip_id ?? 'active'}`
           : mapExperienceMode === 'trace'
             ? 'trace:active'
             : null;
@@ -21468,7 +21479,7 @@ function MapScreen() {
     mapMissionVisible,
     returnFromMissionToTripOverview,
   ]);
-  const canOpenMapDrawer = !trailFollowSession && !navMode && !waterFollowActive && !showSearch && !inlineSearchOpen && !mapSearchSession;
+  const canOpenMapDrawer = !trailFollowSession && !trailPreviewOpen && !navMode && !waterFollowActive && !showSearch && !inlineSearchOpen && !mapSearchSession;
   const openMapDrawer = useCallback(() => {
     if (!canOpenMapDrawer) return;
     setShowMapDrawer(true);
@@ -21775,10 +21786,36 @@ function MapScreen() {
   }
 
   function closeTrailPreview() {
+    const context = trailPreviewReturnContextRef.current;
+    trailPreviewReturnContextRef.current = null;
     setTrailPreviewOpen(false);
     setTrailPreviewLoading(false);
     setTrailPreviewManifest(null);
     setTrailPreviewProgress(0);
+    if (context) {
+      setMap3dEnabled(context.map3dEnabled);
+      viewportRef.current = context.viewport;
+    }
+  }
+
+  function returnFromTrailPreview() {
+    const context = trailPreviewReturnContextRef.current;
+    closeTrailPreview();
+    if (!context) return;
+    setSelectedTrail(context.trail);
+    selectedTrailRef.current = context.trail;
+    setTrailCardCollapsed(context.trailCardCollapsed);
+    setShowTrailList(context.showTrailList);
+    setTrailRouteBuilderOpen(context.trailRouteBuilderOpen);
+    if (!context.trailRouteBuilderOpen && context.trail) {
+      dispatchPlaceSheet({ type: 'set_presentation', presentation: context.presentation });
+      setTrailSheetScrollRestore(value => ({ key: value.key + 1, y: context.scrollY }));
+    }
+  }
+
+  function exitTrailPreview() {
+    closeTrailPreview();
+    closeSelectedTrailSheet();
   }
 
   function clearTrailMapOverlays() {
@@ -21789,6 +21826,18 @@ function MapScreen() {
   }
 
   async function openTrailPreview(trail: TrailFeature) {
+    if (!trailPreviewOpen) {
+      trailPreviewReturnContextRef.current = {
+        trail: selectedTrail,
+        trailCardCollapsed,
+        showTrailList,
+        trailRouteBuilderOpen,
+        presentation: placeSheetCoordinator.presentation,
+        scrollY: trailSheetScrollYRef.current,
+        map3dEnabled,
+        viewport: viewportRef.current ? { ...viewportRef.current } : null,
+      };
+    }
     setTrailPreviewProgress(0);
     setTrailPreviewManifest(null);
     const localProfile = selectedTrailProfile && (
@@ -22323,6 +22372,10 @@ function MapScreen() {
   useFocusEffect(useCallback(() => {
     if (!selectedTrail) return undefined;
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (trailPreviewOpen) {
+        returnFromTrailPreview();
+        return true;
+      }
       if (trailRouteBuilderOpen || trailPinCaptureMode || trailTraceMode) {
         requestTrailBuilderExit();
         return true;
@@ -22348,6 +22401,7 @@ function MapScreen() {
     selectedTrail?.id,
     placeSheetCoordinator.presentation,
     relatedPlaceReturnStack.length,
+    trailPreviewOpen,
     trailBuilderDirty,
     trailPinCaptureMode,
     trailRouteBuilderOpen,
@@ -25410,6 +25464,7 @@ function MapScreen() {
   );
   const showInlineMapSearch = Boolean(
     !trailFollowSession &&
+    !trailPreviewOpen &&
     !trailPinCaptureMode &&
     !navMode &&
     !waterFollowActive &&
@@ -25419,6 +25474,7 @@ function MapScreen() {
     (!mapSheetOpen || inlineSearchOpen || scopedMapSearchActive)
   );
   const showMapStatusBar = Boolean(
+    !trailPreviewOpen &&
     !navMode &&
     !originalsOwnMapContext &&
     !waterFollowActive &&
@@ -25450,6 +25506,7 @@ function MapScreen() {
     ? Math.max(128, windowHeight - inlineSearchTop - 28)
     : undefined;
   const mapControlsBlocked = Boolean(
+    trailPreviewOpen ||
     !!trailFollowSession ||
     navMode ||
     mapSearchChromeActive ||
@@ -25754,17 +25811,17 @@ function MapScreen() {
             setMapStyleGeneration(generation => generation + 1);
           }}
           waypoints={waypoints}
-          camps={mapMissionVisible || routeBuildMapActive || scopedMapSearchActive || waterFollowActive || originalsOwnMapContext ? [] : nativeMapCampPins as any}
-          gas={mapMissionVisible || routeBuildMapActive || scopedMapSearchActive || originalsOwnMapContext ? [] : routeSearchGas as any}
-          pois={mapMissionVisible || routeBuildMapActive || originalsOwnMapContext ? [] : scopedMapSearchPois}
+          camps={mapMissionVisible || trailPreviewOpen || routeBuildMapActive || scopedMapSearchActive || waterFollowActive || originalsOwnMapContext ? [] : nativeMapCampPins as any}
+          gas={mapMissionVisible || trailPreviewOpen || routeBuildMapActive || scopedMapSearchActive || originalsOwnMapContext ? [] : routeSearchGas as any}
+          pois={mapMissionVisible || trailPreviewOpen || routeBuildMapActive || originalsOwnMapContext ? [] : scopedMapSearchPois}
           offlineTrailFeatures={layerTrails ? offlineV2Catalog.trail_features : undefined}
-          waterNavLines={mapMissionVisible || scopedMapSearchActive ? null : waterNavLines}
-          waterSpotCards={mapMissionVisible || scopedMapSearchActive ? [] : allWaterSpotCards}
-          waterCorridor={mapMissionVisible ? null : waterCorridor}
-          waterFollowRoute={mapMissionVisible ? null : waterFollowRoute}
-          reports={mapMissionVisible || scopedMapSearchActive || safeWaterPlanningActive || waterFollowActive || originalsOwnMapContext ? [] : mapReports}
-          communityPins={mapMissionVisible || scopedMapSearchActive || safeWaterPlanningActive || waterFollowActive || originalsOwnMapContext ? [] : displayCommunityPins}
-          searchMarker={!mapMissionVisible && searchRouteCard ? { lat: searchRouteCard.lat, lng: searchRouteCard.lng, name: searchRouteCard.name } : null}
+          waterNavLines={mapMissionVisible || trailPreviewOpen || scopedMapSearchActive ? null : waterNavLines}
+          waterSpotCards={mapMissionVisible || trailPreviewOpen || scopedMapSearchActive ? [] : allWaterSpotCards}
+          waterCorridor={mapMissionVisible || trailPreviewOpen ? null : waterCorridor}
+          waterFollowRoute={mapMissionVisible || trailPreviewOpen ? null : waterFollowRoute}
+          reports={mapMissionVisible || trailPreviewOpen || scopedMapSearchActive || safeWaterPlanningActive || waterFollowActive || originalsOwnMapContext ? [] : mapReports}
+          communityPins={mapMissionVisible || trailPreviewOpen || scopedMapSearchActive || safeWaterPlanningActive || waterFollowActive || originalsOwnMapContext ? [] : displayCommunityPins}
+          searchMarker={!mapMissionVisible && !trailPreviewOpen && searchRouteCard ? { lat: searchRouteCard.lat, lng: searchRouteCard.lng, name: searchRouteCard.name } : null}
           userLoc={userLoc}
           navMode={navMode}
           navCameraFollow={navCameraFollow}
@@ -25784,7 +25841,6 @@ function MapScreen() {
           tracePinCoords={trailPinCaptureMode ? trailCapturePins : []}
           trailPreviewCoords={trailPreviewOpen && trailPreviewManifest?.status === 'available' ? trailPreviewManifest.coordinates ?? [] : []}
           trailPreviewProgress={trailPreviewProgress}
-          trailPreviewTone={trailPreviewTone}
           routeBuildActive={routeBuildMapActive}
           routeBuildCoords={routeBuildSession?.routeCoords ?? []}
           routeBuildReveal={routeBuildReveal}
@@ -25794,17 +25850,17 @@ function MapScreen() {
           originalsRouteProgress={originalsMapExperience.routeProgress}
           originalsCueStops={originalsMapExperience.cues}
           suppressFeatureTaps={mapTapToolOwnsFeatureSelection}
-          showLandOverlay={showLands}
-          showUsgsOverlay={showUsgs}
+          showLandOverlay={showLands && !trailPreviewOpen}
+          showUsgsOverlay={showUsgs && !trailPreviewOpen}
           showTerrain={map3dEnabled && !navMode}
-          showTrailOverlay={layerTrails}
-          showMvum={layerMvum}
-          showFire={layerFire}
+          showTrailOverlay={layerTrails && !trailPreviewOpen}
+          showMvum={layerMvum && !trailPreviewOpen}
+          showFire={layerFire && !trailPreviewOpen}
           onFireOverlayStatusChange={setFireOverlayStatus}
-          showAva={layerAva}
-          showRadar={layerRadar}
-          showNautical={layerNautical}
-          hideMapStatusBadge={!mapVisualWorkActive || scopedMapSearchActive}
+          showAva={layerAva && !trailPreviewOpen}
+          showRadar={layerRadar && !trailPreviewOpen}
+          showNautical={layerNautical && !trailPreviewOpen}
+          hideMapStatusBadge={!mapVisualWorkActive || scopedMapSearchActive || trailPreviewOpen}
           missionBriefActive={missionBriefOverlay.active}
           missionBriefFullRoute={missionBriefOverlay.fullRoute}
           missionBriefProgressRoute={missionBriefOverlay.progressRoute}
@@ -25822,7 +25878,7 @@ function MapScreen() {
             const center = vp
               ? { lat: (vp.n + vp.s) / 2, lng: (vp.e + vp.w) / 2 }
               : waypoints[0] ? { lat: waypoints[0].lat, lng: waypoints[0].lng } : null;
-            if (center && !mapMissionVisible) {
+            if (center && !mapMissionVisible && !trailPreviewOpen) {
               // Search a generous radius on first load so trip camps appear immediately
               const bounds = vp ?? {
                 n: center.lat + 1.5, s: center.lat - 1.5,
@@ -25854,7 +25910,7 @@ function MapScreen() {
             const lat = (b.n + b.s) / 2;
             const lng = (b.e + b.w) / 2;
             const radius = Math.max(1.0, Math.min(4.0, Math.max(Math.abs(b.n - b.s), Math.abs(b.e - b.w)) / 2 + 0.5));
-            if (!scopedMapSearchActive && !mapMissionVisible) {
+            if (!scopedMapSearchActive && !mapMissionVisible && !trailPreviewOpen) {
               refreshCommunityPins({ lat, lng }, radius, false);
               queueViewportPlaceFetch(b);
               queueViewportCampFetch(b);
@@ -26194,9 +26250,10 @@ function MapScreen() {
         manifest={trailPreviewManifest}
         loading={trailPreviewLoading}
         mapRef={nativeMapRef}
-        tone={trailPreviewTone}
         pauseSignal={trailPreviewPauseSignal}
-        onClose={closeTrailPreview}
+        renderCompass={bearing => <ThreeNeedleCompass heading={bearing} bearing={null} compact />}
+        onBack={returnFromTrailPreview}
+        onClose={exitTrailPreview}
         onProgress={setTrailPreviewProgress}
       />
       {trailFollowSession ? (
@@ -26811,7 +26868,7 @@ function MapScreen() {
         </View>
       )}
 
-      {!trailFollowSession && !trailPinCaptureMode && !navMode && (scopedMapSearchActive || !activeTrip) && !safeWaterPlanningActive && !waterFollowActive && userHeading !== null && !showSearch && !inlineSearchOpen && (
+      {!trailPreviewOpen && !trailFollowSession && !trailPinCaptureMode && !navMode && (scopedMapSearchActive || !activeTrip) && !safeWaterPlanningActive && !waterFollowActive && userHeading !== null && !showSearch && !inlineSearchOpen && (
         <View
           style={[s.compassPill, mapChrome.toast, { top: compassTop, left: 68 }]}
           testID="map.compass"
@@ -28003,7 +28060,7 @@ function MapScreen() {
                   ) : (
                     user && (
                       <TouchableOpacity style={s.trailTextAction} onPress={openTrailFieldReportComposer}>
-                        <Ionicons name="add-circle-outline" size={16} color={trailPreviewTone === 'gold' ? '#f5c84b' : '#23d2c3'} />
+                        <Ionicons name="add-circle-outline" size={16} color="#AD5A33" />
                         <Text style={s.trailTextActionText}>Add report</Text>
                       </TouchableOpacity>
                     )

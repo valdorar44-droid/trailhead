@@ -45,7 +45,7 @@ export function createMapCameraOwnership(
     owner,
     experienceKey: experienceKey?.trim() || owner,
     blocksRecentViewport: true,
-    restoreBrowseCameraOnRelease: owner === 'originals',
+    restoreBrowseCameraOnRelease: owner === 'originals' || owner === 'preview3d',
   };
 }
 

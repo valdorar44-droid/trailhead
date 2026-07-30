@@ -331,7 +331,6 @@ export interface NativeMapProps {
   tracePinCoords?: [number, number][];
   trailPreviewCoords?: [number, number][];
   trailPreviewProgress?: number;
-  trailPreviewTone?: 'cyan' | 'gold';
   routeBuildActive?: boolean;
   routeBuildCoords?: [number, number][];
   routeBuildReveal?: number;
@@ -925,7 +924,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     userLoc, navMode, navCameraFollow = false, trailFollowActive = false, nativeNavEngineActive = false, navIdx, navHeading, navSpeed,
     mapLayer, routeProviderMode = 'trailhead', routeOpts, rendererMode,
     traceMode = false, traceDraftCoords = [], traceRouteCoords = [], tracePinCoords = [],
-    trailPreviewCoords = [], trailPreviewProgress = 0, trailPreviewTone = 'cyan',
+    trailPreviewCoords = [], trailPreviewProgress = 0,
     routeBuildActive = false, routeBuildCoords = [], routeBuildReveal = 1, routeBuildStops = [],
     originalsRouteActive = false, originalsRouteCoords = [], originalsRouteProgress = 0, originalsCueStops = [],
     suppressFeatureTaps = false,
@@ -1306,6 +1305,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
 
   const rememberFreeCamera = useCallback((lat: number, lng: number, zoom?: number, pitch?: number) => {
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+    if (cameraOwnershipRef.current.blocksRecentViewport) return;
     freeCameraDefaultRef.current = {
       centerCoordinate: [lng, lat],
       zoomLevel: Number.isFinite(Number(zoom)) ? Number(zoom) : freeCameraDefaultRef.current.zoomLevel,
@@ -2799,11 +2799,21 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     return {
       ...split,
       active: trailPreviewCoords.length >= 2,
-      accent: trailPreviewTone === 'gold' ? '#f5c84b' : '#22d3ee',
+      accent: '#AD5A33',
       remaining: split.remaining.length >= 2 ? split.remaining : [],
       completed: split.completed.length >= 2 ? split.completed : [],
     };
-  }, [trailPreviewCoords, trailPreviewProgress, trailPreviewTone]);
+  }, [trailPreviewCoords, trailPreviewProgress]);
+
+  const trailPreviewFinish = useMemo(() => {
+    const finish = trailPreviewCoords[trailPreviewCoords.length - 1];
+    if (!trailPreviewVisual.active || !finish) return emptyFC();
+    return pointFC([{
+      type: 'Feature' as const,
+      geometry: { type: 'Point' as const, coordinates: finish },
+      properties: { role: 'finish' },
+    }]);
+  }, [trailPreviewCoords, trailPreviewVisual.active]);
 
   const trailHighlightFinish = useMemo(() => {
     const coords = resolvedTrailCoordinates(trailHighlight);
@@ -3208,7 +3218,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       isUserInteraction: !!(feat as any)?.properties?.isUserInteraction,
       isAnimatingFromUserInteraction: !!(feat as any)?.properties?.isAnimatingFromUserInteraction,
     });
-    if (userDriven || !programmatic) {
+    if (!cameraOwnershipRef.current.blocksRecentViewport && (userDriven || !programmatic)) {
       freeCameraDefaultRef.current = {
         centerCoordinate: [(e + w) / 2, (n + s) / 2],
         zoomLevel: Number.isFinite(Number(zoomLevel)) ? Number(zoomLevel) : freeCameraDefaultRef.current.zoomLevel,
@@ -3658,6 +3668,24 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               />
             </MapGL.ShapeSource>
           )}
+          {trailPreviewFinish.features.length > 0 ? (
+            <MapGL.ShapeSource id="trail-preview-finish" shape={trailPreviewFinish}>
+              <MapGL.SymbolLayer
+                id="trail-preview-finish-diamond"
+                {...mapboxTopSlotProps}
+                style={{
+                  textField: '◆',
+                  textSize: ['interpolate', ['linear'], ['zoom'], 8, 14, 13, 20, 16, 25],
+                  textColor: '#F5C84B',
+                  textHaloColor: '#111412',
+                  textHaloWidth: 2,
+                  textFont: ['Open Sans Bold'],
+                  textAllowOverlap: true,
+                  textIgnorePlacement: true,
+                } as any}
+              />
+            </MapGL.ShapeSource>
+          ) : null}
         </>
       )}
 

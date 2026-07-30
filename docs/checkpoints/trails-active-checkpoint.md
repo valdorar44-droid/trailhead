@@ -758,3 +758,9 @@ Verify the staged file list before every commit.
 
 - Do not reopen Trail Builder design, route-shape behavior, the out-and-back regression, local Expo-module publication, T1-T6, broad Map/Search/Offline/Follow/flyover crawls, Layers, Memory Gate, NPS, Originals, Android Auto, Camp Guide, screenshots, or production work without new evidence.
 - Do not stage or modify `.cursor/`, `dashboard/explore_serving_index_v2.json`, or `docs/app-store-copy.md` as part of Trails work.
+
+### Trail Builder route-shape physical sanity (2026-07-30T13:20:27-05:00)
+
+- On the same accepted Samsung preview update `019fb2a4-f690-71bd-814c-ed80e3e90cac`, `Reverse route` completed and returned to the stable Route-ready sheet without an error, blank state, lost geometry, or changed distance/time. Evidence `C:\Users\User\Documents\Codex\evidence\trailhead\trail-builder-582d6b7\android\sanity-reverse.png`, SHA-256 `cbd4dfda12e62a127f9236e92f46dab4a0924279233cfd5f72940a567a2681c1`.
+- `Close the loop` then completed physically, returned to Route ready, retained Edit/Save/3D/More/Start Follow, and changed the route from `82 mi` to `152 mi`. The sheet truthfully states that the closing segment is direct until reviewed on the map. Evidence `sanity-close-loop.png`, SHA-256 `0d3f33615cde099fcdbf551abf66300196a455c501830145c0bd44be3f0a0dcb`.
+- Together with the earlier exact out-and-back edit/rebuild regression, all three route-shape options now have current physical Android evidence. No source, OTA, native project, backend, or production state changed.

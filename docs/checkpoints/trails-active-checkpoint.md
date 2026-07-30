@@ -716,3 +716,21 @@ Verify the staged file list before every commit.
 
 - Do not rerun the publisher from `/tmp`, reuse a whole-workspace `node_modules` symlink, or start another export before the local-module assertion passes.
 - Do not reopen Trail Builder design, source behavior, T1-T6, broad app crawls, or production work while correcting this isolated release-worktree blocker.
+
+### Trail Builder release-worktree guard ready (2026-07-30T04:40:00-05:00)
+
+- Branch `feat/trailhead-1.0.10-overhaul`; pre-commit HEAD `7a07f5026883b8ecc9ebca7dccf833c3956ea00b`. Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, Valhalla work, Android Auto scripts, and every unrelated dirty file remain excluded.
+- Added a deterministic resolution assertion for all six tracked `file:./modules/` Expo packages. It proves each installed package resolves to the matching `mobile/modules/*` directory in the current worktree, validates its package identity, and verifies its entry file. The guarded publisher now runs this assertion before Sentry export or Metro, and the complete pre-preview gate includes it.
+- The authoritative workspace passes local Expo modules `6/6`, Trail Builder `11/11`, Trail Follow and recording, Trail Preview `7/7`, production-publisher CLI, and TypeScript. The Mapbox-oriented source audit confirms free drawing remains a local geometric trace until explicit review, snapped modes use the routing stack, route rendering reuses the shared map route source, and camera fitting/gesture ownership remains explicit.
+- No OTA, channel, backend, native project, permission, dependency version, runtime, or production state changed. Preview remains source `7aa2465949ef746b2e9704de42b40632e4466b67`: Android update `019fb1eb-8720-733e-9e5c-7565da82639e`; iOS update `019fb1eb-8720-7a16-877f-bd743b2aac22`.
+
+#### Exact next action
+
+1. Commit only `mobile/package.json`, `mobile/scripts/local-expo-module-resolution.test.mjs`, the two guarded release scripts, and this checkpoint; push the branch.
+2. Create a persistent clean worktree at the new immutable SHA, run `npm ci`, and require the local-module assertion to pass there before one guarded paired preview publication.
+3. Verify the exact Android update on Samsung and run only the approved Trail Builder delta. Stop for acceptance before iOS parity; production remains unchanged.
+
+#### Do not repeat after this checkpoint
+
+- Do not publish from `/tmp`, share `node_modules` across worktrees, bypass the local-module assertion, or start a second speculative publication.
+- Do not repeat T1-T6, broad Map/Search/Offline/Follow/flyover crawls, Layers, Memory Gate, NPS, Originals, Android Auto, Camp Guide, screenshots, or production work.

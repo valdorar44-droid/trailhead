@@ -253,6 +253,10 @@ if (dryRun) {
   process.exit(0);
 }
 
+// Local Expo modules are tracked with file: dependencies. A release worktree
+// must resolve each one inside itself; sharing node_modules across worktrees can
+// leave symlinks pointing at a different checkout and make Metro fail midway.
+run(process.execPath, ['scripts/local-expo-module-resolution.test.mjs']);
 run(process.execPath, ['scripts/upload-sentry-update-sourcemaps.mjs', '--check-env']);
 run('npx', [
   '--yes', 'expo', 'export',

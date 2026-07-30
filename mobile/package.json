@@ -16,6 +16,7 @@
     "test:maestro-config": "node scripts/maestro-config.test.mjs",
     "test:automation-selectors": "node scripts/automation-selector-contract.test.mjs",
     "test:release-worktree": "node scripts/release-worktree.test.mjs",
+    "test:local-expo-modules": "node scripts/local-expo-module-resolution.test.mjs",
     "test:release-identity": "node scripts/release-identity.test.mjs",
     "test:eas-build-evidence": "node scripts/eas-build-evidence.test.mjs",
     "test:eas-update-evidence": "node scripts/eas-update-evidence.test.mjs",

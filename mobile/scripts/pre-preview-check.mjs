@@ -84,6 +84,12 @@ const checks = [
     args: ['scripts/release-worktree.test.mjs'],
   },
   {
+    label: 'Local Expo module resolution',
+    cwd: mobileRoot,
+    cmd: 'node',
+    args: ['scripts/local-expo-module-resolution.test.mjs'],
+  },
+  {
     label: 'Release commit identity',
     cwd: mobileRoot,
     cmd: 'node',

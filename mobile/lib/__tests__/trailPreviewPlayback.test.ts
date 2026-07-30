@@ -90,6 +90,12 @@ test('Trail Builder uses the shared T6 player and restores the builder through B
   assert.match(mapSource, /testID="trail\.builder\.review"/);
   assert.match(mapSource, /testID="trail\.builder\.route\.flyover"/);
   assert.match(mapSource, /setTrailRouteBuilderOpen\(context\.trailRouteBuilderOpen\)/);
+  assert.match(mapSource, /setTrailPinCaptureMode\(context\.trailPinCaptureMode\)/);
+  assert.match(mapSource, /setTrailTraceMode\(context\.trailTraceMode\)/);
+  assert.match(mapSource, /syncTrailCaptureModeToWeb\(context\.trailPinCaptureMode\)/);
+  assert.match(mapSource, /setTrailPinCaptureMode\(false\);\s*setTrailTraceMode\(false\);\s*syncTrailCaptureModeToWeb\(false\)/);
+  assert.match(mapSource, /trailTraceMode && !trailPreviewOpen && !navMode/);
+  assert.match(mapSource, /trailPinCaptureMode && !trailPreviewOpen && !navMode/);
 });
 
 test('the preview route keeps its yellow finish diamond on the native map', () => {

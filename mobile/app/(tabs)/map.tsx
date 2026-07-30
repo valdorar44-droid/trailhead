@@ -7626,6 +7626,8 @@ function MapScreen() {
     trailCardCollapsed: boolean;
     showTrailList: boolean;
     trailRouteBuilderOpen: boolean;
+    trailPinCaptureMode: boolean;
+    trailTraceMode: boolean;
     presentation: SheetPresentation;
     scrollY: number;
     map3dEnabled: boolean;
@@ -21819,6 +21821,9 @@ function MapScreen() {
     setTrailCardCollapsed(context.trailCardCollapsed);
     setShowTrailList(context.showTrailList);
     setTrailRouteBuilderOpen(context.trailRouteBuilderOpen);
+    setTrailPinCaptureMode(context.trailPinCaptureMode);
+    setTrailTraceMode(context.trailTraceMode);
+    syncTrailCaptureModeToWeb(context.trailPinCaptureMode);
     if (!context.trailRouteBuilderOpen && context.trail) {
       dispatchPlaceSheet({ type: 'set_presentation', presentation: context.presentation });
       setTrailSheetScrollRestore(value => ({ key: value.key + 1, y: context.scrollY }));
@@ -21844,6 +21849,8 @@ function MapScreen() {
         trailCardCollapsed,
         showTrailList,
         trailRouteBuilderOpen,
+        trailPinCaptureMode,
+        trailTraceMode,
         presentation: placeSheetCoordinator.presentation,
         scrollY: trailSheetScrollYRef.current,
         map3dEnabled,
@@ -21868,6 +21875,9 @@ function MapScreen() {
       setTrailCardCollapsed(true);
       setShowTrailList(false);
       setTrailRouteBuilderOpen(false);
+      setTrailPinCaptureMode(false);
+      setTrailTraceMode(false);
+      syncTrailCaptureModeToWeb(false);
       setMap3dEnabled(true);
     };
     if (localManifest) {
@@ -27149,7 +27159,7 @@ function MapScreen() {
         </View>
       )}
 
-      {trailTraceMode && !navMode && !waterFollowActive && !mapMissionVisible && (
+      {trailTraceMode && !trailPreviewOpen && !navMode && !waterFollowActive && !mapMissionVisible && (
         <View style={s.traceHud} pointerEvents="auto">
           <View style={s.traceHudIcon}>
             <Ionicons name="analytics-outline" size={18} color={C.orange} />
@@ -27166,7 +27176,7 @@ function MapScreen() {
         </View>
       )}
 
-      {trailPinCaptureMode && !navMode && !waterFollowActive && !mapMissionVisible && (
+      {trailPinCaptureMode && !trailPreviewOpen && !navMode && !waterFollowActive && !mapMissionVisible && (
         <View style={s.trailRouteBuilderWrap} pointerEvents="auto">
           <TrailheadSheet contentStyle={s.trailCaptureSheetContent}>
             <View style={s.trailCompactMessage}>

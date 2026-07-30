@@ -81,5 +81,8 @@ test('the preview route keeps its yellow finish diamond on the native map', () =
   assert.match(nativeMapSource, /id="trail-preview-finish-diamond"/);
   assert.match(nativeMapSource, /textColor:\s*'#F5C84B'/);
   assert.match(nativeMapSource, /trailPreviewVisual\.marker && trailPreviewProgress < 0\.995/);
+  assert.match(nativeMapSource, /id="trail-preview-finish-marker"/);
+  assert.match(nativeMapSource, /testID="trail\.preview\.finish-diamond"/);
+  assert.match(nativeMapSource, /transform:\s*\[\{ rotate: '45deg' \}\]/);
   assert.match(playerSource, /Math\.round\(manifest\.distance_m \* progress\)/);
 });

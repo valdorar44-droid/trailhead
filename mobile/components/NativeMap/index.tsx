@@ -3686,6 +3686,16 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               />
             </MapGL.ShapeSource>
           ) : null}
+          {trailPreviewFinish.features.length > 0 && trailPreviewCoords.length > 0 ? (
+            <MapGL.MarkerView
+              id="trail-preview-finish-marker"
+              coordinate={trailPreviewCoords[trailPreviewCoords.length - 1]}
+              allowOverlap
+              allowOverlapWithPuck
+            >
+              <TrailFinishDiamond testID="trail.preview.finish-diamond" />
+            </MapGL.MarkerView>
+          ) : null}
         </>
       )}
 
@@ -4054,6 +4064,16 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             } as any}
           />
         </MapGL.ShapeSource>
+      ) : null}
+      {routeCoords.length > 0 && trailFollowFinish.features.length > 0 && !waterRouteVisualActive && !routeBuildActive && !originalsRouteVisual.active ? (
+        <MapGL.MarkerView
+          id="trailhead-follow-finish-marker"
+          coordinate={routeCoords[routeCoords.length - 1]}
+          allowOverlap
+          allowOverlapWithPuck
+        >
+          <TrailFinishDiamond testID="trail.follow.finish-diamond" />
+        </MapGL.MarkerView>
       ) : null}
 
       {/* ── Mission briefing overlays ─────────────────────────────────── */}
@@ -4965,6 +4985,16 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               />
             </MapGL.ShapeSource>
           ) : null}
+          {trailHighlightFinish.features.length > 0 ? (
+            <MapGL.MarkerView
+              id="trailhead-selected-trail-finish-marker"
+              coordinate={(trailHighlightFinish.features[0].geometry as GeoJSON.Point).coordinates as [number, number]}
+              allowOverlap
+              allowOverlapWithPuck
+            >
+              <TrailFinishDiamond testID="trail.selected.finish-diamond" />
+            </MapGL.MarkerView>
+          ) : null}
         </>
       )}
         </>
@@ -5604,6 +5634,14 @@ function WaypointDot({ wp, index, isNavTarget, onPress }: {
   );
 }
 
+function TrailFinishDiamond({ testID }: { testID: string }) {
+  return (
+    <View testID={testID} pointerEvents="none" style={styles.trailFinishMarker}>
+      <View style={styles.trailFinishDiamond} />
+    </View>
+  );
+}
+
 function ReportDot({ type, subtype }: { type: string; subtype?: string }) {
   const COLORS: Record<string, string> = {
     police: '#eab308dd', hazard: '#ef4444dd', road_condition: '#f97316dd',
@@ -5675,6 +5713,25 @@ const styles = StyleSheet.create({
   wpDotText: {
     color: '#fff', fontSize: 11, fontWeight: '900', fontFamily: 'monospace',
     textAlign: 'center',
+  },
+  trailFinishMarker: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  trailFinishDiamond: {
+    width: 15,
+    height: 15,
+    backgroundColor: '#F5C84B',
+    borderColor: '#111412',
+    borderWidth: 2,
+    transform: [{ rotate: '45deg' }],
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.28,
+    shadowRadius: 3,
+    elevation: 5,
   },
   reportDot: {
     width: 32, height: 32, borderRadius: 16,

@@ -76,3 +76,12 @@ test('Route ready preserves Save, flyover, Follow, reshape, and point editing', 
   assert.match(mapSource, /function editSelectedTrailRoutePoints\(\)/);
   assert.match(mapSource, /setTrailPinCaptureMode\(true\)/);
 });
+
+test('manual rebuild commits the current edited-anchor snapshot', () => {
+  assert.match(
+    mapSource,
+    /onBuild=\{\(\) => \{ void capturePinnedTrailRoute\(trailCaptureAnchors\); \}\}/,
+    'post-edit Build must use the same identity-bound anchor snapshot as routing, undo, and redo rebuilds',
+  );
+  assert.ok(!mapSource.includes('onBuild={() => { void capturePinnedTrailRoute(); }}'));
+});

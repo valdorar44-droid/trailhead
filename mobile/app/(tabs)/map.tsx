@@ -27437,7 +27437,7 @@ function MapScreen() {
               onOpenRouting={openTrailRoutingPicker}
               onUndo={undoTrailCapturePin}
               onRedo={redoTrailCapturePin}
-              onBuild={() => { void capturePinnedTrailRoute(); }}
+              onBuild={() => { void capturePinnedTrailRoute(trailCaptureAnchors); }}
             />
           )}
         </View>

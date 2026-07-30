@@ -1,6 +1,6 @@
 # Trailhead Explore and Community Trails Active Checkpoint
 
-Last updated: 2026-07-30 15:46 CDT (America/Winnipeg)
+Last updated: 2026-07-30 17:54 CDT (America/Winnipeg)
 
 ## Resume protocol
 
@@ -187,4 +187,63 @@ Verify `git diff --cached --name-only` before every commit.
 - Task-owned Metro, Gradle, Maestro, and test processes: none.
 - Next packet: E3 destination integration. Replace hub-specific trail rows with canonical Trail Discovery identities and shared Peek/Full sheets while preserving NPS, RIDB, camps, Viator, ratings, comments, reports, edits, Offline, Follow, Builder, and Flyover.
 - E3 preview must include one exact-scroll regression assertion for `99b00a1` before acceptance.
+
+## E3 destination integration checkpoint — 2026-07-30 17:54 CDT
+
+- Branch: `feat/trailhead-1.0.10-overhaul`.
+- E3 canonical destination integration and source-panel source: `27ce8d4eebbdd505a5c02f10547c24282a72dda6`.
+- Focused Android Back/source correction: `7bbcd4da00fae3d4061bf065d97ef6f5d41f6e6e`.
+- Protected Explore-index Git object remains `f39f30fdbb33477dacd8fcf5016612a8729dc69e`.
+- `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, Valhalla work, Android Auto scripts, and every unrelated dirty file remained unstaged.
+
+### Delivered behavior
+
+- Destination hubs request verified canonical TrailSystem V2 items and reuse the shared Trail Discovery card, main-map highlight, Trail Peek, and Trail Full flow.
+- Legacy sourced trail-area rows remain a data-parity fallback for one preview cycle and are not promoted above complete canonical routes.
+- Yellowstone Overview preserves its official NPS content and 24 separately labelled guided trips.
+- Yellowstone Trails opened verified canonical routes; `Boundary Trail (Xc)` opened the main Map, complete route highlight, Trail Peek, and Trail Full without a blank or swapped sheet.
+- Returning to Explore restored the exact Yellowstone Trails destination context instead of opening a parallel trail surface.
+- The public source panel now omits generic access/details/website/season instructions and keeps only factual publisher, checked-date, season, and source-note values.
+- Android system Back now follows child detail → module → Overview → close. The explicit Close action still exits the entire hub.
+
+### Focused verification
+
+- `npm run test:explore-trails`: 18 passing tests across destination registry, module registry, discovery workspace, destination integration, and source-panel coverage.
+- `npm run test:nps-hub-preservation`: 22 passing tests across NPS hierarchy, navigation, scroll, and explicit empty/unavailable states.
+- `npm run audit:copy -- --preset explore`, `npx tsc --noEmit`, and `git diff --check` passed.
+- Android Samsung `SM-A326U1`, build `69`, verified exact source `7bbcd4d`, runtime `native-1.0.10-android.7`, and update `019fb537-6493-7587-9e87-5aa57178f651`.
+- Android system Back from Yellowstone Trails returned to Overview while retaining the Yellowstone hub. The prior direct-close P1 is fixed.
+- Paired iOS update is published from the same source with runtime `native-1.0.10-ios.6` and update `019fb537-6493-70b6-9f45-5ce23fef6504`; physical iOS spot proof remains deferred until the iPhone is connected.
+- Sentry accepted Android, iOS, and web source maps before preview promotion.
+
+### Preview identities
+
+- Candidate branch: `preview-candidate-7bbcd4da00fae3d4061bf065d97ef6f5d41f6e6e-ms83nrsx-b2f5ecc095bcce96a82c97e5`.
+- Android group: `b97157cb-c793-4a7e-8de8-2761e16505c7`.
+- Android update: `019fb537-6493-7587-9e87-5aa57178f651`.
+- iOS group: `457fc663-8a23-4257-97ac-5089d75f88d5`.
+- iOS update: `019fb537-6493-70b6-9f45-5ce23fef6504`.
+
+### Evidence and defects
+
+- Evidence directory: `C:\Users\User\Documents\Codex\evidence\trailhead\explore-trails-e3-7bbcd4d\android`.
+- Identity XML SHA-256: `910ad659fea73998d4e140fefee2a0c80f782d659f90cf728fc12637a7467db3`.
+- Trails module XML SHA-256: `6027e0595383d74b49a50ac012f74fef9bec272a7d5eaf729c275562cd6ae268`.
+- Back-to-Overview XML SHA-256: `67aa8194b82f8751c7db66eac9435d5e83afe4e1ae2200f8f4243adbe09d0ddb`.
+- No open P0/P1 in E3.
+- P2: the Yellowstone source panel still exposes one internal `Source · Trailhead` row in the native render even though the pure presentation filter passes. Keep the evidence-backed public-source filter, remove this row at the final UI boundary in the next accepted JS packet, and verify that single assertion once. Do not publish another isolated E3 OTA for cosmetic copy.
+- P2 data gap: Yosemite exact canonical boundary coverage remains incomplete; the legacy parity fallback remains enabled for one preview cycle rather than fabricating a complete route.
+- Task-owned Metro, Gradle, Maestro, publisher, and test processes: none.
+
+### Next exact packet
+
+1. Repair the existing E4/E5 Figma prototype before implementation. Current Share and Suggest hotspots incorrectly reuse status screens, and Community/moderation cards incorrectly open the generic verified Trail Peek.
+2. Add and connect the required private-route, privacy-review, unlisted-link, recipient, submission-status, Community-detail, moderator-decision, approval-credit, promotion, and takedown states using the existing warm-white/near-black/orange system.
+3. Present the focused Figma delta for user approval. Do not implement E4/E5 backend or mobile flows until that design gate is accepted.
+4. After approval, implement E4 private routes/sharing first, publish Android preview, and stop for review before E5 moderation.
+
+### Do not repeat
+
+- Do not repeat E2/E3 discovery, filter, Yellowstone search, destination trails, broad sheets, NPS research, Trails T1–T6, Offline, Layers, Memory, Originals, Android Auto, or screenshot crawls without new evidence.
+- Do not expose private or unlisted geometry, publish Community routes, or award contribution credits before the E4/E5 authorization, privacy, moderation, and idempotency gates pass.
 - Do not repeat E2 search ranking, filters, broad trail sheets, Trails T1–T6, NPS research, Layers, Memory, Originals, Android Auto, or broad Map crawls without new evidence.

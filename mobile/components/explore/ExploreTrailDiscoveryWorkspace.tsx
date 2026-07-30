@@ -81,6 +81,8 @@ export function ExploreTrailDiscoveryWorkspace({
   const generationRef = useRef(0);
   const listRef = useRef<FlatList<TrailDiscoveryItemV2>>(null);
   const listOffsetRef = useRef(0);
+  const restorePendingRef = useRef(false);
+  const restoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const requestParams = useCallback((nextCursor?: string): TrailDiscoverParams => ({
     mode: scope,
@@ -138,16 +140,33 @@ export function ExploreTrailDiscoveryWorkspace({
 
   useEffect(() => {
     listOffsetRef.current = 0;
+    restorePendingRef.current = false;
+    if (restoreTimerRef.current) clearTimeout(restoreTimerRef.current);
     listRef.current?.scrollToOffset({ offset: 0, animated: false });
   }, [filters, query, scope]);
 
-  useEffect(() => {
-    if (!visible || !items.length || listOffsetRef.current <= 0) return;
-    const frame = requestAnimationFrame(() => {
+  const restoreListOffset = useCallback(() => {
+    if (!visible || !items.length || !restorePendingRef.current || listOffsetRef.current <= 0) return;
+    if (restoreTimerRef.current) clearTimeout(restoreTimerRef.current);
+    restoreTimerRef.current = setTimeout(() => {
+      if (!visible || !restorePendingRef.current) return;
       listRef.current?.scrollToOffset({ offset: listOffsetRef.current, animated: false });
-    });
-    return () => cancelAnimationFrame(frame);
+      restoreTimerRef.current = setTimeout(() => {
+        restorePendingRef.current = false;
+        restoreTimerRef.current = null;
+      }, 160);
+    }, 48);
   }, [items.length, visible]);
+
+  useEffect(() => {
+    restoreListOffset();
+    return () => {
+      if (restoreTimerRef.current) {
+        clearTimeout(restoreTimerRef.current);
+        restoreTimerRef.current = null;
+      }
+    };
+  }, [restoreListOffset]);
 
   const resultLabel = useMemo(() => {
     if (loading) return 'Finding trails';
@@ -163,6 +182,20 @@ export function ExploreTrailDiscoveryWorkspace({
     }));
   }
 
+  function prepareMapReturn() {
+    restorePendingRef.current = listOffsetRef.current > 0;
+  }
+
+  function openMap(request: TrailDiscoveryMapRequestV2) {
+    prepareMapReturn();
+    onOpenMap(request);
+  }
+
+  function selectTrail(trail: TrailDiscoveryItemV2) {
+    prepareMapReturn();
+    onSelectTrail(trail);
+  }
+
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose} presentationStyle="fullScreen">
       <View style={[styles.screen, { backgroundColor: C.bg, paddingTop: insets.top }]} testID="explore.trails.workspace">
@@ -176,7 +209,7 @@ export function ExploreTrailDiscoveryWorkspace({
           </View>
           <TouchableOpacity
             style={[styles.mapButton, { borderColor: C.border }]}
-            onPress={() => onOpenMap({ scope, query, filters, tripId: activeTripId || undefined })}
+            onPress={() => openMap({ scope, query, filters, tripId: activeTripId || undefined })}
             accessibilityLabel="Show trails on map"
             testID="explore.trails.map"
           >
@@ -272,11 +305,15 @@ export function ExploreTrailDiscoveryWorkspace({
             keyExtractor={item => item.id}
             contentContainerStyle={styles.list}
             renderItem={({ item }) => (
-              <TrailDiscoveryCard item={item} onPress={() => onSelectTrail(item)} testID={`explore.trails.result.${item.id}`} />
+              <TrailDiscoveryCard item={item} onPress={() => selectTrail(item)} testID={`explore.trails.result.${item.id}`} />
             )}
             onEndReached={() => { if (cursor && !loadingMore) void load(cursor); }}
             onEndReachedThreshold={0.4}
-            onScroll={event => { listOffsetRef.current = event.nativeEvent.contentOffset.y; }}
+            onScroll={event => {
+              if (!visible || restorePendingRef.current) return;
+              listOffsetRef.current = event.nativeEvent.contentOffset.y;
+            }}
+            onContentSizeChange={restoreListOffset}
             scrollEventThrottle={120}
             ListFooterComponent={loadingMore ? <ActivityIndicator style={styles.more} color={C.orange} /> : null}
           />

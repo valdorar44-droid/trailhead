@@ -53,6 +53,11 @@ test('primary list eligibility requires complete geometry', () => {
 
 test('workspace preserves list offset across a focus-gated Map return', () => {
   assert.match(workspaceSource, /listOffsetRef = useRef\(0\)/);
-  assert.match(workspaceSource, /onScroll=\{event => \{ listOffsetRef\.current = event\.nativeEvent\.contentOffset\.y; \}\}/);
+  assert.match(workspaceSource, /restorePendingRef = useRef\(false\)/);
+  assert.match(workspaceSource, /restorePendingRef\.current = listOffsetRef\.current > 0/);
+  assert.match(workspaceSource, /if \(!visible \|\| restorePendingRef\.current\) return;/);
+  assert.match(workspaceSource, /onContentSizeChange=\{restoreListOffset\}/);
   assert.match(workspaceSource, /scrollToOffset\(\{ offset: listOffsetRef\.current, animated: false \}\)/);
+  assert.match(workspaceSource, /prepareMapReturn\(\);\s+onOpenMap\(request\)/);
+  assert.match(workspaceSource, /prepareMapReturn\(\);\s+onSelectTrail\(trail\)/);
 });

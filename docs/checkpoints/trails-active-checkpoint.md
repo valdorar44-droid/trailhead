@@ -564,3 +564,12 @@ Verify the staged file list before every commit.
 
 - Do not reopen the Android underlay, finish marker, manifest-distance, Back, or Close assertions without new evidence. Do not repeat T1-T5 Android, Offline packs, Layers/styles, Memory Gate, Yellowstone, NPS, Originals, Android Auto, Camp Guide, broad Search, screenshots, or production work.
 - Do not republish `dffcbf1`, introduce a second renderer, add narration/random orbit behavior, or remove the exact-route and return-context contracts.
+
+### T6 completion-audit correction checkpoint (2026-07-29T23:15:00-05:00)
+
+- Branch `feat/trailhead-1.0.10-overhaul`; exact starting HEAD `9a54edc794375a6fcf25b4d3896b2f4416b05c55`. Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; `.cursor/`, the Explore index, `docs/app-store-copy.md`, and unrelated dirty files remain excluded.
+- Requirement-by-requirement source inspection found one T6 gap not covered by the accepted Trail-sheet device flow: the Trail Builder `FLYOVER` action still calls `startMapMissionBrief({ source: 'trail_builder' })` instead of the shared `TrailPreviewPlayer`. The approved T6 contract requires builder and sheet flyovers to use the same silent deterministic `NativeMap` preview, and Back must restore the builder exactly.
+- Narrow correction only: route the selected builder plan into `openTrailPreview`, retain its exact plan identity in the immutable local manifest, add stable builder-preview selectors, and prove player controls plus Builder Back and Close. Do not change Map Mission for non-trail features, Trail Builder geometry, Follow, recording, sheets, discovery, Offline, or native configuration.
+- The prior sheet-origin underlay, finish diamond, manifest distance, sheet Back, and sheet Close assertions remain accepted and are not repeated except where the shared player is necessarily exercised from Builder.
+- Current paired preview remains source `dffcbf16d0274b392139188455288c2e4a7fdc5d`, Android update `019fb124-dc04-7987-94be-66880b3000a3`, and iOS update `019fb124-dc04-7982-acc2-e66f6b6332fb`. A new paired preview is required only after the focused correction passes.
+- Exact next action: add one deterministic regression for the Builder boundary, implement the single shared-player handoff, run focused Trail Preview/Builder/TypeScript/copy/privacy gates, publish one paired preview, and run only the missing Android Builder and control delta.

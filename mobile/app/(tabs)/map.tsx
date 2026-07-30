@@ -1774,9 +1774,19 @@ function trailBearingDeg(a: [number, number], b: [number, number]) {
   return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
 }
 
-function buildLocalTrailPreviewManifest(trail: TrailFeature, profile?: TrailProfile | null): TrailPreviewManifest | null {
+function buildLocalTrailPreviewManifest(
+  trail: TrailFeature,
+  profile?: TrailProfile | null,
+  routePlan?: TrailRoutePlan | null,
+): TrailPreviewManifest | null {
   const seed: [number, number] = [trail.lng, trail.lat];
-  const coords = primaryTrailLine(profile?.geometry, seed);
+  const ownedRoutePlan = routePlan && trailRoutePlanMatchesOwner(routePlan, trail)
+    ? routePlan
+    : null;
+  const profileCoords = primaryTrailLine(profile?.geometry, seed);
+  const coords = ownedRoutePlan?.coords?.length && ownedRoutePlan.coords.length >= 2
+    ? dedupeTrailCoords(ownedRoutePlan.coords)
+    : profileCoords;
   if (coords.length < 2) return null;
   const distanceM = trailCoordsDistanceM(coords);
   const compact = compactCoords(coords, 18);
@@ -1799,9 +1809,11 @@ function buildLocalTrailPreviewManifest(trail: TrailFeature, profile?: TrailProf
   return {
     version: 1,
     status: 'available',
-    route_id: `local:${profile?.id || trail.id}`,
+    route_id: ownedRoutePlan
+      ? `local:${trail.id}:${ownedRoutePlan.geometryRevision || Math.round(distanceM)}`
+      : `local:${profile?.id || trail.id}`,
     trail_id: profile?.id || trail.profile_id || trail.id,
-    trail_name: profile?.name || trail.name,
+    trail_name: ownedRoutePlan?.title || profile?.name || trail.name,
     generated_at: Math.floor(Date.now() / 1000),
     preview_available: true,
     distance_m: Math.round(distanceM),
@@ -21845,7 +21857,10 @@ function MapScreen() {
       selectedTrailProfile.id === trail.id ||
       selectedTrailProfile.name === trail.name
     ) ? selectedTrailProfile : null;
-    const localManifest = buildLocalTrailPreviewManifest(trail, localProfile);
+    const candidatePlan = trailRoutePlans.find(plan => plan.id === selectedTrailRoutePlanId)
+      ?? trailRoutePlans[0]
+      ?? null;
+    const localManifest = buildLocalTrailPreviewManifest(trail, localProfile, candidatePlan);
     const openManifest = (manifest: TrailPreviewManifest) => {
       setTrailPreviewManifest(manifest);
       setTrailPreviewOpen(true);

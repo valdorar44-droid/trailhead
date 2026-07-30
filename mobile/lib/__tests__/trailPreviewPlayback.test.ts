@@ -70,6 +70,13 @@ test('T6 remains a silent same-map preview with explicit controls and return sem
   assert.doesNotMatch(playerSource, /Speech|voice|narrat/i);
 });
 
+test('canonical Trails V2 preview consumes the identity-bound resolved route plan before the network fallback', () => {
+  assert.match(mapSource, /trailRoutePlanMatchesOwner\(routePlan, trail\)/);
+  assert.match(mapSource, /buildLocalTrailPreviewManifest\(trail, localProfile, candidatePlan\)/);
+  assert.match(mapSource, /ownedRoutePlan\?\.coords\?\.length/);
+  assert.match(mapSource, /local:\$\{trail\.id\}:\$\{ownedRoutePlan\.geometryRevision/);
+});
+
 test('the preview route keeps its yellow finish diamond on the native map', () => {
   assert.match(nativeMapSource, /id="trail-preview-finish-diamond"/);
   assert.match(nativeMapSource, /textColor:\s*'#F5C84B'/);

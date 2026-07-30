@@ -542,3 +542,25 @@ Verify the staged file list before every commit.
 
 - Do not repeat T1-T5 Android, Offline packs, Layers/styles, Memory Gate, Yellowstone, NPS, Originals, Android Auto, Camp Guide, broad Search, or screenshots.
 - Do not republish an unchanged T6 candidate, create another trail renderer, replace exact route geometry, or add narration/random orbit behavior.
+
+### T6 Android accepted — isolated player and finish marker (2026-07-29T23:01:56-05:00)
+
+- Branch `feat/trailhead-1.0.10-overhaul`; Android-accepted functional source `dffcbf16d0274b392139188455288c2e4a7fdc5d`. Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, and unrelated dirty files remained excluded from every commit.
+- The canonical preview now resolves the identity-bound Trail System route plan, reports distance from its verified immutable manifest, hides the moving progress point at arrival, and renders the restrained yellow finish diamond through a native `MarkerView` at the exact final coordinate. Commits in this accepted packet are `fe8d5c7`, `28f1de0`, `7460905`, and `dffcbf1`.
+- One deterministic physical-device defect was found after the first visual capture: the collapsed Trail banner remained partially visible behind the flyover player and its exposed edge could receive a tap that backed out of the experience. Functional commit `dffcbf16d0274b392139188455288c2e4a7fdc5d` unmounts both collapsed and full Trail sheets while preview owns the map. The selected trail, invoking return snapshot, geometry, camera, and scroll context remain retained for Back.
+- Guarded paired preview source `dffcbf16d0274b392139188455288c2e4a7fdc5d`: Android group `e8418504-7b91-4290-9009-4a176756e8f4`, update `019fb124-dc04-7987-94be-66880b3000a3`, runtime `native-1.0.10-android.7`; iOS group `fc2e4966-a085-402a-9aea-38d61994d90c`, update `019fb124-dc04-7982-acc2-e66f6b6332fb`, runtime `native-1.0.10-ios.6`. Preview candidate branch is `preview-candidate-dffcbf16d0274b392139188455288c2e4a7fdc5d-ms6yz49i-9914b5b59ee3d9b7470f755b`; Sentry accepted Android, iOS, and web source maps before channel promotion.
+- Samsung `SM-A326U1`, serial `RFCR408DA9B`, matched app `1.0.10`, build `69`, exact source, runtime, and Android update. The bounded Maestro flow passed canonical Search -> Short Point -> Peek -> preview, asserted all preview controls, asserted Back restored the exact Peek primary action, reopened preview, asserted Close restored the Map search surface, and confirmed the player was absent after Close.
+- The final isolated preview hierarchy contains one `trail.preview.player`, one `trail.preview.finish-diamond`, one `11 mi of 11 mi`, zero Peek actions, and zero collapsed-sheet identifiers. Visual proof shows no exposed banner edge or competing touch target. Arrival screenshot `C:\Users\User\Documents\Codex\evidence\trailhead\trails-t6-fe8d5c7-android\07-isolated-preview.png`, SHA-256 `eb18467bb96b9224178391af56882f5a2d6c2a44c1580b47222c5c777372cd81`; hierarchy SHA-256 `6a0da995ef180104e9cb9b6efe0b0653232e5de6cee00f5524f6ca9ebb6c1926`. Close-restored Map screenshot `10-close-map.png`, SHA-256 `d34ec1a9254be26c2e714aa14268e5ab5ccbb6d14032a2ca917103789bb32861`; hierarchy SHA-256 `4e1eb6d85cf80d0347cce52883852782e1e96b5f24c3363f71f623c8278b55a5`. QA hierarchy SHA-256 `984caf65128bbbb892111ceda63bc55e3f1308e8c9995d95ef02ac83e7643c26`.
+- Focused verification passed: Trail Preview `6/6`, complete Trail Follow suite, Trails V2 `6/6`, camera ownership `6/6`, full mobile TypeScript, copy audit across `167` files, privacy controls, native drift, whitespace, exact Android update identity, isolated player rendering, Back restoration, and Close teardown. The temporary Maestro flow was removed. Task-owned Metro, Gradle, Maestro, Expo/EAS publisher, test, mock-location, and emulator processes are none.
+- Android T6 has no open P0/P1. No production update or build was published. The paired iOS update exists from the exact accepted source but is not yet physically accepted.
+
+#### Exact next action
+
+1. Obtain user review of the Android T6 player now left on the accepted map state.
+2. Apply iOS update `019fb124-dc04-7982-acc2-e66f6b6332fb` to build `61` and run only the shared T6 delta: open Short Point preview, endpoint/route, controls, Back restoration, Close teardown, and repeated open/close stability. Do not repeat Search hydration, T5 lifecycle, or earlier trail packets.
+3. If iOS passes, close T6 and choose the next Trails packet/release checkpoint. Production remains a separate explicit decision.
+
+#### Do not repeat after this checkpoint
+
+- Do not reopen the Android underlay, finish marker, manifest-distance, Back, or Close assertions without new evidence. Do not repeat T1-T5 Android, Offline packs, Layers/styles, Memory Gate, Yellowstone, NPS, Originals, Android Auto, Camp Guide, broad Search, screenshots, or production work.
+- Do not republish `dffcbf1`, introduce a second renderer, add narration/random orbit behavior, or remove the exact-route and return-context contracts.

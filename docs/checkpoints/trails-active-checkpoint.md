@@ -479,3 +479,24 @@ Verify the staged file list before every commit.
 
 - Do not repeat route-plan identity, Search/Short Point hydration, handoff repair, route/finish-marker proof, T1-T4, Android T5 recording lifecycle, Offline, styles/Layers, Memory Gate, Yellowstone, NPS, Originals, Android Auto, Camp Guide, broad Search, screenshots, or production work.
 - Do not republish `6f56821`, weaken the camera-mode contract, add another renderer, or infer success from the correct visual recenter alone. The required acceptance is `Recenter` label changing to `Route`, followed by exact Short Point route overview reopening.
+
+### T5 Android camera ownership accepted (2026-07-29T21:00:29-05:00)
+
+- Branch `feat/trailhead-1.0.10-overhaul`; Android-accepted functional source `06596fef7fdabf2b29e3f6e0a46227dc4a363a65`. Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, and unrelated dirty files remained excluded.
+- The previous tracking-mode correction was correct but incomplete. Code-path characterization proved that RNMapbox's `onRegionWillChange` and `onRegionIsChanging` callbacks could retain a user-interaction flag on Recenter's button-originated `flyTo`, and both callbacks bypassed the existing programmatic-camera marker. Commit `06596fef7fdabf2b29e3f6e0a46227dc4a363a65` now makes those callbacks release camera ownership only outside the programmatic interval. A real map touch still clears the interval and breaks away normally.
+- Fixed internal event kinds record only `previous` and `next` camera modes for Route-button and parent-gesture transitions. No coordinates, route geometry, touch positions, search text, account content, or telemetry were added. Focused camera-event, Trail Follow, route-plan ownership, Trails V2 `6/6`, TypeScript, copy audit across `167` files, privacy controls, and whitespace checks passed.
+- Guarded paired preview source `06596fef7fdabf2b29e3f6e0a46227dc4a363a65`: Android group `c56731b4-dcf2-42d6-b916-90d8a2fef17e`, update `019fb0ba-a4e3-716d-b0cc-7e31bafbf06c`, runtime `native-1.0.10-android.7`; iOS group `978d1cc9-3336-4c75-95e8-4cf0730501ca`, update `019fb0ba-a4e3-7d0d-8c13-9d3a2964497a`, runtime `native-1.0.10-ios.6`. Sentry accepted Android, iOS, and web source maps before the preview channel moved. Android QA matched app `1.0.10`, build `69`, exact source, runtime, and update.
+- Physical Samsung acceptance passed: Short Point -> Navigate -> Nearby -> Follow -> Route framed the exact verified 10.7-mile route and restrained finish diamond; a real drag retained `Recenter`; Recenter returned to the live location and changed the control to `Route`; pressing Route again reopened the same Short Point route and changed the control back to `Recenter`.
+- Evidence directory: `C:\Users\User\Documents\Codex\evidence\trailhead\trails-t5-06596fe-android`. Initial Route SHA-256 `dce2d5f7fdd0adfa9d013bf138a82abe922b1f3729a1caff286d243f7e41f30c`; real drag `64cba1f6374c94cd56944ac9b8794b187a634a3af23689eef66d121548e3a38b`; accepted Recenter with `Route` control `7fa746e8b93766c7ce872c50fb712da7efa3d85ada0a1e56ef92cb6a3292e05b`; reopened route and finish marker `2b9aa2ac74ff91bfca1043874d372fc4dd460219c356fc41d150cada5abf6065`.
+- Device restoration passed: Follow ended, fine/coarse permissions are denied, system location is disabled, shell mock-location mode is deny/default, the GPS test provider is absent, no Trail location service remains, and the app is force-stopped. The detached publisher worktree was path-verified and removed. Task-owned Metro, Expo/EAS publisher, Gradle, Maestro, test, and mock-location processes are none.
+- Android T5 camera acceptance has no open P0/P1. No production update or build was published.
+
+#### Exact next action
+
+1. Apply the existing paired iOS update `019fb0ba-a4e3-7d0d-8c13-9d3a2964497a` to build `61` when the iPhone is connected. Run only Route -> drag -> Recenter -> Route plus the remaining recording/background/GPX delta; do not repeat Search hydration or handoff repairs.
+2. In parallel, begin T6 Android design-to-code characterization against approved Figma node `652:2020`: exact route, deterministic start-to-finish camera, silent playback, play/pause/scrub/restart/recenter/close, and exact return state on the same `NativeMap`.
+
+#### Do not repeat after this checkpoint
+
+- Do not repeat T5 Android Search, handoff, route-plan identity, recording lifecycle, or camera proof. Do not repeat T1-T4, Offline packs, styles/Layers, Memory Gate, Yellowstone, NPS, Originals, Android Auto, Camp Guide, broad Search, screenshots, or production work without new evidence.
+- Do not republish `06596fe`. The Android camera P1 is closed; iOS shares the update but remains physically unaccepted.

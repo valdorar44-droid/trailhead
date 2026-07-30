@@ -6,6 +6,7 @@ export {
 } from './ExploreDetailSheet';
 export {
   createExploreDetailNavigationState,
+  exploreDetailBackAction,
   exploreDetailNavigationReducer,
   type ExploreDetailModuleKey,
   type ExploreDetailNavigationAction,

@@ -74,3 +74,8 @@ test('source panel preserves concrete publisher, checked date, and explicit seas
 test('source panel is empty when no factual source information exists', () => {
   assert.deepEqual(getExploreSourcePanelModel(makePlace()), { body: '', rows: [] });
 });
+
+test('source panel does not expose Trailhead as an external publisher', () => {
+  const place = makePlace({ source_pack: { primary: 'Trailhead' } });
+  assert.deepEqual(getExploreSourceRows(place), []);
+});

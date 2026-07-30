@@ -4,6 +4,7 @@ import test from 'node:test';
 import type { ExploreSourcePackItem } from '../api';
 import {
   createExploreDetailNavigationState,
+  exploreDetailBackAction,
   exploreDetailNavigationReducer,
 } from '../exploreDetailNavigation';
 
@@ -59,4 +60,22 @@ test('scroll positions are finite and non-negative', () => {
 
   assert.equal(state.mainScrollY, 0);
   assert.equal(state.childScrollY, 0);
+});
+
+test('system Back follows child to module to Overview before closing the hub', () => {
+  let state = createExploreDetailNavigationState('nps:yell', 'trails');
+  state = exploreDetailNavigationReducer(state, { type: 'select_item', item: yosemiteOverlook });
+
+  const childBack = exploreDetailBackAction(state);
+  assert.deepEqual(childBack, { type: 'select_item', item: null });
+  state = exploreDetailNavigationReducer(state, childBack!);
+  assert.equal(state.activeModule, 'trails');
+  assert.equal(state.selectedItem, null);
+
+  const moduleBack = exploreDetailBackAction(state);
+  assert.deepEqual(moduleBack, { type: 'open_module', module: null });
+  state = exploreDetailNavigationReducer(state, moduleBack!);
+  assert.equal(state.activeModule, null);
+
+  assert.equal(exploreDetailBackAction(state), null);
 });

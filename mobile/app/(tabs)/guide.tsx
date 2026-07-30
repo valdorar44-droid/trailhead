@@ -27,6 +27,8 @@ import {
   GUIDED_DESTINATIONS,
   GuidedDestinationBrowser,
   GuidedTripDetailModal,
+  exploreDetailBackAction,
+  exploreDetailNavigationReducer,
   exploreCategoryFromQuery,
   exploreCategoryMatches,
   exploreContentQualityScore,
@@ -2409,6 +2411,15 @@ function GuideScreenContent() {
     setSelectedExploreSuspendedForMap(false);
     setSelectedExploreNavigation(createExploreDetailNavigationState());
   }, []);
+  const handleSelectedExploreRequestClose = useCallback(() => {
+    const backAction = exploreDetailBackAction(selectedExploreNavigation);
+    if (!backAction) {
+      closeSelectedExplore();
+      return;
+    }
+    setSelectedExploreNavigation(previous => exploreDetailNavigationReducer(previous, backAction));
+    if (backAction.type === 'open_module') setProfileReadMode('summary');
+  }, [closeSelectedExplore, selectedExploreNavigation]);
   const suspendSelectedExploreForMap = useCallback(() => {
     setSelectedExploreSuspendedForMap(true);
   }, []);
@@ -6619,7 +6630,7 @@ function GuideScreenContent() {
         onShowArea={showSelectedExperienceOnMap}
       />
 
-      <Modal visible={!!selectedExplore && !selectedExploreSuspendedForMap} animationType="slide" onRequestClose={closeSelectedExplore}>
+      <Modal visible={!!selectedExplore && !selectedExploreSuspendedForMap} animationType="slide" onRequestClose={handleSelectedExploreRequestClose}>
         {selectedExplore && (
           <PlaceSheetShell model={selectedExploreSheetModel!}>
           <ExploreDetailSheet

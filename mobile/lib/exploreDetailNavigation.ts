@@ -74,3 +74,11 @@ export function exploreDetailNavigationReducer(
     ? { ...state, childScrollY: y }
     : { ...state, mainScrollY: y };
 }
+
+export function exploreDetailBackAction(
+  state: ExploreDetailNavigationState,
+): ExploreDetailNavigationAction | null {
+  if (state.selectedItem) return { type: 'select_item', item: null };
+  if (state.activeModule) return { type: 'open_module', module: null };
+  return null;
+}

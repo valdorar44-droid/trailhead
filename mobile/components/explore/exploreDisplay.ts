@@ -199,6 +199,10 @@ function isOpenKnowledgePublisher(value?: string | null) {
   return /\b(wikidata|wikipedia|wikimedia|commons)\b/i.test(String(value || ''));
 }
 
+function isInternalTrailheadPublisher(value?: string | null) {
+  return /^trailhead(?:\s+(?:explore|trails?|catalog|places?))?$/i.test(String(value || '').trim());
+}
+
 const COUNTRY_ALIASES: Array<[string, string[]]> = [
   ['united states', ['united states', 'usa', 'u.s.', 'u.s.a.']],
   ['canada', ['canada']],
@@ -633,7 +637,12 @@ export function getExploreSourceRows(place: ExplorePlaceProfile): ExploreSourceR
   const latestCheckedAt = checkedAt.length ? Math.max(...checkedAt) : undefined;
   const rows: ExploreSourceRow[] = [];
 
-  if (source && !isOpenKnowledgePublisher(source) && !/openstreetmap|open map|mapbox|geoapify|nominatim/i.test(source)) {
+  if (
+    source
+    && !isInternalTrailheadPublisher(source)
+    && !isOpenKnowledgePublisher(source)
+    && !/openstreetmap|open map|mapbox|geoapify|nominatim/i.test(source)
+  ) {
     rows.push({
       label: 'Source',
       value: source,

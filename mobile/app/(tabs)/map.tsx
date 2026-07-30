@@ -21837,7 +21837,7 @@ function MapScreen() {
     clearTrailRoutePreview();
   }
 
-  async function openTrailPreview(trail: TrailFeature) {
+  async function openTrailPreview(trail: TrailFeature, routePlanOverride: TrailRoutePlan | null = null) {
     if (!trailPreviewOpen) {
       trailPreviewReturnContextRef.current = {
         trail: selectedTrail,
@@ -21857,7 +21857,8 @@ function MapScreen() {
       selectedTrailProfile.id === trail.id ||
       selectedTrailProfile.name === trail.name
     ) ? selectedTrailProfile : null;
-    const candidatePlan = trailRoutePlans.find(plan => plan.id === selectedTrailRoutePlanId)
+    const candidatePlan = routePlanOverride
+      ?? trailRoutePlans.find(plan => plan.id === selectedTrailRoutePlanId)
       ?? trailRoutePlans[0]
       ?? null;
     const localManifest = buildLocalTrailPreviewManifest(trail, localProfile, candidatePlan);
@@ -24529,13 +24530,7 @@ function MapScreen() {
       setTimeout(() => setQuickToast(''), 2400);
       return;
     }
-    previewTrailRoutePlan(trail, plan);
-    missionRouteOverrideRef.current = plan.coords;
-    await startMapMissionBrief({
-      source: 'trail_builder',
-      skipDirected: true,
-      routeName: trail.name || plan.title || 'Trail route',
-    });
+    await openTrailPreview(trail, plan);
   }
 
   function trailRoutePlanStatus(plan: TrailRoutePlan) {
@@ -28106,7 +28101,7 @@ function MapScreen() {
       />
 
       {selectedTrail && !navMode && !trailPinCaptureMode && trailRouteBuilderOpen && !mapMissionVisible && (
-        <View style={s.trailRouteBuilderWrap}>
+        <View testID="trail.builder.review" style={s.trailRouteBuilderWrap}>
           <TrailheadSheet contentStyle={s.trailRouteBuilderBlur}>
             <View style={s.trailRouteBuilderHeader}>
               <View style={[s.trailIconBadge, { backgroundColor: C.orangeGlow, borderColor: C.orange + '66' }]}>
@@ -28277,6 +28272,7 @@ function MapScreen() {
 
                 <View style={s.trailRouteBuilderActions}>
                   <TouchableOpacity
+                    testID="trail.builder.route.back"
                     style={s.trailRouteSecondaryBtn}
                     onPress={closeTrailRouteBuilderPanel}
                   >
@@ -28295,6 +28291,7 @@ function MapScreen() {
                     <Text style={s.trailRouteSecondaryText}>SAVE</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
+                    testID="trail.builder.route.flyover"
                     style={s.trailRouteSecondaryBtn}
                     disabled={!selectedTrailRoutePlanId}
                     onPress={() => {

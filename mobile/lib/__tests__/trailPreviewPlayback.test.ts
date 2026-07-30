@@ -79,6 +79,19 @@ test('canonical Trails V2 preview consumes the identity-bound resolved route pla
   assert.match(mapSource, /local:\$\{trail\.id\}:\$\{ownedRoutePlan\.geometryRevision/);
 });
 
+test('Trail Builder uses the shared T6 player and restores the builder through Back', () => {
+  const builderFlyover = mapSource.match(
+    /async function flyTrailRoutePlan[\s\S]*?\n  }\n\n  function trailRoutePlanStatus/,
+  )?.[0] ?? '';
+  assert.match(builderFlyover, /await openTrailPreview\(trail, plan\)/);
+  assert.doesNotMatch(builderFlyover, /startMapMissionBrief|missionRouteOverrideRef/);
+  assert.match(mapSource, /async function openTrailPreview\(trail: TrailFeature, routePlanOverride: TrailRoutePlan \| null = null\)/);
+  assert.match(mapSource, /const candidatePlan = routePlanOverride\s*\?\?/);
+  assert.match(mapSource, /testID="trail\.builder\.review"/);
+  assert.match(mapSource, /testID="trail\.builder\.route\.flyover"/);
+  assert.match(mapSource, /setTrailRouteBuilderOpen\(context\.trailRouteBuilderOpen\)/);
+});
+
 test('the preview route keeps its yellow finish diamond on the native map', () => {
   assert.match(nativeMapSource, /id="trail-preview-finish-diamond"/);
   assert.match(nativeMapSource, /textColor:\s*'#F5C84B'/);

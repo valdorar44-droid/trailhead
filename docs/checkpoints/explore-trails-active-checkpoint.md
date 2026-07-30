@@ -1,6 +1,6 @@
 # Trailhead Explore and Community Trails Active Checkpoint
 
-Last updated: 2026-07-30 15:05 CDT (America/Winnipeg)
+Last updated: 2026-07-30 14:32 CDT (America/Winnipeg)
 
 ## Resume protocol
 
@@ -67,20 +67,32 @@ Verify `git diff --cached --name-only` before every commit.
 - Legacy `POST /api/trails/community` currently creates a public profile, supplies fallback prose/access values, and awards five credits immediately. It is unsafe and must become a pending-submission compatibility adapter before community discovery can ship.
 - Existing Trail Builder/GPX/recording geometry is reused. No second route model or map renderer is introduced.
 
+## E1 completion checkpoint
+
+- Implementation commit: `9f3af8b283bf9e3cc373b8afdf52e791e937119b`.
+- Protected Explore-index Git object remains `f39f30fdbb33477dacd8fcf5016612a8729dc69e`.
+- Figma section `804:2554` contains the connected E1-E5 flow. Phone frames include Explore home, Nearby, Along Trip, filters, Community discovery, private route, submission status, moderation, and dark recovery. Responsive proofs are small phone `804:3690` and tablet `804:3749`.
+- Explore exposes exactly five primary destinations. The legacy `things` key remains an internal alias to Scenic.
+- The legacy instant-public community endpoint now creates a private owned route and immutable submitted review snapshot. It no longer inserts a public trail profile, invents access prose, or awards submission credits.
+- Additive tables separate owned routes, submissions, public Community routes, and idempotent approval-credit awards.
+- Existing `Trailhead community` profiles are preserved and idempotently queued for moderation. Unreviewed profiles are excluded from public verified discovery.
+- Focused evidence:
+  - `npm run test:explore-trails`: 6 passing tests.
+  - `python -m unittest tests.test_explore_community_trails tests.test_trails_v2`: 19 passing tests.
+  - `python -m unittest tests.test_backend_v110_contracts`: 17 passing tests.
+  - `npx tsc --noEmit`, `npm run audit:explore`, Python compile, and whitespace checks passed.
+- Open P0/P1: none in E1.
+- Task-owned background processes: none.
+
 ## Next exact packet
 
-### E1 — Explore foundations
+### E2 — Trail Discovery review boundary
 
-1. Add the approved Figma Explore/Community Trails branches and states without changing the approved Trail sheet or Builder visuals.
-2. Introduce a typed five-category registry and destination capability registry. Hide visible `Things` while preserving its internal alias and search behavior.
-3. Stabilize category/navigation identity and source-revision module rendering with focused tests.
-4. Add moderation-safe persistence and convert the legacy community endpoint into a pending adapter with no publication and no approval credit.
-5. Audit existing `Trailhead community` profiles into a deterministic moderation report; do not delete owner data.
-6. Commit only named E1 files, update this checkpoint, and push.
-
-### E2 review boundary
-
-After E1, implement Trail Discovery Nearby/Along Trip/filter/pagination/map-list synchronization, publish the Android-first preview, and stop for user review before iOS/production.
+1. Extend TrailSystem V2 discovery with query, cursor, sort, source-backed filters, catalog lane, bounds, Nearby, and authenticated Along Trip corridor scope.
+2. Implement the approved Explore → Trails list/map workspace using shared trail cards and sheets.
+3. Preserve explicit Search this area, selected-route highlighting, return state, and complete-geometry list eligibility.
+4. Run focused API/mobile tests and publish one Android-first preview.
+5. Stop for user review before iOS or production.
 
 ## Do not repeat
 

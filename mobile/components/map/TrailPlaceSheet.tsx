@@ -5,6 +5,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme, type ColorPalette } from '@/lib/design';
 import type { PlaceSheetModel } from '@/lib/placeSheetAdapters';
 import { sheetActionTestIDV1 } from '@/lib/sheetActions';
+import { trailSheetMetricDisplayValue } from '@/lib/trailSheetMetricPresentation';
 import { trailheadFonts } from '@/lib/typography';
 
 export type TrailSheetMetric = {
@@ -173,14 +174,20 @@ export function TrailSheetMetricGrid({
 }) {
   const C = useTheme();
   const s = makeStyles(C);
-  const visible = metrics.filter(metric => metric.value.trim()).slice(0, 3);
+  const visible = metrics
+    .map(metric => ({
+      ...metric,
+      value: trailSheetMetricDisplayValue(metric.label, metric.value),
+    }))
+    .filter(metric => metric.value)
+    .slice(0, 3);
   if (!visible.length) return null;
   return (
     <View style={[s.metricGrid, compact && s.metricGridCompact]}>
       {visible.map(metric => (
         <View key={metric.label} style={s.metricCell}>
           <Text style={[s.metricLabel, compact && s.metricLabelAccent]} numberOfLines={1}>{metric.label.toUpperCase()}</Text>
-          <Text style={s.metricValue} numberOfLines={1}>{metric.value}</Text>
+          <Text style={s.metricValue}>{metric.value}</Text>
         </View>
       ))}
     </View>
@@ -266,12 +273,12 @@ function makeStyles(C: ColorPalette) {
       marginRight: -8,
     },
     metricGrid: {
-      minHeight: 64,
+      minHeight: 72,
       flexDirection: 'row',
       gap: 8,
     },
     metricGridCompact: {
-      minHeight: 58,
+      minHeight: 68,
       gap: 0,
       borderRadius: 12,
       borderWidth: 1,
@@ -290,7 +297,7 @@ function makeStyles(C: ColorPalette) {
     },
     metricLabel: { color: C.text3, fontSize: 11, lineHeight: 14, fontWeight: '700', letterSpacing: 0.35 },
     metricLabelAccent: { color: C.orange },
-    metricValue: { color: C.text, fontSize: 15, lineHeight: 20, fontWeight: '700', marginTop: 3 },
+    metricValue: { color: C.text, fontSize: 14, lineHeight: 18, fontWeight: '700', marginTop: 3 },
     actions: { minHeight: 48, flexDirection: 'row', gap: 12 },
     primaryButton: {
       flex: 1,

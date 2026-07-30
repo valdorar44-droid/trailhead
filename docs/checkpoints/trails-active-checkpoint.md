@@ -734,3 +734,27 @@ Verify the staged file list before every commit.
 
 - Do not publish from `/tmp`, share `node_modules` across worktrees, bypass the local-module assertion, or start a second speculative publication.
 - Do not repeat T1-T6, broad Map/Search/Offline/Follow/flyover crawls, Layers, Memory Gate, NPS, Originals, Android Auto, Camp Guide, screenshots, or production work.
+
+### Trail Builder visual-polish Android acceptance (2026-07-30T05:59:32-05:00)
+
+- Branch `feat/trailhead-1.0.10-overhaul`; exact accepted source HEAD `582d6b714f0520dfccbf60d45ad5250d9eed47d2`. Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; `.cursor/`, `dashboard/explore_serving_index_v2.json`, and `docs/app-store-copy.md` remain excluded.
+- The paired preview was published from immutable source `582d6b714f0520dfccbf60d45ad5250d9eed47d2` on candidate branch `preview-candidate-582d6b714f0520dfccbf60d45ad5250d9eed47d2-ms7dz9ht-358bbdcade7d266ed3b5777c` (branch ID `019fb2a4-ceb6-786d-9db3-d07ad6c78cfb`). Android runtime `native-1.0.10-android.7`, group `b103cef8-3c96-4f16-9169-b3c8326dcd06`, update `019fb2a4-f690-71bd-814c-ed80e3e90cac`; iOS runtime `native-1.0.10-ios.6`, group `ad3682f7-7254-4697-ada7-a456ddd3a062`, update `019fb2a4-f690-7345-9dc9-7511d75b9afb`.
+- Samsung `SM-A326U1` build `69` reported exact QA identity: version `1.0.10`, channel `preview`, source `582d6b714f0520dfccbf60d45ad5250d9eed47d2`, runtime `native-1.0.10-android.7`, update `019fb2a4-f690-71bd-814c-ed80e3e90cac`.
+- The deterministic edit/rebuild defect was not an overlay failure. An out-and-back route `[A, B, A]` was reduced to the two identical endpoints `[A, A]`; Build correctly rejected the collapsed geometry. `trailBuilderEditAnchorIndices` now preserves the interior turning point on closed three-point routes and caps long routes at eight deterministic anchors.
+- Exact device regression passed: Straight two-point route -> More -> Out and back -> Edit points -> Build returned to Route ready with valid geometry. Key evidence is `C:\Users\User\Documents\Codex\evidence\trailhead\trail-builder-582d6b7\android\out-and-back-rebuilt.png`, SHA-256 `d29285713229821a8198d7f52a0ae33d748eb220ed31c464d8c92744f4608dab`.
+- Draw passed with a real ADB stroke, enabled Undo/Clear/Review, disabled Review after Undo, and returned to Route ready after a second stroke and explicit Review. Evidence `draw-line.png` SHA-256 `b789b8237b25f11bf30880db6536e4da636535c66fbef71f190447657dfbbc93`; `draw-route-ready.png` SHA-256 `0784ad2220a25315e56aa5334943df7cde606b1f09c95adba93846f4f8cedc27`.
+- The same-map 3D preview exposed only player controls, played successfully, and Back restored the exact Route-ready state; no Builder banner/control remained touchable behind the player. Evidence `preview3d.png` SHA-256 `c270f4f7e48de434aaef10f8894199ba3845eb40c35dd6a2f0fedfc749edb755`.
+- Save persisted the route and cleared dirty state; Close then exited without an unsaved-confirmation prompt and restored the Map/tab shell. Manual unsourced Start Follow showed the honest verified-source guard rather than inventing trailhead directions. Previously accepted canonical near/far Follow, compass, recording, Offline, and flyover behavior were not repeated.
+- Final focused verification passed once: local Expo modules `6/6`; Trail Builder session/presentation/ownership `14/14`; Trail Follow and recording; Trail Preview `7/7`; user-facing copy audit across `168` files; privacy controls; TypeScript; and whitespace.
+- No open P0/P1 remains in the Android Trail Builder packet. The identical JS source is published for iOS, but this final visual-only delta has not been physically spot-checked on iPhone; the earlier T1-T6 iOS behavior remains accepted. No production update was published.
+- No task-owned Metro, Gradle, Maestro, Expo/EAS publisher, test, or simulated-location process remains. The long-running Codex/host Node processes and ADB server predate this packet and were not stopped.
+
+#### Exact next action
+
+1. Treat the Android Trail Builder visual packet as accepted. When an iPhone is next connected, run only Add points, Draw/Review, Route ready, 3D Back, and Close restoration against update `019fb2a4-f690-7345-9dc9-7511d75b9afb`.
+2. After that short parity check, move to the next explicitly selected product packet. Production remains a separate approval.
+
+#### Do not repeat after this checkpoint
+
+- Do not reopen Trail Builder design, route-shape behavior, the out-and-back regression, local Expo-module publication, T1-T6, broad Map/Search/Offline/Follow/flyover crawls, Layers, Memory Gate, NPS, Originals, Android Auto, Camp Guide, screenshots, or production work without new evidence.
+- Do not stage or modify `.cursor/`, `dashboard/explore_serving_index_v2.json`, or `docs/app-store-copy.md` as part of Trails work.

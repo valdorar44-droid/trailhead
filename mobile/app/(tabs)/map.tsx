@@ -27354,7 +27354,10 @@ function MapScreen() {
       )}
 
       {trailTraceMode && !trailPreviewOpen && !navMode && !waterFollowActive && !mapMissionVisible && (
-        <View style={s.trailRouteBuilderWrap} pointerEvents="auto">
+        <View
+          style={[s.trailRouteBuilderWrap, { bottom: Math.max(insets.bottom, 8) }]}
+          pointerEvents="auto"
+        >
           <TrailBuilderDrawSheet
             distanceLabel={trailTraceDraft.length > 1 ? fmtTrailRouteDistance(trailCoordsDistanceM(trailTraceDraft)) : ''}
             pointCount={trailTraceDraft.length}
@@ -27370,7 +27373,10 @@ function MapScreen() {
       )}
 
       {trailPinCaptureMode && !trailPreviewOpen && !navMode && !waterFollowActive && !mapMissionVisible && (
-        <View style={s.trailRouteBuilderWrap} pointerEvents="auto">
+        <View
+          style={[s.trailRouteBuilderWrap, { bottom: Math.max(insets.bottom, 8) }]}
+          pointerEvents="auto"
+        >
           {trailRouteOptionsOpen ? (
             <TrailBuilderRouteOptionsSheet
               routeChoices={trailBuilderRouteChoices}
@@ -28213,7 +28219,10 @@ function MapScreen() {
       />
 
       {selectedTrail && !navMode && !trailPinCaptureMode && trailRouteBuilderOpen && !mapMissionVisible && (
-        <View testID="trail.builder.review" style={s.trailRouteBuilderWrap}>
+        <View
+          testID="trail.builder.review"
+          style={[s.trailRouteBuilderWrap, { bottom: Math.max(insets.bottom, 8) }]}
+        >
           {trailRouteOptionsOpen ? (
             <TrailBuilderRouteOptionsSheet
               routeChoices={trailBuilderRouteChoices}

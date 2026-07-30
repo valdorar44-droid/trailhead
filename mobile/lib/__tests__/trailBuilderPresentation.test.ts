@@ -46,6 +46,16 @@ test('Trail Builder keeps driving-safe targets and stable automation IDs', () =>
   }
 });
 
+test('Trail Builder actions stay above the platform gesture area', () => {
+  const safeBottomPattern = /style=\{\[s\.trailRouteBuilderWrap, \{ bottom: Math\.max\(insets\.bottom, 8\) \}\]\}/g;
+  assert.equal(
+    mapSource.match(safeBottomPattern)?.length,
+    3,
+    'draw, point, and review sheets must all respect the bottom safe area',
+  );
+  assert.ok(!mapSource.includes('style={s.trailRouteBuilderWrap}'), 'no builder sheet may sit flush against the gesture edge');
+});
+
 test('Draw review is explicit and routing changes rebuild with the selected mode', () => {
   assert.match(mapSource, /onTraceStart=\{beginTrailTraceStroke\}/);
   assert.match(mapSource, /onTraceEnd=\{finishTrailTraceStroke\}/);

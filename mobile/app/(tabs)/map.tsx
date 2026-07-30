@@ -1154,7 +1154,19 @@ type CatchDraft = {
   notes: string;
 };
 type DiscoveryMode = 'camps' | 'trails';
-type TrailDiscoveryScope = 'nearby' | 'view';
+type TrailDiscoveryScope = 'nearby' | 'view' | 'along_trip';
+type TrailDiscoveryRequest = {
+  query?: string;
+  filters?: {
+    activity?: string[];
+    difficulty?: string[];
+    routeShape?: string[];
+    permittedUse?: string[];
+    downloadable?: boolean | null;
+    catalog?: 'verified' | 'community' | 'all';
+  };
+  tripId?: string;
+};
 type TrailSnapMode = 'trail' | 'road' | 'dirt' | 'straight' | 'hybrid';
 type TrailRouteIntent = 'segment' | 'out_back' | 'loop' | 'far_end' | 'capture';
 type TrailRoutePlan = {
@@ -6252,6 +6264,8 @@ function MapScreen() {
   const setPendingNavigatePlace = useStore(st => st.setPendingNavigatePlace);
   const pendingMapSelection = useStore(st => st.pendingMapSelection);
   const setPendingMapSelection = useStore(st => st.setPendingMapSelection);
+  const pendingTrailDiscovery = useStore(st => st.pendingTrailDiscovery);
+  const setPendingTrailDiscovery = useStore(st => st.setPendingTrailDiscovery);
   const pendingStartCopilotVoice = useStore(st => st.pendingStartCopilotVoice);
   const setPendingStartCopilotVoice = useStore(st => st.setPendingStartCopilotVoice);
   const pendingOpenOfflineModal = useStore(st => st.pendingOpenOfflineModal);
@@ -6474,6 +6488,7 @@ function MapScreen() {
   const [trailDiscoveryScope, setTrailDiscoveryScope] = useState<TrailDiscoveryScope>('view');
   const [trailDiscoveryOrigin, setTrailDiscoveryOrigin] = useState<{ lat: number; lng: number } | null>(null);
   const [trailDiscoverySystems, setTrailDiscoverySystems] = useState<TrailDiscoveryItemV2[]>([]);
+  const trailDiscoveryRequestRef = useRef<TrailDiscoveryRequest>({});
   const trailSystemSelectionGenerationRef = useRef(0);
   const [trailDiscoverySheetStage, setTrailDiscoverySheetStage] = useState<TrailheadSnapStage>('peek');
   const trailDiscoverySheetStageRef = useRef<TrailheadSnapStage>('peek');
@@ -10748,6 +10763,7 @@ function MapScreen() {
         subtitle: place.note || place.sourceLabel || 'Trail',
         score: 100,
         profile_id: place.trailId,
+        system_v2_id: place.trailSystemId,
         source_label: place.sourceLabel || 'Explore trail',
         summary: trailContext?.summary || place.note,
         photo_url: trailContext?.photoUrl || null,
@@ -10791,6 +10807,25 @@ function MapScreen() {
     const zoom = isExploreTrail ? 13 : 12;
     focusMapSelectionPoint({ lat: place.lat, lng: place.lng, name: place.name }, zoom, isExploreTrail ? 'trail' : 'place');
   }, [mapSurfaceReady, pendingMapSelection, screenActivity.isActive, setPendingMapSelection, useNativeMapSurface, weatherUnitMode]);
+
+  useEffect(() => {
+    if (!pendingTrailDiscovery || !screenActivity.isActive || (useNativeMapSurface && !mapSurfaceReady)) return;
+    if (isSearchingTrails) return;
+    const request = pendingTrailDiscovery;
+    setPendingTrailDiscovery(null);
+    void runTrailDiscoverySearch(request.scope, {
+      query: request.query,
+      filters: request.filters,
+      tripId: request.tripId,
+    });
+  }, [
+    mapSurfaceReady,
+    isSearchingTrails,
+    pendingTrailDiscovery,
+    screenActivity.isActive,
+    setPendingTrailDiscovery,
+    useNativeMapSurface,
+  ]);
 
   useEffect(() => {
     if (!pendingOpenOfflineModal) return;
@@ -22722,8 +22757,9 @@ function MapScreen() {
     });
   }
 
-  async function runTrailDiscoverySearch(scope: TrailDiscoveryScope = 'view') {
+  async function runTrailDiscoverySearch(scope: TrailDiscoveryScope = 'view', request: TrailDiscoveryRequest = {}) {
     if (isSearchingTrails) return;
+    trailDiscoveryRequestRef.current = request;
     setDiscoveryMode('trails');
     setTrailDiscoveryScope(scope);
     setShowDiscoveryPanel(true);
@@ -22744,34 +22780,43 @@ function MapScreen() {
         : vp
           ? { lat: (vp.n + vp.s) / 2, lng: (vp.e + vp.w) / 2 }
           : userLoc;
-    if (center) {
+    if (center || scope === 'along_trip') {
       setTrailDiscoveryOrigin(scope === 'nearby' && userLoc ? { lat: userLoc.lat, lng: userLoc.lng } : center);
       setIsSearchingTrails(true);
-      setQuickToast(scope === 'nearby' && userLoc ? 'Finding trails near you' : 'Finding trails in this map view');
+      setQuickToast(scope === 'along_trip' ? 'Finding trails along your trip' : scope === 'nearby' && userLoc ? 'Finding trails near you' : 'Finding trails in this map view');
       try {
         const radiusMi = scope === 'nearby'
           ? 45
           : vp
           ? Math.max(3, Math.min(80, Math.max(
               Math.abs(vp.n - vp.s) * 69,
-              Math.abs(vp.e - vp.w) * 69 * Math.cos(center.lat * Math.PI / 180),
+              Math.abs(vp.e - vp.w) * 69 * Math.cos((center?.lat ?? 0) * Math.PI / 180),
             ) / 2 + 3))
           : 45;
         let live: OsmPoi[] = [];
         try {
           const discovered = await api.discoverTrailSystems({
             mode: scope,
-            lat: center.lat,
-            lng: center.lng,
+            lat: center?.lat,
+            lng: center?.lng,
             radius: radiusMi,
             n: scope === 'view' ? vp?.n : undefined,
             s: scope === 'view' ? vp?.s : undefined,
             e: scope === 'view' ? vp?.e : undefined,
             w: scope === 'view' ? vp?.w : undefined,
             limit: 80,
+            q: request.query?.trim() || undefined,
+            activity: request.filters?.activity,
+            difficulty: request.filters?.difficulty,
+            routeShape: request.filters?.routeShape,
+            permittedUse: request.filters?.permittedUse,
+            downloadable: request.filters?.downloadable == null ? undefined : request.filters.downloadable,
+            catalog: request.filters?.catalog,
+            tripId: scope === 'along_trip' ? request.tripId : undefined,
           });
           setTrailDiscoverySystems(discovered.trails ?? []);
-          live = (discovered.trails ?? []).map(item => ({
+          const discoveredMapItems = [...(discovered.trails ?? []), ...(discovered.map_candidates ?? [])];
+          live = discoveredMapItems.map(item => ({
             id: item.id,
             profile_id: item.primary_trail_id,
             name: item.name,
@@ -22788,18 +22833,19 @@ function MapScreen() {
             last_checked: item.freshness.checked_at,
             raw: item,
           } as OsmPoi));
-          if (live.length === 0) {
+          if (live.length === 0 && scope !== 'along_trip' && center) {
             const legacy = await api.discoverTrails({ mode: scope, lat: center.lat, lng: center.lng, radius: radiusMi, limit: 80 });
             live = (legacy.trails ?? []).map(trailProfileToPoi);
           }
-          setQuickToast(discovered.offline ? 'Showing offline trail results' : scope === 'nearby' && userLoc ? 'Trails near you loaded' : 'Trails in this view loaded');
+          setQuickToast(discovered.offline ? 'Showing offline trail results' : scope === 'along_trip' ? 'Trails along your trip loaded' : scope === 'nearby' && userLoc ? 'Trails near you loaded' : 'Trails in this view loaded');
         } catch {
           setTrailDiscoverySystems([]);
+          if (scope === 'along_trip') throw new Error('Along Trip trail search unavailable');
           try {
-            const legacy = await api.discoverTrails({ mode: scope, lat: center.lat, lng: center.lng, radius: radiusMi, limit: 80 });
+            const legacy = await api.discoverTrails({ mode: scope, lat: center!.lat, lng: center!.lng, radius: radiusMi, limit: 80 });
             live = (legacy.trails ?? []).map(trailProfileToPoi);
           } catch {
-            live = await api.getOsmPois(center.lat, center.lng, Math.min(80, Math.max(radiusMi, 30)), 'trail,trailhead,viewpoint,peak,hot_spring,water');
+            live = await api.getOsmPois(center!.lat, center!.lng, Math.min(80, Math.max(radiusMi, 30)), 'trail,trailhead,viewpoint,peak,hot_spring,water');
           }
           setQuickToast(scope === 'nearby' && userLoc ? 'Showing live map trail places' : 'Showing map-view trail places');
         }
@@ -22808,8 +22854,8 @@ function MapScreen() {
           : [];
         const supportRadiusMi = Math.min(75, Math.max(radiusMi, 30));
         const [supportPoisResult, supportGasResult] = await Promise.allSettled([
-          api.getOsmPois(center.lat, center.lng, supportRadiusMi, 'water,trailhead,viewpoint,peak,hot_spring'),
-          api.getGas(center.lat, center.lng, supportRadiusMi),
+          center ? api.getOsmPois(center.lat, center.lng, supportRadiusMi, 'water,trailhead,viewpoint,peak,hot_spring') : Promise.resolve([]),
+          center ? api.getGas(center.lat, center.lng, supportRadiusMi) : Promise.resolve([]),
         ]);
         const onlineSupportPois = supportPoisResult.status === 'fulfilled' ? supportPoisResult.value : [];
         const onlineFuelPois = supportGasResult.status === 'fulfilled'
@@ -28287,7 +28333,7 @@ function MapScreen() {
                 </Text>
                 <Text style={s.campDiscoverySub} numberOfLines={1}>
                   {discoveryMode === 'trails'
-                    ? 'Trails in this view'
+                    ? trailDiscoveryScope === 'along_trip' ? 'Along saved trip' : trailDiscoveryScope === 'nearby' ? 'Near you' : 'This map area'
                     : 'Camps in this view'}
                 </Text>
               </View>
@@ -28300,7 +28346,7 @@ function MapScreen() {
               <TouchableOpacity
                 style={[s.campDiscoverySearchArea, s.trailDiscoverySearchHeader]}
                 onPress={() => discoveryMode === 'trails'
-                  ? runTrailDiscoverySearch('view')
+                  ? runTrailDiscoverySearch('view', trailDiscoveryRequestRef.current)
                   : viewportRef.current && loadCampsInArea(viewportRef.current, activeFilters, { openSheet: true })}
                 activeOpacity={0.86}
               >

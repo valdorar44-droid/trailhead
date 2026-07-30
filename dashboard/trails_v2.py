@@ -82,6 +82,7 @@ class TrailDiscoveryItemV2(BaseModel):
     center: TrailCenterV2
     geometry_status: TrailGeometryStatusV2
     geometry_revision: str | None = None
+    distance_from_center_mi: float | None = None
     activities: list[str] = Field(default_factory=list)
     permitted_uses: list[str] = Field(default_factory=list)
     facts: TrailFactsV2 = Field(default_factory=TrailFactsV2)
@@ -103,10 +104,12 @@ class TrailSystemV2(TrailDiscoveryItemV2):
 
 class TrailDiscoveryResponseV2(BaseModel):
     version: Literal[2] = 2
-    mode: Literal["nearby", "view"]
+    mode: Literal["nearby", "view", "along_trip"]
     source: str = "trailhead-canonical"
     offline: bool = False
     trails: list[TrailDiscoveryItemV2] = Field(default_factory=list)
+    map_candidates: list[TrailDiscoveryItemV2] = Field(default_factory=list)
+    next_cursor: str | None = None
 
 
 def model_public(model: BaseModel) -> dict[str, Any]:

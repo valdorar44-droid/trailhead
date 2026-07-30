@@ -583,6 +583,7 @@ export interface SavedPlace {
   groupId?: string;
   note?: string;
   trailId?: string;
+  trailSystemId?: string;
   geometryRef?: string;
   sourceLabel?: string;
   trailContext?: {
@@ -791,6 +792,20 @@ interface AppState {
     | { kind: 'trail'; trail: SavedPlace }
     | { kind: 'explorePlace'; place: ExploreMapSelection }
     | null;
+  pendingTrailDiscovery: {
+    runId: number;
+    scope: 'nearby' | 'view' | 'along_trip';
+    query?: string;
+    filters?: {
+      activity?: string[];
+      difficulty?: string[];
+      routeShape?: string[];
+      permittedUse?: string[];
+      downloadable?: boolean | null;
+      catalog?: 'verified' | 'community' | 'all';
+    };
+    tripId?: string;
+  } | null;
   pendingStartCopilotVoice: boolean;
   pendingOpenOfflineModal: boolean;
   pendingOfflineTrip: TripResult | null;
@@ -848,6 +863,7 @@ interface AppState {
   setPendingRouteFlyover: (request: AppState['pendingRouteFlyover']) => void;
   setPendingNavigatePlace: (place: { lat: number; lng: number; name: string } | null) => void;
   setPendingMapSelection: (selection: AppState['pendingMapSelection']) => void;
+  setPendingTrailDiscovery: (request: AppState['pendingTrailDiscovery']) => void;
   setPendingStartCopilotVoice: (start: boolean) => void;
   setPendingOpenOfflineModal: (open: boolean) => void;
   setPendingOfflineTrip: (trip: TripResult | null) => void;
@@ -894,6 +910,7 @@ export const useStore = create<AppState>((set) => ({
   pendingRouteFlyover: null,
   pendingNavigatePlace: null,
   pendingMapSelection: null,
+  pendingTrailDiscovery: null,
   pendingStartCopilotVoice: false,
   pendingOpenOfflineModal: false,
   pendingOfflineTrip: null,
@@ -964,6 +981,7 @@ export const useStore = create<AppState>((set) => ({
       pendingRouteFlyover: null,
       pendingNavigatePlace: null,
       pendingMapSelection: null,
+      pendingTrailDiscovery: null,
       pendingStartCopilotVoice: false,
       pendingOpenOfflineModal: false,
       pendingOfflineTrip: null,
@@ -1022,6 +1040,7 @@ export const useStore = create<AppState>((set) => ({
       pendingRouteFlyover: null,
       pendingNavigatePlace: null,
       pendingMapSelection: null,
+      pendingTrailDiscovery: null,
       pendingStartCopilotVoice: false,
       pendingOpenOfflineModal: false,
       pendingOfflineTrip: null,
@@ -1186,6 +1205,7 @@ export const useStore = create<AppState>((set) => ({
   setPendingRouteFlyover: (request) => { if (accountLocalMutationAllowed()) set({ pendingRouteFlyover: request }); },
   setPendingNavigatePlace: (place) => { if (accountLocalMutationAllowed()) set({ pendingNavigatePlace: place }); },
   setPendingMapSelection: (selection) => { if (accountLocalMutationAllowed()) set({ pendingMapSelection: selection }); },
+  setPendingTrailDiscovery: (request) => { if (accountLocalMutationAllowed()) set({ pendingTrailDiscovery: request }); },
   setPendingStartCopilotVoice: (start) => { if (accountLocalMutationAllowed()) set({ pendingStartCopilotVoice: start }); },
   setPendingOpenOfflineModal: (open) => { if (accountLocalMutationAllowed()) set({ pendingOpenOfflineModal: open }); },
   setPendingOfflineTrip: (trip) => { if (accountLocalMutationAllowed()) set({ pendingOfflineTrip: trip }); },
@@ -1521,6 +1541,7 @@ function clearLegacyAccountStateFromMemory() {
     pendingRouteFlyover: null,
     pendingNavigatePlace: null,
     pendingMapSelection: null,
+    pendingTrailDiscovery: null,
     pendingStartCopilotVoice: false,
     pendingOpenOfflineModal: false,
     pendingOfflineTrip: null,

@@ -81,7 +81,7 @@ test('trail sheet parity retains planning, offline, community, source, and navig
 
 test('full sheet copy avoids invented confidence and access assurances', () => {
   const implementedTrailSheet = mapSource.slice(
-    mapSource.indexOf('{selectedTrail && !navMode && !trailPinCaptureMode && !trailCardCollapsed'),
+    mapSource.indexOf('{selectedTrail && !trailPreviewOpen && !navMode && !trailPinCaptureMode && !trailCardCollapsed && !trailRouteBuilderOpen'),
     mapSource.indexOf('{selectedTrail && !navMode && !trailPinCaptureMode && trailRouteBuilderOpen'),
   );
   assert.doesNotMatch(implementedTrailSheet, /profile confidence|check local rules|parking nearby|restrooms nearby/i);

@@ -1430,6 +1430,21 @@ export const api = {
     if (params.s != null) qs.set('s', String(params.s));
     if (params.e != null) qs.set('e', String(params.e));
     if (params.w != null) qs.set('w', String(params.w));
+    if (params.q) qs.set('q', params.q);
+    if (params.cursor) qs.set('cursor', params.cursor);
+    if (params.sort) qs.set('sort', params.sort);
+    if (params.activity?.length) qs.set('activity', params.activity.join(','));
+    if (params.difficulty?.length) qs.set('difficulty', params.difficulty.join(','));
+    if (params.routeShape?.length) qs.set('route_shape', params.routeShape.join(','));
+    if (params.permittedUse?.length) qs.set('permitted_use', params.permittedUse.join(','));
+    if (params.minDistance != null) qs.set('min_distance', String(params.minDistance));
+    if (params.maxDistance != null) qs.set('max_distance', String(params.maxDistance));
+    if (params.minElevation != null) qs.set('min_elevation', String(params.minElevation));
+    if (params.maxElevation != null) qs.set('max_elevation', String(params.maxElevation));
+    if (params.downloadable != null) qs.set('downloadable', String(params.downloadable));
+    if (params.catalog) qs.set('catalog', params.catalog);
+    if (params.tripId) qs.set('trip_id', params.tripId);
+    if (params.destinationRef) qs.set('destination_ref', params.destinationRef);
     return req<TrailDiscoverResponseV2>(`/api/trails/v2/discover?${qs.toString()}`);
   },
   discoverTrailArea: (params: TrailDiscoverParams) => {
@@ -3977,10 +3992,12 @@ export interface TrailDiscoveryItemV2 {
   id: string;
   primary_trail_id: string;
   name: string;
+  catalog?: 'verified' | 'community';
   kind: string;
   center: { lat: number; lng: number };
   geometry_status: TrailGeometryStatusV2;
   geometry_revision?: string;
+  distance_from_center_mi?: number;
   activities: string[];
   permitted_uses: string[];
   facts: TrailFactsV2;
@@ -4008,10 +4025,12 @@ export interface TrailSystemV2 extends TrailDiscoveryItemV2 {
 }
 export interface TrailDiscoverResponseV2 {
   version: 2;
-  mode: 'nearby' | 'view';
+  mode: 'nearby' | 'view' | 'along_trip';
   source: string;
   offline: boolean;
   trails: TrailDiscoveryItemV2[];
+  map_candidates?: TrailDiscoveryItemV2[];
+  next_cursor?: string;
 }
 export interface TrailPreviewResponseV2 {
   version: 2;
@@ -4033,9 +4052,24 @@ export interface TrailDiscoverParams {
   s?: number;
   e?: number;
   w?: number;
-  mode?: 'nearby' | 'view';
+  mode?: 'nearby' | 'view' | 'along_trip';
   limit?: number;
   refresh?: boolean;
+  q?: string;
+  cursor?: string;
+  sort?: 'nearby' | 'name' | 'distance' | 'elevation';
+  activity?: string[];
+  difficulty?: string[];
+  routeShape?: string[];
+  permittedUse?: string[];
+  minDistance?: number;
+  maxDistance?: number;
+  minElevation?: number;
+  maxElevation?: number;
+  downloadable?: boolean;
+  catalog?: 'verified' | 'community' | 'all';
+  tripId?: string;
+  destinationRef?: string;
 }
 export interface TrailDiscoverResponse {
   mode: 'nearby' | 'view';

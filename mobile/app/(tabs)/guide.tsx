@@ -23,6 +23,7 @@ import {
   ExploreHero,
   ExploreHomeControls,
   ExplorePlaceCard,
+  ExploreTrailDiscoveryWorkspace,
   GUIDED_DESTINATIONS,
   GuidedDestinationBrowser,
   GuidedTripDetailModal,
@@ -45,6 +46,7 @@ import {
   type ExploreNearbyModule,
   type ExploreSortMode,
   type GuidedDestination,
+  type TrailDiscoveryMapRequestV2,
 } from '@/components/explore';
 import { useStore } from '@/lib/store';
 import { useScreenActivity } from '@/lib/screenActivity';
@@ -56,7 +58,7 @@ import {
   sheetRequestIsCurrent,
   type SheetIdentity,
 } from '@/lib/sheetCoordinator';
-import { api, PaywallError, type BookableExperience, type CampsitePin, type ExploreCatalogIndexItem, type ExploreExperienceQueryOptions, type ExploreExperiencesResponse, type ExploreGuidedDestination, type ExploreGuidedDestinationResponse, type ExplorePlaceProfile, type ExploreSourcePackItem, type ExploreTrailCard, type OsmPoi, type TrailProfile } from '@/lib/api';
+import { api, PaywallError, type BookableExperience, type CampsitePin, type ExploreCatalogIndexItem, type ExploreExperienceQueryOptions, type ExploreExperiencesResponse, type ExploreGuidedDestination, type ExploreGuidedDestinationResponse, type ExplorePlaceProfile, type ExploreSourcePackItem, type ExploreTrailCard, type OsmPoi, type TrailDiscoveryItemV2, type TrailProfile } from '@/lib/api';
 import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
 import { accountStorage, storage } from '@/lib/storage';
 import {
@@ -2192,6 +2194,7 @@ function GuideScreenContent() {
   const setMapboxToken = useStore(st => st.setMapboxToken);
   const setPendingNavigatePlace = useStore(st => st.setPendingNavigatePlace);
   const setPendingMapSelection = useStore(st => st.setPendingMapSelection);
+  const setPendingTrailDiscovery = useStore(st => st.setPendingTrailDiscovery);
   const [originalsDiscoverable, setOriginalsDiscoverable] = useState(Boolean(user?.is_admin));
   useFocusEffect(useCallback(() => {
     let current = true;
@@ -2220,6 +2223,7 @@ function GuideScreenContent() {
   const [exploreSortMode, setExploreSortMode] = useState<ExploreSortMode>('best');
   const [exploreCategory, setExploreCategory] = useState<ExploreCategoryKey>('all');
   const [exploreFilterSheetOpen, setExploreFilterSheetOpen] = useState(false);
+  const [exploreTrailDiscoveryOpen, setExploreTrailDiscoveryOpen] = useState(false);
   const [guidedTourCategory, setGuidedTourCategory] = useState<GuidedTourCategory>('all');
   const [guidedTourSort, setGuidedTourSort] = useState<GuidedTourSort>('top_rated');
   const [guidedTourDate, setGuidedTourDate] = useState<GuidedTourDate>('any');
@@ -5491,8 +5495,62 @@ function GuideScreenContent() {
     );
   }
 
+  function openTrailDiscoveryMap(request: TrailDiscoveryMapRequestV2) {
+    setPendingTrailDiscovery({
+      runId: Date.now(),
+      scope: request.scope,
+      query: request.query || undefined,
+      filters: request.filters,
+      tripId: request.tripId,
+    });
+    setExploreTrailDiscoveryOpen(false);
+    router.push('/(tabs)/map');
+  }
+
+  function openTrailDiscoveryItem(item: TrailDiscoveryItemV2) {
+    setPendingMapSelection({
+      kind: 'trail',
+      trail: {
+        id: item.primary_trail_id,
+        name: item.name,
+        lat: item.center.lat,
+        lng: item.center.lng,
+        icon: 'flag',
+        note: item.summary || item.sources[0]?.label,
+        trailId: item.primary_trail_id,
+        trailSystemId: item.id,
+        sourceLabel: item.catalog === 'community' ? 'Community route' : item.sources[0]?.label,
+        trailContext: {
+          difficulty: item.facts.difficulty,
+          distanceMi: item.facts.distance_mi,
+          routeType: item.facts.route_shape,
+          summary: item.summary,
+          photoUrl: item.media[0]?.url,
+          sourceUrl: item.sources[0]?.url,
+        },
+        createdAt: Date.now(),
+      },
+    });
+    setExploreTrailDiscoveryOpen(false);
+    router.push('/(tabs)/map');
+  }
+
+  async function requestTrailDiscoveryLocation() {
+    const permission = await Location.requestForegroundPermissionsAsync();
+    if (permission.status !== 'granted') return;
+    const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+    setUserLoc({ lat: position.coords.latitude, lng: position.coords.longitude });
+  }
+
   function selectExploreHomeCategory(key: ExploreCategoryKey) {
     setExploreSavedOnly(false);
+    if (key === 'trails') {
+      setExploreCategory('trails');
+      setExploreMode(exploreMode === 'nearby' ? 'featured' : exploreMode);
+      setExploreFilterSheetOpen(false);
+      setExploreTrailDiscoveryOpen(true);
+      return;
+    }
     if (key === 'nearby') {
       setExploreCategory('all');
       setExploreMode('nearby');
@@ -6400,6 +6458,17 @@ function GuideScreenContent() {
           </>
         )}
       </ScrollView>
+
+      <ExploreTrailDiscoveryWorkspace
+        visible={exploreTrailDiscoveryOpen}
+        location={userLoc}
+        signedIn={Boolean(user)}
+        activeTripId={activeTrip?.trip_id}
+        onClose={() => setExploreTrailDiscoveryOpen(false)}
+        onOpenMap={openTrailDiscoveryMap}
+        onSelectTrail={openTrailDiscoveryItem}
+        onRequestLocation={() => { void requestTrailDiscoveryLocation(); }}
+      />
 
       <SearchV2Sheet
         visible={searchV2Enabled && exploreSearchOpen}

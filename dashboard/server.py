@@ -23378,6 +23378,162 @@ async def _trail_system_for_detail_v2(system_id: str) -> TrailSystemV2 | None:
     return fallback
 
 
+def _trail_discovery_cursor_v2(offset: int, signature: str) -> str:
+    payload = f"{max(0, int(offset))}:{signature[:16]}".encode("utf-8")
+    return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+
+def _trail_discovery_cursor_offset_v2(cursor: str | None, signature: str) -> int:
+    if not cursor:
+        return 0
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        offset_text, supplied_signature = base64.urlsafe_b64decode(padded).decode("utf-8").split(":", 1)
+        offset = int(offset_text)
+    except Exception as exc:
+        raise HTTPException(400, "Invalid trail discovery cursor") from exc
+    if supplied_signature != signature[:16] or offset < 0:
+        raise HTTPException(400, "Trail discovery cursor does not match this search")
+    return offset
+
+
+def _trail_discovery_route_coordinates_v2(document: dict) -> list[list[float]]:
+    points: list[list[float]] = []
+
+    def add(raw: object) -> None:
+        if not isinstance(raw, (list, tuple)) or len(raw) < 2:
+            return
+        try:
+            lng, lat = float(raw[0]), float(raw[1])
+        except Exception:
+            return
+        if -180 <= lng <= 180 and -90 <= lat <= 90:
+            points.append([lng, lat])
+
+    def visit(raw: object) -> None:
+        if not isinstance(raw, dict):
+            return
+        geometry_type = str(raw.get("type") or "")
+        coordinates = raw.get("coordinates")
+        if geometry_type == "LineString" and isinstance(coordinates, list):
+            for value in coordinates:
+                add(value)
+            return
+        if geometry_type == "MultiLineString" and isinstance(coordinates, list):
+            for line in coordinates:
+                if isinstance(line, list):
+                    for value in line:
+                        add(value)
+            return
+        if geometry_type == "Feature":
+            visit(raw.get("geometry"))
+            return
+        if geometry_type == "FeatureCollection":
+            for feature in raw.get("features") or []:
+                visit(feature)
+            return
+        for value in raw.get("coords") or []:
+            add(value)
+
+    for key in ("route_geometry", "route", "geometry"):
+        visit(document.get(key))
+    return points
+
+
+def _trail_discovery_query_profiles_v2(
+    query: str,
+    generated_at: int,
+    geometry_revision: str,
+    *,
+    limit: int = 500,
+) -> list[dict]:
+    normalized = re.sub(r"[^a-z0-9]+", " ", str(query or "").lower()).strip()
+    if not normalized:
+        return []
+    tokens = normalized.split()
+    items, _ = _load_canonical_trail_index()
+    scored: list[tuple[tuple[int, int, str], dict]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        name = re.sub(r"[^a-z0-9]+", " ", str(item.get("name") or "").lower()).strip()
+        context = " ".join(str(item.get(key) or "") for key in (
+            "parent_destination", "destination_name", "park_name", "land_manager", "activities",
+        )).lower()
+        searchable = f"{name} {context}"
+        if not all(token in searchable for token in tokens):
+            continue
+        score = 0 if name == normalized else 1 if name.startswith(normalized) else 2 if normalized in name else 3
+        scored.append(((score, len(name), name), item))
+    scored.sort(key=lambda value: value[0])
+    profiles: list[dict] = []
+    for _, item in scored[: max(1, min(limit, 800))]:
+        profile = _trail_profile_from_canonical_v2(item, generated_at, geometry_revision)
+        if profile:
+            profiles.append(profile)
+    return profiles
+
+
+def _trail_discovery_profile_matches_query_v2(profile: dict, query: str) -> bool:
+    tokens = re.sub(r"[^a-z0-9]+", " ", str(query or "").lower()).strip().split()
+    if not tokens:
+        return True
+    searchable = " ".join(str(profile.get(key) or "") for key in (
+        "name", "summary", "description", "parent_destination", "destination_name",
+        "park_name", "land_manager", "source_label", "activities", "permitted_uses",
+    )).lower()
+    return all(token in searchable for token in tokens)
+
+
+def _trail_discovery_filter_values_v2(raw: str | None) -> set[str]:
+    return {
+        re.sub(r"\s+", " ", value).strip().lower()
+        for value in str(raw or "").split(",")
+        if re.sub(r"\s+", " ", value).strip()
+    }
+
+
+def _trail_discovery_matches_v2(
+    system: TrailSystemV2,
+    *,
+    activities: set[str],
+    difficulties: set[str],
+    route_shapes: set[str],
+    permitted_uses: set[str],
+    min_distance: float | None,
+    max_distance: float | None,
+    min_elevation: float | None,
+    max_elevation: float | None,
+    downloadable: bool | None,
+    catalog: str,
+) -> bool:
+    if catalog != "all" and system.catalog != catalog:
+        return False
+    item_activities = {value.lower() for value in system.activities}
+    item_uses = {value.lower() for value in system.permitted_uses}
+    if activities and not activities.intersection(item_activities | item_uses):
+        return False
+    if permitted_uses and not permitted_uses.intersection(item_uses):
+        return False
+    if difficulties and str(system.facts.difficulty or "").lower() not in difficulties:
+        return False
+    if route_shapes and str(system.facts.route_shape or "").lower() not in route_shapes:
+        return False
+    distance = system.facts.distance_mi
+    elevation = system.facts.elevation_gain_ft
+    if min_distance is not None and (distance is None or distance < min_distance):
+        return False
+    if max_distance is not None and (distance is None or distance > max_distance):
+        return False
+    if min_elevation is not None and (elevation is None or elevation < min_elevation):
+        return False
+    if max_elevation is not None and (elevation is None or elevation > max_elevation):
+        return False
+    if downloadable is not None and bool(system.capabilities.download) != downloadable:
+        return False
+    return True
+
+
 @app.get("/api/trails/v2/discover")
 async def trails_discover_v2(
     lat: float | None = None,
@@ -23388,33 +23544,148 @@ async def trails_discover_v2(
     e: float | None = None,
     w: float | None = None,
     mode: str = "nearby",
-    limit: int = 60,
+    q: str | None = None,
+    cursor: str | None = None,
+    sort: str = "nearby",
+    activity: str | None = None,
+    difficulty: str | None = None,
+    route_shape: str | None = None,
+    permitted_use: str | None = None,
+    min_distance: float | None = None,
+    max_distance: float | None = None,
+    min_elevation: float | None = None,
+    max_elevation: float | None = None,
+    downloadable: bool | None = None,
+    catalog: str = "verified",
+    trip_id: str | None = None,
+    destination_ref: str | None = None,
+    limit: int = 30,
+    user: dict | None = Depends(_optional_user),
 ):
-    mode = "view" if mode == "view" else "nearby"
+    mode = mode if mode in {"view", "along_trip"} else "nearby"
+    catalog = catalog if catalog in {"verified", "community", "all"} else "verified"
+    sort = sort if sort in {"nearby", "name", "distance", "elevation"} else "nearby"
     bbox = None
     if mode == "view" and None not in (n, s, e, w):
         bbox = {"n": float(n), "s": float(s), "e": float(e), "w": float(w)}
         lat = (bbox["n"] + bbox["s"]) / 2
         lng = (bbox["e"] + bbox["w"]) / 2
         radius = max(3, min(80, max(abs(bbox["n"] - bbox["s"]) * 69, abs(bbox["e"] - bbox["w"]) * 69) / 2 + 3))
-    if lat is None or lng is None:
+    if mode == "along_trip":
+        if not user:
+            raise HTTPException(401, "Sign in to search along a trip")
+        if not trip_id:
+            raise HTTPException(400, "trip_id is required for Along Trip")
+        trip = get_trip_document_v2(int(user["id"]), trip_id)
+        if not trip:
+            raise HTTPException(404, "Trip not found")
+        route_points = _trail_discovery_route_coordinates_v2(trip)
+        if len(route_points) < 2:
+            raise HTTPException(409, "This trip does not have a saved route")
+        pad_lat = 8.0 / 69.0
+        center_lat = sum(point[1] for point in route_points) / len(route_points)
+        pad_lng = 8.0 / max(10.0, 69.0 * math.cos(math.radians(center_lat)))
+        bbox = {
+            "n": max(point[1] for point in route_points) + pad_lat,
+            "s": min(point[1] for point in route_points) - pad_lat,
+            "e": max(point[0] for point in route_points) + pad_lng,
+            "w": min(point[0] for point in route_points) - pad_lng,
+        }
+        lat = (bbox["n"] + bbox["s"]) / 2
+        lng = (bbox["e"] + bbox["w"]) / 2
+        radius = 80
+    if (lat is None or lng is None) and not str(q or "").strip():
         raise HTTPException(400, "lat/lng or n/s/e/w bounds are required")
-    limit = max(1, min(int(limit), 100))
+    limit = max(1, min(int(limit), 60))
     geometry_revision = await _canonical_trail_geometry_revision_v2()
-    canonical_profiles = _canonical_trail_profiles_near_v2(
-        float(lat),
-        float(lng),
-        float(radius),
-        bbox=bbox,
-        limit=max(160, limit * 3),
-        geometry_revision=geometry_revision,
+    generated_at = _load_canonical_trail_index()[1]
+    query_text = str(q or "").strip()
+    canonical_profiles: list[dict] = []
+    cached_profiles: list[dict] = []
+    if lat is not None and lng is not None:
+        if not query_text:
+            canonical_profiles = _canonical_trail_profiles_near_v2(
+                float(lat),
+                float(lng),
+                float(radius),
+                bbox=bbox,
+                limit=max(240, limit * 8),
+                geometry_revision=geometry_revision,
+            )
+        cached_profiles = list_trail_profiles_near(
+            float(lat), float(lng), float(radius), max(160, limit * 5), bbox=bbox, mode="view" if bbox else "nearby",
+        )
+        if query_text:
+            cached_profiles = [
+                profile for profile in cached_profiles
+                if _trail_discovery_profile_matches_query_v2(profile, query_text)
+            ]
+    query_profiles = _trail_discovery_query_profiles_v2(
+        query_text, generated_at, geometry_revision, limit=max(240, limit * 8),
     )
-    cached_profiles = list_trail_profiles_near(float(lat), float(lng), float(radius), max(100, limit * 2), bbox=bbox, mode=mode)
-    systems = build_trail_systems_v2(canonical_profiles + cached_profiles, limit=limit)
+    query_rank = {
+        str(profile.get("id") or ""): index
+        for index, profile in enumerate(query_profiles)
+        if profile.get("id")
+    }
+    systems = build_trail_systems_v2(canonical_profiles + cached_profiles + query_profiles, limit=800)
+    activities = _trail_discovery_filter_values_v2(activity)
+    difficulties = _trail_discovery_filter_values_v2(difficulty)
+    route_shapes = _trail_discovery_filter_values_v2(route_shape)
+    permitted_uses = _trail_discovery_filter_values_v2(permitted_use)
+    systems = [system for system in systems if _trail_discovery_matches_v2(
+        system,
+        activities=activities,
+        difficulties=difficulties,
+        route_shapes=route_shapes,
+        permitted_uses=permitted_uses,
+        min_distance=min_distance,
+        max_distance=max_distance,
+        min_elevation=min_elevation,
+        max_elevation=max_elevation,
+        downloadable=downloadable,
+        catalog=catalog,
+    )]
+    if lat is not None and lng is not None:
+        for system in systems:
+            system.distance_from_center_mi = round(
+                _haversine_m(float(lat), float(lng), system.center.lat, system.center.lng) / 1609.344, 2,
+            )
+    if query_text and sort == "nearby":
+        systems.sort(key=lambda item: (
+            query_rank.get(item.primary_trail_id, len(query_rank) + 1),
+            item.distance_from_center_mi is None,
+            item.distance_from_center_mi or 0,
+            item.name.lower(),
+        ))
+    elif sort == "name":
+        systems.sort(key=lambda item: (item.name.lower(), item.id))
+    elif sort == "distance":
+        systems.sort(key=lambda item: (item.facts.distance_mi is None, item.facts.distance_mi or 0, item.name.lower()))
+    elif sort == "elevation":
+        systems.sort(key=lambda item: (item.facts.elevation_gain_ft is None, item.facts.elevation_gain_ft or 0, item.name.lower()))
+    else:
+        systems.sort(key=lambda item: (item.distance_from_center_mi is None, item.distance_from_center_mi or 0, item.name.lower()))
+    signature = hashlib.sha256(json.dumps({
+        "q": str(q or "").strip().lower(), "sort": sort, "activity": sorted(activities),
+        "difficulty": sorted(difficulties), "route_shape": sorted(route_shapes),
+        "permitted_use": sorted(permitted_uses), "min_distance": min_distance,
+        "max_distance": max_distance, "min_elevation": min_elevation,
+        "max_elevation": max_elevation, "downloadable": downloadable,
+        "catalog": catalog, "mode": mode, "trip_id": trip_id, "destination_ref": destination_ref,
+        "bbox": bbox,
+    }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    offset = _trail_discovery_cursor_offset_v2(cursor, signature)
+    list_systems = [system for system in systems if system.geometry_status == "complete"]
+    map_candidates = [system for system in systems if system.geometry_status != "complete"]
+    page = list_systems[offset:offset + limit]
+    next_cursor = _trail_discovery_cursor_v2(offset + limit, signature) if offset + limit < len(list_systems) else None
     _cache_trail_systems_v2(systems)
     response = TrailDiscoveryResponseV2(
         mode=mode,
-        trails=[discovery_item_v2(system) for system in systems],
+        trails=[discovery_item_v2(system) for system in page],
+        map_candidates=[discovery_item_v2(system) for system in map_candidates[:120]],
+        next_cursor=next_cursor,
     )
     return trail_v2_public(response)
 

@@ -289,6 +289,94 @@ class TrailsV2Tests(unittest.TestCase):
         self.assertTrue(preview["preview_available"])
         self.assertNotIn("geometry", discovery["trails"][0])
 
+    def test_discovery_paginates_complete_routes_and_keeps_partial_map_candidates(self):
+        first = profile(
+            "trail:usfs:first", "First Loop",
+            [[-109.0, 38.0], [-109.01, 38.01], [-109.0, 38.0]],
+            source="usfs", source_label="US Forest Service", allowed_uses="Hiking",
+        )
+        second = profile(
+            "trail:nps:second", "Second Loop",
+            [[-109.02, 38.02], [-109.03, 38.03], [-109.02, 38.02]],
+            source="nps", source_label="National Park Service", allowed_uses="Hiking",
+        )
+        partial = profile(
+            "osm:way:99", "Connector Path",
+            [[-109.04, 38.04], [-109.05, 38.05]],
+            source="osm", source_label="OpenStreetMap",
+        )
+        server._trail_system_v2_cache.clear()
+        with patch.object(server, "_canonical_trail_geometry_revision_v2", new=AsyncMock(return_value="sha256:test")), patch.object(
+            server, "_canonical_trail_profiles_near_v2", return_value=[first, second, partial],
+        ), patch.object(server, "list_trail_profiles_near", return_value=[]):
+            first_page = asyncio.run(server.trails_discover_v2(lat=38.0, lng=-109.0, limit=1))
+            second_page = asyncio.run(server.trails_discover_v2(
+                lat=38.0, lng=-109.0, limit=1, cursor=first_page["next_cursor"],
+            ))
+
+        self.assertEqual(len(first_page["trails"]), 1)
+        self.assertEqual(len(second_page["trails"]), 1)
+        self.assertNotEqual(first_page["trails"][0]["id"], second_page["trails"][0]["id"])
+        self.assertEqual(first_page["map_candidates"][0]["geometry_status"], "partial")
+        self.assertNotIn(first_page["map_candidates"][0]["id"], {
+            first_page["trails"][0]["id"], second_page["trails"][0]["id"],
+        })
+
+    def test_along_trip_scope_uses_owned_route_bounds(self):
+        official = profile(
+            "trail:usfs:along", "Along Route Loop",
+            [[-109.0, 38.0], [-109.01, 38.01], [-109.0, 38.0]],
+            source="usfs", source_label="US Forest Service", allowed_uses="Hiking",
+        )
+        with patch.object(server, "get_trip_document_v2", return_value={
+            "trip_id": "trip-one",
+            "route_geometry": {"coords": [[-109.5, 38.5], [-109.0, 38.0]]},
+        }), patch.object(
+            server, "_canonical_trail_geometry_revision_v2", new=AsyncMock(return_value="sha256:test"),
+        ), patch.object(
+            server, "_canonical_trail_profiles_near_v2", return_value=[official],
+        ) as canonical, patch.object(server, "list_trail_profiles_near", return_value=[]):
+            response = asyncio.run(server.trails_discover_v2(
+                mode="along_trip", trip_id="trip-one", limit=20, user={"id": 7},
+            ))
+
+        self.assertEqual(response["mode"], "along_trip")
+        self.assertEqual(response["trails"][0]["name"], "Along Route Loop")
+        self.assertIsNotNone(canonical.call_args.kwargs["bbox"])
+
+    def test_query_excludes_unrelated_nearby_profiles_and_keeps_canonical_rank(self):
+        exact = profile(
+            "trail:nps:yellowstone", "Yellowstone Trail",
+            [[-110.0, 44.5], [-110.01, 44.51], [-110.0, 44.5]],
+            source="nps", source_label="National Park Service", allowed_uses="Hiking",
+        )
+        contextual = profile(
+            "trail:nps:geyser", "Geyser Basin Loop",
+            [[-110.2, 44.6], [-110.21, 44.61], [-110.2, 44.6]],
+            source="nps", source_label="National Park Service", allowed_uses="Hiking",
+        )
+        unrelated = profile(
+            "trail:local:other", "Island Coastal Walk",
+            [[-63.0, 46.0], [-63.01, 46.01], [-63.0, 46.0]],
+            source="parks", source_label="Parks", allowed_uses="Hiking",
+        )
+        server._trail_system_v2_cache.clear()
+        with patch.object(
+            server, "_canonical_trail_geometry_revision_v2", new=AsyncMock(return_value="sha256:test"),
+        ), patch.object(
+            server, "_trail_discovery_query_profiles_v2", return_value=[exact, contextual],
+        ), patch.object(
+            server, "list_trail_profiles_near", return_value=[unrelated],
+        ), patch.object(server, "_canonical_trail_profiles_near_v2") as nearby:
+            response = asyncio.run(server.trails_discover_v2(
+                lat=46.0, lng=-63.0, q="yellowstone", limit=20,
+            ))
+
+        self.assertEqual([item["name"] for item in response["trails"]], [
+            "Yellowstone Trail", "Geyser Basin Loop",
+        ])
+        nearby.assert_not_called()
+
     def test_public_payload_omits_missing_facts(self):
         point = profile("place:nps:trailhead:1", "Rim Trailhead", None, source="nps", source_label="National Park Service")
         payload = model_public(build_trail_systems_v2([point])[0])

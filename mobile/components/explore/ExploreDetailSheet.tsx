@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Image, Linking, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, type ImageResizeMode, type ImageStyle, type StyleProp, type TextStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import type { ExplorePlaceProfile, ExploreSourcePackItem, ExploreTrailCard } from '@/lib/api';
+import type { ExplorePlaceProfile, ExploreSourcePackItem, ExploreTrailCard, TrailDiscoveryItemV2 } from '@/lib/api';
 import { mono, useTheme } from '@/lib/design';
 import {
   boundedExploreImageCandidates,
@@ -23,6 +23,7 @@ import {
   type ExploreDetailModuleRegistrySnapshot,
 } from '@/lib/exploreDetailModuleRegistry';
 import { ExploreTrailArea } from './ExploreTrailArea';
+import { ExploreDestinationTrailList, type ExploreDestinationTrailState } from './ExploreDestinationTrailList';
 import { StaticMapboxPreview, type StaticMapboxPin } from './StaticMapboxPreview';
 import {
   getExploreCategoryColor,
@@ -91,6 +92,9 @@ type Props = {
   weatherSlot?: React.ReactNode;
   weather?: ExploreDetailWeather | null;
   trailStatusSlot?: React.ReactNode;
+  destinationTrails?: ExploreDestinationTrailState;
+  onDestinationTrail?: (trail: TrailDiscoveryItemV2) => void;
+  onRetryDestinationTrails?: () => void;
   onClose: () => void;
   onPlayAudio: () => void;
   onShowArea: () => void;
@@ -430,6 +434,9 @@ export function ExploreDetailSheet({
   weatherSlot,
   weather,
   trailStatusSlot,
+  destinationTrails,
+  onDestinationTrail,
+  onRetryDestinationTrails,
   onClose,
   onPlayAudio,
   onShowArea,
@@ -790,6 +797,7 @@ export function ExploreDetailSheet({
       onNearbyAction?.({ label: 'Weather', detail: 'Forecast', icon: 'partly-sunny-outline', tone: '#0ea5e9', action: 'weather' });
     }
     if (key === 'trails') {
+      onTabChange('trails');
       onNearbyAction?.({ label: 'Trails', detail: 'Trails', icon: 'trail-sign-outline', tone: '#ca8a04', action: 'trails' });
     }
   }
@@ -1252,11 +1260,21 @@ export function ExploreDetailSheet({
       );
     }
     if (key === 'trails') {
-      return (
+      const legacyTrailArea = (
         <>
           {trailStatusSlot}
           <ExploreTrailArea place={place} mediaUrl={mediaUrl} onTrailMap={onTrailMap} onTrailRoute={onTrailRoute} />
         </>
+      );
+      return (
+        destinationTrails && onDestinationTrail && onRetryDestinationTrails ? (
+          <ExploreDestinationTrailList
+            state={destinationTrails}
+            fallback={legacyTrailArea}
+            onSelectTrail={onDestinationTrail}
+            onRetry={onRetryDestinationTrails}
+          />
+        ) : legacyTrailArea
       );
     }
     if (key === 'amenities') {

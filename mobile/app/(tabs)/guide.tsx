@@ -40,6 +40,7 @@ import {
   mergeCuratedExplorePlaces,
   mergeExploreTrailChildIntoParent,
   type ExploreCategoryKey,
+  type ExploreDestinationTrailState,
   type ExploreDetailNavigationState,
   type ExploreDetailTab,
   type ExploreDetailWeather,
@@ -358,6 +359,11 @@ function shouldHydrateExploreTrailArea(place?: ExplorePlaceProfile | null) {
   ].join(' ').toLowerCase();
   return ['trails', 'trailheads', 'climb', 'peaks'].includes(key)
     || /\b(trail|hike|trek|trekking|glacier|karakoram|pakistan|k2|base camp|pass)\b/.test(text);
+}
+
+function destinationTrailRadiusMi(place: ExplorePlaceProfile) {
+  const text = [place.id, place.summary.title, place.summary.region, place.summary.state].join(' ');
+  return /pakistan|karakoram|k2|glacier/i.test(text) ? 80 : 45;
 }
 
 function shouldSearchBookableExperiences(query: string, category: ExploreCategoryKey) {
@@ -2278,6 +2284,10 @@ function GuideScreenContent() {
   const [exploreTrailAreasById, setExploreTrailAreasById] = useState<Record<string, ExplorePlaceProfile>>({});
   const [exploreTrailAreaLoadingId, setExploreTrailAreaLoadingId] = useState<string | null>(null);
   const [exploreTrailAreaErrors, setExploreTrailAreaErrors] = useState<Record<string, string>>({});
+  const [exploreDestinationTrailsById, setExploreDestinationTrailsById] = useState<Record<string, ExploreDestinationTrailState>>({});
+  const exploreDestinationTrailsRef = useRef(exploreDestinationTrailsById);
+  exploreDestinationTrailsRef.current = exploreDestinationTrailsById;
+  const exploreDestinationTrailGenerationRef = useRef<Record<string, number>>({});
   const savedExploreIds = useMemo(
     () => tripRepository.savedEntities.map(entity => entity.id),
     [tripRepository.savedEntities],
@@ -4207,10 +4217,73 @@ function GuideScreenContent() {
     }
   }, [applyHydratedTrailArea, exploreTrailAreaLoadingId, exploreTrailAreasById]);
 
+  const hydrateExploreDestinationTrails = useCallback(async (place: ExplorePlaceProfile, force = false) => {
+    const lat = Number(place.summary.lat);
+    const lng = Number(place.summary.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      setExploreDestinationTrailsById(current => ({
+        ...current,
+        [place.id]: { status: 'ready', trails: [], mapCandidates: [] },
+      }));
+      return;
+    }
+    const existing = exploreDestinationTrailsRef.current[place.id];
+    if (!force && existing?.status === 'ready') return;
+    const generation = (exploreDestinationTrailGenerationRef.current[place.id] ?? 0) + 1;
+    exploreDestinationTrailGenerationRef.current[place.id] = generation;
+    setExploreDestinationTrailsById(current => ({
+      ...current,
+      [place.id]: { status: 'loading', trails: [], mapCandidates: [] },
+    }));
+    try {
+      const response = await api.discoverTrailSystems({
+        mode: 'nearby',
+        lat,
+        lng,
+        radius: destinationTrailRadiusMi(place),
+        limit: 24,
+        sort: 'nearby',
+        catalog: 'verified',
+        destinationRef: place.id,
+      });
+      if (exploreDestinationTrailGenerationRef.current[place.id] !== generation) return;
+      const seen = new Set<string>();
+      const trails = (response.trails ?? []).filter(trail => {
+        if (trail.geometry_status !== 'complete' || seen.has(trail.id)) return false;
+        seen.add(trail.id);
+        return true;
+      });
+      setExploreDestinationTrailsById(current => ({
+        ...current,
+        [place.id]: {
+          status: 'ready',
+          trails,
+          mapCandidates: response.map_candidates ?? [],
+        },
+      }));
+    } catch {
+      if (exploreDestinationTrailGenerationRef.current[place.id] !== generation) return;
+      setExploreDestinationTrailsById(current => ({
+        ...current,
+        [place.id]: {
+          status: 'error',
+          trails: [],
+          mapCandidates: [],
+          error: 'Trails unavailable',
+        },
+      }));
+    }
+  }, []);
+
   useEffect(() => {
     if (!selectedExplore || !shouldHydrateExploreTrailArea(selectedExplore)) return;
     hydrateExploreTrailArea(selectedExplore).catch(() => {});
   }, [selectedExplore?.id]);
+
+  useEffect(() => {
+    if (!selectedExplore || profileReadMode !== 'trails') return;
+    void hydrateExploreDestinationTrails(selectedExplore);
+  }, [hydrateExploreDestinationTrails, profileReadMode, selectedExplore?.id]);
 
   async function generateGuide() {
     if (!activeTrip || guideLoading) return;
@@ -5533,6 +5606,11 @@ function GuideScreenContent() {
     router.push('/(tabs)/map');
   }
 
+  function openExploreDestinationTrail(item: TrailDiscoveryItemV2) {
+    suspendSelectedExploreForMap();
+    openTrailDiscoveryItem(item);
+  }
+
   async function requestTrailDiscoveryLocation() {
     const permission = await Location.requestForegroundPermissionsAsync();
     if (permission.status !== 'granted') return;
@@ -6562,6 +6640,13 @@ function GuideScreenContent() {
             campgroundsSlot={renderExploreCampgrounds(selectedExplore)}
             experiencesSlot={renderExploreExperiences(selectedExplore)}
             trailStatusSlot={renderExploreTrailStatus(selectedExplore)}
+            destinationTrails={exploreDestinationTrailsById[selectedExplore.id] ?? {
+              status: 'loading',
+              trails: [],
+              mapCandidates: [],
+            }}
+            onDestinationTrail={openExploreDestinationTrail}
+            onRetryDestinationTrails={() => { void hydrateExploreDestinationTrails(selectedExplore, true); }}
             weather={getExploreDetailWeather(selectedExplore)}
             weatherSlot={renderExploreWeather(selectedExplore)}
             relatedSlot={relatedExplore.length > 0 ? (

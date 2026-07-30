@@ -21,6 +21,7 @@ export { ExploreHomeControls, type ExploreSortMode } from './ExploreHomeControls
 export { ExploreModeTabs } from './ExploreModeTabs';
 export { ExplorePlaceCard } from './ExplorePlaceCard';
 export { ExploreTrailArea } from './ExploreTrailArea';
+export { ExploreDestinationTrailList, type ExploreDestinationTrailState } from './ExploreDestinationTrailList';
 export { ExploreTrailDiscoveryWorkspace } from './ExploreTrailDiscoveryWorkspace';
 export type { TrailDiscoveryMapRequestV2 } from './ExploreTrailDiscoveryWorkspace';
 export { TrailDiscoveryCard } from './TrailDiscoveryCard';

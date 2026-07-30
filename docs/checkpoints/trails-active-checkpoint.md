@@ -1,5 +1,7 @@
 # Trailhead Trails Active Checkpoint
 
+Active Explore and Community Trails packet: [`explore-trails-active-checkpoint.md`](./explore-trails-active-checkpoint.md). Read that checkpoint first when work concerns Explore trail discovery, private/unlisted routes, or moderated community routes.
+
 Last updated: 2026-07-28 02:08 CDT (America/Winnipeg)
 
 ## Resume protocol

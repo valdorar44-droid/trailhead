@@ -2,6 +2,8 @@
 
 Active Trails packet: [`trails-active-checkpoint.md`](./trails-active-checkpoint.md). Read that checkpoint first for Trails work; it owns packet scope, protected files, Figma references, and the forward-only resume point.
 
+Active Explore and Community Trails packet: [`explore-trails-active-checkpoint.md`](./explore-trails-active-checkpoint.md). Read it for the current E1-E5 scope and review boundaries.
+
 Last updated: 2026-07-23 09:51:01 CDT (America/Winnipeg)
 
 ## Resume protocol

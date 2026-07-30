@@ -521,3 +521,24 @@ Verify the staged file list before every commit.
 
 - Do not repeat T1-T5 Android, Offline acceptance, Layers/styles, Memory Gate, Yellowstone, NPS, Originals, Android Auto, Camp Guide, broad Search, screenshots, or production work.
 - Do not redesign Trail Peek/Full, Trailhead Full, Follow, recording, or Trail Builder in T6. Do not introduce a second map or random/orbit camera behavior.
+
+### T6 implementation ready for Android preview (2026-07-29T21:26:48-05:00)
+
+- Branch `feat/trailhead-1.0.10-overhaul`; exact functional HEAD `4b83da6c1e3880476ec157ebbf8d7a5e65aa5cb1`. Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, and all unrelated dirty files remained excluded.
+- Implemented approved Figma node `652:2020` on the single existing `NativeMap`: warm-white controls, orange route progress, Close, Back, play/pause, scrub, restart, compass/recenter, deterministic start-to-finish keyframe interpolation, and no narration or second renderer.
+- The preview now owns the camera without overwriting the retained browse viewport. Back restores the invoking trail sheet or builder presentation and scroll anchor; Close exits the trail workflow and returns to the previous browse camera.
+- Added the same restrained yellow finish diamond used by selected trails and Follow at the exact last coordinate of the immutable preview manifest. The preview hides unrelated map sources and chrome while active, but it does not change underlying layer preferences or reload the map style.
+- Focused verification passed: Trail Preview `5/5`, complete Trail Follow suite, Trails V2 `6/6`, camera ownership `6/6`, full mobile TypeScript, copy audit across `167` files, privacy controls, native drift, and whitespace. Native-drift warnings were limited to external release secrets unavailable in the local shell; no native/config drift was detected.
+- Android is connected as Samsung `SM-A326U1`, serial `RFCR408DA9B`, with Trailhead `1.0.10` build `69`. Current installed preview remains source `06596fef7fdabf2b29e3f6e0a46227dc4a363a65`, runtime `native-1.0.10-android.7`, update `019fb0ba-a4e3-716d-b0cc-7e31bafbf06c` until the guarded T6 preview is published and applied.
+- Task-owned Metro, Gradle, Maestro, Expo/EAS publisher, test, mock-location, and emulator processes: none. The shared ADB server and Codex/MCP Node processes remain active.
+
+#### Exact next action
+
+1. Publish one guarded preview from immutable source `4b83da6c1e3880476ec157ebbf8d7a5e65aa5cb1`; the publisher may create paired update groups, but Android is installed and accepted first.
+2. On Samsung, run only Short Point -> Preview route: exact route and yellow endpoint, deterministic motion, play/pause, scrub, restart, recenter, gesture pause, Back restoration, builder Back restoration, Close teardown, and five open/close cycles.
+3. If Android passes, record evidence and stop for acceptance before the exact-SHA iOS delta. Do not publish production.
+
+#### Do not repeat after this checkpoint
+
+- Do not repeat T1-T5 Android, Offline packs, Layers/styles, Memory Gate, Yellowstone, NPS, Originals, Android Auto, Camp Guide, broad Search, or screenshots.
+- Do not republish an unchanged T6 candidate, create another trail renderer, replace exact route geometry, or add narration/random orbit behavior.

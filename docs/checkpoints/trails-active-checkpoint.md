@@ -637,3 +637,23 @@ Verify the staged file list before every commit.
 
 - Do not repeat T1-T6 discovery, sheets, Builder, GPX, Offline packs, Follow, recording, flyover, camera, Back, Close, endpoint, or metric work without new evidence.
 - Do not repeat Layers/styles, Memory Gate, Yellowstone, NPS, Originals, Android Auto, Camp Guide, broad Search, store screenshots, or production work as part of this closed packet.
+
+### Trail Builder visual-polish design checkpoint (2026-07-30T03:28:03-05:00)
+
+- Branch `feat/trailhead-1.0.10-overhaul`; exact baseline HEAD `2747270a3b4dc1f58cd9322417b9527bd7687caa`. Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; `.cursor/`, `dashboard/explore_serving_index_v2.json`, and `docs/app-store-copy.md` remain excluded.
+- New user evidence reopens only Trail Builder presentation: the shipped control matrix is visually inconsistent with the accepted Trailhead sheets, relies too heavily on monospace treatment, gives every control equal weight, and exposes clipped/internal-looking state copy. No T1-T6 behavior, geometry, Offline, Follow, recording, or flyover regression was reported.
+- Figma section `27 · Trail Builder Polish — Review 01`, node `794:2477`, was added to `FJUcMWAfsNyjsguCEp2dBe`. It contains `Add points`, `Routing options`, `Route ready`, and `Draw a line` states derived from the existing Trailhead V2 tokens, local sheet/action/filter/metric components, and the existing main-map route treatment.
+- Proposed contract: activities scroll horizontally; one `Routing` row preserves Trail, Road, 4WD, Hybrid, and Straight line; sheet content can scroll while the primary action remains anchored; contextual controls remain hidden until useful; route review shows metrics, Edit points, Save, 3D preview, overflow, and Start Follow; Draw mode exposes Undo, Clear, and Review line. No capability is removed.
+- Figma validation found only Inter and Barlow Condensed in the new sheet content, no monospace text, no text below 14 px in the inspected sheets, no overflowing sheet children, and Android action targets at 48 dp after the activity-chip correction.
+- Review evidence: `C:\Users\User\Documents\Codex\evidence\trailhead\trail-builder-polish\figma-review-01.png`, SHA-256 `512AF9F1F5F7269A270C62F4FF527B43D3E3C532A1B3BD1EC8F09C9CCBE22954`.
+- No application code, native configuration, build, OTA, backend, or production state changed. No task-owned Metro, Gradle, Maestro, Expo/EAS, or test process remains.
+
+#### Exact next action
+
+1. Obtain user approval for Figma node `794:2477`.
+2. After approval, implement only the Trail Builder presentation delta, preserve all current T3-T6 behavior, publish one Android preview OTA, and physically test Draw a line plus the near/far Start Follow handoff. Run only a short iOS parity check after Android acceptance.
+
+#### Do not repeat after this checkpoint
+
+- Do not repeat completed T1-T6 discovery, sheets, Offline packs, recording, flyover, or broad platform crawls. Test only the Builder states changed by this approved visual packet.
+- Do not remove GPX, known-trail, tap-to-route, free draw, activity modes, snapping modes, undo/redo, route-shape tools, Save, 3D preview, Follow, compass, Back/Close restoration, or the one-map architecture.

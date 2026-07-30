@@ -4,7 +4,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { trailFollowCameraAction, transitionTrailFollowCamera } from '../trailFollowCameraOwnership';
 import { trailRoutePlanMatchesOwner } from '../trailRoutePlanOwnership';
-import { shouldNotifyTrackingModeBreakaway } from '../nativeMapCameraEvents';
+import {
+  shouldNotifyRegionGestureBreakaway,
+  shouldNotifyTrackingModeBreakaway,
+} from '../nativeMapCameraEvents';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const map = fs.readFileSync(path.resolve(here, '../../app/(tabs)/map.tsx'), 'utf8');
@@ -27,7 +30,7 @@ assert.match(map, /const presentTrailFollowHandoffContext = useCallback/);
 assert.match(map, /nativeMapRef\.current\?\.highlightResolvedTrail\(geometry/);
 assert.match(map, /if \(handoff\?\.phase === 'handoff'\)[\s\S]*presentTrailFollowHandoffContext\(handoff\)/);
 assert.match(map, /presentTrailFollowRoute\(trailFollowSession, trailFollowCameraMode === 'route_overview'\)/);
-assert.match(map, /onOpenRoute=\{\(\) => \{[\s\S]*transitionTrailFollowCamera\(trailFollowCameraModeRef\.current, 'route_button'\)/);
+assert.match(map, /onOpenRoute=\{\(\) => \{[\s\S]*const previous = trailFollowCameraModeRef\.current;[\s\S]*transitionTrailFollowCamera\(previous, 'route_button'\)/);
 assert.match(map, /navCameraFollowStateRef\.current = false;\s*setNavCameraFollow\(false\)/);
 assert.match(map, /cameraMode=\{trailFollowCameraMode\}/);
 assert.match(map, /trailFollowActive=\{trailFollowSession\?\.phase === 'follow'/);
@@ -59,8 +62,13 @@ assert.doesNotMatch(repository, /fetch\(|api\.|analytics|telemetry/i);
 assert.match(config, /isAndroidBackgroundLocationEnabled: false/);
 assert.match(config, /active trail recording can continue/);
 assert.match(nativeMap, /shouldNotifyTrackingModeBreakaway\(\{/);
+assert.equal((nativeMap.match(/shouldNotifyRegionGestureBreakaway\(\{/g) ?? []).length, 2);
 assert.match(nativeMap, /camera:tracking-programmatic/);
 assert.match(nativeMap, /camera:tracking-breakaway-ignored/);
+assert.match(nativeMap, /camera:region-breakaway-ignored/);
+assert.match(nativeMap, /const userDriven = !programmatic && \(/);
+assert.match(map, /kind: 'trail-camera:parent-gesture'/);
+assert.match(map, /kind: 'trail-camera:route-button'/);
 
 assert.equal(transitionTrailFollowCamera('follow', 'route_button'), 'route_overview');
 assert.equal(transitionTrailFollowCamera('route_overview', 'gesture'), 'free');
@@ -71,6 +79,14 @@ assert.equal(
     followUserLocation: false,
     nowMs: 1_200,
     userGestureUntilMs: 0,
+    programmaticUntilMs: 2_000,
+  }),
+  false,
+);
+assert.equal(
+  shouldNotifyRegionGestureBreakaway({
+    nativeUserEvent: true,
+    nowMs: 1_200,
     programmaticUntilMs: 2_000,
   }),
   false,

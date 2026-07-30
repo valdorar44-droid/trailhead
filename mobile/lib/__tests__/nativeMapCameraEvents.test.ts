@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import { shouldNotifyTrackingModeBreakaway } from '../nativeMapCameraEvents';
+import {
+  shouldNotifyRegionGestureBreakaway,
+  shouldNotifyTrackingModeBreakaway,
+} from '../nativeMapCameraEvents';
 
 assert.equal(
   shouldNotifyTrackingModeBreakaway({
@@ -43,6 +46,36 @@ assert.equal(
   }),
   false,
   'an old touch cannot break away a later tracking transition',
+);
+
+assert.equal(
+  shouldNotifyRegionGestureBreakaway({
+    nativeUserEvent: true,
+    nowMs: 1_200,
+    programmaticUntilMs: 2_000,
+  }),
+  false,
+  'a Recenter region event cannot release ownership even if RNMapbox carries a user flag',
+);
+
+assert.equal(
+  shouldNotifyRegionGestureBreakaway({
+    nativeUserEvent: true,
+    nowMs: 2_100,
+    programmaticUntilMs: 0,
+  }),
+  true,
+  'a real map gesture remains eligible after touch clears the programmatic interval',
+);
+
+assert.equal(
+  shouldNotifyRegionGestureBreakaway({
+    nativeUserEvent: false,
+    nowMs: 2_100,
+    programmaticUntilMs: 0,
+  }),
+  false,
+  'an ordinary camera event never becomes a gesture merely because time passed',
 );
 
 console.log('native map camera event tests passed');

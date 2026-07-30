@@ -25876,7 +25876,13 @@ function MapScreen() {
             }
             if (trailPreviewOpen) setTrailPreviewPauseSignal(v => v + 1);
             if (trailFollowSessionRef.current && trailFollowSessionRef.current.phase !== 'handoff') {
-              const next = transitionTrailFollowCamera(trailFollowCameraModeRef.current, 'gesture');
+              const previous = trailFollowCameraModeRef.current;
+              const next = transitionTrailFollowCamera(previous, 'gesture');
+              recordAndroidMapDebugEvent({
+                at: now,
+                kind: 'trail-camera:parent-gesture',
+                details: { previous, next },
+              });
               trailFollowCameraModeRef.current = next;
               setTrailFollowCameraMode(next);
             }
@@ -26215,7 +26221,13 @@ function MapScreen() {
           onOpenRoute={() => {
             const session = trailFollowSessionRef.current;
             if (!session) return;
-            const next = transitionTrailFollowCamera(trailFollowCameraModeRef.current, 'route_button');
+            const previous = trailFollowCameraModeRef.current;
+            const next = transitionTrailFollowCamera(previous, 'route_button');
+            recordAndroidMapDebugEvent({
+              at: Date.now(),
+              kind: 'trail-camera:route-button',
+              details: { previous, next },
+            });
             trailFollowCameraModeRef.current = next;
             setTrailFollowCameraMode(next);
             if (next === 'follow') {

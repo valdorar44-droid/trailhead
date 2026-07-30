@@ -25,7 +25,10 @@ import {
   mapCameraOwnershipKey,
   type MapCameraOwnership,
 } from '@/lib/mapCameraOwnership';
-import { shouldNotifyTrackingModeBreakaway } from '@/lib/nativeMapCameraEvents';
+import {
+  shouldNotifyRegionGestureBreakaway,
+  shouldNotifyTrackingModeBreakaway,
+} from '@/lib/nativeMapCameraEvents';
 
 import { buildMapStyle, mapboxStylePlacementFamily, MapMode } from './mapStyle';
 import type { ContourSourceMode, PremiumMapStyle, TrailSourceMode } from './mapStyle';
@@ -2957,8 +2960,23 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   }, [emitDebugEvent, isExtremeMapbox, isMapboxRenderer, onError]);
 
   const handleRegionIsChanging = useCallback((feat: any) => {
-    if (!visualWorkActiveRef.current || !isUserCameraEvent(feat)) return;
+    if (!visualWorkActiveRef.current) return;
     const props = feat?.properties ?? {};
+    const now = Date.now();
+    const nativeUserEvent = isUserCameraEvent(feat);
+    if (!shouldNotifyRegionGestureBreakaway({
+      nativeUserEvent,
+      nowMs: now,
+      programmaticUntilMs: programmaticCameraUntilRef.current,
+    })) {
+      if (nativeUserEvent) {
+        emitDebugEvent('camera:region-breakaway-ignored', {
+          phase: 'is-changing',
+          programmatic: now < programmaticCameraUntilRef.current,
+        });
+      }
+      return;
+    }
     markUserCameraGesture('region-is-changing', {
       zoom: props.zoomLevel ?? null,
       center: Array.isArray(feat?.geometry?.coordinates) ? feat.geometry.coordinates : null,
@@ -3176,8 +3194,12 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       { n, s, e, w },
       visualGeneration,
     )) return;
-    const userDriven = isUserCameraEvent(feat) || Date.now() < userCameraGestureUntilRef.current;
-    const programmatic = Date.now() < programmaticCameraUntilRef.current;
+    const now = Date.now();
+    const programmatic = now < programmaticCameraUntilRef.current;
+    const userDriven = !programmatic && (
+      isUserCameraEvent(feat)
+      || now < userCameraGestureUntilRef.current
+    );
     emitDebugEvent('region:did-change', {
       center: { lat: (n + s) / 2, lng: (e + w) / 2 },
       zoom: zoomLevel || 10,
@@ -3402,21 +3424,35 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           if (visualWorkActiveRef.current) markUserCameraGesture('touch-start', {}, false);
         }}
         onRegionWillChange={(feature: any) => {
-          if (visualWorkActiveRef.current && isUserCameraEvent(feature)) {
-            const props = feature?.properties ?? {};
-            markUserCameraGesture('region-will-change', {
-              zoom: props.zoomLevel ?? null,
-              center: Array.isArray(feature?.geometry?.coordinates) ? feature.geometry.coordinates : null,
-              isUserInteraction: !!props.isUserInteraction,
-              isAnimatingFromUserInteraction: !!props.isAnimatingFromUserInteraction,
-            });
-            emitDebugEvent('region:will-change:user', {
-              zoom: props.zoomLevel ?? null,
-              center: Array.isArray(feature?.geometry?.coordinates) ? feature.geometry.coordinates : null,
-              isUserInteraction: !!props.isUserInteraction,
-              isAnimatingFromUserInteraction: !!props.isAnimatingFromUserInteraction,
-            });
+          if (!visualWorkActiveRef.current) return;
+          const props = feature?.properties ?? {};
+          const now = Date.now();
+          const nativeUserEvent = isUserCameraEvent(feature);
+          if (!shouldNotifyRegionGestureBreakaway({
+            nativeUserEvent,
+            nowMs: now,
+            programmaticUntilMs: programmaticCameraUntilRef.current,
+          })) {
+            if (nativeUserEvent) {
+              emitDebugEvent('camera:region-breakaway-ignored', {
+                phase: 'will-change',
+                programmatic: now < programmaticCameraUntilRef.current,
+              });
+            }
+            return;
           }
+          markUserCameraGesture('region-will-change', {
+            zoom: props.zoomLevel ?? null,
+            center: Array.isArray(feature?.geometry?.coordinates) ? feature.geometry.coordinates : null,
+            isUserInteraction: !!props.isUserInteraction,
+            isAnimatingFromUserInteraction: !!props.isAnimatingFromUserInteraction,
+          });
+          emitDebugEvent('region:will-change:user', {
+            zoom: props.zoomLevel ?? null,
+            center: Array.isArray(feature?.geometry?.coordinates) ? feature.geometry.coordinates : null,
+            isUserInteraction: !!props.isUserInteraction,
+            isAnimatingFromUserInteraction: !!props.isAnimatingFromUserInteraction,
+          });
         }}
         onRegionIsChanging={handleRegionIsChanging}
         onRegionDidChange={handleRegionChange}

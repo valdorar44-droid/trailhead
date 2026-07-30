@@ -377,6 +377,25 @@ class TrailsV2Tests(unittest.TestCase):
         ])
         nearby.assert_not_called()
 
+    def test_activity_and_route_shape_filters_normalize_source_labels(self):
+        hiking = profile(
+            "trail:nps:hiking", "Source Label Loop",
+            [[-110.0, 44.5], [-110.01, 44.51], [-110.0, 44.5]],
+            source="nps", source_label="National Park Service", allowed_uses="Hiking trail",
+        )
+        hiking["route_type"] = "Out-and-back"
+        server._trail_system_v2_cache.clear()
+        with patch.object(
+            server, "_canonical_trail_geometry_revision_v2", new=AsyncMock(return_value="sha256:test"),
+        ), patch.object(
+            server, "_canonical_trail_profiles_near_v2", return_value=[hiking],
+        ), patch.object(server, "list_trail_profiles_near", return_value=[]):
+            response = asyncio.run(server.trails_discover_v2(
+                lat=44.5, lng=-110.0, activity="Hiking", route_shape="Out and back", limit=20,
+            ))
+
+        self.assertEqual([item["name"] for item in response["trails"]], ["Source Label Loop"])
+
     def test_public_payload_omits_missing_facts(self):
         point = profile("place:nps:trailhead:1", "Rim Trailhead", None, source="nps", source_label="National Park Service")
         payload = model_public(build_trail_systems_v2([point])[0])

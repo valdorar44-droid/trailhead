@@ -23485,11 +23485,28 @@ def _trail_discovery_profile_matches_query_v2(profile: dict, query: str) -> bool
     return all(token in searchable for token in tokens)
 
 
+def _trail_discovery_filter_key_v2(value: object) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+    if not normalized:
+        return ""
+    if any(token in normalized for token in ("hiking", "hike", "foot trail", "backpack")):
+        return "hiking"
+    if any(token in normalized for token in ("biking", "bike", "bicycle", "cycling", "mountain bike", "mtb")):
+        return "biking"
+    if any(token in normalized for token in ("horseback", "horse", "equestrian")):
+        return "horseback"
+    if any(token in normalized for token in ("off highway", "off road vehicle", "ohv", "atv", "utv")):
+        return "ohv"
+    if any(token in normalized for token in ("4wd", "4x4", "four wheel drive")):
+        return "4wd"
+    return normalized
+
+
 def _trail_discovery_filter_values_v2(raw: str | None) -> set[str]:
     return {
-        re.sub(r"\s+", " ", value).strip().lower()
+        key
         for value in str(raw or "").split(",")
-        if re.sub(r"\s+", " ", value).strip()
+        if (key := _trail_discovery_filter_key_v2(value))
     }
 
 
@@ -23509,15 +23526,21 @@ def _trail_discovery_matches_v2(
 ) -> bool:
     if catalog != "all" and system.catalog != catalog:
         return False
-    item_activities = {value.lower() for value in system.activities}
-    item_uses = {value.lower() for value in system.permitted_uses}
+    item_activities = {
+        key for value in system.activities
+        if (key := _trail_discovery_filter_key_v2(value))
+    }
+    item_uses = {
+        key for value in system.permitted_uses
+        if (key := _trail_discovery_filter_key_v2(value))
+    }
     if activities and not activities.intersection(item_activities | item_uses):
         return False
     if permitted_uses and not permitted_uses.intersection(item_uses):
         return False
-    if difficulties and str(system.facts.difficulty or "").lower() not in difficulties:
+    if difficulties and _trail_discovery_filter_key_v2(system.facts.difficulty) not in difficulties:
         return False
-    if route_shapes and str(system.facts.route_shape or "").lower() not in route_shapes:
+    if route_shapes and _trail_discovery_filter_key_v2(system.facts.route_shape) not in route_shapes:
         return False
     distance = system.facts.distance_mi
     elevation = system.facts.elevation_gain_ft

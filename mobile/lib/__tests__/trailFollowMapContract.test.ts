@@ -4,12 +4,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { trailFollowCameraAction, transitionTrailFollowCamera } from '../trailFollowCameraOwnership';
 import { trailRoutePlanMatchesOwner } from '../trailRoutePlanOwnership';
+import { shouldNotifyTrackingModeBreakaway } from '../nativeMapCameraEvents';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const map = fs.readFileSync(path.resolve(here, '../../app/(tabs)/map.tsx'), 'utf8');
 const background = fs.readFileSync(path.resolve(here, '../backgroundTasks.ts'), 'utf8');
 const repository = fs.readFileSync(path.resolve(here, '../trailRecordingRepository.ts'), 'utf8');
 const config = fs.readFileSync(path.resolve(here, '../../app.config.js'), 'utf8');
+const nativeMap = fs.readFileSync(path.resolve(here, '../../components/NativeMap/index.tsx'), 'utf8');
 
 assert.match(map, /resolveTrailFollowStart\(\{/);
 assert.match(map, /sourceBackedTrailheads\(trail\)/);
@@ -56,11 +58,23 @@ assert.doesNotMatch(repository, /fetch\(|api\.|analytics|telemetry/i);
 
 assert.match(config, /isAndroidBackgroundLocationEnabled: false/);
 assert.match(config, /active trail recording can continue/);
+assert.match(nativeMap, /shouldNotifyTrackingModeBreakaway\(\{/);
+assert.match(nativeMap, /camera:tracking-programmatic/);
+assert.match(nativeMap, /camera:tracking-breakaway-ignored/);
 
 assert.equal(transitionTrailFollowCamera('follow', 'route_button'), 'route_overview');
 assert.equal(transitionTrailFollowCamera('route_overview', 'gesture'), 'free');
 assert.equal(transitionTrailFollowCamera('free', 'route_button'), 'follow');
 assert.deepEqual(trailFollowCameraAction('route_overview'), { label: 'Recenter', icon: 'locate-outline' });
+assert.equal(
+  shouldNotifyTrackingModeBreakaway({
+    followUserLocation: false,
+    nowMs: 1_200,
+    userGestureUntilMs: 0,
+    programmaticUntilMs: 2_000,
+  }),
+  false,
+);
 assert.equal(
   trailRoutePlanMatchesOwner(
     { trailId: 'trail:short-point', geometryRevision: 'sha256:short' },

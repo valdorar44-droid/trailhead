@@ -25,6 +25,7 @@ import {
   mapCameraOwnershipKey,
   type MapCameraOwnership,
 } from '@/lib/mapCameraOwnership';
+import { shouldNotifyTrackingModeBreakaway } from '@/lib/nativeMapCameraEvents';
 
 import { buildMapStyle, mapboxStylePlacementFamily, MapMode } from './mapStyle';
 import type { ContourSourceMode, PremiumMapStyle, TrailSourceMode } from './mapStyle';
@@ -1312,7 +1313,18 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
 
   useEffect(() => {
     if (!navMode || navCameraFollow) navGestureBreakawayRef.current = false;
-  }, [navCameraFollow, navMode]);
+    if (navMode && navCameraFollow) {
+      const now = Date.now();
+      // Recenter is an explicit camera command. Clear any stale touch window so
+      // RNMapbox's tracking transition cannot immediately look like a gesture.
+      userCameraGestureUntilRef.current = 0;
+      programmaticCameraUntilRef.current = now + NAV_GESTURE_HOLD_MS;
+      emitDebugEvent('camera:tracking-programmatic', {
+        followUserLocation: true,
+        holdMs: NAV_GESTURE_HOLD_MS,
+      });
+    }
+  }, [emitDebugEvent, navCameraFollow, navMode]);
 
   const persistRecentViewport = useCallback((lat: number, lng: number, zoomLevel: number, pitch: number) => {
     if (
@@ -3461,12 +3473,26 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         onUserTrackingModeChange={(event: any) => {
           if (!visualWorkActiveRef.current) return;
           const payload = event?.nativeEvent?.payload ?? {};
-          if (payload?.followUserLocation === false) {
-            markUserCameraGesture('tracking-mode-change', {
-              followUserLocation: false,
+          if (payload?.followUserLocation !== false) return;
+          const now = Date.now();
+          const shouldBreakAway = shouldNotifyTrackingModeBreakaway({
+            followUserLocation: false,
+            nowMs: now,
+            userGestureUntilMs: userCameraGestureUntilRef.current,
+            programmaticUntilMs: programmaticCameraUntilRef.current,
+          });
+          if (!shouldBreakAway) {
+            emitDebugEvent('camera:tracking-breakaway-ignored', {
               reason: payload?.reason ?? null,
+              programmatic: now < programmaticCameraUntilRef.current,
+              recentTouch: now < userCameraGestureUntilRef.current,
             });
+            return;
           }
+          markUserCameraGesture('tracking-mode-change', {
+            followUserLocation: false,
+            reason: payload?.reason ?? null,
+          });
         }}
       />
 

@@ -657,3 +657,21 @@ Verify the staged file list before every commit.
 
 - Do not repeat completed T1-T6 discovery, sheets, Offline packs, recording, flyover, or broad platform crawls. Test only the Builder states changed by this approved visual packet.
 - Do not remove GPX, known-trail, tap-to-route, free draw, activity modes, snapping modes, undo/redo, route-shape tools, Save, 3D preview, Follow, compass, Back/Close restoration, or the one-map architecture.
+
+### Trail Builder visual-polish approval (2026-07-30T03:34:46-05:00)
+
+- The user approved Figma node `794:2477` as the implementation source for the focused Trail Builder presentation pass.
+- Routing-mode copy was normalized from `Follow trails` to `Trail` in both the Add points and Routing options states. `Start Follow` remains the distinct action that begins on-trail guidance.
+- Updated Figma text nodes: `I796:2519;551:1072` and `I797:2990;551:1072`. The validated section still uses the same Trailhead components, typography, spacing, 48 dp targets, and preserved capability set.
+- No application code, native configuration, build, OTA, backend, or production state changed. Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; unrelated worktree changes remain excluded.
+
+#### Exact next action
+
+1. Implement only the approved Trail Builder presentation delta on Android while preserving every current T3-T6 behavior.
+2. Run focused tests for tap-to-route, routing modes, Draw a line, route review, near/far Start Follow, and state restoration; publish one Android preview OTA only after those checks pass.
+3. After Android acceptance, apply the identical source to iOS and run the short parity check.
+
+#### Do not repeat after this checkpoint
+
+- Do not reopen the approved routing label or redesign the four approved states without new user feedback.
+- Do not repeat completed Trails discovery, sheet, Offline, recording, or flyover crawls; test only behavior directly touched by the Builder presentation implementation.

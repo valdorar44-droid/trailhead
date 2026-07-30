@@ -96,6 +96,9 @@ test('Trail Builder uses the shared T6 player and restores the builder through B
   assert.match(mapSource, /setTrailPinCaptureMode\(false\);\s*setTrailTraceMode\(false\);\s*syncTrailCaptureModeToWeb\(false\)/);
   assert.match(mapSource, /trailTraceMode && !trailPreviewOpen && !navMode/);
   assert.match(mapSource, /trailPinCaptureMode && !trailPreviewOpen && !navMode/);
+  assert.equal([...mapSource.matchAll(/trailId: feature\.id/g)].length, 2);
+  assert.match(mapSource, /geometryRevision: localTrailPlanGeometryRevision\(coords\)/);
+  assert.match(mapSource, /geometryRevision: localTrailPlanGeometryRevision\(clean\)/);
 });
 
 test('the preview route keeps its yellow finish diamond on the native map', () => {

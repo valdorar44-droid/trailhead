@@ -1742,6 +1742,21 @@ function trailCoordsDistanceM(coords: [number, number][]) {
   }, 0);
 }
 
+function localTrailPlanGeometryRevision(coords: [number, number][]) {
+  if (coords.length < 2) return null;
+  const first = coords[0];
+  const last = coords[coords.length - 1];
+  return [
+    'local',
+    coords.length,
+    Math.round(trailCoordsDistanceM(coords)),
+    first[0].toFixed(5),
+    first[1].toFixed(5),
+    last[0].toFixed(5),
+    last[1].toFixed(5),
+  ].join(':');
+}
+
 function trailRoutePlanFromSystem(
   trail: TrailFeature,
   system: TrailSystemV2,
@@ -24044,6 +24059,8 @@ function MapScreen() {
       };
       const plan: TrailRoutePlan = withTrailElevation({
         id: 'capture',
+        trailId: feature.id,
+        geometryRevision: localTrailPlanGeometryRevision(coords),
         title: review.name,
         subtitle: `${fmtTrailRouteDistance(distanceM)} · GPX route`,
         icon: 'cloud-upload-outline',
@@ -24092,6 +24109,7 @@ function MapScreen() {
     const distanceM = trailCoordsDistanceM(coords);
     const next: TrailRoutePlan = withTrailElevation({
       ...current,
+      geometryRevision: localTrailPlanGeometryRevision(coords),
       title: kind === 'reverse' ? 'Reversed route' : kind === 'out_back' ? 'Out and back' : 'Closed loop',
       subtitle: `${fmtTrailRouteDistance(distanceM)} · ${trailBuilderActivityLabel(trailBuilderActivity)}`,
       coords,
@@ -24464,6 +24482,8 @@ function MapScreen() {
       };
       const plan: TrailRoutePlan = withTrailElevation({
         id: 'capture',
+        trailId: feature.id,
+        geometryRevision: localTrailPlanGeometryRevision(clean),
         title: 'Pinned trail route',
         subtitle: `${fmtTrailRouteDistance(distanceM)} · ${pins.length} points · ${fmtTrailElevation(estimateTrailElevation(clean))}`,
         icon: 'git-branch-outline',

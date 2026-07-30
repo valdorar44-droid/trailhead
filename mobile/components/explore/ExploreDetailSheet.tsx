@@ -32,7 +32,7 @@ import {
   getExploreDisplayRegion,
   getExploreDisplayTitle,
   getExploreIcon,
-  getExploreSourceRows,
+  getExploreSourcePanelModel,
   getExploreTrustBadge,
   isExploreLocationMismatchCopy,
   cleanSourcePublisherLabel,
@@ -1586,16 +1586,19 @@ export function ExploreDetailSheet({
 
 function SourceFreshnessPanel({ place }: { place: ExplorePlaceProfile }) {
   const C = useTheme();
-  const rows = getExploreSourceRows(place);
+  const { body, rows } = getExploreSourcePanelModel(place);
+  if (!body && rows.length === 0) return null;
   return (
     <View style={[styles.sourcePanel, { borderColor: C.border, backgroundColor: C.s1 }]}>
       <View style={styles.sourcePanelTop}>
-        <View style={[styles.sourceIcon, { backgroundColor: '#2563eb18' }]}>
-          <Ionicons name="shield-checkmark-outline" size={23} color="#2563eb" />
+        <View style={[styles.sourceIcon, { backgroundColor: '#984F2F18' }]}>
+          <Ionicons name="document-text-outline" size={23} color="#984F2F" />
         </View>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={[styles.sourcePanelTitle, { color: C.text }]}>Before You Go</Text>
-          <ExpandableText value={sourceBodyForPlace(place)} textStyle={[styles.sourcePanelBody, { color: C.text2 }]} previewChars={230} />
+          <Text style={[styles.sourcePanelTitle, { color: C.text }]}>Sources</Text>
+          {!!body && (
+            <ExpandableText value={body} textStyle={[styles.sourcePanelBody, { color: C.text2 }]} previewChars={230} />
+          )}
         </View>
       </View>
       <View style={styles.sourceRows}>
@@ -1686,21 +1689,6 @@ function SourcePack({
       })}
     </View>
   );
-}
-
-function sourceBodyForPlace(place: ExplorePlaceProfile) {
-  const raw = String(place.source_pack?.source_note || '').trim();
-  const fallback = String(place.attribution || '').trim();
-  const body = raw || fallback;
-  const officialSource = body.match(/^official\s+(.+?)\s+data\.?$/i);
-  if (officialSource?.[1]) return cleanSourcePublisherLabel(officialSource[1]);
-  if (/^(trailhead|recreation\.gov|ridb|national park service|nps|us forest service|usfs|bureau of land management|blm)$/i.test(body)) {
-    return 'Check current access, fees, closures, and rules before you go.';
-  }
-  if (/wiki|source pack|open map|openstreetmap|generated from|open the full card|open image references|verify media license/i.test(body)) {
-    return 'Check current access, fees, closures, and rules before you go.';
-  }
-  return body || 'Check current access before you go.';
 }
 
 function detailKickerForPlace(place: ExplorePlaceProfile) {

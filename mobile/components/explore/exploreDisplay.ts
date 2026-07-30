@@ -54,6 +54,11 @@ export type ExploreSourceRow = {
   tone: string;
 };
 
+export type ExploreSourcePanelModel = {
+  body: string;
+  rows: ExploreSourceRow[];
+};
+
 export type ExploreDisplayContext = {
   campCount?: number;
   relatedCount?: number;
@@ -604,40 +609,79 @@ export function getExplorePrimarySourceLabel(place: ExplorePlaceProfile) {
 
 export function getExploreSourceRows(place: ExplorePlaceProfile): ExploreSourceRow[] {
   const v3 = readV3(place);
+  const sources = Array.isArray(v3.sources) ? v3.sources : [];
   const facts = place.facts ?? {};
-  const sourceBadge = getExploreSourceBadge(place);
+  const source = cleanSourcePublisherLabel(
+    getExplorePrimarySourceLabel(place)
+    || v3.source_quality?.primary_name
+    || v3.source_quality?.primary_provider
+    || place.source_pack?.primary
+    || sources[0]?.publisher
+    || sources[0]?.name
+    || sources[0]?.title
+    || place.summary.source_title
+    || place.attribution,
+  );
   const season = getExploreBestSeason(place);
-  const confidence = sourceConfidenceFromRecord(v3);
-  const officialUrl = place.source_pack?.official_url || facts.official_url || place.summary.source_url || facts.source_url;
-  const rows: ExploreSourceRow[] = [
-    {
-      label: 'Access',
-      value: /current access/i.test(sourceBadge) ? 'Current access' : 'Check current access',
-      icon: /current access/i.test(sourceBadge) ? 'shield-checkmark-outline' : 'map-outline',
-      tone: /current access/i.test(sourceBadge) ? '#16a34a' : '#2563eb',
-    },
-    {
+  const checkedAt = [
+    facts.last_updated,
+    place.provenance?.primary && typeof place.provenance.primary === 'object'
+      ? place.provenance.primary.checked_at
+      : undefined,
+    ...(place.provenance?.sources ?? []).map(item => item.checked_at),
+  ].filter((value): value is number => Number.isFinite(value));
+  const latestCheckedAt = checkedAt.length ? Math.max(...checkedAt) : undefined;
+  const rows: ExploreSourceRow[] = [];
+
+  if (source && !isOpenKnowledgePublisher(source) && !/openstreetmap|open map|mapbox|geoapify|nominatim/i.test(source)) {
+    rows.push({
+      label: 'Source',
+      value: source,
+      icon: 'document-text-outline',
+      tone: '#984F2F',
+    });
+  }
+  if (latestCheckedAt != null) {
+    const timestampMs = latestCheckedAt > 10_000_000_000 ? latestCheckedAt : latestCheckedAt * 1000;
+    const checkedDate = new Date(timestampMs);
+    if (Number.isFinite(checkedDate.getTime())) {
+      rows.push({
+        label: 'Updated',
+        value: checkedDate.toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          year: 'numeric',
+        }),
+        icon: 'time-outline',
+        tone: '#984F2F',
+      });
+    }
+  }
+  if (season && !/^(check|book early|permit season)/i.test(season)) {
+    rows.push({
       label: 'Season',
       value: season,
       icon: 'calendar-outline',
-      tone: facts.last_updated ? '#16a34a' : '#ca8a04',
-    },
-    {
-      label: 'Details',
-      value: confidence.score >= 65 || /official/i.test(sourceBadge) ? 'Current details' : 'Check before going',
-      icon: 'shield-outline',
-      tone: confidence.score >= 65 || /official/i.test(sourceBadge) ? '#0ea5e9' : '#ca8a04',
-    },
-  ];
-  if (officialUrl) {
-    rows.push({
-      label: 'Website',
-      value: /viator|booking/i.test(String(officialUrl)) ? 'Booking page' : 'Official website',
-      icon: 'open-outline',
-      tone: '#f97316',
+      tone: '#984F2F',
     });
   }
   return rows;
+}
+
+export function getExploreSourceNote(place: ExplorePlaceProfile) {
+  const body = normalizeExploreCopyBlock(place.source_pack?.source_note).trim();
+  if (!body) return '';
+  if (/check (?:current|local)|before you go|check before|source pack|open image references|generated from|verify media license|openstreetmap|open map|wikidata|wikimedia|wikipedia/i.test(body)) {
+    return '';
+  }
+  return body;
+}
+
+export function getExploreSourcePanelModel(place: ExplorePlaceProfile): ExploreSourcePanelModel {
+  return {
+    body: getExploreSourceNote(place),
+    rows: getExploreSourceRows(place),
+  };
 }
 
 export function getExploreCardSummary(place: ExplorePlaceProfile) {

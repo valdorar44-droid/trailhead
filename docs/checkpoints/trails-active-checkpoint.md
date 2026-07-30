@@ -696,3 +696,23 @@ Verify the staged file list before every commit.
 
 - Do not repeat T1-T6 discovery, sheets, Offline packs, recording lifecycle, broad Follow, flyover endpoint/camera, Layers, Memory Gate, Yellowstone, NPS, Originals, Android Auto, Camp Guide, broad Search, or screenshots.
 - Do not redesign the approved Builder states, reintroduce the control matrix/native options alert, remove a preserved capability, or publish iOS/production before Android acceptance.
+
+### Trail Builder preview publication blocked before channel promotion (2026-07-30T04:30:15-05:00)
+
+- Exact committed and pushed implementation source is `a7866c93641000506450af2741f5c016b670a3bd`. The implementation and all focused checks remain accepted at source level; this checkpoint changes documentation only.
+- The guarded publisher stopped during local Expo export, before `eas update`, Sentry-map upload, or channel promotion. The preview channel was queried afterward and still points to source `7aa2465949ef746b2e9704de42b40632e4466b67`, Android update `019fb1eb-8720-733e-9e5c-7565da82639e`, and iOS update `019fb1eb-8720-7a16-877f-bd743b2aac22`. No partial `a7866c9` update reached either device.
+- First deterministic failure: the disposable `/tmp` worktree disappeared while Metro was running, so `expo-trailhead-car-reports` could no longer resolve. The retry used persistent worktree `/home/sean/.openclaw/worktrees/trailhead-preview-a7866c9` and passed that boundary.
+- Second deterministic failure: sharing the main workspace `node_modules` directory into another worktree leaves local Expo-module symlinks bound to the wrong project root; Metro then could not resolve `expo-valhalla-routing`. This is release-worktree dependency wiring, not a Trail Builder, Map, native-module, or runtime defect.
+- Publication attempts are stopped. No third export/publish was started. The safe next correction is to prepare the persistent clean worktree with its own dependency tree (`npm ci` or an equivalently verified local-module layout), prove every tracked local Expo module resolves inside that worktree, and only then perform one guarded publication attempt.
+- Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; unrelated dirty files remain excluded. No task-owned Metro, Expo/EAS publisher, test, Gradle, or Maestro process remains.
+
+#### Exact next action
+
+1. Repair only the clean-worktree dependency layout and run a local module-resolution assertion for `expo-trailhead-car-reports`, `expo-valhalla-routing`, `expo-tile-server`, `expo-audio-route`, and other tracked Expo modules.
+2. Once that assertion passes, publish one guarded paired preview from the exact accepted source lineage, verify the Android update identity, and run the bounded Samsung Trail Builder delta.
+3. If Android passes, stop for user acceptance before the exact-source iOS parity check. Production remains unchanged.
+
+#### Do not repeat after this checkpoint
+
+- Do not rerun the publisher from `/tmp`, reuse a whole-workspace `node_modules` symlink, or start another export before the local-module assertion passes.
+- Do not reopen Trail Builder design, source behavior, T1-T6, broad app crawls, or production work while correcting this isolated release-worktree blocker.

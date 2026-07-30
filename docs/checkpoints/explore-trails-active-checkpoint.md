@@ -292,3 +292,32 @@ Verify `git diff --cached --name-only` before every commit.
 
 - Do not repeat E2/E3 discovery, Yellowstone, NPS, Trails T1–T6, Offline, Layers, Memory, Originals, Android Auto, broad Map crawls, or Figma research without new evidence.
 - Do not expose private or unlisted geometry, enable Community discovery from unreviewed records, create a Verified route, or issue contribution credits before the corresponding authorization, moderation, and idempotency tests pass.
+
+## E4 private routes implementation baseline — 2026-07-30 18:21 CDT
+
+- Branch: `feat/trailhead-1.0.10-overhaul`; exact baseline HEAD `50181933842409270897190df6e05ecaf1881c54`.
+- Last paired preview remains source `7bbcd4da00fae3d4061bf065d97ef6f5d41f6e6e`, Android runtime `native-1.0.10-android.7` / update `019fb537-6493-7587-9e87-5aa57178f651`, and iOS runtime `native-1.0.10-ios.6` / update `019fb537-6493-70b6-9f45-5ce23fef6504`.
+- Protected Explore-index working-file Git object is `f39f30fdbb33477dacd8fcf5016612a8729dc69e`; tracked baseline `1b33aa4dee09df19a22a8a2c0134345f30881b99`.
+- Before implementation, no task-owned backend or mobile E4 file differed from HEAD. Existing `.cursor/`, Explore-index, app-store copy, Valhalla, Android Auto, and Gradle/script changes remain unrelated and excluded.
+- Figma design-to-code was read from privacy review `812:3335` and link ready `812:3408`. Implementation must reuse Trailhead V2 tokens, Barlow Condensed display type, Inter body type, existing map/builder/sheet/button/card primitives, and the approved 12/16/20 radii rather than importing generated web/Tailwind code.
+- Geospatial rule: privacy cropping, geometry validation, hashing, impossible-jump checks, and bounds are deterministic in-process geometric operations. No routing API is used to guess or rewrite a submitted route.
+
+### Narrow E4 scope
+
+1. Contain unreviewed legacy trail exposure and repair account-deletion cleanup before adding sharing.
+2. Add private owned-route CRUD with owner authorization, expected revisions, idempotency, canonical geometry validation/hash, and privacy-review invalidation.
+3. Add high-entropy unlisted links whose raw token is returned once, whose SHA-256 alone is stored, and whose resolver is non-enumerable and revision-pinned.
+4. Add explicit privacy review, start/end cropping, metadata stripping, create/copy/update/revoke, and recipient recovery states on mobile without another map or ownership store.
+5. Keep routes private by default. Do not add them to Explore, submit them for moderation, publish Community routes, create Verified routes, or award credits in E4.
+
+### Required proof before preview
+
+- Backend: ownership and enumeration resistance, token hashing/revocation, revision conflicts, idempotency, invalid geometry/jumps, metadata stripping contract, account deletion, legacy containment, rate limits, and feature flags.
+- Mobile: local-route compatibility, privacy-review invalidation, deterministic crop, stale owner/generation rejection, signed-in/signed-out/offline/expired/revoked states, exact Back/Close restoration, and clean copy.
+- Run focused backend/mobile tests, TypeScript, copy/privacy, native drift, and whitespace checks. This is expected to remain JS/backend-compatible; any discovered native requirement stops the packet before publication.
+- Publish Android preview first and run only the private → privacy review → link → recipient → update/revoke delta. Publish the paired iOS update from the exact accepted SHA afterward.
+
+### Do not repeat
+
+- Do not repeat E2/E3 discovery, NPS, Yellowstone, Trails T1–T6, Offline, Layers, Memory, Originals, Android Auto, broad sheets, or Figma research.
+- Do not weaken privacy, authorization, deletion, idempotency, or geometry checks to make a preview pass.

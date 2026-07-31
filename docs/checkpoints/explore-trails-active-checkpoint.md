@@ -1041,3 +1041,30 @@ Verify `git diff --cached --name-only` before every commit.
 - Do not rerun the b06 network fetch, the b06 cache-only quality rebuild, App Store submission, or the Android internal-preview loop.
 - Do not submit Android, publish a production OTA, promote candidates, expose Community routes, or modify public feature stages.
 - Do not stage `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, or unrelated dirty files.
+
+## Nationwide NPS resumable batch 7 — 2026-07-31 16:50 CDT
+
+- Branch: `feat/trailhead-1.0.10-overhaul`; starting HEAD `012cc7bd`. Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; App Store copy SHA-256 remains `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+- Starting point: 172 rich-cache parks and 302 remaining. One bounded run selected 28 untouched park codes and used 328 of the source-controlled 700-request cap.
+- Candidate: `data/explore/audit_candidates/nps/live-20260731-b07`; 200 parks now have rich cached source packs and 274 remain.
+- Candidate audit is `promotion_ready: true` with zero errors and zero warnings. The Explore QA matrix passed and 58 focused official-place tests passed.
+- Module growth from `b06-quality` to `b07`: Things to See `3,955 -> 4,603`; Things to Do `1,461 -> 1,617`; campgrounds `330 -> 336`; alerts `283 -> 317`; visitor centers `303 -> 346`; events `1,396 -> 1,616`; parking `317 -> 352`; guided items `276 -> 327`; passes `48 -> 50`.
+- Attributed media increased from `5,107` to `5,505`. Stable identity counts remain 729 Explore places, 474 NPS park identities, 500 source records, and 7 existing trail geometries.
+- Data-depth audit now reports 200 rich-cache parks with only 2 legitimately sparse destination packs, while 12 of the 274 remaining parks retain some base destination content.
+- Artifact hashes: catalog `8d7c4567034e9aa6229de5e91814170f3f134be46e7ce952665c496514132e0f`; source records `90fb7c05c132381da4307f6aaf4e4e85d324a1609b5e0320f57ef8fb3449d90c`; trail geometries `08aeb659b98b0933de5e2277e3ba4bcb711993f61da2fa733ed9ee2dfe8c8d53`; audit `70352d31e51f82a744ea026d04a640cd57fc2add6c6d24c131d9629019fa3add`.
+- The NPS key was supplied through the authenticated Railway environment to the WSL process only. It was not printed by the enrichment command or written to the repository.
+- Live catalogs, the protected serving index, production/preview channels, public feature stages, Community-trails stage, and store state remain unchanged.
+- Task-owned Railway, enrichment, test, EAS submit, Metro, Gradle, Maestro, and publisher processes: none.
+
+### Exact next action
+
+1. Commit and push this checkpoint only; keep protected and unrelated work unstaged.
+2. Do not start batch 8 until a new hourly API window. Use the time before then for isolated image-identity and module-coverage review of the 28 newly enriched parks.
+3. Keep `b07` isolated until the Android internal-data handoff has new request-level evidence and device acceptance.
+4. After data preview is visible and accepted, intentionally assemble a serving candidate from the accepted NPS and USFS/BLM artifacts without overwriting the protected index automatically.
+
+### Do not repeat
+
+- Do not rerun batch 7, its 28 park codes, its QA matrix, App Store upload, or the Android internal-preview loop.
+- Do not submit Android, publish a production OTA, promote candidate data, expose Community routes, or modify public stages.
+- Do not repeat completed Trails, 3D, Builder, GPX, Offline, Follow, recording, Layers, Memory, Originals, or Android Auto work without new evidence.

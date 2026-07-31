@@ -74,6 +74,13 @@ class TrailCapabilitiesV2(BaseModel):
     build_route: bool = False
 
 
+class TrailCommunityTrustV1(BaseModel):
+    contributor_handle: str
+    approved_contributions: int = 1
+    reviewed: bool = True
+    source_verified: bool = False
+
+
 class TrailDiscoveryItemV2(BaseModel):
     version: Literal[2] = 2
     id: str
@@ -96,6 +103,7 @@ class TrailDiscoveryItemV2(BaseModel):
     summary: str | None = None
     detail_ref: str
     preview_ref: str | None = None
+    community: TrailCommunityTrustV1 | None = None
 
 
 class TrailSystemV2(TrailDiscoveryItemV2):
@@ -548,11 +556,19 @@ def build_trail_systems_v2(profiles: list[dict[str, Any]], *, limit: int = 80) -
                 build_route=geometry_status == "complete",
             )
             detail_ref = f"/api/trails/v2/{system_id}"
+            catalog_lane = _catalog_lane(primary) or "verified"
+            provenance = primary.get("provenance") if isinstance(primary.get("provenance"), dict) else {}
+            community_trust = None
+            if catalog_lane == "community":
+                community_trust = TrailCommunityTrustV1(
+                    contributor_handle=_clean_text(provenance.get("submitted_by")) or "Trailhead contributor",
+                    approved_contributions=max(1, _integer(provenance.get("contributor_approved_count")) or 1),
+                )
             systems.append(TrailSystemV2(
                 id=system_id,
                 primary_trail_id=primary_id,
                 name=_clean_text(primary.get("name")),
-                catalog=_catalog_lane(primary) or "verified",
+                catalog=catalog_lane,
                 kind=kind,
                 center=TrailCenterV2(lat=round(lat, 7), lng=round(lng, 7)),
                 geometry_status=geometry_status,
@@ -579,6 +595,7 @@ def build_trail_systems_v2(profiles: list[dict[str, Any]], *, limit: int = 80) -
                 summary=_summary(primary),
                 detail_ref=detail_ref,
                 preview_ref=f"{detail_ref}/preview" if capabilities.preview else None,
+                community=community_trust,
                 member_trail_ids=member_ids,
                 geometry=geometry,
                 bounds=bounds,

@@ -450,3 +450,55 @@ Verify `git diff --cached --name-only` before every commit.
 - Do not repeat E1-E3 discovery, Trails T1-T6, NPS, Layers, Memory, Originals, Android Auto, broad Map/sheet crawls, Figma research, or private-link creation/opening.
 - Do not expose private/unlisted geometry, publish an unreviewed route, treat Community as Verified, award credits at submission, or add generated access/safety prose.
 - Task-owned Metro, Gradle, Maestro, publisher, and test processes: none.
+
+## E5 implementation completion checkpoint — 2026-07-30 22:00 CDT
+
+- Branch: `feat/trailhead-1.0.10-overhaul`; pre-commit repository HEAD `a54d1eb48f4b9f29b9edb499396d47f80d62a8fa`.
+- Current paired preview remains the accepted E4 source `da519b373cd06d4467bd36eebc16cf4384699c39`: Android update `019fb5ea-41af-730e-a829-9075ddc641fb` on runtime `native-1.0.10-android.7`; iOS update `019fb5ea-41af-7681-83cf-0d020e55d2d9` on runtime `native-1.0.10-ios.6`.
+- Protected Explore-index hash remains `f39f30fdbb33477dacd8fcf5016612a8729dc69e`; unrelated App Store copy hash remains `97c7734c15dde3c4617f69fa391afdbab48a1a23`.
+- `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, and unrelated work remain excluded from the E5 commit.
+
+### Completed behavior
+
+- Added immutable owner contribution submissions with draft/submitted/changes-requested/approved-community/rejected/withdrawn/archived presentation, revision binding, resubmission, withdrawal, and stale owner-scope rejection.
+- Added deterministic duplicate and access diagnostics, contributor-facing decisions, private moderator findings, approval-only Community publication, exactly-once five-credit awards, takedown/restore, and authoritative-source-gated Verified promotion.
+- Contributor approval counts now refresh across all active Community snapshots for the same contributor.
+- Owner-facing moderation history strips moderator identity and internal findings; administrators retain both.
+- Added the mobile `Suggest as a trail` flow from owned routes through access/photo attestation, immutable review, submission status, changes requested, resubmit, withdraw, and new-revision recovery.
+- Community catalog metadata now survives canonical conversion and hydration. Shared trail sheets show `Community route`, `Reviewed route`, `Not source-verified`, contributor handle, and approved-contribution count without treating Community as Verified.
+- Added the Trail Review dashboard with queue filters, real submitted-geometry preview, duplicate/access/source evidence, separate public/internal notes, approve/request-changes/reject, Community takedown/restore, and source-gated Verified promotion.
+- Public Community publication remains disabled. No native project, dependency, permission, runtime, Offline, navigation, or existing trail capability changed.
+
+### Design and behavior references
+
+- Figma file `FJUcMWAfsNyjsguCEp2dBe`: moderator queue `814:3421`, Community detail `814:3348`, duplicate comparison `814:3494`, evidence review `814:3567`, decision `814:3640`, Verified promotion `814:3786`, and takedown `814:3859`.
+- Mobbin references were used only for moderation behavior: Circle moderation `d695963e-5465-44f1-8a86-171fd1f7c121`, Reddit queue `c20fd251-fbfe-471b-b3a4-c0175cf1ada4`, Sprout approvals `acaff017-f7dd-4611-8163-428b099a22d9`, Canny moderation `9cb38c58-98c5-4a87-b11d-19410d2ef4eb`, AllTrails custom routes `409abb56-0b6a-4bc7-aeac-a5b939c37c89`, and Grab contribution queue `f63dd033-10b3-4cd8-92d1-87e6d2dafc5c`. No external branding or imagery ships.
+
+### Focused verification
+
+- E5 backend moderation lifecycle: 7 tests passed, including two-route contributor-count refresh, owner/internal-note privacy, immutable approval, exactly-once credits, takedown/restore, and Verified promotion rules.
+- Mobile contribution presentation and repository: 7 tests passed, including owner-scope generation guards and stale-response rejection.
+- Explore/Trails focused suite: 25 tests passed.
+- Preservation suite: 99 Python tests plus 37 mobile trail-sharing assertions passed across E4 private routes, Explore Community containment, Trails V2, catalog behavior, planner copy safety, and link handling.
+- TypeScript, copy audit across 174 user-facing files, privacy controls, dashboard JavaScript syntax, and scoped `git diff --check` passed.
+- Browser-control kernel was unavailable after a clean reset; this is a local tooling failure, not a product failure. The Trail Review dashboard still requires one visual pass against the internal deployment.
+- Task-owned Metro, Gradle, Maestro, publisher, device-helper, and test processes: none after closeout.
+
+### Open device assertions
+
+- E4 Android closeout remains limited to: recipient Map Back restoration, `Saved to Trails`, owner Stop sharing, and one revoked-link assertion.
+- E5 Android delta remains limited to: owner Suggest/submit, admin decision, Community card/sheet trust lane, ratings/comments/report action preservation, takedown unavailable, restore, and no Verified confusion.
+- No product P0/P1 is open from automated verification. Device acceptance has not yet been claimed.
+
+### Exact next action
+
+1. Commit and push only the named E5 backend, dashboard, mobile, tests, and this checkpoint.
+2. Deploy backend compatibility with `TRAILHEAD_COMMUNITY_TRAILS_STAGE=internal`; verify health and visually inspect Trail Review without enabling public Community discovery.
+3. Publish one paired preview OTA from that immutable SHA with Sentry source maps.
+4. Run the four remaining E4 Android assertions and the bounded E5 Android delta once, then checkpoint any deterministic failure instead of looping.
+5. Stop for user review before physical iOS proof or public Community enablement.
+
+### Do not repeat
+
+- Do not repeat E1-E3 discovery, Yellowstone, NPS, Trails T1-T6, Offline inventory, Layers, Memory, Originals, Android Auto, broad Map/sheet crawls, Figma research, or private-link creation/opening.
+- Do not expose private/unlisted geometry, publish an unreviewed route, award credits at submission, mix Community with Verified, or add generated access/safety prose.

@@ -28136,6 +28136,7 @@ function MapScreen() {
           ? new Date(checkedAt * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
           : '';
         const trustLabel = [sourceName, checkedLabel ? `updated ${checkedLabel}` : ''].filter(Boolean).join(' · ');
+        const communityTrust = selectedTrail.catalog === 'community' ? selectedTrail.community : undefined;
         const areaLabel = selectedTrailProfile?.area_name || selectedTrail.subtitle || '';
         const identityMeta = [areaLabel, distanceLabel !== '--' ? distanceLabel : ''].filter(Boolean).join(' · ');
         const peekMetrics = [
@@ -28266,6 +28267,26 @@ function MapScreen() {
                 onSave={() => saveSelectedTrailPlace(selectedTrail)}
                 onMore={() => openSelectedTrailMoreActions(selectedTrail, canPreviewTrail)}
               />
+
+              {communityTrust ? (
+                <View
+                  testID={`${selectedTrailSheetModel!.testID}-community-trust`}
+                  style={s.trailCleanSection}
+                >
+                  <TrailSheetSectionTitle>Community route</TrailSheetSectionTitle>
+                  <TrailSheetLinkRow
+                    title="Reviewed route"
+                    subtitle={communityTrust.source_verified ? 'Source-verified' : 'Not source-verified'}
+                  />
+                  {!communityTrust.source_verified ? (
+                    <Text style={s.trailCleanCopy}>Verified trails use official corroboration.</Text>
+                  ) : null}
+                  <TrailSheetLinkRow
+                    title={`Contributed by ${communityTrust.contributor_handle}`}
+                    subtitle={`${communityTrust.approved_contributions} approved ${communityTrust.approved_contributions === 1 ? 'contribution' : 'contributions'}`}
+                  />
+                </View>
+              ) : null}
 
               {partial ? (
                 <TrailSheetLinkRow

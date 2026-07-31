@@ -58,6 +58,36 @@ test('discovery adapter keeps stable identity and genuine zero facts', () => {
   assert.equal(feature.photo_url, null);
 });
 
+test('Community trust survives discovery and full-system hydration', () => {
+  const community = {
+    contributor_handle: 'ridgewalker',
+    approved_contributions: 2,
+    reviewed: true,
+    source_verified: false,
+  };
+  const feature = trailDiscoveryItemToFeature(item({
+    catalog: 'community',
+    community,
+  }), support);
+  assert.equal(feature.catalog, 'community');
+  assert.deepEqual(feature.community, community);
+
+  const system = {
+    ...item({ catalog: 'community', community }),
+    member_trail_ids: ['trail:usfs:rim'],
+    geometry: {
+      type: 'FeatureCollection',
+      features: [{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: [[-109, 38], [-109.1, 38.1]] } }],
+    },
+  } as TrailSystemV2;
+  const hydrated = hydrateTrailFeatureFromSystem({ ...feature, community: undefined }, system);
+  assert.equal(hydrated.catalog, 'community');
+  assert.deepEqual(hydrated.community, community);
+  assert.match(mapSource, /selectedTrail\.catalog === 'community' \? selectedTrail\.community : undefined/);
+  assert.match(mapSource, /Community route[\s\S]*Reviewed route[\s\S]*Not source-verified/);
+  assert.match(mapSource, /Verified trails use official corroboration\./);
+});
+
 test('missing facts stay absent instead of becoming zero or generic copy', () => {
   const feature = trailDiscoveryItemToFeature(item({
     geometry_status: 'point',

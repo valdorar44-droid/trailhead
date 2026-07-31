@@ -6,6 +6,21 @@ export const TRAIL_SHARE_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 export type OwnedTrailRouteOriginV1 = 'builder' | 'gpx' | 'recording';
 export type OwnedTrailRouteVisibilityV1 = 'private' | 'unlisted';
 
+export type OwnedTrailAccessPointV1 = Readonly<{
+  name?: string;
+  lat: number;
+  lng: number;
+  source?: string;
+}>;
+
+export type OwnedTrailSourceEvidenceV1 = Readonly<{
+  title?: string;
+  publisher?: string;
+  kind?: string;
+  url?: string;
+  reviewed_at?: string;
+}>;
+
 export type CanonicalTrailLineV1 = Readonly<{
   type: 'LineString';
   coordinates: readonly (readonly [number, number])[];
@@ -82,8 +97,8 @@ export type OwnedTrailRouteCreateV1 = Readonly<{
   activity?: string;
   route_shape?: string;
   permitted_uses: readonly string[];
-  trailheads: readonly never[];
-  source_evidence: readonly never[];
+  trailheads: readonly OwnedTrailAccessPointV1[];
+  source_evidence: readonly OwnedTrailSourceEvidenceV1[];
   photos: readonly never[];
 }>;
 
@@ -91,9 +106,13 @@ export type OwnedTrailRouteUpdateV1 = Readonly<{
   expected_revision: number;
   title?: string;
   geometry?: CanonicalTrailLineV1;
+  description?: string;
   activity?: string;
   route_shape?: string;
   permitted_uses?: readonly string[];
+  trailheads?: readonly OwnedTrailAccessPointV1[];
+  source_evidence?: readonly OwnedTrailSourceEvidenceV1[];
+  photos?: readonly never[];
   privacy_reviewed?: boolean;
 }>;
 
@@ -417,6 +436,18 @@ export function prepareOfflineTrailForSharing(
   const routeShape = cleanRouteShape((trail.geometry.features[0]?.properties as Record<string, unknown> | null)?.route_shape);
   const title = cleanText(trail.trail.name, 140);
   if (!title) throw new Error('Name this route before sharing it.');
+  const trailheads = (trail.trail.trailheads_v2 ?? [])
+    .filter(item => Number.isFinite(item.lat) && Number.isFinite(item.lng)
+      && Math.abs(item.lat) <= 90 && Math.abs(item.lng) <= 180)
+    .slice(0, 16)
+    .map(item => ({
+      ...(cleanText(item.name, 120) ? { name: cleanText(item.name, 120) } : {}),
+      lat: Number(item.lat.toFixed(7)),
+      lng: Number(item.lng.toFixed(7)),
+      ...(cleanText(item.source ?? trail.trail.source_label, 80)
+        ? { source: cleanText(item.source ?? trail.trail.source_label, 80) }
+        : {}),
+    }));
   return {
     payload: {
       origin: inferOwnedTrailRouteOrigin(trail),
@@ -428,9 +459,9 @@ export function prepareOfflineTrailForSharing(
       // legally permitted on every segment. OfflineTrail has no authoritative
       // permitted-use evidence, so this remains empty.
       permitted_uses: [],
-      // These fields require a separate explicit review. Legacy local files do
-      // not prove that a point is public access or that media is shareable.
-      trailheads: [],
+      // Canonical TrailSystem trailheads are carried as review evidence. They
+      // are not treated as proof of access until a moderator checks the source.
+      trailheads,
       source_evidence: [],
       photos: [],
     },

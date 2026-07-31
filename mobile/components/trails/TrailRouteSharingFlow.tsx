@@ -6,6 +6,7 @@ import {
   Share,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -29,9 +30,28 @@ import {
   TrailRouteSharingRepositoryV1,
   type TrailRouteLinkResultV1,
 } from '@/lib/trailRouteSharingRepository';
+import {
+  latestTrailSubmissionForRoute,
+  trailSubmissionCanWithdraw,
+  trailSubmissionNeedsNewRevision,
+  trailSubmissionPresentation,
+  type TrailSubmissionV1,
+} from '@/lib/trailContributions';
+import {
+  StaleTrailContributionRequestError,
+  TrailContributionRepositoryV1,
+} from '@/lib/trailContributionRepository';
 import { trailheadFonts } from '@/lib/typography';
 
-type FlowStage = 'privacy' | 'ready' | 'active' | 'confirm_update' | 'confirm_revoke';
+type FlowStage =
+  | 'privacy'
+  | 'ready'
+  | 'active'
+  | 'confirm_update'
+  | 'confirm_revoke'
+  | 'contribution'
+  | 'contribution_review'
+  | 'submission_status';
 
 type TrailRouteSharingFlowProps = Readonly<{
   visible: boolean;
@@ -60,6 +80,20 @@ function friendlySharingError(error: unknown): string {
   return 'Trailhead could not update this link. Try again.';
 }
 
+function friendlyContributionError(error: unknown): string {
+  if (error instanceof StaleTrailContributionRequestError) return '';
+  if (error instanceof StaleTrailRouteSharingRequestError) return '';
+  if (error instanceof ApiError) {
+    if (error.status === 401) return 'Sign in again to submit this route.';
+    if (error.status === 404) return 'Trail contributions are not available for this account.';
+    if (error.status === 429) return 'Too many route changes. Try again later.';
+    if (typeof error.detail === 'string' && error.detail.trim()) return error.detail.trim();
+    return 'Trailhead could not update this submission. Try again.';
+  }
+  const message = error instanceof Error ? error.message.trim() : '';
+  return message || 'Trailhead could not update this submission. Try again.';
+}
+
 function formatDistance(metres: number): string {
   if (!Number.isFinite(metres) || metres <= 0) return '';
   const miles = metres / 1609.344;
@@ -81,6 +115,12 @@ export default function TrailRouteSharingFlow({
       && scope === accountInventoryScope(accountStorage.epoch(), useStore.getState().user?.id).key,
     () => storage.get('trailhead_token'),
   ));
+  const contributionRepositoryRef = useRef(new TrailContributionRepositoryV1(
+    api,
+    scope => !accountStorage.isCleaning()
+      && scope === accountInventoryScope(accountStorage.epoch(), useStore.getState().user?.id).key,
+    () => storage.get('trailhead_token'),
+  ));
   const [localTrail, setLocalTrail] = useState<OfflineTrail | null>(trail);
   const [stage, setStage] = useState<FlowStage>('privacy');
   const [crop, setCrop] = useState<TrailRouteCropV1>({ start: 0, finish: 1 });
@@ -90,10 +130,15 @@ export default function TrailRouteSharingFlow({
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
   const [mapContextReady, setMapContextReady] = useState(false);
+  const [submission, setSubmission] = useState<TrailSubmissionV1 | null>(null);
+  const [submissionLoading, setSubmissionLoading] = useState(false);
+  const [publicAccessNote, setPublicAccessNote] = useState('');
+  const [contributorAttested, setContributorAttested] = useState(false);
 
   useEffect(() => {
     if (!visible) return;
     repositoryRef.current.cancel();
+    contributionRepositoryRef.current.cancel();
     setLocalTrail(trail);
     setCrop({ start: 0, finish: 1 });
     setCropTarget('start');
@@ -103,9 +148,35 @@ export default function TrailRouteSharingFlow({
     setError('');
     setCopied(false);
     setMapContextReady(false);
+    setSubmission(null);
+    setSubmissionLoading(false);
+    setPublicAccessNote('');
+    setContributorAttested(false);
   }, [ownerScope, trail?.id, visible]);
 
-  useEffect(() => () => repositoryRef.current.cancel(), []);
+  useEffect(() => () => {
+    repositoryRef.current.cancel();
+    contributionRepositoryRef.current.cancel();
+  }, []);
+
+  useEffect(() => {
+    const routeId = localTrail?.sharing?.ownerScope === ownerScope
+      ? localTrail.sharing.remoteRouteId
+      : null;
+    if (!visible || !routeId) return;
+    let active = true;
+    setSubmissionLoading(true);
+    void contributionRepositoryRef.current.list(ownerScope)
+      .then(items => {
+        if (!active) return;
+        setSubmission(latestTrailSubmissionForRoute(items, routeId));
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (active) setSubmissionLoading(false);
+      });
+    return () => { active = false; };
+  }, [localTrail?.sharing?.remoteRouteId, ownerScope, visible]);
 
   const prepared = useMemo(() => {
     if (!localTrail) return { value: null, error: '' };
@@ -124,6 +195,7 @@ export default function TrailRouteSharingFlow({
 
   const close = () => {
     repositoryRef.current.cancel();
+    contributionRepositoryRef.current.cancel();
     setLinkResult(null);
     setError('');
     onClose();
@@ -132,6 +204,16 @@ export default function TrailRouteSharingFlow({
   const goBack = () => {
     if (stage === 'confirm_update' || stage === 'confirm_revoke') {
       setStage(linkResult?.status === 'ready' ? 'ready' : 'active');
+      return;
+    }
+    if (stage === 'contribution_review') {
+      setStage('contribution');
+      setError('');
+      return;
+    }
+    if (stage === 'contribution' || stage === 'submission_status') {
+      setStage(localTrail?.sharing?.shareEnabled ? 'active' : 'privacy');
+      setError('');
       return;
     }
     close();
@@ -177,6 +259,71 @@ export default function TrailRouteSharingFlow({
       setStage('privacy');
     } catch (cause) {
       const message = friendlySharingError(cause);
+      if (message) setError(message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const openContribution = () => {
+    setError('');
+    if (submission && ['submitted', 'changes_requested', 'approved_community'].includes(submission.status)) {
+      setStage('submission_status');
+      return;
+    }
+    setStage('contribution');
+  };
+
+  const submitContribution = async () => {
+    if (!localTrail || !prepared.value || busy) return;
+    const hasAccessPoint = prepared.value.payload.trailheads.length > 0;
+    if (!hasAccessPoint && !publicAccessNote.trim()) {
+      setError('Add the public access point or explain where this point-to-point route begins.');
+      setStage('contribution');
+      return;
+    }
+    if (!contributorAttested) {
+      setError('Confirm the route is not intentionally placed on private or prohibited land.');
+      setStage('contribution');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      const preparedRoute = await repositoryRef.current.prepareOwnedRoute(
+        ownerScope,
+        localTrail,
+        crop,
+        persistTrail,
+      );
+      setLocalTrail(preparedRoute.trail);
+      const attestations = {
+        contributor_attested: true,
+        photo_rights_confirmed: false,
+        ...(publicAccessNote.trim() ? { public_access_note: publicAccessNote.trim() } : {}),
+      } as const;
+      const result = submission && trailSubmissionNeedsNewRevision(submission.status)
+        ? await contributionRepositoryRef.current.resubmit(ownerScope, submission.id, attestations)
+        : await contributionRepositoryRef.current.submit(ownerScope, preparedRoute.route.id, attestations);
+      setSubmission(result);
+      setStage('submission_status');
+    } catch (cause) {
+      const message = friendlyContributionError(cause);
+      if (message) setError(message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const withdrawSubmission = async () => {
+    if (!submission || !trailSubmissionCanWithdraw(submission.status) || busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      const result = await contributionRepositoryRef.current.withdraw(ownerScope, submission.id);
+      setSubmission(result);
+    } catch (cause) {
+      const message = friendlyContributionError(cause);
       if (message) setError(message);
     } finally {
       setBusy(false);
@@ -295,6 +442,15 @@ export default function TrailRouteSharingFlow({
         disabled={busy || !prepared.value || !mapContextReady}
         style={s.fullButton}
       />
+      <TrailheadButton
+        testID="trail-contribution.open"
+        label={submission ? 'View submission' : 'Suggest as a trail'}
+        icon="trail-sign-outline"
+        variant="ghost"
+        onPress={openContribution}
+        disabled={busy || submissionLoading || !prepared.value}
+        style={s.fullButton}
+      />
       <TrailheadButton testID="trail-share.keep-private" label="Keep private" variant="ghost" onPress={close} disabled={busy} style={s.fullButton} />
     </>
   );
@@ -336,7 +492,217 @@ export default function TrailRouteSharingFlow({
           disabled={busy}
           style={s.fullButton}
         />
+        <TrailheadButton
+          testID="trail-contribution.open"
+          label={submission ? 'View submission' : 'Suggest as a trail'}
+          icon="trail-sign-outline"
+          variant="ghost"
+          onPress={openContribution}
+          disabled={busy || submissionLoading}
+          style={s.fullButton}
+        />
         <TrailheadButton testID="trail-share.stop" label="Stop sharing" icon="unlink-outline" variant="danger" onPress={() => setStage('confirm_revoke')} disabled={busy} style={s.fullButton} />
+      </>
+    );
+  };
+
+  const renderContributionForm = () => {
+    const trailheads = prepared.value?.payload.trailheads ?? [];
+    const firstTrailhead = trailheads[0];
+    return (
+      <>
+        {renderTop('Suggest as a trail', 'Community routes')}
+        {renderRoutePreview()}
+        <TrailheadCard style={s.submissionCard}>
+          <Text style={s.eyebrow}>ROUTE</Text>
+          <Text style={s.submissionTitle}>{localTrail?.trail.name}</Text>
+          <Text style={s.submissionMeta}>
+            {[localTrail?.builder?.activity, prepared.value?.retainedDistanceM ? formatDistance(prepared.value.retainedDistanceM) : '']
+              .filter(Boolean)
+              .join(' · ')}
+          </Text>
+        </TrailheadCard>
+        <View style={s.sectionBlock}>
+          <Text style={s.sectionHeading}>Public access</Text>
+          {firstTrailhead ? (
+            <TrailheadCard style={s.accessCard}>
+              <Ionicons name="location-outline" size={20} color={C.orange} />
+              <View style={s.flex}>
+                <Text style={s.factTitle}>{firstTrailhead.name || 'Trailhead included'}</Text>
+                {firstTrailhead.source ? <Text style={s.factText}>{firstTrailhead.source}</Text> : null}
+              </View>
+            </TrailheadCard>
+          ) : (
+            <TextInput
+              testID="trail-contribution.access-note"
+              style={s.accessInput}
+              value={publicAccessNote}
+              onChangeText={value => {
+                setPublicAccessNote(value.slice(0, 1000));
+                setError('');
+              }}
+              placeholder="Where does the public route begin?"
+              placeholderTextColor={C.text3}
+              multiline
+              textAlignVertical="top"
+              accessibilityLabel="Public access point"
+            />
+          )}
+        </View>
+        <TouchableOpacity
+          testID="trail-contribution.attest"
+          style={s.attestationRow}
+          onPress={() => {
+            setContributorAttested(value => !value);
+            setError('');
+          }}
+          accessibilityRole="checkbox"
+          accessibilityState={{ checked: contributorAttested }}
+        >
+          <View style={[s.checkbox, contributorAttested && s.checkboxChecked]}>
+            {contributorAttested ? <Ionicons name="checkmark" size={18} color={C.white} /> : null}
+          </View>
+          <Text style={[s.factText, s.flex]}>I did not intentionally place this route on private or prohibited land.</Text>
+        </TouchableOpacity>
+        {error ? <Text style={s.errorText}>{error}</Text> : null}
+        <TrailheadButton
+          testID="trail-contribution.review"
+          label="Review submission"
+          variant="primary"
+          onPress={() => {
+            const hasAccessPoint = trailheads.length > 0;
+            if (!hasAccessPoint && !publicAccessNote.trim()) {
+              setError('Add the public access point or explain where this point-to-point route begins.');
+              return;
+            }
+            if (!contributorAttested) {
+              setError('Confirm the route is not intentionally placed on private or prohibited land.');
+              return;
+            }
+            setError('');
+            setStage('contribution_review');
+          }}
+          disabled={busy || !prepared.value || !mapContextReady}
+          style={s.fullButton}
+        />
+      </>
+    );
+  };
+
+  const renderContributionReview = () => (
+    <>
+      {renderTop('Review submission', 'Community routes')}
+      {renderRoutePreview()}
+      <TrailheadCard style={s.submissionCard}>
+        <Text style={s.eyebrow}>SUBMISSION</Text>
+        <Text style={s.submissionTitle}>{localTrail?.trail.name}</Text>
+        <Text style={s.submissionMeta}>The current route revision will be locked for review.</Text>
+      </TrailheadCard>
+      <TrailheadCard style={s.privacyCard}>
+        <View style={s.privacyIcon}><Ionicons name="shield-checkmark-outline" size={22} color={C.orange} /></View>
+        <View style={s.flex}>
+          <Text style={s.factTitle}>Your owned route stays private</Text>
+          <Text style={s.factText}>Only your Trailhead handle appears with an approved Community route.</Text>
+        </View>
+      </TrailheadCard>
+      {error ? <Text style={s.errorText}>{error}</Text> : null}
+      <TrailheadButton
+        testID="trail-contribution.submit"
+        label={submission?.status === 'changes_requested' ? 'Resubmit for review' : 'Submit for review'}
+        variant="primary"
+        onPress={() => void submitContribution()}
+        loading={busy}
+        disabled={busy || !mapContextReady}
+        style={s.fullButton}
+      />
+      <TrailheadButton
+        testID="trail-contribution.back-to-edit"
+        label="Back to edit"
+        variant="ghost"
+        onPress={() => setStage('contribution')}
+        disabled={busy}
+        style={s.fullButton}
+      />
+    </>
+  );
+
+  const renderSubmissionStatus = () => {
+    if (!submission) {
+      return (
+        <>
+          {renderTop('Trail submission', 'Community routes')}
+          <TrailheadCard style={s.submissionCard}>
+            <Text style={s.submissionTitle}>Submission unavailable</Text>
+            <Text style={s.submissionMeta}>Open the saved route and try again.</Text>
+          </TrailheadCard>
+          <TrailheadButton label="Done" variant="primary" onPress={close} style={s.fullButton} />
+        </>
+      );
+    }
+    const presentation = trailSubmissionPresentation(submission);
+    const canWithdraw = trailSubmissionCanWithdraw(submission.status);
+    return (
+      <>
+        {renderTop('Trail submission', 'Community routes')}
+        <TrailheadCard style={s.statusCard}>
+          <View style={s.statusIcon}>
+            <Ionicons
+              name={submission.status === 'approved_community' ? 'checkmark' : submission.status === 'changes_requested' ? 'pencil-outline' : 'document-text-outline'}
+              size={24}
+              color={C.orange}
+            />
+          </View>
+          <Text style={s.eyebrow}>{presentation.eyebrow}</Text>
+          <Text style={s.statusTitle}>{presentation.title}</Text>
+          <Text style={s.statusDetail}>{presentation.detail}</Text>
+        </TrailheadCard>
+        <TrailheadCard style={s.submissionCard}>
+          <Text style={s.factTitle}>{submission.snapshot?.title || localTrail?.trail.name}</Text>
+          <Text style={s.submissionMeta}>Revision {submission.route_revision}</Text>
+        </TrailheadCard>
+        {error ? <Text style={s.errorText}>{error}</Text> : null}
+        {submission.status === 'changes_requested' ? (
+          <>
+            <TrailheadButton
+              testID="trail-contribution.edit-route"
+              label="Close and edit route"
+              variant="primary"
+              onPress={close}
+              disabled={busy}
+              style={s.fullButton}
+            />
+            <TrailheadButton
+              testID="trail-contribution.resubmit"
+              label="Review updated route"
+              variant="ghost"
+              onPress={() => setStage('contribution')}
+              disabled={busy}
+              style={s.fullButton}
+            />
+          </>
+        ) : null}
+        {['rejected', 'withdrawn', 'archived'].includes(submission.status) ? (
+          <TrailheadButton
+            testID="trail-contribution.new-revision"
+            label="Submit a new revision"
+            variant="primary"
+            onPress={() => setStage('contribution')}
+            disabled={busy}
+            style={s.fullButton}
+          />
+        ) : null}
+        {canWithdraw ? (
+          <TrailheadButton
+            testID="trail-contribution.withdraw"
+            label="Withdraw submission"
+            variant="danger"
+            onPress={() => void withdrawSubmission()}
+            loading={busy}
+            disabled={busy}
+            style={s.fullButton}
+          />
+        ) : null}
+        <TrailheadButton testID="trail-contribution.done" label="Done" variant="ghost" onPress={close} disabled={busy} style={s.fullButton} />
       </>
     );
   };
@@ -379,7 +745,15 @@ export default function TrailRouteSharingFlow({
           renderConfirmation(stage === 'confirm_update' ? 'update' : 'revoke')
         ) : (
           <ScrollView contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
-            {stage === 'privacy' ? renderPrivacy() : renderLinkReady()}
+            {stage === 'privacy'
+              ? renderPrivacy()
+              : stage === 'contribution'
+                ? renderContributionForm()
+                : stage === 'contribution_review'
+                  ? renderContributionReview()
+                  : stage === 'submission_status'
+                    ? renderSubmissionStatus()
+                    : renderLinkReady()}
           </ScrollView>
         )}
       </SafeAreaView>
@@ -432,6 +806,33 @@ const styles = (C: ColorPalette) => StyleSheet.create({
   linkActions: { flexDirection: 'row', gap: 10 },
   actionButton: { flex: 1, minHeight: 48 },
   recoveryText: { color: C.text2, fontSize: 14, lineHeight: 20 },
+  sectionBlock: { gap: 10 },
+  sectionHeading: { color: C.text, fontFamily: trailheadFonts.displayBold, fontSize: 21, lineHeight: 24 },
+  submissionCard: { padding: 16, gap: 6 },
+  submissionTitle: { color: C.text, fontSize: 17, lineHeight: 22, fontWeight: '800' },
+  submissionMeta: { color: C.text2, fontSize: 13, lineHeight: 19 },
+  accessCard: { minHeight: 68, padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  accessInput: {
+    minHeight: 112,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.s1,
+    color: C.text,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    fontSize: 15,
+    lineHeight: 21,
+  },
+  attestationRow: { minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 4 },
+  checkbox: { width: 28, height: 28, borderRadius: 8, borderWidth: 1.5, borderColor: C.border2, alignItems: 'center', justifyContent: 'center', backgroundColor: C.s1 },
+  checkboxChecked: { backgroundColor: C.orange, borderColor: C.orange },
+  privacyCard: { padding: 16, flexDirection: 'row', alignItems: 'center', gap: 13 },
+  privacyIcon: { width: 44, height: 44, borderRadius: 12, backgroundColor: C.orangeGlow, alignItems: 'center', justifyContent: 'center' },
+  statusCard: { padding: 18, gap: 8, alignItems: 'flex-start' },
+  statusIcon: { width: 48, height: 48, borderRadius: 12, borderWidth: 1, borderColor: C.border, backgroundColor: C.orangeGlow, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+  statusTitle: { color: C.text, fontFamily: trailheadFonts.displayBold, fontSize: 28, lineHeight: 31 },
+  statusDetail: { color: C.text2, fontSize: 15, lineHeight: 22 },
   confirmWrap: { flex: 1, justifyContent: 'flex-end', backgroundColor: C.bg },
   confirmSheet: { borderBottomLeftRadius: 0, borderBottomRightRadius: 0 },
   confirmContent: { padding: 22, gap: 14 },

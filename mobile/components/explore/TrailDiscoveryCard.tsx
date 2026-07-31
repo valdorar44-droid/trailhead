@@ -54,7 +54,11 @@ export function TrailDiscoveryCard({ item, onPress, testID }: Props) {
           <Text style={[styles.meta, { color: C.text3 }]} numberOfLines={1}>{item.activities.slice(0, 3).join(' · ')}</Text>
         )}
         <View style={styles.footer}>
-          <Text style={[styles.source, { color: C.text3 }]} numberOfLines={1}>{source || 'Trail details'}</Text>
+          <Text style={[styles.source, { color: C.text3 }]} numberOfLines={1}>
+            {item.catalog === 'community' && item.community
+              ? `by ${item.community.contributor_handle} · ${item.community.approved_contributions} approved`
+              : source || 'Trail details'}
+          </Text>
           {item.distance_from_center_mi != null ? (
             <Text style={[styles.distance, { color: C.text2 }]}>{item.distance_from_center_mi.toFixed(item.distance_from_center_mi >= 10 ? 0 : 1)} mi away</Text>
           ) : null}

@@ -33,6 +33,8 @@ export function trailDiscoveryItemToFeature(item: TrailDiscoveryItemV2, support:
     support,
     profile_id: item.primary_trail_id,
     system_v2_id: item.id,
+    catalog: item.catalog,
+    community: item.community,
     geometry_status: item.geometry_status,
     geometry_revision: item.geometry_revision,
     capabilities_v2: item.capabilities,
@@ -66,6 +68,8 @@ export function hydrateTrailFeatureFromSystem(feature: TrailFeature, system: Tra
   return {
     ...feature,
     name: system.name || feature.name,
+    catalog: system.catalog,
+    community: system.community,
     geometry_status: system.geometry_status,
     geometry_revision: system.geometry_revision,
     capabilities_v2: system.capabilities,

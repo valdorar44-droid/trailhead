@@ -271,7 +271,11 @@ from db.store import (
     delete_owned_trail_route_v1, list_owned_trail_routes_v1,
     create_owned_trail_share_v1, revoke_owned_trail_share_v1,
     resolve_owned_trail_share_v1, create_trail_submission_v1,
-    get_owned_trail_route_v1, list_trail_submissions_v1,
+    get_owned_trail_route_v1, list_trail_submissions_v1, get_trail_submission_v1,
+    withdraw_trail_submission_v1, resubmit_trail_submission_v1,
+    moderate_trail_submission_v1, list_community_trails_v1,
+    get_community_trail_v1, set_community_trail_status_v1,
+    promote_community_trail_v1,
     add_trail_edit_suggestion, get_trail_edit_suggestions,
     update_trail_edit_suggestion_status, set_trail_profile_admin_update,
     get_camp_profile_override, set_camp_profile_override, add_camp_edit_suggestion,
@@ -24038,6 +24042,40 @@ class OwnedTrailShareResolvePayload(BaseModel):
     token: str
 
 
+class TrailSubmissionAttestationPayload(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    contributor_attested: bool
+    photo_rights_confirmed: bool = False
+    public_access_note: Optional[str] = Field(default=None, max_length=1000)
+
+
+class TrailSubmissionDecisionPayload(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    decision: Literal["changes_requested", "approved_community", "rejected"]
+    note: Optional[str] = Field(default=None, max_length=2000)
+    internal_note: Optional[str] = Field(default=None, max_length=2000)
+    duplicate_review: dict = Field(default_factory=dict)
+    access_review: dict = Field(default_factory=dict)
+    photo_rights_verified: bool = False
+
+
+class CommunityTrailStatusPayload(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    action: Literal["take_down", "restore"]
+    note: str = Field(min_length=1, max_length=2000)
+
+
+class CommunityTrailPromotionPayload(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    verified_trail_id: str = Field(min_length=4, max_length=180)
+    authoritative_sources: list[dict] = Field(min_length=1, max_length=12)
+    note: str = Field(min_length=1, max_length=2000)
+
+
 def _raise_trail_route_api_error(exc: Exception) -> None:
     if isinstance(exc, RevisionConflictError):
         raise HTTPException(409, {
@@ -24221,6 +24259,208 @@ async def revoke_owned_trail_share_link(
         return revoke_owned_trail_share_v1(
             user["id"], route_id, expected_revision=expected_revision,
             idempotency_key=idempotency_key,
+        )
+    except Exception as exc:
+        _raise_trail_route_api_error(exc)
+
+
+@app.post("/api/trail-routes/{route_id}/submissions", status_code=201)
+async def create_owned_trail_submission(
+    route_id: str,
+    body: TrailSubmissionAttestationPayload,
+    user: dict = Depends(_current_user),
+):
+    _require_private_trail_routes(user)
+    _require_community_trail_publication(user)
+    try:
+        return create_trail_submission_v1(
+            user["id"],
+            route_id,
+            user.get("username"),
+            attestations=body.model_dump(),
+            require_attestations=True,
+        )
+    except Exception as exc:
+        _raise_trail_route_api_error(exc)
+
+
+@app.get("/api/trail-submissions/mine")
+async def list_my_trail_submissions(
+    status: Optional[str] = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=200),
+    user: dict = Depends(_current_user),
+):
+    _require_community_trail_publication(user)
+    clean_status = str(status or "").strip().lower() or None
+    if clean_status and clean_status not in {
+        "draft", "submitted", "changes_requested", "approved_community",
+        "rejected", "withdrawn", "archived",
+    }:
+        raise HTTPException(400, "Invalid submission status")
+    return {
+        "version": 1,
+        "submissions": list_trail_submissions_v1(
+            user_id=user["id"], status=clean_status, limit=limit,
+        ),
+    }
+
+
+@app.get("/api/trail-submissions/{submission_id}")
+async def get_my_trail_submission(
+    submission_id: str,
+    user: dict = Depends(_current_user),
+):
+    _require_community_trail_publication(user)
+    submission = get_trail_submission_v1(submission_id, user_id=user["id"])
+    if not submission:
+        raise HTTPException(404, "Not found")
+    return submission
+
+
+@app.post("/api/trail-submissions/{submission_id}/withdraw")
+async def withdraw_my_trail_submission(
+    submission_id: str,
+    user: dict = Depends(_current_user),
+):
+    _require_community_trail_publication(user)
+    try:
+        return withdraw_trail_submission_v1(user["id"], submission_id)
+    except Exception as exc:
+        _raise_trail_route_api_error(exc)
+
+
+@app.post("/api/trail-submissions/{submission_id}/resubmit", status_code=201)
+async def resubmit_my_trail_submission(
+    submission_id: str,
+    body: TrailSubmissionAttestationPayload,
+    user: dict = Depends(_current_user),
+):
+    _require_community_trail_publication(user)
+    try:
+        return resubmit_trail_submission_v1(
+            user["id"],
+            submission_id,
+            user.get("username"),
+            attestations=body.model_dump(),
+        )
+    except Exception as exc:
+        _raise_trail_route_api_error(exc)
+
+
+@app.get("/api/admin/trail-submissions")
+async def admin_list_trail_submissions(
+    status: Optional[str] = Query(default="submitted"),
+    limit: int = Query(default=100, ge=1, le=200),
+    admin: dict = Depends(_require_admin),
+):
+    _require_community_trail_publication(admin)
+    clean_status = str(status or "").strip().lower() or None
+    if clean_status and clean_status not in {
+        "draft", "submitted", "changes_requested", "approved_community",
+        "rejected", "withdrawn", "archived",
+    }:
+        raise HTTPException(400, "Invalid submission status")
+    return {
+        "version": 1,
+        "submissions": list_trail_submissions_v1(
+            status=clean_status,
+            limit=limit,
+            include_snapshot=True,
+            include_moderator_identity=True,
+        ),
+    }
+
+
+@app.get("/api/admin/trail-submissions/{submission_id}")
+async def admin_get_trail_submission(
+    submission_id: str,
+    admin: dict = Depends(_require_admin),
+):
+    _require_community_trail_publication(admin)
+    submission = get_trail_submission_v1(
+        submission_id,
+        include_moderator_identity=True,
+    )
+    if not submission:
+        raise HTTPException(404, "Not found")
+    return submission
+
+
+@app.post("/api/admin/trail-submissions/{submission_id}/decision")
+async def admin_decide_trail_submission(
+    submission_id: str,
+    body: TrailSubmissionDecisionPayload,
+    admin: dict = Depends(_require_admin),
+):
+    _require_community_trail_publication(admin)
+    try:
+        return moderate_trail_submission_v1(
+            submission_id,
+            moderator_id=admin["id"],
+            **body.model_dump(),
+        )
+    except Exception as exc:
+        _raise_trail_route_api_error(exc)
+
+
+@app.get("/api/admin/community-trails")
+async def admin_list_community_trails(
+    status: Optional[str] = Query(default=None),
+    limit: int = Query(default=100, ge=1, le=200),
+    admin: dict = Depends(_require_admin),
+):
+    _require_community_trail_publication(admin)
+    clean_status = str(status or "").strip().lower() or None
+    if clean_status and clean_status not in {"active", "taken_down", "promoted", "archived"}:
+        raise HTTPException(400, "Invalid Community route status")
+    return {
+        "version": 1,
+        "community_trails": list_community_trails_v1(status=clean_status, limit=limit),
+    }
+
+
+@app.get("/api/admin/community-trails/{community_id}")
+async def admin_get_community_trail(
+    community_id: str,
+    admin: dict = Depends(_require_admin),
+):
+    _require_community_trail_publication(admin)
+    community = get_community_trail_v1(community_id, include_inactive=True)
+    if not community:
+        raise HTTPException(404, "Not found")
+    return community
+
+
+@app.post("/api/admin/community-trails/{community_id}/status")
+async def admin_set_community_trail_status(
+    community_id: str,
+    body: CommunityTrailStatusPayload,
+    admin: dict = Depends(_require_admin),
+):
+    _require_community_trail_publication(admin)
+    try:
+        return set_community_trail_status_v1(
+            community_id,
+            moderator_id=admin["id"],
+            action=body.action,
+            note=body.note,
+        )
+    except Exception as exc:
+        _raise_trail_route_api_error(exc)
+
+
+@app.post("/api/admin/community-trails/{community_id}/promote")
+async def admin_promote_community_trail(
+    community_id: str,
+    body: CommunityTrailPromotionPayload,
+    admin: dict = Depends(_require_admin),
+):
+    _require_community_trail_publication(admin)
+    try:
+        return promote_community_trail_v1(
+            community_id,
+            moderator_id=admin["id"],
+            **body.model_dump(),
         )
     except Exception as exc:
         _raise_trail_route_api_error(exc)

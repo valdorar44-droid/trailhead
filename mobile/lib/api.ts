@@ -32,6 +32,10 @@ import type {
   TrailRouteRevokeMutationV1,
   TrailRouteShareMutationV1,
 } from './trailRouteSharing';
+import type {
+  TrailSubmissionAttestationV1,
+  TrailSubmissionV1,
+} from './trailContributions';
 
 const BASE = TRAILHEAD_API_BASE;
 export type WeatherUnitMode = 'auto' | 'imperial' | 'metric';
@@ -1514,6 +1518,42 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ token: shareToken }),
     }, null),
+  createTrailSubmission: (
+    routeId: string,
+    data: TrailSubmissionAttestationV1,
+    authToken: string | null,
+  ) => reqWithToken<TrailSubmissionV1>(
+    `/api/trail-routes/${encodeURIComponent(routeId)}/submissions`,
+    { method: 'POST', body: JSON.stringify(data) },
+    authToken,
+  ),
+  listMyTrailSubmissions: (authToken: string | null, limit = 100) =>
+    reqWithToken<{ version: 1; submissions: TrailSubmissionV1[] }>(
+      `/api/trail-submissions/mine?limit=${Math.max(1, Math.min(200, Math.round(limit)))}`,
+      {},
+      authToken,
+    ),
+  getMyTrailSubmission: (submissionId: string, authToken: string | null) =>
+    reqWithToken<TrailSubmissionV1>(
+      `/api/trail-submissions/${encodeURIComponent(submissionId)}`,
+      {},
+      authToken,
+    ),
+  withdrawTrailSubmission: (submissionId: string, authToken: string | null) =>
+    reqWithToken<TrailSubmissionV1>(
+      `/api/trail-submissions/${encodeURIComponent(submissionId)}/withdraw`,
+      { method: 'POST' },
+      authToken,
+    ),
+  resubmitTrailSubmission: (
+    submissionId: string,
+    data: TrailSubmissionAttestationV1,
+    authToken: string | null,
+  ) => reqWithToken<TrailSubmissionV1>(
+    `/api/trail-submissions/${encodeURIComponent(submissionId)}/resubmit`,
+    { method: 'POST', body: JSON.stringify(data) },
+    authToken,
+  ),
   suggestTrailEdit: (trailId: string, data: TrailEditSuggestionPayload) =>
     req<{ id: number; status: string; credits_earned: number; new_balance: number }>(`/api/trails/${encodeURIComponent(trailId)}/suggest-edit`, {
       method: 'POST', body: JSON.stringify(data),
@@ -4071,6 +4111,12 @@ export interface TrailDiscoveryItemV2 {
   summary?: string;
   detail_ref: string;
   preview_ref?: string;
+  community?: {
+    contributor_handle: string;
+    approved_contributions: number;
+    reviewed: boolean;
+    source_verified: boolean;
+  };
 }
 export interface TrailSystemV2 extends TrailDiscoveryItemV2 {
   member_trail_ids: string[];

@@ -14922,17 +14922,19 @@ def _trail_profile_readable(
         or (lane == "unreviewed" and include_unreviewed)
     )
 
-def upsert_trail_profile(profile: dict, preserve_admin: bool = True) -> dict:
+def _upsert_trail_profile_db(
+    db: sqlite3.Connection,
+    profile: dict,
+    *,
+    preserve_admin: bool = True,
+) -> dict:
     now = int(time.time())
     trail_id = str(profile.get("id") or "").strip()[:180]
     if not trail_id:
         raise ValueError("trail profile id required")
-    db = _conn()
     existing = db.execute("SELECT * FROM trail_profiles WHERE id=?", (trail_id,)).fetchone()
     if existing and preserve_admin and int(existing["admin_edited"] or 0):
-        decoded = _decode_trail_profile(existing)
-        db.close()
-        return decoded
+        return _decode_trail_profile(existing)
     merged = {**(_decode_trail_profile(existing) if existing else {}), **profile}
     lat = float(merged.get("lat") or 0)
     lng = float(merged.get("lng") or 0)
@@ -14974,8 +14976,20 @@ def upsert_trail_profile(profile: dict, preserve_admin: bool = True) -> dict:
         ),
     )
     row = db.execute("SELECT * FROM trail_profiles WHERE id=?", (trail_id,)).fetchone()
-    db.commit(); db.close()
     return _decode_trail_profile(row)
+
+
+def upsert_trail_profile(profile: dict, preserve_admin: bool = True) -> dict:
+    db = _conn()
+    try:
+        result = _upsert_trail_profile_db(db, profile, preserve_admin=preserve_admin)
+        db.commit()
+        return result
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 def get_trail_profile(
     trail_id: str,
@@ -15062,7 +15076,12 @@ def _decode_owned_trail_route(row: sqlite3.Row | dict) -> dict:
     return raw
 
 
-def _decode_trail_submission(row: sqlite3.Row | dict, *, include_snapshot: bool = True) -> dict:
+def _decode_trail_submission(
+    row: sqlite3.Row | dict,
+    *,
+    include_snapshot: bool = True,
+    include_moderator_identity: bool = False,
+) -> dict:
     raw = dict(row)
     try:
         snapshot = json.loads(raw.pop("snapshot_json") or "{}")
@@ -15074,6 +15093,20 @@ def _decode_trail_submission(row: sqlite3.Row | dict, *, include_snapshot: bool 
             raw[public_key] = json.loads(raw.pop(key) or ("[]" if key == "moderator_history_json" else "{}"))
         except Exception:
             raw[public_key] = [] if key == "moderator_history_json" else {}
+    if not include_moderator_identity and isinstance(raw.get("moderator_history"), list):
+        public_history: list[dict] = []
+        for item in raw["moderator_history"]:
+            if not isinstance(item, dict):
+                continue
+            public_item = {key: value for key, value in item.items() if key != "moderator_id"}
+            if isinstance(public_item.get("details"), dict):
+                public_item["details"] = {
+                    key: value
+                    for key, value in public_item["details"].items()
+                    if key != "internal_note"
+                }
+            public_history.append(public_item)
+        raw["moderator_history"] = public_history
     if include_snapshot:
         raw["snapshot"] = snapshot
     else:
@@ -16050,7 +16083,277 @@ def resolve_owned_trail_share_v1(token: str) -> dict | None:
     return snapshot if isinstance(snapshot, dict) else None
 
 
-def create_trail_submission_v1(user_id: int, route_id: str, submitter_handle: str | None) -> dict:
+TRAIL_SUBMISSION_STATUSES = {
+    "draft", "submitted", "changes_requested", "approved_community",
+    "rejected", "withdrawn", "archived",
+}
+TRAIL_CONTRIBUTION_APPROVAL_CREDITS = 5
+
+
+def _decode_community_trail(row: sqlite3.Row | dict) -> dict:
+    raw = dict(row)
+    try:
+        raw["snapshot"] = json.loads(raw.pop("snapshot_json") or "{}")
+    except Exception:
+        raw["snapshot"] = {}
+    return raw
+
+
+def _trail_geometry_points(geometry: object) -> list[list[float]]:
+    points: list[list[float]] = []
+
+    def visit(candidate: object) -> None:
+        if not isinstance(candidate, dict):
+            return
+        kind = candidate.get("type")
+        if kind == "FeatureCollection":
+            for feature in candidate.get("features") or []:
+                visit(feature)
+            return
+        if kind == "Feature":
+            visit(candidate.get("geometry"))
+            return
+        coordinates = candidate.get("coordinates")
+        lines = [coordinates] if kind == "LineString" else coordinates if kind == "MultiLineString" else []
+        for line in lines or []:
+            if not isinstance(line, list):
+                continue
+            for point in line:
+                if not isinstance(point, (list, tuple)) or len(point) < 2:
+                    continue
+                try:
+                    lng, lat = float(point[0]), float(point[1])
+                except (TypeError, ValueError):
+                    continue
+                if math.isfinite(lng) and math.isfinite(lat) and -180 <= lng <= 180 and -90 <= lat <= 90:
+                    normalized = [round(lng, 7), round(lat, 7)]
+                    if not points or points[-1] != normalized:
+                        points.append(normalized)
+
+    visit(geometry)
+    return points
+
+
+def _sample_trail_points(points: list[list[float]], maximum: int = 80) -> list[list[float]]:
+    if len(points) <= maximum:
+        return points
+    step = (len(points) - 1) / max(1, maximum - 1)
+    return [points[round(index * step)] for index in range(maximum)]
+
+
+def _trail_submission_geometry_diagnostics(snapshot: dict) -> dict:
+    points = _trail_geometry_points(snapshot.get("geometry"))
+    distance_m = sum(
+        _trail_route_distance_m(points[index - 1], points[index])
+        for index in range(1, len(points))
+    )
+    closed = bool(
+        len(points) > 2
+        and _trail_route_distance_m(points[0], points[-1]) <= 50
+    )
+    return {
+        "status": "complete" if len(points) >= 2 else "invalid",
+        "point_count": len(points),
+        "distance_m": round(distance_m, 1),
+        "closed": closed,
+        "geometry_sha256": snapshot.get("geometry_sha256"),
+    }
+
+
+def _normalized_trail_submission_name(value: object) -> str:
+    clean = re.sub(r"\b(trails?|routes?|loops?)\b", " ", str(value or "").lower())
+    return re.sub(r"[^a-z0-9]+", " ", clean).strip()
+
+
+def _trail_submission_duplicate_diagnostics_db(
+    db: sqlite3.Connection,
+    snapshot: dict,
+    *,
+    submission_id: str | None = None,
+) -> dict:
+    points = _trail_geometry_points(snapshot.get("geometry"))
+    if len(points) < 2:
+        return {"status": "invalid_geometry", "matches": []}
+    sampled = _sample_trail_points(points)
+    lngs = [point[0] for point in points]
+    lats = [point[1] for point in points]
+    margin = 0.08
+    rows = db.execute(
+        """SELECT * FROM trail_profiles
+           WHERE lat BETWEEN ? AND ? AND lng BETWEEN ? AND ?
+           ORDER BY updated_at DESC LIMIT 500""",
+        (min(lats) - margin, max(lats) + margin, min(lngs) - margin, max(lngs) + margin),
+    ).fetchall()
+    target_name = _normalized_trail_submission_name(snapshot.get("title"))
+    matches: list[dict] = []
+    for row in rows:
+        profile = _decode_trail_profile(row)
+        provenance = profile.get("provenance") if isinstance(profile.get("provenance"), dict) else {}
+        if submission_id and provenance.get("submission_id") == submission_id:
+            continue
+        lane = trail_profile_publication_lane(profile)
+        if lane == "unreviewed":
+            continue
+        candidate_points = _sample_trail_points(_trail_geometry_points(profile.get("geometry")))
+        if len(candidate_points) < 2:
+            continue
+        close = 0
+        for point in sampled:
+            if min(_trail_route_distance_m(point, candidate) for candidate in candidate_points) <= 80:
+                close += 1
+        overlap = close / max(1, len(sampled))
+        candidate_name = _normalized_trail_submission_name(profile.get("name"))
+        name_match = bool(target_name and candidate_name and target_name == candidate_name)
+        possible_duplicate = bool(overlap >= 0.65 or (name_match and overlap >= 0.25))
+        if possible_duplicate or overlap >= 0.15 or name_match:
+            matches.append({
+                "trail_id": profile.get("id"),
+                "name": profile.get("name"),
+                "catalog": lane,
+                "name_match": name_match,
+                "overlap_ratio": round(overlap, 3),
+                "possible_duplicate": possible_duplicate,
+            })
+    matches.sort(key=lambda item: (
+        not item["possible_duplicate"],
+        -float(item["overlap_ratio"]),
+        not item["name_match"],
+        str(item.get("name") or "").lower(),
+    ))
+    selected = matches[:8]
+    return {
+        "status": "possible_conflict" if any(item["possible_duplicate"] for item in selected) else "clear",
+        "matches": selected,
+        "checked_at": int(time.time()),
+    }
+
+
+def _clean_trail_submission_attestations(value: object) -> dict:
+    raw = value if isinstance(value, dict) else {}
+    return {
+        "contributor_attested": bool(raw.get("contributor_attested")),
+        "photo_rights_confirmed": bool(raw.get("photo_rights_confirmed")),
+        "public_access_note": _clean_trail_route_text(raw.get("public_access_note"), 1000),
+    }
+
+
+def _trail_submission_access_diagnostics(snapshot: dict) -> dict:
+    attestations = snapshot.get("attestations") if isinstance(snapshot.get("attestations"), dict) else {}
+    trailheads = snapshot.get("trailheads") if isinstance(snapshot.get("trailheads"), list) else []
+    sources = snapshot.get("source_evidence") if isinstance(snapshot.get("source_evidence"), list) else []
+    return {
+        "status": "review_required",
+        "trailhead_count": len(trailheads),
+        "source_count": len(sources),
+        "permitted_use_count": len(snapshot.get("permitted_uses") or []),
+        "contributor_attested": bool(attestations.get("contributor_attested")),
+        "public_access_note_present": bool(attestations.get("public_access_note")),
+    }
+
+
+def _trail_submission_snapshot(
+    route: dict,
+    *,
+    attestations: dict | None,
+    require_attestations: bool,
+) -> dict:
+    title = _clean_trail_route_text(route.get("title"), 180)
+    if not title or len(title) < 4:
+        raise ValueError("Give the route a meaningful name before submitting")
+    clean_attestations = _clean_trail_submission_attestations(attestations)
+    trailheads = route.get("trailheads") or []
+    source_evidence = route.get("source_evidence") or []
+    if not trailheads and not source_evidence and not clean_attestations["public_access_note"]:
+        raise ValueError("Add a trailhead or access evidence before submitting")
+    if require_attestations and not clean_attestations["contributor_attested"]:
+        raise ValueError("Confirm the route is not intentionally placed on private or prohibited land")
+    photos = route.get("photos") or []
+    if require_attestations and photos and not clean_attestations["photo_rights_confirmed"]:
+        raise ValueError("Confirm you can share the route photos")
+    return {
+        "version": 1,
+        "route_id": route["id"],
+        "route_revision": int(route.get("content_revision") or route["geometry_revision"]),
+        "title": title,
+        "description": route.get("description"),
+        "origin": route["origin"],
+        "activity": route.get("activity"),
+        "route_shape": route.get("route_shape"),
+        "geometry": route["geometry"],
+        "geometry_sha256": route["geometry_sha256"],
+        "trailheads": trailheads,
+        "permitted_uses": route.get("permitted_uses") or [],
+        "source_evidence": source_evidence,
+        "photos": photos,
+        "attestations": clean_attestations,
+    }
+
+
+def _insert_trail_submission_db(
+    db: sqlite3.Connection,
+    *,
+    user_id: int,
+    route: dict,
+    submitter_handle: str | None,
+    attestations: dict | None,
+    require_attestations: bool,
+    resubmitted_from: str | None = None,
+) -> sqlite3.Row:
+    revision = int(route.get("content_revision") or route["geometry_revision"])
+    existing = db.execute(
+        "SELECT * FROM trail_submissions_v1 WHERE route_id=? AND route_revision=?",
+        (route["id"], revision),
+    ).fetchone()
+    if existing:
+        return existing
+    snapshot = _trail_submission_snapshot(
+        route,
+        attestations=attestations,
+        require_attestations=require_attestations,
+    )
+    submission_id = f"trail_submission_{secrets.token_hex(16)}"
+    now = int(time.time())
+    duplicate = _trail_submission_duplicate_diagnostics_db(db, snapshot, submission_id=submission_id)
+    access = _trail_submission_access_diagnostics(snapshot)
+    history = []
+    if resubmitted_from:
+        history.append({
+            "event": "resubmitted",
+            "from_submission_id": resubmitted_from,
+            "at": now,
+        })
+    db.execute(
+        """INSERT INTO trail_submissions_v1
+           (id,route_id,user_id,route_revision,geometry_sha256,submitter_handle,
+            snapshot_json,status,duplicate_json,access_review_json,
+            moderator_history_json,submitted_at,updated_at)
+           VALUES (?,?,?,?,?,?,?,'submitted',?,?,?,?,?)""",
+        (
+            submission_id,
+            route["id"],
+            user_id,
+            revision,
+            route["geometry_sha256"],
+            re.sub(r"\s+", " ", str(submitter_handle or "")).strip()[:80] or None,
+            json.dumps(snapshot, separators=(",", ":"), sort_keys=True),
+            json.dumps(duplicate, separators=(",", ":"), sort_keys=True),
+            json.dumps(access, separators=(",", ":"), sort_keys=True),
+            json.dumps(history, separators=(",", ":"), sort_keys=True),
+            now,
+            now,
+        ),
+    )
+    return db.execute("SELECT * FROM trail_submissions_v1 WHERE id=?", (submission_id,)).fetchone()
+
+
+def create_trail_submission_v1(
+    user_id: int,
+    route_id: str,
+    submitter_handle: str | None,
+    *,
+    attestations: dict | None = None,
+    require_attestations: bool = False,
+) -> dict:
     db = _conn()
     try:
         db.execute("BEGIN IMMEDIATE")
@@ -16062,54 +16365,14 @@ def create_trail_submission_v1(user_id: int, route_id: str, submitter_handle: st
         if not route:
             raise KeyError("Trail route not found")
         decoded = _decode_owned_trail_route(route)
-        existing = db.execute(
-            """SELECT * FROM trail_submissions_v1
-               WHERE route_id=? AND route_revision=?""",
-            (route_id, int(decoded.get("content_revision") or decoded["geometry_revision"])),
-        ).fetchone()
-        if existing:
-            db.commit()
-            return _decode_trail_submission(existing)
-        trailheads = decoded.get("trailheads") or []
-        source_evidence = decoded.get("source_evidence") or []
-        if not trailheads and not source_evidence:
-            raise ValueError("Add a trailhead or access evidence before submitting")
-        snapshot = {
-            "version": 1,
-            "route_id": decoded["id"],
-            "route_revision": int(decoded.get("content_revision") or decoded["geometry_revision"]),
-            "title": decoded["title"],
-            "description": decoded.get("description"),
-            "origin": decoded["origin"],
-            "activity": decoded.get("activity"),
-            "route_shape": decoded.get("route_shape"),
-            "geometry": decoded["geometry"],
-            "geometry_sha256": decoded["geometry_sha256"],
-            "trailheads": trailheads,
-            "permitted_uses": decoded.get("permitted_uses") or [],
-            "source_evidence": source_evidence,
-            "photos": decoded.get("photos") or [],
-        }
-        submission_id = f"trail_submission_{secrets.token_hex(16)}"
-        now = int(time.time())
-        db.execute(
-            """INSERT INTO trail_submissions_v1
-               (id,route_id,user_id,route_revision,geometry_sha256,submitter_handle,
-                snapshot_json,status,submitted_at,updated_at)
-               VALUES (?,?,?,?,?,?,?,'submitted',?,?)""",
-            (
-                submission_id,
-                route_id,
-                user_id,
-                int(decoded.get("content_revision") or decoded["geometry_revision"]),
-                decoded["geometry_sha256"],
-                re.sub(r"\s+", " ", str(submitter_handle or "")).strip()[:80] or None,
-                json.dumps(snapshot, separators=(",", ":"), sort_keys=True),
-                now,
-                now,
-            ),
+        row = _insert_trail_submission_db(
+            db,
+            user_id=user_id,
+            route=decoded,
+            submitter_handle=submitter_handle,
+            attestations=attestations,
+            require_attestations=require_attestations,
         )
-        row = db.execute("SELECT * FROM trail_submissions_v1 WHERE id=?", (submission_id,)).fetchone()
         db.commit()
     except Exception:
         db.rollback()
@@ -16121,6 +16384,7 @@ def create_trail_submission_v1(user_id: int, route_id: str, submitter_handle: st
 
 def list_trail_submissions_v1(
     *, user_id: int | None = None, status: str | None = None, limit: int = 100,
+    include_snapshot: bool = False, include_moderator_identity: bool = False,
 ) -> list[dict]:
     clauses: list[str] = []
     params: list = []
@@ -16138,7 +16402,681 @@ def list_trail_submissions_v1(
         params,
     ).fetchall()
     db.close()
-    return [_decode_trail_submission(row, include_snapshot=user_id is not None) for row in rows]
+    return [
+        _decode_trail_submission(
+            row,
+            include_snapshot=user_id is not None or include_snapshot,
+            include_moderator_identity=include_moderator_identity,
+        )
+        for row in rows
+    ]
+
+
+def get_trail_submission_v1(
+    submission_id: str,
+    *,
+    user_id: int | None = None,
+    include_snapshot: bool = True,
+    include_moderator_identity: bool = False,
+) -> dict | None:
+    clean_id = str(submission_id or "").strip()
+    if not clean_id.startswith("trail_submission_"):
+        return None
+    db = _conn()
+    if user_id is None:
+        row = db.execute("SELECT * FROM trail_submissions_v1 WHERE id=?", (clean_id,)).fetchone()
+    else:
+        row = db.execute(
+            "SELECT * FROM trail_submissions_v1 WHERE id=? AND user_id=?",
+            (clean_id, int(user_id)),
+        ).fetchone()
+    db.close()
+    return _decode_trail_submission(
+        row,
+        include_snapshot=include_snapshot,
+        include_moderator_identity=include_moderator_identity,
+    ) if row else None
+
+
+def _trail_submission_history(row: sqlite3.Row | dict) -> list[dict]:
+    try:
+        history = json.loads(dict(row).get("moderator_history_json") or "[]")
+    except Exception:
+        history = []
+    return [item for item in history if isinstance(item, dict)] if isinstance(history, list) else []
+
+
+def _trail_moderation_event(
+    *,
+    event: str,
+    at: int,
+    moderator_id: int | None = None,
+    note: str | None = None,
+    details: dict | None = None,
+) -> dict:
+    output: dict = {"event": event, "at": int(at)}
+    if moderator_id is not None:
+        output["moderator_id"] = int(moderator_id)
+    if note:
+        output["note"] = _clean_trail_route_text(note, 2000)
+    if details:
+        output["details"] = details
+    return output
+
+
+def withdraw_trail_submission_v1(user_id: int, submission_id: str) -> dict:
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute(
+            "SELECT * FROM trail_submissions_v1 WHERE id=? AND user_id=?",
+            (submission_id, int(user_id)),
+        ).fetchone()
+        if not row:
+            raise KeyError("Trail submission not found")
+        if row["status"] == "withdrawn":
+            db.commit()
+            return _decode_trail_submission(row)
+        if row["status"] not in {"submitted", "changes_requested"}:
+            raise ValueError("This submission can no longer be withdrawn")
+        now = int(time.time())
+        history = _trail_submission_history(row)
+        history.append(_trail_moderation_event(event="withdrawn", at=now))
+        db.execute(
+            """UPDATE trail_submissions_v1
+               SET status='withdrawn',updated_at=?,moderator_history_json=? WHERE id=?""",
+            (now, json.dumps(history, separators=(",", ":"), sort_keys=True), submission_id),
+        )
+        updated = db.execute("SELECT * FROM trail_submissions_v1 WHERE id=?", (submission_id,)).fetchone()
+        db.commit()
+        return _decode_trail_submission(updated)
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def resubmit_trail_submission_v1(
+    user_id: int,
+    submission_id: str,
+    submitter_handle: str | None,
+    *,
+    attestations: dict,
+) -> dict:
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        previous = db.execute(
+            "SELECT * FROM trail_submissions_v1 WHERE id=? AND user_id=?",
+            (submission_id, int(user_id)),
+        ).fetchone()
+        if not previous:
+            raise KeyError("Trail submission not found")
+        if previous["status"] != "changes_requested":
+            raise ValueError("Only a changes-requested submission can be resubmitted")
+        route = db.execute(
+            """SELECT * FROM owned_trail_routes_v1
+               WHERE id=? AND user_id=? AND deleted_at IS NULL""",
+            (previous["route_id"], int(user_id)),
+        ).fetchone()
+        if not route:
+            raise KeyError("Trail route not found")
+        decoded_route = _decode_owned_trail_route(route)
+        route_revision = int(decoded_route.get("content_revision") or decoded_route["geometry_revision"])
+        if route_revision <= int(previous["route_revision"]):
+            raise ValueError("Update the route before resubmitting")
+        new_row = _insert_trail_submission_db(
+            db,
+            user_id=int(user_id),
+            route=decoded_route,
+            submitter_handle=submitter_handle,
+            attestations=attestations,
+            require_attestations=True,
+            resubmitted_from=submission_id,
+        )
+        now = int(time.time())
+        history = _trail_submission_history(previous)
+        history.append(_trail_moderation_event(
+            event="resubmitted",
+            at=now,
+            details={"new_submission_id": new_row["id"], "route_revision": route_revision},
+        ))
+        db.execute(
+            """UPDATE trail_submissions_v1
+               SET status='archived',updated_at=?,moderator_history_json=? WHERE id=?""",
+            (now, json.dumps(history, separators=(",", ":"), sort_keys=True), submission_id),
+        )
+        db.commit()
+        return _decode_trail_submission(new_row)
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def _community_public_snapshot(
+    submission: sqlite3.Row | dict,
+    snapshot: dict,
+    *,
+    community_id: str,
+    approved_count: int,
+) -> dict:
+    public_trail_id = f"trail:community:{community_id}"
+    return {
+        "version": 1,
+        "community_id": community_id,
+        "public_trail_id": public_trail_id,
+        "submission_id": dict(submission)["id"],
+        "route_revision": int(snapshot.get("route_revision") or dict(submission)["route_revision"]),
+        "geometry_sha256": snapshot.get("geometry_sha256"),
+        "title": snapshot.get("title"),
+        "description": snapshot.get("description"),
+        "activity": snapshot.get("activity"),
+        "route_shape": snapshot.get("route_shape"),
+        "geometry": snapshot.get("geometry"),
+        "trailheads": snapshot.get("trailheads") or [],
+        "permitted_uses": snapshot.get("permitted_uses") or [],
+        "source_evidence": snapshot.get("source_evidence") or [],
+        "photos": snapshot.get("photos") or [],
+        "contributor_handle": dict(submission).get("submitter_handle") or "Trailhead contributor",
+        "contributor_approved_count": max(1, int(approved_count)),
+        "trust": "community_reviewed",
+    }
+
+
+def _community_profile_from_snapshot(
+    public_snapshot: dict,
+    *,
+    verified_sources: list[dict] | None = None,
+    verified_trail_id: str | None = None,
+) -> dict:
+    points = _trail_geometry_points(public_snapshot.get("geometry"))
+    if len(points) < 2:
+        raise ValueError("The submitted route does not contain usable geometry")
+    distance_m = sum(
+        _trail_route_distance_m(points[index - 1], points[index])
+        for index in range(1, len(points))
+    )
+    lat = sum(point[1] for point in points) / len(points)
+    lng = sum(point[0] for point in points) / len(points)
+    activity = _clean_trail_route_text(public_snapshot.get("activity"), 60)
+    sources = verified_sources or []
+    is_verified = bool(verified_trail_id)
+    source_label = (
+        _clean_trail_route_text((sources[0] if sources else {}).get("label"), 180)
+        if is_verified else "Trailhead community"
+    ) or ("Official source" if is_verified else "Trailhead community")
+    official_url = (sources[0] if sources else {}).get("url") if is_verified else None
+    review_status = "promoted" if is_verified else "approved_community"
+    profile_id = verified_trail_id or public_snapshot["public_trail_id"]
+    provenance = {
+        "review_status": review_status,
+        "catalog": {
+            "feature_type": "trail",
+            "route_type": public_snapshot.get("route_shape"),
+        },
+        "submission_id": public_snapshot.get("submission_id"),
+        "community_id": public_snapshot.get("community_id"),
+        "geometry_sha256": public_snapshot.get("geometry_sha256"),
+        "route_revision": public_snapshot.get("route_revision"),
+        "submitted_by": public_snapshot.get("contributor_handle"),
+        "contributor_approved_count": public_snapshot.get("contributor_approved_count"),
+        "source_evidence": sources if is_verified else public_snapshot.get("source_evidence") or [],
+    }
+    return {
+        "id": profile_id,
+        "name": public_snapshot.get("title") or "Community route",
+        "summary": "",
+        "description": public_snapshot.get("description") or "",
+        "lat": round(lat, 7),
+        "lng": round(lng, 7),
+        "length_mi": round(distance_m / 1609.344, 2),
+        "activities": [activity] if activity else [],
+        "geometry": public_snapshot.get("geometry"),
+        "trailheads": public_snapshot.get("trailheads") or [],
+        "official_url": official_url or "",
+        "photos": public_snapshot.get("photos") or [],
+        "source": "official" if is_verified else "trailhead-community",
+        "source_label": source_label,
+        "provenance": provenance,
+        "last_checked": int(time.time()),
+        "admin_edited": bool(is_verified),
+    }
+
+
+def _refresh_community_contributor_count_db(
+    db: sqlite3.Connection,
+    *,
+    user_id: int,
+    approved_count: int,
+    now: int,
+) -> None:
+    """Keep the public contribution count consistent across a contributor's routes."""
+    count = max(1, int(approved_count))
+    rows = db.execute(
+        """SELECT community.*
+           FROM community_trails_v1 community
+           JOIN trail_submissions_v1 submission ON submission.id=community.submission_id
+           WHERE submission.user_id=? AND submission.status='approved_community'""",
+        (int(user_id),),
+    ).fetchall()
+    for row in rows:
+        community = _decode_community_trail(row)
+        snapshot = community.get("snapshot") if isinstance(community.get("snapshot"), dict) else {}
+        if not snapshot:
+            continue
+        updated_snapshot = dict(snapshot)
+        updated_snapshot["contributor_approved_count"] = count
+        db.execute(
+            "UPDATE community_trails_v1 SET snapshot_json=?,updated_at=? WHERE id=?",
+            (
+                json.dumps(updated_snapshot, separators=(",", ":"), sort_keys=True),
+                now,
+                row["id"],
+            ),
+        )
+        if row["status"] == "active":
+            _upsert_trail_profile_db(
+                db,
+                _community_profile_from_snapshot(updated_snapshot),
+                preserve_admin=False,
+            )
+
+
+def moderate_trail_submission_v1(
+    submission_id: str,
+    *,
+    moderator_id: int,
+    decision: str,
+    note: str | None,
+    internal_note: str | None = None,
+    duplicate_review: dict | None = None,
+    access_review: dict | None = None,
+    photo_rights_verified: bool = False,
+) -> dict:
+    clean_decision = str(decision or "").strip().lower()
+    if clean_decision not in {"changes_requested", "approved_community", "rejected"}:
+        raise ValueError("Invalid moderation decision")
+    clean_note = _clean_trail_route_text(note, 2000)
+    clean_internal_note = _clean_trail_route_text(internal_note, 2000)
+    if not clean_note:
+        raise ValueError("Add a reason for this decision")
+    duplicate = duplicate_review if isinstance(duplicate_review, dict) else {}
+    access = access_review if isinstance(access_review, dict) else {}
+    duplicate_status = str(duplicate.get("status") or "").strip().lower()
+    access_status = str(access.get("status") or "").strip().lower()
+    if duplicate_status and duplicate_status not in {"clear", "related", "duplicate"}:
+        raise ValueError("Invalid duplicate review status")
+    if access_status and access_status not in {"supported", "insufficient", "restricted"}:
+        raise ValueError("Invalid access review status")
+
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute("SELECT * FROM trail_submissions_v1 WHERE id=?", (submission_id,)).fetchone()
+        if not row:
+            raise KeyError("Trail submission not found")
+        target_status = clean_decision
+        if row["status"] == target_status:
+            community = db.execute(
+                "SELECT * FROM community_trails_v1 WHERE submission_id=?", (submission_id,),
+            ).fetchone()
+            award = db.execute(
+                "SELECT * FROM trail_contribution_credit_awards_v1 WHERE submission_id=?", (submission_id,),
+            ).fetchone()
+            db.commit()
+            return {
+                "submission": _decode_trail_submission(row),
+                "community_trail": _decode_community_trail(community) if community else None,
+                "credits_awarded": bool(award),
+                "credits": int(award["credits"]) if award else 0,
+            }
+        if row["status"] != "submitted":
+            raise ValueError("This submission is not awaiting review")
+        decoded = _decode_trail_submission(row)
+        snapshot = decoded.get("snapshot") if isinstance(decoded.get("snapshot"), dict) else {}
+        attestations = snapshot.get("attestations") if isinstance(snapshot.get("attestations"), dict) else {}
+        if clean_decision == "approved_community":
+            if duplicate_status not in {"clear", "related"}:
+                raise ValueError("Complete the duplicate review before approval")
+            if access_status != "supported":
+                raise ValueError("Access evidence must be supported before approval")
+            if not attestations.get("contributor_attested"):
+                raise ValueError("Contributor attestation is required before approval")
+            if snapshot.get("photos") and not (
+                attestations.get("photo_rights_confirmed") or photo_rights_verified
+            ):
+                raise ValueError("Photo rights must be confirmed before approval")
+
+        now = int(time.time())
+        history = _trail_submission_history(row)
+        history.append(_trail_moderation_event(
+            event=clean_decision,
+            at=now,
+            moderator_id=moderator_id,
+            note=clean_note,
+            details={
+                "duplicate_status": duplicate_status or None,
+                "access_status": access_status or None,
+                "photo_rights_verified": bool(photo_rights_verified),
+                "internal_note": clean_internal_note or None,
+            },
+        ))
+        db.execute(
+            """UPDATE trail_submissions_v1
+               SET status=?,moderation_note=?,duplicate_json=?,access_review_json=?,
+                   moderator_history_json=?,moderated_at=?,updated_at=? WHERE id=?""",
+            (
+                target_status,
+                clean_note,
+                json.dumps(duplicate, separators=(",", ":"), sort_keys=True),
+                json.dumps(access, separators=(",", ":"), sort_keys=True),
+                json.dumps(history, separators=(",", ":"), sort_keys=True),
+                now,
+                now,
+                submission_id,
+            ),
+        )
+        community_row = None
+        award_row = None
+        if clean_decision == "approved_community":
+            community_id = "community_" + hashlib.sha256(submission_id.encode("utf-8")).hexdigest()[:24]
+            approved_count = db.execute(
+                """SELECT COUNT(*) FROM trail_submissions_v1
+                   WHERE user_id=? AND status='approved_community'""",
+                (row["user_id"],),
+            ).fetchone()[0] if row["user_id"] is not None else 1
+            public_snapshot = _community_public_snapshot(
+                row,
+                snapshot,
+                community_id=community_id,
+                approved_count=max(1, int(approved_count)),
+            )
+            db.execute(
+                """INSERT INTO community_trails_v1
+                   (id,submission_id,publication_revision,snapshot_json,status,created_at,updated_at)
+                   VALUES (?,?,1,?,'active',?,?)
+                   ON CONFLICT(submission_id) DO NOTHING""",
+                (
+                    community_id,
+                    submission_id,
+                    json.dumps(public_snapshot, separators=(",", ":"), sort_keys=True),
+                    now,
+                    now,
+                ),
+            )
+            community_row = db.execute(
+                "SELECT * FROM community_trails_v1 WHERE submission_id=?", (submission_id,),
+            ).fetchone()
+            if community_row and community_row["status"] == "active":
+                _upsert_trail_profile_db(
+                    db,
+                    _community_profile_from_snapshot(public_snapshot),
+                    preserve_admin=False,
+                )
+            if row["user_id"] is not None:
+                reward_key = f"trail-contribution:{submission_id}"
+                transaction = db.execute(
+                    """INSERT OR IGNORE INTO credit_transactions
+                       (user_id,amount,reason,reward_key,created_at) VALUES (?,?,?,?,?)""",
+                    (
+                        int(row["user_id"]),
+                        TRAIL_CONTRIBUTION_APPROVAL_CREDITS,
+                        f"Approved trail contribution: {str(snapshot.get('title') or 'Trail')[:100]}",
+                        reward_key,
+                        now,
+                    ),
+                )
+                if transaction.rowcount > 0:
+                    db.execute(
+                        "UPDATE users SET credits=credits+? WHERE id=?",
+                        (TRAIL_CONTRIBUTION_APPROVAL_CREDITS, int(row["user_id"])),
+                    )
+                    _record_contest_event_db(
+                        db,
+                        int(row["user_id"]),
+                        TRAIL_CONTRIBUTION_APPROVAL_CREDITS,
+                        "Approved trail contribution",
+                        "trail_submission",
+                        submission_id,
+                        now,
+                    )
+                db.execute(
+                    """INSERT OR IGNORE INTO trail_contribution_credit_awards_v1
+                       (submission_id,user_id,credits,awarded_at) VALUES (?,?,?,?)""",
+                    (
+                        submission_id,
+                        int(row["user_id"]),
+                        TRAIL_CONTRIBUTION_APPROVAL_CREDITS,
+                        now,
+                    ),
+                )
+                award_row = db.execute(
+                    "SELECT * FROM trail_contribution_credit_awards_v1 WHERE submission_id=?",
+                    (submission_id,),
+                ).fetchone()
+                _refresh_community_contributor_count_db(
+                    db,
+                    user_id=int(row["user_id"]),
+                    approved_count=max(1, int(approved_count)),
+                    now=now,
+                )
+                community_row = db.execute(
+                    "SELECT * FROM community_trails_v1 WHERE submission_id=?",
+                    (submission_id,),
+                ).fetchone()
+        updated = db.execute("SELECT * FROM trail_submissions_v1 WHERE id=?", (submission_id,)).fetchone()
+        balance = None
+        if updated["user_id"] is not None:
+            user_row = db.execute("SELECT credits FROM users WHERE id=?", (updated["user_id"],)).fetchone()
+            balance = int(user_row["credits"]) if user_row else None
+        db.commit()
+        return {
+            "submission": _decode_trail_submission(updated),
+            "community_trail": _decode_community_trail(community_row) if community_row else None,
+            "credits_awarded": bool(award_row),
+            "credits": int(award_row["credits"]) if award_row else 0,
+            "new_balance": balance,
+        }
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def list_community_trails_v1(*, status: str | None = "active", limit: int = 100) -> list[dict]:
+    db = _conn()
+    if status:
+        rows = db.execute(
+            "SELECT * FROM community_trails_v1 WHERE status=? ORDER BY updated_at DESC LIMIT ?",
+            (status, max(1, min(int(limit), 200))),
+        ).fetchall()
+    else:
+        rows = db.execute(
+            "SELECT * FROM community_trails_v1 ORDER BY updated_at DESC LIMIT ?",
+            (max(1, min(int(limit), 200)),),
+        ).fetchall()
+    db.close()
+    return [_decode_community_trail(row) for row in rows]
+
+
+def get_community_trail_v1(community_id: str, *, include_inactive: bool = False) -> dict | None:
+    db = _conn()
+    if include_inactive:
+        row = db.execute("SELECT * FROM community_trails_v1 WHERE id=?", (community_id,)).fetchone()
+    else:
+        row = db.execute(
+            "SELECT * FROM community_trails_v1 WHERE id=? AND status='active'", (community_id,),
+        ).fetchone()
+    db.close()
+    return _decode_community_trail(row) if row else None
+
+
+def set_community_trail_status_v1(
+    community_id: str,
+    *,
+    moderator_id: int,
+    action: str,
+    note: str,
+) -> dict:
+    clean_action = str(action or "").strip().lower()
+    if clean_action not in {"take_down", "restore"}:
+        raise ValueError("Invalid Community route action")
+    clean_note = _clean_trail_route_text(note, 2000)
+    if not clean_note:
+        raise ValueError("Add a reason for this action")
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute("SELECT * FROM community_trails_v1 WHERE id=?", (community_id,)).fetchone()
+        if not row:
+            raise KeyError("Community route not found")
+        target = "taken_down" if clean_action == "take_down" else "active"
+        if row["status"] == target:
+            db.commit()
+            return _decode_community_trail(row)
+        if clean_action == "restore" and row["status"] != "taken_down":
+            raise ValueError("Only a taken-down Community route can be restored")
+        if clean_action == "take_down" and row["status"] != "active":
+            raise ValueError("Only an active Community route can be taken down")
+        decoded = _decode_community_trail(row)
+        snapshot = decoded.get("snapshot") if isinstance(decoded.get("snapshot"), dict) else {}
+        public_trail_id = snapshot.get("public_trail_id")
+        now = int(time.time())
+        if clean_action == "take_down":
+            if public_trail_id:
+                db.execute("DELETE FROM trail_profiles WHERE id=?", (public_trail_id,))
+        else:
+            _upsert_trail_profile_db(
+                db,
+                _community_profile_from_snapshot(snapshot),
+                preserve_admin=False,
+            )
+        db.execute(
+            "UPDATE community_trails_v1 SET status=?,updated_at=? WHERE id=?",
+            (target, now, community_id),
+        )
+        submission = db.execute(
+            "SELECT * FROM trail_submissions_v1 WHERE id=?", (row["submission_id"],),
+        ).fetchone()
+        if submission:
+            history = _trail_submission_history(submission)
+            history.append(_trail_moderation_event(
+                event="taken_down" if clean_action == "take_down" else "restored",
+                at=now,
+                moderator_id=moderator_id,
+                note=clean_note,
+            ))
+            db.execute(
+                "UPDATE trail_submissions_v1 SET moderator_history_json=?,updated_at=? WHERE id=?",
+                (json.dumps(history, separators=(",", ":"), sort_keys=True), now, row["submission_id"]),
+            )
+        updated = db.execute("SELECT * FROM community_trails_v1 WHERE id=?", (community_id,)).fetchone()
+        db.commit()
+        return _decode_community_trail(updated)
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def promote_community_trail_v1(
+    community_id: str,
+    *,
+    moderator_id: int,
+    verified_trail_id: str,
+    authoritative_sources: list[dict],
+    note: str,
+) -> dict:
+    clean_id = str(verified_trail_id or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9:_-]{4,180}", clean_id):
+        raise ValueError("Invalid verified trail id")
+    if not clean_id.startswith("trail:"):
+        clean_id = f"trail:verified:{clean_id}"
+    clean_note = _clean_trail_route_text(note, 2000)
+    if not clean_note:
+        raise ValueError("Add a promotion note")
+    clean_sources: list[dict] = []
+    for raw in authoritative_sources[:12] if isinstance(authoritative_sources, list) else []:
+        if not isinstance(raw, dict):
+            continue
+        label = _clean_trail_route_text(raw.get("label"), 180)
+        kind = str(raw.get("kind") or "").strip().lower()
+        url = _validate_public_trail_url(raw.get("url"), "Authoritative source link")
+        if label and kind in {"official", "agency", "land_manager"}:
+            clean_sources.append({"label": label, "kind": kind, "url": url})
+    if not clean_sources:
+        raise ValueError("Add an authoritative official source before promotion")
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute("SELECT * FROM community_trails_v1 WHERE id=?", (community_id,)).fetchone()
+        if not row:
+            raise KeyError("Community route not found")
+        if row["status"] == "promoted":
+            if row["promoted_trail_id"] != clean_id:
+                raise ValueError("This Community route was promoted to another trail")
+            profile = db.execute("SELECT * FROM trail_profiles WHERE id=?", (clean_id,)).fetchone()
+            db.commit()
+            return {
+                "community_trail": _decode_community_trail(row),
+                "verified_trail": _decode_trail_profile(profile) if profile else None,
+            }
+        if row["status"] != "active":
+            raise ValueError("Only an active Community route can be promoted")
+        existing = db.execute("SELECT * FROM trail_profiles WHERE id=?", (clean_id,)).fetchone()
+        if existing:
+            raise ValueError("Verified trail id already exists")
+        decoded = _decode_community_trail(row)
+        snapshot = decoded.get("snapshot") if isinstance(decoded.get("snapshot"), dict) else {}
+        profile = _upsert_trail_profile_db(
+            db,
+            _community_profile_from_snapshot(
+                snapshot,
+                verified_sources=clean_sources,
+                verified_trail_id=clean_id,
+            ),
+            preserve_admin=False,
+        )
+        if snapshot.get("public_trail_id"):
+            db.execute("DELETE FROM trail_profiles WHERE id=?", (snapshot["public_trail_id"],))
+        now = int(time.time())
+        db.execute(
+            """UPDATE community_trails_v1
+               SET status='promoted',promoted_trail_id=?,updated_at=? WHERE id=?""",
+            (clean_id, now, community_id),
+        )
+        submission = db.execute(
+            "SELECT * FROM trail_submissions_v1 WHERE id=?", (row["submission_id"],),
+        ).fetchone()
+        if submission:
+            history = _trail_submission_history(submission)
+            history.append(_trail_moderation_event(
+                event="promoted",
+                at=now,
+                moderator_id=moderator_id,
+                note=clean_note,
+                details={"verified_trail_id": clean_id, "sources": clean_sources},
+            ))
+            db.execute(
+                "UPDATE trail_submissions_v1 SET moderator_history_json=?,updated_at=? WHERE id=?",
+                (json.dumps(history, separators=(",", ":"), sort_keys=True), now, row["submission_id"]),
+            )
+        updated = db.execute("SELECT * FROM community_trails_v1 WHERE id=?", (community_id,)).fetchone()
+        db.commit()
+        return {
+            "community_trail": _decode_community_trail(updated),
+            "verified_trail": profile,
+        }
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 def _distance_miles(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     r = 3958.8

@@ -222,6 +222,9 @@ export class TrailRouteSharingRepositoryV1 {
           ...(prepared.payload.activity ? { activity: prepared.payload.activity } : {}),
           ...(prepared.payload.route_shape ? { route_shape: prepared.payload.route_shape } : {}),
           permitted_uses: [],
+          trailheads: prepared.payload.trailheads,
+          source_evidence: prepared.payload.source_evidence,
+          photos: [],
         }, trailRouteIdempotencyKey(
           requestBase(request),
           'update',
@@ -245,6 +248,17 @@ export class TrailRouteSharingRepositoryV1 {
       local = await this.persistIfCurrent(request, local, route, persist, prepared.crop);
     }
     return { route, trail: local };
+  }
+
+  async prepareOwnedRoute(
+    ownerScope: string,
+    trail: OfflineTrail,
+    crop: TrailRouteCropV1,
+    persist: PersistSharedTrailMappingV1,
+  ): Promise<{ route: OwnedTrailRouteV1; trail: OfflineTrail }> {
+    const request = this.begin(ownerScope, trail);
+    const authToken = await this.bindAuthToken(request);
+    return this.remoteRoute(request, trail, crop, persist, true, authToken);
   }
 
   async createLink(

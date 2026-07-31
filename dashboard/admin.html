@@ -305,6 +305,67 @@ td.name{color:var(--text);font-weight:600;}
 .originals-empty{color:var(--text3);font-size:12px;padding:18px;text-align:center;border:1px dashed var(--border);border-radius:10px;}
 @media(max-width:1050px){.originals-shell{grid-template-columns:1fr}.originals-sidebar{position:static;max-height:none}.originals-json-grid,.originals-preview-grid{grid-template-columns:1fr}.originals-metrics{grid-template-columns:repeat(3,1fr)}}
 @media(max-width:720px){.originals-form,.originals-review-grid{grid-template-columns:1fr}.originals-stop-editor{grid-template-columns:1fr 1fr}.originals-metrics,.originals-lab-summary{grid-template-columns:1fr 1fr}.originals-preview-link,.originals-license-grid{grid-template-columns:1fr}.originals-lab-state{flex-direction:column}.originals-lab-meta{text-align:left}}
+
+/* Trail review */
+@font-face{font-family:'Barlow Condensed';src:url('/app/assets/app/fonts/BarlowCondensed-Bold.f599739e94768bec57f6899c422a5119.ttf') format('truetype');font-weight:700;font-display:swap;}
+.trail-mod-page{min-height:calc(100vh - 112px);margin:-28px;padding:28px;background:#f7f8f6;color:#111412;border-radius:20px;}
+.trail-mod-head{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:18px;}
+.trail-mod-title{font:700 34px/1 'Barlow Condensed',sans-serif;letter-spacing:.2px;}
+.trail-mod-sub{color:#4f5752;font-size:13px;line-height:1.5;margin-top:7px;}
+.trail-mod-refresh{min-height:44px;border:1px solid #d9ddd9;border-radius:12px;background:#fff;color:#111412;padding:0 16px;font-weight:750;cursor:pointer;}
+.trail-mod-toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:14px;}
+.trail-mod-tab{min-height:44px;border:1px solid #d9ddd9;border-radius:12px;background:#fff;color:#4f5752;padding:0 14px;font-size:12px;font-weight:800;cursor:pointer;}
+.trail-mod-tab.active{border-color:#ad5a33;background:#ad5a33;color:#fff;}
+.trail-mod-search,.trail-mod-select,.trail-mod-input,.trail-mod-textarea{border:1px solid #d9ddd9;border-radius:12px;background:#fff;color:#111412;outline:none;font:inherit;}
+.trail-mod-search{height:44px;padding:0 13px;min-width:240px;margin-left:auto;}
+.trail-mod-select{height:44px;padding:0 36px 0 12px;}
+.trail-mod-search:focus,.trail-mod-select:focus,.trail-mod-input:focus,.trail-mod-textarea:focus{border-color:#984f2f;box-shadow:0 0 0 2px rgba(152,79,47,.14);}
+.trail-mod-layout{display:grid;grid-template-columns:minmax(300px,380px) minmax(460px,1fr);gap:14px;align-items:start;}
+.trail-mod-panel{background:#fff;border:1px solid #e0e3df;border-radius:20px;box-shadow:0 8px 28px rgba(17,20,18,.06);overflow:hidden;}
+.trail-mod-panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 18px;border-bottom:1px solid #e8eae7;}
+.trail-mod-panel-title{font:700 22px/1.1 'Barlow Condensed',sans-serif;}
+.trail-mod-count{color:#984f2f;font-size:12px;font-weight:850;}
+.trail-mod-list{display:flex;flex-direction:column;gap:9px;max-height:calc(100vh - 280px);overflow:auto;padding:12px;}
+.trail-mod-item{width:100%;min-height:92px;text-align:left;border:1px solid #e0e3df;border-radius:12px;background:#fff;padding:13px;cursor:pointer;color:#111412;}
+.trail-mod-item:hover,.trail-mod-item.active{border-color:#ad5a33;box-shadow:inset 3px 0 0 #ad5a33;}
+.trail-mod-item-top{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}
+.trail-mod-item-title{font-size:14px;font-weight:850;line-height:1.3;}
+.trail-mod-item-state{color:#984f2f;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.4px;}
+.trail-mod-item-meta{color:#4f5752;font-size:11px;line-height:1.45;margin-top:8px;}
+.trail-mod-conflict{display:inline-flex;margin-top:8px;color:#8a4c00;font-size:10px;font-weight:850;}
+.trail-mod-empty{padding:28px;color:#4f5752;font-size:13px;line-height:1.5;text-align:center;}
+.trail-mod-detail{padding:18px;max-height:calc(100vh - 238px);overflow:auto;}
+.trail-mod-detail-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:16px;}
+.trail-mod-detail-title{font:700 30px/1 'Barlow Condensed',sans-serif;}
+.trail-mod-detail-meta{color:#4f5752;font-size:12px;margin-top:7px;}
+.trail-mod-state{display:inline-flex;align-items:center;min-height:30px;border:1px solid #cfd4cf;border-radius:999px;padding:0 10px;color:#4f5752;font-size:10px;font-weight:900;text-transform:uppercase;}
+.trail-mod-route{height:210px;border-radius:16px;background:#111412;overflow:hidden;margin-bottom:14px;}
+.trail-mod-route svg{width:100%;height:100%;display:block;}
+.trail-mod-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:14px;}
+.trail-mod-fact{border:1px solid #e0e3df;border-radius:12px;padding:11px;min-height:70px;}
+.trail-mod-fact-label{color:#69716c;font-size:9px;font-weight:900;letter-spacing:.7px;text-transform:uppercase;}
+.trail-mod-fact-value{color:#111412;font-size:13px;font-weight:800;margin-top:7px;overflow-wrap:anywhere;}
+.trail-mod-section{border-top:1px solid #e8eae7;padding-top:16px;margin-top:16px;}
+.trail-mod-section-title{font:700 20px/1.1 'Barlow Condensed',sans-serif;margin-bottom:10px;}
+.trail-mod-evidence{display:flex;flex-direction:column;gap:8px;}
+.trail-mod-evidence-row{border:1px solid #e0e3df;border-radius:12px;padding:11px;color:#111412;text-decoration:none;}
+.trail-mod-evidence-title{font-size:12px;font-weight:800;}
+.trail-mod-evidence-meta{color:#4f5752;font-size:10px;margin-top:4px;overflow-wrap:anywhere;}
+.trail-mod-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+.trail-mod-label{display:block;color:#69716c;font-size:9px;font-weight:900;letter-spacing:.7px;text-transform:uppercase;margin-bottom:6px;}
+.trail-mod-input,.trail-mod-textarea{width:100%;padding:11px 12px;}
+.trail-mod-textarea{min-height:92px;resize:vertical;line-height:1.45;}
+.trail-mod-check{display:flex;align-items:flex-start;gap:9px;color:#4f5752;font-size:12px;line-height:1.45;margin-top:10px;}
+.trail-mod-check input{margin-top:2px;accent-color:#ad5a33;}
+.trail-mod-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;}
+.trail-mod-action{min-height:44px;border-radius:12px;padding:0 14px;font-size:12px;font-weight:850;cursor:pointer;border:1px solid #cfd4cf;background:#fff;color:#111412;}
+.trail-mod-action.primary{background:#ad5a33;border-color:#ad5a33;color:#fff;}
+.trail-mod-action.warn{border-color:#b06700;color:#8a4c00;}
+.trail-mod-action.danger{border-color:#b42318;color:#b42318;}
+.trail-mod-action:disabled{opacity:.45;cursor:not-allowed;}
+.trail-mod-note{color:#4f5752;font-size:12px;line-height:1.55;}
+@media(max-width:1050px){.trail-mod-layout{grid-template-columns:1fr}.trail-mod-list{max-height:360px}.trail-mod-detail{max-height:none}.trail-mod-search{margin-left:0;flex:1}.trail-mod-page{margin:-16px;padding:18px;border-radius:16px;}}
+@media(max-width:650px){.trail-mod-grid,.trail-mod-form-grid{grid-template-columns:1fr}.trail-mod-head{flex-direction:column}.trail-mod-refresh{width:100%}.trail-mod-toolbar>*{width:100%}.trail-mod-title{font-size:30px}.trail-mod-detail-title{font-size:26px}}
 </style>
 </head>
 <body>
@@ -358,6 +419,9 @@ td.name{color:var(--text);font-weight:600;}
       </div>
       <div class="nav-item" onclick="showPage('originals',this)">
         <span class="nav-icon">OR</span><span class="nav-label">Originals</span>
+      </div>
+      <div class="nav-item" onclick="showPage('trail-moderation',this)">
+        <span class="nav-icon">TM</span><span class="nav-label">Trail Review</span>
       </div>
       <div class="nav-item" onclick="showPage('contest',this)">
         <span class="nav-icon">CT</span><span class="nav-label">Contest</span>
@@ -1100,6 +1164,47 @@ td.name{color:var(--text);font-weight:600;}
         </div>
       </div>
 
+      <!-- Trail Review -->
+      <div class="page" id="page-trail-moderation">
+        <section class="trail-mod-page">
+          <div class="trail-mod-head">
+            <div>
+              <div class="trail-mod-title">Trail submissions</div>
+              <div class="trail-mod-sub">Review contributor routes before they enter the Community catalog.</div>
+            </div>
+            <button class="trail-mod-refresh" type="button" onclick="loadTrailModeration()">Refresh</button>
+          </div>
+          <div class="trail-mod-toolbar" role="tablist" aria-label="Trail review filters">
+            <button class="trail-mod-tab active" id="trail-mod-tab-submitted" type="button" onclick="setTrailModerationMode('submitted')">Awaiting review</button>
+            <button class="trail-mod-tab" id="trail-mod-tab-conflicts" type="button" onclick="setTrailModerationMode('conflicts')">Conflicts</button>
+            <button class="trail-mod-tab" id="trail-mod-tab-changes_requested" type="button" onclick="setTrailModerationMode('changes_requested')">Changes requested</button>
+            <button class="trail-mod-tab" id="trail-mod-tab-all" type="button" onclick="setTrailModerationMode('all')">All submissions</button>
+            <button class="trail-mod-tab" id="trail-mod-tab-community" type="button" onclick="setTrailModerationMode('community')">Community</button>
+            <input class="trail-mod-search" id="trail-mod-search" aria-label="Search trail submissions" placeholder="Search routes or contributors" oninput="renderTrailModerationQueue()">
+            <select class="trail-mod-select" id="trail-mod-sort" aria-label="Sort trail submissions" onchange="renderTrailModerationQueue()">
+              <option value="oldest">Oldest first</option>
+              <option value="newest">Newest first</option>
+            </select>
+          </div>
+          <div class="trail-mod-layout">
+            <aside class="trail-mod-panel">
+              <div class="trail-mod-panel-head">
+                <div class="trail-mod-panel-title" id="trail-mod-list-title">Awaiting review</div>
+                <div class="trail-mod-count" id="trail-mod-count">Loading</div>
+              </div>
+              <div class="trail-mod-list" id="trail-mod-list" aria-live="polite">
+                <div class="trail-mod-empty">Loading submissions…</div>
+              </div>
+            </aside>
+            <article class="trail-mod-panel">
+              <div class="trail-mod-detail" id="trail-mod-detail">
+                <div class="trail-mod-empty">Select a route to review its geometry and evidence.</div>
+              </div>
+            </article>
+          </div>
+        </section>
+      </div>
+
       <!-- Bug Reports -->
       <div class="page" id="page-bugs">
         <div class="page-title">Bug Reports</div>
@@ -1171,6 +1276,11 @@ let originalVirtualValidation = null;
 let originalFeedbackItems = [];
 let originalSimulationFrame = null;
 let originalSimulationLastTimestamp = null;
+let trailModerationMode = 'submitted';
+let trailModerationSubmissions = [];
+let trailModerationCommunity = [];
+let selectedTrailModerationSubmissionId = null;
+let selectedTrailModerationCommunityId = null;
 const ORIGINAL_REVIEW_CHECKS = [
   'route_reviewed', 'cue_route_reviewed',
   'narration_reviewed', 'audio_assets_reviewed', 'transcripts_reviewed',
@@ -1248,6 +1358,7 @@ function showPage(name, el) {
   if (name === 'camp-edits') loadCampEdits();
   if (name === 'audio-guides') loadAudioGuidePlaces();
   if (name === 'originals') loadOriginals();
+  if (name === 'trail-moderation') loadTrailModeration();
   if (name === 'contest') loadContest();
   if (name === 'push-campaigns') loadPushCampaigns();
   if (name === 'messages') loadSupportThreads();
@@ -4641,6 +4752,396 @@ async function importOriginalJson(event) {
     toast('JSON imported', 'originals-ok');
   } catch(e) {
     toast('Import: ' + e.message, 'err');
+  }
+}
+
+function setTrailModerationMode(mode) {
+  trailModerationMode = mode;
+  selectedTrailModerationSubmissionId = null;
+  selectedTrailModerationCommunityId = null;
+  ['submitted', 'conflicts', 'changes_requested', 'all', 'community'].forEach(value => {
+    document.getElementById(`trail-mod-tab-${value}`)?.classList.toggle('active', value === mode);
+  });
+  document.getElementById('trail-mod-detail').innerHTML = '<div class="trail-mod-empty">Select a route to review its geometry and evidence.</div>';
+  loadTrailModeration();
+}
+
+function trailModerationStatusLabel(status) {
+  return ({
+    submitted: 'Awaiting review', changes_requested: 'Changes requested',
+    approved_community: 'Approved', rejected: 'Rejected', withdrawn: 'Withdrawn',
+    archived: 'Archived', active: 'Active', taken_down: 'Taken down', promoted: 'Verified',
+  })[status] || String(status || 'Unknown').replaceAll('_', ' ');
+}
+
+function trailModerationDate(value) {
+  const number = Number(value || 0);
+  if (!number) return 'Date unavailable';
+  return new Date(number * 1000).toLocaleString(undefined, {
+    month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit'
+  });
+}
+
+function trailModerationGeometryPoints(geometry) {
+  const points = [];
+  function visit(candidate) {
+    if (!candidate || typeof candidate !== 'object') return;
+    if (candidate.type === 'FeatureCollection') {
+      (candidate.features || []).forEach(visit);
+      return;
+    }
+    if (candidate.type === 'Feature') {
+      visit(candidate.geometry);
+      return;
+    }
+    const lines = candidate.type === 'LineString'
+      ? [candidate.coordinates]
+      : candidate.type === 'MultiLineString' ? candidate.coordinates : [];
+    (lines || []).forEach(line => (line || []).forEach(point => {
+      const lng = Number(point?.[0]);
+      const lat = Number(point?.[1]);
+      if (Number.isFinite(lng) && Number.isFinite(lat) && Math.abs(lng) <= 180 && Math.abs(lat) <= 90) {
+        points.push([lng, lat]);
+      }
+    }));
+  }
+  visit(geometry);
+  return points;
+}
+
+function trailModerationRouteSvg(geometry) {
+  const points = trailModerationGeometryPoints(geometry);
+  if (points.length < 2) return '<div class="trail-mod-empty">Route geometry unavailable.</div>';
+  const width = 760;
+  const height = 210;
+  const lngs = points.map(point => point[0]);
+  const lats = points.map(point => point[1]);
+  const minLng = Math.min(...lngs);
+  const maxLng = Math.max(...lngs);
+  const minLat = Math.min(...lats);
+  const maxLat = Math.max(...lats);
+  const lngSpan = Math.max(maxLng - minLng, .00001);
+  const latSpan = Math.max(maxLat - minLat, .00001);
+  const projected = points.map(point => [
+    24 + ((point[0] - minLng) / lngSpan) * (width - 48),
+    24 + (1 - ((point[1] - minLat) / latSpan)) * (height - 48),
+  ]);
+  const path = projected.map((point, index) => `${index ? 'L' : 'M'}${point[0].toFixed(1)} ${point[1].toFixed(1)}`).join(' ');
+  const start = projected[0];
+  const finish = projected[projected.length - 1];
+  const diamond = `${finish[0]},${finish[1]-7} ${finish[0]+7},${finish[1]} ${finish[0]},${finish[1]+7} ${finish[0]-7},${finish[1]}`;
+  return `<svg role="img" aria-label="Submitted route geometry" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">
+    <path d="${path}" fill="none" stroke="#f7f8f6" stroke-opacity=".28" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"></path>
+    <path d="${path}" fill="none" stroke="#d36d3d" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"></path>
+    <circle cx="${start[0]}" cy="${start[1]}" r="6" fill="#f7f8f6" stroke="#111412" stroke-width="2"></circle>
+    <polygon points="${diamond}" fill="#d36d3d" stroke="#f7f8f6" stroke-width="2"></polygon>
+  </svg>`;
+}
+
+async function loadTrailModeration() {
+  const list = document.getElementById('trail-mod-list');
+  const detail = document.getElementById('trail-mod-detail');
+  if (!list || !detail) return;
+  list.innerHTML = '<div class="trail-mod-empty">Loading routes…</div>';
+  try {
+    if (trailModerationMode === 'community') {
+      const response = await api('/api/admin/community-trails?limit=200');
+      trailModerationCommunity = Array.isArray(response.community_trails) ? response.community_trails : [];
+      trailModerationSubmissions = [];
+    } else {
+      const status = trailModerationMode === 'changes_requested'
+        ? 'changes_requested'
+        : trailModerationMode === 'all' ? '' : 'submitted';
+      const response = await api(`/api/admin/trail-submissions?status=${encodeURIComponent(status)}&limit=200`);
+      trailModerationSubmissions = Array.isArray(response.submissions) ? response.submissions : [];
+      if (trailModerationMode === 'conflicts') {
+        trailModerationSubmissions = trailModerationSubmissions.filter(item => item.duplicate?.status === 'possible_conflict');
+      }
+      trailModerationCommunity = [];
+    }
+    renderTrailModerationQueue();
+    if (trailModerationMode === 'community' && selectedTrailModerationCommunityId) {
+      const exists = trailModerationCommunity.some(item => item.id === selectedTrailModerationCommunityId);
+      if (exists) await selectTrailModerationCommunity(selectedTrailModerationCommunityId);
+    } else if (selectedTrailModerationSubmissionId) {
+      const exists = trailModerationSubmissions.some(item => item.id === selectedTrailModerationSubmissionId);
+      if (exists) await selectTrailModerationSubmission(selectedTrailModerationSubmissionId);
+    }
+  } catch (error) {
+    list.innerHTML = `<div class="trail-mod-empty">Trail review could not load.<br>${esc(error.message)}</div>`;
+    detail.innerHTML = '<div class="trail-mod-empty">Review tools are unavailable.</div>';
+  }
+}
+
+function renderTrailModerationQueue() {
+  const list = document.getElementById('trail-mod-list');
+  if (!list) return;
+  const search = String(document.getElementById('trail-mod-search')?.value || '').trim().toLowerCase();
+  const oldest = document.getElementById('trail-mod-sort')?.value !== 'newest';
+  const labels = {
+    submitted: 'Awaiting review', conflicts: 'Conflicts',
+    changes_requested: 'Changes requested', all: 'All submissions', community: 'Community routes',
+  };
+  document.getElementById('trail-mod-list-title').textContent = labels[trailModerationMode];
+  const source = trailModerationMode === 'community' ? trailModerationCommunity : trailModerationSubmissions;
+  const rows = source.filter(item => {
+    const snapshot = item.snapshot || {};
+    return !search || [snapshot.title, snapshot.contributor_handle, item.submitter_handle, item.status]
+      .filter(Boolean).some(value => String(value).toLowerCase().includes(search));
+  }).sort((a, b) => oldest
+    ? Number(a.updated_at || 0) - Number(b.updated_at || 0)
+    : Number(b.updated_at || 0) - Number(a.updated_at || 0));
+  document.getElementById('trail-mod-count').textContent = `${rows.length} ${rows.length === 1 ? 'route' : 'routes'}`;
+  if (!rows.length) {
+    const empty = trailModerationMode === 'conflicts'
+      ? 'No submitted routes have unresolved duplicate conflicts.'
+      : trailModerationMode === 'community'
+        ? 'No Community routes match this filter.'
+        : `No routes match ${labels[trailModerationMode].toLowerCase()}.`;
+    list.innerHTML = `<div class="trail-mod-empty">${empty}</div>`;
+    return;
+  }
+  list.innerHTML = rows.map(item => {
+    const snapshot = item.snapshot || {};
+    const conflict = item.duplicate?.status === 'possible_conflict';
+    const selected = trailModerationMode === 'community'
+      ? selectedTrailModerationCommunityId === item.id
+      : selectedTrailModerationSubmissionId === item.id;
+    const handler = trailModerationMode === 'community'
+      ? `selectTrailModerationCommunity('${esc(item.id)}')`
+      : `selectTrailModerationSubmission('${esc(item.id)}')`;
+    const handle = snapshot.contributor_handle || item.submitter_handle || 'Trailhead contributor';
+    return `<button class="trail-mod-item${selected ? ' active' : ''}" type="button" onclick="${handler}">
+      <div class="trail-mod-item-top">
+        <div class="trail-mod-item-title">${esc(snapshot.title || 'Untitled route')}</div>
+        <div class="trail-mod-item-state">${esc(trailModerationStatusLabel(item.status))}</div>
+      </div>
+      <div class="trail-mod-item-meta">${esc(handle)} · ${esc(trailModerationDate(item.updated_at))}</div>
+      ${conflict ? '<span class="trail-mod-conflict">Possible duplicate</span>' : ''}
+    </button>`;
+  }).join('');
+}
+
+async function selectTrailModerationSubmission(submissionId) {
+  selectedTrailModerationSubmissionId = submissionId;
+  selectedTrailModerationCommunityId = null;
+  renderTrailModerationQueue();
+  const detail = document.getElementById('trail-mod-detail');
+  detail.innerHTML = '<div class="trail-mod-empty">Loading route evidence…</div>';
+  try {
+    const submission = await api(`/api/admin/trail-submissions/${encodeURIComponent(submissionId)}`);
+    if (selectedTrailModerationSubmissionId !== submissionId) return;
+    renderTrailModerationSubmission(submission);
+  } catch (error) {
+    detail.innerHTML = `<div class="trail-mod-empty">This submission could not load.<br>${esc(error.message)}</div>`;
+  }
+}
+
+function renderTrailModerationSubmission(submission) {
+  const detail = document.getElementById('trail-mod-detail');
+  const snapshot = submission.snapshot || {};
+  const duplicate = submission.duplicate || {};
+  const access = submission.access_review || {};
+  const sources = Array.isArray(snapshot.source_evidence) ? snapshot.source_evidence : [];
+  const trailheads = Array.isArray(snapshot.trailheads) ? snapshot.trailheads : [];
+  const uses = Array.isArray(snapshot.permitted_uses) ? snapshot.permitted_uses : [];
+  const photos = Array.isArray(snapshot.photos) ? snapshot.photos : [];
+  const duplicateMatches = Array.isArray(duplicate.matches) ? duplicate.matches : [];
+  const history = Array.isArray(submission.moderator_history) ? submission.moderator_history : [];
+  const pending = submission.status === 'submitted';
+  detail.innerHTML = `
+    <div class="trail-mod-detail-head">
+      <div>
+        <div class="trail-mod-detail-title">${esc(snapshot.title || 'Untitled route')}</div>
+        <div class="trail-mod-detail-meta">${esc(submission.submitter_handle || 'Trailhead contributor')} · revision ${Number(submission.route_revision || 1)}</div>
+      </div>
+      <span class="trail-mod-state">${esc(trailModerationStatusLabel(submission.status))}</span>
+    </div>
+    <div class="trail-mod-route">${trailModerationRouteSvg(snapshot.geometry)}</div>
+    <div class="trail-mod-grid">
+      <div class="trail-mod-fact"><div class="trail-mod-fact-label">Activity</div><div class="trail-mod-fact-value">${esc(snapshot.activity || 'Not listed')}</div></div>
+      <div class="trail-mod-fact"><div class="trail-mod-fact-label">Route shape</div><div class="trail-mod-fact-value">${esc(snapshot.route_shape || 'Not listed')}</div></div>
+      <div class="trail-mod-fact"><div class="trail-mod-fact-label">Access points</div><div class="trail-mod-fact-value">${trailheads.length}</div></div>
+      <div class="trail-mod-fact"><div class="trail-mod-fact-label">Permitted uses</div><div class="trail-mod-fact-value">${esc(uses.join(', ') || 'Not listed')}</div></div>
+      <div class="trail-mod-fact"><div class="trail-mod-fact-label">Source records</div><div class="trail-mod-fact-value">${sources.length}</div></div>
+      <div class="trail-mod-fact"><div class="trail-mod-fact-label">Photos</div><div class="trail-mod-fact-value">${photos.length}</div></div>
+    </div>
+    ${snapshot.description ? `<div class="trail-mod-section"><div class="trail-mod-section-title">Contributor description</div><div class="trail-mod-note">${esc(snapshot.description)}</div></div>` : ''}
+    <div class="trail-mod-section">
+      <div class="trail-mod-section-title">Duplicate comparison</div>
+      <div class="trail-mod-note">${duplicate.status === 'possible_conflict' ? 'Review the possible overlap before deciding.' : 'No strong duplicate match was detected.'} Geometry is one signal.</div>
+      <div class="trail-mod-evidence" style="margin-top:10px;">
+        ${duplicateMatches.length ? duplicateMatches.map(match => `<div class="trail-mod-evidence-row">
+          <div class="trail-mod-evidence-title">${esc(match.name || match.trail_id || 'Nearby trail')}</div>
+          <div class="trail-mod-evidence-meta">${Math.round(Number(match.overlap_ratio || 0) * 100)}% overlap${match.name_match ? ' · matching name' : ''} · ${esc(match.catalog || 'catalog')}</div>
+        </div>`).join('') : '<div class="trail-mod-note">No nearby match needs comparison.</div>'}
+      </div>
+    </div>
+    <div class="trail-mod-section">
+      <div class="trail-mod-section-title">Access and sources</div>
+      <div class="trail-mod-note">${access.trailhead_count || trailheads.length} access ${Number(access.trailhead_count || trailheads.length) === 1 ? 'point' : 'points'} · ${access.source_count || sources.length} source ${Number(access.source_count || sources.length) === 1 ? 'record' : 'records'}</div>
+      <div class="trail-mod-evidence" style="margin-top:10px;">
+        ${sources.length ? sources.map(source => source.url
+          ? `<a class="trail-mod-evidence-row" href="${esc(source.url)}" target="_blank" rel="noopener noreferrer"><div class="trail-mod-evidence-title">${esc(source.title || source.publisher || 'Official source')}</div><div class="trail-mod-evidence-meta">${esc(source.publisher || source.kind || '')} · Open source</div></a>`
+          : `<div class="trail-mod-evidence-row"><div class="trail-mod-evidence-title">${esc(source.title || source.publisher || 'Source')}</div><div class="trail-mod-evidence-meta">${esc(source.publisher || source.kind || '')}</div></div>`).join('')
+          : '<div class="trail-mod-note">No source record was submitted.</div>'}
+      </div>
+    </div>
+    ${pending ? `<div class="trail-mod-section">
+      <div class="trail-mod-section-title">Decision</div>
+      <div class="trail-mod-form-grid">
+        <div><label class="trail-mod-label" for="trail-mod-duplicate">Duplicate review</label><select class="trail-mod-select" id="trail-mod-duplicate" style="width:100%;"><option value="">Select result</option><option value="clear">Continue · no duplicate</option><option value="related">Related route</option><option value="duplicate">Duplicate</option></select></div>
+        <div><label class="trail-mod-label" for="trail-mod-access">Access evidence</label><select class="trail-mod-select" id="trail-mod-access" style="width:100%;"><option value="">Select result</option><option value="supported">Supported</option><option value="insufficient">Insufficient</option><option value="restricted">Restricted</option></select></div>
+      </div>
+      ${photos.length ? '<label class="trail-mod-check"><input id="trail-mod-photo-rights" type="checkbox"> <span>Photo rights are documented for every submitted image.</span></label>' : ''}
+      <label class="trail-mod-label" for="trail-mod-decision-note" style="margin-top:12px;">Contributor-facing decision note</label>
+      <textarea class="trail-mod-textarea" id="trail-mod-decision-note" placeholder="State what was reviewed or what must change."></textarea>
+      <label class="trail-mod-label" for="trail-mod-internal-note" style="margin-top:12px;">Internal findings</label>
+      <textarea class="trail-mod-textarea" id="trail-mod-internal-note" placeholder="Record reviewer-only evidence or follow-up details."></textarea>
+      <div class="trail-mod-actions">
+        <button class="trail-mod-action primary" type="button" onclick="submitTrailModerationDecision('approved_community')">Approve Community</button>
+        <button class="trail-mod-action warn" type="button" onclick="submitTrailModerationDecision('changes_requested')">Request changes</button>
+        <button class="trail-mod-action danger" type="button" onclick="submitTrailModerationDecision('rejected')">Reject</button>
+      </div>
+    </div>` : ''}
+    ${history.length ? `<div class="trail-mod-section"><div class="trail-mod-section-title">Review history</div><div class="trail-mod-evidence">${history.map(event => `<div class="trail-mod-evidence-row"><div class="trail-mod-evidence-title">${esc(trailModerationStatusLabel(event.event))}</div><div class="trail-mod-evidence-meta">${esc(trailModerationDate(event.at))}${event.note ? ` · ${esc(event.note)}` : ''}</div></div>`).join('')}</div></div>` : ''}`;
+}
+
+async function submitTrailModerationDecision(decision) {
+  if (!selectedTrailModerationSubmissionId) return;
+  const note = String(document.getElementById('trail-mod-decision-note')?.value || '').trim();
+  const internalNote = String(document.getElementById('trail-mod-internal-note')?.value || '').trim();
+  const duplicateStatus = document.getElementById('trail-mod-duplicate')?.value || '';
+  const accessStatus = document.getElementById('trail-mod-access')?.value || '';
+  if (!note) return toast('Add a clear decision note', 'err');
+  if (decision === 'approved_community' && !['clear', 'related'].includes(duplicateStatus)) return toast('Complete the duplicate review', 'err');
+  if (decision === 'approved_community' && accessStatus !== 'supported') return toast('Confirm supported access evidence', 'err');
+  try {
+    await api(`/api/admin/trail-submissions/${encodeURIComponent(selectedTrailModerationSubmissionId)}/decision`, {
+      method: 'POST',
+      body: JSON.stringify({
+        decision,
+        note,
+        internal_note: internalNote || null,
+        duplicate_review: { status: duplicateStatus },
+        access_review: { status: accessStatus },
+        photo_rights_verified: Boolean(document.getElementById('trail-mod-photo-rights')?.checked),
+      }),
+    });
+    toast(decision === 'approved_community' ? 'Community route approved' : decision === 'changes_requested' ? 'Changes requested' : 'Submission rejected');
+    selectedTrailModerationSubmissionId = null;
+    document.getElementById('trail-mod-detail').innerHTML = '<div class="trail-mod-empty">Select another route to review.</div>';
+    await loadTrailModeration();
+  } catch (error) {
+    toast(error.message, 'err');
+  }
+}
+
+async function selectTrailModerationCommunity(communityId) {
+  selectedTrailModerationCommunityId = communityId;
+  selectedTrailModerationSubmissionId = null;
+  renderTrailModerationQueue();
+  const detail = document.getElementById('trail-mod-detail');
+  detail.innerHTML = '<div class="trail-mod-empty">Loading Community route…</div>';
+  try {
+    const community = await api(`/api/admin/community-trails/${encodeURIComponent(communityId)}`);
+    if (selectedTrailModerationCommunityId !== communityId) return;
+    renderTrailModerationCommunity(community);
+  } catch (error) {
+    detail.innerHTML = `<div class="trail-mod-empty">This Community route could not load.<br>${esc(error.message)}</div>`;
+  }
+}
+
+function renderTrailModerationCommunity(community) {
+  const detail = document.getElementById('trail-mod-detail');
+  const snapshot = community.snapshot || {};
+  const sources = Array.isArray(snapshot.source_evidence) ? snapshot.source_evidence : [];
+  const active = community.status === 'active';
+  const takenDown = community.status === 'taken_down';
+  detail.innerHTML = `
+    <div class="trail-mod-detail-head">
+      <div>
+        <div class="trail-mod-detail-title">${esc(snapshot.title || 'Community route')}</div>
+        <div class="trail-mod-detail-meta">Contributed by ${esc(snapshot.contributor_handle || 'Trailhead contributor')} · ${Number(snapshot.contributor_approved_count || 1)} approved ${Number(snapshot.contributor_approved_count || 1) === 1 ? 'contribution' : 'contributions'}</div>
+      </div>
+      <span class="trail-mod-state">${esc(trailModerationStatusLabel(community.status))}</span>
+    </div>
+    <div class="trail-mod-route">${trailModerationRouteSvg(snapshot.geometry)}</div>
+    <div class="trail-mod-grid">
+      <div class="trail-mod-fact"><div class="trail-mod-fact-label">Catalog</div><div class="trail-mod-fact-value">Community route</div></div>
+      <div class="trail-mod-fact"><div class="trail-mod-fact-label">Review</div><div class="trail-mod-fact-value">Reviewed route</div></div>
+      <div class="trail-mod-fact"><div class="trail-mod-fact-label">Source status</div><div class="trail-mod-fact-value">Not source-verified</div></div>
+    </div>
+    <div class="trail-mod-section">
+      <div class="trail-mod-section-title">Trust lane</div>
+      <div class="trail-mod-note">Verified trails require official corroboration. Community ratings, comments and field reports remain separate.</div>
+    </div>
+    <div class="trail-mod-section">
+      <div class="trail-mod-section-title">Submitted sources</div>
+      <div class="trail-mod-evidence">${sources.length ? sources.map(source => source.url
+        ? `<a class="trail-mod-evidence-row" href="${esc(source.url)}" target="_blank" rel="noopener noreferrer"><div class="trail-mod-evidence-title">${esc(source.title || source.publisher || 'Source')}</div><div class="trail-mod-evidence-meta">${esc(source.publisher || source.kind || '')}</div></a>`
+        : `<div class="trail-mod-evidence-row"><div class="trail-mod-evidence-title">${esc(source.title || source.publisher || 'Source')}</div></div>`).join('')
+        : '<div class="trail-mod-note">No source record was submitted.</div>'}</div>
+    </div>
+    ${community.status !== 'promoted' ? `<div class="trail-mod-section">
+      <div class="trail-mod-section-title">Catalog status</div>
+      <label class="trail-mod-label" for="trail-community-action-note">Reason</label>
+      <textarea class="trail-mod-textarea" id="trail-community-action-note" placeholder="Record the evidence behind this action."></textarea>
+      <div class="trail-mod-actions">
+        ${active ? '<button class="trail-mod-action danger" type="button" onclick="setCommunityTrailStatus(\'take_down\')">Take down</button>' : ''}
+        ${takenDown ? '<button class="trail-mod-action primary" type="button" onclick="setCommunityTrailStatus(\'restore\')">Restore</button>' : ''}
+      </div>
+    </div>` : ''}
+    ${active ? `<div class="trail-mod-section">
+      <div class="trail-mod-section-title">Promote to Verified</div>
+      <div class="trail-mod-note">Promotion creates a new immutable verified revision and keeps contributor attribution and review history.</div>
+      <div class="trail-mod-form-grid" style="margin-top:10px;">
+        <div><label class="trail-mod-label" for="trail-promote-id">Verified trail ID</label><input class="trail-mod-input" id="trail-promote-id" placeholder="trail:verified:route-name"></div>
+        <div><label class="trail-mod-label" for="trail-promote-source-label">Official source</label><input class="trail-mod-input" id="trail-promote-source-label" placeholder="Land agency"></div>
+      </div>
+      <label class="trail-mod-label" for="trail-promote-source-url" style="margin-top:10px;">Official source URL</label>
+      <input class="trail-mod-input" id="trail-promote-source-url" type="url" placeholder="https://agency.gov/trails/route">
+      <label class="trail-mod-label" for="trail-promote-note" style="margin-top:10px;">Promotion note</label>
+      <textarea class="trail-mod-textarea" id="trail-promote-note" placeholder="State how geometry and access were corroborated."></textarea>
+      <div class="trail-mod-actions"><button class="trail-mod-action primary" type="button" onclick="promoteCommunityTrail()">Create Verified revision</button></div>
+    </div>` : ''}`;
+}
+
+async function setCommunityTrailStatus(action) {
+  if (!selectedTrailModerationCommunityId) return;
+  const note = String(document.getElementById('trail-community-action-note')?.value || '').trim();
+  if (!note) return toast('Add a reason for this action', 'err');
+  try {
+    await api(`/api/admin/community-trails/${encodeURIComponent(selectedTrailModerationCommunityId)}/status`, {
+      method: 'POST', body: JSON.stringify({ action, note }),
+    });
+    toast(action === 'take_down' ? 'Community route taken down' : 'Community route restored');
+    await loadTrailModeration();
+  } catch (error) {
+    toast(error.message, 'err');
+  }
+}
+
+async function promoteCommunityTrail() {
+  if (!selectedTrailModerationCommunityId) return;
+  const verifiedTrailId = String(document.getElementById('trail-promote-id')?.value || '').trim();
+  const sourceLabel = String(document.getElementById('trail-promote-source-label')?.value || '').trim();
+  const sourceUrl = String(document.getElementById('trail-promote-source-url')?.value || '').trim();
+  const note = String(document.getElementById('trail-promote-note')?.value || '').trim();
+  if (!verifiedTrailId || !sourceLabel || !sourceUrl || !note) return toast('Complete the verified source and promotion note', 'err');
+  try {
+    await api(`/api/admin/community-trails/${encodeURIComponent(selectedTrailModerationCommunityId)}/promote`, {
+      method: 'POST',
+      body: JSON.stringify({
+        verified_trail_id: verifiedTrailId,
+        authoritative_sources: [{ label: sourceLabel, kind: 'official', url: sourceUrl }],
+        note,
+      }),
+    });
+    toast('Verified trail revision created');
+    await loadTrailModeration();
+  } catch (error) {
+    toast(error.message, 'err');
   }
 }
 

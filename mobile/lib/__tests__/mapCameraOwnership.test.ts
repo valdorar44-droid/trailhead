@@ -78,3 +78,17 @@ test('ownership transitions reset a previous application before returning from 3
   assert.equal(returnedState.appliedApplicationKey, null);
   assert.equal(consumeMapCameraClaim(returnedState, review, 'style:1:route:7').apply, true);
 });
+
+test('closing 3D releases camera ownership to ordinary browse', () => {
+  const preview = createMapCameraOwnership('preview3d', 'trail:yosemite:rev-1');
+  const previewState = synchronizeMapCameraClaimOwnership(initialMapCameraClaimState(), preview);
+  const browseState = synchronizeMapCameraClaimOwnership(previewState, BROWSE_MAP_CAMERA_OWNERSHIP);
+
+  assert.equal(browseState.ownershipKey, 'browse:none');
+  assert.equal(browseState.appliedApplicationKey, null);
+  assert.equal(browseState.cancelledOwnershipKey, null);
+  assert.equal(
+    consumeMapCameraClaim(browseState, BROWSE_MAP_CAMERA_OWNERSHIP, 'browse:ignored').apply,
+    false,
+  );
+});

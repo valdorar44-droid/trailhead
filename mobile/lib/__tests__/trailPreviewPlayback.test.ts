@@ -95,10 +95,12 @@ test('Trail Builder uses the shared T6 player and restores the builder through B
   assert.match(mapSource, /setTrailPinCaptureMode\(context\.trailPinCaptureMode\)/);
   assert.match(mapSource, /setTrailTraceMode\(context\.trailTraceMode\)/);
   assert.match(mapSource, /syncTrailCaptureModeToWeb\(context\.trailPinCaptureMode\)/);
-  assert.match(mapSource, /await nativeMapRef\.current\?\.getVisibleBounds\(\)\.catch\(\(\) => null\)/);
-  assert.match(mapSource, /viewport: visibleViewport[\s\S]*?viewportRef\.current/);
-  assert.match(mapSource, /\[\[viewport\.w, viewport\.s\], \[viewport\.e, viewport\.n\]\]/);
-  assert.match(mapSource, /fitCoordinates\([\s\S]*?\[0, 0, 0, 0\],[\s\S]*?450/);
+  assert.match(mapSource, /captureTrailPreviewReturnCamera\(\{/);
+  assert.match(mapSource, /resolveTrailPreviewReturnCamera\(context\.returnCamera/);
+  assert.match(mapSource, /pendingTrailPreviewReturnCameraRef\.current = context\.returnCamera/);
+  assert.match(mapSource, /camera:trail-preview-return-route/);
+  assert.match(mapSource, /camera:trail-preview-return-user/);
+  assert.doesNotMatch(mapSource, /function closeTrailPreview\(\)[\s\S]*?context\.viewport/);
   assert.match(mapSource, /setTrailPinCaptureMode\(false\);\s*setTrailTraceMode\(false\);\s*syncTrailCaptureModeToWeb\(false\)/);
   assert.match(mapSource, /trailTraceMode && !trailPreviewOpen && !navMode/);
   assert.match(mapSource, /trailPinCaptureMode && !trailPreviewOpen && !navMode/);

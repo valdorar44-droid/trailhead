@@ -294,6 +294,11 @@ import {
   synchronizeMapCameraClaimOwnership,
 } from '@/lib/mapCameraOwnership';
 import {
+  captureTrailPreviewReturnCamera,
+  resolveTrailPreviewReturnCamera,
+  type TrailPreviewReturnCameraV1,
+} from '@/lib/trailPreviewReturnCamera';
+import {
   FIRE_OVERLAY_IDLE_STATUS,
   FIRE_OVERLAY_LOADING_STATUS,
   FIRE_OVERLAY_UNAVAILABLE_STATUS,
@@ -7698,6 +7703,9 @@ function MapScreen() {
   const [trailPreviewManifest, setTrailPreviewManifest] = useState<TrailPreviewManifest | null>(null);
   const [trailPreviewProgress, setTrailPreviewProgress] = useState(0);
   const [trailPreviewPauseSignal, setTrailPreviewPauseSignal] = useState(0);
+  const trailPreviewReturnGenerationRef = useRef(0);
+  const pendingTrailPreviewReturnCameraRef = useRef<TrailPreviewReturnCameraV1 | null>(null);
+  const [trailPreviewReturnCameraRevision, setTrailPreviewReturnCameraRevision] = useState(0);
   const trailPreviewReturnContextRef = useRef<{
     trail: TrailFeature | null;
     trailCardCollapsed: boolean;
@@ -7708,7 +7716,7 @@ function MapScreen() {
     presentation: SheetPresentation;
     scrollY: number;
     map3dEnabled: boolean;
-    viewport: { n: number; s: number; e: number; w: number; zoom: number } | null;
+    returnCamera: TrailPreviewReturnCameraV1;
   } | null>(null);
   const [trailCardCollapsed, setTrailCardCollapsed] = useState(false);
   const [showTrailList, setShowTrailList] = useState(false);
@@ -8011,6 +8019,11 @@ function MapScreen() {
     if (!mapCameraClaim) return;
     const fitCoordinates = nativeMapRef.current?.fitCoordinates;
     if (typeof fitCoordinates !== 'function') return;
+    const pendingReturnCamera = pendingTrailPreviewReturnCameraRef.current;
+    if (
+      pendingReturnCamera?.mode === 'user_viewport'
+      && pendingReturnCamera.ownerKey === mapCameraOwnershipKey(mapCameraOwnership)
+    ) return;
     const decision = consumeMapCameraClaim(
       mapCameraClaimStateRef.current,
       mapCameraOwnership,
@@ -8025,6 +8038,55 @@ function MapScreen() {
       mapCameraClaim.duration,
     );
   }, [mapCameraClaim, mapCameraOwnership]);
+
+  useEffect(() => {
+    const snapshot = pendingTrailPreviewReturnCameraRef.current;
+    if (!snapshot || trailPreviewOpen) return;
+    const trailIdentity = String(selectedTrail?.system_v2_id ?? selectedTrail?.id ?? '');
+    const geometryRevision = String(selectedTrail?.geometry_revision ?? 'pending');
+    const decision = resolveTrailPreviewReturnCamera(snapshot, {
+      trailIdentity,
+      geometryRevision,
+      ownerKey: mapCameraOwnershipKey(mapCameraOwnership),
+      styleGeneration: mapStyleGeneration,
+      generation: trailPreviewReturnGenerationRef.current,
+    });
+    if (decision.action === 'discard') {
+      pendingTrailPreviewReturnCameraRef.current = null;
+      recordAndroidMapDebugEvent({
+        at: Date.now(),
+        kind: 'camera:trail-preview-return-discard',
+        details: { reason: decision.reason },
+      });
+      return;
+    }
+    if (decision.action !== 'restore_viewport' || !snapshot.viewport) return;
+    pendingTrailPreviewReturnCameraRef.current = null;
+    mapCameraClaimStateRef.current = cancelMapCameraClaimForGesture(
+      mapCameraClaimStateRef.current,
+      mapCameraOwnership,
+    );
+    const viewport = snapshot.viewport;
+    viewportRef.current = viewport;
+    recordAndroidMapDebugEvent({
+      at: Date.now(),
+      kind: 'camera:trail-preview-return-user',
+      details: { reason: decision.reason },
+    });
+    requestAnimationFrame(() => {
+      nativeMapRef.current?.fitCoordinates(
+        [[viewport.w, viewport.s], [viewport.e, viewport.n]],
+        [0, 0, 0, 0],
+        450,
+      );
+    });
+  }, [
+    mapCameraOwnership,
+    mapStyleGeneration,
+    selectedTrail,
+    trailPreviewOpen,
+    trailPreviewReturnCameraRevision,
+  ]);
 
   const clearRouteBuildMapTimers = useCallback(() => {
     routeBuildTimersRef.current.forEach(timer => clearTimeout(timer));
@@ -21985,17 +22047,6 @@ function MapScreen() {
     setTrailPreviewProgress(0);
     if (context) {
       setMap3dEnabled(context.map3dEnabled);
-      viewportRef.current = context.viewport;
-      if (context.viewport) {
-        const viewport = context.viewport;
-        requestAnimationFrame(() => {
-          nativeMapRef.current?.fitCoordinates(
-            [[viewport.w, viewport.s], [viewport.e, viewport.n]],
-            [0, 0, 0, 0],
-            450,
-          );
-        });
-      }
     }
   }
 
@@ -22003,6 +22054,37 @@ function MapScreen() {
     const context = trailPreviewReturnContextRef.current;
     closeTrailPreview();
     if (!context) return;
+    const returnOwnership = createMapCameraOwnership(
+      context.returnCamera.owner,
+      context.returnCamera.ownerExperienceKey,
+    );
+    const trailIdentity = String(context.trail?.system_v2_id ?? context.trail?.id ?? '');
+    const geometryRevision = String(context.trail?.geometry_revision ?? 'pending');
+    const cameraDecision = resolveTrailPreviewReturnCamera(context.returnCamera, {
+      trailIdentity,
+      geometryRevision,
+      ownerKey: mapCameraOwnershipKey(returnOwnership),
+      styleGeneration: mapStyleGeneration,
+      generation: trailPreviewReturnGenerationRef.current,
+    });
+    if (cameraDecision.action === 'restore_viewport') {
+      pendingTrailPreviewReturnCameraRef.current = context.returnCamera;
+      setTrailPreviewReturnCameraRevision(value => value + 1);
+    } else if (cameraDecision.action === 'route_claim') {
+      pendingTrailPreviewReturnCameraRef.current = null;
+      recordAndroidMapDebugEvent({
+        at: Date.now(),
+        kind: 'camera:trail-preview-return-route',
+        details: { reason: cameraDecision.reason },
+      });
+    } else {
+      pendingTrailPreviewReturnCameraRef.current = null;
+      recordAndroidMapDebugEvent({
+        at: Date.now(),
+        kind: 'camera:trail-preview-return-discard',
+        details: { reason: cameraDecision.reason },
+      });
+    }
     setSelectedTrail(context.trail);
     selectedTrailRef.current = context.trail;
     setTrailCardCollapsed(context.trailCardCollapsed);
@@ -22018,6 +22100,7 @@ function MapScreen() {
   }
 
   function exitTrailPreview() {
+    pendingTrailPreviewReturnCameraRef.current = null;
     closeTrailPreview();
     closeSelectedTrailSheet();
   }
@@ -22031,10 +22114,23 @@ function MapScreen() {
 
   async function openTrailPreview(trail: TrailFeature, routePlanOverride: TrailRoutePlan | null = null) {
     if (!trailPreviewOpen) {
-      // Programmatic trail framing can intentionally suppress ordinary viewport
-      // persistence. Capture the renderer's live bounds so Back restores what
-      // the user actually saw instead of an older browse viewport.
-      const visibleViewport = await nativeMapRef.current?.getVisibleBounds().catch(() => null);
+      pendingTrailPreviewReturnCameraRef.current = null;
+      const returnGeneration = ++trailPreviewReturnGenerationRef.current;
+      const ownerKey = mapCameraOwnershipKey(mapCameraOwnership);
+      const userAdjusted = mapCameraClaimStateRef.current.ownershipKey === ownerKey
+        && mapCameraClaimStateRef.current.cancelledOwnershipKey === ownerKey;
+      const visibleViewport = userAdjusted
+        ? await nativeMapRef.current?.getVisibleBounds().catch(() => null) ?? null
+        : null;
+      const returnCamera = captureTrailPreviewReturnCamera({
+        trailIdentity: String(trail.system_v2_id ?? trail.id),
+        geometryRevision: String(trail.geometry_revision ?? 'pending'),
+        ownership: mapCameraOwnership,
+        claimState: mapCameraClaimStateRef.current,
+        viewport: visibleViewport,
+        styleGeneration: mapStyleGeneration,
+        generation: returnGeneration,
+      });
       trailPreviewReturnContextRef.current = {
         trail: selectedTrail,
         trailCardCollapsed,
@@ -22045,10 +22141,13 @@ function MapScreen() {
         presentation: placeSheetCoordinator.presentation,
         scrollY: trailSheetScrollYRef.current,
         map3dEnabled,
-        viewport: visibleViewport
-          ? { ...visibleViewport }
-          : viewportRef.current ? { ...viewportRef.current } : null,
+        returnCamera,
       };
+      recordAndroidMapDebugEvent({
+        at: Date.now(),
+        kind: 'camera:trail-preview-return-captured',
+        details: { mode: returnCamera.mode },
+      });
     }
     setTrailPreviewProgress(0);
     setTrailPreviewManifest(null);

@@ -420,3 +420,33 @@ Verify `git diff --cached --name-only` before every commit.
 - Do not weaken geometry, authorization, token, revision, or privacy safeguards to make the preview pass.
 - Do not begin E5 public Community moderation, promotion, or credits until E4 Android is accepted.
 - Task-owned Metro, Gradle, Maestro, publisher, and test processes: none.
+## E5 implementation pre-change checkpoint — 2026-07-30 21:14 CDT
+
+- Branch: `feat/trailhead-1.0.10-overhaul`; repository HEAD `c93f99a5c7b95c48ec4b30f384ec114174351089`; last mobile implementation source `da519b373cd06d4467bd36eebc16cf4384699c39`.
+- Paired preview published from `da519b3`: Android update `019fb5ea-41af-730e-a829-9075ddc641fb` on runtime `native-1.0.10-android.7`; iOS update `019fb5ea-41af-7681-83cf-0d020e55d2d9` on runtime `native-1.0.10-ios.6`.
+- Protected Explore-index hash remains `f39f30fdbb33477dacd8fcf5016612a8729dc69e`; unrelated App Store copy hash remains `97c7734c15dde3c4617f69fa391afdbab48a1a23`. `.cursor/`, both protected files, and unrelated work remain unstaged.
+- Android E4 closeout is waiting only on the connected Samsung's secure unlock. The device is USB-powered at 1%; no PIN bypass will be attempted. The focused automated sharing gate remains green.
+
+### Accepted design and behavior evidence
+
+- Figma file `FJUcMWAfsNyjsguCEp2dBe`, section `812:3334`, defines 27 connected E4/E5 states. Implementation anchors include Suggest form `813:2885`, Community Peek `818:3182`, Community Full `814:3348`, moderator queue `814:3421`, duplicate comparison `814:3494`, evidence review `814:3567`, decisions `814:3640`, approval `814:3713`, verified promotion `814:3786`, and takedown `814:3859`.
+- The approved Community detail uses the existing Trailhead trail sheet, keeps `Community route` visibly separate from Verified, and preserves Preview, Save, Download, Report, ratings, comments, and contributor history without extra explanatory copy.
+- Mobbin behavior evidence: AllTrails custom routes remain private saved routes before any contribution flow (`409abb56-0b6a-4bc7-aeac-a5b939c37c89`); concise contribution status is represented as a scannable queue row rather than a decorative success page (`f63dd033-10b3-4cd8-92d1-87e6d2dafc5c`). No Mobbin branding or imagery ships.
+
+### Current code audit
+
+- Existing foundations already include additive ownership, submission, Community publication, and exactly-once award tables; immutable submission snapshots; legacy Community containment; account-deletion anonymization; a `catalog=verified|community|all` discovery contract; Community filter/card styling; and a feature stage defaulting to off.
+- Missing production behavior is limited to owner submission/status actions, deterministic diagnostics, moderator decisions, Community publication projection, exactly-once approval credits, takedown/restore, Verified promotion, owner/mobile status UI, and admin moderation UI.
+- Public Community discovery and contribution-credit issuance remain off until the E5 authorization, moderation, privacy, idempotency, copy, and device gates pass.
+
+### Exact next action
+
+1. Add backend E5 lifecycle functions and focused tests without changing the native graph or enabling the public feature stage.
+2. Add owner/mobile status and admin moderation surfaces by adapting the approved Figma states to existing React Native and dashboard components.
+3. Complete the four remaining Android E4 assertions after the user unlocks the device, then run the bounded E5 Android delta and publish one new paired preview only when both packets pass.
+
+### Do not repeat
+
+- Do not repeat E1-E3 discovery, Trails T1-T6, NPS, Layers, Memory, Originals, Android Auto, broad Map/sheet crawls, Figma research, or private-link creation/opening.
+- Do not expose private/unlisted geometry, publish an unreviewed route, treat Community as Verified, award credits at submission, or add generated access/safety prose.
+- Task-owned Metro, Gradle, Maestro, publisher, and test processes: none.

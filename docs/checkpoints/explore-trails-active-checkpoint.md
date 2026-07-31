@@ -1068,3 +1068,28 @@ Verify `git diff --cached --name-only` before every commit.
 - Do not rerun batch 7, its 28 park codes, its QA matrix, App Store upload, or the Android internal-preview loop.
 - Do not submit Android, publish a production OTA, promote candidate data, expose Community routes, or modify public stages.
 - Do not repeat completed Trails, 3D, Builder, GPX, Offline, Follow, recording, Layers, Memory, Originals, or Android Auto work without new evidence.
+
+## NPS batch 7 media-identity closeout — 2026-07-31 17:02 CDT
+
+- Starting HEAD `d37a3778`. The review was limited to the 28 newly enriched parks and a cache-only rebuild; no additional NPS request, mobile publication, backend deployment, or serving-index change occurred.
+- All 28 new parks expose at least one real destination module. Their lead images are unique across the batch, carry park-specific NPS captions and attribution, and use official NPS source records.
+- The review found one real renderer defect: NPS event images may be returned as relative `/common/uploads/...` URLs. Fourteen relative media entries were present across Fort Union National Monument, Frederick Douglass National Historic Site, and George Rogers Clark National Historical Park.
+- Added one NPS URL resolver for park, child, event, and aggregated media links. Relative paths now resolve against `https://www.nps.gov/`; already absolute links remain unchanged.
+- Candidate audits now reject non-HTTPS top-level or destination-module media URLs so broken relative links cannot silently re-enter an accepted catalog.
+- Cache-only candidate `data/explore/audit_candidates/nps/live-20260731-b07-quality` is `promotion_ready: true` with zero errors, zero warnings, and zero relative media URLs across all 474 NPS identities.
+- Verification passed: 47 focused NPS/Explore unit tests, 59 official-place/QA tests, Python compilation, cache-only candidate rebuild, Explore QA matrix, and whitespace checks.
+- Quality-candidate hashes: catalog `4de80fb200b10a673ae3b569539e41429402e6fed62ceee416c99e8106359305`; source records `c92c4233612c96815fb748242569376e010956fe497a22a14385a8f81d09b139`; trail geometries `5f8f3161823fddad1d76eaa074e85cd76ee3fc19c763d5033e82bdbcfadfb2a5`; audit `782cc0c91216d914f12fed836b3d76211be9bb38a1bc2d15bd680afb8ebc18fc`.
+- One upstream credit typo (`NPS Pnoto`) remains preserved as source attribution rather than silently rewriting a credit line. It is a copy-review note, not an image-identity failure.
+- Protected Explore-index and App Store copy hashes remain unchanged. Task-owned test, enrichment, Railway, EAS, Metro, Gradle, Maestro, and publisher processes: none.
+
+### Exact next action
+
+1. Commit and push only the NPS importer, audit, focused tests, and this checkpoint.
+2. Keep `b07-quality` isolated. Do not promote it until the internal Android data-preview handoff is visible and accepted.
+3. The next implementation task is a fixed-code request-path diagnostic for the existing Android internal-preview handoff, not another speculative OTA or broad crawl.
+4. Batch 8 remains blocked until a new hourly API window and should not begin while the internal preview handoff is being diagnosed.
+
+### Do not repeat
+
+- Do not repeat the 28-park media review, batch 7, the cache-only quality rebuild, or the prior three Android preview publications.
+- Do not stage or overwrite protected/user-owned files, submit Android, publish production OTA, or promote the catalog.

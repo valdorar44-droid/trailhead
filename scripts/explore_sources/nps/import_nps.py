@@ -6,6 +6,7 @@ import re
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urljoin
 
 from scripts.explore_sources.base.aliases import apply_aliases
 from scripts.explore_sources.base.cards import build_card
@@ -18,6 +19,12 @@ from scripts.explore_sources.base.source_policy import assert_source_allowed
 NPS_LICENSE = "National Park Service public data"
 NPS_ATTRIBUTION = "National Park Service"
 NPS_CHILD_ITEM_LIMIT = 48
+
+
+def nps_absolute_url(value: Any) -> str:
+    """Resolve NPS-relative links without inventing a non-official host."""
+    url = compact_text(value)
+    return urljoin("https://www.nps.gov/", url) if url else ""
 
 
 def load_parks(path: str | Path) -> list[dict[str, Any]]:
@@ -83,7 +90,7 @@ def source_record_from_park(park: dict[str, Any], now: int) -> SourceRecord | No
     lng = as_float(park.get("longitude") or park.get("lng"))
     if not source_id or not name or lat is None or lng is None:
         return None
-    url = compact_text(park.get("url") or f"https://www.nps.gov/{source_id}/index.htm")
+    url = nps_absolute_url(park.get("url") or f"https://www.nps.gov/{source_id}/index.htm")
     return SourceRecord(
         id=f"nps:{source_id}",
         source="nps",
@@ -240,7 +247,7 @@ def source_pack_from_park(park: dict[str, Any], record: SourceRecord, related: d
 
 
 def add_media(media: list[dict[str, Any]], item: dict[str, Any], fallback_title: str = "") -> None:
-    url = compact_text(item.get("url"))
+    url = nps_absolute_url(item.get("url"))
     if not url:
         return
     photo = {
@@ -266,7 +273,7 @@ def source_pack_item(item: dict[str, Any], kind: str, park_code: str) -> dict[st
         "url": child_url(item, park_code),
         "lat": lat,
         "lng": lng,
-        "image_url": image.get("url") or "",
+        "image_url": nps_absolute_url(image.get("url")),
         "image_caption": compact_text(image.get("caption") or image.get("title") or title),
         "image_credit": compact_text(image.get("credit") or NPS_ATTRIBUTION),
         "image_license": NPS_LICENSE,
@@ -290,7 +297,7 @@ def event_item(item: dict[str, Any], park_code: str) -> dict[str, Any]:
         "url": child_url(item, park_code),
         "lat": lat,
         "lng": lng,
-        "image_url": image.get("url") or "",
+        "image_url": nps_absolute_url(image.get("url")),
         "image_caption": compact_text(image.get("caption") or image.get("title") or title),
         "image_credit": compact_text(image.get("credit") or NPS_ATTRIBUTION),
         "image_license": NPS_LICENSE,
@@ -395,7 +402,7 @@ def address_line(item: dict[str, Any]) -> str:
 
 
 def child_url(item: dict[str, Any], park_code: str) -> str:
-    url = compact_text(item.get("url"))
+    url = nps_absolute_url(item.get("url"))
     if url:
         return url
     if park_code:

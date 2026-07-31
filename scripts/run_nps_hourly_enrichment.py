@@ -482,6 +482,12 @@ def audit_candidate_catalog(
             if isinstance(value, list) and value:
                 module_counts[key]["places"] += 1
                 module_counts[key]["items"] += len(value)
+                for module_item in value:
+                    if not isinstance(module_item, dict):
+                        continue
+                    image_url = str(module_item.get("image_url") or "").strip()
+                    if image_url and not image_url.startswith("https://"):
+                        errors.append({"code": "module_media_url", "message": f"{place_id} {key} media URL is not HTTPS."})
             elif key == "operating_hours" and value:
                 module_counts[key]["places"] += 1
                 module_counts[key]["items"] += 1
@@ -491,6 +497,8 @@ def audit_candidate_catalog(
             if not isinstance(item, dict) or not item.get("url"):
                 continue
             media_count += 1
+            if not str(item.get("url") or "").startswith("https://"):
+                errors.append({"code": "media_url", "message": f"{place_id} media URL is not HTTPS."})
             missing = [field for field in ("caption", "credit", "license") if not str(item.get(field) or "").strip()]
             if missing:
                 errors.append({"code": "media_attribution", "message": f"{place_id} media is missing {', '.join(missing)}."})

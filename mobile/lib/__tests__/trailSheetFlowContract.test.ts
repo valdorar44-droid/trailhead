@@ -9,6 +9,7 @@ import { TRAIL_SHEET_PARITY_MODULES } from '../placeSheetAdapters';
 const mobileRoot = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const mapSource = readFileSync(join(mobileRoot, 'app/(tabs)/map.tsx'), 'utf8');
 const presentationSource = readFileSync(join(mobileRoot, 'components/map/TrailPlaceSheet.tsx'), 'utf8');
+const snapSheetSource = readFileSync(join(mobileRoot, 'components/map/TrailheadSnapSheet.tsx'), 'utf8');
 const trailActionSheetSource = readFileSync(join(mobileRoot, 'components/trails/TrailActionSheet.tsx'), 'utf8');
 const actionSource = readFileSync(join(mobileRoot, 'lib/sheetActions.ts'), 'utf8');
 
@@ -20,6 +21,11 @@ test('trail and trailhead selections enter the shared Peek/Full coordinator', ()
   assert.match(mapSource, /expandedLoading=\{fullLoading\}/);
   assert.match(mapSource, /trailSheetExpandedIsLoading/);
   assert.match(presentationSource, /testID=\{`\$\{model\.testID\}-peek`\}/);
+});
+
+test('the visible snap sheet owns its rectangle instead of passing sheet taps to map features', () => {
+  assert.match(snapSheetSource, /<Animated\.View[\s\S]*?pointerEvents="auto"/);
+  assert.doesNotMatch(snapSheetSource, /<Animated\.View[\s\S]*?pointerEvents="box-none"/);
 });
 
 test('trail enrichment is generation-bound and commits as one readiness state', () => {

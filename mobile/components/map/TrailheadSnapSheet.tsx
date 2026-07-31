@@ -146,7 +146,7 @@ export default function TrailheadSnapSheet({
   return (
     <Animated.View
       testID={testID}
-      pointerEvents="box-none"
+      pointerEvents="auto"
       style={[
         s.wrap,
         {

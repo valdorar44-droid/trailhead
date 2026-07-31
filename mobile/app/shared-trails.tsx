@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { TrailheadButton, TrailheadCard } from '@/components/TrailheadUI';
 import PrivateTrailRouteMap from '@/components/trails/PrivateTrailRouteMap';
 import { accountInventoryRequestIsCurrent, accountInventoryScope } from '@/lib/accountInventoryScope';
@@ -21,6 +21,8 @@ import {
   consumeSharedTrailToken,
   readSharedTrailRecipientRoute,
   rememberSharedTrailRecipientRoute,
+  setSharedTrailRecipientFocused,
+  settleSharedTrailTokenResolution,
   subscribeSharedTrailToken,
 } from '@/lib/sharedTrailLinkHandoff';
 import { useStore } from '@/lib/store';
@@ -64,9 +66,11 @@ export default function SharedTrailRouteScreen() {
       if (!isSharedTrailRouteV1(route)) throw new Error('invalid_shared_route');
       retryTokenRef.current = '';
       rememberSharedTrailRecipientRoute(route);
+      settleSharedTrailTokenResolution(true);
       setRecipient({ status: 'ready', route });
     } catch (error) {
       if (generation !== resolutionGenerationRef.current) return;
+      settleSharedTrailTokenResolution(false);
       if (error instanceof ApiError && (error.status === 400 || error.status === 404)) {
         retryTokenRef.current = '';
         setRecipient({ status: 'unavailable' });
@@ -79,10 +83,16 @@ export default function SharedTrailRouteScreen() {
     }
   }, []);
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
+    setSharedTrailRecipientFocused(true);
+    const unsubscribe = subscribeSharedTrailToken(() => void resolveHandoff());
     void resolveHandoff();
-    return subscribeSharedTrailToken(() => void resolveHandoff());
-  }, [resolveHandoff]);
+    return () => {
+      resolutionGenerationRef.current += 1;
+      unsubscribe();
+      setSharedTrailRecipientFocused(false);
+    };
+  }, [resolveHandoff]));
 
   const route = recipient.status === 'ready' ? recipient.route : null;
 

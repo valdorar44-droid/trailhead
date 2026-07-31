@@ -1195,6 +1195,22 @@ type TrailRoutePlan = {
   warnings: string[];
   engine?: string;
 };
+type SharedTrailMapReturnMarker = Readonly<{
+  sharedRouteId: string;
+  routeRevision: number;
+  shareRevision: number;
+}>;
+
+function sharedTrailMapSelectionId(marker: SharedTrailMapReturnMarker): string {
+  return `shared:${marker.sharedRouteId}:${marker.routeRevision}:${marker.shareRevision}`;
+}
+
+function sharedTrailMapReturnMatchesSelection(
+  marker: SharedTrailMapReturnMarker | null,
+  trail: TrailFeature | null,
+): boolean {
+  return !!marker && !!trail && trail.id === sharedTrailMapSelectionId(marker);
+}
 type ActiveTrailFollow = {
   phase: 'handoff' | 'follow' | 'recovery' | 'recording_only' | 'complete';
   trail: TrailFeature;
@@ -6269,7 +6285,7 @@ function MapScreen() {
   const pendingSavedTrailId = useStore(st => st.pendingSavedTrailId);
   const setPendingSavedTrailId = useStore(st => st.setPendingSavedTrailId);
   const pendingSharedTrailRoute = useStore(st => st.pendingSharedTrailRoute);
-  const sharedTrailMapReturnRef = useRef(false);
+  const sharedTrailMapReturnRef = useRef<SharedTrailMapReturnMarker | null>(null);
   const setPendingSharedTrailRoute = useStore(st => st.setPendingSharedTrailRoute);
   const pendingRouteFlyover = useStore(st => st.pendingRouteFlyover);
   const setPendingRouteFlyover = useStore(st => st.setPendingRouteFlyover);
@@ -7379,6 +7395,12 @@ function MapScreen() {
   const [selectedTrail, setSelectedTrail] = useState<TrailFeature | null>(null);
   const selectedTrailRef = useRef<TrailFeature | null>(null);
   selectedTrailRef.current = selectedTrail;
+  useEffect(() => {
+    const marker = sharedTrailMapReturnRef.current;
+    if (marker && !sharedTrailMapReturnMatchesSelection(marker, selectedTrail)) {
+      sharedTrailMapReturnRef.current = null;
+    }
+  }, [selectedTrail?.id]);
   const pendingTrailOfflineReadyRef = useRef<{
     regionIds: string[];
     v2Ready: boolean;
@@ -10673,7 +10695,7 @@ function MapScreen() {
     try {
       preview = offlineTrailFromSharedRoute(pendingSharedTrailRoute, Date.now());
     } catch {
-      sharedTrailMapReturnRef.current = false;
+      sharedTrailMapReturnRef.current = null;
       setPendingSharedTrailRoute(null);
       setQuickToast('Shared route is unavailable');
       setTimeout(() => setQuickToast(''), 2600);
@@ -10681,16 +10703,26 @@ function MapScreen() {
     }
     const coords = primaryTrailLine(preview.geometry, [preview.trail.lng, preview.trail.lat]);
     if (coords.length < 2) {
-      sharedTrailMapReturnRef.current = false;
+      sharedTrailMapReturnRef.current = null;
       setPendingSharedTrailRoute(null);
       setQuickToast('Shared route is unavailable');
       setTimeout(() => setQuickToast(''), 2600);
       return;
     }
     const distanceM = trailCoordsDistanceM(coords);
+    const sharedReturnMarker: SharedTrailMapReturnMarker = {
+      sharedRouteId: pendingSharedTrailRoute.shared_route_id,
+      routeRevision: pendingSharedTrailRoute.route_revision,
+      shareRevision: pendingSharedTrailRoute.share_revision,
+    };
+    const sharedTrail: TrailFeature = {
+      ...preview.trail,
+      id: sharedTrailMapSelectionId(sharedReturnMarker),
+    };
     const plan: TrailRoutePlan = {
       id: 'capture',
-      trailId: `shared:${pendingSharedTrailRoute.shared_route_id}:${pendingSharedTrailRoute.share_revision}`,
+      trailId: sharedTrail.id,
+      geometryRevision: sharedTrail.geometry_revision,
       title: pendingSharedTrailRoute.title,
       subtitle: `${fmtTrailRouteDistance(distanceM)} · shared route`,
       icon: 'link-outline',
@@ -10700,14 +10732,14 @@ function MapScreen() {
       warnings: [],
       engine: 'Shared route',
     };
-    sharedTrailMapReturnRef.current = true;
-    setSelectedTrail(preview.trail);
+    sharedTrailMapReturnRef.current = sharedReturnMarker;
+    setSelectedTrail(sharedTrail);
     setTrailCardCollapsed(true);
     // A recipient opens the immutable shared revision in view-only Map state.
     // Trail Builder remains untouched until the recipient explicitly saves a
     // local copy and chooses to edit it.
     setTrailRouteBuilderOpen(false);
-    previewTrailRoutePlan(preview.trail, plan);
+    previewTrailRoutePlan(sharedTrail, plan);
     setQuickToast('Shared route opened');
     setTimeout(() => setQuickToast(''), 2200);
     // Clear only after the main-map state owns the complete immutable route.
@@ -22102,6 +22134,7 @@ function MapScreen() {
   }
 
   function openTrailFeature(feature: TrailFeature) {
+    sharedTrailMapReturnRef.current = null;
     trailDiscoveryReturnRef.current = null;
     clearTrailMapOverlays();
     focusMapSelectionPoint({ lat: feature.lat, lng: feature.lng, name: feature.name }, 13, 'trail');
@@ -22485,13 +22518,14 @@ function MapScreen() {
   }
 
   function closeSelectedTrailSheet() {
-    if (sharedTrailMapReturnRef.current) {
-      sharedTrailMapReturnRef.current = false;
+    if (sharedTrailMapReturnMatchesSelection(sharedTrailMapReturnRef.current, selectedTrailRef.current)) {
+      sharedTrailMapReturnRef.current = null;
       trailDiscoveryReturnRef.current = null;
       clearSelectedTrailSheetState();
       router.back();
       return;
     }
+    sharedTrailMapReturnRef.current = null;
     trailDiscoveryReturnRef.current = null;
     clearSelectedTrailSheetState();
   }
@@ -22540,13 +22574,14 @@ function MapScreen() {
   useFocusEffect(useCallback(() => {
     if (!selectedTrail) return undefined;
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
-      if (sharedTrailMapReturnRef.current) {
-        sharedTrailMapReturnRef.current = false;
+      if (sharedTrailMapReturnMatchesSelection(sharedTrailMapReturnRef.current, selectedTrailRef.current)) {
+        sharedTrailMapReturnRef.current = null;
         trailDiscoveryReturnRef.current = null;
         clearSelectedTrailSheetState();
         router.back();
         return true;
       }
+      sharedTrailMapReturnRef.current = null;
       if (trailPreviewOpen) {
         returnFromTrailPreview();
         return true;

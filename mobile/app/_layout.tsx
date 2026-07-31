@@ -327,7 +327,7 @@ function RootLayout() {
       return;
     }
     if (appLink?.screen === 'sharedTrail') {
-      if (handoffSharedTrailToken(appLink.shareToken)) router.push('/shared-trails' as any);
+      if (handoffSharedTrailToken(appLink.shareToken)) router.navigate('/shared-trails' as any);
       return;
     }
     const request = routeBuilderRequestFromGeoUrl(url);

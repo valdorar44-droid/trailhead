@@ -6,9 +6,15 @@ import {
 
 type Listener = () => void;
 
-let pendingToken = '';
-let recentDigest = '';
-let recentAt = 0;
+type SharedTrailTokenHandoffState =
+  | Readonly<{ phase: 'idle' }>
+  | Readonly<{ phase: 'pending'; digest: string; token: string }>
+  | Readonly<{ phase: 'resolving'; digest: string }>
+  | Readonly<{ phase: 'focused'; digest: string }>;
+
+let handoffState: SharedTrailTokenHandoffState = { phase: 'idle' };
+let recipientFocused = false;
+let resolvedDigest = '';
 let recipientRoute: SharedTrailRouteV1 | null = null;
 const listeners = new Set<Listener>();
 
@@ -17,24 +23,58 @@ export function handoffSharedTrailToken(token: string): boolean {
   const clean = String(token || '').trim();
   if (!TRAIL_SHARE_TOKEN_PATTERN.test(clean)) return false;
   const digest = stableTrailRouteDigest(clean);
-  const now = Date.now();
-  if (digest === recentDigest && now - recentAt < 3_000) return false;
-  recentDigest = digest;
-  recentAt = now;
+  if (handoffState.phase !== 'idle' && handoffState.digest === digest) return false;
   recipientRoute = null;
-  pendingToken = clean;
+  resolvedDigest = '';
+  handoffState = { phase: 'pending', digest, token: clean };
   for (const listener of listeners) listener();
   return true;
 }
 
 export function consumeSharedTrailToken(): string {
-  const token = pendingToken;
-  pendingToken = '';
+  if (handoffState.phase !== 'pending') return '';
+  const { digest, token } = handoffState;
+  // The resolving state retains only a digest. The raw bearer exists only in
+  // this return value while the recipient performs its anonymous request.
+  handoffState = { phase: 'resolving', digest };
   return token;
 }
 
+/** Marks the recipient route as the active owner of a resolved handoff. */
+export function settleSharedTrailTokenResolution(resolved: boolean): void {
+  if (handoffState.phase !== 'resolving') return;
+  const { digest } = handoffState;
+  if (!resolved) {
+    if (resolvedDigest === digest) resolvedDigest = '';
+    handoffState = { phase: 'idle' };
+    return;
+  }
+  resolvedDigest = digest;
+  handoffState = recipientFocused ? { phase: 'focused', digest } : { phase: 'idle' };
+}
+
+/**
+ * Only the focused recipient screen may own and consume a link activation.
+ * Blurring releases the digest so intentionally reopening the same HTTPS link
+ * creates a fresh anonymous resolution instead of looking like an OS duplicate.
+ */
+export function setSharedTrailRecipientFocused(focused: boolean): void {
+  recipientFocused = focused;
+  if (!focused) {
+    if (handoffState.phase === 'focused' || handoffState.phase === 'resolving') {
+      handoffState = { phase: 'idle' };
+    }
+    return;
+  }
+  if (handoffState.phase === 'idle' && resolvedDigest && recipientRoute) {
+    handoffState = { phase: 'focused', digest: resolvedDigest };
+  }
+}
+
 export function clearSharedTrailTokenHandoff(): void {
-  pendingToken = '';
+  handoffState = { phase: 'idle' };
+  recipientFocused = false;
+  resolvedDigest = '';
   recipientRoute = null;
 }
 
@@ -49,6 +89,8 @@ export function readSharedTrailRecipientRoute(): SharedTrailRouteV1 | null {
 
 export function clearSharedTrailRecipientRoute(): void {
   recipientRoute = null;
+  resolvedDigest = '';
+  if (handoffState.phase === 'focused') handoffState = { phase: 'idle' };
 }
 
 export function subscribeSharedTrailToken(listener: Listener): () => void {

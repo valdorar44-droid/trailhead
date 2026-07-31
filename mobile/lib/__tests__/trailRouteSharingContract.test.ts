@@ -21,10 +21,11 @@ test('shared bearer token remains transient and anonymous resolution strips acco
   const store = readFileSync('lib/store.ts', 'utf8');
   const recipient = readFileSync('app/shared-trails.tsx', 'utf8');
   assert.match(api, /reqWithToken<SharedTrailRouteV1>[\s\S]*trail-routes\/shared\/resolve[\s\S]*}, null\)/);
-  assert.match(layout, /handoffSharedTrailToken\(appLink\.shareToken\)[\s\S]*router\.push\('\/shared-trails'/);
+  assert.match(layout, /handoffSharedTrailToken\(appLink\.shareToken\)[\s\S]*router\.navigate\('\/shared-trails'/);
   assert.doesNotMatch(layout, /pathname:\s*'\/shared-trails'[\s\S]*token/);
   assert.doesNotMatch(store, /shareToken:\s*string/);
   assert.match(recipient, /consumeSharedTrailToken\(\)/);
+  assert.match(recipient, /useFocusEffect\([\s\S]*setSharedTrailRecipientFocused\(true\)[\s\S]*setSharedTrailRecipientFocused\(false\)/);
   assert.doesNotMatch(recipient, /useLocalSearchParams/);
 });
 
@@ -56,11 +57,32 @@ test('recipient opens the immutable shared revision without exposing Trail Build
   assert.doesNotMatch(handoff, /setTrailBuilderDirty\(true\)/);
 });
 
-test('shared route Map return restores the view-only recipient without retaining the bearer token', () => {
+test('shared route Map return is bound to the selected route and immutable revision', () => {
   const map = readFileSync('app/(tabs)/map.tsx', 'utf8');
   const recipient = readFileSync('app/shared-trails.tsx', 'utf8');
   const handoff = readFileSync('lib/sharedTrailLinkHandoff.ts', 'utf8');
-  assert.match(map, /sharedTrailMapReturnRef\.current[\s\S]*router\.back\(\)/);
+  const sharedRouteHandoff = map.slice(
+    map.indexOf('if (!pendingSharedTrailRoute'),
+    map.indexOf('if (!pendingMapSelection'),
+  );
+  const openTrailFeature = map.slice(
+    map.indexOf('function openTrailFeature(feature: TrailFeature)'),
+    map.indexOf('function openTrailFromPoint'),
+  );
+  const closeTrailSheet = map.slice(
+    map.indexOf('function closeSelectedTrailSheet()'),
+    map.indexOf('function restoreTrailDiscoveryReturn()'),
+  );
+  assert.match(map, /type SharedTrailMapReturnMarker = Readonly<\{[\s\S]*sharedRouteId: string;[\s\S]*routeRevision: number;[\s\S]*shareRevision: number;/);
+  assert.match(map, /return `shared:\$\{marker\.sharedRouteId\}:\$\{marker\.routeRevision\}:\$\{marker\.shareRevision\}`/);
+  assert.match(sharedRouteHandoff, /sharedRouteId: pendingSharedTrailRoute\.shared_route_id[\s\S]*routeRevision: pendingSharedTrailRoute\.route_revision[\s\S]*shareRevision: pendingSharedTrailRoute\.share_revision/);
+  assert.match(sharedRouteHandoff, /id: sharedTrailMapSelectionId\(sharedReturnMarker\)/);
+  assert.match(sharedRouteHandoff, /trailId: sharedTrail\.id[\s\S]*geometryRevision: sharedTrail\.geometry_revision/);
+  assert.match(closeTrailSheet, /sharedTrailMapReturnMatchesSelection\(sharedTrailMapReturnRef\.current, selectedTrailRef\.current\)[\s\S]*router\.back\(\)/);
+  assert.match(map, /BackHandler\.addEventListener\('hardwareBackPress'[\s\S]*sharedTrailMapReturnMatchesSelection\(sharedTrailMapReturnRef\.current, selectedTrailRef\.current\)[\s\S]*router\.back\(\)/);
+  assert.match(openTrailFeature, /sharedTrailMapReturnRef\.current = null/);
+  assert.match(map, /if \(marker && !sharedTrailMapReturnMatchesSelection\(marker, selectedTrail\)\) \{\s*sharedTrailMapReturnRef\.current = null/);
+  assert.doesNotMatch(map, /sharedTrailMapReturnRef = useRef\((?:true|false)\)/);
   assert.match(recipient, /rememberSharedTrailRecipientRoute\(route\)[\s\S]*setPendingSharedTrailRoute\(route\)/);
   assert.match(recipient, /readSharedTrailRecipientRoute\(\)/);
   assert.doesNotMatch(handoff, /recipientRoute[\s\S]*AsyncStorage|recipientRoute[\s\S]*SecureStore/);

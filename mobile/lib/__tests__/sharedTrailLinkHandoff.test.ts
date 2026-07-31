@@ -7,6 +7,8 @@ import {
   handoffSharedTrailToken,
   readSharedTrailRecipientRoute,
   rememberSharedTrailRecipientRoute,
+  setSharedTrailRecipientFocused,
+  settleSharedTrailTokenResolution,
   subscribeSharedTrailToken,
 } from '../sharedTrailLinkHandoff';
 import type { SharedTrailRouteV1 } from '../trailRouteSharing';
@@ -23,18 +25,26 @@ const route = (): SharedTrailRouteV1 => ({
   geometry_sha256: 'abc',
 });
 
-test('bearer handoff is in-memory, consume-once, validated, and duplicate guarded', () => {
+test('bearer handoff coalesces the same activation while pending, resolving, or focused', () => {
   clearSharedTrailTokenHandoff();
   const token = 'C'.repeat(43);
   let notifications = 0;
   const unsubscribe = subscribeSharedTrailToken(() => { notifications += 1; });
+  setSharedTrailRecipientFocused(true);
   assert.equal(handoffSharedTrailToken('invalid'), false);
   assert.equal(handoffSharedTrailToken(token), true);
   assert.equal(notifications, 1);
+  assert.equal(handoffSharedTrailToken(token), false, 'pending delivery is coalesced');
   assert.equal(consumeSharedTrailToken(), token);
-  assert.equal(consumeSharedTrailToken(), '');
-  assert.equal(handoffSharedTrailToken(token), false);
+  assert.equal(consumeSharedTrailToken(), '', 'the raw bearer is cleared after one consume');
+  assert.equal(handoffSharedTrailToken(token), false, 'resolving delivery is coalesced');
+  settleSharedTrailTokenResolution(true);
+  assert.equal(handoffSharedTrailToken(token), false, 'focused resolved delivery is coalesced');
   assert.equal(notifications, 1);
+  setSharedTrailRecipientFocused(false);
+  assert.equal(handoffSharedTrailToken(token), true, 'the same link is accepted after the recipient loses focus');
+  assert.equal(consumeSharedTrailToken(), token, 'intentional reopen receives the bearer for revalidation');
+  assert.equal(consumeSharedTrailToken(), '');
   unsubscribe();
 });
 
@@ -45,6 +55,7 @@ test('a newer valid link replaces an unconsumed older handoff', () => {
   assert.equal(handoffSharedTrailToken(first), true);
   assert.equal(handoffSharedTrailToken(second), true);
   assert.equal(consumeSharedTrailToken(), second);
+  settleSharedTrailTokenResolution(false);
 });
 
 test('resolved route remains in memory for Map return and clears for a new token or exit', () => {

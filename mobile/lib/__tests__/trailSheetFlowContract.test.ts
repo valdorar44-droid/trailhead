@@ -60,7 +60,7 @@ test('Back restores the trail discovery sheet, viewport, stage, and scroll while
   assert.match(mapSource, /setShowDiscoveryPanel\(true\)/);
   assert.match(mapSource, /nativeMapRef\.current\?\.fitCoordinates/);
   assert.match(mapSource, /if \(restoreTrailDiscoveryReturn\(\)\) return true/);
-  assert.match(mapSource, /function closeSelectedTrailSheet\(\) \{\s*trailDiscoveryReturnRef\.current = null;/);
+  assert.match(mapSource, /function closeSelectedTrailSheet\(\)[\s\S]*sharedTrailMapReturnMatchesSelection\(sharedTrailMapReturnRef\.current, selectedTrailRef\.current\)[\s\S]*trailDiscoveryReturnRef\.current = null;/);
 });
 
 test('trail sheet parity retains planning, offline, community, source, and navigation capabilities', () => {

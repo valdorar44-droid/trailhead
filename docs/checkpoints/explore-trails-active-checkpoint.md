@@ -978,3 +978,19 @@ Verify `git diff --cached --name-only` before every commit.
 
 - Do not rerun batch 5, its 28 park codes, or its 57-test/QA matrix.
 - Do not restart the internal-preview device loop, start another native build, submit stores, publish production OTA, expose Community routes, or promote candidates without acceptance.
+
+## Nationwide NPS resumable batch 6 — 2026-07-31 15:45 CDT
+
+- Starting point: 144 rich-cache parks and 330 remaining. One bounded run selected 28 new park codes and used 312 of the hard 700-request cap.
+- Candidate: `data/explore/audit_candidates/nps/live-20260731-b06`; 172 parks now have rich cached source packs and 302 remain.
+- Candidate audit is `promotion_ready: true` with zero errors and zero warnings. The Explore QA matrix and 57 official-place tests passed.
+- Module growth from `b05` to `b06`: Things to See `3,512 -> 3,955`; Things to Do `1,334 -> 1,461`; campgrounds `326 -> 330`; alerts `248 -> 283`; visitor centers `273 -> 303`; events `1,241 -> 1,396`; parking `291 -> 317`; guided items `243 -> 276`; passes `44 -> 48`.
+- Attributed media increased from `4,739` to `5,107`; stable catalog/source/trail identity counts remain unchanged.
+- Artifact hashes: catalog `ccc9e87d9209927a48285764e76a5abb886284b875b8caf74410221489b577b6`; source records `c01998e55f63435b7d396b24c9afa13510d8045a28e3a20efdbec5e59f4c06d8`; trail geometries `1b236917e333d508bf8207f0c8b1857f59e357752ea21b47dc0d20ac21a49f85`; audit `1cc3011dc5e63c5c34115e2a597e9cd415c063f9788039cfd6c0a11690ca91cf`.
+- The authenticated Railway key remained process-only. Live catalogs, the protected serving index, public stages, production artifacts, and preview channel were unchanged.
+
+### Exact next action
+
+1. Resume at 172 rich parks and 302 remaining. Run only a new untouched-code batch.
+2. Keep `b06` isolated pending internal device-preview acceptance and manual image/module review.
+3. Do not refetch batches 1-6 or promote generated data automatically.

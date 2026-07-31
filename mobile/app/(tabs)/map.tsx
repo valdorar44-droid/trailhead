@@ -22116,7 +22116,11 @@ function MapScreen() {
     clearTrailRoutePreview();
   }
 
-  async function openTrailPreview(trail: TrailFeature, routePlanOverride: TrailRoutePlan | null = null) {
+  async function openTrailPreview(
+    trail: TrailFeature,
+    routePlanOverride: TrailRoutePlan | null = null,
+    returnPresentationOverride?: SheetPresentation,
+  ) {
     if (!trailPreviewOpen) {
       pendingTrailPreviewReturnCameraRef.current = null;
       const returnGeneration = ++trailPreviewReturnGenerationRef.current;
@@ -22142,7 +22146,7 @@ function MapScreen() {
         trailRouteBuilderOpen,
         trailPinCaptureMode,
         trailTraceMode,
-        presentation: placeSheetCoordinator.presentation,
+        presentation: returnPresentationOverride ?? placeSheetCoordinatorRef.current.presentation,
         scrollY: trailSheetScrollYRef.current,
         map3dEnabled,
         returnCamera,
@@ -23940,11 +23944,12 @@ function MapScreen() {
   function runSelectedTrailMoreAction(action: TrailActionSheetItem) {
     const trail = selectedTrail;
     if (!trail) return;
+    const returnPresentation = placeSheetCoordinatorRef.current.presentation;
     setShowTrailActionSheet(false);
     InteractionManager.runAfterInteractions(() => {
       switch (action.id) {
         case 'preview_3d':
-          openTrailPreview(trail);
+          openTrailPreview(trail, null, returnPresentation);
           break;
         case 'download':
           void downloadSelectedTrail(trail);

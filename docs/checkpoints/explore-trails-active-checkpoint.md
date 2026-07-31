@@ -647,3 +647,27 @@ Verify `git diff --cached --name-only` before every commit.
 - Do not repeat destination search ranking, route cards, Peek/Full hydration, More-action reachability, Trails T1-T6, Builder, GPX, Offline, Follow, recording, Yellowstone, NPS, Layers, Memory, Originals, Android Auto, broad Map/sheet crawls, Figma research, or the protected suite before source changes.
 - Do not auto-select destinations, fabricate geometry/access facts, expose Community as Verified, weaken the Mapbox credential gate, or create another speculative camera OTA.
 - Task-owned Metro, Gradle, Maestro, publisher, tests, Railway deploys, and device-helper processes: none. Four Codex-owned MCP `node ./mcp/server.cjs --stdio` processes remain and must not be stopped. The Android ADB server is the only device transport still running.
+
+## Trails production closeout — exact-preview return-context correction (2026-07-31)
+
+- Timestamp: `2026-07-31T11:41:20-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; pre-change HEAD `da8e202402049e23d3a3a80fb97e7e7a0bcb603f`.
+- Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; App Store copy SHA-256 remains `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`. Those files, `.cursor/`, Valhalla work, Android helper mode changes, and unrelated dirty files remain excluded.
+- Exact Android preview identity was verified before the bounded assertion: version `1.0.10`, build `69`, source `da8e202402049e23d3a3a80fb97e7e7a0bcb603f`, runtime `native-1.0.10-android.7`, update `019fb77d-5dae-7d10-87f2-e3bf6f365af0`.
+- The single manually adjusted Yosemite assertion proved the final camera ownership behavior: `Spur From 19E58` remained selected and the adjusted resolved route viewport returned after 3D. It also exposed one adjacent deterministic return-context defect: opening 3D from Trail Full through the controlled More sheet returned to Peek rather than the invoking Full presentation.
+- Evidence: `C:\Users\User\Documents\Codex\trailhead-evidence\release-manual-pan-back-da8e202.png`, SHA-256 `865ae323f3f30e8706d60f8f547924f71b026f015d46dbfb7681e4afce770f6e`.
+- Evidence-backed correction: capture the coordinator's current presentation before dismissing the More sheet, pass it into `openTrailPreview`, and store that explicit value in the preview return context. This avoids a modal-dismiss transition rewriting the invoking presentation while preserving every Peek, Builder, camera, and Close path.
+- Focused Trail Preview tests pass `7/7`; TypeScript completed without diagnostics. A paired preview OTA and the single Full -> More -> 3D -> Back assertion remain before the production freeze.
+- User authorized exactly two new production builds after this assertion: one Android AAB and one iOS IPA. Because Apple production is `1.0.10`, the paired store candidate advances to `1.0.11`; Android may jump from its older public version. No production OTA is published to incompatible older runtimes.
+
+### Exact next action
+
+1. Commit only the map return-context fix, focused test, and this checkpoint.
+2. Publish one paired preview OTA from the immutable correction SHA and rerun only Trail Full -> More -> 3D -> Back on Android. Perform the paired iOS spot only if the device is available; automated shared coverage remains required either way.
+3. If the exact assertion passes, create a clean `1.0.11` release commit and run the release/native gates once.
+4. Start exactly one Android and one iOS production build from that identical SHA. Record build IDs, remote numbers, runtimes, fingerprints, artifact hashes, and store-install evidence before any submission or production OTA.
+
+### Do not repeat
+
+- Do not repeat destination search, Peek/Full hydration, actions, Builder, GPX, Offline, Follow, recording, flyover playback, E4/E5 lifecycle, NPS research, Layers, Memory, Originals, Android Auto, broad Map/sheet crawls, or Figma work.
+- Do not build from the dirty feature worktree, weaken native/runtime gates, backport the native-dependent Trails packet to production `.3`, or spend either production build before the exact return assertion passes.

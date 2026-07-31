@@ -86,7 +86,15 @@ test('Trail Builder uses the shared T6 player and restores the builder through B
   )?.[0] ?? '';
   assert.match(builderFlyover, /await openTrailPreview\(trail, plan\)/);
   assert.doesNotMatch(builderFlyover, /startMapMissionBrief|missionRouteOverrideRef/);
-  assert.match(mapSource, /async function openTrailPreview\(trail: TrailFeature, routePlanOverride: TrailRoutePlan \| null = null\)/);
+  assert.match(mapSource, /async function openTrailPreview\([\s\S]*?returnPresentationOverride\?: SheetPresentation/);
+  assert.match(
+    mapSource,
+    /presentation:\s*returnPresentationOverride\s*\?\?\s*placeSheetCoordinatorRef\.current\.presentation/,
+  );
+  assert.match(
+    mapSource,
+    /const returnPresentation = placeSheetCoordinatorRef\.current\.presentation;[\s\S]*?openTrailPreview\(trail, null, returnPresentation\)/,
+  );
   assert.match(mapSource, /const candidatePlan = routePlanOverride\s*\?\?/);
   assert.match(mapSource, /testID="trail\.builder\.review"/);
   assert.match(mapSource, /testIDPrefix="trail\.builder\.route"/);

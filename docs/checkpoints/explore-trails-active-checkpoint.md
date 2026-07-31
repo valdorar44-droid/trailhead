@@ -1115,3 +1115,30 @@ Verify `git diff --cached --name-only` before every commit.
 
 - Do not repeat previous speculative Explore preview publications, catalog research, NPS fetches, media review, or broad Android crawls.
 - Do not submit Android, touch Apple review, publish production OTA, expose Community routes, or promote candidate data.
+
+## Internal Explore agency handoff closeout - 2026-07-31 17:43 CDT
+
+- Branch: `feat/trailhead-1.0.10-overhaul`; implementation source `6b69014145a767319d064ace1bcd7906d5bd219e`. Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; App Store copy SHA-256 remains `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+- The fixed-code device diagnostic on source `76d8bb5c` proved the request was authenticated and the Railway sidecar was ready (`active`, `ready`, `5`). The remaining defect was downstream: compact responses dropped the internal marker, existing NPS identities lost their internal preview ranks during enrichment, and the visible `Parks & Land` lane excluded forest/public-land identities.
+- The correction preserves preview rank and identity through enrichment and compact serialization, forwards the bounded top-level preview marker so internal data is never persisted into the public cache, and aligns server/mobile `Parks & Land` matching for parks, forests, public land, land, recreation areas, and wilderness records.
+- Verification passed: 8 internal-preview backend tests, 24 Explore serving/filter tests, 5 mobile request-path tests, 4 destination-registry tests, full mobile TypeScript, Python compilation, and whitespace checks. The optional agency-pilot module could not start in the system Python because `pytest` is not installed; no product assertion failed and no dependency was installed solely to rerun it.
+- Railway deployment `cd32d0a7-aa88-4f7e-b116-52b0ed9d3659` succeeded from the exact clean source and `https://api.gettrailhead.app/api/health` returned healthy.
+- Android preview update `019fba50-2c27-79bf-a966-a46190152155`, group `20be7872-fda7-4fc7-80bf-958d11d6a8fa`, runtime `native-1.0.10-android.7`, and iOS preview update `019fba58-5fe3-7769-a553-c1a92a14b5ff`, group `8d8b21f6-fb43-4414-a261-7b93e7f83c68`, runtime `native-1.0.10-ios.6`, are both bound to exact source `6b690141` on preview channel `019dbc97-3cde-795b-a35d-e6aa985060d3`. Sentry source maps uploaded for both platforms.
+- The Samsung `SM_A326U1` retained its account and installed binary `1.0.10` build `69`. Two-launch OTA handoff succeeded. On-device QA reports exact source/update identity plus `Request: active`, `Data: ready`, and `Profiles: 5`.
+- The Android `Parks & Land` delta passed. The lane displayed 415 real matching places and the bounded scroll found all five proof destinations: Sierra National Forest, Moab BLM, Carlsbad Caverns National Park, Catoctin Mountain Park, and Channel Islands National Park. No broad Explore crawl was repeated.
+- Evidence: `C:\Users\User\AppData\Local\Temp\trailhead-qa6-6b690141.xml` SHA-256 `2ed8f7f5c349987f89311e782afba1d814e9f4e38d19c8cc9589f6738d1b5c30`; `C:\Users\User\AppData\Local\Temp\trailhead-parksland-6b690141.xml` SHA-256 `1c3a16ac1625abec70b03c6a4dc5665e94ad273cdbbd47629a3f8e1581b590ae`; `C:\Users\User\AppData\Local\Temp\explore-parks-land-6b690141.png` SHA-256 `97a0a12000b0563d75a7b855e6492b02025ddd6fd95831c4bf6189e41cff1d77`; `C:\Users\User\AppData\Local\Temp\explore-parks-land-cards-6b690141.png` SHA-256 `176b07ec9964a8c5d16a5f811660a3a1e5a24a3ea0e5ad4179079342a50f618c`.
+- The first local Android publisher process hit its 120-second wrapper timeout before any EAS update existed. Server evidence confirmed no update was created; the single actual publication completed under the normal guarded publisher with update `019fba50...`.
+- No Android production build, Play Console action, production OTA, public serving-index promotion, Community-trails exposure, or feature-stage change occurred. Android store submission remains user-owned. The previously uploaded iOS 1.0.11 App Store Connect binary was not rebuilt or resubmitted.
+- Task-owned Railway, EAS, Expo, Metro, Gradle, Maestro, test, and enrichment processes: none.
+
+### Exact next action
+
+1. Keep `b07-quality` isolated and begin the approved Explore data-depth continuation without touching the protected live serving index.
+2. Audit the remaining 274 NPS parks by module coverage and run only the next untouched-code resumable batch when the NPS request window permits.
+3. In parallel with non-network review, prepare the Sierra/USFS and Moab/BLM pilot candidate merge under the audit directory, retaining agency attribution and deterministic deduplication.
+4. Any catalog promotion remains an intentional later step after candidate QA and device review.
+
+### Do not repeat
+
+- Do not repeat the internal-preview diagnostic, the two preview exports, the five-destination Android delta, NPS batches 1-7, the batch-7 media review, or broad Explore/Trails/Map crawls.
+- Do not submit Android, rebuild/resubmit iOS, publish production OTA, expose Community routes, overwrite the protected serving index, or change public feature stages without separate authorization.

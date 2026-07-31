@@ -13,7 +13,10 @@ from scripts.explore_sources.base.schema import ExplorePlaceV3, SourceRecord, Tr
 from scripts.explore_sources.base.source_policy import assert_source_allowed
 
 
-BLM_LICENSE = "BLM public geospatial data; verify current dataset terms before redistribution"
+BLM_LICENSE = (
+    "BLM public-domain geospatial data; provided as-is without warranty. "
+    "Cite the Bureau of Land Management as the data source."
+)
 BLM_ATTRIBUTION = "Bureau of Land Management"
 
 
@@ -58,39 +61,47 @@ def source_record_from_feature(feature: dict[str, Any], now: int) -> SourceRecor
     geometry = feature.get("geometry") if isinstance(feature.get("geometry"), dict) else props.get("geometry")
     lat, lng = representative_point(geometry)
     source_id = compact_text(
-        props.get("BLM_ID")
-        or props.get("OBJECTID")
-        or props.get("GLOBALID")
-        or props.get("SITE_ID")
-        or props.get("ROUTE_ID")
-        or props.get("ID")
-        or props.get("id")
+        pget(props, "BLM_ID", "GLOBALID", "SITE_ID", "ROUTE_ID", "OBJECTID", "ID")
     )
     name = compact_text(
-        props.get("NAME")
-        or props.get("SITE_NAME")
-        or props.get("AREA_NAME")
-        or props.get("ROUTE_NAME")
-        or props.get("REC_AREA_NAME")
+        pget(
+            props,
+            "NAME",
+            "SITE_NAME",
+            "AREA_NAME",
+            "ROUTE_NAME",
+            "REC_AREA_NAME",
+            "FET_NAME",
+            "ROUTE_PRMRY_NM",
+            "MBT_NAME",
+            "RECSITENAME",
+            "LABEL",
+        )
     )
+    dataset_id = slugify(compact_text(pget(props, "_trailhead_dataset_id")))
     if not source_id:
         source_id = slugify(name or json.dumps(geometry or {}, sort_keys=True))[:80]
+    if dataset_id:
+        source_id = f"{dataset_id}:{source_id}"
     if not name:
-        name = category_for_props(props, geometry)[0].replace("_", " ").title()
+        return None
     if lat is None or lng is None:
-        lat = as_float(props.get("LATITUDE") or props.get("lat"))
-        lng = as_float(props.get("LONGITUDE") or props.get("lng") or props.get("lon"))
+        lat = as_float(pget(props, "LATITUDE", "LAT"))
+        lng = as_float(pget(props, "LONGITUDE", "LNG", "LONG", "LON"))
     if lat is None or lng is None:
         return None
     category, subcategory = category_for_props(props, geometry)
-    url = compact_text(props.get("SOURCE_URL") or props.get("URL") or "https://www.blm.gov/maps/georeferenced-PDFs")
+    url = compact_text(
+        pget(props, "_trailhead_source_url", "SOURCE_URL", "URL")
+        or "https://www.blm.gov/services/geospatial/GISData"
+    )
     return SourceRecord(
         id=f"blm:{source_id}",
         source="blm",
         source_id=source_id,
         source_url=url,
-        license=BLM_LICENSE,
-        attribution=BLM_ATTRIBUTION,
+        license=compact_text(pget(props, "_trailhead_license")) or BLM_LICENSE,
+        attribution=compact_text(pget(props, "_trailhead_attribution")) or BLM_ATTRIBUTION,
         fetched_at=now,
         last_seen_at=now,
         raw=feature,
@@ -106,24 +117,45 @@ def source_record_from_feature(feature: dict[str, Any], now: int) -> SourceRecor
 
 
 def category_for_props(props: dict[str, Any], geometry: dict[str, Any] | None) -> tuple[str, str]:
-    text = " ".join(compact_text(props.get(key)).lower() for key in (
+    text = " ".join(compact_text(pget(props, key)).lower() for key in (
+        "_trailhead_feature_kind",
         "FEATURE_TYPE",
         "TYPE",
         "SITE_TYPE",
+        "FET_TYPE",
+        "FET_SUBTYPE",
         "AREA_TYPE",
         "ROUTE_TYPE",
+        "PLAN_ASSET_CLASS",
         "DESIGNATION",
         "MANAGEMENT",
         "NAME",
         "SITE_NAME",
         "ROUTE_NAME",
+        "ROUTE_PRMRY_NM",
+        "RECSITENAME",
+        "FEATUREDACTIVITY",
     ))
-    if "trailhead" in text or "access point" in text:
+    if "trailhead" in text or "trail head" in text:
         return "trailhead", "trailhead"
-    if "dispersed" in text or "primitive camp" in text:
+    if "dispersed" in text or "primitive camp" in text or ("primitive" in text and "camp" in text):
         return "dispersed_camp", "dispersed_camp"
     if "campground" in text or "camp site" in text or "campsite" in text:
         return "campground", "campground"
+    if "parking area" in text:
+        return "place", "parking"
+    if "boat ramp" in text:
+        return "place", "boat_ramp"
+    if "toilet" in text or "restroom" in text:
+        return "place", "restroom"
+    if "visitor center" in text or "ranger station" in text or "field office" in text or "contact station" in text:
+        return "visitor_center", "visitor_center"
+    if "interpretive" in text:
+        return "historic_site", "interpretive_site"
+    if "staging area" in text:
+        return "trailhead", "staging_area"
+    if "access point" in text:
+        return "place", "access_point"
     if any(term in text for term in ("ohv", "off-highway", "off highway", "jeep", "4x4", "four wheel", "atv")):
         return "offroad_route", "ohv_route"
     if "scenic byway" in text or "scenic drive" in text or "backway" in text:
@@ -132,7 +164,7 @@ def category_for_props(props: dict[str, Any], geometry: dict[str, Any] | None) -
         return "viewpoint", "overlook"
     if "historic" in text or "heritage" in text or "petroglyph" in text:
         return "historic_site", "historic_site"
-    if "trail" in text and is_line_geometry(geometry):
+    if ("trail" in text or "mountain bike" in text) and is_line_geometry(geometry):
         return "trail", "trail"
     if any(term in text for term in ("monument", "conservation", "wilderness", "recreation area", "public land", "national landscape")):
         return "public_land", public_land_subcategory(text)
@@ -143,7 +175,7 @@ def category_for_props(props: dict[str, Any], geometry: dict[str, Any] | None) -
 
 def trail_from_record(record: SourceRecord) -> TrailGeometry:
     props = record.properties
-    distance = as_float(props.get("LENGTH_MILES") or props.get("MILES") or props.get("length_mi")) or line_distance_mi(record.geometry)
+    distance = as_float(pget(props, "LENGTH_MILES", "MILES", "LENGTH_MI", "GIS_MILES", "BLM_MILES")) or line_distance_mi(record.geometry)
     allowed = allowed_uses(props)
     return TrailGeometry(
         id=f"trail:blm:{slugify(record.source_id)}",
@@ -153,16 +185,16 @@ def trail_from_record(record: SourceRecord) -> TrailGeometry:
         representative_lat=record.lat,
         representative_lng=record.lng,
         distance_mi=round(distance, 2) if distance else None,
-        elevation_gain_ft=as_float(props.get("ELEV_GAIN") or props.get("elevation_gain_ft")),
-        elevation_loss_ft=as_float(props.get("ELEV_LOSS") or props.get("elevation_loss_ft")),
+        elevation_gain_ft=as_float(pget(props, "ELEV_GAIN", "ELEVATION_GAIN_FT")),
+        elevation_loss_ft=as_float(pget(props, "ELEV_LOSS", "ELEVATION_LOSS_FT")),
         route_type=route_type_for_record(record),
         activities=activities_for_record(record, allowed),
-        difficulty=compact_text(props.get("DIFFICULTY") or props.get("TECHNICAL_RATING") or ""),
-        surface=compact_text(props.get("SURFACE") or props.get("ROAD_SURFACE") or ""),
-        access=compact_text(props.get("ACCESS_STATUS") or props.get("STATUS") or props.get("ACCESS") or ""),
+        difficulty=compact_text(pget(props, "DIFFICULTY", "TECHNICAL_RATING", "TRAILDIFFICULTY")),
+        surface=compact_text(pget(props, "SURFACE", "ROAD_SURFACE", "OBSRVE_SRFCE_TYPE")),
+        access=access_from_props(props),
         allowed_uses=allowed,
-        seasonal_notes=compact_text(props.get("SEASONAL") or props.get("SEASONAL_STATUS") or props.get("OPEN_SEASON") or ""),
-        land_manager=compact_text(props.get("FIELD_OFFICE") or props.get("DISTRICT") or props.get("MANAGER") or BLM_ATTRIBUTION),
+        seasonal_notes=clean_fact(pget(props, "SEASONAL", "SEASONAL_STATUS", "OPEN_SEASON", "PLAN_SEASON_RSTRCT_CODE", "RECSITESEASON")),
+        land_manager=compact_text(pget(props, "FIELD_OFFICE", "UNIT_NAME", "DISTRICT", "MANAGER", "_trailhead_destination_name")) or BLM_ATTRIBUTION,
         source_quality=quality_for_source("blm"),
         sources=[source_ref(record)],
     )
@@ -182,28 +214,36 @@ def place_from_record(record: SourceRecord) -> ExplorePlaceV3 | None:
         lng=record.lng,
         geometry=record.geometry,
         country="US",
-        region=compact_text(props.get("STATE") or props.get("STATE_ABBR") or props.get("REGION") or ""),
-        admin=compact_text(props.get("FIELD_OFFICE") or props.get("DISTRICT") or props.get("MANAGER") or ""),
+        region=compact_text(pget(props, "STATE", "STATE_ABBR", "ADMIN_ST", "CONTACTSTATE", "REGION")),
+        admin=compact_text(pget(props, "FIELD_OFFICE", "UNIT_NAME", "DISTRICT", "MANAGER", "_trailhead_destination_name")),
         summary=summary_from_record(record),
-        description=compact_text(props.get("DESCRIPTION") or props.get("COMMENTS") or props.get("NOTES") or ""),
+        description=compact_text(pget(props, "DESCRIPTION", "COMMENTS", "NOTES", "DESCRIPTIO")),
         tags=sorted_unique([
             record.category,
             record.subcategory,
             "blm",
             "public land",
-            props.get("DESIGNATION"),
-            props.get("MANAGEMENT"),
-            props.get("FIELD_OFFICE"),
+            pget(props, "DESIGNATION", "ROUTE_SPCL_DSGNTN_TYPE"),
+            pget(props, "MANAGEMENT", "PLAN_ASSET_CLASS"),
+            pget(props, "FIELD_OFFICE", "UNIT_NAME", "_trailhead_destination_name"),
         ]),
-        access=compact_text(props.get("ACCESS_STATUS") or props.get("STATUS") or props.get("ACCESS") or ""),
-        safety=compact_text(props.get("HAZARD") or props.get("SAFETY") or props.get("TRAVEL_NOTES") or ""),
+        access=access_from_props(props),
+        safety=clean_fact(pget(props, "HAZARD", "SAFETY", "TRAVEL_NOTES")),
         amenities=amenities_from_props(props),
         sources=[source_ref(record)],
         quality=quality_for_source("blm"),
         last_seen_at=record.last_seen_at,
         updated_at=record.fetched_at,
     )
-    return apply_aliases(build_card(score_place(place)))
+    source_summary = place.summary
+    source_description = place.description
+    place = apply_aliases(build_card(score_place(place)))
+    place.summary = source_summary
+    place.description = source_description
+    place.card["summary"] = source_summary or source_description
+    place.card["warnings"] = [place.safety] if place.safety else []
+    place.card["best_for"] = []
+    return place
 
 
 def source_ref(record: SourceRecord) -> dict[str, Any]:
@@ -219,30 +259,23 @@ def source_ref(record: SourceRecord) -> dict[str, Any]:
 
 def summary_from_record(record: SourceRecord) -> str:
     props = record.properties
-    if props.get("DESCRIPTION"):
-        return compact_text(props["DESCRIPTION"])[:420]
-    readable = record.category.replace("_", " ")
-    manager = compact_text(props.get("FIELD_OFFICE") or props.get("DISTRICT") or "BLM")
-    return f"{record.name} is an official {manager} {readable} record. Verify access, seasonal closures, fire restrictions, route status, and local rules before relying on it."
+    return compact_text(pget(props, "DESCRIPTION", "DESCRIPTIO"))[:420]
 
 
 def allowed_uses(props: dict[str, Any]) -> list[str]:
     values = []
     checks = [
-        ("HIKING", "hiking"),
-        ("BICYCLE", "bike"),
-        ("EQUESTRIAN", "horse"),
-        ("HORSE", "horse"),
-        ("OHV", "OHV"),
-        ("ATV", "OHV"),
-        ("MOTORCYCLE", "motorcycle"),
-        ("FOUR_WHEEL_DRIVE", "4x4"),
-        ("FOURWD", "4x4"),
+        (("HIKING",), "hiking"),
+        (("BICYCLE",), "bike"),
+        (("EQUESTRIAN", "HORSE"), "horse"),
+        (("OHV", "ATV"), "OHV"),
+        (("MOTORCYCLE",), "motorcycle"),
+        (("FOUR_WHEEL_DRIVE", "FOURWD"), "4x4"),
     ]
-    for key, label in checks:
-        if truthy(props.get(key)):
+    for keys, label in checks:
+        if any(truthy(pget(props, key)) for key in keys):
             values.append(label)
-    text = compact_text(props.get("ALLOWED_USES") or props.get("USES") or props.get("ACTIVITIES")).lower()
+    text = compact_text(pget(props, "ALLOWED_USES", "USES", "ACTIVITIES", "FEATUREDACTIVITY", "_trailhead_default_activity")).lower()
     for needle, label in [
         ("hike", "hiking"),
         ("bike", "bike"),
@@ -255,6 +288,9 @@ def allowed_uses(props: dict[str, Any]) -> list[str]:
     ]:
         if needle in text:
             values.append(label)
+    designation = compact_text(pget(props, "OHV_ROUTE_DSGNTN_LIM")).lower()
+    if designation and "closed" not in designation and designation not in {"none", "no", "unknown"}:
+        values.append("OHV")
     return sorted_unique(values)
 
 
@@ -263,29 +299,30 @@ def activities_for_record(record: SourceRecord, allowed: list[str]) -> list[str]
         return sorted_unique([*allowed, "overland"])
     if record.category == "scenic_drive":
         return sorted_unique([*allowed, "driving"])
-    return sorted_unique(allowed or ["hiking"])
+    return sorted_unique(allowed)
 
 
 def route_type_for_record(record: SourceRecord) -> str:
     props = record.properties
     if record.category == "offroad_route":
-        return compact_text(props.get("ROUTE_TYPE") or "OHV route")
+        return compact_text(pget(props, "ROUTE_TYPE")) or "OHV route"
     if record.category == "scenic_drive":
-        return compact_text(props.get("ROUTE_TYPE") or "Scenic drive")
-    return compact_text(props.get("ROUTE_TYPE") or "Mapped route")
+        return compact_text(pget(props, "ROUTE_TYPE")) or "Scenic drive"
+    route_type = compact_text(pget(props, "ROUTE_TYPE", "PLAN_ASSET_CLASS"))
+    return "Trail" if "trail" in route_type.lower() or not route_type else route_type
 
 
 def amenities_from_props(props: dict[str, Any]) -> list[str]:
     values = []
-    for key, label in [
-        ("WATER", "water"),
-        ("TOILET", "toilets"),
-        ("PICNIC", "picnic"),
-        ("FEE", "fee"),
-        ("PARKING", "parking"),
-        ("TRASH", "trash"),
+    for keys, label in [
+        (("WATER",), "water"),
+        (("TOILET",), "toilets"),
+        (("PICNIC",), "picnic"),
+        (("FEE", "RECSITEEFEE"), "fee"),
+        (("PARKING",), "parking"),
+        (("TRASH",), "trash"),
     ]:
-        if truthy(props.get(key)):
+        if any(truthy(pget(props, key)) for key in keys):
             values.append(label)
     return sorted_unique(values)
 
@@ -313,7 +350,34 @@ def is_line_geometry(geometry: dict[str, Any] | None) -> bool:
 def truthy(value: Any) -> bool:
     if isinstance(value, bool):
         return value
-    return compact_text(value).lower() in {"yes", "y", "true", "1", "designated", "open", "allowed"}
+    text = compact_text(value).lower()
+    if not text or text in {"no", "n", "false", "0", "none", "unknown", "no data", "not available", "unavailable", "closed"} or text.startswith(("no ", "not ")):
+        return False
+    return text in {"yes", "y", "true", "1", "designated", "open", "allowed", "accepted", "managed"} or bool(text)
+
+
+def pget(props: dict[str, Any], *keys: str) -> Any:
+    folded = {str(key).casefold(): value for key, value in props.items()}
+    for key in keys:
+        value = folded.get(key.casefold())
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def clean_fact(value: Any) -> str:
+    text = compact_text(value)
+    if text.casefold() in {"", "none", "no", "no data", "unknown", "not available", "n/a"}:
+        return ""
+    return text
+
+
+def access_from_props(props: dict[str, Any]) -> str:
+    values = [
+        clean_fact(pget(props, "ACCESS_STATUS", "STATUS", "ACCESS", "PLAN_ACCESS_RSTRCT")),
+        clean_fact(pget(props, "OHV_DSGNTN_LIM_EXPLAIN")),
+    ]
+    return " · ".join(value for value in values if value)
 
 
 def as_float(value: Any) -> float | None:

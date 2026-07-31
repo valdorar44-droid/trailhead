@@ -760,3 +760,48 @@ Verify `git diff --cached --name-only` before every commit.
 
 - Do not repeat Trails T1-T6, 3D Back, destination search, shared trail sheets, Builder, GPX, Offline, Follow, recording, Layers, Memory, Originals, Android Auto, broad NPS research, or the protected pre-preview suite without new evidence.
 - Do not write candidates into `dashboard/`, auto-stage generated candidate data, fabricate agency modules, merge Community and Verified trails, or start additional native builds.
+
+## Sierra USFS and Moab BLM isolated pilot checkpoint — 2026-07-31 13:21 CDT
+
+- Branch: `feat/trailhead-1.0.10-overhaul`; pre-change HEAD `211246ea5acc39c5941b5f293a185e30c3988fe2`.
+- Frozen paired release remains `release/trailhead-1.0.11`, tag `v1.0.11`, source `0f7431d32088405f4c381ed1a220fcb2169ec761`.
+- Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; App Store copy SHA-256 remains `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`. Neither file, `.cursor/`, Valhalla work, Android helpers, nor unrelated mode-only changes are part of this packet.
+
+### Paired production-build status
+
+- The single authorized iOS build remains finished: EAS `712109e9-6b7f-4f72-ab51-2aa42a6095da`, version `1.0.11`, build `62`, runtime `native-1.0.11-ios.1`. IPA SHA-256: `9ca83267c03fc0fafa8664593e98645481b57ac0addd5ea5f9bbcf4861c4b3f1`.
+- The single authorized Android build remains queued: EAS `723dca56-01a3-416b-a22d-98c838a849ee`, version `1.0.11`, version code `70`, runtime `native-1.0.11-android.1`, fingerprint `04839b31d3b43d2eaaf2348ec46846358b142c3a`.
+- No replacement build, store submission, or production OTA was started.
+
+### Agency adapter and candidate work
+
+- Official USFS and BLM ArcGIS fields now import case-insensitively. Dataset-qualified Global/Object IDs preserve feature grain; connected route segments continue through the existing TrailSystem V2 grouping rather than corrupting source identity.
+- Unknown permitted use remains empty. The adapters no longer default an unknown route to hiking and no longer generate generic `verify local rules` summaries.
+- Exact agency site types now map to supported capabilities: USFS visitor/fee stations, observation and interpretive sites, picnic/boating/fishing/day-use sites, OHV staging, and BLM parking, boat ramps, toilets, visitor centers, trail heads, access points, primitive camps, staging, and scenic sites.
+- MultiPolygon representative points are supported for official land-unit and recreation-area boundaries.
+- `scripts/build_explore_agency_pilots.py` fetches ArcGIS pages with a source-controlled 60-request ceiling, writes only below `data/explore/audit_candidates/`, supports zero-request rebuilds from captured source fixtures, and refuses dashboard output.
+- The builder records reviewed source metadata, exact agency attribution, stable record IDs, artifact sizes and SHA-256 hashes, data-quality findings, and an explicit `live_serving_index_modified: false` assertion.
+- Raw route segments are grouped with the existing `build_trail_systems_v2`; no parallel trail identity or discovery engine was created.
+
+### Live candidate and data-quality result
+
+- Live source pull used 10 of 40 allowed requests and captured 1,347 official features: Sierra boundary `1`, Sierra trails `686`, Sierra recreation sites `219`, Moab BLM point sites `108`, polygon sites `11`, mountain-bike opportunities `3`, mountain-bike routes `45`, managed public trails `248`, recreation areas `1`, and featured sites `6`.
+- Final isolated candidate: `data/explore/audit_candidates/agencies/live-20260731-b04`.
+- Normalized output: 1,281 source records, 1,121 places, 901 source route segments, and 668 TrailSystem V2 route systems.
+- Sierra hub candidate: 13 scenic/interpretive places, 38 source-backed activities, 3 visitor-information sites, 120 camp/stay records, and 533 trail systems.
+- Moab BLM hub candidate: 27 scenic/interpretive places, 2 source-backed route activities, 5 visitor-information sites, 42 camp/stay records, 18 parking records, and 135 trail systems.
+- Data-quality gate reports zero errors and `promotion_ready: true`. Review warnings remain intentionally visible: 10 named `45 CUT OFF` route variants, 17 trails with permitted use not listed, and 2 near-duplicate place pairs. No missing fact was guessed to eliminate a warning.
+- Final hashes: source records `28d8bfc75296212b6786e1bfeeec3b67dd825f06b5c79830d0917296273d8730`; places `3eccca40e187d5ef8cab2d68cb944bafa10b251cb6c40ecb554b0cfb631ad7b4`; source route segments `e7fd4c9e52a4a76df92077eaa0ddfbdd9a2596fb1e6abdf0ed66567b8cea394a`; TrailSystem V2 systems `2659df549f807748146feec371208fb3420157286b547eb9596a502982bccd4f`; destinations `06cc747a8192240fbe19b010f7dc0de163209ca741e7de0b5c8f981288ffca73`; audit `ab05affedff86466d7b5c3d68666e497d5c1186bee95a567fb63f88ee8fcd5ab`.
+
+### Focused verification and exact next action
+
+- `tests/test_explore_agency_pilots.py`, `tests/test_explore_sources.py`, and `tests/test_trails_v2.py`: 71 passed. Python compilation and named-file whitespace checks passed.
+- Exact next action: commit/push only the two agency adapters, shared MultiPolygon normalization, isolated builder, focused tests, and this checkpoint. Keep the candidate out of the live serving index until the 10 route variants and 2 duplicate place pairs receive an intentional review.
+- After that review, merge the accepted agency destination packs through the existing serving-index promotion path, run the bounded Android destination hub → module → child → shared sheet → map → Back delta, and spot-check the identical source on iOS.
+- Continue the resumable nationwide NPS batches separately; do not blend NPS promotion with the USFS/BLM pilot review.
+
+### Do not repeat
+
+- Do not repeat Trails T1–T6, 3D Back, Trail Builder, GPX, Offline, Follow, recording, Flyover, broad Search, NPS research, Layers, Memory, Originals, Android Auto, or the protected pre-preview suite.
+- Do not auto-promote this candidate, fabricate permitted use or editorial modules, replace TrailSystem V2, stage the protected serving index/App Store copy, or start another native build.
+- Task-owned Metro, Gradle, Maestro, publisher, and test processes: none. The remote Android EAS build is the only active task process.

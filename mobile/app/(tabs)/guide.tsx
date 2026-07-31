@@ -127,6 +127,7 @@ import {
   resolveExploreNearbySearchCenter,
   serviceDestinationQueryFromExploreQuery,
 } from '@/lib/exploreNearbyContext';
+import { sourcePackItemCampPin } from '@/lib/exploreSourcePackHandoff';
 import {
   boundedExploreImageUrl,
   exploreImageSource,
@@ -4494,6 +4495,13 @@ function GuideScreenContent() {
     const lng = Number(item.lng);
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
       if (item.url) Linking.openURL(item.url);
+      return;
+    }
+    const camp = sourcePackItemCampPin(item);
+    if (camp) {
+      setPendingMapSelection({ kind: 'camp', camp });
+      suspendSelectedExploreForMap();
+      router.push('/(tabs)/map');
       return;
     }
     const sourceKey = String(item.source_id || item.title || item.kind || 'detail')

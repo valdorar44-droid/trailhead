@@ -19,8 +19,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.explore_sources.base.dedupe import dedupe_places, disambiguate_duplicate_display_names, link_trailheads_to_trails
+from scripts.explore_sources.base.enrichment import enrich_place_dict
 from scripts.explore_sources.blm.import_blm import BLM_ATTRIBUTION, BLM_LICENSE, import_blm_fixture
 from scripts.explore_sources.usfs.import_usfs import USFS_ATTRIBUTION, USFS_LICENSE, import_usfs_fixture
+from scripts.data.build_canonical_serving_indexes import build_explore_index, merge_explore_indexes
 from dashboard.trails_v2 import build_trail_systems_v2, model_public
 
 
@@ -32,6 +34,43 @@ BLM_NATIONAL = "https://gis.blm.gov/arcgis/rest/services/recreation/BLM_Natl_Rec
 USFS_METADATA = "https://data.fs.usda.gov/geodata/edw/datasets.php"
 BLM_METADATA = "https://www.blm.gov/services/geospatial/GISData/utah"
 MOAB_BBOX = (-110.3, 38.0, -109.0, 39.4)
+
+AGENCY_HUBS: dict[str, dict[str, Any]] = {
+    "sierra-national-forest": {
+        "id": "place:usfs:9006",
+        "name": "Sierra National Forest",
+        "category": "forest",
+        "subcategories": ["national_forest"],
+        "region": "CA",
+        "summary": (
+            "Recreation in Sierra National Forest spans all seasons, including camping, hiking, biking, "
+            "horseback riding, fishing, winter travel and off-highway vehicle routes."
+        ),
+        "activities": ["Camping", "Hiking", "Biking", "Horseback riding"],
+        "official_url": "https://www.fs.usda.gov/recarea/sierra/recarea/?recid=45636",
+        "source_id": "usfs-sierra-boundary:316",
+        "source": "usfs",
+        "attribution": USFS_ATTRIBUTION,
+        "license": USFS_LICENSE,
+    },
+    "moab-blm": {
+        "id": "place:blm:moab-field-office",
+        "name": "Moab BLM",
+        "category": "public_land",
+        "subcategories": ["blm_field_office"],
+        "region": "UT",
+        "summary": (
+            "The BLM Moab Field Office manages 1.8 million acres of Colorado Plateau canyon country, "
+            "with routes and sites for riding, biking, climbing, hiking, horseback travel and river trips."
+        ),
+        "activities": ["OHV", "Mountain biking", "Hiking", "River trips"],
+        "official_url": "https://www.blm.gov/office/moab-field-office",
+        "source_id": "blm-moab-field-office",
+        "source": "blm",
+        "attribution": BLM_ATTRIBUTION,
+        "license": BLM_LICENSE,
+    },
+}
 
 
 @dataclass(frozen=True)
@@ -331,17 +370,24 @@ def audit_candidate(
 
 def source_item(place: dict[str, Any]) -> dict[str, Any]:
     source = (place.get("sources") or [{}])[0]
-    return {
+    item = {
         "source_id": place.get("id"),
         "title": place.get("name"),
-        "description": place.get("summary") or place.get("description") or "",
         "kind": (place.get("subcategories") or [place.get("category")])[0],
+        "category": place.get("category"),
         "lat": place.get("lat"),
         "lng": place.get("lng"),
         "url": source.get("url", ""),
         "source": source.get("source", ""),
         "source_label": source.get("attribution", ""),
     }
+    description = str(place.get("summary") or place.get("description") or "").strip()
+    if description:
+        item["description"] = description
+    amenities = [str(value) for value in place.get("amenities") or [] if str(value).strip()]
+    if amenities:
+        item["amenities"] = amenities
+    return item
 
 
 def trail_profile(segment: dict[str, Any]) -> dict[str, Any]:
@@ -431,6 +477,162 @@ def build_destination_pack(destination_id: str, name: str, places: list[dict[str
     }
 
 
+def median_center(places: list[dict[str, Any]]) -> tuple[float, float]:
+    points = sorted(
+        (float(item["lat"]), float(item["lng"]))
+        for item in places
+        if item.get("lat") is not None and item.get("lng") is not None
+    )
+    if not points:
+        raise ValueError("agency destination has no valid center")
+    middle = len(points) // 2
+    if len(points) % 2:
+        return points[middle]
+    return (
+        (points[middle - 1][0] + points[middle][0]) / 2,
+        (points[middle - 1][1] + points[middle][1]) / 2,
+    )
+
+
+def build_destination_hub(
+    destination_id: str,
+    places: list[dict[str, Any]],
+    trails: list[dict[str, Any]],
+    fetched_at: int,
+) -> dict[str, Any]:
+    definition = AGENCY_HUBS[destination_id]
+    pack = build_destination_pack(destination_id, definition["name"], places, trails)["source_pack"]
+    pack.update({
+        "primary": definition["attribution"],
+        "official_url": definition["official_url"],
+        "license": definition["license"],
+        "extract": definition["summary"],
+        "activities": definition["activities"],
+        "sources": [{
+            "title": definition["attribution"],
+            "publisher": definition["attribution"],
+            "url": definition["official_url"],
+            "kind": "official_source",
+        }],
+    })
+    boundary = next((item for item in places if item.get("geometry") and item.get("category") in {"forest", "public_land"}), None)
+    lat, lng = (
+        (float(boundary["lat"]), float(boundary["lng"]))
+        if boundary and boundary.get("lat") is not None and boundary.get("lng") is not None
+        else median_center(places)
+    )
+    hub = {
+        "id": definition["id"],
+        "source_ids": [f'{definition["source"]}:{definition["source_id"]}'],
+        "name": definition["name"],
+        "category": definition["category"],
+        "subcategories": definition["subcategories"],
+        "lat": lat,
+        "lng": lng,
+        "geometry": boundary.get("geometry") if boundary else None,
+        "country": "US",
+        "region": definition["region"],
+        "admin": definition["name"],
+        "summary": definition["summary"],
+        "description": definition["summary"],
+        "tags": [definition["source"], "public lands", "destination guide"],
+        "search_aliases": [definition["name"], destination_id.replace("-", " ")],
+        "source_pack": pack,
+        "card": {
+            "title": definition["name"],
+            "headline": definition["name"],
+            "summary": definition["summary"],
+            "source_badge": definition["attribution"],
+        },
+        "sources": [{
+            "source": definition["source"],
+            "source_id": definition["source_id"],
+            "url": definition["official_url"],
+            "license": definition["license"],
+            "attribution": definition["attribution"],
+            "quality": "official_source",
+        }],
+        "quality": "official_source",
+        "verified": True,
+        "last_seen_at": fetched_at,
+        "updated_at": fetched_at,
+        "linked_trail_ids": [str(item.get("id")) for item in trails if item.get("id")],
+    }
+    return enrich_place_dict(hub)
+
+
+def build_pilot_catalog(
+    place_dicts: list[dict[str, Any]],
+    trail_system_dicts: list[dict[str, Any]],
+    fetched_at: int,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    enriched = [enrich_place_dict(item) for item in place_dicts]
+    reviewable = [item for item in enriched if item.get("reviewable")]
+    usfs_places = [item for item in place_dicts if item.get("sources", [{}])[0].get("source") == "usfs"]
+    blm_places = [item for item in place_dicts if item.get("sources", [{}])[0].get("source") == "blm"]
+    usfs_trails = [item for item in trail_system_dicts if any(source.get("label") == USFS_ATTRIBUTION for source in item.get("sources") or [])]
+    blm_trails = [item for item in trail_system_dicts if any(source.get("label") == BLM_ATTRIBUTION for source in item.get("sources") or [])]
+    hubs = [
+        build_destination_hub("sierra-national-forest", usfs_places, usfs_trails, fetched_at),
+        build_destination_hub("moab-blm", blm_places, blm_trails, fetched_at),
+    ]
+    if any(not hub.get("reviewable") for hub in hubs):
+        blocked = {hub["id"]: hub.get("rejection_reasons") for hub in hubs if not hub.get("reviewable")}
+        raise ValueError(f"agency destination hub failed enrichment gate: {blocked}")
+    items = [*reviewable, *hubs]
+    return ({
+        "schema_version": 3,
+        "catalog_id": "trailhead-explore-agency-pilots-v1",
+        "generated_at": fetched_at,
+        "source": "Trailhead Explore agency pilots",
+        "count": len(items),
+        "places": items,
+    }, hubs)
+
+
+def build_serving_review(
+    out_dir: Path,
+    pilot_index: dict[str, Any],
+    current_index_path: Path,
+) -> dict[str, Any]:
+    if not current_index_path.is_file():
+        return {
+            "current_index": str(current_index_path),
+            "current_index_available": False,
+            "candidate_count": len(pilot_index.get("items") or []),
+        }
+    current = json.loads(current_index_path.read_text())
+    minimum = int((current.get("gate") or {}).get("minimum_reviewable") or 1)
+    merged = merge_explore_indexes([current, pilot_index], minimum_reviewable=minimum)
+    write_json(out_dir / "serving_index_merged_review.json", merged)
+
+    current_by_id = {
+        str(item.get("id") or ""): item
+        for item in current.get("items") or []
+        if isinstance(item, dict) and item.get("id")
+    }
+    pilot_by_id = {
+        str(item.get("id") or ""): item
+        for item in pilot_index.get("items") or []
+        if isinstance(item, dict) and item.get("id")
+    }
+    replaced = sorted(item_id for item_id in pilot_by_id if item_id in current_by_id)
+    added = sorted(item_id for item_id in pilot_by_id if item_id not in current_by_id)
+    return {
+        "current_index": str(current_index_path),
+        "current_index_available": True,
+        "current_count": len(current.get("items") or []),
+        "candidate_count": len(pilot_by_id),
+        "merged_count": len(merged.get("items") or []),
+        "replaced_count": len(replaced),
+        "added_count": len(added),
+        "replaced_ids": replaced,
+        "added_ids": added,
+        "gate": merged.get("gate"),
+        "live_serving_index_modified": False,
+    }
+
+
 def build_candidate(out_dir: Path, max_requests: int, timeout: float, reuse_source_dir: Path | None = None) -> dict[str, Any]:
     budget = RequestBudget(max_requests)
     source_dir = out_dir / "source"
@@ -482,16 +684,65 @@ def build_candidate(out_dir: Path, max_requests: int, timeout: float, reuse_sour
     write_json(out_dir / "places.json", {"schema_version": 3, "count": len(place_dicts), "places": place_dicts})
     write_json(out_dir / "trail_segments.json", {"schema_version": 1, "count": len(trail_segment_dicts), "trails": trail_segment_dicts})
     write_json(out_dir / "trails.json", {"schema_version": 2, "count": len(trail_system_dicts), "trails": trail_system_dicts})
+    destinations = [
+        build_destination_pack("sierra-national-forest", "Sierra National Forest", [item for item in place_dicts if item.get("sources", [{}])[0].get("source") == "usfs"], [item for item in trail_system_dicts if any(source.get("label") == USFS_ATTRIBUTION for source in item.get("sources") or [])]),
+        build_destination_pack("moab-blm", "Moab BLM", [item for item in place_dicts if item.get("sources", [{}])[0].get("source") == "blm"], [item for item in trail_system_dicts if any(source.get("label") == BLM_ATTRIBUTION for source in item.get("sources") or [])]),
+    ]
     write_json(out_dir / "destinations.json", {
         "schema_version": 1,
-        "destinations": [
-            build_destination_pack("sierra-national-forest", "Sierra National Forest", [item for item in place_dicts if item.get("sources", [{}])[0].get("source") == "usfs"], [item for item in trail_system_dicts if any(source.get("label") == USFS_ATTRIBUTION for source in item.get("sources") or [])]),
-            build_destination_pack("moab-blm", "Moab BLM", [item for item in place_dicts if item.get("sources", [{}])[0].get("source") == "blm"], [item for item in trail_system_dicts if any(source.get("label") == BLM_ATTRIBUTION for source in item.get("sources") or [])]),
-        ],
+        "destinations": destinations,
+    })
+    pilot_catalog, hubs = build_pilot_catalog(place_dicts, trail_system_dicts, fetched_at)
+    write_json(out_dir / "explore_catalog_v3.json", pilot_catalog)
+    pilot_index = build_explore_index(out_dir / "explore_catalog_v3.json", minimum_reviewable=1, enforce_enrichment_gate=True)
+    accepted_ids = {
+        str(item.get("id") or "")
+        for item in pilot_index.get("items") or []
+        if isinstance(item, dict) and item.get("id")
+    }
+    # The canonical serving gate is stricter than the reusable enrichment
+    # score. Keep records that fail it inside source-backed destination modules,
+    # but do not publish them as standalone organic cards.
+    pilot_catalog["places"] = [
+        item for item in pilot_catalog["places"]
+        if str(item.get("id") or "") in accepted_ids
+    ]
+    pilot_catalog["count"] = len(pilot_catalog["places"])
+    write_json(out_dir / "explore_catalog_v3.json", pilot_catalog)
+    pilot_index = build_explore_index(out_dir / "explore_catalog_v3.json", minimum_reviewable=1, enforce_enrichment_gate=True)
+    if pilot_index.get("rejections"):
+        raise ValueError("agency pilot serving catalog contains rejected standalone records")
+    pilot_index["catalogs"] = [{
+        "catalog_id": pilot_catalog["catalog_id"],
+        "generated_at": fetched_at,
+        "source_count": pilot_index["source_count"],
+    }]
+    write_json(out_dir / "serving_index_review.json", pilot_index)
+    promotion_review = build_serving_review(
+        out_dir,
+        pilot_index,
+        ROOT / "dashboard" / "explore_serving_index_v2.json",
+    )
+    write_json(out_dir / "promotion_review.json", promotion_review)
+    audit["counts"].update({
+        "reviewable_places": len(pilot_catalog["places"]) - len(hubs),
+        "destination_hubs": len(hubs),
     })
     write_json(out_dir / "audit.json", audit)
 
-    artifact_names = ["source_records.jsonl", "places.json", "trail_segments.json", "trails.json", "destinations.json", "audit.json"]
+    artifact_names = [
+        "source_records.jsonl",
+        "places.json",
+        "trail_segments.json",
+        "trails.json",
+        "destinations.json",
+        "explore_catalog_v3.json",
+        "serving_index_review.json",
+        "promotion_review.json",
+        "audit.json",
+    ]
+    if (out_dir / "serving_index_merged_review.json").is_file():
+        artifact_names.append("serving_index_merged_review.json")
     manifest = {
         "schema_version": 1,
         "generated_at": fetched_at,

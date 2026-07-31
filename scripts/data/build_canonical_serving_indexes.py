@@ -793,9 +793,20 @@ def explore_filter_coverage(items: list[dict[str, Any]]) -> tuple[dict[str, int]
 
 
 def dedupe_explore_records(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    by_id: dict[str, tuple[int, dict[str, Any]]] = {}
+    without_id: list[tuple[int, dict[str, Any]]] = []
+    for index, item in enumerate(items):
+        item_id = compact(item.get("id"))
+        if not item_id:
+            without_id.append((index, item))
+            continue
+        existing = by_id.get(item_id)
+        if not existing or explore_sort_key(item) < explore_sort_key(existing[1]):
+            by_id[item_id] = (existing[0] if existing else index, item)
+
     by_key: dict[str, tuple[int, dict[str, Any]]] = {}
     passthrough: list[tuple[int, dict[str, Any]]] = []
-    for index, item in enumerate(items):
+    for index, item in sorted([*without_id, *by_id.values()], key=lambda pair: pair[0]):
         key = explore_dedupe_key(item)
         if not key:
             passthrough.append((index, item))

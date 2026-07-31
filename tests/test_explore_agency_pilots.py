@@ -9,9 +9,12 @@ from scripts.build_explore_agency_pilots import (
     DatasetSpec,
     RequestBudget,
     audit_candidate,
+    build_destination_hub,
     is_technical_route_name,
     merge_colocated_agency_amenities,
+    source_item,
 )
+from scripts.explore_sources.base.content_quality import sanitize_source_pack_item
 from scripts.explore_sources.base.schema import ExplorePlaceV3
 from scripts.explore_sources.blm.import_blm import import_blm_fixture
 from scripts.explore_sources.usfs.import_usfs import import_usfs_fixture
@@ -242,3 +245,61 @@ def test_official_named_cutoff_is_not_treated_as_a_raw_route_number():
     assert is_technical_route_name("45 CUT OFF T5") is False
     assert is_technical_route_name("21E242") is True
     assert is_technical_route_name("Forest Road 5S30") is True
+
+
+def test_sparse_agency_child_keeps_source_identity_without_generated_summary():
+    item = source_item({
+        "id": "place:usfs:trailhead-1",
+        "name": "Granite Trailhead",
+        "category": "trailhead",
+        "subcategories": ["trailhead"],
+        "lat": 37.1,
+        "lng": -119.1,
+        "summary": "",
+        "sources": [{
+            "source": "usfs",
+            "url": "https://www.fs.usda.gov/",
+            "attribution": "USDA Forest Service",
+        }],
+    })
+    clean = sanitize_source_pack_item(item, parent={
+        "name": "Sierra National Forest",
+        "category": "forest",
+        "lat": 37.2,
+        "lng": -119.2,
+    })
+
+    assert clean["source_id"] == "place:usfs:trailhead-1"
+    assert clean["title"] == "Granite Trailhead"
+    assert "description" not in clean
+
+
+def test_destination_hub_uses_official_copy_and_source_backed_modules():
+    places = [{
+        "id": "place:blm:camp-1",
+        "name": "Canyon Camp",
+        "category": "campground",
+        "subcategories": ["developed_campground"],
+        "lat": 38.5,
+        "lng": -109.5,
+        "summary": "Officially listed campground in the Moab Field Office.",
+        "sources": [{
+            "source": "blm",
+            "url": "https://www.blm.gov/visit/canyon-camp",
+            "attribution": "Bureau of Land Management",
+        }],
+    }]
+    trails = [{
+        "id": "trail-system:blm:1",
+        "name": "Canyon Trail",
+        "center": {"lat": 38.55, "lng": -109.55},
+        "sources": [{"label": "Bureau of Land Management"}],
+    }]
+
+    hub = build_destination_hub("moab-blm", places, trails, 1785500000)
+
+    assert hub["reviewable"] is True
+    assert hub["summary"].startswith("The BLM Moab Field Office manages 1.8 million acres")
+    assert hub["source_pack"]["campgrounds"][0]["title"] == "Canyon Camp"
+    assert hub["source_pack"]["trails"][0]["source_id"] == "trail-system:blm:1"
+    assert "verify" not in json.dumps(hub).lower()

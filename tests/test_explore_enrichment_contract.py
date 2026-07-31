@@ -8,6 +8,7 @@ from pathlib import Path
 from scripts.data.build_canonical_serving_indexes import (
     build_explore_index,
     clean_public_text,
+    dedupe_explore_records,
     source_backed_feature_description,
 )
 from scripts.data.promote_explore_serving_index import promote
@@ -61,6 +62,29 @@ def place(place_id: str, name: str, *, photo: bool = False) -> dict:
 
 
 class ExploreEnrichmentContractTests(unittest.TestCase):
+    def test_exact_id_replacement_wins_before_location_deduplication(self):
+        old = {
+            "id": "place:usfs:9006",
+            "title": "Sierra National Forest",
+            "lat": 37.75,
+            "lng": -119.55,
+            "description": "",
+            "enrichment_score": 60,
+        }
+        official = {
+            "id": "place:usfs:9006",
+            "title": "Sierra National Forest",
+            "lat": 37.22,
+            "lng": -118.74,
+            "description": "Official source-backed forest recreation overview with current destination modules.",
+            "enrichment_score": 82,
+        }
+
+        deduped = dedupe_explore_records([old, official])
+
+        self.assertEqual(len(deduped), 1)
+        self.assertEqual(deduped[0]["lat"], 37.22)
+
     def test_page_and_video_urls_never_become_images(self):
         raw = place("bad-media", "Bad Media Camp")
         raw["media"] = [

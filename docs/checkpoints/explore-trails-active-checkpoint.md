@@ -816,3 +816,48 @@ Verify `git diff --cached --name-only` before every commit.
 - Focused agency test suite: 18 passed after the review correction; the preceding full agency/source/TrailSystem suite passed 71 tests.
 - Exact next action: intentionally map this accepted candidate into the existing serving-index promotion inputs without overwriting the user-owned live index, produce a diff/report for Sierra and Moab, then request/perform the bounded Android Explore review before live promotion.
 - Do not repeat the source download, adapter audit, duplicate review, route-name review, or any completed Trails packet.
+
+## Agency destination-hub serving candidate — 2026-07-31 13:43 CDT
+
+- Branch: `feat/trailhead-1.0.10-overhaul`; pre-change HEAD `5de1b746f3c714599b21ba8b96ac0e3d76b4e239`.
+- Frozen paired store source remains `0f7431d32088405f4c381ed1a220fcb2169ec761`, tag `v1.0.11`.
+- Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; App Store copy SHA-256 remains `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`. Neither file nor `.cursor/` is staged or modified by this packet.
+
+### Paired production-build status
+
+- iOS build `712109e9-6b7f-4f72-ab51-2aa42a6095da` remains finished: version `1.0.11`, build `62`, runtime `native-1.0.11-ios.1`, source `0f7431d`. IPA SHA-256 `9ca83267c03fc0fafa8664593e98645481b57ac0addd5ea5f9bbcf4861c4b3f1`.
+- Android build `723dca56-01a3-416b-a22d-98c838a849ee` is `IN_PROGRESS`: version `1.0.11`, version code `70`, runtime `native-1.0.11-android.1`, source `0f7431d`, fingerprint `04839b31d3b43d2eaaf2348ec46846358b142c3a`.
+- Exactly two authorized builds exist. No replacement build, store submission, production OTA, or public feature-stage change was started.
+
+### Serving candidate and child-sheet integration
+
+- Deterministic zero-request rebuild: `data/explore/audit_candidates/agencies/live-20260731-b08`; official fixtures reused from accepted `b06` source capture.
+- The public standalone catalog contains only records that pass both reusable enrichment and canonical serving gates: 106 agency places plus Sierra National Forest and Moab BLM destination hubs. Serving rejections: `0`.
+- The 1,011 sparse/source-only place records remain available inside typed destination modules instead of receiving generated summaries or competing as organic cards. Missing permitted use remains unknown.
+- Trail data remains in the existing TrailSystem V2 path: 901 source segments grouped into 668 stable trail systems.
+- Sierra hub: 13 scenic/interpretive items, 38 source-backed activities, 3 visitor-information sites, 120 camps/stays, and 533 trails.
+- Moab BLM hub: 27 scenic/interpretive items, 2 source-backed route activities, 5 visitor-information sites, 42 camps/stays, 16 parking items after amenity reconciliation, and 135 trails.
+- Hub summaries and planning facts are sourced from the official USDA Forest Service Sierra recreation page and BLM Moab Field Office page. The former generic `verify local rules` Sierra copy is replaced in the isolated candidate only.
+- Source-pack sanitization now omits weak or missing child descriptions instead of manufacturing generic instructions. Exact IDs are reconciled before name/location deduplication, allowing the official Sierra hub revision to replace its existing compatibility ID.
+- Explore destination campground children now hand off to the shared campground sheet with stable identity, source, official/reservation URLs, site type, amenities and exact media. Other source-pack children retain the shared place handoff.
+
+### Candidate evidence
+
+- Candidate catalog SHA-256 `49ff9be12f10469ef0ccc7b0d64e4c8e5fe46d73ed5fa5573259b286cc66cc08`.
+- Candidate serving-index SHA-256 `57b21166af6252ec57486b5dc3a981cf3ce0c9e5ee04b184dc6491fb56f2d716`.
+- Merged serving review SHA-256 `1a2d294ac577b6939be119cda92135355480972e95ff97f7fca31a675e349190`.
+- Promotion review: current `5,336`; candidate `108`; merged `5,435`; `107` added, `1` replaced (`place:usfs:9006`); gate passed; live index untouched.
+- Focused backend/data tests: `54` passed. Mobile child-handoff tests: `2` passed. Full Explore Trails tests passed. TypeScript completed without diagnostics. Named-file whitespace check passed.
+
+### Exact next action
+
+1. Commit and push only the named agency serving, content-quality, child-handoff, tests and this checkpoint.
+2. When the running Android build finishes, download the AAB, hash it, and record paired artifact evidence. Do not start another build.
+3. Stage the `b08` catalog and TrailSystem artifacts for an internal backend/data preview without modifying the protected bundled serving index. Run Sierra/Moab hub -> module -> child -> campground/place/trail sheet -> map -> Back on Android.
+4. Promote only the device-accepted catalog revision through the intentional serving-index process; keep Community trails internal and keep NPS continuation separate.
+
+### Do not repeat
+
+- Do not repeat Trails T1-T6, 3D Back, Builder, GPX, Offline, Follow, recording, Flyover, Layers, Memory, Originals, Android Auto, source downloads, duplicate review, broad NPS research, or the protected pre-preview suite.
+- Do not weaken the organic serving gate, generate descriptions for sparse agency records, expose raw route segments, overwrite the protected serving index automatically, submit stores, or start another native build.
+- Task-owned Metro, Gradle, Maestro, publisher and local test processes: none. The remote Android EAS build is the only active task process.

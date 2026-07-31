@@ -956,3 +956,25 @@ Verify `git diff --cached --name-only` before every commit.
 - Do not repeat the three Android preview publications, cold-launch identity checks, Railway sidecar/env verification, or authenticated server probe.
 - Do not start another native build, submit either store artifact, publish a production OTA, expose Community routes, or promote agency/NPS candidates without the required acceptance.
 - Do not repeat Trails T1-T6, 3D Back, Builder, GPX, Offline, Follow, recording, Flyover, Layers, Memory, Originals, Android Auto, or broad Explore/NPS crawls.
+
+## Nationwide NPS resumable batch 5 — 2026-07-31 15:39 CDT
+
+- Starting point: 116 rich-cache parks and 358 remaining. One bounded run selected 28 previously untouched park codes and used 320 of the hard 700-request cap.
+- Candidate: `data/explore/audit_candidates/nps/live-20260731-b05`; 144 parks now have rich cached source packs and 330 remain.
+- Candidate audit is `promotion_ready: true` with zero errors and zero warnings. The Explore QA matrix passed and 57 focused official-place tests passed.
+- Module growth from NPS candidate `b04` to `b05`: Things to See `2,982 -> 3,512`; Things to Do `1,136 -> 1,334`; campgrounds `276 -> 326`; alerts `196 -> 248`; visitor centers `239 -> 273`; events `1,088 -> 1,241`; parking `269 -> 291`; guided items `218 -> 243`; passes `37 -> 44`.
+- Attributed media increased from `4,387` to `4,739`. The fixed 729-place catalog, 474 NPS place identities, 500 source records, and 7 existing trail geometries remain stable while source packs become richer.
+- Artifact hashes: catalog `8c512d4ce902cd7383463d7d35dd7827c9ebb62d06ab6ded84a8136891ec8efe`; source records `b44530cd6922a46fd4cfe89b0bfe91216e6500c46babf1160583c09a4aea293f`; trail geometries `fc854e0490b72584636c9990896ffbcf5e161cd3207c37d49fd4ae6e44e3d3e4`; audit `273b5ab516fcd24745a7dfcc98f927297536f1c74079a72d4ff3ec4c18d8839c`.
+- The NPS key was supplied from the authenticated Railway environment to the process only and was not printed or stored in the repository.
+- Protected Explore-index and App Store copy files remain unchanged. Live Explore catalogs and serving index remain untouched.
+
+### Exact next action
+
+1. Continue from the 144-park rich cache with the next bounded NPS batch; never refetch the completed park codes.
+2. Keep candidates isolated until the internal Android data-preview blocker has new request-level evidence and the candidate receives device review.
+3. Do not promote or stage the generated candidate into the user-owned serving index automatically.
+
+### Do not repeat
+
+- Do not rerun batch 5, its 28 park codes, or its 57-test/QA matrix.
+- Do not restart the internal-preview device loop, start another native build, submit stores, publish production OTA, expose Community routes, or promote candidates without acceptance.

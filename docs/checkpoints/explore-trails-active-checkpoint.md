@@ -805,3 +805,14 @@ Verify `git diff --cached --name-only` before every commit.
 - Do not repeat Trails T1–T6, 3D Back, Trail Builder, GPX, Offline, Follow, recording, Flyover, broad Search, NPS research, Layers, Memory, Originals, Android Auto, or the protected pre-preview suite.
 - Do not auto-promote this candidate, fabricate permitted use or editorial modules, replace TrailSystem V2, stage the protected serving index/App Store copy, or start another native build.
 - Task-owned Metro, Gradle, Maestro, publisher, and test processes: none. The remote Android EAS build is the only active task process.
+
+## Agency pilot review closeout — 2026-07-31 13:25 CDT
+
+- Pre-change HEAD `4890dbc8777f48f31b8390b62f85b19c4fd560c8`; protected Explore-index and App Store copy hashes remain unchanged.
+- The two candidate duplicate pairs were not duplicate places: each was a named BLM site colocated with its own parking or restroom record. The isolated builder now attaches those agency amenities to the named place and retains both source IDs instead of publishing competing cards.
+- Official USFS names such as `45 CUT OFF T1` through `T9` are source-owned branch names, not opaque route numbers. The technical-name check now blocks compact codes such as `21E242` and `Forest Road 5S30` without suppressing those named branches.
+- Final candidate is `data/explore/audit_candidates/agencies/live-20260731-b06`: 1,281 source records, 1,117 places, 901 segments, and 668 TrailSystem V2 systems. It reports zero errors and one honest warning group: 17 USFS trail segments whose permitted use is not listed. Those routes retain an empty activity instead of an inferred use.
+- Final hashes: source records `b122ff5e8bfbcc425e6d181d0f50d4318e744ca6f869a5e3c20dde1db989710d`; places `091a88e223331b58021d913714d5a81b391a0c8a8090a6b1ba6730c890d2d495`; source segments `e7fd4c9e52a4a76df92077eaa0ddfbdd9a2596fb1e6abdf0ed66567b8cea394a`; TrailSystem V2 systems `2659df549f807748146feec371208fb3420157286b547eb9596a502982bccd4f`; destinations `dadeb0dca343deadccedcd141e8b826c9579619a866958e6b06409d09afb48d1`; audit `8a812c05808acb1569b25e4b7e51e511430d198ff3f502f3a3dbb8f65b163a90`.
+- Focused agency test suite: 18 passed after the review correction; the preceding full agency/source/TrailSystem suite passed 71 tests.
+- Exact next action: intentionally map this accepted candidate into the existing serving-index promotion inputs without overwriting the user-owned live index, produce a diff/report for Sierra and Moab, then request/perform the bounded Android Explore review before live promotion.
+- Do not repeat the source download, adapter audit, duplicate review, route-name review, or any completed Trails packet.

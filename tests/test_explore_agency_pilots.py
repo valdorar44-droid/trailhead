@@ -5,7 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from scripts.build_explore_agency_pilots import DatasetSpec, RequestBudget, audit_candidate
+from scripts.build_explore_agency_pilots import (
+    DatasetSpec,
+    RequestBudget,
+    audit_candidate,
+    is_technical_route_name,
+    merge_colocated_agency_amenities,
+)
+from scripts.explore_sources.base.schema import ExplorePlaceV3
 from scripts.explore_sources.blm.import_blm import import_blm_fixture
 from scripts.explore_sources.usfs.import_usfs import import_usfs_fixture
 from scripts.explore_sources.base.normalize import representative_point
@@ -203,3 +210,35 @@ def test_multi_polygon_has_a_stable_representative_point():
     })
     assert lat is not None
     assert lng is not None
+
+
+def test_colocated_agency_amenity_is_attached_to_the_named_place():
+    scenic = ExplorePlaceV3(
+        id="view",
+        source_ids=["view-source"],
+        name="Lone Mesa Viewpoint",
+        category="viewpoint",
+        lat=38.6,
+        lng=-109.7,
+        sources=[{"source": "blm", "source_id": "view-source"}],
+    )
+    restroom = ExplorePlaceV3(
+        id="restroom",
+        source_ids=["restroom-source"],
+        name="Lone Mesa Viewpoint",
+        category="place",
+        subcategories=["restroom"],
+        lat=38.6,
+        lng=-109.7,
+        sources=[{"source": "blm", "source_id": "restroom-source"}],
+    )
+    merged = merge_colocated_agency_amenities([scenic, restroom])
+    assert [item.id for item in merged] == ["view"]
+    assert merged[0].amenities == ["toilets"]
+    assert merged[0].source_ids == ["view-source", "restroom-source"]
+
+
+def test_official_named_cutoff_is_not_treated_as_a_raw_route_number():
+    assert is_technical_route_name("45 CUT OFF T5") is False
+    assert is_technical_route_name("21E242") is True
+    assert is_technical_route_name("Forest Road 5S30") is True

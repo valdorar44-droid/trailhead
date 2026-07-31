@@ -177,6 +177,46 @@ def normalize_name(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", value.casefold()).strip()
 
 
+def is_technical_route_name(value: str) -> bool:
+    text = re.sub(r"\s+", " ", value).strip()
+    return bool(
+        re.fullmatch(r"(?:[A-Z]?\d{1,5}[A-Z]?)(?:[-/. ]\d{1,5}[A-Z]?)?", text, re.I)
+        or re.fullmatch(r"[A-Z]{1,3}\d{1,4}[A-Z]{0,2}", text, re.I)
+        or re.fullmatch(r"\d{1,3}[A-Z]\d{1,4}[A-Z]?", text, re.I)
+        or re.fullmatch(r"(?:forest|fs)\s+road\s+[A-Z0-9./-]+", text, re.I)
+    )
+
+
+def merge_colocated_agency_amenities(places: list[Any]) -> list[Any]:
+    amenity_labels = {
+        "parking": "parking",
+        "restroom": "toilets",
+    }
+    groups: dict[tuple[str, float, float], list[Any]] = {}
+    for place in places:
+        key = (normalize_name(place.name), round(float(place.lat or 0), 5), round(float(place.lng or 0), 5))
+        groups.setdefault(key, []).append(place)
+    removed: set[str] = set()
+    for group in groups.values():
+        primary = next((item for item in group if item.category != "place"), None)
+        if not primary:
+            continue
+        for item in group:
+            if item is primary or item.category != "place":
+                continue
+            mapped = [amenity_labels[value] for value in item.subcategories if value in amenity_labels]
+            if not mapped:
+                continue
+            primary.source_ids = list(dict.fromkeys([*primary.source_ids, *item.source_ids]))
+            primary.amenities = list(dict.fromkeys([*primary.amenities, *mapped]))
+            primary.sources = list({
+                (source.get("source"), source.get("source_id")): source
+                for source in [*primary.sources, *item.sources]
+            }.values())
+            removed.add(item.id)
+    return [place for place in places if place.id not in removed]
+
+
 def visible_text(place: dict[str, Any]) -> str:
     card = place.get("card") if isinstance(place.get("card"), dict) else {}
     return " ".join(str(value or "") for value in (
@@ -254,10 +294,7 @@ def audit_candidate(
     ]
     finding(errors, "unsupported_or_filler_copy", len(unsupported), unsupported, "Generic instructions obscure what the agency actually supplied.")
 
-    technical_names = [
-        item.get("name", "") for item in trails
-        if re.fullmatch(r"(?:forest\s+road\s+)?[0-9]+[a-z][0-9a-z.-]*", normalize_name(str(item.get("name") or "")).replace(" ", ""), re.I)
-    ]
+    technical_names = [item.get("name", "") for item in trails if is_technical_route_name(str(item.get("name") or ""))]
     finding(warnings, "technical_route_names", len(technical_names), technical_names, "Raw route identifiers should not dominate discovery without a public name.")
 
     missing_activities = [item.get("id", "") for item in trails if not item.get("activities")]
@@ -422,7 +459,7 @@ def build_candidate(out_dir: Path, max_requests: int, timeout: float, reuse_sour
     usfs_records, usfs_places, usfs_trails = import_usfs_fixture(usfs_path, fetched_at=fetched_at)
     blm_records, blm_places, blm_trails = import_blm_fixture(blm_path, fetched_at=fetched_at)
     records = usfs_records + blm_records
-    places = dedupe_places(usfs_places + blm_places)
+    places = merge_colocated_agency_amenities(dedupe_places(usfs_places + blm_places))
     trails = usfs_trails + blm_trails
     disambiguate_duplicate_display_names(places)
     link_trailheads_to_trails(places, trails)

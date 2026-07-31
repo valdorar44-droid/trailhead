@@ -78,8 +78,8 @@ test('shared route Map return is bound to the selected route and immutable revis
   assert.match(sharedRouteHandoff, /sharedRouteId: pendingSharedTrailRoute\.shared_route_id[\s\S]*routeRevision: pendingSharedTrailRoute\.route_revision[\s\S]*shareRevision: pendingSharedTrailRoute\.share_revision/);
   assert.match(sharedRouteHandoff, /id: sharedTrailMapSelectionId\(sharedReturnMarker\)/);
   assert.match(sharedRouteHandoff, /trailId: sharedTrail\.id[\s\S]*geometryRevision: sharedTrail\.geometry_revision/);
-  assert.match(closeTrailSheet, /sharedTrailMapReturnMatchesSelection\(sharedTrailMapReturnRef\.current, selectedTrailRef\.current\)[\s\S]*router\.back\(\)/);
-  assert.match(map, /BackHandler\.addEventListener\('hardwareBackPress'[\s\S]*sharedTrailMapReturnMatchesSelection\(sharedTrailMapReturnRef\.current, selectedTrailRef\.current\)[\s\S]*router\.back\(\)/);
+  assert.match(closeTrailSheet, /sharedTrailMapReturnMatchesSelection\(sharedTrailMapReturnRef\.current, selectedTrailRef\.current\)[\s\S]*router\.navigate\('\/shared-trails'/);
+  assert.match(map, /BackHandler\.addEventListener\('hardwareBackPress'[\s\S]*sharedTrailMapReturnMatchesSelection\(sharedTrailMapReturnRef\.current, selectedTrailRef\.current\)[\s\S]*router\.navigate\('\/shared-trails'/);
   assert.match(openTrailFeature, /sharedTrailMapReturnRef\.current = null/);
   assert.match(map, /if \(marker && !sharedTrailMapReturnMatchesSelection\(marker, selectedTrail\)\) \{\s*sharedTrailMapReturnRef\.current = null/);
   assert.doesNotMatch(map, /sharedTrailMapReturnRef = useRef\((?:true|false)\)/);

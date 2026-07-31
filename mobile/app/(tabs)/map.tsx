@@ -22522,7 +22522,10 @@ function MapScreen() {
       sharedTrailMapReturnRef.current = null;
       trailDiscoveryReturnRef.current = null;
       clearSelectedTrailSheetState();
-      router.back();
+      // The tab navigator may reuse its existing Map route instead of placing
+      // the recipient screen directly underneath it. Navigate to the cached
+      // recipient explicitly so Close always restores the exact shared route.
+      router.navigate('/shared-trails' as any);
       return;
     }
     sharedTrailMapReturnRef.current = null;
@@ -22578,7 +22581,7 @@ function MapScreen() {
         sharedTrailMapReturnRef.current = null;
         trailDiscoveryReturnRef.current = null;
         clearSelectedTrailSheetState();
-        router.back();
+        router.navigate('/shared-trails' as any);
         return true;
       }
       sharedTrailMapReturnRef.current = null;

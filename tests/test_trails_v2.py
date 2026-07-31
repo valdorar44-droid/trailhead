@@ -122,6 +122,37 @@ class TrailsV2Tests(unittest.TestCase):
         self.assertIsNone(system.facts.route_shape)
         self.assertEqual(system.facts.distance_mi, 0.36)
 
+    def test_fact_only_generated_summary_is_not_repeated_as_description(self):
+        item = profile(
+            "trail:nps:falls-loop",
+            "Falls Loop",
+            [[-109.0, 38.0], [-109.01, 38.01]],
+            source="nps",
+            source_label="National Park Service",
+            length_mi=1.6,
+            allowed_uses="Hiking",
+        )
+        item["summary"] = "1.6 miles. Point-to-point. Moderate. Hiking trail."
+
+        system = build_trail_systems_v2([item])[0]
+
+        self.assertIsNone(system.summary)
+
+    def test_editorial_trail_summary_is_preserved(self):
+        item = profile(
+            "trail:nps:river-walk",
+            "River Walk",
+            [[-109.0, 38.0], [-109.01, 38.01]],
+            source="nps",
+            source_label="National Park Service",
+            allowed_uses="Hiking",
+        )
+        item["summary"] = "A shaded river trail follows the canyon to the lower falls."
+
+        system = build_trail_systems_v2([item])[0]
+
+        self.assertEqual(system.summary, item["summary"])
+
     def test_complete_authority_suppresses_same_name_fragments(self):
         official = profile(
             "trail:usfs:mill-creek",
@@ -376,6 +407,28 @@ class TrailsV2Tests(unittest.TestCase):
             "Yellowstone Trail", "Geyser Basin Loop",
         ])
         nearby.assert_not_called()
+
+    def test_canonical_destination_reference_scopes_nearby_trails(self):
+        official = profile(
+            "trail:nps:yosemite-loop", "Yosemite Loop",
+            [[-119.54, 37.86], [-119.55, 37.87], [-119.54, 37.86]],
+            source="nps", source_label="National Park Service", allowed_uses="Hiking",
+        )
+        with patch.object(
+            server,
+            "_find_explore_place",
+            return_value={"id": "nps:yose", "summary": {"lat": 37.8651, "lng": -119.5383}},
+        ), patch.object(
+            server, "_canonical_trail_geometry_revision_v2", new=AsyncMock(return_value="sha256:test"),
+        ), patch.object(
+            server, "_canonical_trail_profiles_near_v2", return_value=[official],
+        ) as nearby, patch.object(server, "list_trail_profiles_near", return_value=[]):
+            response = asyncio.run(server.trails_discover_v2(
+                destination_ref="nps:yose", limit=20,
+            ))
+
+        self.assertEqual(response["trails"][0]["name"], "Yosemite Loop")
+        self.assertEqual(nearby.call_args.args[:2], (37.8651, -119.5383))
 
     def test_activity_and_route_shape_filters_normalize_source_labels(self):
         hiking = profile(

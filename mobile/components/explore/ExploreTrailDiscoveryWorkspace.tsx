@@ -14,7 +14,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api, type TrailDiscoverParams, type TrailDiscoveryItemV2 } from '@/lib/api';
 import { useTheme } from '@/lib/design';
-import { mergeTrailDiscoveryItems, trailDiscoveryResponseIsCurrent } from '@/lib/trailDiscoveryWorkspace';
+import SearchResultRowV2 from '@/components/search/SearchResultRowV2';
+import { useSearchV2Session, type SearchResultV2 } from '@/lib/searchV2';
+import {
+  isTrailDiscoveryDestinationResult,
+  mergeTrailDiscoveryItems,
+  trailDiscoveryDestinationRef,
+  trailDiscoveryResponseIsCurrent,
+  trailDiscoveryResultLabel,
+} from '@/lib/trailDiscoveryWorkspace';
 import { TrailDiscoveryCard } from './TrailDiscoveryCard';
 
 export type TrailDiscoveryScopeV2 = 'nearby' | 'along_trip';
@@ -33,6 +41,8 @@ export type TrailDiscoveryMapRequestV2 = {
   query: string;
   filters: TrailDiscoveryFiltersV2;
   tripId?: string;
+  destinationRef?: string;
+  center?: { lat: number; lng: number };
 };
 
 type Props = {
@@ -40,6 +50,7 @@ type Props = {
   location: { lat: number; lng: number } | null;
   signedIn: boolean;
   activeTripId?: string | null;
+  searchV2Enabled: boolean;
   onClose: () => void;
   onOpenMap: (request: TrailDiscoveryMapRequestV2) => void;
   onSelectTrail: (trail: TrailDiscoveryItemV2) => void;
@@ -63,7 +74,7 @@ function hasFilters(filters: TrailDiscoveryFiltersV2) {
 }
 
 export function ExploreTrailDiscoveryWorkspace({
-  visible, location, signedIn, activeTripId, onClose, onOpenMap, onSelectTrail, onRequestLocation,
+  visible, location, signedIn, activeTripId, searchV2Enabled, onClose, onOpenMap, onSelectTrail, onRequestLocation,
 }: Props) {
   const C = useTheme();
   const insets = useSafeAreaInsets();
@@ -78,19 +89,45 @@ export function ExploreTrailDiscoveryWorkspace({
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState('');
+  const [selectedDestination, setSelectedDestination] = useState<SearchResultV2 | null>(null);
+  const [destinationError, setDestinationError] = useState('');
   const [retainedListOffset, setRetainedListOffset] = useState(0);
   const generationRef = useRef(0);
+  const destinationSelectionRef = useRef(0);
   const listRef = useRef<FlatList<TrailDiscoveryItemV2>>(null);
   const listOffsetRef = useRef(0);
   const restorePendingRef = useRef(false);
   const restoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  const destinationSearchContext = useMemo(() => ({
+    surface: 'trail_hub' as const,
+    intent: 'destination' as const,
+    scope: 'global' as const,
+    include_external: true,
+    limit: 6,
+  }), []);
+  const destinationSearch = useSearchV2Session({
+    enabled: searchV2Enabled,
+    active: visible && scope === 'nearby' && !selectedDestination,
+    context: destinationSearchContext,
+  });
+  const destinationResults = useMemo(
+    () => destinationSearch.state.results.filter(isTrailDiscoveryDestinationResult).slice(0, 4),
+    [destinationSearch.state.results],
+  );
+
+  useEffect(() => {
+    if (!searchV2Enabled || !visible || scope !== 'nearby') return;
+    destinationSearch.setQuery(selectedDestination ? '' : query);
+  }, [destinationSearch.setQuery, query, scope, searchV2Enabled, selectedDestination, visible]);
+
   const requestParams = useCallback((nextCursor?: string): TrailDiscoverParams => ({
     mode: scope,
-    lat: scope === 'nearby' ? location?.lat : undefined,
-    lng: scope === 'nearby' ? location?.lng : undefined,
+    lat: scope === 'nearby' ? selectedDestination?.coordinates?.lat ?? location?.lat : undefined,
+    lng: scope === 'nearby' ? selectedDestination?.coordinates?.lng ?? location?.lng : undefined,
     tripId: scope === 'along_trip' ? activeTripId || undefined : undefined,
-    q: query.trim() || undefined,
+    q: selectedDestination ? undefined : query.trim() || undefined,
+    destinationRef: selectedDestination ? trailDiscoveryDestinationRef(selectedDestination) : undefined,
     cursor: nextCursor,
     limit: 24,
     activity: filters.activity,
@@ -100,10 +137,10 @@ export function ExploreTrailDiscoveryWorkspace({
     downloadable: filters.downloadable == null ? undefined : filters.downloadable,
     catalog: filters.catalog,
     sort: 'nearby',
-  }), [activeTripId, filters, location?.lat, location?.lng, query, scope]);
+  }), [activeTripId, filters, location?.lat, location?.lng, query, scope, selectedDestination]);
 
   const load = useCallback(async (nextCursor?: string) => {
-    if (scope === 'nearby' && !location && !query.trim()) return;
+    if (scope === 'nearby' && !location && !query.trim() && !selectedDestination) return;
     if (scope === 'along_trip' && (!signedIn || !activeTripId)) return;
     const generation = ++generationRef.current;
     nextCursor ? setLoadingMore(true) : setLoading(true);
@@ -127,7 +164,7 @@ export function ExploreTrailDiscoveryWorkspace({
         setLoadingMore(false);
       }
     }
-  }, [activeTripId, location, query, requestParams, scope, signedIn]);
+  }, [activeTripId, location, query, requestParams, scope, selectedDestination, signedIn]);
 
   useEffect(() => {
     if (!visible) return;
@@ -137,7 +174,8 @@ export function ExploreTrailDiscoveryWorkspace({
 
   useEffect(() => {
     if (scope === 'along_trip' && (!signedIn || !activeTripId)) setScope('nearby');
-  }, [activeTripId, scope, signedIn]);
+    if (scope === 'along_trip' && selectedDestination) setSelectedDestination(null);
+  }, [activeTripId, scope, selectedDestination, signedIn]);
 
   useEffect(() => {
     listOffsetRef.current = 0;
@@ -170,12 +208,35 @@ export function ExploreTrailDiscoveryWorkspace({
     };
   }, [restoreListOffset]);
 
-  const resultLabel = useMemo(() => {
-    if (loading) return 'Finding trails';
-    if (!items.length && !mapCandidates.length) return 'No trails found';
-    const count = items.length + mapCandidates.length;
-    return `${count} ${count === 1 ? 'trail' : 'trails'}`;
-  }, [items.length, loading, mapCandidates.length]);
+  const resultLabel = useMemo(
+    () => trailDiscoveryResultLabel(items.length, mapCandidates.length, loading),
+    [items.length, loading, mapCandidates.length],
+  );
+
+  async function selectDestination(result: SearchResultV2) {
+    const selection = ++destinationSelectionRef.current;
+    setDestinationError('');
+    try {
+      const resolved = await destinationSearch.resolveResult(result.result_id);
+      if (selection !== destinationSelectionRef.current) return;
+      if (!resolved?.coordinates) {
+        setDestinationError('That destination could not open.');
+        return;
+      }
+      setSelectedDestination(resolved);
+      setQuery(resolved.title);
+      listRef.current?.scrollToOffset({ offset: 0, animated: false });
+    } catch {
+      if (selection === destinationSelectionRef.current) setDestinationError('That destination could not open.');
+    }
+  }
+
+  function changeQuery(value: string) {
+    destinationSelectionRef.current += 1;
+    setDestinationError('');
+    if (selectedDestination && value !== selectedDestination.title) setSelectedDestination(null);
+    setQuery(value);
+  }
 
   function toggleFilter(key: 'activity' | 'difficulty' | 'routeShape' | 'permittedUse', value: string) {
     setDraftFilters(current => ({
@@ -212,7 +273,14 @@ export function ExploreTrailDiscoveryWorkspace({
           </View>
           <TouchableOpacity
             style={[styles.mapButton, { borderColor: C.border }]}
-            onPress={() => openMap({ scope, query, filters, tripId: activeTripId || undefined })}
+            onPress={() => openMap({
+              scope,
+              query: selectedDestination ? '' : query,
+              filters,
+              tripId: activeTripId || undefined,
+              destinationRef: selectedDestination ? trailDiscoveryDestinationRef(selectedDestination) : undefined,
+              center: selectedDestination?.coordinates || undefined,
+            })}
             accessibilityLabel="Show trails on map"
             testID="explore.trails.map"
           >
@@ -227,7 +295,7 @@ export function ExploreTrailDiscoveryWorkspace({
             <TextInput
               testID="explore.trails.search"
               value={query}
-              onChangeText={setQuery}
+              onChangeText={changeQuery}
               placeholder="Search trails or destinations"
               placeholderTextColor={C.text3}
               style={[styles.searchInput, { color: C.text }]}
@@ -235,7 +303,10 @@ export function ExploreTrailDiscoveryWorkspace({
               autoCorrect={false}
             />
             {!!query && (
-              <TouchableOpacity onPress={() => setQuery('')} accessibilityLabel="Clear search">
+              <TouchableOpacity
+                onPress={() => { setSelectedDestination(null); setDestinationError(''); setQuery(''); }}
+                accessibilityLabel="Clear search"
+              >
                 <Ionicons name="close-circle" size={19} color={C.text3} />
               </TouchableOpacity>
             )}
@@ -271,7 +342,35 @@ export function ExploreTrailDiscoveryWorkspace({
           </View>
         </View>
 
-        {!loading && scope === 'nearby' && !location && !query.trim() ? (
+        {selectedDestination ? (
+          <View style={[styles.destinationSelected, { borderColor: C.border, backgroundColor: C.s1 }]} testID="explore.trails.destination.selected">
+            <Ionicons name="map-outline" size={19} color={C.orange} />
+            <Text style={[styles.destinationSelectedText, { color: C.text }]} numberOfLines={1}>{selectedDestination.title}</Text>
+            <TouchableOpacity
+              style={styles.destinationClear}
+              onPress={() => { setSelectedDestination(null); setQuery(''); }}
+              accessibilityLabel={`Clear ${selectedDestination.title}`}
+            >
+              <Ionicons name="close" size={18} color={C.text2} />
+            </TouchableOpacity>
+          </View>
+        ) : destinationResults.length > 0 ? (
+          <View style={styles.destinationResults} testID="explore.trails.destinations">
+            <Text style={[styles.destinationHeading, { color: C.text2 }]}>Destinations</Text>
+            {destinationResults.map(result => (
+              <SearchResultRowV2
+                key={result.result_id}
+                result={result}
+                resolving={destinationSearch.state.resolvingResultId === result.result_id}
+                onPress={() => { void selectDestination(result); }}
+                testID={`explore.trails.destination.${result.result_id}`}
+              />
+            ))}
+          </View>
+        ) : null}
+        {!!destinationError && <Text style={[styles.destinationError, { color: C.red }]}>{destinationError}</Text>}
+
+        {!loading && scope === 'nearby' && !location && !query.trim() && !selectedDestination ? (
           <View style={styles.state}>
             <Ionicons name="location-outline" size={30} color={C.orange} />
             <Text style={[styles.stateTitle, { color: C.text }]}>Location is off</Text>
@@ -398,6 +497,22 @@ const styles = StyleSheet.create({
   mapButton: { minHeight: 44, borderWidth: 1, borderRadius: 12, paddingHorizontal: 13, flexDirection: 'row', alignItems: 'center', gap: 7 },
   mapText: { fontSize: 13, fontWeight: '800' },
   controls: { paddingHorizontal: 16, paddingTop: 14, gap: 12 },
+  destinationResults: { paddingHorizontal: 16, paddingTop: 10, gap: 8 },
+  destinationHeading: { fontSize: 12, lineHeight: 16, fontWeight: '800', letterSpacing: 0.4 },
+  destinationSelected: {
+    minHeight: 48,
+    marginHorizontal: 16,
+    marginTop: 10,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingLeft: 13,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+  },
+  destinationSelectedText: { flex: 1, minWidth: 0, fontSize: 15, lineHeight: 20, fontWeight: '700' },
+  destinationClear: { width: 48, height: 48, alignItems: 'center', justifyContent: 'center' },
+  destinationError: { paddingHorizontal: 16, paddingTop: 8, fontSize: 13, lineHeight: 18 },
   search: { minHeight: 50, borderWidth: 1, borderRadius: 14, paddingHorizontal: 13, flexDirection: 'row', alignItems: 'center', gap: 9 },
   searchInput: { flex: 1, fontSize: 16, paddingVertical: 0 },
   scopeRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },

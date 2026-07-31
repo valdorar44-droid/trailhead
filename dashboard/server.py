@@ -23650,6 +23650,17 @@ def _trail_discovery_matches_v2(
     return True
 
 
+def _trail_discovery_destination_point_v2(destination_ref: str | None) -> tuple[float | None, float | None]:
+    ref = str(destination_ref or "").strip()
+    if not ref or len(ref) > 512:
+        return None, None
+    try:
+        place = _find_explore_place(ref)
+    except Exception:
+        place = None
+    return _explore_profile_point(place) if place else (None, None)
+
+
 @app.get("/api/trails/v2/discover")
 async def trails_discover_v2(
     lat: float | None = None,
@@ -23682,6 +23693,10 @@ async def trails_discover_v2(
     catalog = catalog if catalog in {"verified", "community", "all"} else "verified"
     include_community = _community_trail_publication_available(user)
     sort = sort if sort in {"nearby", "name", "distance", "elevation"} else "nearby"
+    if mode == "nearby" and destination_ref:
+        destination_lat, destination_lng = _trail_discovery_destination_point_v2(destination_ref)
+        if destination_lat is not None and destination_lng is not None:
+            lat, lng = destination_lat, destination_lng
     bbox = None
     if mode == "view" and None not in (n, s, e, w):
         bbox = {"n": float(n), "s": float(s), "e": float(e), "w": float(w)}

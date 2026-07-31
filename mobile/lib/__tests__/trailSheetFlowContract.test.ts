@@ -9,6 +9,7 @@ import { TRAIL_SHEET_PARITY_MODULES } from '../placeSheetAdapters';
 const mobileRoot = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const mapSource = readFileSync(join(mobileRoot, 'app/(tabs)/map.tsx'), 'utf8');
 const presentationSource = readFileSync(join(mobileRoot, 'components/map/TrailPlaceSheet.tsx'), 'utf8');
+const trailActionSheetSource = readFileSync(join(mobileRoot, 'components/trails/TrailActionSheet.tsx'), 'utf8');
 const actionSource = readFileSync(join(mobileRoot, 'lib/sheetActions.ts'), 'utf8');
 
 test('trail and trailhead selections enter the shared Peek/Full coordinator', () => {
@@ -77,6 +78,33 @@ test('trail sheet parity retains planning, offline, community, source, and navig
   assert.match(mapSource, /<TrailSheetSectionTitle>Source<\/TrailSheetSectionTitle>/);
   assert.match(mapSource, /api\.suggestTrailEdit/);
   assert.match(actionSource, /const SUGGEST_EDIT:[\s\S]*?'Suggest edit'/);
+});
+
+test('Android trail More actions use a scrollable sheet instead of a three-button native alert', () => {
+  const moreActionsSource = mapSource.slice(
+    mapSource.indexOf('function selectedTrailMoreActions'),
+    mapSource.indexOf('function openLinkedTrailhead'),
+  );
+  assert.doesNotMatch(moreActionsSource, /Alert\.alert\(trail\.name/);
+  for (const actionId of [
+    'preview_3d', 'download', 'add_to_trip', 'build_route', 'report',
+    'suggest_edit', 'official_website', 'share', 'refresh_details',
+  ]) {
+    assert.match(moreActionsSource, new RegExp(`id: '${actionId}'`));
+  }
+  assert.match(mapSource, /<TrailActionSheet/);
+  assert.match(trailActionSheetSource, /<ScrollView/);
+  assert.match(trailActionSheetSource, /minHeight: 54/);
+  assert.match(trailActionSheetSource, /testID=\{`trail\.actions\.\$\{action\.id\}`\}/);
+});
+
+test('trail selection focuses once through the shared open function before route hydration', () => {
+  const openSource = mapSource.slice(
+    mapSource.indexOf('function openTrailFeature'),
+    mapSource.indexOf('function openTrailFromPoint'),
+  );
+  assert.match(openSource, /focusMapSelectionPoint/);
+  assert.match(openSource, /setShowTrailActionSheet\(false\)/);
 });
 
 test('full sheet copy avoids invented confidence and access assurances', () => {

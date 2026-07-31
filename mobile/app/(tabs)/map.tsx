@@ -43,6 +43,7 @@ import RouteActivityOfferSheet from '@/components/routeBuilder/RouteActivityOffe
 import PackingListSheet from '@/components/trip/PackingListSheet';
 import TripNotesSheet from '@/components/trips/TripNotesSheet';
 import TrailPreviewPlayer from '@/components/trails/TrailPreviewPlayer';
+import TrailActionSheet, { type TrailActionSheetItem } from '@/components/trails/TrailActionSheet';
 import TrailBuilderLauncherSheet from '@/components/trails/TrailBuilderLauncherSheet';
 import {
   TrailBuilderAddPointsSheet,
@@ -136,6 +137,7 @@ import {
   tripRouteDurationSeconds,
 } from '@/lib/tripTimelinePresentation';
 import { mergePackingProgress } from '@/lib/tripPacking';
+import { trailSummaryForDisplay } from '@/lib/trailSummaryPresentation';
 import {
   shouldRestoreTripOverviewFromMission,
   tripOverviewReturnState,
@@ -1176,6 +1178,8 @@ type TrailDiscoveryRequest = {
     catalog?: 'verified' | 'community' | 'all';
   };
   tripId?: string;
+  destinationRef?: string;
+  center?: { lat: number; lng: number };
 };
 type TrailSnapMode = 'trail' | 'road' | 'dirt' | 'straight' | 'hybrid';
 type TrailRouteIntent = 'segment' | 'out_back' | 'loop' | 'far_end' | 'capture';
@@ -6971,6 +6975,7 @@ function MapScreen() {
   const [showFieldReportForm, setShowFieldReportForm] = useState(false);
   const [showTrailFieldReportForm, setShowTrailFieldReportForm] = useState(false);
   const [showTrailEditForm, setShowTrailEditForm] = useState(false);
+  const [showTrailActionSheet, setShowTrailActionSheet] = useState(false);
   const [trailEditSubmitting, setTrailEditSubmitting] = useState(false);
   const [frSentiment,  setFrSentiment]  = useState<FieldReportSentiment | null>(null);
   const [frAccess,     setFrAccess]     = useState<FieldReportAccess | null>(null);
@@ -10916,10 +10921,15 @@ function MapScreen() {
     if (isSearchingTrails) return;
     const request = pendingTrailDiscovery;
     setPendingTrailDiscovery(null);
+    if (request.center) {
+      nativeMapRef.current?.flyTo(request.center.lat, request.center.lng, 10.5, request.query || 'Trail destination');
+    }
     void runTrailDiscoverySearch(request.scope, {
       query: request.query,
       filters: request.filters,
       tripId: request.tripId,
+      destinationRef: request.destinationRef,
+      center: request.center,
     });
   }, [
     mapSurfaceReady,
@@ -22153,6 +22163,7 @@ function MapScreen() {
     setFrSubmitting(false);
     setShowTrailFieldReportForm(false);
     setShowTrailEditForm(false);
+    setShowTrailActionSheet(false);
     resetFieldReportForm();
     setTrailCardCollapsed(false);
     selectedTrailRef.current = feature;
@@ -22514,6 +22525,7 @@ function MapScreen() {
     setSelectedTrail(null);
     setShowTrailFieldReportForm(false);
     setShowTrailEditForm(false);
+    setShowTrailActionSheet(false);
     resetFieldReportForm();
   }
 
@@ -22888,14 +22900,16 @@ function MapScreen() {
     setShowDiscoveryPanel(true);
     setShowTrailList(false);
     setMapMoved(false);
-    const visibleBounds = scope === 'view'
+    const visibleBounds = scope === 'view' && !request.center
       ? await nativeMapRef.current?.getVisibleBounds?.().catch(() => null)
       : null;
     const vp = visibleBounds ?? viewportRef.current;
     const visibleCenter = visibleBounds
       ? [((visibleBounds.e + visibleBounds.w) / 2), ((visibleBounds.n + visibleBounds.s) / 2)] as [number, number]
       : await nativeMapRef.current?.getVisibleCenter?.().catch(() => null);
-    const mapCenter = scope === 'nearby'
+    const mapCenter = request.center
+      ? [request.center.lng, request.center.lat] as [number, number]
+      : scope === 'nearby'
       ? (userLoc ? [userLoc.lng, userLoc.lat] as [number, number] : visibleCenter ?? currentMapCenterCoord())
       : visibleCenter ?? currentMapCenterCoord();
     const center = mapCenter
@@ -22928,7 +22942,7 @@ function MapScreen() {
             e: scope === 'view' ? vp?.e : undefined,
             w: scope === 'view' ? vp?.w : undefined,
             limit: 80,
-            q: request.query?.trim() || undefined,
+            q: request.destinationRef ? undefined : request.query?.trim() || undefined,
             activity: request.filters?.activity,
             difficulty: request.filters?.difficulty,
             routeShape: request.filters?.routeShape,
@@ -22936,6 +22950,7 @@ function MapScreen() {
             downloadable: request.filters?.downloadable == null ? undefined : request.filters.downloadable,
             catalog: request.filters?.catalog,
             tripId: scope === 'along_trip' ? request.tripId : undefined,
+            destinationRef: request.destinationRef,
           });
           setTrailDiscoverySystems(discovered.trails ?? []);
           const discoveredMapItems = [...(discovered.trails ?? []), ...(discovered.map_candidates ?? [])];
@@ -23750,7 +23765,7 @@ function MapScreen() {
     }
   }
 
-  function openSelectedTrailMoreActions(trail: TrailFeature, canPreview: boolean) {
+  function selectedTrailMoreActions(trail: TrailFeature, canPreview: boolean): TrailActionSheetItem[] {
     const descriptors = resolveSheetActionDescriptorsV1({
       entityKind: trail.type === 'trailhead' ? 'trailhead' : 'trail',
       capabilities: {
@@ -23772,35 +23787,73 @@ function MapScreen() {
       const descriptor = sheetActionByIdV1(descriptors, id);
       return descriptor?.available ? descriptor : undefined;
     };
-    const actions: any[] = [];
-    if (action('preview_3d')) actions.push({ text: action('preview_3d')!.label, onPress: () => openTrailPreview(trail) });
+    const actions: TrailActionSheetItem[] = [];
+    if (action('preview_3d')) actions.push({ id: 'preview_3d', label: action('preview_3d')!.label, icon: 'cube-outline' });
     if (action('download')) {
       actions.push({
-        text: trail.support.offlineReady ? 'Refresh offline trail' : 'Download for offline',
-        onPress: () => downloadSelectedTrail(trail),
+        id: 'download',
+        label: trail.support.offlineReady ? 'Refresh offline trail' : 'Download for offline',
+        icon: 'cloud-download-outline',
       });
     }
     if (action('add_to_trip')) {
       actions.push({
-        text: action('add_to_trip')!.label,
-        onPress: () => addPlaceToActiveTripDay(trail, selectedDay),
+        id: 'add_to_trip',
+        label: action('add_to_trip')!.label,
+        icon: 'add-circle-outline',
       });
     }
-    actions.push({ text: 'Build route', onPress: () => seedTrailPinCaptureFromTrail(trail) });
-    if (action('report')) actions.push({ text: action('report')!.label, onPress: openTrailFieldReportComposer });
-    if (action('suggest_edit')) actions.push({ text: action('suggest_edit')!.label, onPress: () => openSelectedTrailEdit(trail) });
+    actions.push({ id: 'build_route', label: 'Build route', icon: 'git-branch-outline' });
+    if (action('report')) actions.push({ id: 'report', label: action('report')!.label, icon: 'flag-outline' });
+    if (action('suggest_edit')) actions.push({ id: 'suggest_edit', label: action('suggest_edit')!.label, icon: 'create-outline' });
     if (action('official_website')) {
       actions.push({
-        text: action('official_website')!.label,
-        onPress: () => Linking.openURL(String(selectedTrailProfile?.official_url || selectedTrailProfile?.source_pack?.official_url)),
+        id: 'official_website',
+        label: action('official_website')!.label,
+        icon: 'open-outline',
       });
     }
-    if (action('share')) actions.push({ text: action('share')!.label, onPress: () => shareSelectedTrail(trail) });
-    actions.push(
-      { text: 'Refresh details', onPress: refreshSelectedTrailSource },
-      { text: 'Cancel', style: 'cancel' },
-    );
-    Alert.alert(trail.name, undefined, actions);
+    if (action('share')) actions.push({ id: 'share', label: action('share')!.label, icon: 'share-outline' });
+    actions.push({ id: 'refresh_details', label: 'Refresh details', icon: 'refresh-outline' });
+    return actions;
+  }
+
+  function runSelectedTrailMoreAction(action: TrailActionSheetItem) {
+    const trail = selectedTrail;
+    if (!trail) return;
+    setShowTrailActionSheet(false);
+    InteractionManager.runAfterInteractions(() => {
+      switch (action.id) {
+        case 'preview_3d':
+          openTrailPreview(trail);
+          break;
+        case 'download':
+          void downloadSelectedTrail(trail);
+          break;
+        case 'add_to_trip':
+          addPlaceToActiveTripDay(trail, selectedDay);
+          break;
+        case 'build_route':
+          seedTrailPinCaptureFromTrail(trail);
+          break;
+        case 'report':
+          openTrailFieldReportComposer();
+          break;
+        case 'suggest_edit':
+          openSelectedTrailEdit(trail);
+          break;
+        case 'official_website':
+          void Linking.openURL(String(selectedTrailProfile?.official_url || selectedTrailProfile?.source_pack?.official_url))
+            .catch(() => Alert.alert('Could not open website', 'Try again when you are online.'));
+          break;
+        case 'share':
+          void shareSelectedTrail(trail);
+          break;
+        case 'refresh_details':
+          void refreshSelectedTrailSource();
+          break;
+      }
+    });
   }
 
   function openLinkedTrailhead(trailhead: { name?: string; lat: number; lng: number }) {
@@ -28120,7 +28173,9 @@ function MapScreen() {
         const difficulty = model.difficulty_label && model.difficulty_label !== 'Unrated'
           ? model.difficulty_label
           : selectedTrail.system_v2_id ? '' : trailDifficultyText(selectedTrail);
-        const summary = String(selectedTrailProfile?.summary || selectedTrailProfile?.description || selectedTrail.summary || '').trim();
+        const summary = trailSummaryForDisplay(
+          selectedTrailProfile?.summary || selectedTrailProfile?.description || selectedTrail.summary,
+        );
         const canPreviewTrail = selectedTrail.system_v2_id
           ? selectedTrail.capabilities_v2?.preview === true
           : Boolean(buildLocalTrailPreviewManifest(selectedTrail, selectedTrailProfile) || selectedTrailProfile?.preview_available);
@@ -28265,7 +28320,7 @@ function MapScreen() {
                   navigateToCamp(selectedTrail);
                 }}
                 onSave={() => saveSelectedTrailPlace(selectedTrail)}
-                onMore={() => openSelectedTrailMoreActions(selectedTrail, canPreviewTrail)}
+                onMore={() => setShowTrailActionSheet(true)}
               />
 
               {communityTrust ? (
@@ -28491,6 +28546,18 @@ function MapScreen() {
         submitting={trailEditSubmitting}
         onClose={() => { if (!trailEditSubmitting) setShowTrailEditForm(false); }}
         onSubmit={submitSelectedTrailEdit}
+      />
+
+      <TrailActionSheet
+        visible={showTrailActionSheet && Boolean(selectedTrail)}
+        trailName={selectedTrail?.name || 'Trail'}
+        actions={selectedTrail ? selectedTrailMoreActions(selectedTrail, Boolean(
+          selectedTrail.system_v2_id
+            ? selectedTrail.capabilities_v2?.preview === true
+            : buildLocalTrailPreviewManifest(selectedTrail, selectedTrailProfile) || selectedTrailProfile?.preview_available
+        )) : []}
+        onClose={() => setShowTrailActionSheet(false)}
+        onAction={runSelectedTrailMoreAction}
       />
 
       {selectedTrail && !navMode && !trailPinCaptureMode && trailRouteBuilderOpen && !mapMissionVisible && (

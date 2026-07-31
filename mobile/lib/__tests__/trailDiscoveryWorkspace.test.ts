@@ -6,9 +6,13 @@ import { fileURLToPath } from 'node:url';
 import type { TrailDiscoveryItemV2 } from '../api';
 import {
   completeTrailDiscoveryItems,
+  isTrailDiscoveryDestinationResult,
   mergeTrailDiscoveryItems,
+  trailDiscoveryDestinationRef,
+  trailDiscoveryResultLabel,
   trailDiscoveryResponseIsCurrent,
 } from '../trailDiscoveryWorkspace';
+import type { SearchResultV2 } from '../searchV2';
 
 const mobileRoot = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const workspaceSource = readFileSync(join(mobileRoot, 'components/explore/ExploreTrailDiscoveryWorkspace.tsx'), 'utf8');
@@ -49,6 +53,37 @@ test('primary list eligibility requires complete geometry', () => {
     completeTrailDiscoveryItems([item('route'), item('fragment', 'partial'), item('point', 'point')]).map(value => value.id),
     ['route'],
   );
+});
+
+function searchResult(kind: string, categories: string[] = []): SearchResultV2 {
+  return {
+    result_id: `result:${kind}`,
+    title: 'Yosemite National Park',
+    kind,
+    categories,
+    coordinates: { lat: 37.8651, lng: -119.5383 },
+    provenance: { provider: 'trailhead', source_label: 'Trailhead', temporary_use_only: false },
+    persistence_policy: 'canonical',
+    score: 1,
+    match_reason: 'exact',
+  };
+}
+
+test('result labels distinguish complete routes from map-only records', () => {
+  assert.equal(trailDiscoveryResultLabel(0, 113, false), '113 map records');
+  assert.equal(trailDiscoveryResultLabel(1, 113, false), '1 route');
+  assert.equal(trailDiscoveryResultLabel(0, 0, true), 'Finding trails');
+});
+
+test('destination suggestions accept parks and reject trail or service results', () => {
+  assert.equal(isTrailDiscoveryDestinationResult(searchResult('national_park', ['park'])), true);
+  assert.equal(isTrailDiscoveryDestinationResult(searchResult('trail', ['hiking'])), false);
+  assert.equal(isTrailDiscoveryDestinationResult(searchResult('poi', ['fuel'])), false);
+});
+
+test('destination references prefer canonical identity', () => {
+  const result = { ...searchResult('park'), canonical_place_id: 'nps:yose', detail_ref: 'provider:yose' };
+  assert.equal(trailDiscoveryDestinationRef(result), 'nps:yose');
 });
 
 test('workspace preserves list offset across a focus-gated Map return', () => {

@@ -409,7 +409,16 @@ def _summary(profile: dict[str, Any]) -> str | None:
     if not value:
         return None
     blocked = re.compile(r"mapped trail|nearby support context|check (?:current )?access|local rules|scouting lead|trailhead generated", re.I)
-    return None if blocked.search(value) else value[:320]
+    fact_only = re.compile(
+        r"^(?:\d+(?:\.\d+)?\s*(?:mi|miles?|km|kilomet(?:er|re)s?)|loop|out\s*(?:and|&)\s*back|"
+        r"point(?:\s|-)*to(?:\s|-)*point|easy|moderate|hard|(?:hiking|walking|biking|cycling|horseback|"
+        r"equestrian|ohv|4wd|mixed(?:\s|-)*use)(?:\s+trail)?)$",
+        re.I,
+    )
+    parts = [part.strip() for part in re.split(r"[·•]+|[.](?=\s|$)", value) if part.strip()]
+    if blocked.search(value) or (parts and all(fact_only.fullmatch(part) for part in parts)):
+        return None
+    return value[:320]
 
 
 def _system_id(member_ids: list[str], primary_id: str) -> str:

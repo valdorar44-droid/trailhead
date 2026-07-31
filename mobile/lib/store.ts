@@ -807,6 +807,8 @@ interface AppState {
       catalog?: 'verified' | 'community' | 'all';
     };
     tripId?: string;
+    destinationRef?: string;
+    center?: { lat: number; lng: number };
   } | null;
   pendingStartCopilotVoice: boolean;
   pendingOpenOfflineModal: boolean;

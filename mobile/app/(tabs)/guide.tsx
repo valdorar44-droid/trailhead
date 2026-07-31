@@ -5586,6 +5586,8 @@ function GuideScreenContent() {
       query: request.query || undefined,
       filters: request.filters,
       tripId: request.tripId,
+      destinationRef: request.destinationRef,
+      center: request.center,
     });
     router.push('/(tabs)/map');
   }
@@ -6551,6 +6553,7 @@ function GuideScreenContent() {
         location={userLoc}
         signedIn={Boolean(user)}
         activeTripId={activeTrip?.trip_id}
+        searchV2Enabled={searchV2Enabled}
         onClose={() => setExploreTrailDiscoveryOpen(false)}
         onOpenMap={openTrailDiscoveryMap}
         onSelectTrail={openTrailDiscoveryItem}

@@ -91,6 +91,10 @@ class ExploreInternalPreviewTests(unittest.TestCase):
         self.assertEqual(len(merged["places"]), 1)
         self.assertIn("official park profile", merged["places"][0]["summary"]["short_description"])
         self.assertEqual(merged["places"][0]["source_pack"]["things_to_see"][0]["title"], "Exact overlook")
+        self.assertEqual(merged["places"][0]["summary"]["rank"], -999)
+        self.assertEqual(merged["places"][0]["summary"]["hero_rank"], -999)
+        self.assertTrue(merged["places"][0]["promoted_serving"])
+        self.assertTrue(merged["places"][0]["internal_preview"])
 
     def test_internal_proof_destination_is_reachable_before_public_catalog(self):
         os.environ["TRAILHEAD_EXPLORE_DATA_STAGE"] = "internal"
@@ -108,6 +112,21 @@ class ExploreInternalPreviewTests(unittest.TestCase):
         self.assertEqual(result["places"][0]["id"], "place:nps:test")
         self.assertTrue(result["places"][0]["internal_preview"])
         self.assertEqual(result["places"][0]["summary"]["hero_rank"], -999)
+
+    def test_compact_response_preserves_preview_identity_and_parks_land_lane(self):
+        os.environ["TRAILHEAD_EXPLORE_DATA_STAGE"] = "internal"
+        merged = server._merge_explore_internal_preview({"catalog_id": "public", "places": []})
+        with patch.object(server, "_load_explore_catalog", return_value=merged):
+            result = server._explore_serving_query(category="parks")
+        response = server._explore_serving_response(result, limit=10, cursor=0, compact=True)
+        self.assertTrue(response["internal_preview"]["enabled"])
+        self.assertTrue(response["places"][0]["internal_preview"])
+        self.assertTrue(server._explore_place_matches_indexed_category({
+            "category": "public_land",
+            "summary": {"title": "Moab BLM"},
+            "promoted_serving": True,
+            "promoted_category": "public_land",
+        }, "parks"))
 
     def test_preview_header_is_not_a_credential(self):
         with patch.object(server, "_decode_token", return_value=7), patch.object(

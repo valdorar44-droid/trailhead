@@ -8,6 +8,7 @@ import {
   visibleExploreCategoryLabel,
   visibleExplorePrimaryCategory,
 } from '../exploreDestinationRegistry';
+import { exploreCategoryMatches } from '../../components/explore/exploreDisplay';
 
 test('Explore exposes five stable primary destinations', () => {
   assert.deepEqual(
@@ -30,4 +31,17 @@ test('destination capabilities are source-module driven and deterministic', () =
     destinationCapabilitiesForModules(['trails', 'fees', 'alerts', 'map']),
     ['overview', 'official_sources', 'trails', 'fees_permits', 'alerts_conditions', 'map'],
   );
+});
+
+test('Parks & Land includes public-land destination records', () => {
+  const publicLand = {
+    id: 'place:blm:moab',
+    category: 'public_land',
+    summary: {
+      id: 'place:blm:moab',
+      title: 'Moab BLM',
+      category: 'Public land',
+    },
+  } as any;
+  assert.equal(exploreCategoryMatches(publicLand, 'parks'), true);
 });

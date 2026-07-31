@@ -1651,6 +1651,7 @@ function exploreIndexItemToProfile(item: ExploreCatalogIndexItem): ExplorePlaceP
   }).filter(source => source.title || source.publisher || source.url);
   return {
     id: item.id,
+    internal_preview: Boolean(item.internal_preview),
     category: item.v3_category || item.category,
     canonical_role: item.canonical_role || '',
     parent_hub_id: item.parent_hub_id || '',

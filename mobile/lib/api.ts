@@ -4316,6 +4316,7 @@ export interface ExplorePlaceSummary {
 }
 export interface ExplorePlaceProfile {
   id: string;
+  internal_preview?: boolean;
   summary: ExplorePlaceSummary;
   card?: {
     title?: string;
@@ -4534,6 +4535,7 @@ export interface ExploreRouteRankResponse {
 }
 export interface ExploreCatalogIndexItem {
   id: string;
+  internal_preview?: boolean;
   title: string;
   category: string;
   explore_group?: string;

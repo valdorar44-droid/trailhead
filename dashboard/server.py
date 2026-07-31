@@ -4109,9 +4109,21 @@ def _merge_explore_internal_preview(catalog: dict) -> dict:
         if not place_id:
             continue
         if place_id in id_to_index:
-            places[id_to_index[place_id]] = _merge_explore_sidecar_enrichment(
+            merged_place = _merge_explore_sidecar_enrichment(
                 places[id_to_index[place_id]], preview,
             )
+            preview_summary = preview.get("summary") if isinstance(preview.get("summary"), dict) else {}
+            merged_summary = dict(merged_place.get("summary") or {})
+            for rank_key in ("rank", "hero_rank"):
+                if preview_summary.get(rank_key) is not None:
+                    merged_summary[rank_key] = preview_summary[rank_key]
+            merged_place["summary"] = merged_summary
+            merged_place["promoted_serving"] = True
+            merged_place["internal_preview"] = True
+            merged_place["promoted_category"] = str(
+                preview.get("promoted_category") or preview.get("category") or ""
+            )
+            places[id_to_index[place_id]] = merged_place
             continue
         id_to_index[place_id] = len(places)
         places.append(preview)
@@ -5370,6 +5382,7 @@ def _explore_place_index_item(place: dict) -> dict:
         "parent_hub_title": place.get("parent_hub_title") or "",
         "module_target": place.get("module_target") or "",
         "hidden_from_featured": bool(place.get("hidden_from_featured")),
+        "internal_preview": bool(place.get("internal_preview")),
         "subcategories": place.get("subcategories") or [],
         "sources": place.get("sources") or [],
         "source_ids": place.get("source_ids") or [],
@@ -34030,7 +34043,7 @@ EXPLORE_VISIBLE_FACETS = (
 EXPLORE_PROMOTED_FILTER_CATEGORIES = {
     "camp": {"campground", "rv_park", "dispersed_camp", "overnight_parking"},
     "trails": {"trail", "trailhead"},
-    "parks": {"park"},
+    "parks": {"park", "forest", "public_land"},
     "water": {"lake", "water"},
     "views": {"viewpoint"},
     "things": {"activity", "historic", "permit_required", "visitor_center"},
@@ -34465,7 +34478,9 @@ def _explore_place_matches_indexed_category(place: dict, category: str) -> bool:
             re.search(r"\b(cabins?|huts?|lodges?|lodging|shelters?|lookouts?|hotels?|inns?)\b", title)
         )
     if normalized == "park":
-        return bool(primary.intersection({"park", "forest", "national_park", "recreation_area"})) or bool(
+        return bool(primary.intersection({
+            "park", "forest", "national_park", "recreation_area", "public_land", "land", "wilderness",
+        })) or bool(
             re.search(r"\b(national|state|provincial|regional)\s+(park|monument|preserve|forest)\b", title)
         )
     if normalized == "fuel":
@@ -34770,7 +34785,7 @@ def _explore_serving_response(
         page = [_clean_explore_public_response_profile(place) for place in page_profiles]
     next_cursor = safe_cursor + safe_limit if safe_cursor + safe_limit < len(places) else None
     category_counts = result["category_counts"]
-    return {
+    response = {
         "schema_version": EXPLORE_SERVING_SCHEMA_VERSION,
         "catalog_schema_version": catalog.get("schema_version", 1),
         "catalog_id": catalog.get("catalog_id", ""),
@@ -34792,6 +34807,9 @@ def _explore_serving_response(
         "category_counts": category_counts,
         "places": page,
     }
+    if isinstance(catalog.get("internal_preview"), dict):
+        response["internal_preview"] = dict(catalog["internal_preview"])
+    return response
 
 @app.get("/api/explore/catalog")
 async def explore_catalog():

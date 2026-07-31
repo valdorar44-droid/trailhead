@@ -22021,6 +22021,10 @@ function MapScreen() {
 
   async function openTrailPreview(trail: TrailFeature, routePlanOverride: TrailRoutePlan | null = null) {
     if (!trailPreviewOpen) {
+      // Programmatic trail framing can intentionally suppress ordinary viewport
+      // persistence. Capture the renderer's live bounds so Back restores what
+      // the user actually saw instead of an older browse viewport.
+      const visibleViewport = await nativeMapRef.current?.getVisibleBounds().catch(() => null);
       trailPreviewReturnContextRef.current = {
         trail: selectedTrail,
         trailCardCollapsed,
@@ -22031,7 +22035,9 @@ function MapScreen() {
         presentation: placeSheetCoordinator.presentation,
         scrollY: trailSheetScrollYRef.current,
         map3dEnabled,
-        viewport: viewportRef.current ? { ...viewportRef.current } : null,
+        viewport: visibleViewport
+          ? { ...visibleViewport }
+          : viewportRef.current ? { ...viewportRef.current } : null,
       };
     }
     setTrailPreviewProgress(0);

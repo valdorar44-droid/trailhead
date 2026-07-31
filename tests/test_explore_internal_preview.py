@@ -91,6 +91,23 @@ class ExploreInternalPreviewTests(unittest.TestCase):
         self.assertIn("official park profile", merged["places"][0]["summary"]["short_description"])
         self.assertEqual(merged["places"][0]["source_pack"]["things_to_see"][0]["title"], "Exact overlook")
 
+    def test_internal_proof_destination_is_reachable_before_public_catalog(self):
+        os.environ["TRAILHEAD_EXPLORE_DATA_STAGE"] = "internal"
+        base = {
+            "catalog_id": "public",
+            "places": [{
+                "id": "public-place",
+                "summary": {"title": "Public Place", "rank": 1},
+                "source_pack": {},
+            }],
+        }
+        merged = server._merge_explore_internal_preview(base)
+        with patch.object(server, "_load_explore_catalog", return_value=merged):
+            result = server._explore_serving_query()
+        self.assertEqual(result["places"][0]["id"], "place:nps:test")
+        self.assertTrue(result["places"][0]["internal_preview"])
+        self.assertEqual(result["places"][0]["summary"]["hero_rank"], -999)
+
     def test_preview_header_is_not_a_credential(self):
         with patch.object(server, "_decode_token", return_value=7), patch.object(
             server, "get_user_by_id", return_value={"id": 7, "is_admin": False},

@@ -4072,10 +4072,20 @@ def _load_explore_internal_preview_profiles() -> list[dict]:
     except Exception:
         return []
     raw_places = [place for place in payload.get("places") or [] if isinstance(place, dict)]
-    profiles = [
-        _explore_v3_place_to_profile(place, rank=590000 + index)
-        for index, place in enumerate(raw_places, start=1)
-    ]
+    profiles = []
+    for index, place in enumerate(raw_places, start=1):
+        profile = _explore_v3_place_to_profile(place, rank=590000 + index)
+        # These records exist only inside an authenticated internal-review
+        # request. Keep the public catalog untouched, but place the bounded
+        # proof set ahead of the normal catalog so a reviewer can actually
+        # reach it on a phone without paging through thousands of places.
+        summary = dict(profile.get("summary") or {})
+        summary["rank"] = -1000 + index
+        summary["hero_rank"] = -1000 + index
+        profile["summary"] = summary
+        profile["promoted_serving"] = True
+        profile["internal_preview"] = True
+        profiles.append(profile)
     _attach_v3_nearby_source_items(profiles, raw_places)
     _EXPLORE_INTERNAL_PREVIEW_CACHE.update({"key": cache_key, "profiles": profiles})
     return list(profiles)

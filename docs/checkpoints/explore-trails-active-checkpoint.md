@@ -929,3 +929,30 @@ Verify `git diff --cached --name-only` before every commit.
 - Do not mutate or stage `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, `.cursor/`, or unrelated work.
 - Do not submit the 1.0.11 artifacts, publish a production OTA, enable public Community routes, or promote the data sidecar before Android review.
 - Do not repeat completed Trails, Layers, Memory, Originals, Android Auto, or broad NPS/search crawls.
+
+## Internal Explore device-preview blocker — 2026-07-31 15:29 CDT
+
+- Branch target: `feat/trailhead-1.0.10-overhaul`; exact mobile source `365bc78e04fb6b0359fd82589f8f126262f3bc6e`.
+- Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; App Store copy SHA-256 remains `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`. Neither file nor `.cursor/` was staged.
+- Railway deployment `7e8e65ea-4abf-4b2b-b038-2305d9bb2757` is healthy with `TRAILHEAD_EXPLORE_DATA_STAGE=internal`; the deployed sidecar exists at `1,446,869` bytes.
+- A temporary Railway SSH key was registered solely to inspect the running container and was removed immediately after the probe.
+- An in-container authenticated HTTP probe proved the server path works: catalog `trailhead-explore-serving-v2-internal-preview`, total `5,327`, with `place:blm:moab-field-office` first.
+- Android preview build `69` installed update `019fb9d9-6fd4-7134-9e14-c1f8dd069d16`, group `2e895ab4-1832-47bc-9fca-cb3f132589f1`, runtime `native-1.0.10-android.7`, exact source `365bc78`.
+- The mobile fixes wait for auth hydration, pass the active token explicitly, make the first server page authoritative, prevent internal review data from entering the ordinary cache, and recognize the verified Expo `preview` channel. Focused preview, Explore Trails, NPS preservation, account-scope, copy, and TypeScript checks pass.
+- The Samsung still renders the ordinary `416 places` Parks & Land catalog. Because the exact update, admin-only backend response, server artifact, and feature stage are all independently proven, the remaining internal mobile handoff is checkpointed as unresolved rather than retried again.
+- No public catalog, production OTA, store submission, public feature stage, or Community-trails stage changed. iOS remains on update group `9bca76b5-ac6c-4919-b873-80320a5106c5`; it was not advanced to an unaccepted source.
+- Frozen production artifacts remain complete and unchanged: Android AAB build `723dca56-01a3-416b-a22d-98c838a849ee` (version code `70`, SHA-256 `0cc5b90c1722f8a2df93be9dd8e8ed7939511395ea8baee0d0e40fe8d177c08e`) and iOS IPA build `712109e9-6b7f-4f72-ab51-2aa42a6095da` (build `62`, SHA-256 `9ca83267c03fc0fafa8664593e98645481b57ac0addd5ea5f9bbcf4861c4b3f1`). Exactly two production builds were used.
+- Task-owned Metro, Gradle, Maestro, publisher, enrichment, and test processes: none.
+
+### Exact next action
+
+1. Do not publish this source to iOS while Android internal-data visibility is unaccepted.
+2. Continue nationwide NPS enrichment from the existing 116-park rich cache with one new bounded batch and no refetch of completed parks.
+3. Keep every generated catalog in the isolated audit directory. Do not overwrite the protected serving index or promote data publicly.
+4. Return to the internal-preview blocker only with new request-level evidence, such as a safe fixed-code client/server diagnostic; do not publish another speculative OTA.
+
+### Do not repeat
+
+- Do not repeat the three Android preview publications, cold-launch identity checks, Railway sidecar/env verification, or authenticated server probe.
+- Do not start another native build, submit either store artifact, publish a production OTA, expose Community routes, or promote agency/NPS candidates without the required acceptance.
+- Do not repeat Trails T1-T6, 3D Back, Builder, GPX, Offline, Follow, recording, Flyover, Layers, Memory, Originals, Android Auto, or broad Explore/NPS crawls.

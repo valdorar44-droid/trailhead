@@ -551,3 +551,51 @@ Verify `git diff --cached --name-only` before every commit.
 - Do not reopen accepted Builder, GPX, trail-pack, Follow, recording, flyover playback, yellow finish marker, Trailhead sheets, or broad Search/Map audits.
 - Do not fabricate complete geometry, destination facts, access, comments, ratings, or source content. Do not auto-select a destination or trail.
 - Do not rerun the guarded 859-test preview gate until the GitHub Mapbox Maven credential is known-good.
+
+## E2/E5 destination and sheet-action completion checkpoint — 2026-07-30 23:35 CDT
+
+- Branch: `feat/trailhead-1.0.10-overhaul`; exact implementation commit `3d6305667929ba19840c05192fc4ea8837c18b6f`, pushed to `origin/feat/trailhead-1.0.10-overhaul`.
+- Baseline checkpoint commit: `ed1f814e`; previous immutable E5 backend source: `936438bd350744ff8c6fc6ebe83e6f9596bc6120`.
+- Current installed paired preview is still the accepted E4 source `da519b373cd06d4467bd36eebc16cf4384699c39`: Android update `019fb5ea-41af-730e-a829-9075ddc641fb` on runtime `native-1.0.10-android.7`; iOS update `019fb5ea-41af-7681-83cf-0d020e55d2d9` on runtime `native-1.0.10-ios.6`.
+- Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. User-owned App Store copy SHA-256 is `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`. `.cursor/` and both files remain unstaged and untouched.
+
+### Completed behavior
+
+- Trail Discovery now offers explicit Search V2 destination suggestions. Selecting a park, city, or destination freezes its stable identity and coordinates, scopes trail discovery there, preserves server ordering, and never auto-opens a destination or trail.
+- Canonical destination references now resolve server-side against Explore profiles before trail discovery. Temporary Mapbox results remain explicit client-selected scope and are not persisted as canonical trails.
+- Nearby counts now distinguish complete list-ready routes from honest map-only records instead of labelling every partial record as a trail.
+- The Android three-button native overflow is replaced by the controlled, scrollable Trailhead action sheet. Every capability-backed action is reachable: 3D preview, Offline, Add to trip, Build route, Report, Suggest edit, official website, Share, and Refresh.
+- Fact-only generated summaries that merely repeat structured distance, route shape, difficulty, or activity are removed. Genuine editorial/source descriptions remain.
+- Selecting or clearing a route closes stale action presentation and keeps one identity-bound sheet flow.
+- Camera audit correction: `openTrailFeature` already issued the single shared `focusMapSelectionPoint` command. No duplicate camera command was added; the earlier device observation was caused by the older installed preview and remains a narrow post-OTA assertion.
+- No visual departure from approved Figma nodes Trail Discovery `779:2412`, Trail Peek `407:162`, Trail Full `520:782`, and Trailhead Full `520:872`. No new Figma approval is required for this behavior-only repair.
+
+### Focused verification
+
+- Backend Trails V2: 22 tests passed, including canonical destination resolution and summary preservation/omission.
+- Explore Trails mobile suites passed: discovery helpers 7, destination registry 3, module registry 3, workspace 7, summary presentation 3, sheet flow 8, integration 4, and source panel 4.
+- Search V2 suites passed: presentation 11, persistence 19, routing 4, and session behavior 41.
+- Sheet action/coordinator tests passed: 6 action assertions and 2 coordinator assertions.
+- TypeScript `npx tsc --noEmit`, copy audit across 175 user-facing files, privacy controls, and `git diff --check` passed.
+- No native project, dependency, permission, runtime, Offline store, trail geometry, Follow, recording, flyover, or existing sheet capability changed.
+
+### Backend deployment
+
+- Railway production deployment `38ff9b3d-8783-48d1-a032-f2fc2701e137` succeeded from clean detached source `3d6305667929ba19840c05192fc4ea8837c18b6f`.
+- Deployed image digest: `sha256:2bfb36a53eec78f694bf37509bbc790d93d09c34a6b20aec4cb5891f0736bcc3`.
+- Railway internal health check passed and `https://api.gettrailhead.app/api/health` returned `{\"status\":\"ok\",\"service\":\"trailhead\"}`.
+- Public Community publication remains disabled/internal; the additive endpoint change does not expose unreviewed routes.
+
+### Remaining acceptance and exact next action
+
+- Source and backend verification show no open product P0/P1. The new mobile behavior has not yet reached a preview OTA, so device acceptance is not claimed.
+- Preview publication remains externally blocked by GitHub repository secret `RNMAPBOX_MAPS_DOWNLOAD_TOKEN`. Create one new Mapbox secret token with only `downloads:read` and store it directly as that GitHub Actions secret; do not paste it into chat, source, logs, or a local file.
+- Once the credential is known-good, run the guarded paired preview exactly once from `3d6305667929ba19840c05192fc4ea8837c18b6f`, preserving Sentry source-map publication and the Android Auto dependency gate.
+- Android delta after OTA: Explore → Trails → type Yosemite → explicitly select the destination → verify scoped route/map records; open one complete trail through Peek and Full; confirm no duplicated fact summary; scroll through every safe More action; verify 3D Back and resolved-route framing. Then perform the shared iOS spot check from the identical SHA.
+- E4/E5 owner/moderator device assertions remain separate and bounded as previously recorded; do not blend them into another broad Trails crawl.
+
+### Do not repeat
+
+- Do not repeat Trails T1–T6, E1/E3 research, broad Search, Yellowstone, NPS, Offline inventory, Layers, Memory, Originals, Android Auto, full Map/sheet crawls, Figma research, or the 859-test gate before the credential is valid.
+- Do not weaken the Android Auto/Mapbox Maven gate, use a public `pk.*` token for Maven, auto-select destinations, fabricate complete route geometry, or expose Community as Verified.
+- Task-owned Metro, Gradle, Maestro, publisher, test, and device-helper processes: none. Railway deployment is complete and no local process remains running.

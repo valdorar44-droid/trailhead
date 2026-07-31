@@ -176,11 +176,14 @@ class NpsHourlyEnrichmentTests(unittest.TestCase):
                 trails_path=trails_path,
                 source_records_path=records_path,
                 now=2_000_000_000,
+                completed_park_codes={"yell"},
             )
             self.assertTrue(report["promotion_ready"])
             self.assertEqual(report["counts"]["nps_places"], 1)
             self.assertEqual(report["module_coverage"]["things_to_see"]["items"], 1)
             self.assertEqual(report["module_coverage"]["alerts"]["items"], 1)
+            self.assertEqual(report["data_depth"]["rich_cache"]["places"], 1)
+            self.assertEqual(report["data_depth"]["rich_cache"]["without_destination_modules"], 0)
             self.assertEqual(len(report["artifacts"]["catalog"]["sha256"]), 64)
 
     def test_candidate_audit_blocks_duplicate_ids_and_missing_media_license(self):
@@ -216,6 +219,49 @@ class NpsHourlyEnrichmentTests(unittest.TestCase):
             codes = {item["code"] for item in report["errors"]}
             self.assertIn("duplicate_place_id", codes)
             self.assertIn("media_attribution", codes)
+
+    def test_candidate_audit_rejects_raw_reader_facing_subcategory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            catalog_path = root / "explore_catalog_v3.json"
+            trails_path = root / "explore_trail_geometries_v1.json"
+            records_path = root / "explore_source_records.jsonl"
+            catalog_path.write_text(json.dumps({
+                "schema_version": 3,
+                "count": 1,
+                "places": [{
+                    "id": "place:nps:yell",
+                    "name": "Yellowstone National Park",
+                    "subcategories": ["national_park"],
+                    "lat": 44.6,
+                    "lng": -110.5,
+                    "updated_at": 1_990_000_000,
+                    "source_pack": {
+                        "nps_park_code": "yell",
+                        "official_url": "https://www.nps.gov/yell/",
+                        "license": "National Park Service public data",
+                    },
+                    "sources": [{"source": "nps"}],
+                    "media": [{
+                        "url": "https://www.nps.gov/yell.jpg",
+                        "caption": "Yellowstone",
+                        "credit": "NPS",
+                        "license": "National Park Service public data",
+                    }],
+                }],
+            }))
+            trails_path.write_text(json.dumps({"trails": []}))
+            records_path.write_text('{"source":"nps"}\n')
+
+            report = audit_candidate_catalog(
+                catalog_path=catalog_path,
+                trails_path=trails_path,
+                source_records_path=records_path,
+                now=2_000_000_000,
+            )
+
+            self.assertFalse(report["promotion_ready"])
+            self.assertIn("raw_subcategory", {item["code"] for item in report["errors"]})
 
 
 if __name__ == "__main__":

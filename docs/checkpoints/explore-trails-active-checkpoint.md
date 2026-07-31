@@ -1015,3 +1015,29 @@ Verify `git diff --cached --name-only` before every commit.
 
 - Do not resubmit build `62`, start another production build, submit Android, publish a production OTA, or modify App Store review/release settings without new authorization/evidence.
 - Do not rerun NPS batches 1-6, completed Trails/3D/Builder/Offline/Follow work, broad Map/Layer/Memory crawls, or the Android internal-preview loop.
+
+## NPS candidate b06 data-depth quality gate — 2026-07-31 16:45 CDT
+
+- Branch: `feat/trailhead-1.0.10-overhaul`; pre-change HEAD `1f3f2e0`. Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; App Store copy SHA-256 remains `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+- Rebuilt the existing `b06` cache without network requests into `data/explore/audit_candidates/nps/live-20260731-b06-quality`; the live serving index, public feature stages, production artifacts, and preview channels remain untouched.
+- Candidate audit is `promotion_ready: true` with zero errors and zero warnings: 729 Explore places, 474 stable NPS identities, 500 source records, 7 existing trail geometries, and 5,107 attributed media records.
+- Data depth is now explicit in the audit: 172 rich-cache parks, of which 170 expose at least one destination module; 302 parks remain, of which only 13 retain any destination module from base data. The remaining queue is therefore the primary source of visible Explore gaps.
+- Replaced the missing NPS designation fallback `national_park` with the honest reader-facing `Park`. Candidate-level validation now rejects raw snake_case NPS subcategories, and the rebuilt candidate contains zero such NPS labels.
+- Non-NPS sources still contain 29 raw subcategory tokens such as `camp_site`, `wilderness_hut`, `forest_road`, `national_forest`, and `ohv_route`. This is recorded as a separate cross-agency cleanup; it was not folded into the NPS change.
+- Candidate hashes: catalog `fe9fb3473c72f49a5214e47901d96a476f7c57f498ec669be53710131b26e630`; source records `0e738e8a0ab4803c05b14aec7374e450dd9f9a7b9f600faaa2a6ac9d2702e0cf`; trails `ca7e9644eef0d8e413fc6b3460b4eb02625298957a8fc1410c3b6635027c9354`; audit `086ceda028b438d5ee8876402e478ff23ea35c876638445cc8bc9f8a5d28bbb3`.
+- Verification passed: 45 focused NPS/Explore unit tests, Python compilation, cache-only rebuild, candidate promotion audit, and zero-network confirmation.
+- The durable `Explore NPS Data Depth — Candidate b06` analytical report was validated and rendered with module coverage, enrichment-depth comparison, recommendations, and caveats.
+- Task-owned EAS submit, Metro, Gradle, Maestro, publisher, enrichment, and test processes: none.
+
+### Exact next action
+
+1. Commit and push only the four named NPS source/test files plus this checkpoint; keep protected and unrelated work unstaged.
+2. After the rolling NPS API window is safely reset, run one new bounded batch from the 172-park rich cache. Do not refetch completed park codes.
+3. Keep every generated catalog isolated until the internal Android data-preview handoff has new request-level evidence and device acceptance.
+4. Review exact image identity and the two legitimately sparse rich-cache parks before any intentional serving-index promotion.
+
+### Do not repeat
+
+- Do not rerun the b06 network fetch, the b06 cache-only quality rebuild, App Store submission, or the Android internal-preview loop.
+- Do not submit Android, publish a production OTA, promote candidates, expose Community routes, or modify public feature stages.
+- Do not stage `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, or unrelated dirty files.

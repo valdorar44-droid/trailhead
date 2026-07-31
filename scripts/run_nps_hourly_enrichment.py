@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -50,6 +51,15 @@ NPS_MODULE_KEYS = (
     "passes",
     "alerts",
     "operating_hours",
+)
+NPS_DESTINATION_MODULE_KEYS = (
+    "things_to_see",
+    "things_to_do",
+    "campgrounds",
+    "visitor_centers",
+    "events",
+    "parking_lots",
+    "guided",
 )
 
 AUDIT_ENV_BLOCKLIST = {
@@ -209,7 +219,10 @@ def run_batch(args: argparse.Namespace) -> int:
     if not args.skip_rebuild:
         candidate_dir = resolve_candidate_dir(Path(args.candidate_root), args.candidate_run_id)
         outputs = rebuild_catalog(cache_dir, candidate_dir)
-        audit_report = audit_candidate_catalog(**outputs)
+        audit_report = audit_candidate_catalog(
+            **outputs,
+            completed_park_codes=completed_codes(cache_dir),
+        )
         write_json(candidate_dir / "audit-report.json", audit_report)
         if not audit_report["promotion_ready"]:
             write_state(
@@ -367,6 +380,7 @@ def audit_candidate_catalog(
     trails_path: Path,
     source_records_path: Path,
     now: int | None = None,
+    completed_park_codes: set[str] | None = None,
 ) -> dict:
     checked_at = int(time.time() if now is None else now)
     catalog = json.loads(catalog_path.read_text())
@@ -395,6 +409,11 @@ def audit_candidate_catalog(
     media_review_count = 0
     stale_editorial = 0
     stale_operational = 0
+    cached_places = 0
+    cached_without_destination_modules = 0
+    remaining_places = 0
+    remaining_with_destination_modules = 0
+    completed = {str(code).strip().lower() for code in (completed_park_codes or set()) if str(code).strip()}
 
     for index, place in enumerate(places):
         if not isinstance(place, dict):
@@ -427,12 +446,25 @@ def audit_candidate_catalog(
         if not is_nps:
             continue
         nps_count += 1
+        for subcategory in place.get("subcategories") or []:
+            label = str(subcategory or "").strip()
+            if re.fullmatch(r"[a-z0-9]+(?:_[a-z0-9]+)+", label):
+                errors.append({"code": "raw_subcategory", "message": f"NPS place exposes an internal subtype: {place_id} ({label})"})
         if not nps_code:
             errors.append({"code": "nps_code", "message": f"NPS place lacks nps_park_code: {place_id}"})
         elif nps_code in nps_codes:
             errors.append({"code": "duplicate_nps_code", "message": f"Duplicate NPS park code: {nps_code}"})
         else:
             nps_codes.add(nps_code)
+        has_destination_modules = any(source_pack.get(key) for key in NPS_DESTINATION_MODULE_KEYS)
+        if completed_park_codes is not None and nps_code in completed:
+            cached_places += 1
+            if not has_destination_modules:
+                cached_without_destination_modules += 1
+        elif completed_park_codes is not None:
+            remaining_places += 1
+            if has_destination_modules:
+                remaining_with_destination_modules += 1
         if not str(source_pack.get("official_url") or "").startswith("https://"):
             errors.append({"code": "official_url", "message": f"NPS place lacks an HTTPS official URL: {place_id}"})
         if not str(source_pack.get("license") or "").strip():
@@ -487,7 +519,7 @@ def audit_candidate_catalog(
         with source_records_path.open("r", encoding="utf-8") as handle:
             source_record_count = sum(1 for line in handle if line.strip())
 
-    return {
+    report = {
         "schema_version": 1,
         "checked_at": checked_at,
         "promotion_ready": not errors,
@@ -508,6 +540,18 @@ def audit_candidate_catalog(
         },
         "artifacts": artifacts,
     }
+    if completed_park_codes is not None:
+        report["data_depth"] = {
+            "rich_cache": {
+                "places": cached_places,
+                "without_destination_modules": cached_without_destination_modules,
+            },
+            "remaining": {
+                "places": remaining_places,
+                "with_destination_modules": remaining_with_destination_modules,
+            },
+        }
+    return report
 
 
 def write_json(path: Path, payload: dict) -> None:

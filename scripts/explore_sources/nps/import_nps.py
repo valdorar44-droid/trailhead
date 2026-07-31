@@ -96,13 +96,18 @@ def source_record_from_park(park: dict[str, Any], now: int) -> SourceRecord | No
         raw=park,
         name=name,
         category="park",
-        subcategory=compact_text(park.get("designation") or "national_park"),
+        subcategory=nps_designation(park),
         lat=lat,
         lng=lng,
         geometry={"type": "Point", "coordinates": [lng, lat]},
         properties=park,
         confidence=0.95,
     )
+
+
+def nps_designation(park: dict[str, Any]) -> str:
+    """Return a reader-facing designation without exposing an internal enum."""
+    return compact_text(park.get("designation")) or "Park"
 
 
 def place_from_record(record: SourceRecord, related: dict[str, list[dict[str, Any]]] | None = None) -> ExplorePlaceV3:

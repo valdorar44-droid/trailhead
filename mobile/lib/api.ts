@@ -1028,7 +1028,10 @@ export const api = {
     }
     return req<ExploreCatalogIndex>(`/api/explore/catalog/index?${qs.toString()}`);
   },
-  getExploreHome: (params: { mode?: string; sort?: string; lat?: number; lng?: number; limit?: number } = {}) => {
+  getExploreHome: (
+    params: { mode?: string; sort?: string; lat?: number; lng?: number; limit?: number } = {},
+    tokenOverride?: string | null,
+  ) => {
     const qs = new URLSearchParams({
       mode: params.mode || 'featured',
       sort: params.sort || 'best',
@@ -1038,7 +1041,7 @@ export const api = {
       qs.set('lat', String(params.lat));
       qs.set('lng', String(params.lng));
     }
-    return req<ExploreHomeResponse>(`/api/explore/home?${qs.toString()}`);
+    return reqWithToken<ExploreHomeResponse>(`/api/explore/home?${qs.toString()}`, {}, tokenOverride);
   },
   getExplorePlaces: (lat?: number, lng?: number, mode: 'featured' | 'nearby' | 'trip' = 'featured', limit = 60, cursor = 0) => {
     const qs = new URLSearchParams({ mode, limit: String(limit), cursor: String(cursor) });
@@ -4585,6 +4588,11 @@ export interface ExploreCatalogIndex {
     [key: string]: unknown;
   };
   category_counts?: Record<string, number>;
+  internal_preview?: {
+    enabled?: boolean;
+    count?: number;
+    artifact?: string;
+  };
   places: ExploreCatalogIndexItem[];
 }
 export interface ExploreGuidedDestination {

@@ -2193,6 +2193,7 @@ function GuideScreenContent() {
     setExploreAccountLifecycle({ cleaning, epoch });
   }), []);
   const authToken = useStore(st => st.token);
+  const authHydrated = useStore(st => st.authHydrated);
   const activeTrip = useStore(st => st.activeTrip);
   const setActiveTrip = useStore(st => st.setActiveTrip);
   const userLoc = useStore(st => st.userLoc);
@@ -2790,6 +2791,7 @@ function GuideScreenContent() {
   }, [exploreCategory, exploreQuery, guidedTourDraft]);
 
   useEffect(() => {
+    if (!authHydrated) return;
     let cancelled = false;
     const homePageSpec = exploreCatalogPageSpec('', '', 'best');
 
@@ -2842,22 +2844,31 @@ function GuideScreenContent() {
         const firstPlaces = (firstPage.places ?? []).map(exploreIndexItemToProfile);
         const remoteDestinations = guidedDestinationsFromApi(firstPage.guided_destinations ?? firstPage.guided?.destinations);
         if (remoteDestinations.length) setGuidedDestinations(remoteDestinations);
-        setExplorePlaces(current => current.length ? mergeById(current, firstPlaces) : firstPlaces);
+        // The first server page owns ordering. Retain any already-loaded later
+        // pages, but never bury a newly ranked first page behind stale cache.
+        setExplorePlaces(current => mergeById(firstPlaces, current));
         setExploreFacetCounts(exploreFacetCountsFromCatalog(firstPage, firstPlaces));
         const totalCount = Number(firstPage.total_count || firstPage.count || firstPlaces.length);
         const nextCursor = firstPage.next_cursor ?? null;
         updateExploreCatalogPage(homePageSpec.key, { nextCursor, totalCount, loading: false });
-        storage.set(EXPLORE_CACHE_KEY, JSON.stringify({
-          places: firstPlaces,
-          next_cursor: nextCursor,
-          total_count: totalCount,
-          fetched_at: Date.now(),
-        })).catch(() => {});
+        // Internal agency candidates are request-scoped admin review data. Do
+        // not persist them into the ordinary signed-out Explore cache.
+        if (!firstPage.internal_preview?.enabled) {
+          storage.set(EXPLORE_CACHE_KEY, JSON.stringify({
+            places: firstPlaces,
+            next_cursor: nextCursor,
+            total_count: totalCount,
+            fetched_at: Date.now(),
+          })).catch(() => {});
+        }
         setExploreError('');
         setExploreCatalogNotice('');
         setExploreLoading(false);
       };
-      const firstPageRequest = api.getExploreHome({ mode: 'featured', sort: 'best', limit: 48 });
+      const firstPageRequest = api.getExploreHome(
+        { mode: 'featured', sort: 'best', limit: 48 },
+        authToken ?? null,
+      );
       try {
         const firstPage = await withExploreTimeout(firstPageRequest);
         if (cancelled) return;
@@ -2897,7 +2908,7 @@ function GuideScreenContent() {
     return () => {
       cancelled = true;
     };
-  }, [exploreCatalogReloadId, updateExploreCatalogPage]);
+  }, [authHydrated, authToken, exploreCatalogReloadId, updateExploreCatalogPage]);
 
 
 

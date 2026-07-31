@@ -5,6 +5,10 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const apiSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../api.ts'), 'utf8');
+const guideSource = readFileSync(
+  resolve(dirname(fileURLToPath(import.meta.url)), '../../app/(tabs)/guide.tsx'),
+  'utf8',
+);
 
 test('internal Explore data header is build-scoped and authenticated', () => {
   assert.match(apiSource, /EXPO_PUBLIC_EXPLORE_DATA_PREVIEW/);
@@ -22,4 +26,22 @@ test('ordinary API requests do not receive the Explore preview header', () => {
     apiSource.slice(guardedAssignment.index! + guardedAssignment[0].length),
     /X-Trailhead-Explore-Preview'\] = 'internal'/,
   );
+});
+
+test('Explore waits for auth and sends the hydrated token on its first page', () => {
+  assert.match(guideSource, /const authHydrated = useStore\(st => st\.authHydrated\)/);
+  assert.match(guideSource, /if \(!authHydrated\) return;/);
+  assert.match(
+    guideSource,
+    /api\.getExploreHome\([\s\S]+?authToken \?\? null,[\s\S]+?\)/,
+  );
+  assert.match(
+    guideSource,
+    /\[authHydrated, authToken, exploreCatalogReloadId, updateExploreCatalogPage\]/,
+  );
+});
+
+test('the authoritative first page owns order and internal review data is not cached', () => {
+  assert.match(guideSource, /setExplorePlaces\(current => mergeById\(firstPlaces, current\)\)/);
+  assert.match(guideSource, /if \(!firstPage\.internal_preview\?\.enabled\)/);
 });

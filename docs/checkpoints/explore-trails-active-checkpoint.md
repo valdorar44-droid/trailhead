@@ -861,3 +861,13 @@ Verify `git diff --cached --name-only` before every commit.
 - Do not repeat Trails T1-T6, 3D Back, Builder, GPX, Offline, Follow, recording, Flyover, Layers, Memory, Originals, Android Auto, source downloads, duplicate review, broad NPS research, or the protected pre-preview suite.
 - Do not weaken the organic serving gate, generate descriptions for sparse agency records, expose raw route segments, overwrite the protected serving index automatically, submit stores, or start another native build.
 - Task-owned Metro, Gradle, Maestro, publisher and local test processes: none. The remote Android EAS build is the only active task process.
+
+## Nationwide NPS resumable batch 3 — 2026-07-31 13:48 CDT
+
+- Starting point: 60 rich-cache parks and 414 remaining. One bounded batch selected 28 new park codes and used 327 of the hard 700-request cap.
+- Candidate: `data/explore/audit_candidates/nps/live-20260731-b03`; 88 parks now have rich cached source packs and 386 remain.
+- Candidate audit: `promotion_ready: true`, zero errors, zero warnings. The Explore QA matrix passed and 57 focused official-place tests passed.
+- Module growth from NPS candidate `b02` to `b03`: Things to See `1,783 -> 2,386`; Things to Do `771 -> 977`; campgrounds `177 -> 212`; alerts `135 -> 164`; visitor centers `151 -> 204`; events `664 -> 935`; parking `167 -> 193`; guided items `132 -> 175`; passes `26 -> 30`.
+- Artifact hashes: catalog `ba8fac2f133ccc3defb953ecbc165f60ee90b40255f3aa2a579cb82d609d7309`; source records `c380e34f1d33a99b0cedf8b6a9a31a39d01c730760e98347ee1a5180ce0ffda9`; trail geometries `75f1a22791d1d644d9f101eab4e9a4aef0249984fbb8b87d0bec4e6d9b94e9c4`; audit `734304af4c911f1800974a0bf3de3ff3deb454271326bdf6b23c1cd28788cd99`.
+- The NPS key was read into process memory from the already-authenticated Railway production environment, passed only to WSL for this command, and was not printed or stored in the repository.
+- Live Explore catalogs and serving index remain unchanged. Continue from this cache in the next bounded batch; do not refetch the completed 88 parks.

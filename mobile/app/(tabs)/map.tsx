@@ -7874,7 +7874,11 @@ function MapScreen() {
     traceActive: trailTraceMode || trailPinCaptureMode,
     routeBuildStatus: routeBuildSession?.status ?? null,
   });
-  const mapCameraExperienceKey = mapExperienceMode === 'originals'
+  const trailSelectionOwnsCamera = mapExperienceMode === 'browse' && Boolean(selectedTrail);
+  const mapCameraOwnerMode = trailSelectionOwnsCamera ? 'route_review' : mapExperienceMode;
+  const mapCameraExperienceKey = trailSelectionOwnsCamera
+    ? `trail:${selectedTrail?.system_v2_id ?? selectedTrail?.id ?? 'selected'}:${selectedTrail?.geometry_revision ?? 'pending'}`
+    : mapExperienceMode === 'originals'
     ? `originals:${originalsMapExperience.packId}:${originalsMapExperience.version}`
     : mapExperienceMode === 'route_build' || mapExperienceMode === 'route_review'
       ? `route:${routeBuildSession?.requestId ?? `${activeTrip?.trip_id ?? 'pending'}:${activeTrip?.version ?? 0}`}:${mapExperienceMode}`
@@ -7886,8 +7890,8 @@ function MapScreen() {
             ? 'trace:active'
             : null;
   const mapCameraOwnership = useMemo(
-    () => createMapCameraOwnership(mapExperienceMode, mapCameraExperienceKey),
-    [mapCameraExperienceKey, mapExperienceMode],
+    () => createMapCameraOwnership(mapCameraOwnerMode, mapCameraExperienceKey),
+    [mapCameraExperienceKey, mapCameraOwnerMode],
   );
   useEffect(() => {
     mapCameraClaimStateRef.current = synchronizeMapCameraClaimOwnership(
@@ -7939,9 +7943,15 @@ function MapScreen() {
     );
   }, [insets.top, originalsMapExperience.active, originalsMapExperience.routeCoords, windowHeight]);
   const routeSessionCameraCoords = routeBuildSession?.routeCoords ?? [];
-  const routeReviewCameraCoords = routeSessionCameraCoords.length >= 2
-    ? routeSessionCameraCoords
-    : lastRouteCoords;
+  const selectedTrailCameraPlan = trailSelectionOwnsCamera && selectedTrail
+    ? trailRoutePlans.find(plan => trailRoutePlanMatchesOwner(plan, selectedTrail)) ?? null
+    : null;
+  const selectedTrailCameraCoords = selectedTrailCameraPlan?.coords ?? [];
+  const routeReviewCameraCoords = selectedTrailCameraCoords.length >= 2
+    ? selectedTrailCameraCoords
+    : routeSessionCameraCoords.length >= 2
+      ? routeSessionCameraCoords
+      : lastRouteCoords;
 
   const mapCameraClaim = useMemo(() => {
     if (!mapSurfaceReady || !useNativeMapSurface) return null;

@@ -105,6 +105,10 @@ test('trail selection focuses once through the shared open function before route
   );
   assert.match(openSource, /focusMapSelectionPoint/);
   assert.match(openSource, /setShowTrailActionSheet\(false\)/);
+  assert.match(mapSource, /const trailSelectionOwnsCamera = mapExperienceMode === 'browse' && Boolean\(selectedTrail\)/);
+  assert.match(mapSource, /createMapCameraOwnership\(mapCameraOwnerMode, mapCameraExperienceKey\)/);
+  assert.match(mapSource, /trailRoutePlans\.find\(plan => trailRoutePlanMatchesOwner\(plan, selectedTrail\)\)/);
+  assert.match(mapSource, /selectedTrailCameraCoords\.length >= 2/);
 });
 
 test('full sheet copy avoids invented confidence and access assurances', () => {

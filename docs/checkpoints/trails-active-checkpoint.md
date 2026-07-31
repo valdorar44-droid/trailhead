@@ -2,7 +2,14 @@
 
 Active Explore and Community Trails packet: [`explore-trails-active-checkpoint.md`](./explore-trails-active-checkpoint.md). Read that checkpoint first when work concerns Explore trail discovery, private/unlisted routes, or moderated community routes.
 
-Last updated: 2026-07-28 02:08 CDT (America/Winnipeg)
+Last updated: 2026-07-30 23:05 CDT (America/Winnipeg)
+
+## Authoritative current status
+
+- Trails T1 through T6 are complete and physically accepted on Android and iOS. The authoritative completion record is **Paired Trails complete — iOS T6 Back and metric clipping accepted** below; intermediate `pending` and `blocked` entries are retained only as historical evidence.
+- The approved Trail Builder presentation pass is complete and physically accepted on Android from source `582d6b714f0520dfccbf60d45ad5250d9eed47d2`. Its identical iOS update is published; only the explicitly bounded visual parity spot check remains when an iPhone is available.
+- Current Explore Trail Discovery, private/unlisted route, and Community moderation work is owned by [`explore-trails-active-checkpoint.md`](./explore-trails-active-checkpoint.md). Read that checkpoint for the current HEAD, deployment, preview, and device actions.
+- Do not execute any historical **Next exact packet** section in this file. Those sections document the decision that was current at that timestamp and are superseded by later acceptance evidence.
 
 ## Resume protocol
 
@@ -11,7 +18,7 @@ Read this file before every Trails work session and after any context compaction
 1. Run `git status --short --branch` in `/home/sean/.openclaw/workspace/trailhead`.
 2. Verify `dashboard/explore_serving_index_v2.json` still hashes to `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
 3. Never stage `.cursor/`, `dashboard/explore_serving_index_v2.json`, or unrelated dirty files.
-4. Continue from **Next exact packet**. Do not restart completed 1.0.10 crawls, research, or Android Auto work.
+4. Continue from the linked Explore checkpoint or the latest non-superseded completion entry. Do not restart completed T1-T6 work, 1.0.10 crawls, research, or Android Auto work.
 
 ## Source and paired preview baseline
 
@@ -81,7 +88,9 @@ Verify the staged file list before every commit.
 - Strava route overview: `https://mobbin.com/flows/4cc0ed37-630d-4ac5-8203-bce848bc5a32`.
 - References are behavioral only; no external branding or imagery ships.
 
-## Packet ledger
+## Historical packet ledger
+
+The status at the start of each packet is preserved for auditability. Later completion entries in this file override those intermediate statuses.
 
 ### T1 - Canonical discovery, cards, and highlighting
 
@@ -252,7 +261,9 @@ Verify the staged file list before every commit.
 
 - Status: pending T5 acceptance.
 
-## Next exact packet
+## Historical next packet — superseded
+
+This section records the T4 continuation that was correct at the time. T4 later passed and T1-T6 are now closed; do not execute these steps.
 
 1. Resume from `fad527c35f228eba42cf5929b32e7a109e94c1c8`; verify the protected Explore-index hash before staging anything.
 2. Add one fixed, privacy-safe RNMapbox transition trace for create callback, registry visibility, immutable identity, status progress and terminal ordering. Do not log bounds, routes, searches or account data.

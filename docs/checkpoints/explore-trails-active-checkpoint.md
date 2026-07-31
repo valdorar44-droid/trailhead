@@ -502,3 +502,52 @@ Verify `git diff --cached --name-only` before every commit.
 
 - Do not repeat E1-E3 discovery, Yellowstone, NPS, Trails T1-T6, Offline inventory, Layers, Memory, Originals, Android Auto, broad Map/sheet crawls, Figma research, or private-link creation/opening.
 - Do not expose private/unlisted geometry, publish an unreviewed route, award credits at submission, mix Community with Verified, or add generated access/safety prose.
+
+## E5 backend deployment and preview credential checkpoint — 2026-07-30 22:40 CDT
+
+- Immutable E5 implementation commit `936438bd350744ff8c6fc6ebe83e6f9596bc6120` is pushed.
+- Railway deployment `091e9881-3c55-421a-8cd0-af0508af6128` succeeded from a clean detached `936438b` worktree. Health is green and `TRAILHEAD_COMMUNITY_TRAILS_STAGE=internal`.
+- Unauthenticated live checks return `401 Authentication required` for both owner and moderator submission endpoints. Public Community discovery remains disabled.
+- First guarded preview run `30601268192` reached the full pre-preview suite. All 859 backend tests and the remaining mobile/copy/privacy gates passed; Android Auto unit dependency resolution alone failed because the GitHub Mapbox Maven credential returned `401 Unauthorized`.
+- A single secret-sync attempt proved the non-exportable EAS secret cannot be read outside an EAS builder. The empty GitHub replacement was removed immediately. No token value was printed, persisted, committed, or exposed to telemetry.
+- Corrective preview run `30602049498` stopped at the credential presence guard before validation or publication. No EAS update group was created by either failed run.
+- Mapbox DevKit confirms two account-side secret tokens with `downloads:read`, but secret values are intentionally unrecoverable. A new least-privilege `downloads:read` token must be created in Mapbox and stored as GitHub repository secret `RNMAPBOX_MAPS_DOWNLOAD_TOKEN` before one final guarded preview run.
+- No product P0/P1 was introduced. This is a CI credential blocker; production and public Community remain unchanged.
+
+### Exact next action
+
+1. Create a new Mapbox secret token named `TRAILHEAD_GITHUB_ACTIONS_DOWNLOAD_2026_07_R2` with only `downloads:read`.
+2. Store it directly in GitHub Actions as repository secret `RNMAPBOX_MAPS_DOWNLOAD_TOKEN`; do not paste it into chat, source, or a local file.
+3. Rerun the guarded paired preview once from `936438b`, then extract Android/iOS update identities and run only the bounded E4/E5 Android delta.
+
+### Do not repeat
+
+- Do not rerun the 859-test gate until the GitHub credential presence and Mapbox Maven authorization are known-good.
+- Do not weaken or skip the Android Auto dependency gate, reuse a public `pk.*` token for Maven, or attempt to extract the EAS build secret.
+
+## E2/E5 bounded device audit — actionable gaps (2026-07-30 23:06 CDT)
+
+- Branch `feat/trailhead-1.0.10-overhaul`; exact source HEAD `936438bd350744ff8c6fc6ebe83e6f9596bc6120`.
+- Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, Valhalla work, Android Auto scripts, and every unrelated dirty file remain excluded.
+- Samsung `SM-A326U1` (`RFCR408DA9B`) was connected and unlocked. This was a bounded Trail Discovery → Trail Peek → Full → 3D → Back pass, not a repeat of T1-T6, Layers, Offline, Memory, NPS, Originals, Android Auto, or broad Map testing.
+- Nearby discovery truthfully withheld partial/point-only records from the primary list, but its count read `113 trails` while no complete-route card was available. The state needs an honest map-record label rather than implying 113 list-ready routes.
+- Query `Yosemite` returned distant trail-name matches such as `Yosemite Border` instead of offering Yosemite as a destination scope. The mobile workspace currently sends only `q`; the existing `destination_ref` contract is not used by the backend. The approved Trail Discovery contract requires explicit destination/park selection without automatically opening a result.
+- Selecting complete route `Yosemite Border` opened the shared Peek and Full sheet, and 3D Preview followed the exact route with the yellow finish diamond. Back restored the same Peek. However, the ordinary selection remained over the prior Manitoba/Canada viewport until Preview; the resolved-route focus command is being superseded or missed.
+- Peek and Full repeat the generated fact sentence `1.6 miles. Point-to-point. Moderate. Hiking trail.` alongside the same structured metrics; Peek clips it and Full repeats it again under Route facts. This is redundant source-derived filler, not useful trail description.
+- Android full-sheet overflow showed only `Build route`, `Download for offline`, and `Preview in 3D`. Source inspection proves the other handlers are constructed after those entries, but React Native Android alerts expose at most three buttons. `Report`, `Suggest edit`, `Official website`, `Share`, and `Refresh details` are therefore unreachable. Replace this native alert with the approved controlled Trailhead action sheet; do not change the action layout concept.
+- Evidence SHA-256: Nearby state `e41e87fd5b4dfd5ea4782bf16ce3374c6f32cc2a44a20c55aa3a81e9a8fae523`; Yosemite results `88386e512e0f63a12776c0e0d873b2eb6f252a149f7a9b7973dc7f2fcd9ac429`; Peek `0a144595ed2a4df3c9aaec9aadff53e5b638b186463a54e5595becab3e0cfeb6`; Full `7befe6b482a8e8559742c15f3f039c4ed9fe502da67bf74c64ea68418ff24080`; 3D `305ec2edd6d026543e32357cf85d25cd77901136739e9f245223709134f5e45c`.
+- Design authority remains Figma Trail Discovery `779:2412`, Trail Peek `407:162`, Trail Full `520:782`, and Trailhead Full `520:872`. Existing AllTrails/Mobbin references remain behavioral evidence only; no new visual departure or external imagery is planned.
+
+### Exact next action
+
+1. Add explicit Search V2 destination suggestions to Trail Discovery. Selecting a destination freezes its canonical/temporary identity and coordinates for the trail request; typing alone never changes map scope or opens a result.
+2. Make the backend honor `destination_ref` and scoped center/bounds, while retaining canonical Trailhead trail ordering and Mapbox suggest/retrieve session rules.
+3. Replace the Android three-button alert with a controlled, scrollable Trailhead action sheet containing every available descriptor and stable test ID.
+4. Remove fact-only generated trail summaries when they merely repeat structured metrics. Preserve genuine editorial/source description.
+5. Fix one resolved-route camera ownership boundary, then run only Yosemite destination → route card → Peek/Full → every available action → 3D Back and map restoration.
+
+### Do not repeat
+
+- Do not reopen accepted Builder, GPX, trail-pack, Follow, recording, flyover playback, yellow finish marker, Trailhead sheets, or broad Search/Map audits.
+- Do not fabricate complete geometry, destination facts, access, comments, ratings, or source content. Do not auto-select a destination or trail.
+- Do not rerun the guarded 859-test preview gate until the GitHub Mapbox Maven credential is known-good.

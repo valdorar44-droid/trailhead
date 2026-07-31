@@ -98,7 +98,7 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 38
-        versionName "1.0.10"
+        versionName "1.0.11"
         manifestPlaceholders = [
             googleMapsApiKey: googleMapsApiKey,
             branchKey: branchApiKey,

@@ -67,11 +67,11 @@ const ciTriggerSource = ciWorkflow.slice(0, ciWorkflow.indexOf('\npermissions:')
 const mobileCiJob = workflowJobSource(ciWorkflow, 'mobile');
 const androidNativeCiJob = workflowJobSource(ciWorkflow, 'android-native');
 
-expect(pkg.version === '1.0.10', 'package.json must use marketing version 1.0.10.');
-expect(lockRoot?.version === '1.0.10', 'package-lock.json root version must use 1.0.10.');
-expect(config.version === '1.0.10', 'app.config.js must use marketing version 1.0.10.');
-expect(config.ios.runtimeVersion === 'native-1.0.10-ios.6', 'iOS runtime is not native-1.0.10-ios.6.');
-expect(config.android.runtimeVersion === 'native-1.0.10-android.7', 'Android runtime is not native-1.0.10-android.7.');
+expect(pkg.version === '1.0.11', 'package.json must use marketing version 1.0.11.');
+expect(lockRoot?.version === '1.0.11', 'package-lock.json root version must use 1.0.11.');
+expect(config.version === '1.0.11', 'app.config.js must use marketing version 1.0.11.');
+expect(config.ios.runtimeVersion === 'native-1.0.11-ios.1', 'iOS runtime is not native-1.0.11-ios.1.');
+expect(config.android.runtimeVersion === 'native-1.0.11-android.1', 'Android runtime is not native-1.0.11-android.1.');
 expect(
   easConfig.build.preview.env.EXPO_PUBLIC_BRANCH_ATTRIBUTION_ENABLED === 'false'
     && easConfig.build.production.env.EXPO_PUBLIC_BRANCH_ATTRIBUTION_ENABLED === 'false',
@@ -152,7 +152,7 @@ for (const pathPrefix of ['/originals', '/app', '/r', '/support', '/trips', '/pr
   expect(androidManifest.includes(`android:pathPrefix="${pathPrefix}"`), `Android app-link path is missing: ${pathPrefix}`);
 }
 expect(!androidManifest.includes('android:pathPrefix="/reset-password"'), 'Password-reset web forms must not be captured by Android.');
-expect(androidGradle.includes('versionName "1.0.10"'), 'Android versionName is not 1.0.10.');
+expect(androidGradle.includes('versionName "1.0.11"'), 'Android versionName is not 1.0.11.');
 expect(androidGradle.includes('androidx.car.app:app-projected:1.7.0'), 'Android Auto projected dependency changed or is missing.');
 expect(androidGradle.includes('@sentry/react-native/package.json'), 'Android Sentry source-map wiring is missing.');
 expect(
@@ -168,13 +168,13 @@ expect(
   !androidMainApplication.includes('RNBranchModule') && !androidMainActivity.includes('RNBranchModule'),
   'Do not duplicate Branch Expo adapter callbacks in Android app classes.',
 );
-contains('android/app/src/main/res/values/strings.xml', 'native-1.0.10-android.7', 'Android native runtime resource is stale.');
+contains('android/app/src/main/res/values/strings.xml', 'native-1.0.11-android.1', 'Android native runtime resource is stale.');
 
-expect(iosInfo.includes('<string>1.0.10</string>'), 'iOS Info.plist marketing version is stale.');
+expect(iosInfo.includes('<string>1.0.11</string>'), 'iOS Info.plist marketing version is stale.');
 expect(iosInfo.includes('<string>Automatic</string>'), 'iOS appearance must follow the app theme.');
 expect(iosInfo.includes('BarlowCondensed-SemiBold.ttf') && iosInfo.includes('BarlowCondensed-Bold.ttf'), 'iOS font registration is incomplete.');
 expect(iosInfo.includes('branch_key_not_configured'), 'Tracked iOS Branch key must remain an explicit non-secret placeholder.');
-expect(iosProject.match(/MARKETING_VERSION = 1\.0\.10;/g)?.length === 2, 'Xcode marketing versions are not both 1.0.10.');
+expect(iosProject.match(/MARKETING_VERSION = 1\.0\.11;/g)?.length === 2, 'Xcode marketing versions are not both 1.0.11.');
 expect(iosProject.includes('Branch.json in Resources'), 'Branch NativeLink configuration is not bundled.');
 expect(
   branchIosAppDelegateAdapter.includes('RNBranch.initSession(launchOptions: launchOptions, isReferrable: true)')
@@ -204,7 +204,7 @@ for (const pathPattern of ['/originals/*', '/app/*', '/r/*', '/support/*', '/tri
   expect(siteProxyWorker.includes(`'${pathPattern}'`), `Cloudflare association path is missing: ${pathPattern}`);
 }
 expect(!applePaths.some(path => String(path).startsWith('/reset-password')), 'Password-reset web forms must not be captured by iOS.');
-contains('ios/Trailhead/Supporting/Expo.plist', 'native-1.0.10-ios.6', 'iOS native runtime resource is stale.');
+contains('ios/Trailhead/Supporting/Expo.plist', 'native-1.0.11-ios.1', 'iOS native runtime resource is stale.');
 contains('ios/Trailhead/Branch.json', '"checkPasteboardOnInstall": true', 'Branch NativeLink pasteboard setting is missing.');
 contains('.gitignore', '*.mobileprovision', 'Mobile provisioning profiles must stay ignored.');
 expect(!source('.gitignore').split(/\r?\n/).includes('/ios/'), 'The authoritative iOS project is still ignored.');

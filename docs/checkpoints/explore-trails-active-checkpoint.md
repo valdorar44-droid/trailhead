@@ -363,3 +363,60 @@ Verify `git diff --cached --name-only` before every commit.
 
 - Do not repeat E2/E3 discovery, filters, Yellowstone, NPS, Trails T1–T6, Offline inventory, Layers, Memory, Originals, Android Auto, broad Map/sheet crawls, or Figma research.
 - Do not begin E5 moderation, Community public discovery, Verified promotion, or contribution credits until the Android E4 packet is accepted.
+
+## E4 Android sharing closeout checkpoint — 2026-07-30 20:57 CDT
+
+- Branch: `feat/trailhead-1.0.10-overhaul`; exact current HEAD `da519b373cd06d4467bd36eebc16cf4384699c39`.
+- Protected Explore-index Git object remains `f39f30fdbb33477dacd8fcf5016612a8729dc69e`.
+- `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, and all unrelated files remained unstaged.
+- Backend compatibility remains deployed with private trail routes internal and Community publication off.
+
+### Completed and published
+
+- Client sharing preflight now rejects sparse routes using the server's unchanged 25 km continuity rule and gives the owner a specific Trail Builder recovery action.
+- A valid 0.2 mi Builder route created a revision-pinned unlisted link, opened through the HTTPS landing page, resolved anonymously, and displayed the immutable view-only recipient state and main-map route.
+- Shared-link delivery is now a process-memory state machine. Duplicate OS delivery coalesces only while pending, resolving, or focused; reopening the same link after leaving the recipient revalidates it. Raw bearer tokens are cleared at consume and are not persisted, routed, logged, or placed in telemetry.
+- Preview source `ffe4e6251a17eb00c1163b6c04eeeb3f84368565` is live on Android build 69/runtime `native-1.0.10-android.7` and iOS runtime `native-1.0.10-ios.6`.
+- Android update: `019fb5df-72db-7230-bf5d-566d3eff9ffb`, group `7e30c7ba-db35-4468-8b8e-688dcf203d82`.
+- iOS update: `019fb5df-72db-7738-99f5-2e41aaf04081`, group `ff176349-52d6-415b-9493-71e12d6b835c`.
+- Candidate branch: `preview-candidate-ffe4e6251a17eb00c1163b6c04eeeb3f84368565-ms8a8bja-ccb89fc568711416a6616372`.
+- Sentry accepted Android, iOS, and web source maps before channel promotion.
+
+### Focused verification
+
+- `npm run test:trail-sharing`: 37 focused geometry, repository, handoff, contract, Plan, and link assertions passed.
+- Shared trail sheet flow, route-plan ownership, TypeScript, and scoped whitespace gates passed.
+- Android QA identity exactly matched version 1.0.10, build 69, source `ffe4e62`, preview channel, expected runtime, and update ID.
+- Intentional same-link reopen returned the ready recipient instead of `Shared route unavailable`.
+- Main Map rendered the exact shared route, title, compass, and view-only route state.
+
+### Deterministic remaining P1 and correction
+
+- On preview source `ffe4e62`, Android Back from the shared route Map returned to Explore instead of the recipient. The route and recipient cache remained correct; explicitly navigating to `/shared-trails` immediately restored the exact ready recipient.
+- Cause: the tab navigator reuses its existing Map route, so `router.back()` does not guarantee that the root recipient screen is immediately underneath it.
+- Evidence-backed correction `da519b373cd06d4467bd36eebc16cf4384699c39` changes only the matching shared-route Close/Back branch to `router.navigate('/shared-trails')`. The route/revision marker still prevents unrelated trails from returning there.
+- The correction passed the complete focused sharing gate, shared sheet flow, TypeScript, and whitespace checks. It is committed and pushed but not republished, honoring the one-correction/no-loop stop rule after the device assertion failed.
+
+### Evidence
+
+- Directory: `C:\Users\User\Documents\Codex\evidence\trailhead\explore-trails-e4-ffe4e62\android`.
+- Release identity XML SHA-256: `e91d1cb306bdacda1011e6a47560f52480eb17d8ea87b9cdfe1d63ef9956a482`.
+- Recipient reopen XML SHA-256: `3fc6751f2a1ad3f6c893111fa66e13fd7ee8b50689e9de2530f16e6571b37fb2`.
+- Shared Map XML SHA-256: `dea766c2e7423941ce46e81aa66dad2ab8607a9447ca90ea499629366de87f5f`.
+- Failed Back result XML SHA-256: `ae406ee1d916800194c9c851517d5c9399713d69a0a741bf251050e5c72240cb`.
+- Explicit recipient navigation XML SHA-256: `3fc6751f2a1ad3f6c893111fa66e13fd7ee8b50689e9de2530f16e6571b37fb2`.
+- Evidence XML contains no raw share token. A temporary Chrome hierarchy containing the URL fragment was deleted and is not retained.
+
+### Exact next action
+
+1. Publish one paired preview OTA from immutable source `da519b3` with Sentry source maps.
+2. On Android, rerun only shared recipient → Open on map → one Back. It must restore the exact ready recipient.
+3. If that passes, verify Save a copy once, then owner Stop sharing and one revoked-link assertion.
+4. Record final Android E4 acceptance and stop for user review before physical iOS proof or E5 moderation.
+
+### Do not repeat
+
+- Do not repeat E2/E3 discovery, Yellowstone, NPS, Trails T1–T6, Offline, Layers, Memory, Originals, Android Auto, broad Map/sheets, Figma research, or the already-passing link creation/opening assertions.
+- Do not weaken geometry, authorization, token, revision, or privacy safeguards to make the preview pass.
+- Do not begin E5 public Community moderation, promotion, or credits until E4 Android is accepted.
+- Task-owned Metro, Gradle, Maestro, publisher, and test processes: none.

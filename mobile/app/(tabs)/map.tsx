@@ -28192,7 +28192,9 @@ function MapScreen() {
           : '';
         const trustLabel = [sourceName, checkedLabel ? `updated ${checkedLabel}` : ''].filter(Boolean).join(' · ');
         const communityTrust = selectedTrail.catalog === 'community' ? selectedTrail.community : undefined;
-        const areaLabel = selectedTrailProfile?.area_name || selectedTrail.subtitle || '';
+        const areaLabel = selectedTrailProfile?.area_name
+          || trailSummaryForDisplay(selectedTrail.subtitle)
+          || '';
         const identityMeta = [areaLabel, distanceLabel !== '--' ? distanceLabel : ''].filter(Boolean).join(' · ');
         const peekMetrics = [
           isTrailhead ? { label: 'TYPE', value: 'Trail access' } : { label: 'ROUTE', value: routeType },

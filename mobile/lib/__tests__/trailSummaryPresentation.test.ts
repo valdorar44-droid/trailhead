@@ -6,6 +6,7 @@ import { trailSummaryForDisplay } from '../trailSummaryPresentation';
 test('fact-only generated trail summaries are omitted', () => {
   assert.equal(trailSummaryForDisplay('1.6 miles. Point-to-point. Moderate. Hiking trail.'), '');
   assert.equal(trailSummaryForDisplay('3 mi · Loop · Easy · Biking trail'), '');
+  assert.equal(trailSummaryForDisplay('0.9 miles. Point-to-point. Moderate. Bike trail. · 0.9 mi'), '');
 });
 
 test('real trail descriptions remain available', () => {

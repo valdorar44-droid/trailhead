@@ -1,5 +1,5 @@
 const BLOCKED_TRAIL_SUMMARY = /mapped trail|nearby support context|check (?:current )?access|local rules|scouting lead|trailhead generated/i;
-const FACT_ONLY_TRAIL_SUMMARY_PART = /^(?:\d+(?:\.\d+)?\s*(?:mi|miles?|km|kilomet(?:er|re)s?)|loop|out\s*(?:and|&)\s*back|point(?:\s|-)*to(?:\s|-)*point|easy|moderate|hard|(?:hiking|walking|biking|cycling|horseback|equestrian|ohv|4wd|mixed(?:\s|-)*use)(?:\s+trail)?)$/i;
+const FACT_ONLY_TRAIL_SUMMARY_PART = /^(?:\d+(?:\.\d+)?\s*(?:mi|miles?|km|kilomet(?:er|re)s?)|loop|out\s*(?:and|&)\s*back|point(?:\s|-)*to(?:\s|-)*point|easy|moderate|hard|(?:hiking|walking|bike|biking|cycling|horseback|equestrian|ohv|4wd|mixed(?:\s|-)*use)(?:\s+trail)?)$/i;
 
 /**
  * Trail facts already have dedicated metric rows. Keep only genuine editorial

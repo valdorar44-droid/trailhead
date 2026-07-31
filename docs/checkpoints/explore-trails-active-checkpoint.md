@@ -994,3 +994,24 @@ Verify `git diff --cached --name-only` before every commit.
 1. Resume at 172 rich parks and 302 remaining. Run only a new untouched-code batch.
 2. Keep `b06` isolated pending internal device-preview acceptance and manual image/module review.
 3. Do not refetch batches 1-6 or promote generated data automatically.
+
+## iOS 1.0.11 App Store Connect upload — 2026-07-31 16:31 CDT
+
+- User explicitly authorized iOS submission and will handle Android submission independently. No Android Play Console action, Android OTA, or replacement build was performed.
+- Submitted the exact frozen iOS production build by EAS build ID `712109e9-6b7f-4f72-ab51-2aa42a6095da`: Trailhead `1.0.11`, build `62`, runtime `native-1.0.11-ios.1`, source `0f7431d32088405f4c381ed1a220fcb2169ec761`.
+- EAS submission `ea91a45b-e545-4492-89b6-7b98e6bbfcfa` finished successfully for App Store Connect app `6763677349`. This confirms the binary upload; App Store Connect processing and the separate App Review state must be checked in Apple's console.
+- No new native build was started. The release worktree's build-generated native metadata changes were left untouched rather than staged, reset, or used as submission source.
+- Neither available browser had an authenticated App Store Connect session, so no unsupported claim was made that Apple's separate `Submit for Review` action had completed.
+- Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; App Store copy SHA-256 remains `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+- Task-owned EAS submit, Metro, Gradle, Maestro, publisher, enrichment, and test processes: none.
+
+### Exact next action
+
+1. Continue isolated Explore/NPS data-depth work from candidate `b06` without touching the live serving index.
+2. Use non-network data-quality review first; only start a new NPS fetch batch after the hourly API window is safe.
+3. Keep the internal Android Explore-preview blocker checkpointed until new request-level evidence exists; do not publish another speculative OTA.
+
+### Do not repeat
+
+- Do not resubmit build `62`, start another production build, submit Android, publish a production OTA, or modify App Store review/release settings without new authorization/evidence.
+- Do not rerun NPS batches 1-6, completed Trails/3D/Builder/Offline/Follow work, broad Map/Layer/Memory crawls, or the Android internal-preview loop.

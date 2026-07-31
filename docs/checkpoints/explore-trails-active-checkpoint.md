@@ -599,3 +599,51 @@ Verify `git diff --cached --name-only` before every commit.
 - Do not repeat Trails T1–T6, E1/E3 research, broad Search, Yellowstone, NPS, Offline inventory, Layers, Memory, Originals, Android Auto, full Map/sheet crawls, Figma research, or the 859-test gate before the credential is valid.
 - Do not weaken the Android Auto/Mapbox Maven gate, use a public `pk.*` token for Maven, auto-select destinations, fabricate complete route geometry, or expose Community as Verified.
 - Task-owned Metro, Gradle, Maestro, publisher, test, and device-helper processes: none. Railway deployment is complete and no local process remains running.
+
+## E2/E5 final paired-preview device checkpoint - 2026-07-31 01:44 CDT
+
+- Branch: `feat/trailhead-1.0.10-overhaul`; exact tested HEAD `35d8608814097aad38929d9cc001439648970ba7`, pushed to `origin/feat/trailhead-1.0.10-overhaul`.
+- Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. User-owned App Store copy SHA-256 remains `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`. `.cursor/`, `dashboard/explore_serving_index_v2.json`, and `docs/app-store-copy.md` remain unstaged and untouched.
+- The replacement Mapbox token `TRAILHEAD_GITHUB_ACTIONS_DOWNLOAD_2026_07_R2` was created with only `downloads:read` and stored directly as GitHub repository secret `RNMAPBOX_MAPS_DOWNLOAD_TOKEN`. Token metadata ID is `cms8gqmel0dtv2wogun0d5e48`; the token value was never printed, persisted, committed, screenshotted, or added to telemetry.
+- Railway remains healthy on deployed backend source `3d6305667929ba19840c05192fc4ea8837c18b6f`. No backend change followed the accepted destination/sheet-action deployment.
+
+### Paired preview identity
+
+- Guarded GitHub preview run `30609257206` passed in 18m36s from immutable source `35d8608814097aad38929d9cc001439648970ba7`.
+- Candidate branch: `preview-candidate-35d8608814097aad38929d9cc001439648970ba7-ms8kebwj-7f1121572b8657b593aea91f`.
+- Preview channel ID: `019dbc97-3cde-795b-a35d-e6aa985060d3`; promotion branch ID: `019fb6e3-ef8e-7e1a-9b88-309d21d131f1`.
+- Android group `7d9cbe9d-0a85-4ab0-8d9d-28413583a4c6`, update `019fb6e4-0703-77b1-9f01-37d2a932cd29`, runtime `native-1.0.10-android.7`.
+- iOS group `8c28dbdd-b4f2-45f5-9087-4d2cf01c5bee`, update `019fb6e4-0703-7593-82e7-384144d8798c`, runtime `native-1.0.10-ios.6`.
+- Samsung `SM-A326U1` (`RFCR408DA9B`) reported app `1.0.10`, build `69`, preview channel, full source SHA `35d8608814097aad38929d9cc001439648970ba7`, Android runtime `.7`, and the exact final update ID above.
+
+### Focused corrections and verification
+
+- Commit `7197355201f399a73e7c0435382c92c389ea67cc` removes repeated bike-trail metric summaries without removing genuine editorial/source descriptions.
+- Commit `a1f3ca39807272e8d8a4807c15a3261bb8c1473e` captures renderer-live viewport bounds before entering 3D instead of relying only on stale React viewport state.
+- Commit `35d8608814097aad38929d9cc001439648970ba7` gives an actively selected, identity-matched trail route `route_review` camera ownership while retaining ordinary browse rendering and pins.
+- Focused `test:explore-trails`, `test:trail-preview`, and TypeScript `npx tsc --noEmit` passed before final publication. The guarded preview additionally passed the complete protected pre-preview suite and Sentry source-map delivery.
+- Android final assertion passed: Explore -> Trails -> explicit `Yosemite National Park` destination -> `Spur From 19E58` immediately framed the actual resolved route, retained the shared Peek/Full sheet, and showed the clean nonduplicated source facts.
+- Android final assertion passed: the controlled More sheet exposed Preview in 3D, Download for offline, Build route, Report, Suggest edit, Share, and Refresh details. No native three-button truncation remained.
+- Android final assertion passed: 3D used the actual 0.9-mile route, deterministic progress, the approved finish marker, and the existing main-map renderer.
+- Android final assertion failed: `Back` from 3D restored the correct Full sheet and trail identity but returned the camera to a broad Wyoming viewport instead of the exact route-framed Yosemite viewport. This is an unresolved P1. Per the bounded no-loop rule, no fourth speculative OTA was created.
+- iOS received the exact paired update but has not received this packet's physical spot check. Do not claim iOS acceptance yet.
+
+### Evidence
+
+- QA identity: `C:\\Users\\User\\.codex\\tmp\\qa-35d8608.png`, SHA-256 `5d289a80369cefBDD1c43e24bb658eefc94df22900d1bb3a6fa27e3731f378bd`.
+- Resolved-route framing pass: `C:\\Users\\User\\.codex\\tmp\\trail-framed-35d8608.png`, SHA-256 `5d98ba639db77abafB27368e446d4c180e9c1506ac707c7b75259a548c81ace2`.
+- Full-sheet pre-preview state: `C:\\Users\\User\\.codex\\tmp\\trail-full-final.png`, SHA-256 `097ae84a271d92d7b5fcf1358cf5b04d9a302859f3304b6e1aec5b6c902f3ba2`.
+- Deterministic 3D route: `C:\\Users\\User\\.codex\\tmp\\trail-3d-final.png`, SHA-256 `3d8bce43b642323a6c7cf1cac7f16b3f03cd87870b31c2b98ab650cdbecca372a`.
+- 3D Back camera failure: `C:\\Users\\User\\.codex\\tmp\\trail-back-35d8608.png`, SHA-256 `2e5ce692b80f88bb75f8abcc45768fad642a24fd88c8c9c7414e4e0a8257722d`.
+
+### Exact next action
+
+1. Treat 3D Back restoration as one isolated P1. Inspect the captured live bounds and the subsequent camera-owner command sequence once; determine which identity writes the broad Wyoming bounds.
+2. Add a deterministic camera-command regression assertion before changing source. Apply one evidence-backed correction, publish one paired preview, and rerun only Preview in 3D -> Back from the already-scoped Yosemite trail.
+3. After that assertion passes, perform the shared iOS E2/E5 spot check from the identical SHA and close the packet. Only then begin E4 private-route sharing and E5 moderator-state device assertions.
+
+### Do not repeat
+
+- Do not repeat destination search ranking, route cards, Peek/Full hydration, More-action reachability, Trails T1-T6, Builder, GPX, Offline, Follow, recording, Yellowstone, NPS, Layers, Memory, Originals, Android Auto, broad Map/sheet crawls, Figma research, or the protected suite before source changes.
+- Do not auto-select destinations, fabricate geometry/access facts, expose Community as Verified, weaken the Mapbox credential gate, or create another speculative camera OTA.
+- Task-owned Metro, Gradle, Maestro, publisher, tests, Railway deploys, and device-helper processes: none. Four Codex-owned MCP `node ./mcp/server.cjs --stdio` processes remain and must not be stopped. The Android ADB server is the only device transport still running.

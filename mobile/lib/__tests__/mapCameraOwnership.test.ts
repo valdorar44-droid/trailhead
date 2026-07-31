@@ -8,6 +8,7 @@ import {
   initialMapCameraClaimState,
   mapCameraOwnerPriority,
   synchronizeMapCameraClaimOwnership,
+  trailRouteReviewCameraExperienceKey,
 } from '../mapCameraOwnership';
 
 test('camera owner priority keeps safety-sensitive experiences in front', () => {
@@ -58,6 +59,30 @@ test('a user gesture cancels automatic reapplication until the experience change
   const nextOwnership = createMapCameraOwnership('originals', 'originals:moab:2');
   const nextVersion = consumeMapCameraClaim(cancelled.state, nextOwnership, 'style:1:route:2');
   assert.equal(nextVersion.apply, true);
+});
+
+test('trail route-review ownership stays stable while geometry hydrates', () => {
+  const experienceKey = trailRouteReviewCameraExperienceKey('trail:yosemite:19e58');
+  const initialOwnership = createMapCameraOwnership('route_review', experienceKey);
+  let state = consumeMapCameraClaim(
+    initialMapCameraClaimState(),
+    initialOwnership,
+    'style:1:geometry:pending',
+  ).state;
+  state = cancelMapCameraClaimForGesture(state, initialOwnership);
+
+  const hydratedOwnership = createMapCameraOwnership(
+    'route_review',
+    trailRouteReviewCameraExperienceKey('trail:yosemite:19e58'),
+  );
+  const hydrated = consumeMapCameraClaim(
+    state,
+    hydratedOwnership,
+    'style:1:geometry:sha256-resolved',
+  );
+
+  assert.equal(hydratedOwnership.experienceKey, experienceKey);
+  assert.equal(hydrated.apply, false);
 });
 
 test('browse never consumes an automatic camera claim', () => {

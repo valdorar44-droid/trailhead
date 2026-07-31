@@ -70,6 +70,8 @@ assert.match(nativeMap, /markUserCameraGesture\('touch-start', \{\}, !navMode\)/
 assert.match(nativeMap, /const userDriven = !programmatic && \(/);
 assert.match(map, /kind: 'trail-camera:parent-gesture'/);
 assert.match(map, /kind: 'trail-camera:route-button'/);
+assert.match(map, /trailRouteReviewCameraExperienceKey\(selectedTrail\?\.system_v2_id \?\? selectedTrail\?\.id\)/);
+assert.doesNotMatch(map, /mapCameraExperienceKey = trailSelectionOwnsCamera[\s\S]{0,240}geometry_revision/);
 
 assert.equal(transitionTrailFollowCamera('follow', 'route_button'), 'route_overview');
 assert.equal(transitionTrailFollowCamera('route_overview', 'gesture'), 'free');

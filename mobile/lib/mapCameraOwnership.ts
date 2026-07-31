@@ -53,6 +53,10 @@ export function mapCameraOwnershipKey(ownership: MapCameraOwnership): string {
   return `${ownership.owner}:${ownership.experienceKey ?? 'none'}`;
 }
 
+export function trailRouteReviewCameraExperienceKey(trailIdentity: string | null | undefined): string {
+  return `trail:${trailIdentity?.trim() || 'selected'}`;
+}
+
 export function initialMapCameraClaimState(): MapCameraClaimState {
   return {
     ownershipKey: mapCameraOwnershipKey(BROWSE_MAP_CAMERA_OWNERSHIP),

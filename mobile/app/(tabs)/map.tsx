@@ -292,6 +292,7 @@ import {
   initialMapCameraClaimState,
   mapCameraOwnershipKey,
   synchronizeMapCameraClaimOwnership,
+  trailRouteReviewCameraExperienceKey,
 } from '@/lib/mapCameraOwnership';
 import {
   captureTrailPreviewReturnCamera,
@@ -7885,7 +7886,10 @@ function MapScreen() {
   const trailSelectionOwnsCamera = mapExperienceMode === 'browse' && Boolean(selectedTrail);
   const mapCameraOwnerMode = trailSelectionOwnsCamera ? 'route_review' : mapExperienceMode;
   const mapCameraExperienceKey = trailSelectionOwnsCamera
-    ? `trail:${selectedTrail?.system_v2_id ?? selectedTrail?.id ?? 'selected'}:${selectedTrail?.geometry_revision ?? 'pending'}`
+    // Geometry can arrive after the sheet opens. Keep the experience owner stable
+    // so that hydration cannot erase a user's camera gesture; route/style revisions
+    // remain part of the idempotent camera application key below.
+    ? trailRouteReviewCameraExperienceKey(selectedTrail?.system_v2_id ?? selectedTrail?.id)
     : mapExperienceMode === 'originals'
     ? `originals:${originalsMapExperience.packId}:${originalsMapExperience.version}`
     : mapExperienceMode === 'route_build' || mapExperienceMode === 'route_review'

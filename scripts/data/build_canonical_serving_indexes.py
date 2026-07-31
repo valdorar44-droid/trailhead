@@ -792,6 +792,77 @@ def explore_filter_coverage(items: list[dict[str, Any]]) -> tuple[dict[str, int]
     return filter_counts, sorted(name for name, count in filter_counts.items() if count == 0)
 
 
+def merge_explore_record_context(primary: dict[str, Any], supplemental: dict[str, Any]) -> dict[str, Any]:
+    """Preserve complementary official facts when two sources describe one place."""
+    merged = dict(primary)
+    primary_image = compact(primary.get("image_url"))
+    supplemental_image = compact(supplemental.get("image_url"))
+    supplemental_provenance = supplemental.get("provenance") if isinstance(supplemental.get("provenance"), dict) else {}
+    supplemental_primary = supplemental_provenance.get("primary") if isinstance(supplemental_provenance.get("primary"), dict) else {}
+    if not primary_image and supplemental_image:
+        merged["image_url"] = supplemental_image
+        merged["media_kind"] = compact(supplemental.get("media_kind")) or "photo"
+        merged["image_credit"] = (
+            compact(supplemental.get("image_credit"))
+            or compact(supplemental_primary.get("attribution"))
+        )
+        merged["image_license"] = (
+            compact(supplemental.get("image_license"))
+            or compact(supplemental_primary.get("license"))
+        )
+        merged["image_source_url"] = (
+            compact(supplemental.get("image_source_url"))
+            or compact(supplemental_primary.get("url"))
+            or compact(supplemental.get("source_url"))
+        )
+
+    facts: list[dict[str, Any]] = []
+    fact_keys: set[tuple[str, str]] = set()
+    for fact in [*(primary.get("planning_facts") or []), *(supplemental.get("planning_facts") or [])]:
+        if not isinstance(fact, dict) or not compact(fact.get("value")):
+            continue
+        key = (compact(fact.get("key") or fact.get("label")).casefold(), compact(fact.get("value")).casefold())
+        if key in fact_keys:
+            continue
+        fact_keys.add(key)
+        facts.append(dict(fact))
+    if facts:
+        merged["planning_facts"] = facts
+
+    primary_provenance = primary.get("provenance") if isinstance(primary.get("provenance"), dict) else {}
+    provenance = dict(primary_provenance)
+    sources: list[dict[str, Any]] = []
+    source_keys: set[tuple[str, str, str]] = set()
+    raw_sources = [
+        *((primary_provenance.get("sources") or []) if isinstance(primary_provenance.get("sources"), list) else []),
+        *((supplemental_provenance.get("sources") or []) if isinstance(supplemental_provenance.get("sources"), list) else []),
+    ]
+    primary_primary = primary_provenance.get("primary") if isinstance(primary_provenance.get("primary"), dict) else {}
+    if primary_primary:
+        raw_sources.append(primary_primary)
+    if supplemental_primary:
+        raw_sources.append(supplemental_primary)
+    for source in raw_sources:
+        if not isinstance(source, dict):
+            continue
+        key = (
+            compact(source.get("source")).casefold(),
+            compact(source.get("source_id")).casefold(),
+            compact(source.get("url")).casefold(),
+        )
+        if key in source_keys:
+            continue
+        source_keys.add(key)
+        sources.append(dict(source))
+    if sources:
+        provenance["sources"] = sources
+    if provenance:
+        merged["provenance"] = provenance
+    merged["verified"] = bool(primary.get("verified") or supplemental.get("verified"))
+    merged["checked_at"] = max(int(primary.get("checked_at") or 0), int(supplemental.get("checked_at") or 0))
+    return merged
+
+
 def dedupe_explore_records(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     by_id: dict[str, tuple[int, dict[str, Any]]] = {}
     without_id: list[tuple[int, dict[str, Any]]] = []
@@ -801,8 +872,13 @@ def dedupe_explore_records(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             without_id.append((index, item))
             continue
         existing = by_id.get(item_id)
-        if not existing or explore_sort_key(item) < explore_sort_key(existing[1]):
-            by_id[item_id] = (existing[0] if existing else index, item)
+        if not existing:
+            by_id[item_id] = (index, item)
+            continue
+        if explore_sort_key(item) < explore_sort_key(existing[1]):
+            by_id[item_id] = (existing[0], merge_explore_record_context(item, existing[1]))
+        else:
+            by_id[item_id] = (existing[0], merge_explore_record_context(existing[1], item))
 
     by_key: dict[str, tuple[int, dict[str, Any]]] = {}
     passthrough: list[tuple[int, dict[str, Any]]] = []
@@ -812,8 +888,13 @@ def dedupe_explore_records(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             passthrough.append((index, item))
             continue
         existing = by_key.get(key)
-        if not existing or explore_sort_key(item) < explore_sort_key(existing[1]):
-            by_key[key] = (existing[0] if existing else index, item)
+        if not existing:
+            by_key[key] = (index, item)
+            continue
+        if explore_sort_key(item) < explore_sort_key(existing[1]):
+            by_key[key] = (existing[0], merge_explore_record_context(item, existing[1]))
+        else:
+            by_key[key] = (existing[0], merge_explore_record_context(existing[1], item))
     return [item for _, item in sorted([*passthrough, *by_key.values()], key=lambda pair: pair[0])]
 
 
@@ -1495,6 +1576,12 @@ def build_explore_index(
             enrichment_place["description"] = description
         enriched = enrich_place_dict(enrichment_place)
         lat_value, lng_value = valid_point(lat, lng)
+        image_url = primary_media_url(enriched)
+        media_items = [media for media in enriched.get("media") or [] if isinstance(media, dict)]
+        primary_media = next(
+            (media for media in media_items if compact(media.get("url")) == image_url),
+            media_items[0] if media_items else {},
+        )
         item = {
             "id": place.get("id"),
             "title": title,
@@ -1504,7 +1591,10 @@ def build_explore_index(
             "lng": round(lng_value, 7) if lng_value is not None else None,
             "rank": summary.get("rank"),
             "description": description,
-            "image_url": primary_media_url(enriched),
+            "image_url": image_url,
+            "image_credit": compact(primary_media.get("credit") or primary_media.get("attribution")),
+            "image_license": compact(primary_media.get("license")),
+            "image_source_url": compact(primary_media.get("source_url") or primary_media.get("url")),
             "media_kind": enriched["media_kind"],
             "source_url": compact(
                 summary.get("source_url")

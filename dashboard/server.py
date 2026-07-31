@@ -3753,6 +3753,9 @@ def _promoted_explore_item_to_profile(item: dict, index: int, existing: dict | N
     if not description:
         description = _official_cache_description_fallback(title, category_label, "")
     image_url = _safe_explore_image_url(item.get("image_url"))
+    image_credit = str(item.get("image_credit") or "").strip()
+    image_license = str(item.get("image_license") or "").strip()
+    image_source_url = str(item.get("image_source_url") or item.get("source_url") or "").strip()
     try:
         lat = float(item.get("lat"))
         lng = float(item.get("lng"))
@@ -3786,7 +3789,7 @@ def _promoted_explore_item_to_profile(item: dict, index: int, existing: dict | N
             "access": "",
             "safety": "",
             "amenities": [],
-            "media": ([{"url": image_url, "caption": title, "credit": "", "license": ""}] if image_url else []),
+            "media": ([{"url": image_url, "caption": title, "credit": image_credit, "license": image_license}] if image_url else []),
             "card": {"title": title, "headline": title, "summary": description, "highlight": description, "region": "", "facts": [category_label]},
             "summary": {
                 "id": place_id,
@@ -3805,8 +3808,8 @@ def _promoted_explore_item_to_profile(item: dict, index: int, existing: dict | N
                 "short_description": description,
                 "thumbnail_url": image_url,
                 "image_url": image_url,
-                "image_credit": "",
-                "image_license": "",
+                "image_credit": image_credit,
+                "image_license": image_license,
                 "source_url": str(item.get("source_url") or ""),
                 "source_title": "Trailhead",
             },
@@ -3858,6 +3861,8 @@ def _promoted_explore_item_to_profile(item: dict, index: int, existing: dict | N
         "short_description": description,
         "image_url": image_url or summary.get("image_url") or "",
         "thumbnail_url": image_url or summary.get("thumbnail_url") or "",
+        "image_credit": image_credit or summary.get("image_credit") or "",
+        "image_license": image_license or summary.get("image_license") or "",
         "source_title": source_label,
         "source_url": str(item.get("source_url") or summary.get("source_url") or ""),
     })
@@ -3872,6 +3877,9 @@ def _promoted_explore_item_to_profile(item: dict, index: int, existing: dict | N
         card["facts"] = fact_values[:4]
     if area and not card.get("region"):
         card["region"] = area
+    if image_url:
+        card["image_url"] = image_url
+        card["thumbnail_url"] = image_url
     profile["card"] = card
     source_pack = dict(profile.get("source_pack") or {})
     source_pack.update({
@@ -3879,6 +3887,17 @@ def _promoted_explore_item_to_profile(item: dict, index: int, existing: dict | N
         "official_url": str(item.get("source_url") or source_pack.get("official_url") or ""),
         "sources": public_sources,
     })
+    if image_url:
+        photos = [photo for photo in source_pack.get("photos") or [] if isinstance(photo, dict)]
+        if not any(str(photo.get("url") or "") == image_url for photo in photos):
+            photos.insert(0, {
+                "url": image_url,
+                "caption": title,
+                "credit": image_credit,
+                "license": image_license,
+                "source_url": image_source_url,
+            })
+        source_pack["photos"] = photos
     profile["source_pack"] = source_pack
     profile["sources"] = public_sources
     profile["quality"] = str(item.get("enrichment_grade") or profile.get("quality") or "")

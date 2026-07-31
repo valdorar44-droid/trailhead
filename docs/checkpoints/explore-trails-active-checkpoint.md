@@ -1170,3 +1170,29 @@ Verify `git diff --cached --name-only` before every commit.
 - Do not rerun NPS batch 8, its 28 codes, media audit, agency cache rebuild, internal-preview handoff, App Store upload, or existing Android proof.
 - Do not submit Android, publish production OTA, promote candidates, expose Community routes, overwrite protected files, or change public stages without separate authorization.
 - Do not stage `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, or unrelated worktree changes.
+
+## Combined NPS and agency serving-candidate gate - 2026-07-31 18:10 CDT
+
+- Branch: `feat/trailhead-1.0.10-overhaul`; implementation HEAD `a6430b0848f24e5053d09790fbcb3f6722fc08cb`. Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; App Store copy SHA-256 remains `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+- Rebuilt the Sierra/USFS and Moab/BLM candidate from its cached official sources with zero network requests after correcting the Sierra hub sentence. The reader-facing summary now stays intact through public-copy cleanup: `Sierra National Forest supports camping, hiking, biking, horseback riding, fishing, winter travel and motorized routes across its mountain landscape.`
+- The first combined audit correctly exposed two candidate-construction defects before promotion: the 729-place NPS wrapper also carried unrelated OSM/BLM seed records, and the child-copy auditor treated intentionally omitted descriptions as failures. NPS input is now scoped to the 474 stable `place:nps:*` identities, and the audit uses the same category/group precedence as the shared sanitizer. Sparse child records retain their official title, map point, source and action without invented prose.
+- Isolated combined artifacts are under `data/explore/audit_candidates/combined/live-20260731-b08`. The full catalog review contains 993 unique profiles: 886 live profiles, 474 exact NPS replacements, one exact agency replacement, and 107 new agency profiles. It contains 633 source packs and 831 profiles with media.
+- The compact serving review contains 5,435 unique reviewable items and passes the unchanged 4,000-item gate. Relative to the protected live index it adds 104 accepted agency identities. Five older RIDB campground cards are deterministically displaced by higher-quality USDA Forest Service identities for the same places; no record is silently deleted from source artifacts.
+- Serving-quality checks report zero invalid coordinates, missing titles, missing descriptions, non-HTTPS images, developer copy, newly added generic `Check...` copy, missing source URLs, or missing provenance. Fuel and resupply remain known pre-existing filter gaps and were not fabricated in this packet.
+- Combined artifact hashes: full catalog `22d68ba8bc676ff5c29a2282a7c3d4908d87530dd41bcc4c4e1ec02e75ccb884`; serving review `60dc1969c38dcaa05ed0d5320cc2725f973caa7491a641ea8a7f488c80d684f8`; promotion review `d572a29ed8590389b983f60b39a8cd8f2f485c2f01713a2bc448f8a71e997c72`; manifest `1bf4f2f8c041b4c3383ebde0380a0dbde7ada7e60613208d610e91ade3a316ae`. Rebuilt agency manifest SHA-256 is `cb6cde869220151af587f7e1d99640d5f6886ca8b8d20367ca49244b6e25558e`.
+- Verification passed: 22 focused agency/content-quality tests, 72 NPS/Explore serving/source tests, Python compilation, whitespace checks, the app-facing content-quality audit, and the Explore scenario matrix. The matrix has no dead ends; the only warning is pre-existing Iceland coverage that still uses seed context and lacks current freshness metadata.
+- This packet changed only the agency summary generator, the catalog-quality audit alignment, and their focused regression tests. No mobile code, backend deployment, preview/production OTA, serving-index write, public data promotion, Community stage change, or Android production action occurred.
+- Task-owned Railway, NPS enrichment, EAS, Expo, Metro, Gradle, Maestro, publisher, and test processes: none.
+
+### Exact next action
+
+1. Keep the combined candidate isolated and prepare a bounded internal preview artifact from the accepted 993-profile/5,435-item pair; do not replace the protected live catalog or index.
+2. Review the five RIDB-to-USFS campground replacements and a small Android destination sample before intentional promotion.
+3. Record Iceland freshness as a separate future source-expansion packet rather than weakening this U.S. agency gate.
+4. Continue with the next untouched NPS batch only after a new request window and a fresh forward checkpoint.
+
+### Do not repeat
+
+- Do not repeat NPS batch 8, the agency cache rebuild, combined candidate construction, child-copy failure flood, media audit, or previous internal handoff proof.
+- Do not submit Android, publish production OTA, overwrite the protected serving index or catalog, promote data, expose Community routes, or change public stages without separate authorization.
+- Do not stage `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, or unrelated worktree changes.

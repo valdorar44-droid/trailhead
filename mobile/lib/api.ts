@@ -23,6 +23,15 @@ import {
   resolveLegacyTripSaveToken,
 } from './legacyTripSaveContext';
 import { ridbFacilityIdFromCanonicalCampId } from './campDetailIdentity';
+import type {
+  OwnedTrailRouteCreateV1,
+  OwnedTrailRouteUpdateV1,
+  OwnedTrailRouteSummaryV1,
+  OwnedTrailRouteV1,
+  SharedTrailRouteV1,
+  TrailRouteRevokeMutationV1,
+  TrailRouteShareMutationV1,
+} from './trailRouteSharing';
 
 const BASE = TRAILHEAD_API_BASE;
 export type WeatherUnitMode = 'auto' | 'imperial' | 'metric';
@@ -1462,6 +1471,49 @@ export const api = {
     req<TrailPreviewResponseV2>(`/api/trails/v2/${encodeURIComponent(trailId)}/preview`),
   getTrailPreview: (trailId: string) =>
     req<TrailPreviewManifest>(`/api/trails/${encodeURIComponent(trailId)}/preview`),
+  createOwnedTrailRoute: (data: OwnedTrailRouteCreateV1, idempotencyKey: string, authToken: string | null) =>
+    reqWithToken<OwnedTrailRouteV1>('/api/trail-routes', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify(data),
+    }, authToken),
+  listOwnedTrailRoutes: (limit = 100) =>
+    req<{ version: 1; routes: OwnedTrailRouteSummaryV1[] }>(`/api/trail-routes?limit=${Math.max(1, Math.min(200, Math.round(limit)))}`),
+  getOwnedTrailRoute: (routeId: string, authToken: string | null) =>
+    reqWithToken<OwnedTrailRouteV1>(`/api/trail-routes/${encodeURIComponent(routeId)}`, {}, authToken),
+  updateOwnedTrailRoute: (routeId: string, data: OwnedTrailRouteUpdateV1, idempotencyKey: string, authToken: string | null) =>
+    reqWithToken<OwnedTrailRouteV1>(`/api/trail-routes/${encodeURIComponent(routeId)}`, {
+      method: 'PATCH',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify(data),
+    }, authToken),
+  deleteOwnedTrailRoute: (routeId: string, expectedRevision: number, idempotencyKey: string) =>
+    req<{ id: string; revision: number; deleted: true }>(
+      `/api/trail-routes/${encodeURIComponent(routeId)}?expected_revision=${Math.max(1, Math.round(expectedRevision))}`,
+      { method: 'DELETE', headers: { 'Idempotency-Key': idempotencyKey } },
+    ),
+  createOwnedTrailShareLink: (
+    routeId: string,
+    expectedRevision: number,
+    mode: 'create' | 'replace',
+    idempotencyKey: string,
+    authToken: string | null,
+  ) => reqWithToken<TrailRouteShareMutationV1>(`/api/trail-routes/${encodeURIComponent(routeId)}/share-link`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify({ expected_revision: expectedRevision, mode }),
+  }, authToken),
+  revokeOwnedTrailShareLink: (routeId: string, expectedRevision: number, idempotencyKey: string, authToken: string | null) =>
+    reqWithToken<TrailRouteRevokeMutationV1>(
+      `/api/trail-routes/${encodeURIComponent(routeId)}/share-link?expected_revision=${Math.max(1, Math.round(expectedRevision))}`,
+      { method: 'DELETE', headers: { 'Idempotency-Key': idempotencyKey } },
+      authToken,
+    ),
+  resolveSharedTrailRoute: (shareToken: string) =>
+    reqWithToken<SharedTrailRouteV1>('/api/trail-routes/shared/resolve', {
+      method: 'POST',
+      body: JSON.stringify({ token: shareToken }),
+    }, null),
   suggestTrailEdit: (trailId: string, data: TrailEditSuggestionPayload) =>
     req<{ id: number; status: string; credits_earned: number; new_balance: number }>(`/api/trails/${encodeURIComponent(trailId)}/suggest-edit`, {
       method: 'POST', body: JSON.stringify(data),
@@ -2497,6 +2549,8 @@ export interface GeocodeResolveResponse {
 }
 export interface ProductFeatures {
   search_v2?: boolean;
+  private_trail_routes?: boolean;
+  community_trails?: boolean;
   offline_bundle_v2?: boolean;
   trip_graph_v2: boolean;
   trips_tab: boolean;

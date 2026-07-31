@@ -267,7 +267,10 @@ from db.store import (
     upsert_route_intelligence_places, list_cached_places_near_samples,
     submit_trail_field_report, get_trail_field_reports, get_trail_field_report_summary,
     upsert_trail_profile, get_trail_profile, list_trail_profiles_near,
-    create_owned_trail_route_v1, create_trail_submission_v1,
+    create_owned_trail_route_v1, update_owned_trail_route_v1,
+    delete_owned_trail_route_v1, list_owned_trail_routes_v1,
+    create_owned_trail_share_v1, revoke_owned_trail_share_v1,
+    resolve_owned_trail_share_v1, create_trail_submission_v1,
     get_owned_trail_route_v1, list_trail_submissions_v1,
     add_trail_edit_suggestion, get_trail_edit_suggestions,
     update_trail_edit_suggestion_status, set_trail_profile_admin_update,
@@ -393,6 +396,7 @@ _ANON_LIMITS   = {
     "insight": 1,
     "search": 1,
     "original_feedback_token": 10,
+    "trail_share": 500,
 }  # per window
 _anon_buckets: dict[str, dict] = {}
 
@@ -9363,22 +9367,56 @@ async def app_page():
 async def app_page_head():
     return Response(status_code=200, media_type="text/html")
 
+
+def _shared_trail_fallback_html() -> str:
+    """Static shell whose URL-fragment token never leaves the browser."""
+    return """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="referrer" content="no-referrer"><title>Open shared trail | Trailhead</title>
+<style>body{margin:0;background:#f7f8f6;color:#111412;font:16px system-ui,-apple-system,sans-serif}main{max-width:34rem;margin:15vh auto;padding:2rem}h1{font-size:2rem;margin:0 0 .75rem}p{color:#4f5752;line-height:1.5}a{display:inline-block;margin-top:1rem;padding:.9rem 1.2rem;border-radius:12px;background:#ad5a33;color:#fff;text-decoration:none;font-weight:700}a[hidden]{display:none}</style>
+</head><body><main><h1>Open this trail in Trailhead</h1><p id="status">Use Trailhead to view the shared route.</p><a id="open" hidden rel="noreferrer">Open Trailhead</a></main>
+<script>(()=>{const raw=new URLSearchParams(location.hash.slice(1)).get('token')||'';const ok=/^[A-Za-z0-9_-]{43}$/.test(raw);const button=document.getElementById('open');if(!ok){document.getElementById('status').textContent='This trail link is invalid or incomplete.';return;}button.href='trailhead://app/trails/shared#token='+encodeURIComponent(raw);button.hidden=false;})();</script>
+</body></html>"""
+
 @app.get("/app/{route_path:path}", response_class=HTMLResponse)
 async def app_route_page(route_path: str):
     route_path = unquote(route_path).strip("/")
     if ".." in Path(route_path).parts:
         raise HTTPException(status_code=404, detail="Not found")
+    if route_path == "trails/shared" and not _private_trail_share_resolution_enabled():
+        raise HTTPException(status_code=404, detail="Not found")
+    privacy_headers = (
+        {
+            "Cache-Control": "no-store",
+            "Referrer-Policy": "no-referrer",
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'",
+        }
+        if route_path == "trails/shared" else None
+    )
+    if route_path == "trails/shared":
+        return HTMLResponse(_shared_trail_fallback_html(), headers=privacy_headers)
     route_index = WEB_APP_ROOT / route_path / "index.html"
     if route_index.exists():
-        return FileResponse(route_index, media_type="text/html")
+        return FileResponse(route_index, media_type="text/html", headers=privacy_headers)
     app_index = WEB_APP_ROOT / "index.html"
     if app_index.exists():
-        return FileResponse(app_index, media_type="text/html")
-    return DASH.read_text()
+        return FileResponse(app_index, media_type="text/html", headers=privacy_headers)
+    return HTMLResponse(DASH.read_text(), headers=privacy_headers)
 
 @app.head("/app/{route_path:path}")
 async def app_route_page_head(route_path: str):
-    return Response(status_code=200, media_type="text/html")
+    clean_path = unquote(route_path).strip("/")
+    if clean_path == "trails/shared" and not _private_trail_share_resolution_enabled():
+        raise HTTPException(status_code=404, detail="Not found")
+    headers = (
+        {
+            "Cache-Control": "no-store",
+            "Referrer-Policy": "no-referrer",
+            "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'",
+        }
+        if clean_path == "trails/shared" else None
+    )
+    return Response(status_code=200, media_type="text/html", headers=headers)
 
 
 def _site_built_or_public(*parts: str) -> Path | None:
@@ -10323,6 +10361,48 @@ def _product_feature_enabled(env_name: str, user: dict | None = None) -> bool:
     return bool((isinstance(user, dict) and user.get("is_admin")) or _server_feature_enabled(env_name))
 
 
+TRAIL_FEATURE_STAGES = {"off", "internal", "public"}
+
+
+def _trail_feature_stage(env_name: str, *, default: str) -> str:
+    configured = os.getenv(env_name)
+    if configured is None and env_name == "TRAILHEAD_PRIVATE_TRAIL_ROUTES_STAGE":
+        configured = os.getenv("TRAILHEAD_PRIVATE_TRAILS_STAGE")
+    if configured is None:
+        return default
+    normalized = str(configured).strip().lower()
+    normalized = {"on": "public", "enabled": "public", "true": "public", "false": "off"}.get(
+        normalized, normalized,
+    )
+    return normalized if normalized in TRAIL_FEATURE_STAGES else default
+
+
+def _private_trail_routes_available(user: dict | None) -> bool:
+    stage = _trail_feature_stage("TRAILHEAD_PRIVATE_TRAIL_ROUTES_STAGE", default="internal")
+    return stage == "public" or bool(stage == "internal" and isinstance(user, dict) and user.get("is_admin"))
+
+
+def _private_trail_share_resolution_enabled() -> bool:
+    return _trail_feature_stage("TRAILHEAD_PRIVATE_TRAIL_ROUTES_STAGE", default="internal") != "off"
+
+
+def _community_trail_publication_available(user: dict | None) -> bool:
+    stage = _trail_feature_stage("TRAILHEAD_COMMUNITY_TRAILS_STAGE", default="off")
+    return stage == "public" or bool(stage == "internal" and isinstance(user, dict) and user.get("is_admin"))
+
+
+def _require_private_trail_routes(user: dict) -> None:
+    if not _private_trail_routes_available(user):
+        # Keep disabled/internal route ownership undiscoverable to ordinary
+        # clients until the guarded product stage is enabled.
+        raise HTTPException(404, "Not found")
+
+
+def _require_community_trail_publication(user: dict) -> None:
+    if not _community_trail_publication_available(user):
+        raise HTTPException(404, "Not found")
+
+
 ORIGINALS_ROLLOUT_STAGES = {"off", "internal", "public_beta", "public"}
 
 
@@ -10447,6 +10527,8 @@ async def product_features(user: dict | None = Depends(_optional_user)):
         "community_ratings": _product_feature_enabled("TRAILHEAD_COMMUNITY_RATINGS_ENABLED", user),
         "brief_and_backup": _product_feature_enabled("TRAILHEAD_BRIEF_AND_BACKUP_ENABLED", user),
         "digest_preferences": _product_feature_enabled("TRAILHEAD_DIGEST_PREFERENCES_ENABLED", user),
+        "private_trail_routes": _private_trail_routes_available(user),
+        "community_trails": _community_trail_publication_available(user),
     }
 
 
@@ -22344,11 +22426,14 @@ def _official_trail_profile_from_cache_id(trail_id: str) -> dict | None:
         db.close()
     return _official_trail_profile_from_row(row) if row else None
 
-def _trail_profile_for_detail(trail_id: str) -> dict | None:
+def _trail_profile_for_detail(trail_id: str, *, include_community: bool = False) -> dict | None:
     clean_id = _clean_trail_profile_id(trail_id)
     if not clean_id:
         return None
-    return get_trail_profile(clean_id) or _official_trail_profile_from_cache_id(clean_id)
+    return get_trail_profile(
+        clean_id,
+        include_community=include_community,
+    ) or _official_trail_profile_from_cache_id(clean_id)
 
 def _trail_cumulative_m(coords: list[list[float]]) -> list[float]:
     cumulative = [0.0]
@@ -23328,12 +23413,16 @@ def _trail_system_primary_id_v2(system_id: str) -> str:
     return value.rsplit(":", 1)[0] if ":" in value else value
 
 
-async def _trail_system_for_detail_v2(system_id: str) -> TrailSystemV2 | None:
+async def _trail_system_for_detail_v2(
+    system_id: str,
+    *,
+    include_community: bool = False,
+) -> TrailSystemV2 | None:
     cached = _trail_system_v2_cache.get(system_id)
-    if cached and (cached.geometry_status != "complete" or cached.geometry):
+    if cached and (cached.catalog != "community" or include_community) and (cached.geometry_status != "complete" or cached.geometry):
         return cached
     primary_id = _trail_system_primary_id_v2(system_id)
-    primary = _trail_profile_for_detail(primary_id)
+    primary = _trail_profile_for_detail(primary_id, include_community=include_community)
     if not primary:
         items, generated_at = _load_canonical_trail_index()
         canonical = next((item for item in items if str(item.get("id") or "") == primary_id), None)
@@ -23587,6 +23676,7 @@ async def trails_discover_v2(
 ):
     mode = mode if mode in {"view", "along_trip"} else "nearby"
     catalog = catalog if catalog in {"verified", "community", "all"} else "verified"
+    include_community = _community_trail_publication_available(user)
     sort = sort if sort in {"nearby", "name", "distance", "elevation"} else "nearby"
     bbox = None
     if mode == "view" and None not in (n, s, e, w):
@@ -23636,7 +23726,8 @@ async def trails_discover_v2(
                 geometry_revision=geometry_revision,
             )
         cached_profiles = list_trail_profiles_near(
-            float(lat), float(lng), float(radius), max(160, limit * 5), bbox=bbox, mode="view" if bbox else "nearby",
+            float(lat), float(lng), float(radius), max(160, limit * 5), bbox=bbox,
+            mode="view" if bbox else "nearby", include_community=include_community,
         )
         if query_text:
             cached_profiles = [
@@ -23714,8 +23805,11 @@ async def trails_discover_v2(
 
 
 @app.get("/api/trails/v2/{trail_id}")
-async def trail_system_v2(trail_id: str):
-    system = await _trail_system_for_detail_v2(_clean_trail_system_id_v2(trail_id))
+async def trail_system_v2(trail_id: str, user: dict | None = Depends(_optional_user)):
+    system = await _trail_system_for_detail_v2(
+        _clean_trail_system_id_v2(trail_id),
+        include_community=_community_trail_publication_available(user),
+    )
     if not system:
         raise HTTPException(404, "Trail not found")
     if system.geometry_status == "complete" and system.capabilities.preview and not system.geometry:
@@ -23724,8 +23818,11 @@ async def trail_system_v2(trail_id: str):
 
 
 @app.get("/api/trails/v2/{trail_id}/preview")
-async def trail_preview_v2(trail_id: str):
-    system = await _trail_system_for_detail_v2(_clean_trail_system_id_v2(trail_id))
+async def trail_preview_v2(trail_id: str, user: dict | None = Depends(_optional_user)):
+    system = await _trail_system_for_detail_v2(
+        _clean_trail_system_id_v2(trail_id),
+        include_community=_community_trail_publication_available(user),
+    )
     if not system:
         raise HTTPException(404, "Trail not found")
     if not system.capabilities.preview or not system.geometry:
@@ -23761,6 +23858,7 @@ async def trails_discover(
     mode: str = "nearby",
     limit: int = 60,
     refresh: bool = False,
+    user: dict | None = Depends(_optional_user),
 ):
     mode = "view" if mode == "view" else "nearby"
     bbox = None
@@ -23786,7 +23884,11 @@ async def trails_discover(
         ], return_exceptions=True)
     else:
         await _seed_open_trail_profiles(float(lat), float(lng), radius, limit=max(limit, 80), refresh=bool(refresh))
-    raw_trails = list_trail_profiles_near(float(lat), float(lng), radius, max(1, min(max(limit, 40), 140)), bbox=bbox, mode=mode)
+    raw_trails = list_trail_profiles_near(
+        float(lat), float(lng), radius, max(1, min(max(limit, 40), 140)),
+        bbox=bbox, mode=mode,
+        include_community=_community_trail_publication_available(user),
+    )
     ranked_trails = _rank_trail_profiles(raw_trails, float(lat), float(lng), limit=max(1, min(limit, 100)))
     trails = [_public_trail_profile(p) for p in ranked_trails]
     return {
@@ -23798,8 +23900,11 @@ async def trails_discover(
     }
 
 @app.get("/api/trails/{trail_id}")
-async def trail_profile(trail_id: str):
-    profile = _trail_profile_for_detail(trail_id)
+async def trail_profile(trail_id: str, user: dict | None = Depends(_optional_user)):
+    profile = _trail_profile_for_detail(
+        trail_id,
+        include_community=_community_trail_publication_available(user),
+    )
     if not profile:
         raise HTTPException(404, "Trail profile not found")
     profile = _public_trail_profile(profile)
@@ -23807,18 +23912,30 @@ async def trail_profile(trail_id: str):
     return profile
 
 @app.get("/api/trails/{trail_id}/preview")
-async def trail_preview(trail_id: str):
-    profile = _trail_profile_for_detail(trail_id)
+async def trail_preview(trail_id: str, user: dict | None = Depends(_optional_user)):
+    profile = _trail_profile_for_detail(
+        trail_id,
+        include_community=_community_trail_publication_available(user),
+    )
     if not profile:
         raise HTTPException(404, "Trail profile not found")
     return _trail_preview_manifest(profile)
 
 @app.get("/api/trail-areas/discover")
-async def trail_area_discover(lat: float, lng: float, radius: float = 45, limit: int = 24):
+async def trail_area_discover(
+    lat: float, lng: float, radius: float = 45, limit: int = 24,
+    user: dict | None = Depends(_optional_user),
+):
     radius = max(3.0, min(float(radius), 80.0))
     limit = max(1, min(int(limit), 60))
     await _seed_open_trail_profiles(float(lat), float(lng), radius, limit=max(limit, 80))
-    profiles = _rank_trail_profiles(list_trail_profiles_near(float(lat), float(lng), radius, max(limit, 80)), float(lat), float(lng), limit=limit)
+    profiles = _rank_trail_profiles(
+        list_trail_profiles_near(
+            float(lat), float(lng), radius, max(limit, 80),
+            include_community=_community_trail_publication_available(user),
+        ),
+        float(lat), float(lng), limit=limit,
+    )
     return {"area": _trail_area_from_profiles(float(lat), float(lng), radius, profiles)}
 
 class TrailEditSuggestionPayload(BaseModel):
@@ -23861,6 +23978,8 @@ class TrailAdminUpdatePayload(BaseModel):
     photos: Optional[list[dict]] = None
 
 class CommunityTrailPayload(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
     name: str
     summary: Optional[str] = None
     description: Optional[str] = None
@@ -23873,6 +23992,238 @@ class CommunityTrailPayload(BaseModel):
     source_note: Optional[str] = None
     lat: Optional[float] = None
     lng: Optional[float] = None
+
+
+class OwnedTrailRouteCreatePayload(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    origin: str
+    title: str
+    geometry: dict
+    description: Optional[str] = None
+    activity: Optional[str] = None
+    route_shape: Optional[str] = None
+    trailheads: list[dict] = Field(default_factory=list)
+    permitted_uses: list[str] = Field(default_factory=list)
+    source_evidence: list[dict] = Field(default_factory=list)
+    photos: list[dict] = Field(default_factory=list)
+
+
+class OwnedTrailRouteUpdatePayload(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    expected_revision: int = Field(ge=1)
+    title: Optional[str] = None
+    description: Optional[str] = None
+    activity: Optional[str] = None
+    route_shape: Optional[str] = None
+    geometry: Optional[dict] = None
+    trailheads: Optional[list[dict]] = None
+    permitted_uses: Optional[list[str]] = None
+    source_evidence: Optional[list[dict]] = None
+    photos: Optional[list[dict]] = None
+    privacy_reviewed: Optional[bool] = None
+
+
+class OwnedTrailSharePayload(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    expected_revision: int = Field(ge=1)
+    mode: Literal["create", "replace"] = "create"
+
+
+class OwnedTrailShareResolvePayload(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    token: str
+
+
+def _raise_trail_route_api_error(exc: Exception) -> None:
+    if isinstance(exc, RevisionConflictError):
+        raise HTTPException(409, {
+            "code": "trail_route_revision_conflict",
+            "message": "This route changed on another device.",
+            "current_revision": exc.current_revision,
+        }) from exc
+    if isinstance(exc, IdempotencyConflictError):
+        raise HTTPException(409, {
+            "code": "trail_route_idempotency_conflict",
+            "message": "This request key was already used for another change.",
+        }) from exc
+    if isinstance(exc, KeyError):
+        raise HTTPException(404, "Not found") from exc
+    if isinstance(exc, PermissionError):
+        message = str(exc)
+        if "limit" in message.lower():
+            raise HTTPException(429, {
+                "code": "trail_route_rate_limited",
+                "message": "Try this route change again later.",
+            }) from exc
+        raise HTTPException(409, {
+            "code": "trail_route_privacy_review_required",
+            "message": "Review the route before sharing it.",
+        }) from exc
+    if isinstance(exc, ValueError):
+        message = str(exc)
+        if "already has an unlisted link" in message or "does not have an unlisted link" in message:
+            raise HTTPException(409, {
+                "code": "trail_route_share_state_conflict",
+                "message": message,
+            }) from exc
+        raise HTTPException(400, message) from exc
+    raise exc
+
+
+# The raw bearer token stays in the app-link URL fragment and request body, so
+# Railway and Uvicorn access logs never receive it as a path or query value.
+# Invalid, expired, revoked, and unknown tokens intentionally look identical.
+@app.post("/api/trail-routes/shared/resolve")
+async def resolve_shared_trail_route(body: OwnedTrailShareResolvePayload, request: Request):
+    if not _private_trail_share_resolution_enabled():
+        raise HTTPException(404, "Shared route not found")
+    _anon_check(_client_ip(request), "trail_share")
+    shared = resolve_owned_trail_share_v1(body.token)
+    if not shared:
+        raise HTTPException(404, "Shared route not found")
+    return JSONResponse(
+        shared,
+        headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+    )
+
+
+@app.post("/api/trail-routes", status_code=201)
+async def create_owned_trail_route(
+    body: OwnedTrailRouteCreatePayload,
+    user: dict = Depends(_current_user),
+    idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=1, max_length=160),
+):
+    _require_private_trail_routes(user)
+    try:
+        result = create_owned_trail_route_v1(
+            user["id"],
+            **body.model_dump(),
+            idempotency_key=idempotency_key,
+        )
+    except Exception as exc:
+        _raise_trail_route_api_error(exc)
+    route = result.get("route") if isinstance(result, dict) else None
+    if not isinstance(route, dict):
+        raise HTTPException(404, "Not found")
+    return route
+
+
+@app.get("/api/trail-routes")
+async def list_owned_trail_routes(
+    limit: int = Query(default=100, ge=1, le=200),
+    user: dict = Depends(_current_user),
+):
+    _require_private_trail_routes(user)
+    return {"version": 1, "routes": list_owned_trail_routes_v1(user["id"], limit=limit)}
+
+
+@app.get("/api/trail-routes/{route_id}")
+async def get_owned_trail_route(route_id: str, user: dict = Depends(_current_user)):
+    _require_private_trail_routes(user)
+    try:
+        route = get_owned_trail_route_v1(user["id"], route_id)
+    except ValueError:
+        route = None
+    if not route:
+        raise HTTPException(404, "Not found")
+    return route
+
+
+@app.patch("/api/trail-routes/{route_id}")
+async def update_owned_trail_route(
+    route_id: str,
+    body: OwnedTrailRouteUpdatePayload,
+    user: dict = Depends(_current_user),
+    idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=1, max_length=160),
+):
+    _require_private_trail_routes(user)
+    raw = body.model_dump(exclude_unset=True)
+    expected_revision = int(raw.pop("expected_revision"))
+    if not raw:
+        raise HTTPException(400, "No route changes were provided")
+    try:
+        result = update_owned_trail_route_v1(
+            user["id"], route_id, expected_revision=expected_revision,
+            idempotency_key=idempotency_key, changes=raw,
+        )
+    except Exception as exc:
+        _raise_trail_route_api_error(exc)
+    route = result.get("route") if isinstance(result, dict) else None
+    if not isinstance(route, dict):
+        raise HTTPException(404, "Not found")
+    return route
+
+
+@app.delete("/api/trail-routes/{route_id}")
+async def delete_owned_trail_route(
+    route_id: str,
+    expected_revision: int = Query(..., ge=1),
+    user: dict = Depends(_current_user),
+    idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=1, max_length=160),
+):
+    _require_private_trail_routes(user)
+    try:
+        result = delete_owned_trail_route_v1(
+            user["id"], route_id, expected_revision=expected_revision,
+            idempotency_key=idempotency_key,
+        )
+    except Exception as exc:
+        _raise_trail_route_api_error(exc)
+    mutation = result.get("mutation") if isinstance(result, dict) else None
+    if not isinstance(mutation, dict) or not mutation.get("route_id"):
+        raise HTTPException(404, "Not found")
+    return {
+        "id": mutation["route_id"],
+        "revision": mutation.get("revision"),
+        "deleted": True,
+    }
+
+
+@app.post("/api/trail-routes/{route_id}/share-link")
+async def create_owned_trail_share_link(
+    route_id: str,
+    body: OwnedTrailSharePayload,
+    user: dict = Depends(_current_user),
+    idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=1, max_length=160),
+):
+    _require_private_trail_routes(user)
+    try:
+        result = create_owned_trail_share_v1(
+            user["id"], route_id, expected_revision=body.expected_revision,
+            idempotency_key=idempotency_key, replace=body.mode == "replace",
+        )
+    except Exception as exc:
+        _raise_trail_route_api_error(exc)
+    token = result.get("share_token")
+    return {
+        **result,
+        "share_url": (
+            f"https://gettrailhead.app/app/trails/shared#token={quote(str(token), safe='')}"
+            if token else None
+        ),
+        "rotate_required": token is None,
+    }
+
+
+@app.delete("/api/trail-routes/{route_id}/share-link")
+async def revoke_owned_trail_share_link(
+    route_id: str,
+    expected_revision: int = Query(..., ge=1),
+    user: dict = Depends(_current_user),
+    idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=1, max_length=160),
+):
+    _require_private_trail_routes(user)
+    try:
+        return revoke_owned_trail_share_v1(
+            user["id"], route_id, expected_revision=expected_revision,
+            idempotency_key=idempotency_key,
+        )
+    except Exception as exc:
+        _raise_trail_route_api_error(exc)
 
 @app.post("/api/admin/trails/{trail_id}")
 async def admin_update_trail(trail_id: str, body: TrailAdminUpdatePayload,
@@ -23895,70 +24246,38 @@ async def admin_update_trail(trail_id: str, body: TrailAdminUpdatePayload,
     return {"ok": True, "profile": profile}
 
 @app.post("/api/trails/community")
-async def submit_community_trail(body: CommunityTrailPayload, user: dict = Depends(_current_user)):
-    name = re.sub(r"\s+", " ", (body.name or "").strip())[:140]
-    if not name:
-        raise HTTPException(400, "Trail name is required")
-    geometry = body.geometry if isinstance(body.geometry, dict) else {}
-    coords = geometry.get("coordinates") if geometry.get("type") == "LineString" else None
-    if not isinstance(coords, list) or len(coords) < 2:
-        raise HTTPException(400, "Trail geometry must be a LineString with at least two points")
-    clean_coords: list[list[float]] = []
-    for pair in coords[:2000]:
-        if not isinstance(pair, (list, tuple)) or len(pair) < 2:
-            continue
-        lng, lat = float(pair[0]), float(pair[1])
-        if -180 <= lng <= 180 and -90 <= lat <= 90:
-            clean_coords.append([round(lng, 7), round(lat, 7)])
-    if len(clean_coords) < 2:
-        raise HTTPException(400, "Trail geometry has no valid coordinates")
-    clean_trailheads = []
-    for item in body.trailheads[:8]:
-        if not isinstance(item, dict):
-            continue
-        try:
-            th_lat = float(item.get("lat"))
-            th_lng = float(item.get("lng"))
-        except Exception:
-            continue
-        if -90 <= th_lat <= 90 and -180 <= th_lng <= 180:
-            clean_trailheads.append({
-                "name": str(item.get("name") or "Trailhead").strip()[:120],
-                "lat": round(th_lat, 7),
-                "lng": round(th_lng, 7),
-                "role": str(item.get("role") or "access").strip()[:40],
-            })
+async def submit_community_trail(
+    body: CommunityTrailPayload,
+    user: dict = Depends(_current_user),
+    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key", max_length=160),
+):
+    _require_private_trail_routes(user)
+    _require_community_trail_publication(user)
     source_note = re.sub(r"\s+", " ", str(body.source_note or "")).strip()[:500]
-    if not clean_trailheads and not source_note:
+    if not body.trailheads and not source_note:
         raise HTTPException(400, "Add a trailhead or explain the public access point")
-    clean_photos = []
-    for photo in body.photos[:12]:
-        if not isinstance(photo, dict):
-            continue
-        clean = {
-            key: photo.get(key)
-            for key in ("url", "caption", "credit", "license", "source_url", "ownership_confirmed")
-            if photo.get(key) not in (None, "")
-        }
-        if clean:
-            clean_photos.append(clean)
-    geometry_snapshot = {"type": "LineString", "coordinates": clean_coords}
     try:
-        route = create_owned_trail_route_v1(
+        route_result = create_owned_trail_route_v1(
             user["id"],
             origin="builder",
-            title=name,
+            title=body.name,
             description=(body.description or body.summary or "").strip()[:2000] or None,
-            geometry=geometry_snapshot,
+            geometry=body.geometry,
             activity=next((str(a).strip()[:60] for a in body.activities if str(a).strip()), None),
-            trailheads=clean_trailheads,
-            permitted_uses=[str(a).strip()[:60] for a in body.activities[:12] if str(a).strip()],
+            trailheads=body.trailheads,
+            # Activity is a contributor claim, not evidence that an activity is
+            # legally permitted on the route.
+            permitted_uses=[],
             source_evidence=[{"note": source_note}] if source_note else [],
-            photos=clean_photos,
+            photos=body.photos,
+            idempotency_key=idempotency_key or f"legacy-community-{uuid.uuid4().hex}",
         )
+        route = route_result.get("route")
+        if not isinstance(route, dict):
+            raise ValueError("The original route is no longer available")
         submission = create_trail_submission_v1(user["id"], route["id"], user.get("username"))
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        _raise_trail_route_api_error(exc)
     fresh = get_user_by_id(user["id"])
     return {
         "ok": True,

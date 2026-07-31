@@ -1,9 +1,9 @@
 """SQLite WAL store. Schema + queries."""
 from __future__ import annotations
-import base64, sqlite3, json, time, math, hashlib, secrets, re, io, struct, wave, zlib, os
+import base64, sqlite3, json, time, math, hashlib, secrets, re, io, struct, wave, zlib, os, ipaddress
 from datetime import date as _date, datetime as _datetime, timedelta as _timedelta, timezone as _timezone
 from pathlib import Path as _Path
-from urllib.parse import quote as _url_quote, unquote as _url_unquote
+from urllib.parse import quote as _url_quote, unquote as _url_unquote, urlsplit as _urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from config.settings import settings
 from db.originals_validation import (
@@ -330,6 +330,7 @@ def _backfill_embedded_trip_payloads(db: sqlite3.Connection) -> None:
 
 TRAILHEAD_V110_BACKEND_MIGRATION = "trailhead_1_0_10_backend_contracts_v1"
 EXPLORE_COMMUNITY_TRAILS_MIGRATION = "explore_community_trails_v1"
+EXPLORE_PRIVATE_TRAILS_E4_MIGRATION = "explore_private_trails_e4_v1"
 
 
 def _table_columns(db: sqlite3.Connection, table: str) -> set[str]:
@@ -676,6 +677,80 @@ def _migrate_explore_community_trails(db: sqlite3.Connection) -> None:
         db.execute(
             "INSERT OR REPLACE INTO schema_migrations (migration_id,applied_at) VALUES (?,?)",
             (EXPLORE_COMMUNITY_TRAILS_MIGRATION, int(time.time())),
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+
+def _migrate_explore_private_trails_e4(db: sqlite3.Connection) -> None:
+    """Harden private route ownership and immutable unlisted sharing.
+
+    The first community-trails migration shipped the ownership tables as an
+    additive compatibility scaffold.  This follow-up intentionally keeps those
+    rows and adds the route-wide revision and mutation ledger required for safe
+    mobile retries and revision-pinned shares.
+    """
+    db.commit()
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        db.execute(
+            """CREATE TABLE IF NOT EXISTS schema_migrations (
+                migration_id TEXT PRIMARY KEY,
+                applied_at   INTEGER NOT NULL
+            )"""
+        )
+        columns = _table_columns(db, "owned_trail_routes_v1")
+        additions = {
+            "revision": "INTEGER NOT NULL DEFAULT 1",
+            "content_revision": "INTEGER NOT NULL DEFAULT 1",
+            "share_route_revision": "INTEGER",
+            "share_snapshot_json": "TEXT",
+            "share_created_at": "INTEGER",
+            "share_updated_at": "INTEGER",
+        }
+        for column, definition in additions.items():
+            if column not in columns:
+                db.execute(
+                    f"ALTER TABLE owned_trail_routes_v1 ADD COLUMN {column} {definition}"
+                )
+        db.execute(
+            """CREATE TABLE IF NOT EXISTS trail_route_mutations_v1 (
+                user_id          INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                idempotency_key  TEXT NOT NULL,
+                operation        TEXT NOT NULL,
+                route_id         TEXT,
+                request_hash     TEXT NOT NULL,
+                response_json    TEXT NOT NULL,
+                created_at       INTEGER NOT NULL,
+                PRIMARY KEY (user_id, idempotency_key)
+            )"""
+        )
+        db.execute(
+            """CREATE INDEX IF NOT EXISTS idx_trail_route_mutations_owner
+                ON trail_route_mutations_v1(user_id, created_at DESC)"""
+        )
+        db.execute(
+            """CREATE INDEX IF NOT EXISTS idx_trail_route_mutations_route
+                ON trail_route_mutations_v1(route_id, created_at DESC)"""
+        )
+        required_tables = {
+            "owned_trail_routes_v1": {
+                "id", "user_id", "revision", "content_revision", "geometry_revision",
+                "geometry_sha256", "privacy_reviewed_at", "share_token_hash",
+                "share_revision", "share_route_revision", "share_snapshot_json",
+            },
+            "trail_route_mutations_v1": {
+                "user_id", "idempotency_key", "operation", "route_id",
+                "request_hash", "response_json", "created_at",
+            },
+        }
+        for table, required in required_tables.items():
+            _require_table_columns(db, table, required)
+        db.execute(
+            "INSERT OR REPLACE INTO schema_migrations (migration_id,applied_at) VALUES (?,?)",
+            (EXPLORE_PRIVATE_TRAILS_E4_MIGRATION, int(time.time())),
         )
         db.commit()
     except Exception:
@@ -2707,6 +2782,7 @@ def init_db():
     _backfill_embedded_trip_payloads(db)
     _migrate_trailhead_v110_backend_contracts(db)
     _migrate_explore_community_trails(db)
+    _migrate_explore_private_trails_e4(db)
     _queue_legacy_community_trail_profiles(db)
     db.commit()
     db.close()
@@ -5637,8 +5713,10 @@ def delete_user(user_id: int) -> None:
     # disabled on this recovery path.
     db = sqlite3.connect(settings.db_path, timeout=60.0, check_same_thread=False)
     try:
+        db.row_factory = sqlite3.Row
         db.execute("PRAGMA foreign_keys=OFF")
         _delete_user_support_data(db, user_id)
+        _delete_user_trail_route_data(db, user_id)
         db.execute("DELETE FROM authored_trip_pack_acquisition_requests WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM authored_trip_pack_entitlements WHERE user_id=?", (user_id,))
         db.execute("UPDATE authored_trip_packs SET created_by=NULL WHERE created_by=?", (user_id,))
@@ -5697,9 +5775,319 @@ def _delete_user_support_data(db: sqlite3.Connection, user_id: int) -> None:
     db.execute("UPDATE support_messages SET sender_admin_id=NULL WHERE sender_admin_id=?", (user_id,))
 
 
+def _redact_deleted_trail_text(
+    value: object,
+    limit: int,
+    private_terms: set[str] | None = None,
+) -> str | None:
+    clean = _clean_trail_route_text(value, limit)
+    if not clean:
+        return None
+    clean = re.sub(
+        r"(?i)\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b",
+        "Deleted contributor", clean,
+    )
+    clean = re.sub(r"(?<!\w)\+?\d[\d\s().-]{6,}\d(?!\w)", "Deleted contributor", clean)
+    for term in sorted(private_terms or set(), key=len, reverse=True):
+        if len(term) >= 3:
+            clean = re.sub(re.escape(term), "Deleted contributor", clean, flags=re.IGNORECASE)
+    return clean
+
+
+def _anonymize_public_trail_snapshot(
+    value: object,
+    *,
+    private_terms: set[str] | None = None,
+) -> dict:
+    """Rebuild an approved route from a strict public-content allowlist."""
+    if not isinstance(value, dict):
+        return {"contributor_handle": "Deleted contributor"}
+    output: dict = {"version": 1}
+    title = _redact_deleted_trail_text(value.get("title"), 140, private_terms)
+    if title:
+        output["title"] = title
+    origin = str(value.get("origin") or "").strip().lower()
+    if origin in {"builder", "gpx", "recording"}:
+        output["origin"] = origin
+    for field, aliases, label in (
+        ("activity", TRAIL_ROUTE_ACTIVITY_ALIASES, "activity"),
+        ("route_shape", TRAIL_ROUTE_SHAPE_ALIASES, "shape"),
+    ):
+        try:
+            clean = _clean_trail_route_enum(value.get(field), aliases, label)
+        except ValueError:
+            clean = None
+        if clean:
+            output[field] = clean
+    try:
+        geometry, _payload, geometry_sha256 = normalize_owned_trail_geometry_v1(value.get("geometry"))
+    except (TypeError, ValueError):
+        geometry = None
+        geometry_sha256 = None
+    if geometry:
+        output["geometry"] = geometry
+        output["geometry_sha256"] = geometry_sha256
+    for field in ("geometry_revision", "route_revision", "content_revision", "publication_revision"):
+        raw = value.get(field)
+        if isinstance(raw, int) and not isinstance(raw, bool) and raw > 0:
+            output[field] = raw
+    try:
+        trailheads = _clean_trailheads_v1(value.get("trailheads") or [])
+    except (TypeError, ValueError):
+        trailheads = []
+    if trailheads:
+        # Names, source labels, IDs, and URLs in historical client-authored
+        # trailhead dictionaries are not trusted as anonymous. Coordinates and
+        # a constrained route role are sufficient to preserve public access.
+        public_trailheads: list[dict] = []
+        for trailhead in trailheads:
+            public_item = {
+                key: trailhead[key] for key in ("lat", "lng") if key in trailhead
+            }
+            role = str(trailhead.get("role") or "").strip().lower()
+            if role in {"access", "end", "parking", "start", "trailhead"}:
+                public_item["role"] = role
+            if public_item:
+                public_trailheads.append(public_item)
+        if public_trailheads:
+            output["trailheads"] = public_trailheads
+    try:
+        source_evidence = _clean_trail_route_records_v1(
+            value.get("source_evidence") or [], kind="source_evidence",
+        )
+    except (TypeError, ValueError):
+        source_evidence = []
+    # Historical source dictionaries are client-authored. Keep only a validated
+    # public link and a constrained evidence kind; drop titles, publisher names,
+    # source IDs, dates, notes, and other text that may identify the account.
+    public_source_evidence: list[dict] = []
+    public_evidence_kinds = {
+        "access", "allowed_use", "allowed_uses", "official",
+        "official_access", "permitted_use", "permitted_uses",
+    }
+    for item in source_evidence:
+        public_item: dict = {}
+        raw_url = _redact_deleted_trail_text(item.get("url"), 800, private_terms)
+        if raw_url:
+            try:
+                public_item["url"] = _validate_public_trail_url(raw_url, "Trail source link")
+            except ValueError:
+                pass
+        kind = str(item.get("kind") or "").strip().lower()
+        if kind in public_evidence_kinds:
+            public_item["kind"] = kind
+        if public_item.get("url"):
+            public_source_evidence.append(public_item)
+    if public_source_evidence:
+        output["source_evidence"] = public_source_evidence
+    # Permitted-use claims require publisher/source identity. Those historical
+    # free-text fields are intentionally removed during account deletion, so the
+    # claims are omitted rather than retained without evidence.
+    for field in ("legacy_profile_id", "promoted_trail_id"):
+        raw = str(value.get(field) or "").strip()
+        if raw and _CANONICAL_ID_RE.fullmatch(raw):
+            output[field] = raw
+    status = str(value.get("status") or "").strip().lower()
+    if status in {"approved_community", "archived", "published", "verified"}:
+        output["status"] = status
+    # Photos are intentionally omitted. Legacy nested image dictionaries may
+    # contain EXIF, device identifiers, private URLs, or unverified rights.
+    output["contributor_handle"] = "Deleted contributor"
+    # Round-trip through strict JSON to reject non-finite or custom values in a
+    # historical snapshot rather than carrying an opaque object forward.
+    try:
+        return json.loads(json.dumps(output, separators=(",", ":"), sort_keys=True, allow_nan=False))
+    except (TypeError, ValueError):
+        return {"version": 1, "contributor_handle": "Deleted contributor"}
+
+
+def _anonymize_trail_moderator_history(value: object) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    output: list[dict] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        clean: dict = {}
+        for key in ("action", "status"):
+            text = _clean_trail_route_text(item.get(key), 60)
+            if text and re.fullmatch(r"[A-Za-z0-9 _-]+", text):
+                clean[key] = text
+        for key in ("created_at", "moderated_at"):
+            raw = item.get(key)
+            if isinstance(raw, int) and not isinstance(raw, bool) and raw > 0:
+                clean[key] = raw
+        if clean:
+            output.append(clean)
+    return output
+
+
+def _delete_user_trail_route_data(db: sqlite3.Connection, user_id: int) -> None:
+    """Delete private trail work and anonymize already-public contributions.
+
+    This is deliberately explicit because the locked-database account deletion
+    recovery path disables foreign keys.  A published Community route keeps its
+    immutable geometry and moderation record, but no account identifier or
+    chosen handle survives account deletion.
+    """
+    if not _table_columns(db, "owned_trail_routes_v1"):
+        return
+    user_row = db.execute("SELECT email,username FROM users WHERE id=?", (user_id,)).fetchone()
+    private_terms = {
+        str(value).strip()
+        for value in (dict(user_row).values() if user_row else [])
+        if str(value or "").strip()
+    }
+    public_rows = db.execute(
+        """SELECT submission.id,submission.submitter_handle,submission.snapshot_json,community.id AS community_id,
+                  community.snapshot_json AS community_snapshot_json
+           FROM trail_submissions_v1 submission
+           JOIN community_trails_v1 community ON community.submission_id=submission.id
+           WHERE submission.user_id=?""",
+        (user_id,),
+    ).fetchall()
+    public_ids = [str(row["id"]) for row in public_rows]
+    for row in public_rows:
+        if str(row["submitter_handle"] or "").strip():
+            private_terms.add(str(row["submitter_handle"]).strip())
+        try:
+            submission_snapshot = json.loads(row["snapshot_json"] or "{}")
+        except Exception:
+            submission_snapshot = {}
+        try:
+            community_snapshot = json.loads(row["community_snapshot_json"] or "{}")
+        except Exception:
+            community_snapshot = {}
+        history_row = db.execute(
+            "SELECT moderator_history_json FROM trail_submissions_v1 WHERE id=?",
+            (row["id"],),
+        ).fetchone()
+        try:
+            moderator_history = json.loads(history_row["moderator_history_json"] or "[]") if history_row else []
+        except Exception:
+            moderator_history = []
+        db.execute(
+            """UPDATE trail_submissions_v1
+               SET route_id=NULL,user_id=NULL,submitter_handle='Deleted contributor',
+                   snapshot_json=?,duplicate_json='{}',access_review_json='{}',
+                   moderator_history_json=?,updated_at=? WHERE id=?""",
+            (
+                json.dumps(_anonymize_public_trail_snapshot(
+                    submission_snapshot, private_terms=private_terms,
+                ), separators=(",", ":"), sort_keys=True),
+                json.dumps(_anonymize_trail_moderator_history(moderator_history), separators=(",", ":"), sort_keys=True),
+                int(time.time()), row["id"],
+            ),
+        )
+        db.execute(
+            """UPDATE community_trails_v1 SET snapshot_json=?,updated_at=? WHERE id=?""",
+            (
+                json.dumps(_anonymize_public_trail_snapshot(
+                    community_snapshot, private_terms=private_terms,
+                ), separators=(",", ":"), sort_keys=True),
+                int(time.time()), row["community_id"],
+            ),
+        )
+    if public_ids:
+        placeholders = ",".join("?" for _ in public_ids)
+        db.execute(
+            f"DELETE FROM trail_submissions_v1 WHERE user_id=? AND id NOT IN ({placeholders})",
+            (user_id, *public_ids),
+        )
+    else:
+        db.execute("DELETE FROM trail_submissions_v1 WHERE user_id=?", (user_id,))
+    db.execute("DELETE FROM trail_contribution_credit_awards_v1 WHERE user_id=?", (user_id,))
+    db.execute("DELETE FROM trail_route_mutations_v1 WHERE user_id=?", (user_id,))
+    db.execute("DELETE FROM owned_trail_routes_v1 WHERE user_id=?", (user_id,))
+
+    # Contain the historical instant-public profile path as well. Unreviewed
+    # rows are private work and are removed; an approved/public route remains
+    # available with de-identified attribution.
+    if _table_columns(db, "trail_profiles"):
+        rows = db.execute("SELECT * FROM trail_profiles").fetchall()
+        for profile_row in rows:
+            profile = _decode_trail_profile(profile_row)
+            provenance = profile.get("provenance") if isinstance(profile.get("provenance"), dict) else {}
+            try:
+                submitted_by_id = int(provenance.get("submitted_by_id"))
+            except (TypeError, ValueError):
+                continue
+            if submitted_by_id != int(user_id):
+                continue
+            lane = trail_profile_publication_lane(profile)
+            if lane == "unreviewed":
+                db.execute("DELETE FROM trail_profiles WHERE id=?", (profile["id"],))
+                continue
+            submitted_by = str(provenance.get("submitted_by") or "").strip()
+            if submitted_by:
+                private_terms.add(submitted_by)
+            clean_provenance = {
+                key: provenance[key]
+                for key in ("review_status", "source", "source_id", "source_url", "catalog")
+                if key in provenance
+            }
+            clean_provenance["submitted_by"] = "Deleted contributor"
+            safe_profile = _anonymize_public_trail_snapshot(
+                {
+                    "version": 1,
+                    "title": profile.get("name"),
+                    "activity": next(iter(profile.get("activities") or []), None),
+                    "geometry": profile.get("geometry"),
+                    "trailheads": profile.get("trailheads") or [],
+                    "status": "approved_community" if lane == "community" else "verified",
+                },
+                private_terms=private_terms,
+            )
+            safe_geometry = safe_profile.get("geometry") if isinstance(safe_profile.get("geometry"), dict) else None
+            safe_coordinates = safe_geometry.get("coordinates") if safe_geometry else None
+            first_coordinate = (
+                safe_coordinates[0]
+                if isinstance(safe_coordinates, list) and safe_coordinates
+                and isinstance(safe_coordinates[0], list) and len(safe_coordinates[0]) >= 2
+                else None
+            )
+            safe_activity = str(safe_profile.get("activity") or "").strip()
+            safe_title = str(safe_profile.get("title") or "Community route").strip()[:180]
+            db.execute(
+                """UPDATE trail_profiles
+                   SET name=?,summary='',description='',lat=?,lng=?,difficulty='',activities=?,
+                       land_manager='',geometry=?,trailheads=?,official_url='',photos='[]',
+                       provenance=?,updated_at=? WHERE id=?""",
+                (
+                    safe_title,
+                    float(first_coordinate[1]) if first_coordinate else float(profile.get("lat") or 0),
+                    float(first_coordinate[0]) if first_coordinate else float(profile.get("lng") or 0),
+                    json.dumps([safe_activity] if safe_activity else [], separators=(",", ":")),
+                    json.dumps(safe_geometry, separators=(",", ":"), sort_keys=True) if safe_geometry else "null",
+                    json.dumps(safe_profile.get("trailheads") or [], separators=(",", ":"), sort_keys=True),
+                    json.dumps(clean_provenance, separators=(",", ":"), sort_keys=True),
+                    int(time.time()),
+                    profile["id"],
+                ),
+            )
+    postchecks = {
+        "owned_trail_routes_v1": db.execute(
+            "SELECT COUNT(*) FROM owned_trail_routes_v1 WHERE user_id=?", (user_id,),
+        ).fetchone()[0],
+        "trail_route_mutations_v1": db.execute(
+            "SELECT COUNT(*) FROM trail_route_mutations_v1 WHERE user_id=?", (user_id,),
+        ).fetchone()[0],
+        "trail_contribution_credit_awards_v1": db.execute(
+            "SELECT COUNT(*) FROM trail_contribution_credit_awards_v1 WHERE user_id=?", (user_id,),
+        ).fetchone()[0],
+        "trail_submissions_v1": db.execute(
+            "SELECT COUNT(*) FROM trail_submissions_v1 WHERE user_id=?", (user_id,),
+        ).fetchone()[0],
+    }
+    remaining = [table for table, count in postchecks.items() if int(count)]
+    if remaining:
+        raise RuntimeError("Account deletion retained private trail data: " + ", ".join(remaining))
+
+
 def _delete_user_full(user_id: int) -> None:
     db = _conn()
     _delete_user_support_data(db, user_id)
+    _delete_user_trail_route_data(db, user_id)
     # Tables with REFERENCES users(id) — strict foreign key constraints, delete first
     db.execute("DELETE FROM contributor_badges WHERE user_id=? OR granted_by=?", (user_id, user_id))
     db.execute("DELETE FROM contest_events      WHERE user_id=?",    (user_id,))
@@ -14484,6 +14872,56 @@ def _decode_trail_profile(row: sqlite3.Row | dict) -> dict:
     d["admin_edited"] = bool(d.get("admin_edited"))
     return d
 
+
+def trail_profile_publication_lane(profile: dict | sqlite3.Row) -> str:
+    """Classify a stored profile without trusting its public-facing label.
+
+    Legacy community submissions were historically written straight into
+    ``trail_profiles``.  Every reader uses this classifier so an unreviewed
+    row cannot leak through a legacy list, detail, preview, area, or map path.
+    """
+    raw = dict(profile)
+    decoded = (
+        raw
+        if isinstance(raw.get("provenance"), dict)
+        else _decode_trail_profile(raw)
+    )
+    provenance = decoded.get("provenance") if isinstance(decoded.get("provenance"), dict) else {}
+    source = str(decoded.get("source") or "").strip().lower()
+    source_label = str(decoded.get("source_label") or "").strip().lower()
+    review_status = str(provenance.get("review_status") or "").strip().lower()
+    is_legacy_community = (
+        source in {"trailhead community", "community"}
+        or source_label == "trailhead community"
+        or review_status in {
+            "community", "submitted", "changes_requested", "rejected",
+            "withdrawn", "archived", "approved_community",
+            "community_approved", "approved", "verified", "promoted",
+        }
+        or provenance.get("submitted_by_id") is not None
+    )
+    if not is_legacy_community:
+        return "verified"
+    if review_status in {"verified", "promoted"}:
+        return "verified"
+    if review_status in {"approved_community", "community_approved", "approved"}:
+        return "community"
+    return "unreviewed"
+
+
+def _trail_profile_readable(
+    profile: dict | sqlite3.Row,
+    *,
+    include_community: bool,
+    include_unreviewed: bool,
+) -> bool:
+    lane = trail_profile_publication_lane(profile)
+    return (
+        lane == "verified"
+        or (lane == "community" and include_community)
+        or (lane == "unreviewed" and include_unreviewed)
+    )
+
 def upsert_trail_profile(profile: dict, preserve_admin: bool = True) -> dict:
     now = int(time.time())
     trail_id = str(profile.get("id") or "").strip()[:180]
@@ -14539,14 +14977,27 @@ def upsert_trail_profile(profile: dict, preserve_admin: bool = True) -> dict:
     db.commit(); db.close()
     return _decode_trail_profile(row)
 
-def get_trail_profile(trail_id: str) -> dict | None:
+def get_trail_profile(
+    trail_id: str,
+    *,
+    include_community: bool = False,
+    include_unreviewed: bool = False,
+) -> dict | None:
     db = _conn()
     row = db.execute("SELECT * FROM trail_profiles WHERE id=?", (trail_id,)).fetchone()
     db.close()
-    return _decode_trail_profile(row) if row else None
+    if not row or not _trail_profile_readable(
+        row,
+        include_community=include_community,
+        include_unreviewed=include_unreviewed,
+    ):
+        return None
+    return _decode_trail_profile(row)
 
 def list_trail_profiles_near(lat: float, lng: float, radius_mi: float = 50, limit: int = 80,
-                             bbox: dict | None = None, mode: str = "nearby") -> list[dict]:
+                             bbox: dict | None = None, mode: str = "nearby",
+                             *, include_community: bool = False,
+                             include_unreviewed: bool = False) -> list[dict]:
     db = _conn()
     params: list = []
     where = ""
@@ -14566,7 +15017,15 @@ def list_trail_profiles_near(lat: float, lng: float, radius_mi: float = 50, limi
         (*params, lat, lat, lng, lng, candidate_limit),
     ).fetchall()
     db.close()
-    profiles = [_decode_trail_profile(r) for r in rows]
+    profiles = [
+        _decode_trail_profile(r)
+        for r in rows
+        if _trail_profile_readable(
+            r,
+            include_community=include_community,
+            include_unreviewed=include_unreviewed,
+        )
+    ]
     for p in profiles:
         p["distance_mi"] = _distance_miles(lat, lng, p["lat"], p["lng"])
         if bbox:
@@ -14599,6 +15058,7 @@ def _decode_owned_trail_route(row: sqlite3.Row | dict) -> dict:
         except Exception:
             raw[public_key] = {} if public_key == "geometry" else []
     raw["share_enabled"] = bool(raw.pop("share_token_hash", None))
+    raw.pop("share_snapshot_json", None)
     return raw
 
 
@@ -14621,6 +15081,389 @@ def _decode_trail_submission(row: sqlite3.Row | dict, *, include_snapshot: bool 
     return raw
 
 
+TRAIL_ROUTE_MAX_POINTS = 50_000
+TRAIL_ROUTE_MAX_JUMP_M = 25_000.0
+TRAIL_ROUTE_MAX_TOTAL_M = 10_000_000.0
+TRAIL_ROUTE_MUTATION_LIMITS = {
+    "create": 25,
+    "update": 150,
+    "delete": 30,
+    "share_create": 30,
+    "share_replace": 30,
+    "share_revoke": 50,
+}
+TRAIL_ROUTE_PUBLIC_FIELDS = (
+    "id", "origin", "title", "description", "activity", "route_shape",
+    "geometry", "geometry_revision", "geometry_sha256", "trailheads",
+    "source_evidence",
+)
+_TRAIL_SHARE_TOKEN_RE = re.compile(r"^[A-Za-z0-9_-]{43}$")
+
+
+def _trail_route_distance_m(a: list[float], b: list[float]) -> float:
+    lat1, lng1 = math.radians(a[1]), math.radians(a[0])
+    lat2, lng2 = math.radians(b[1]), math.radians(b[0])
+    dlat = lat2 - lat1
+    dlng = lng2 - lng1
+    value = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlng / 2) ** 2
+    return 6_371_008.8 * 2 * math.asin(min(1.0, math.sqrt(value)))
+
+
+def normalize_owned_trail_geometry_v1(geometry: dict) -> tuple[dict, str, str]:
+    """Return a bounded canonical GeoJSON LineString and its stable hash."""
+    if not isinstance(geometry, dict):
+        raise ValueError("Trail geometry must be a GeoJSON LineString")
+    candidate = geometry.get("geometry") if geometry.get("type") == "Feature" else geometry
+    if not isinstance(candidate, dict) or candidate.get("type") != "LineString":
+        raise ValueError("Trail geometry must be a GeoJSON LineString")
+    coordinates = candidate.get("coordinates")
+    if not isinstance(coordinates, list) or len(coordinates) < 2:
+        raise ValueError("Trail geometry needs at least two points")
+    if len(coordinates) > TRAIL_ROUTE_MAX_POINTS:
+        raise ValueError(f"Trail geometry exceeds {TRAIL_ROUTE_MAX_POINTS:,} points")
+    canonical: list[list[float]] = []
+    total_distance = 0.0
+    for raw in coordinates:
+        if not isinstance(raw, (list, tuple)) or len(raw) < 2:
+            raise ValueError("Trail geometry contains an invalid point")
+        if isinstance(raw[0], bool) or isinstance(raw[1], bool):
+            raise ValueError("Trail geometry contains an invalid point")
+        try:
+            lng = float(raw[0])
+            lat = float(raw[1])
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Trail geometry contains an invalid point") from exc
+        if not math.isfinite(lng) or not math.isfinite(lat) or not (-180 <= lng <= 180 and -90 <= lat <= 90):
+            raise ValueError("Trail geometry contains coordinates outside the map")
+        # Recording timestamps, accuracy, altitude, and device-specific track
+        # metadata never enter uploaded or shared route geometry. Elevation is
+        # derived separately from source-owned terrain data.
+        point: list[float] = [round(lng, 7), round(lat, 7)]
+        if canonical and point[:2] == canonical[-1][:2]:
+            continue
+        if canonical:
+            jump = _trail_route_distance_m(canonical[-1], point)
+            if jump > TRAIL_ROUTE_MAX_JUMP_M:
+                raise ValueError("Trail geometry contains an impossible jump")
+            total_distance += jump
+        canonical.append(point)
+    if len(canonical) < 2 or total_distance < 1.0:
+        raise ValueError("Trail geometry needs two distinct points")
+    if total_distance > TRAIL_ROUTE_MAX_TOTAL_M:
+        raise ValueError("Trail geometry is longer than a supported route")
+    normalized = {"type": "LineString", "coordinates": canonical}
+    payload = json.dumps(normalized, separators=(",", ":"), sort_keys=True, allow_nan=False)
+    if len(payload.encode("utf-8")) > 4 * 1024 * 1024:
+        raise ValueError("Trail geometry is too large")
+    return normalized, payload, hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _clean_trail_route_text(value: object, limit: int) -> str | None:
+    clean = re.sub(r"\s+", " ", str(value or "")).strip()[:limit]
+    return clean or None
+
+
+TRAIL_ROUTE_ACTIVITY_ALIASES = {
+    "hike": "hiking", "hiking": "hiking", "walk": "walking", "walking": "walking",
+    "run": "running", "running": "running", "backpacking": "backpacking",
+    "bike": "biking", "biking": "biking", "cycling": "biking",
+    "mountain bike": "mountain_biking", "mountain biking": "mountain_biking",
+    "mountain_biking": "mountain_biking", "horseback": "horseback",
+    "horseback riding": "horseback", "horseback_riding": "horseback",
+    "ohv": "ohv", "off-road": "ohv", "off road": "ohv", "4wd": "4wd",
+    "four wheel drive": "4wd", "motorcycle": "motorcycle",
+    "skiing": "skiing", "snowshoeing": "snowshoeing", "mixed use": "mixed_use",
+    "mixed_use": "mixed_use",
+}
+TRAIL_ROUTE_SHAPE_ALIASES = {
+    "loop": "loop", "out and back": "out_and_back", "out_and_back": "out_and_back",
+    "point to point": "point_to_point", "point_to_point": "point_to_point",
+    "one way": "one_way", "one_way": "one_way",
+}
+
+
+def _clean_trail_route_enum(
+    value: object,
+    aliases: dict[str, str],
+    label: str,
+) -> str | None:
+    clean = _clean_trail_route_text(value, 60)
+    if clean is None:
+        return None
+    normalized = re.sub(r"[-\s]+", " ", clean.lower()).strip()
+    result = aliases.get(normalized) or aliases.get(clean.lower())
+    if not result:
+        raise ValueError(f"Invalid trail route {label}")
+    return result
+
+
+def _validate_public_trail_url(value: object, label: str) -> str:
+    clean = _clean_trail_route_text(value, 800)
+    if not clean:
+        raise ValueError(f"{label} is required")
+    parsed = _urlsplit(clean)
+    hostname = str(parsed.hostname or "").lower().rstrip(".")
+    if parsed.scheme.lower() != "https" or not hostname or parsed.username or parsed.password:
+        raise ValueError(f"{label} must use a public HTTPS address")
+    if hostname == "localhost" or hostname.endswith((".localhost", ".local", ".internal")):
+        raise ValueError(f"{label} must use a public HTTPS address")
+    try:
+        address = ipaddress.ip_address(hostname)
+    except ValueError:
+        address = None
+    if address and (
+        address.is_private or address.is_loopback or address.is_link_local
+        or address.is_reserved or address.is_unspecified or address.is_multicast
+    ):
+        raise ValueError(f"{label} must use a public HTTPS address")
+    return clean
+
+
+def _trail_source_evidence_supports_permissions(evidence: object) -> bool:
+    permission_kinds = {
+        "access", "allowed_use", "allowed_uses", "official",
+        "official_access", "permitted_use", "permitted_uses",
+    }
+    return bool(
+        isinstance(evidence, list)
+        and any(
+            isinstance(item, dict)
+            and item.get("url")
+            and (item.get("publisher") or item.get("source_id"))
+            and str(item.get("kind") or "").strip().lower() in permission_kinds
+            for item in evidence
+        )
+    )
+
+
+def _clean_trail_route_string_list(value: object, *, limit: int = 20) -> list[str]:
+    if not isinstance(value, list):
+        raise ValueError("Trail route values must be a list")
+    output: list[str] = []
+    seen: set[str] = set()
+    for raw in value[:limit]:
+        clean = _clean_trail_route_text(raw, 60)
+        key = str(clean or "").lower()
+        if clean and key not in seen:
+            seen.add(key)
+            output.append(clean)
+    return output
+
+
+def _clean_trail_route_activity_list(value: object, *, limit: int = 20) -> list[str]:
+    if not isinstance(value, list):
+        raise ValueError("Trail route permitted uses must be a list")
+    output: list[str] = []
+    for raw in value[:limit]:
+        clean = _clean_trail_route_enum(raw, TRAIL_ROUTE_ACTIVITY_ALIASES, "permitted use")
+        if clean and clean not in output:
+            output.append(clean)
+    return output
+
+
+def _clean_trailheads_v1(value: object) -> list[dict]:
+    if not isinstance(value, list):
+        raise ValueError("Trailheads must be a list")
+    output: list[dict] = []
+    allowed = {"name", "lat", "lng", "role", "place_id", "source", "source_url"}
+    for raw in value[:16]:
+        if not isinstance(raw, dict):
+            continue
+        clean = {key: raw.get(key) for key in allowed if raw.get(key) not in (None, "")}
+        if "lat" in clean or "lng" in clean:
+            if isinstance(clean.get("lat"), bool) or isinstance(clean.get("lng"), bool):
+                raise ValueError("Trailhead coordinates are invalid")
+            try:
+                lat, lng = float(clean.get("lat")), float(clean.get("lng"))
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Trailhead coordinates are invalid") from exc
+            if not math.isfinite(lat) or not math.isfinite(lng) or not (-90 <= lat <= 90 and -180 <= lng <= 180):
+                raise ValueError("Trailhead coordinates are outside the map")
+            clean["lat"], clean["lng"] = round(lat, 7), round(lng, 7)
+        for key, max_length in (("name", 120), ("role", 40), ("place_id", 180), ("source", 80)):
+            if key in clean:
+                clean[key] = _clean_trail_route_text(clean[key], max_length)
+        if clean.get("source_url"):
+            clean["source_url"] = _validate_public_trail_url(clean["source_url"], "Trailhead source link")
+        output.append({key: val for key, val in clean.items() if val not in (None, "")})
+    return output
+
+
+def _clean_trail_route_records_v1(value: object, *, kind: str) -> list[dict]:
+    if not isinstance(value, list):
+        raise ValueError(f"Trail route {kind} must be a list")
+    if kind == "photos":
+        if value:
+            raise ValueError("Trail photos are not available for private route uploads yet")
+        return []
+    output: list[dict] = []
+    for raw in value[:20 if kind == "source_evidence" else 12]:
+        if not isinstance(raw, dict):
+            continue
+        clean = {}
+        for key, max_length in (
+            ("title", 180), ("publisher", 180), ("kind", 60),
+            ("note", 600), ("license", 160), ("source_id", 180),
+            ("reviewed_at", 80),
+        ):
+            text = _clean_trail_route_text(raw.get(key), max_length)
+            if text:
+                clean[key] = text
+        raw_url = _clean_trail_route_text(raw.get("url"), 800)
+        if raw_url:
+            clean["url"] = _validate_public_trail_url(raw_url, "Trail source link")
+        encoded = json.dumps(clean, separators=(",", ":"), sort_keys=True, allow_nan=False)
+        if len(encoded.encode("utf-8")) > 16_384:
+            raise ValueError(f"Trail route {kind} entry is too large")
+        output.append(json.loads(encoded))
+    return output
+
+
+def _trail_route_request_hash(operation: str, payload: dict) -> str:
+    encoded = json.dumps(
+        {"operation": operation, "payload": payload},
+        separators=(",", ":"), sort_keys=True, allow_nan=False,
+    )
+    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def _validate_trail_route_revision(value: object) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+        raise ValueError("Expected revision must be a positive integer")
+    return value
+
+
+def _trail_route_mutation_replay(
+    db: sqlite3.Connection,
+    user_id: int,
+    idempotency_key: str,
+    request_hash: str,
+) -> dict | None:
+    row = db.execute(
+        """SELECT request_hash,response_json FROM trail_route_mutations_v1
+           WHERE user_id=? AND idempotency_key=?""",
+        (user_id, idempotency_key),
+    ).fetchone()
+    if not row:
+        return None
+    if not secrets.compare_digest(str(row["request_hash"]), request_hash):
+        raise IdempotencyConflictError("Idempotency-Key was already used for another trail route change")
+    return json.loads(row["response_json"])
+
+
+def _trail_route_replay_owner_view(
+    db: sqlite3.Connection,
+    user_id: int,
+    replay: dict,
+) -> dict | None:
+    route_id = str(replay.get("route_id") or "").strip()
+    row = db.execute(
+        """SELECT * FROM owned_trail_routes_v1
+           WHERE id=? AND user_id=? AND deleted_at IS NULL""",
+        (route_id, user_id),
+    ).fetchone() if route_id else None
+    return _decode_owned_trail_route(row) if row else None
+
+
+def _require_current_trail_share_replay(
+    replay: dict,
+    route: dict | None,
+    *,
+    share_enabled: bool,
+) -> dict:
+    """Reject an idempotent share replay after a later route mutation.
+
+    A raw share token is intentionally never stored in the mutation ledger, so
+    an immediate replay can only report the current link state.  Once a revoke,
+    replacement, or other mutation advances the route revision, returning the
+    old mutation's success flags would contradict the nested route and could
+    mislead the client about whether a link is live.  Surface the normal
+    revision conflict instead.
+    """
+    if not route:
+        raise KeyError("Trail route not found")
+    replay_revision = int(replay.get("revision") or 0)
+    current_revision = int(route.get("revision") or 0)
+    if replay_revision < 1 or current_revision != replay_revision:
+        raise RevisionConflictError(max(1, current_revision))
+    if bool(route.get("share_enabled")) is not bool(share_enabled):
+        raise IdempotencyConflictError("Trail share state changed after this request")
+    return route
+
+
+def _compact_trail_route_mutation_response(
+    route_id: str | None,
+    response: dict,
+) -> dict:
+    route = response.get("route") if isinstance(response.get("route"), dict) else response
+    compact = {
+        "route_id": route.get("id") or route_id,
+        "revision": route.get("revision") or response.get("revision"),
+        "content_revision": route.get("content_revision"),
+        "geometry_revision": route.get("geometry_revision"),
+        "geometry_sha256": route.get("geometry_sha256"),
+    }
+    for key in ("deleted", "revoked", "share_revision"):
+        if key in response:
+            compact[key] = response[key]
+    return {key: value for key, value in compact.items() if value is not None}
+
+
+def _trail_route_mutation_envelope(
+    *,
+    route: dict | None,
+    mutation: dict,
+    replayed: bool,
+) -> dict:
+    return {
+        "route": route,
+        "mutation": mutation,
+        "replayed": bool(replayed),
+        "route_deleted": route is None and bool(mutation.get("route_id")),
+    }
+
+
+def _enforce_trail_route_mutation_limit(
+    db: sqlite3.Connection,
+    user_id: int,
+    operation: str,
+) -> None:
+    limit = TRAIL_ROUTE_MUTATION_LIMITS.get(operation)
+    if not limit:
+        return
+    since = int(time.time()) - 86_400
+    count = db.execute(
+        """SELECT COUNT(*) FROM trail_route_mutations_v1
+           WHERE user_id=? AND operation=? AND created_at>=?""",
+        (user_id, operation, since),
+    ).fetchone()[0]
+    if int(count) >= int(limit):
+        raise PermissionError("Trail route change limit reached")
+
+
+def _record_trail_route_mutation(
+    db: sqlite3.Connection,
+    *,
+    user_id: int,
+    idempotency_key: str,
+    operation: str,
+    route_id: str | None,
+    request_hash: str,
+    response: dict,
+) -> None:
+    compact = _compact_trail_route_mutation_response(route_id, response)
+    db.execute(
+        """INSERT INTO trail_route_mutations_v1
+           (user_id,idempotency_key,operation,route_id,request_hash,response_json,created_at)
+           VALUES (?,?,?,?,?,?,?)""",
+        (
+            user_id, idempotency_key, operation, route_id, request_hash,
+            json.dumps(compact, separators=(",", ":"), sort_keys=True),
+            int(time.time()),
+        ),
+    )
+
+
 def create_owned_trail_route_v1(
     user_id: int,
     *,
@@ -14634,56 +15477,577 @@ def create_owned_trail_route_v1(
     permitted_uses: list[str] | None = None,
     source_evidence: list[dict] | None = None,
     photos: list[dict] | None = None,
+    idempotency_key: str | None = None,
 ) -> dict:
-    origin = str(origin or "").strip().lower()
-    if origin not in {"builder", "gpx", "recording"}:
+    clean_origin = str(origin or "").strip().lower()
+    if clean_origin not in {"builder", "gpx", "recording"}:
         raise ValueError("Invalid trail route origin")
-    clean_title = re.sub(r"\s+", " ", str(title or "")).strip()[:140]
-    if len(clean_title) < 3:
+    clean_title = _clean_trail_route_text(title, 140)
+    if not clean_title or len(clean_title) < 3:
         raise ValueError("Trail name must be at least 3 characters")
-    geometry_payload = json.dumps(geometry, separators=(",", ":"), sort_keys=True)
-    geometry_sha256 = hashlib.sha256(geometry_payload.encode("utf-8")).hexdigest()
+    clean_geometry, geometry_payload, geometry_sha256 = normalize_owned_trail_geometry_v1(geometry)
+    clean_source_evidence = _clean_trail_route_records_v1(
+        source_evidence or [], kind="source_evidence",
+    )
+    clean_permitted_uses = _clean_trail_route_activity_list(permitted_uses or [])
+    if clean_permitted_uses and not _trail_source_evidence_supports_permissions(clean_source_evidence):
+        raise ValueError("Permitted uses require official source evidence")
+    normalized = {
+        "origin": clean_origin,
+        "title": clean_title,
+        "description": _clean_trail_route_text(description, 2000),
+        "activity": _clean_trail_route_enum(activity, TRAIL_ROUTE_ACTIVITY_ALIASES, "activity"),
+        "route_shape": _clean_trail_route_enum(route_shape, TRAIL_ROUTE_SHAPE_ALIASES, "shape"),
+        "geometry": clean_geometry,
+        "trailheads": _clean_trailheads_v1(trailheads or []),
+        "permitted_uses": clean_permitted_uses,
+        "source_evidence": clean_source_evidence,
+        "photos": _clean_trail_route_records_v1(photos or [], kind="photos"),
+    }
+    clean_key = str(idempotency_key or "").strip()
+    if clean_key and not _IDEMPOTENCY_KEY_RE.fullmatch(clean_key):
+        raise ValueError("Invalid Idempotency-Key")
+    ledger_key = clean_key or f"legacy-create-{secrets.token_hex(16)}"
+    request_hash = _trail_route_request_hash("create", normalized)
     route_id = f"trail_route_{secrets.token_hex(16)}"
     now = int(time.time())
     db = _conn()
-    db.execute(
-        """INSERT INTO owned_trail_routes_v1
-           (id,user_id,origin,title,description,activity,route_shape,geometry_json,
-            geometry_revision,geometry_sha256,trailheads_json,permitted_uses_json,
-            source_evidence_json,photos_json,visibility,privacy_reviewed_at,created_at,updated_at)
-           VALUES (?,?,?,?,?,?,?,?,1,?,?,?,?,?,'private',NULL,?,?)""",
-        (
-            route_id,
-            user_id,
-            origin,
-            clean_title,
-            re.sub(r"\s+", " ", str(description or "")).strip()[:2000] or None,
-            re.sub(r"\s+", " ", str(activity or "")).strip()[:60] or None,
-            re.sub(r"\s+", " ", str(route_shape or "")).strip()[:60] or None,
-            geometry_payload,
-            geometry_sha256,
-            json.dumps(trailheads or [], separators=(",", ":"), sort_keys=True),
-            json.dumps(permitted_uses or [], separators=(",", ":"), sort_keys=True),
-            json.dumps(source_evidence or [], separators=(",", ":"), sort_keys=True),
-            json.dumps(photos or [], separators=(",", ":"), sort_keys=True),
-            now,
-            now,
-        ),
-    )
-    row = db.execute("SELECT * FROM owned_trail_routes_v1 WHERE id=?", (route_id,)).fetchone()
-    db.commit(); db.close()
-    return _decode_owned_trail_route(row)
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        if clean_key:
+            replay = _trail_route_mutation_replay(db, user_id, clean_key, request_hash)
+            if replay is not None:
+                route = _trail_route_replay_owner_view(db, user_id, replay)
+                db.commit()
+                return _trail_route_mutation_envelope(
+                    route=route, mutation=replay, replayed=True,
+                )
+        _enforce_trail_route_mutation_limit(db, user_id, "create")
+        db.execute(
+            """INSERT INTO owned_trail_routes_v1
+               (id,user_id,origin,title,description,activity,route_shape,geometry_json,
+                revision,content_revision,geometry_revision,geometry_sha256,trailheads_json,permitted_uses_json,
+                source_evidence_json,photos_json,visibility,privacy_reviewed_at,created_at,updated_at)
+               VALUES (?,?,?,?,?,?,?,?,1,1,1,?,?,?,?,?,'private',NULL,?,?)""",
+            (
+                route_id, user_id, clean_origin, clean_title, normalized["description"],
+                normalized["activity"], normalized["route_shape"], geometry_payload,
+                geometry_sha256,
+                json.dumps(normalized["trailheads"], separators=(",", ":"), sort_keys=True),
+                json.dumps(normalized["permitted_uses"], separators=(",", ":"), sort_keys=True),
+                json.dumps(normalized["source_evidence"], separators=(",", ":"), sort_keys=True),
+                json.dumps(normalized["photos"], separators=(",", ":"), sort_keys=True),
+                now, now,
+            ),
+        )
+        row = db.execute("SELECT * FROM owned_trail_routes_v1 WHERE id=?", (route_id,)).fetchone()
+        result = _decode_owned_trail_route(row)
+        _record_trail_route_mutation(
+            db, user_id=user_id, idempotency_key=ledger_key, operation="create",
+            route_id=route_id, request_hash=request_hash, response=result,
+        )
+        db.commit()
+        return _trail_route_mutation_envelope(
+            route=result,
+            mutation=_compact_trail_route_mutation_response(route_id, result),
+            replayed=False,
+        )
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 def get_owned_trail_route_v1(user_id: int, route_id: str) -> dict | None:
+    clean_id = _validate_canonical_id(route_id, "trail route id")
     db = _conn()
     row = db.execute(
         """SELECT * FROM owned_trail_routes_v1
            WHERE id=? AND user_id=? AND deleted_at IS NULL""",
-        (route_id, user_id),
+        (clean_id, user_id),
     ).fetchone()
     db.close()
     return _decode_owned_trail_route(row) if row else None
+
+
+def list_owned_trail_routes_v1(user_id: int, *, limit: int = 100) -> list[dict]:
+    db = _conn()
+    rows = db.execute(
+        """SELECT id,origin,title,activity,route_shape,revision,content_revision,
+                  geometry_revision,geometry_sha256,visibility,privacy_reviewed_at,
+                  share_revision,share_route_revision,
+                  CASE WHEN share_token_hash IS NULL THEN 0 ELSE 1 END AS share_enabled,
+                  created_at,updated_at
+           FROM owned_trail_routes_v1
+           WHERE user_id=? AND deleted_at IS NULL
+           ORDER BY updated_at DESC,id DESC LIMIT ?""",
+        (user_id, max(1, min(int(limit), 200))),
+    ).fetchall()
+    db.close()
+    output: list[dict] = []
+    for row in rows:
+        item = dict(row)
+        item["share_enabled"] = bool(item.get("share_enabled"))
+        output.append(item)
+    return output
+
+
+def update_owned_trail_route_v1(
+    user_id: int,
+    route_id: str,
+    *,
+    expected_revision: int,
+    idempotency_key: str,
+    changes: dict,
+) -> dict:
+    clean_id = _validate_canonical_id(route_id, "trail route id")
+    clean_key = str(idempotency_key or "").strip()
+    if not _IDEMPOTENCY_KEY_RE.fullmatch(clean_key):
+        raise ValueError("Invalid Idempotency-Key")
+    expected_revision = _validate_trail_route_revision(expected_revision)
+    if not isinstance(changes, dict):
+        raise ValueError("Trail route changes must be an object")
+    allowed = {
+        "title", "description", "activity", "route_shape", "geometry",
+        "trailheads", "permitted_uses", "source_evidence", "photos",
+        "privacy_reviewed",
+    }
+    unknown = set(changes).difference(allowed)
+    if unknown:
+        raise ValueError("Unsupported trail route field")
+    normalized: dict = {}
+    if "title" in changes:
+        title = _clean_trail_route_text(changes.get("title"), 140)
+        if not title or len(title) < 3:
+            raise ValueError("Trail name must be at least 3 characters")
+        normalized["title"] = title
+    if "description" in changes:
+        normalized["description"] = _clean_trail_route_text(changes.get("description"), 2000)
+    if "activity" in changes:
+        normalized["activity"] = _clean_trail_route_enum(
+            changes.get("activity"), TRAIL_ROUTE_ACTIVITY_ALIASES, "activity",
+        )
+    if "route_shape" in changes:
+        normalized["route_shape"] = _clean_trail_route_enum(
+            changes.get("route_shape"), TRAIL_ROUTE_SHAPE_ALIASES, "shape",
+        )
+    if "geometry" in changes:
+        geometry, payload, digest = normalize_owned_trail_geometry_v1(changes["geometry"])
+        normalized["geometry"] = geometry
+        normalized["geometry_payload"] = payload
+        normalized["geometry_sha256"] = digest
+    if "trailheads" in changes:
+        normalized["trailheads"] = _clean_trailheads_v1(changes["trailheads"])
+    if "permitted_uses" in changes:
+        normalized["permitted_uses"] = _clean_trail_route_activity_list(changes["permitted_uses"])
+    if "source_evidence" in changes:
+        normalized["source_evidence"] = _clean_trail_route_records_v1(
+            changes["source_evidence"], kind="source_evidence",
+        )
+    if "photos" in changes:
+        normalized["photos"] = _clean_trail_route_records_v1(changes["photos"], kind="photos")
+    if "privacy_reviewed" in changes:
+        if not isinstance(changes["privacy_reviewed"], bool):
+            raise ValueError("privacy_reviewed must be true or false")
+        normalized["privacy_reviewed"] = changes["privacy_reviewed"]
+    hash_payload = {
+        key: value for key, value in normalized.items()
+        if key != "geometry_payload"
+    }
+    request_hash = _trail_route_request_hash("update", {
+        "route_id": clean_id,
+        "expected_revision": expected_revision,
+        "changes": hash_payload,
+    })
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        replay = _trail_route_mutation_replay(db, user_id, clean_key, request_hash)
+        if replay is not None:
+            route = _trail_route_replay_owner_view(db, user_id, replay)
+            db.commit()
+            return _trail_route_mutation_envelope(
+                route=route, mutation=replay, replayed=True,
+            )
+        _enforce_trail_route_mutation_limit(db, user_id, "update")
+        row = db.execute(
+            """SELECT * FROM owned_trail_routes_v1
+               WHERE id=? AND user_id=? AND deleted_at IS NULL""",
+            (clean_id, user_id),
+        ).fetchone()
+        if not row:
+            raise KeyError("Trail route not found")
+        current = _decode_owned_trail_route(row)
+        current_revision = int(current.get("revision") or 1)
+        if current_revision != expected_revision:
+            raise RevisionConflictError(current_revision)
+        merged = dict(current)
+        content_fields = {
+            "title", "description", "activity", "route_shape", "geometry",
+            "trailheads", "permitted_uses", "source_evidence", "photos",
+        }
+        changed_fields: set[str] = set()
+        for field in content_fields.intersection(normalized):
+            new_value = normalized[field]
+            if json.dumps(current.get(field), sort_keys=True, separators=(",", ":")) != json.dumps(new_value, sort_keys=True, separators=(",", ":")):
+                merged[field] = new_value
+                changed_fields.add(field)
+        if merged.get("permitted_uses") and not _trail_source_evidence_supports_permissions(
+            merged.get("source_evidence"),
+        ):
+            raise ValueError("Permitted uses require official source evidence")
+        privacy_supplied = "privacy_reviewed" in normalized
+        if not changed_fields and not privacy_supplied:
+            result = current
+        else:
+            now = int(time.time())
+            next_revision = current_revision + 1
+            next_content_revision = int(current.get("content_revision") or 1) + (1 if changed_fields else 0)
+            geometry_changed = "geometry" in changed_fields
+            if geometry_changed:
+                merged["geometry_sha256"] = normalized["geometry_sha256"]
+                merged["geometry_revision"] = int(current.get("geometry_revision") or 1) + 1
+            privacy_reviewed_at = current.get("privacy_reviewed_at")
+            if changed_fields:
+                privacy_reviewed_at = None
+            if privacy_supplied:
+                privacy_reviewed_at = now if normalized["privacy_reviewed"] else None
+            geometry_json = (
+                normalized["geometry_payload"]
+                if geometry_changed
+                else json.dumps(merged["geometry"], separators=(",", ":"), sort_keys=True)
+            )
+            db.execute(
+                """UPDATE owned_trail_routes_v1
+                   SET title=?,description=?,activity=?,route_shape=?,geometry_json=?,
+                       revision=?,content_revision=?,geometry_revision=?,geometry_sha256=?,trailheads_json=?,
+                       permitted_uses_json=?,source_evidence_json=?,photos_json=?,
+                       privacy_reviewed_at=?,updated_at=?
+                   WHERE id=? AND user_id=? AND deleted_at IS NULL""",
+                (
+                    merged["title"], merged.get("description"), merged.get("activity"),
+                    merged.get("route_shape"), geometry_json, next_revision, next_content_revision,
+                    int(merged.get("geometry_revision") or 1), merged["geometry_sha256"],
+                    json.dumps(merged.get("trailheads") or [], separators=(",", ":"), sort_keys=True),
+                    json.dumps(merged.get("permitted_uses") or [], separators=(",", ":"), sort_keys=True),
+                    json.dumps(merged.get("source_evidence") or [], separators=(",", ":"), sort_keys=True),
+                    json.dumps(merged.get("photos") or [], separators=(",", ":"), sort_keys=True),
+                    privacy_reviewed_at, now, clean_id, user_id,
+                ),
+            )
+            saved = db.execute(
+                "SELECT * FROM owned_trail_routes_v1 WHERE id=? AND user_id=?",
+                (clean_id, user_id),
+            ).fetchone()
+            result = _decode_owned_trail_route(saved)
+        _record_trail_route_mutation(
+            db, user_id=user_id, idempotency_key=clean_key, operation="update",
+            route_id=clean_id, request_hash=request_hash, response=result,
+        )
+        db.commit()
+        return _trail_route_mutation_envelope(
+            route=result,
+            mutation=_compact_trail_route_mutation_response(clean_id, result),
+            replayed=False,
+        )
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def delete_owned_trail_route_v1(
+    user_id: int,
+    route_id: str,
+    *,
+    expected_revision: int,
+    idempotency_key: str,
+) -> dict:
+    clean_id = _validate_canonical_id(route_id, "trail route id")
+    expected_revision = _validate_trail_route_revision(expected_revision)
+    clean_key = str(idempotency_key or "").strip()
+    if not _IDEMPOTENCY_KEY_RE.fullmatch(clean_key):
+        raise ValueError("Invalid Idempotency-Key")
+    request_hash = _trail_route_request_hash("delete", {
+        "route_id": clean_id, "expected_revision": expected_revision,
+    })
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        replay = _trail_route_mutation_replay(db, user_id, clean_key, request_hash)
+        if replay is not None:
+            db.commit()
+            return _trail_route_mutation_envelope(
+                route=None, mutation=replay, replayed=True,
+            )
+        _enforce_trail_route_mutation_limit(db, user_id, "delete")
+        row = db.execute(
+            """SELECT revision,share_token_hash,share_revision
+               FROM owned_trail_routes_v1
+               WHERE id=? AND user_id=? AND deleted_at IS NULL""",
+            (clean_id, user_id),
+        ).fetchone()
+        if not row:
+            raise KeyError("Trail route not found")
+        current_revision = int(row["revision"] or 1)
+        if current_revision != expected_revision:
+            raise RevisionConflictError(current_revision)
+        now = int(time.time())
+        next_revision = current_revision + 1
+        next_share_revision = int(row["share_revision"] or 0) + (1 if row["share_token_hash"] else 0)
+        db.execute(
+            """UPDATE owned_trail_routes_v1
+               SET revision=?,visibility='private',share_token_hash=NULL,
+                   share_revision=?,share_route_revision=NULL,share_snapshot_json=NULL,
+                   share_updated_at=?,updated_at=?,deleted_at=?
+               WHERE id=? AND user_id=?""",
+            (next_revision, next_share_revision, now, now, now, clean_id, user_id),
+        )
+        result = {"id": clean_id, "revision": next_revision, "deleted": True}
+        _record_trail_route_mutation(
+            db, user_id=user_id, idempotency_key=clean_key, operation="delete",
+            route_id=clean_id, request_hash=request_hash, response=result,
+        )
+        db.commit()
+        return _trail_route_mutation_envelope(
+            route=None,
+            mutation=_compact_trail_route_mutation_response(clean_id, result),
+            replayed=False,
+        )
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def _owned_trail_share_snapshot(route: dict, *, content_revision: int, share_revision: int) -> dict:
+    snapshot = {
+        "version": 1,
+        "route_revision": int(content_revision),
+        "content_revision": int(content_revision),
+        "share_revision": int(share_revision),
+    }
+    for field in TRAIL_ROUTE_PUBLIC_FIELDS:
+        if field in route:
+            snapshot["shared_route_id" if field == "id" else field] = route[field]
+    if route.get("permitted_uses") and _trail_source_evidence_supports_permissions(
+        route.get("source_evidence"),
+    ):
+        snapshot["permitted_uses"] = list(route["permitted_uses"])
+    return snapshot
+
+
+def create_owned_trail_share_v1(
+    user_id: int,
+    route_id: str,
+    *,
+    expected_revision: int,
+    idempotency_key: str,
+    replace: bool = False,
+) -> dict:
+    clean_id = _validate_canonical_id(route_id, "trail route id")
+    expected_revision = _validate_trail_route_revision(expected_revision)
+    clean_key = str(idempotency_key or "").strip()
+    if not _IDEMPOTENCY_KEY_RE.fullmatch(clean_key):
+        raise ValueError("Invalid Idempotency-Key")
+    operation = "share_replace" if replace else "share_create"
+    request_hash = _trail_route_request_hash(operation, {
+        "route_id": clean_id, "expected_revision": expected_revision,
+    })
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        replay = _trail_route_mutation_replay(db, user_id, clean_key, request_hash)
+        if replay is not None:
+            route = _require_current_trail_share_replay(
+                replay,
+                _trail_route_replay_owner_view(db, user_id, replay),
+                share_enabled=True,
+            )
+            db.commit()
+            return {
+                **_trail_route_mutation_envelope(
+                    route=route, mutation=replay, replayed=True,
+                ),
+                "share_revision": replay.get("share_revision") or (route or {}).get("share_revision"),
+                "share_token": None,
+                "resolver_path": "/api/trail-routes/shared/resolve",
+                "link_exists": True,
+            }
+        _enforce_trail_route_mutation_limit(db, user_id, operation)
+        row = db.execute(
+            """SELECT * FROM owned_trail_routes_v1
+               WHERE id=? AND user_id=? AND deleted_at IS NULL""",
+            (clean_id, user_id),
+        ).fetchone()
+        if not row:
+            raise KeyError("Trail route not found")
+        route = _decode_owned_trail_route(row)
+        current_revision = int(route.get("revision") or 1)
+        if current_revision != expected_revision:
+            raise RevisionConflictError(current_revision)
+        has_share = bool(route.get("share_enabled"))
+        if has_share and not replace:
+            raise ValueError("This route already has an unlisted link")
+        if replace and not has_share:
+            raise ValueError("This route does not have an unlisted link to replace")
+        if not route.get("privacy_reviewed_at"):
+            raise PermissionError("Review route privacy before creating an unlisted link")
+        now = int(time.time())
+        next_revision = current_revision + 1
+        next_share_revision = int(route.get("share_revision") or 0) + 1
+        content_revision = int(route.get("content_revision") or 1)
+        token = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(token.encode("ascii")).hexdigest()
+        snapshot = _owned_trail_share_snapshot(
+            route, content_revision=content_revision, share_revision=next_share_revision,
+        )
+        snapshot_json = json.dumps(snapshot, separators=(",", ":"), sort_keys=True)
+        db.execute(
+            """UPDATE owned_trail_routes_v1
+               SET revision=?,visibility='unlisted',share_token_hash=?,share_revision=?,
+                   share_route_revision=?,share_snapshot_json=?,
+                   share_created_at=COALESCE(share_created_at,?),share_updated_at=?,updated_at=?
+               WHERE id=? AND user_id=? AND deleted_at IS NULL""",
+            (
+                next_revision, token_hash, next_share_revision, content_revision,
+                snapshot_json, now, now, now, clean_id, user_id,
+            ),
+        )
+        saved = db.execute(
+            "SELECT * FROM owned_trail_routes_v1 WHERE id=? AND user_id=?",
+            (clean_id, user_id),
+        ).fetchone()
+        result = {
+            "route": _decode_owned_trail_route(saved),
+            "share_revision": next_share_revision,
+        }
+        _record_trail_route_mutation(
+            db, user_id=user_id, idempotency_key=clean_key, operation=operation,
+            route_id=clean_id, request_hash=request_hash, response=result,
+        )
+        db.commit()
+        return {
+            **_trail_route_mutation_envelope(
+                route=result["route"],
+                mutation=_compact_trail_route_mutation_response(clean_id, result),
+                replayed=False,
+            ),
+            "share_revision": next_share_revision,
+            "share_token": token,
+            "resolver_path": "/api/trail-routes/shared/resolve",
+            "link_exists": False,
+        }
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def revoke_owned_trail_share_v1(
+    user_id: int,
+    route_id: str,
+    *,
+    expected_revision: int,
+    idempotency_key: str,
+) -> dict:
+    clean_id = _validate_canonical_id(route_id, "trail route id")
+    expected_revision = _validate_trail_route_revision(expected_revision)
+    clean_key = str(idempotency_key or "").strip()
+    if not _IDEMPOTENCY_KEY_RE.fullmatch(clean_key):
+        raise ValueError("Invalid Idempotency-Key")
+    request_hash = _trail_route_request_hash("share_revoke", {
+        "route_id": clean_id, "expected_revision": expected_revision,
+    })
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        replay = _trail_route_mutation_replay(db, user_id, clean_key, request_hash)
+        if replay is not None:
+            route = _require_current_trail_share_replay(
+                replay,
+                _trail_route_replay_owner_view(db, user_id, replay),
+                share_enabled=False,
+            )
+            db.commit()
+            return {
+                **_trail_route_mutation_envelope(
+                    route=route, mutation=replay, replayed=True,
+                ),
+                "revoked": True,
+            }
+        _enforce_trail_route_mutation_limit(db, user_id, "share_revoke")
+        row = db.execute(
+            """SELECT * FROM owned_trail_routes_v1
+               WHERE id=? AND user_id=? AND deleted_at IS NULL""",
+            (clean_id, user_id),
+        ).fetchone()
+        if not row:
+            raise KeyError("Trail route not found")
+        route = _decode_owned_trail_route(row)
+        current_revision = int(route.get("revision") or 1)
+        if current_revision != expected_revision:
+            raise RevisionConflictError(current_revision)
+        if not route.get("share_enabled"):
+            raise ValueError("This route does not have an unlisted link")
+        now = int(time.time())
+        next_revision = current_revision + 1
+        next_share_revision = int(route.get("share_revision") or 0) + 1
+        db.execute(
+            """UPDATE owned_trail_routes_v1
+               SET revision=?,visibility='private',share_token_hash=NULL,share_revision=?,
+                   share_route_revision=NULL,share_snapshot_json=NULL,share_updated_at=?,updated_at=?
+               WHERE id=? AND user_id=? AND deleted_at IS NULL""",
+            (next_revision, next_share_revision, now, now, clean_id, user_id),
+        )
+        saved = db.execute(
+            "SELECT * FROM owned_trail_routes_v1 WHERE id=? AND user_id=?",
+            (clean_id, user_id),
+        ).fetchone()
+        result = {"route": _decode_owned_trail_route(saved), "revoked": True}
+        _record_trail_route_mutation(
+            db, user_id=user_id, idempotency_key=clean_key, operation="share_revoke",
+            route_id=clean_id, request_hash=request_hash, response=result,
+        )
+        db.commit()
+        return {
+            **_trail_route_mutation_envelope(
+                route=result["route"],
+                mutation=_compact_trail_route_mutation_response(clean_id, result),
+                replayed=False,
+            ),
+            "revoked": True,
+        }
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def resolve_owned_trail_share_v1(token: str) -> dict | None:
+    clean_token = str(token or "").strip()
+    if not _TRAIL_SHARE_TOKEN_RE.fullmatch(clean_token):
+        return None
+    token_hash = hashlib.sha256(clean_token.encode("ascii")).hexdigest()
+    db = _conn()
+    row = db.execute(
+        """SELECT share_snapshot_json FROM owned_trail_routes_v1
+           WHERE share_token_hash=? AND visibility='unlisted' AND deleted_at IS NULL""",
+        (token_hash,),
+    ).fetchone()
+    db.close()
+    if not row or not row["share_snapshot_json"]:
+        return None
+    try:
+        snapshot = json.loads(row["share_snapshot_json"])
+    except Exception:
+        return None
+    return snapshot if isinstance(snapshot, dict) else None
 
 
 def create_trail_submission_v1(user_id: int, route_id: str, submitter_handle: str | None) -> dict:
@@ -14698,6 +16062,14 @@ def create_trail_submission_v1(user_id: int, route_id: str, submitter_handle: st
         if not route:
             raise KeyError("Trail route not found")
         decoded = _decode_owned_trail_route(route)
+        existing = db.execute(
+            """SELECT * FROM trail_submissions_v1
+               WHERE route_id=? AND route_revision=?""",
+            (route_id, int(decoded.get("content_revision") or decoded["geometry_revision"])),
+        ).fetchone()
+        if existing:
+            db.commit()
+            return _decode_trail_submission(existing)
         trailheads = decoded.get("trailheads") or []
         source_evidence = decoded.get("source_evidence") or []
         if not trailheads and not source_evidence:
@@ -14705,7 +16077,7 @@ def create_trail_submission_v1(user_id: int, route_id: str, submitter_handle: st
         snapshot = {
             "version": 1,
             "route_id": decoded["id"],
-            "route_revision": int(decoded["geometry_revision"]),
+            "route_revision": int(decoded.get("content_revision") or decoded["geometry_revision"]),
             "title": decoded["title"],
             "description": decoded.get("description"),
             "origin": decoded["origin"],
@@ -14729,7 +16101,7 @@ def create_trail_submission_v1(user_id: int, route_id: str, submitter_handle: st
                 submission_id,
                 route_id,
                 user_id,
-                int(decoded["geometry_revision"]),
+                int(decoded.get("content_revision") or decoded["geometry_revision"]),
                 decoded["geometry_sha256"],
                 re.sub(r"\s+", " ", str(submitter_handle or "")).strip()[:80] or None,
                 json.dumps(snapshot, separators=(",", ":"), sort_keys=True),
@@ -14807,7 +16179,11 @@ def update_trail_edit_suggestion_status(suggestion_id: int, status: str) -> bool
     return cur.rowcount > 0
 
 def set_trail_profile_admin_update(trail_id: str, data: dict, admin_id: int | None) -> dict:
-    current = get_trail_profile(trail_id)
+    current = get_trail_profile(
+        trail_id,
+        include_community=True,
+        include_unreviewed=True,
+    )
     if not current:
         raise KeyError(trail_id)
     clean = {k: v for k, v in data.items() if v is not None}

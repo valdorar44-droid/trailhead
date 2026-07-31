@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
@@ -14,6 +15,14 @@ from db import store
 
 class ExploreCommunityTrailsTests(unittest.TestCase):
     def setUp(self):
+        self.feature_stages = patch.dict(
+            "os.environ",
+            {
+                "TRAILHEAD_PRIVATE_TRAIL_ROUTES_STAGE": "public",
+                "TRAILHEAD_COMMUNITY_TRAILS_STAGE": "public",
+            },
+        )
+        self.feature_stages.start()
         self.original_db_path = settings.db_path
         self.temp = tempfile.TemporaryDirectory()
         settings.db_path = str(Path(self.temp.name) / "explore-community-trails.db")
@@ -28,6 +37,7 @@ class ExploreCommunityTrailsTests(unittest.TestCase):
         server.app.dependency_overrides.pop(server._current_user, None)
         settings.db_path = self.original_db_path
         self.temp.cleanup()
+        self.feature_stages.stop()
 
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {server._make_token(self.user_id)}"}

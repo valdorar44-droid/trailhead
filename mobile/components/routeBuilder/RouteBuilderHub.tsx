@@ -35,6 +35,7 @@ type RouteBuilderHubProps = {
   onOpenActiveMap: () => void;
   onOpenSavedRoute: (tripId: string) => void;
   onOpenSavedTrailRoute: (trail: OfflineTrail) => void;
+  onShareSavedTrailRoute?: (trail: OfflineTrail) => void;
   onDeleteSavedTrailRoute: (trail: OfflineTrail) => void;
   onCloseNewRouteConfirm: () => void;
   onSaveCloseAndStartNewRoute: () => void;
@@ -58,6 +59,7 @@ export default function RouteBuilderHub({
   onOpenActiveMap,
   onOpenSavedRoute,
   onOpenSavedTrailRoute,
+  onShareSavedTrailRoute,
   onDeleteSavedTrailRoute,
   onCloseNewRouteConfirm,
   onSaveCloseAndStartNewRoute,
@@ -170,8 +172,23 @@ export default function RouteBuilderHub({
                 </View>
               </View>
               <View style={s.savedTrailActions}>
+                {onShareSavedTrailRoute && (item.builder || item.ownerRouteOrigin) ? (
+                  <TouchableOpacity
+                    testID={`trail-route.share.${item.id}`}
+                    style={s.savedTrailAction}
+                    onPress={(event: any) => {
+                      event.stopPropagation?.();
+                      onShareSavedTrailRoute(item);
+                    }}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Share ${item.trail.name}`}
+                    activeOpacity={0.82}
+                  >
+                    <Ionicons name="share-outline" size={17} color={C.text2} />
+                  </TouchableOpacity>
+                ) : null}
                 <TouchableOpacity
-                  style={s.savedTrailDelete}
+                  style={s.savedTrailAction}
                   onPress={(event: any) => {
                     event.stopPropagation?.();
                     onDeleteSavedTrailRoute(item);
@@ -322,7 +339,7 @@ const styles = (C: ColorPalette) => StyleSheet.create({
   },
   savedTrailMain: { flex: 1, minWidth: 0 },
   savedTrailActions: { alignItems: 'center', gap: 8 },
-  savedTrailDelete: {
+  savedTrailAction: {
     width: 32,
     height: 32,
     borderRadius: 10,

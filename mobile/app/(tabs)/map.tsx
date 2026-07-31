@@ -145,7 +145,16 @@ import { trustedTripTimelinePhotoUrl } from '@/lib/tripTimelineMedia';
 import { routeUnitsParam } from '@/lib/routeBuilder/units';
 import { shouldPersistTripRoute, type RoutePersistenceScope } from '@/lib/routePersistencePolicy';
 import type { RouteBuildPreviewStop } from '@/lib/routeBuildSession';
-import { loadOfflineTrail, saveOfflineTrail } from '@/lib/offlineTrails';
+import {
+  loadOfflineTrail,
+  saveOfflineTrail,
+  saveOfflineTrailForAccountScope,
+  type OfflineTrail,
+} from '@/lib/offlineTrails';
+import {
+  offlineTrailFromRecordingForPrivacyReview,
+  offlineTrailFromSharedRoute,
+} from '@/lib/trailRouteSharing';
 import {
   getOfflineFileStatesSnapshot,
   trailRouteGraphLocalPath,
@@ -219,9 +228,10 @@ import {
   resumeLocalTrailRecording,
   startLocalTrailRecording,
 } from '@/lib/trailRecordingRuntime';
-import { exportTrailRecordingGpx } from '@/lib/trailRecordingRepository';
+import { exportTrailRecordingGpx, listTrailRecordingPoints } from '@/lib/trailRecordingRepository';
 import { recordingElapsedMs, type TrailRecordingSessionV1 } from '@/lib/trailRecordingSession';
 import TrailFollowHud from '@/components/trails/TrailFollowHud';
+import TrailRouteSharingFlow from '@/components/trails/TrailRouteSharingFlow';
 import {
   appendTrailBuilderAnchor,
   closeTrailBuilderLoop,
@@ -6258,6 +6268,8 @@ function MapScreen() {
   const activeTripFromCache = useStore(st => st.activeTripFromCache);
   const pendingSavedTrailId = useStore(st => st.pendingSavedTrailId);
   const setPendingSavedTrailId = useStore(st => st.setPendingSavedTrailId);
+  const pendingSharedTrailRoute = useStore(st => st.pendingSharedTrailRoute);
+  const setPendingSharedTrailRoute = useStore(st => st.setPendingSharedTrailRoute);
   const pendingRouteFlyover = useStore(st => st.pendingRouteFlyover);
   const setPendingRouteFlyover = useStore(st => st.setPendingRouteFlyover);
   const pendingNavigatePlace = useStore(st => st.pendingNavigatePlace);
@@ -6518,12 +6530,17 @@ function MapScreen() {
   const [trailRecordingSession, setTrailRecordingSession] = useState<TrailRecordingSessionV1 | null>(null);
   const [trailRecordingClock, setTrailRecordingClock] = useState(Date.now());
   const [trailFollowEndVisible, setTrailFollowEndVisible] = useState(false);
+  const [recordingTrailToShare, setRecordingTrailToShare] = useState<OfflineTrail | null>(null);
   const [navIdx,    setNavIdx]    = useState(0);
   const [routeSteps,  setRouteSteps]  = useState<RouteStep[]>([]);
   const [isRouted,    setIsRouted]    = useState(false);
   const [routeFromCache, setRouteFromCache] = useState(false);
   const [routeDebug, setRouteDebug] = useState('');
   const [routeSourceDebug, setRouteSourceDebug] = useState('');
+
+  useEffect(() => {
+    setRecordingTrailToShare(null);
+  }, [mapAccountInventoryScope.key]);
   const [mapLayer,    setMapLayerState] = useState<MapLayer>(DEFAULT_MAP_LAYER);
   const [premiumMapStyle, setPremiumMapStyle] = useState<PremiumMapStyle>('standard');
   const activeOfflineRendererStyleId = resolveActiveOfflineRendererStyleId(mapLayer, premiumMapStyle);
@@ -10648,6 +10665,56 @@ function MapScreen() {
     })();
     return () => { cancelled = true; };
   }, [pendingSavedTrailId]);
+
+  useEffect(() => {
+    if (!pendingSharedTrailRoute || !screenActivity.isActive || (useNativeMapSurface && !mapSurfaceReady)) return;
+    let preview;
+    try {
+      preview = offlineTrailFromSharedRoute(pendingSharedTrailRoute, Date.now());
+    } catch {
+      setPendingSharedTrailRoute(null);
+      setQuickToast('Shared route is unavailable');
+      setTimeout(() => setQuickToast(''), 2600);
+      return;
+    }
+    const coords = primaryTrailLine(preview.geometry, [preview.trail.lng, preview.trail.lat]);
+    if (coords.length < 2) {
+      setPendingSharedTrailRoute(null);
+      setQuickToast('Shared route is unavailable');
+      setTimeout(() => setQuickToast(''), 2600);
+      return;
+    }
+    const distanceM = trailCoordsDistanceM(coords);
+    const plan: TrailRoutePlan = {
+      id: 'capture',
+      trailId: `shared:${pendingSharedTrailRoute.shared_route_id}:${pendingSharedTrailRoute.share_revision}`,
+      title: pendingSharedTrailRoute.title,
+      subtitle: `${fmtTrailRouteDistance(distanceM)} · shared route`,
+      icon: 'link-outline',
+      coords,
+      distanceM,
+      confidence: 'high',
+      warnings: [],
+      engine: 'Shared route',
+    };
+    setSelectedTrail(preview.trail);
+    setTrailCardCollapsed(true);
+    // A recipient opens the immutable shared revision in view-only Map state.
+    // Trail Builder remains untouched until the recipient explicitly saves a
+    // local copy and chooses to edit it.
+    setTrailRouteBuilderOpen(false);
+    previewTrailRoutePlan(preview.trail, plan);
+    setQuickToast('Shared route opened');
+    setTimeout(() => setQuickToast(''), 2200);
+    // Clear only after the main-map state owns the complete immutable route.
+    setPendingSharedTrailRoute(null);
+  }, [
+    mapSurfaceReady,
+    pendingSharedTrailRoute,
+    screenActivity.isActive,
+    setPendingSharedTrailRoute,
+    useNativeMapSurface,
+  ]);
 
   useEffect(() => {
     if (!pendingNavigatePlace) return;
@@ -24949,6 +25016,81 @@ function MapScreen() {
     endNavigation();
   }
 
+  async function reviewCompletedTrailRecording(completed: TrailRecordingSessionV1) {
+    if (!user || productFeatures?.private_trail_routes !== true) return;
+    const requestedScope = mapAccountInventoryScope;
+    try {
+      const points = await listTrailRecordingPoints(completed.id);
+      if (!accountInventoryRequestIsCurrent(
+        requestedScope,
+        accountStorage.epoch(),
+        useStore.getState().user?.id,
+        accountStorage.isCleaning(),
+      )) return;
+      const route = offlineTrailFromRecordingForPrivacyReview({
+        recordingId: completed.id,
+        trailName: completed.trailName,
+        savedAt: completed.endedAtMs ?? completed.updatedAtMs,
+        // The conversion helper reads only latitude and longitude. Recording
+        // time, altitude, speed, heading and accuracy stay in the local log.
+        points,
+      });
+      const saved = await saveOfflineTrailForAccountScope(
+        route,
+        requestedScope.epoch,
+        () => accountInventoryRequestIsCurrent(
+          requestedScope,
+          accountStorage.epoch(),
+          useStore.getState().user?.id,
+          accountStorage.isCleaning(),
+        ),
+      );
+      if (!saved) return;
+      if (!accountInventoryRequestIsCurrent(
+        requestedScope,
+        accountStorage.epoch(),
+        useStore.getState().user?.id,
+        accountStorage.isCleaning(),
+      )) return;
+      setRecordingTrailToShare(route);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      Alert.alert(
+        'Route review unavailable',
+        message.startsWith('This recording')
+          ? message
+          : 'Trailhead could not prepare this recording for review.',
+      );
+    }
+  }
+
+  async function persistRecordingSharedTrailRoute(route: OfflineTrail) {
+    const requestedScope = mapAccountInventoryScope;
+    if (!accountInventoryRequestIsCurrent(
+      requestedScope,
+      accountStorage.epoch(),
+      useStore.getState().user?.id,
+      accountStorage.isCleaning(),
+    )) return;
+    const saved = await saveOfflineTrailForAccountScope(
+      route,
+      requestedScope.epoch,
+      () => accountInventoryRequestIsCurrent(
+        requestedScope,
+        accountStorage.epoch(),
+        useStore.getState().user?.id,
+        accountStorage.isCleaning(),
+      ),
+    );
+    if (!saved) return;
+    if (accountInventoryRequestIsCurrent(
+      requestedScope,
+      accountStorage.epoch(),
+      useStore.getState().user?.id,
+      accountStorage.isCleaning(),
+    )) setRecordingTrailToShare(route);
+  }
+
   async function stopTrailFollowAndSave() {
     setTrailFollowEndVisible(false);
     trailFollowCameraModeRef.current = 'follow';
@@ -24982,6 +25124,10 @@ function MapScreen() {
                 .catch(() => Alert.alert('Export unavailable', 'Trailhead could not prepare this GPX file.'));
             },
           },
+          ...(user && productFeatures?.private_trail_routes === true ? [{
+            text: 'Review & share',
+            onPress: () => { void reviewCompletedTrailRecording(completed); },
+          }] : []),
         ],
       );
     } else {
@@ -25103,6 +25249,7 @@ function MapScreen() {
       },
       savedAt: Date.now(),
       source: 'manual',
+      ownerRouteOrigin: trailBuilderMode === 'gpx' ? 'gpx' : 'builder',
       builder: {
         schemaVersion: 1,
         mode: trailBuilderMode,
@@ -26563,6 +26710,13 @@ function MapScreen() {
           onEndFollowOnly={stopTrailFollowOnly}
         />
       ) : null}
+      <TrailRouteSharingFlow
+        visible={!!recordingTrailToShare}
+        trail={recordingTrailToShare}
+        ownerScope={mapAccountInventoryScope.key}
+        onClose={() => setRecordingTrailToShare(null)}
+        onTrailUpdated={persistRecordingSharedTrailRoute}
+      />
       {nativeNavigationPanel}
       {nativeTurnListPanel}
       {navLocateButton}

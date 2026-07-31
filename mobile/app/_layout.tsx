@@ -60,6 +60,7 @@ import {
 import { useTrailheadFonts } from '@/lib/typography';
 import { withTrailheadTelemetry } from '@/lib/telemetry/sentry';
 import { appLinkDestinationFromUrl } from '@/lib/appLinks';
+import { handoffSharedTrailToken } from '@/lib/sharedTrailLinkHandoff';
 
 const LAUNCH_LOADER_MIN_MS = 1200;
 const LAUNCH_LOADER_MAX_MS = 4500;
@@ -323,6 +324,10 @@ function RootLayout() {
     }
     if (appLink?.screen === 'original') {
       router.push(`/originals/${encodeURIComponent(appLink.originalId)}` as any);
+      return;
+    }
+    if (appLink?.screen === 'sharedTrail') {
+      if (handoffSharedTrailToken(appLink.shareToken)) router.push('/shared-trails' as any);
       return;
     }
     const request = routeBuilderRequestFromGeoUrl(url);

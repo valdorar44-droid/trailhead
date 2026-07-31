@@ -4,6 +4,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { accountStorage, beginAccountStorageCleanup, endAccountStorageCleanup } from './storage';
 import type { User, TripResult, Report, CampsitePin, OsmPoi, TrailProfile } from './api';
 import type { PendingRouteActivityOffer } from './routeActivityOffer';
+import type { SharedTrailRouteV1 } from './trailRouteSharing';
 import {
   cancelRouteBuildSessionState,
   cancelRouteBuildActivitySearch,
@@ -784,6 +785,7 @@ interface AppState {
   offlineTripIds: string[];
   activeTripFromCache: boolean;
   pendingSavedTrailId: string | null;
+  pendingSharedTrailRoute: SharedTrailRouteV1 | null;
   pendingRouteFlyover: { runId: number; source: 'route_builder' } | null;
   pendingNavigatePlace: { lat: number; lng: number; name: string } | null;
   pendingMapSelection:
@@ -860,6 +862,7 @@ interface AppState {
   clearSearchHistory: () => void;
   setOfflineTripIds: (ids: string[]) => void;
   setPendingSavedTrailId: (id: string | null) => void;
+  setPendingSharedTrailRoute: (route: SharedTrailRouteV1 | null) => void;
   setPendingRouteFlyover: (request: AppState['pendingRouteFlyover']) => void;
   setPendingNavigatePlace: (place: { lat: number; lng: number; name: string } | null) => void;
   setPendingMapSelection: (selection: AppState['pendingMapSelection']) => void;
@@ -907,6 +910,7 @@ export const useStore = create<AppState>((set) => ({
   offlineTripIds: [],
   activeTripFromCache: false,
   pendingSavedTrailId: null,
+  pendingSharedTrailRoute: null,
   pendingRouteFlyover: null,
   pendingNavigatePlace: null,
   pendingMapSelection: null,
@@ -978,6 +982,7 @@ export const useStore = create<AppState>((set) => ({
       searchHistory: [],
       offlineTripIds: [],
       pendingSavedTrailId: null,
+      pendingSharedTrailRoute: null,
       pendingRouteFlyover: null,
       pendingNavigatePlace: null,
       pendingMapSelection: null,
@@ -1037,6 +1042,7 @@ export const useStore = create<AppState>((set) => ({
       searchHistory: [],
       offlineTripIds: [],
       pendingSavedTrailId: null,
+      pendingSharedTrailRoute: null,
       pendingRouteFlyover: null,
       pendingNavigatePlace: null,
       pendingMapSelection: null,
@@ -1202,6 +1208,7 @@ export const useStore = create<AppState>((set) => ({
 
   setOfflineTripIds: (ids) => { if (accountLocalMutationAllowed()) set({ offlineTripIds: ids }); },
   setPendingSavedTrailId: (id) => { if (accountLocalMutationAllowed()) set({ pendingSavedTrailId: id }); },
+  setPendingSharedTrailRoute: (route) => { if (accountLocalMutationAllowed()) set({ pendingSharedTrailRoute: route }); },
   setPendingRouteFlyover: (request) => { if (accountLocalMutationAllowed()) set({ pendingRouteFlyover: request }); },
   setPendingNavigatePlace: (place) => { if (accountLocalMutationAllowed()) set({ pendingNavigatePlace: place }); },
   setPendingMapSelection: (selection) => { if (accountLocalMutationAllowed()) set({ pendingMapSelection: selection }); },
@@ -1538,6 +1545,7 @@ function clearLegacyAccountStateFromMemory() {
     searchHistory: [],
     offlineTripIds: [],
     pendingSavedTrailId: null,
+    pendingSharedTrailRoute: null,
     pendingRouteFlyover: null,
     pendingNavigatePlace: null,
     pendingMapSelection: null,

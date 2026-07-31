@@ -321,3 +321,45 @@ Verify `git diff --cached --name-only` before every commit.
 
 - Do not repeat E2/E3 discovery, NPS, Yellowstone, Trails T1–T6, Offline, Layers, Memory, Originals, Android Auto, broad sheets, or Figma research.
 - Do not weaken privacy, authorization, deletion, idempotency, or geometry checks to make a preview pass.
+
+## E4 private routes implementation-ready checkpoint — 2026-07-30 19:09 CDT
+
+- Branch: `feat/trailhead-1.0.10-overhaul`; pre-implementation checkpoint HEAD `e090a5936cf77e6e69ad603414113e0a3fd2429a`.
+- Last paired preview remains E3: Android runtime `native-1.0.10-android.7` / update `019fb537-6493-7587-9e87-5aa57178f651`; iOS runtime `native-1.0.10-ios.6` / update `019fb537-6493-70b6-9f45-5ce23fef6504`.
+- Protected Explore-index Git object remains `f39f30fdbb33477dacd8fcf5016612a8729dc69e`; working-file SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
+- `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, Valhalla work, Android Auto scripts, Gradle wrappers, and unrelated changes remain excluded.
+
+### Implemented E4 behavior
+
+- Added private owned-route CRUD for Builder, GPX, and explicitly reviewed recordings with canonical geometry, expected revisions, idempotency, owner authorization, rate limits, and `off|internal|public` staging.
+- Routes remain private by default. E4 does not submit, publish, verify, expose in Explore, or award contribution credits.
+- Unlisted links are revision-pinned and revocable. The 43-character bearer token is returned once, SHA-256 is the only stored form, and the raw value is absent from mutation ledgers, route snapshots, OfflineTrail files, app parameters, logs, and telemetry.
+- Anonymous link resolution uses a uniform non-enumerable POST body. The HTTPS/custom-scheme fragment handoff is exact, consume-once, deduplicated, and process-memory-only.
+- Privacy review uses the existing local `NativeMap`, shows route context, supports deterministic start/finish cropping, and never places private geometry in a Static Images URL.
+- Recording upload copies only valid longitude/latitude. Timestamps, altitude, accuracy, speed, heading, device fields, hidden waypoints, and EXIF cannot enter the sharing payload.
+- Owner remote calls bind the captured account token. Local mappings are epoch- and owner-guarded, contain no bearer token, and clear with account scope.
+- Recipients open the immutable shared revision in view-only main-map state. Editing requires the explicit `Save a copy` action.
+- Account deletion removes private routes, mutation ledgers, and private credits, while approved historical public snapshots are rebuilt through a strict de-identifying allowlist.
+- Unreviewed and approved-Community legacy rows are excluded from every verified online reader and from default Offline V2 trail/search artifacts. Boolean trailhead coordinates are rejected.
+
+### Verification
+
+- Backend integration: `40 passed`, `14 subtests passed` across private routes, Explore Community containment, Trails V2, and account-deletion support.
+- Mobile sharing gate: `23` focused sharing/security assertions plus Universal/App Link assertions passed.
+- `npx tsc --noEmit --pretty false`, Trail Builder, Trail Follow/recording, Explore Trails, privacy controls, Explore copy audit, native-drift audit, Python compile, and `git diff --check` passed.
+- Independent final security/privacy audit: P0 none, P1 none, P2 none in E4 scope.
+- Native graph/config did not change; E4 remains a backend + JS-compatible preview packet.
+- Task-owned Metro, Gradle, Maestro, publisher, and test processes: none after the focused runs complete.
+
+### Exact next action
+
+1. Commit only the named E4 backend, mobile, tests, and this checkpoint; verify the staged list excludes every protected/unrelated file.
+2. Push the immutable implementation source.
+3. Deploy backend compatibility with `TRAILHEAD_PRIVATE_TRAIL_ROUTES_STAGE=internal` and Community trails still off; verify health and the effective feature gate.
+4. Publish Android preview first and run only: private saved Builder/GPX/recording -> privacy map/crop -> create/copy link -> recipient -> view-only Map -> save copy -> rotate/update/revoke -> invalid link.
+5. Stop for user review before iOS proof or E5.
+
+### Do not repeat
+
+- Do not repeat E2/E3 discovery, filters, Yellowstone, NPS, Trails T1–T6, Offline inventory, Layers, Memory, Originals, Android Auto, broad Map/sheet crawls, or Figma research.
+- Do not begin E5 moderation, Community public discovery, Verified promotion, or contribution credits until the Android E4 packet is accepted.

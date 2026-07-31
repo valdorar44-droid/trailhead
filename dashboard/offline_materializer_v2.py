@@ -23,6 +23,7 @@ import httpx
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 from config.settings import settings
+from db.store import trail_profile_publication_lane
 from dashboard.pmtiles_states import REGION_BBOXES, STATE_BBOXES
 from dashboard.offline_bundles_v2 import (
     OfflineBoundsV2,
@@ -216,6 +217,8 @@ def _database_catalog_items_v2(bounds: OfflineBoundsV2) -> tuple[OfflineCatalogI
             ).fetchall()
             for row in rows:
                 raw = dict(row)
+                if trail_profile_publication_lane(raw) != "verified":
+                    continue
                 source = str(raw.get("source") or raw.get("source_label") or "")
                 rights = _source_rights(source)
                 geometry = _json_object(raw.get("geometry"))

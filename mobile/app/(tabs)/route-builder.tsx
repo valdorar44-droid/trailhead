@@ -18,6 +18,7 @@ import RouteBuilderActiveDayStopList from '@/components/routeBuilder/RouteBuilde
 import RouteBuilderFooterDock from '@/components/routeBuilder/RouteBuilderFooterDock';
 import RouteActivityOfferSheet from '@/components/routeBuilder/RouteActivityOfferSheet';
 import RouteBuilderHub from '@/components/routeBuilder/RouteBuilderHub';
+import TrailRouteSharingFlow from '@/components/trails/TrailRouteSharingFlow';
 import RouteBuilderInlineResults, {
   RouteBuilderInlineCampCard,
   RouteBuilderInlineResultRow,
@@ -49,7 +50,13 @@ import {
   searchExpoOfflineV2CatalogWithFallback,
 } from '@/lib/offlineV2/expoCatalog';
 import { resolveDownloadedSearchResultPoi } from '@/lib/offlineV2/offlineSearchPresentation';
-import { deleteOfflineTrail, listOfflineTrails, type OfflineTrail } from '@/lib/offlineTrails';
+import {
+  deleteOfflineTrail,
+  listOfflineTrails,
+  saveOfflineTrail,
+  saveOfflineTrailForAccountScope,
+  type OfflineTrail,
+} from '@/lib/offlineTrails';
 import { deleteOfflineTrip, loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 import { applyBackendAcknowledgedActiveTrip, useStore, type TripHistoryItem } from '@/lib/store';
 import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
@@ -1768,6 +1775,8 @@ function RouteBuilderScreenContent() {
     accountLifecycle.cleaning,
   );
   const savedTrails = savedTrailInventoryVisible ? savedTrailInventory.trails : [];
+  const [trailRouteToShare, setTrailRouteToShare] = useState<OfflineTrail | null>(null);
+  useEffect(() => setTrailRouteToShare(null), [routeAccountInventoryScope.key]);
   const [routeTripCards, setRouteTripCards] = useState<Record<string, RouteTripCardData>>({});
   const [days, setDays] = useState(defaultRouteDays);
   const [stops, setStops] = useState<BuilderStop[]>([]);
@@ -6311,6 +6320,33 @@ function RouteBuilderScreenContent() {
     ]);
   }
 
+  async function persistSharedTrailRoute(updated: OfflineTrail) {
+    const requestScope = accountInventoryScope(accountStorage.epoch(), useStore.getState().user?.id);
+    if (requestScope.key !== routeAccountInventoryScope.key) return;
+    const saved = await saveOfflineTrailForAccountScope(
+      updated,
+      requestScope.epoch,
+      () => accountInventoryRequestIsCurrent(
+        requestScope,
+        accountStorage.epoch(),
+        useStore.getState().user?.id,
+        accountStorage.isCleaning(),
+      ),
+    );
+    if (!saved) return;
+    if (!accountInventoryRequestIsCurrent(
+      requestScope,
+      accountStorage.epoch(),
+      useStore.getState().user?.id,
+      accountStorage.isCleaning(),
+    )) return;
+    setSavedTrailInventory(previous => ({
+      scope_key: requestScope.key,
+      trails: previous.trails.map(item => item.id === updated.id ? updated : item),
+    }));
+    setTrailRouteToShare(current => current?.id === updated.id ? updated : current);
+  }
+
   function savedTrailDistance(trail: OfflineTrail) {
     const line = trail.geometry.features.find(feature => feature.geometry?.type === 'LineString');
     const distance = Number((line?.properties as any)?.distance_m);
@@ -6655,7 +6691,8 @@ function RouteBuilderScreenContent() {
   function renderRouteHub() {
     const savedRoutes = tripHistory.slice(0, 10);
     return (
-      <RouteBuilderHub
+      <>
+        <RouteBuilderHub
         header={renderPlanNavigation()}
         bottomInset={bottomInset}
         routeSaving={routeSaving}
@@ -6671,12 +6708,21 @@ function RouteBuilderScreenContent() {
         onOpenActiveMap={() => router.replace('/(tabs)/map')}
         onOpenSavedRoute={openSavedRoute}
         onOpenSavedTrailRoute={openSavedTrailRoute}
+        onShareSavedTrailRoute={user && productFeatures?.private_trail_routes ? setTrailRouteToShare : undefined}
         onDeleteSavedTrailRoute={deleteSavedTrailRoute}
         onCloseNewRouteConfirm={() => setShowNewRouteConfirm(false)}
         onSaveCloseAndStartNewRoute={saveCloseAndStartNewRoute}
         onDiscardCloseAndStartNewRoute={discardCloseAndStartNewRoute}
         paywallModal={<PaywallModal visible={paywallVisible} code={paywallCode} message={paywallMessage} onClose={() => setPaywallVisible(false)} />}
-      />
+        />
+        <TrailRouteSharingFlow
+          visible={!!trailRouteToShare}
+          trail={trailRouteToShare}
+          ownerScope={routeAccountInventoryScope.key}
+          onClose={() => setTrailRouteToShare(null)}
+          onTrailUpdated={persistSharedTrailRoute}
+        />
+      </>
     );
   }
 

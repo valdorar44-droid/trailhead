@@ -8,6 +8,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from db.store import trail_profile_publication_lane
+
 
 TrailGeometryStatusV2 = Literal["complete", "partial", "point"]
 
@@ -252,17 +254,8 @@ def _source_is_authoritative(profile: dict[str, Any]) -> bool:
 
 def _catalog_lane(profile: dict[str, Any]) -> Literal["verified", "community"] | None:
     """Keep unreviewed legacy submissions out of public trail discovery."""
-    provenance = profile.get("provenance") if isinstance(profile.get("provenance"), dict) else {}
-    source = _clean_text(profile.get("source_label") or profile.get("source")).lower()
-    review_status = _clean_text(provenance.get("review_status")).lower()
-    is_legacy_community = source == "trailhead community" or _clean_text(profile.get("id")).startswith("trailhead:")
-    if not is_legacy_community:
-        return "verified"
-    if review_status in {"approved_community", "approved", "community_approved"}:
-        return "community"
-    if review_status in {"verified", "promoted"}:
-        return "verified"
-    return None
+    lane = trail_profile_publication_lane(profile)
+    return lane if lane in {"verified", "community"} else None
 
 
 def _geometry_status(profile: dict[str, Any], lines: list[list[list[float]]]) -> TrailGeometryStatusV2:

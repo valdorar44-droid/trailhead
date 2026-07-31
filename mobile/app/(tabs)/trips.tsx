@@ -34,6 +34,7 @@ import {
 } from '@/lib/tripRepository';
 import AvailabilityWatchManager from '@/components/trips/AvailabilityWatchManager';
 import SavedItemsSection from '@/components/trips/SavedItemsSection';
+import TrailRouteSharingFlow from '@/components/trails/TrailRouteSharingFlow';
 import { OwnedOriginalsSection } from '@/components/originals';
 import TripActionSheet from '@/components/trips/TripActionSheet';
 import TripCard, { TripPreview } from '@/components/trips/TripCard';
@@ -61,6 +62,19 @@ import type {
   TripLibraryItem,
   TripLibrarySnapshot,
 } from '@/components/trips/types';
+import {
+  accountInventoryIsVisible,
+  accountInventoryRequestIsCurrent,
+  accountInventoryRequiresCleanup,
+  accountInventoryScope,
+} from '@/lib/accountInventoryScope';
+import {
+  listOfflineTrails,
+  saveOfflineTrailForAccountScope,
+  type OfflineTrail,
+} from '@/lib/offlineTrails';
+import { ownerTrailRoutesBySavedEntityId } from '@/lib/planSavedTrailRoutes';
+import { accountStorage } from '@/lib/storage';
 
 const EMPTY_SNAPSHOT: TripLibrarySnapshot = {
   activeTrip: null,
@@ -105,6 +119,19 @@ export default function TripsScreen() {
   const [deleteConfirmationVisible, setDeleteConfirmationVisible] = useState(false);
   const [deletingDrafts, setDeletingDrafts] = useState(false);
   const [sectionLayoutRevision, setSectionLayoutRevision] = useState(0);
+  const [accountLifecycle, setAccountLifecycle] = useState(() => ({
+    cleaning: accountStorage.isCleaning(),
+    epoch: accountStorage.epoch(),
+  }));
+  const savedTrailAccountScope = accountInventoryScope(accountLifecycle.epoch, userId || null);
+  const previousSavedTrailAccountScopeRef = useRef(savedTrailAccountScope);
+  const savedTrailAccountTransitionBlocked = !accountLifecycle.cleaning
+    && accountInventoryRequiresCleanup(previousSavedTrailAccountScopeRef.current, savedTrailAccountScope);
+  const [savedTrailInventory, setSavedTrailInventory] = useState<{
+    scopeKey: string;
+    trails: OfflineTrail[];
+  }>({ scopeKey: '', trails: [] });
+  const [trailRouteToShare, setTrailRouteToShare] = useState<OfflineTrail | null>(null);
   const requestSequence = useRef(0);
   const planScrollRef = useRef<ScrollView>(null);
   const planScrollYRef = useRef(0);
@@ -117,6 +144,23 @@ export default function TripsScreen() {
   const loadedOwnerScopeRef = useRef('');
   const repositoryReady = repository.initialized && repository.ownerScope === expectedOwnerScope;
   const { features } = useProductFeatures();
+  const routeSharingEnabled = Boolean(userId && features?.private_trail_routes);
+  const savedTrailInventoryVisible = accountInventoryIsVisible(
+    savedTrailInventory.scopeKey,
+    savedTrailAccountScope,
+    accountLifecycle.cleaning,
+  );
+  const savedOwnerTrailRoutes = savedTrailInventoryVisible ? savedTrailInventory.trails : [];
+  const shareRoutesBySavedEntityId = useMemo(
+    () => routeSharingEnabled
+      ? ownerTrailRoutesBySavedEntityId(snapshot.savedItems, savedOwnerTrailRoutes)
+      : new Map<string, OfflineTrail>(),
+    [routeSharingEnabled, savedOwnerTrailRoutes, snapshot.savedItems],
+  );
+  const shareableSavedItemIds = useMemo(
+    () => new Set(shareRoutesBySavedEntityId.keys()),
+    [shareRoutesBySavedEntityId],
+  );
   const publicationEnabled = Boolean(userId && features?.community_publications);
   const availabilityEnabled = Boolean(userId && features?.availability_monitors);
   const requestedPlanDestination = useMemo(() => planDeepLinkRequest(params), [
@@ -132,6 +176,18 @@ export default function TripsScreen() {
     const value = Number(raw);
     return Number.isFinite(value) && value >= 0 ? value : null;
   }, [params.return_scroll_y]);
+
+  useEffect(() => accountStorage.subscribe((cleaning, epoch) => {
+    setAccountLifecycle({ cleaning, epoch });
+  }), []);
+
+  useEffect(() => {
+    if (!accountLifecycle.cleaning && !savedTrailAccountTransitionBlocked) {
+      previousSavedTrailAccountScopeRef.current = savedTrailAccountScope;
+    }
+  }, [accountLifecycle.cleaning, savedTrailAccountScope.key, savedTrailAccountTransitionBlocked]);
+
+  useEffect(() => setTrailRouteToShare(null), [savedTrailAccountScope.key]);
 
   const refresh = useCallback(async (
     mode: 'loading' | 'refreshing' | 'silent' = 'loading',
@@ -193,6 +249,35 @@ export default function TripsScreen() {
     })();
     return () => { cancelled = true; };
   }, [expectedOwnerScope, refresh, userId]));
+
+  useFocusEffect(useCallback(() => {
+    let cancelled = false;
+    if (!routeSharingEnabled || accountStorage.isCleaning() || savedTrailAccountTransitionBlocked) {
+      if (!routeSharingEnabled) setSavedTrailInventory({ scopeKey: '', trails: [] });
+      return () => { cancelled = true; };
+    }
+    const requestScope = accountInventoryScope(accountStorage.epoch(), useStore.getState().user?.id);
+    void listOfflineTrails()
+      .then(trails => {
+        if (cancelled || !accountInventoryRequestIsCurrent(
+          requestScope,
+          accountStorage.epoch(),
+          useStore.getState().user?.id,
+          accountStorage.isCleaning(),
+        )) return;
+        setSavedTrailInventory({ scopeKey: requestScope.key, trails });
+      })
+      .catch(() => {
+        if (cancelled || !accountInventoryRequestIsCurrent(
+          requestScope,
+          accountStorage.epoch(),
+          useStore.getState().user?.id,
+          accountStorage.isCleaning(),
+        )) return;
+        setSavedTrailInventory({ scopeKey: requestScope.key, trails: [] });
+      });
+    return () => { cancelled = true; };
+  }, [routeSharingEnabled, savedTrailAccountScope.key, savedTrailAccountTransitionBlocked]));
 
   useEffect(() => {
     if (!repositoryReady) {
@@ -501,6 +586,37 @@ export default function TripsScreen() {
     router.push('/(tabs)/guide');
   }, [router, setPendingMapSelection]);
 
+  const shareSavedTrailRoute = useCallback((item: SavedEntityV1) => {
+    const route = shareRoutesBySavedEntityId.get(item.id);
+    if (route) setTrailRouteToShare(route);
+  }, [shareRoutesBySavedEntityId]);
+
+  const persistSharedTrailRoute = useCallback(async (updated: OfflineTrail) => {
+    const requestScope = accountInventoryScope(accountStorage.epoch(), useStore.getState().user?.id);
+    if (requestScope.key !== savedTrailAccountScope.key) return;
+    const saved = await saveOfflineTrailForAccountScope(
+      updated,
+      requestScope.epoch,
+      () => accountInventoryRequestIsCurrent(
+        requestScope,
+        accountStorage.epoch(),
+        useStore.getState().user?.id,
+        accountStorage.isCleaning(),
+      ),
+    );
+    if (!saved || !accountInventoryRequestIsCurrent(
+      requestScope,
+      accountStorage.epoch(),
+      useStore.getState().user?.id,
+      accountStorage.isCleaning(),
+    )) return;
+    setSavedTrailInventory(previous => ({
+      scopeKey: requestScope.key,
+      trails: previous.trails.map(route => route.id === updated.id ? updated : route),
+    }));
+    setTrailRouteToShare(current => current?.id === updated.id ? updated : current);
+  }, [savedTrailAccountScope.key]);
+
   const browseExplore = useCallback(() => router.push('/(tabs)/guide'), [router]);
 
   const openDownloads = useCallback(() => {
@@ -787,7 +903,13 @@ export default function TripsScreen() {
               ) : null}
               {snapshot.savedItems.length > 0 ? (
                 <View testID="plan.saved.anchor" onLayout={event => recordSectionOffset('saved', event.nativeEvent.layout.y)}>
-                  <SavedItemsSection items={snapshot.savedItems} onOpen={openSavedItem} onBrowse={browseExplore} />
+                  <SavedItemsSection
+                    items={snapshot.savedItems}
+                    onOpen={openSavedItem}
+                    onBrowse={browseExplore}
+                    shareableItemIds={shareableSavedItemIds}
+                    onShare={routeSharingEnabled ? shareSavedTrailRoute : undefined}
+                  />
                 </View>
               ) : null}
             </>
@@ -808,6 +930,13 @@ export default function TripsScreen() {
         onClose={() => setNotesTripId(null)}
         onSave={saveNote}
         onDelete={deleteNote}
+      />
+      <TrailRouteSharingFlow
+        visible={Boolean(trailRouteToShare)}
+        trail={trailRouteToShare}
+        ownerScope={savedTrailAccountScope.key}
+        onClose={() => setTrailRouteToShare(null)}
+        onTrailUpdated={persistSharedTrailRoute}
       />
       </ScrollView>
     </SafeAreaView>

@@ -36,6 +36,18 @@ test('recording path reaches privacy review through a coordinate-only conversion
   assert.match(map, /<TrailRouteSharingFlow[\s\S]*trail=\{recordingTrailToShare\}/);
 });
 
+test('Plan Saved items expose owner-route sharing without restoring the retired Route Builder hub', () => {
+  const trips = readFileSync('app/(tabs)/trips.tsx', 'utf8');
+  const savedItems = readFileSync('components/trips/SavedItemsSection.tsx', 'utf8');
+  const routeBuilder = readFileSync('app/(tabs)/route-builder.tsx', 'utf8');
+  assert.match(trips, /features\?\.private_trail_routes/);
+  assert.match(trips, /ownerTrailRoutesBySavedEntityId/);
+  assert.match(trips, /<SavedItemsSection[\s\S]*shareableItemIds=\{shareableSavedItemIds\}[\s\S]*onShare=/);
+  assert.match(trips, /<TrailRouteSharingFlow[\s\S]*trail=\{trailRouteToShare\}/);
+  assert.match(savedItems, /testID=\{`plan\.saved\.share\.\$\{item\.id\}`\}/);
+  assert.doesNotMatch(routeBuilder, /setRouteTabMode\('hub'\)/);
+});
+
 test('recipient opens the immutable shared revision without exposing Trail Builder', () => {
   const map = readFileSync('app/(tabs)/map.tsx', 'utf8');
   const handoff = map.slice(map.indexOf('if (!pendingSharedTrailRoute'), map.indexOf('if (!pendingMapSelection'));

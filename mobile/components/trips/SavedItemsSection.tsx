@@ -39,10 +39,14 @@ export default function SavedItemsSection({
   items,
   onOpen,
   onBrowse,
+  shareableItemIds,
+  onShare,
 }: {
   items: SavedEntityV1[];
   onOpen: (item: SavedEntityV1) => void;
   onBrowse: () => void;
+  shareableItemIds?: ReadonlySet<string>;
+  onShare?: (item: SavedEntityV1) => void;
 }) {
   const C = useTheme();
   const [visibleCount, setVisibleCount] = useState(SAVED_ITEM_RENDER_BATCH);
@@ -69,31 +73,48 @@ export default function SavedItemsSection({
       </View>
 
       <View style={[styles.list, { borderTopColor: C.border }] }>
-        {items.length > 0 ? visibleItems.map(item => (
-          <TouchableOpacity
-            key={item.id}
-            testID={`plan.saved.item.${item.id}`}
-            accessibilityRole="button"
-            accessibilityLabel={`Open saved ${placeType(item).toLowerCase()} ${item.title}`}
-            activeOpacity={0.72}
-            onPress={() => onOpen(item)}
-            style={[styles.row, { borderBottomColor: C.border }]}
-          >
-            <View style={[styles.icon, { backgroundColor: C.s2, borderColor: C.border }] }>
-              <Ionicons name={PLACE_ICONS[item.kind]} size={17} color={item.kind === 'camp' ? C.orange : C.text2} />
+        {items.length > 0 ? visibleItems.map(item => {
+          const canShare = Boolean(onShare && shareableItemIds?.has(item.id));
+          return (
+            <View key={item.id} style={[styles.row, { borderBottomColor: C.border }] }>
+              <TouchableOpacity
+                testID={`plan.saved.item.${item.id}`}
+                accessibilityRole="button"
+                accessibilityLabel={`Open saved ${placeType(item).toLowerCase()} ${item.title}`}
+                activeOpacity={0.72}
+                onPress={() => onOpen(item)}
+                style={styles.openRow}
+              >
+                <View style={[styles.icon, { backgroundColor: C.s2, borderColor: C.border }] }>
+                  <Ionicons name={PLACE_ICONS[item.kind]} size={17} color={item.kind === 'camp' ? C.orange : C.text2} />
+                </View>
+                <View style={styles.rowCopy}>
+                  <Text style={[styles.title, { color: C.text }]} numberOfLines={1}>{item.title}</Text>
+                  <Text style={[styles.meta, { color: C.text2 }]} numberOfLines={1}>{placeMetadata(item)}</Text>
+                </View>
+                {item.note ? (
+                  <View accessible accessibilityLabel="Has a saved note" style={styles.noteMark}>
+                    <Ionicons name="document-text-outline" size={15} color={C.silverBright} />
+                  </View>
+                ) : null}
+                <Ionicons name="chevron-forward" size={17} color={C.text3} />
+              </TouchableOpacity>
+              {canShare ? (
+                <TouchableOpacity
+                  testID={`plan.saved.share.${item.id}`}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Share saved trail route ${item.title}`}
+                  activeOpacity={0.72}
+                  onPress={() => onShare?.(item)}
+                  style={styles.shareAction}
+                >
+                  <Ionicons name="share-outline" size={17} color={C.orange} />
+                  <Text style={[styles.shareLabel, { color: C.orange }]}>Share</Text>
+                </TouchableOpacity>
+              ) : null}
             </View>
-            <View style={styles.rowCopy}>
-              <Text style={[styles.title, { color: C.text }]} numberOfLines={1}>{item.title}</Text>
-              <Text style={[styles.meta, { color: C.text2 }]} numberOfLines={1}>{placeMetadata(item)}</Text>
-            </View>
-            {item.note ? (
-              <View accessible accessibilityLabel="Has a saved note" style={styles.noteMark}>
-                <Ionicons name="document-text-outline" size={15} color={C.silverBright} />
-              </View>
-            ) : null}
-            <Ionicons name="chevron-forward" size={17} color={C.text3} />
-          </TouchableOpacity>
-        )) : (
+          );
+        }) : (
           <TouchableOpacity
             testID="plan.saved.empty.browse"
             accessibilityRole="button"
@@ -174,8 +195,28 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  openRow: {
+    minHeight: 63,
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 10,
     paddingVertical: 9,
+  },
+  shareAction: {
+    minWidth: 58,
+    minHeight: 48,
+    marginLeft: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 1,
+  },
+  shareLabel: {
+    fontSize: 10.5,
+    lineHeight: 13,
+    fontWeight: '800',
   },
   emptyRow: {
     minHeight: 72,

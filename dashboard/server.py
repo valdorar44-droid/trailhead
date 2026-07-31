@@ -3544,16 +3544,29 @@ def _merge_unique_dicts(primary: list, secondary: list, key_fields: tuple[str, .
     return merged
 
 
-def _merge_explore_sidecar_enrichment(base: dict, sidecar: dict) -> dict:
+def _merge_explore_sidecar_enrichment(
+    base: dict,
+    sidecar: dict,
+    *,
+    prefer_sidecar_text: bool = False,
+) -> dict:
     enriched = dict(base)
     base_summary = dict(enriched.get("summary") or {})
     side_summary = sidecar.get("summary") if isinstance(sidecar.get("summary"), dict) else {}
     for key in ("image_url", "thumbnail_url", "image_credit", "image_license", "source_url", "source_title"):
         if not base_summary.get(key) and side_summary.get(key):
             base_summary[key] = side_summary.get(key)
+    if prefer_sidecar_text:
+        for key in ("title", "category", "explore_group", "state", "region"):
+            if side_summary.get(key):
+                base_summary[key] = side_summary.get(key)
     for key in ("hook", "short_description"):
         if side_summary.get(key):
-            base_summary[key] = _explore_richer_text(base_summary.get(key), side_summary.get(key))
+            base_summary[key] = (
+                side_summary.get(key)
+                if prefer_sidecar_text
+                else _explore_richer_text(base_summary.get(key), side_summary.get(key))
+            )
     enriched["summary"] = base_summary
 
     for key in ("canonical_role", "parent_hub_id", "parent_hub_title", "module_target"):
@@ -3580,8 +3593,21 @@ def _merge_explore_sidecar_enrichment(base: dict, sidecar: dict) -> dict:
     side_profile = sidecar.get("profile") if isinstance(sidecar.get("profile"), dict) else {}
     for key in ("summary", "story", "why_it_matters", "what_to_know", "best_time_to_stop", "access_notes", "nearby_context"):
         if side_profile.get(key):
-            base_profile[key] = _explore_richer_text(base_profile.get(key), side_profile.get(key))
+            base_profile[key] = (
+                side_profile.get(key)
+                if prefer_sidecar_text
+                else _explore_richer_text(base_profile.get(key), side_profile.get(key))
+            )
     enriched["profile"] = base_profile
+
+    base_card = dict(enriched.get("card") or {})
+    side_card = sidecar.get("card") if isinstance(sidecar.get("card"), dict) else {}
+    if prefer_sidecar_text:
+        for key in ("title", "headline", "summary", "highlight", "region"):
+            if side_card.get(key):
+                base_card[key] = side_card.get(key)
+    if base_card:
+        enriched["card"] = base_card
 
     base_pack = enriched.get("source_pack") if isinstance(enriched.get("source_pack"), dict) else {}
     side_pack = sidecar.get("source_pack") if isinstance(sidecar.get("source_pack"), dict) else {}
@@ -4129,7 +4155,9 @@ def _merge_explore_internal_preview(catalog: dict) -> dict:
             continue
         if place_id in id_to_index:
             merged_place = _merge_explore_sidecar_enrichment(
-                places[id_to_index[place_id]], preview,
+                places[id_to_index[place_id]],
+                preview,
+                prefer_sidecar_text=True,
             )
             preview_summary = preview.get("summary") if isinstance(preview.get("summary"), dict) else {}
             merged_summary = dict(merged_place.get("summary") or {})

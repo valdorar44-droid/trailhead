@@ -16,6 +16,7 @@ def preview_place(place_id: str, name: str, description: str) -> dict:
         "id": place_id,
         "name": name,
         "category": "park",
+        "region": "UT",
         "lat": 37.0,
         "lng": -110.0,
         "description": description,
@@ -83,18 +84,31 @@ class ExploreInternalPreviewTests(unittest.TestCase):
             "catalog_id": "public",
             "places": [{
                 "id": "place:nps:test",
-                "summary": {"title": "Preview Park", "short_description": "Short."},
+                "summary": {
+                    "title": "Preview Park",
+                    "region": "Preview Park, UT",
+                    "short_description": (
+                        "Preview Park is an official Preview Park park record. Check access, "
+                        "seasonal closures, fire restrictions, road conditions, and local rules before you go."
+                    ),
+                },
+                "profile": {"summary": "Older generic record wording that should not win by length alone."},
+                "card": {"summary": "Older generic card wording that should not win by length alone."},
                 "source_pack": {},
             }],
         }
         merged = server._merge_explore_internal_preview(base)
         self.assertEqual(len(merged["places"]), 1)
-        self.assertIn("official park profile", merged["places"][0]["summary"]["short_description"])
-        self.assertEqual(merged["places"][0]["source_pack"]["things_to_see"][0]["title"], "Exact overlook")
-        self.assertEqual(merged["places"][0]["summary"]["rank"], -999)
-        self.assertEqual(merged["places"][0]["summary"]["hero_rank"], -999)
-        self.assertTrue(merged["places"][0]["promoted_serving"])
-        self.assertTrue(merged["places"][0]["internal_preview"])
+        place = merged["places"][0]
+        self.assertIn("official park profile", place["summary"]["short_description"])
+        self.assertEqual(place["summary"]["region"], "UT")
+        self.assertIn("official park profile", place["profile"]["summary"])
+        self.assertIn("official park profile", place["card"]["summary"])
+        self.assertEqual(place["source_pack"]["things_to_see"][0]["title"], "Exact overlook")
+        self.assertEqual(place["summary"]["rank"], -999)
+        self.assertEqual(place["summary"]["hero_rank"], -999)
+        self.assertTrue(place["promoted_serving"])
+        self.assertTrue(place["internal_preview"])
 
     def test_internal_proof_destination_is_reachable_before_public_catalog(self):
         os.environ["TRAILHEAD_EXPLORE_DATA_STAGE"] = "internal"

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts.data.build_canonical_serving_indexes import build_explore_index
 from scripts.build_explore_agency_pilots import (
     DatasetSpec,
     RequestBudget,
@@ -303,3 +304,20 @@ def test_destination_hub_uses_official_copy_and_source_backed_modules():
     assert hub["source_pack"]["campgrounds"][0]["title"] == "Canyon Camp"
     assert hub["source_pack"]["trails"][0]["source_id"] == "trail-system:blm:1"
     assert "verify" not in json.dumps(hub).lower()
+
+
+def test_sierra_destination_copy_survives_public_copy_cleanup(tmp_path: Path):
+    hub = build_destination_hub("sierra-national-forest", [{
+        "id": "place:usfs:test-site",
+        "name": "Test Site",
+        "category": "visitor_center",
+        "lat": 37.2,
+        "lng": -119.2,
+        "sources": [{"source": "usfs", "attribution": "USDA Forest Service"}],
+    }], [], 1785500000)
+    catalog = tmp_path / "sierra.json"
+    catalog.write_text(json.dumps({"schema_version": 3, "places": [hub]}))
+    serving = build_explore_index(catalog, minimum_reviewable=1, enforce_enrichment_gate=True)["items"]
+
+    assert serving[0]["description"].startswith("Sierra National Forest supports camping")
+    assert "motorized routes" in serving[0]["description"]

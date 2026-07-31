@@ -43,8 +43,8 @@ AGENCY_HUBS: dict[str, dict[str, Any]] = {
         "subcategories": ["national_forest"],
         "region": "CA",
         "summary": (
-            "Recreation in Sierra National Forest spans all seasons, including camping, hiking, biking, "
-            "horseback riding, fishing, winter travel and off-highway vehicle routes."
+            "Sierra National Forest supports camping, hiking, biking, horseback riding, fishing, "
+            "winter travel and motorized routes across its mountain landscape."
         ),
         "activities": ["Camping", "Hiking", "Biking", "Horseback riding"],
         "official_url": "https://www.fs.usda.gov/recarea/sierra/recarea/?recid=45636",

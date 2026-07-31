@@ -141,7 +141,13 @@ def audit_catalog(path: Path, *, sample_limit: int) -> tuple[list[str], list[str
                     continue
                 item_title = str(item.get("title") or item.get("name") or clean_title).strip()
                 item_desc = str(item.get("description") or item.get("summary") or "").strip()
-                if is_weak_description(item_desc, title=item_title, category=item.get("kind") or item.get("category") or clean_category, group=clean_group):
+                # The shared sanitizer deliberately omits weak child copy. A
+                # sourced child with a title, map point and action remains
+                # useful without inventing a description, so an empty value is
+                # valid here. Only non-empty weak copy is a failure.
+                item_category = item.get("category") or item.get("kind") or clean_category
+                item_group = clean_group or clean_category
+                if item_desc and is_weak_description(item_desc, title=item_title, category=item_category, group=item_group):
                     failures.append(f"{path.name}: weak child copy in {clean_title} -> {item_title}")
                 child_distance = distance_mi(parent_lat, parent_lng, item.get("lat"), item.get("lng"))
                 if child_distance is not None and child_distance > radius:

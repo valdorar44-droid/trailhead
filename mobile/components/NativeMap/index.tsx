@@ -3444,7 +3444,14 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         preferredFramesPerSecond={visualWorkActive ? 60 : 1}
         onPress={visualWorkActive ? handlePress : undefined}
         onTouchStart={() => {
-          if (visualWorkActiveRef.current) markUserCameraGesture('touch-start', {}, false);
+          if (visualWorkActiveRef.current) {
+            // Android does not consistently mark region-change payloads as user
+            // driven. Outside active navigation, the touch itself is the
+            // authoritative signal that an experience-owned camera was
+            // manually adjusted. Navigation keeps the stricter native-region
+            // breakaway path so ordinary HUD/map taps cannot detach guidance.
+            markUserCameraGesture('touch-start', {}, !navMode);
+          }
         }}
         onRegionWillChange={(feature: any) => {
           if (!visualWorkActiveRef.current) return;

@@ -93,7 +93,11 @@ test('Trail Builder uses the shared T6 player and restores the builder through B
   );
   assert.match(
     mapSource,
-    /const returnPresentation = placeSheetCoordinatorRef\.current\.presentation;[\s\S]*?openTrailPreview\(trail, null, returnPresentation\)/,
+    /case 'preview_3d':[\s\S]*?openTrailPreview\(trail, null, 'full'\)/,
+  );
+  assert.doesNotMatch(
+    mapSource,
+    /function runSelectedTrailMoreAction[\s\S]*?const returnPresentation = placeSheetCoordinatorRef\.current\.presentation/,
   );
   assert.match(mapSource, /const candidatePlan = routePlanOverride\s*\?\?/);
   assert.match(mapSource, /testID="trail\.builder\.review"/);

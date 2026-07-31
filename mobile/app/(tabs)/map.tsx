@@ -23944,12 +23944,14 @@ function MapScreen() {
   function runSelectedTrailMoreAction(action: TrailActionSheetItem) {
     const trail = selectedTrail;
     if (!trail) return;
-    const returnPresentation = placeSheetCoordinatorRef.current.presentation;
     setShowTrailActionSheet(false);
     InteractionManager.runAfterInteractions(() => {
       switch (action.id) {
         case 'preview_3d':
-          openTrailPreview(trail, null, returnPresentation);
+          // The controlled More menu is reachable only from Trail Full. Do not
+          // infer its return stage from a coordinator ref that can lag behind a
+          // native drag transition.
+          openTrailPreview(trail, null, 'full');
           break;
         case 'download':
           void downloadSelectedTrail(trail);

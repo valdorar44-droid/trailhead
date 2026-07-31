@@ -671,3 +671,26 @@ Verify `git diff --cached --name-only` before every commit.
 
 - Do not repeat destination search, Peek/Full hydration, actions, Builder, GPX, Offline, Follow, recording, flyover playback, E4/E5 lifecycle, NPS research, Layers, Memory, Originals, Android Auto, broad Map/sheet crawls, or Figma work.
 - Do not build from the dirty feature worktree, weaken native/runtime gates, backport the native-dependent Trails packet to production `.3`, or spend either production build before the exact return assertion passes.
+
+## Trails production closeout — exact preview exposed stale sheet-stage ownership (2026-07-31)
+
+- Paired preview source `1942d06cbf6db4e9de16335286b72070d9c23518` published successfully through the guarded local publisher after isolated dependency installation, Expo export, Sentry source-map upload, server-owned update inspection, and atomic preview-channel promotion.
+- Android update `019fb91f-9a69-79cf-bf64-f0944c5057c8`, group `d431e61a-d671-4cd1-b31c-1be623c89958`, runtime `native-1.0.10-android.7`.
+- iOS update `019fb91f-9a69-7141-b86b-e820096adab2`, group `132395bc-bf66-4b50-bef0-4b0c45d10f24`, runtime `native-1.0.10-ios.6`.
+- Samsung identity passed: app `1.0.10`, build `69`, preview channel, exact source and Android update above.
+- The bounded Full -> More -> Preview in 3D -> Back assertion proved that route identity, orange geometry, finish marker, and camera restoration were correct. It also reproduced one remaining P1: the sheet returned to Peek.
+- Deterministic cause: the More menu is rendered only from Trail Full, but its preview callback derived the return presentation from a coordinator ref that can lag behind a native drag transition.
+- Evidence-backed correction: the More-menu 3D action now records `full` directly as its invoking presentation. Direct Peek preview and Trail Builder preview paths retain their existing independent return semantics.
+- Focused Trail Preview tests pass `7/7`; TypeScript and named-file whitespace checks pass.
+- Failed preview evidence: `C:\Users\User\Documents\Codex\trailhead-evidence\trail-back-full-1942d06.png`, SHA-256 `452eaac25d7efa9c3826f59a9a3b98847942a98033236e25a7edc22c36bb430a`.
+
+### Exact next action
+
+1. Commit the constant Full return contract, focused regression assertion, and this checkpoint only.
+2. Publish one paired preview OTA from that immutable SHA and rerun only Full -> More -> 3D -> Back on Android.
+3. If Full, route and camera restore together, freeze the clean paired `1.0.11` release source and run the release/native gates once before the authorized Android AAB and iOS IPA builds.
+
+### Do not repeat
+
+- Do not repeat Trails discovery, destination selection, Peek/Full hydration, action reachability, route resolution, flyover playback, Builder, GPX, Offline, Follow, recording, NPS, Layers, Memory, Originals, Android Auto, or broad Map crawls.
+- Do not infer Full from asynchronous sheet state again; the controlled More menu owns that return contract.

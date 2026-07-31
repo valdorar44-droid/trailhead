@@ -871,3 +871,36 @@ Verify `git diff --cached --name-only` before every commit.
 - Artifact hashes: catalog `ba8fac2f133ccc3defb953ecbc165f60ee90b40255f3aa2a579cb82d609d7309`; source records `c380e34f1d33a99b0cedf8b6a9a31a39d01c730760e98347ee1a5180ce0ffda9`; trail geometries `75f1a22791d1d644d9f101eab4e9a4aef0249984fbb8b87d0bec4e6d9b94e9c4`; audit `734304af4c911f1800974a0bf3de3ff3deb454271326bdf6b23c1cd28788cd99`.
 - The NPS key was read into process memory from the already-authenticated Railway production environment, passed only to WSL for this command, and was not printed or stored in the repository.
 - Live Explore catalogs and serving index remain unchanged. Continue from this cache in the next bounded batch; do not refetch the completed 88 parks.
+
+## Paired 1.0.11 production artifacts complete — 2026-07-31 14:03 CDT
+
+- Frozen release source remains `0f7431d32088405f4c381ed1a220fcb2169ec761` on `release/trailhead-1.0.11`, tagged `v1.0.11`. Both store artifacts were built from this identical source.
+- Android production build `723dca56-01a3-416b-a22d-98c838a849ee` finished successfully: version `1.0.11`, version code `70`, runtime `native-1.0.11-android.1`, fingerprint `04839b31d3b43d2eaaf2348ec46846358b142c3a`.
+- Downloaded AAB: `/tmp/trailhead-release-artifacts-1.0.11/trailhead-android-1.0.11-vc70.aab`; `161,466,191` bytes; SHA-256 `0cc5b90c1722f8a2df93be9dd8e8ed7939511395ea8baee0d0e40fe8d177c08e`.
+- iOS production build `712109e9-6b7f-4f72-ab51-2aa42a6095da` remains finished: version `1.0.11`, build `62`, runtime `native-1.0.11-ios.1`.
+- Downloaded IPA: `/tmp/trailhead-release-artifacts-1.0.11/trailhead-ios-1.0.11-build62.ipa`; `69,859,852` bytes; SHA-256 `9ca83267c03fc0fafa8664593e98645481b57ac0addd5ea5f9bbcf4861c4b3f1`.
+- Exactly the two authorized production builds were consumed. No replacement build, store submission, production OTA, public feature-stage change, or live data promotion was started.
+
+## Nationwide NPS resumable batch 4 — 2026-07-31 14:03 CDT
+
+- Starting point: 88 rich-cache parks and 386 remaining. One bounded batch selected 28 previously untouched park codes and used 325 of the hard 700-request cap.
+- Candidate: `data/explore/audit_candidates/nps/live-20260731-b04`; 116 parks now have rich cached source packs and 358 remain.
+- Candidate audit: `promotion_ready: true`, zero errors, and zero warnings. The Explore QA matrix passed and 57 focused official-place tests passed.
+- Module growth from NPS candidate `b03` to `b04`: Things to See `2,386 -> 2,982`; Things to Do `977 -> 1,136`; campgrounds `212 -> 276`; alerts `164 -> 196`; visitor centers `204 -> 239`; events `935 -> 1,088`; parking `193 -> 269`; guided items `175 -> 218`; passes `30 -> 37`.
+- Candidate now contains 4,387 attributed media items. Artifact hashes: catalog `f02b211bbf4d7e9d51c41de55ed1d5499a55713be90a3a77e80ae232e0534cd3`; source records `7460ec22a0e8b3873688729c1776a0da7b565c0a3d333751e0cddd6386ce7f0b`; trail geometries `793d73b462a84418426de39b3babf3b644eaf09b9e601ca2e4715fbfc19bcb4b`.
+- The NPS key was read into process memory from the authenticated Railway production environment and was neither printed nor written to the repository.
+- Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; App Store copy SHA-256 remains `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+- Live Explore catalogs and the serving index remain unchanged. Do not refetch the completed 116 parks.
+
+### Exact next action
+
+1. Commit and push this checkpoint only; keep protected and unrelated files unstaged.
+2. Stage the accepted Sierra/USFS and Moab/BLM `b08` catalog plus the NPS candidate behind an internal backend/data-preview path without mutating the bundled serving index.
+3. Run one bounded Android destination flow for Sierra and Moab and a sparse/newly enriched NPS park: hub -> module -> child -> shared sheet -> map -> Back.
+4. Promote only device-accepted data through the intentional serving-index process. Keep Community trails internal.
+
+### Do not repeat
+
+- Do not start another native build, submit stores, publish a production OTA, or refetch the 116 completed NPS parks.
+- Do not repeat Trails T1-T6, 3D Back, Builder, GPX, Offline, Follow, recording, Flyover, Layers, Memory, Originals, Android Auto, or broad Explore/NPS research without new evidence.
+- Task-owned Metro, Gradle, Maestro, publisher, test, and enrichment processes: none.

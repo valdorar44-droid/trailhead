@@ -97,6 +97,17 @@ test('crop uses cumulative distance interpolation for sparse and two-point lines
   assert.deepEqual(twoPoint, [[0.002, 0], [0.008, 0]]);
 });
 
+test('sharing rejects a sparse route gap before the server request', () => {
+  assert.doesNotThrow(() => prepareOfflineTrailForSharing(trail({
+    type: 'LineString',
+    coordinates: [[0, 0], [0.22, 0]],
+  }), { start: 0, finish: 1 }));
+  assert.throws(() => prepareOfflineTrailForSharing(trail({
+    type: 'LineString',
+    coordinates: [[0, 0], [0.23, 0]],
+  }), { start: 0, finish: 1 }), /gap between points/i);
+});
+
 test('only exact HTTPS and custom-scheme fragment links expose a token', () => {
   assert.equal(sharedTrailUrlFromToken(TOKEN), `https://gettrailhead.app/app/trails/shared#token=${TOKEN}`);
   assert.equal(sharedTrailTokenFromUrl(`https://gettrailhead.app/app/trails/shared#token=${TOKEN}`), TOKEN);

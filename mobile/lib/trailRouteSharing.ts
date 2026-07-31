@@ -144,6 +144,9 @@ const ALLOWED_ACTIVITIES = new Set([
   'horseback', 'ohv', '4wd', 'motorcycle', 'skiing', 'snowshoeing', 'mixed_use',
 ]);
 const ALLOWED_ROUTE_SHAPES = new Set(['loop', 'out_and_back', 'point_to_point', 'one_way']);
+const TRAIL_ROUTE_MAX_POINTS = 50_000;
+const TRAIL_ROUTE_MAX_JUMP_M = 25_000;
+const TRAIL_ROUTE_MAX_TOTAL_M = 10_000_000;
 
 function finiteCoordinate(raw: unknown): [number, number] | null {
   if (!Array.isArray(raw) || raw.length < 2 || typeof raw[0] === 'boolean' || typeof raw[1] === 'boolean') {
@@ -206,6 +209,25 @@ export function trailLineDistanceM(points: readonly (readonly [number, number])[
   let total = 0;
   for (let index = 1; index < points.length; index += 1) total += distanceM(points[index - 1], points[index]);
   return total;
+}
+
+function validateTrailRouteGeometryForUpload(
+  points: readonly (readonly [number, number])[],
+): void {
+  if (points.length > TRAIL_ROUTE_MAX_POINTS) {
+    throw new Error('This saved route has too many points. Simplify it in Trail Builder before sharing.');
+  }
+  let total = 0;
+  for (let index = 1; index < points.length; index += 1) {
+    const segment = distanceM(points[index - 1], points[index]);
+    if (segment > TRAIL_ROUTE_MAX_JUMP_M) {
+      throw new Error('This saved route has a gap between points. Open it in Trail Builder and add points along the route before sharing.');
+    }
+    total += segment;
+  }
+  if (total > TRAIL_ROUTE_MAX_TOTAL_M) {
+    throw new Error('This saved route is too long to share as one trail. Split it into shorter routes first.');
+  }
 }
 
 /**
@@ -390,6 +412,7 @@ export function prepareOfflineTrailForSharing(
   if (retained.length < 2 || trailLineDistanceM(retained) < 1) {
     throw new Error('This route needs at least two distinct points before it can be shared.');
   }
+  validateTrailRouteGeometryForUpload(retained);
   const activity = cleanActivity(trail.builder?.activity ?? trail.trail.activities?.[0]);
   const routeShape = cleanRouteShape((trail.geometry.features[0]?.properties as Record<string, unknown> | null)?.route_shape);
   const title = cleanText(trail.trail.name, 140);

@@ -431,6 +431,8 @@ export const api = {
   }),
   productFeatures: () => req<ProductFeatures>('/api/product/features'),
   adminQaDiagnostics: () => req<AdminQaDiagnosticsV1>('/api/admin/qa/diagnostics'),
+  exploreInternalPreviewDiagnostics: () =>
+    req<ExploreInternalPreviewDiagnosticsV1>('/api/explore/qa/preview-status'),
   getCommunicationPreferences: () =>
     req<CommunicationPreferences>('/api/communication-preferences'),
   updateCommunicationPreferences: (preferences: CommunicationPreferencesUpdate) =>
@@ -2628,6 +2630,12 @@ export interface AdminQaDiagnosticsV1 {
     ui_system_v2: boolean;
     originals: boolean;
   };
+}
+export interface ExploreInternalPreviewDiagnosticsV1 {
+  schema: 'explore_internal_preview_diagnostics_v1';
+  request_code: 'active' | 'header_missing' | 'server_stage_off' | 'admin_required' | 'not_applicable';
+  data_code: 'ready' | 'sidecar_missing' | 'sidecar_empty' | 'unchecked';
+  profile_count: number;
 }
 export type CommunityRatingKind = 'camp' | 'trail' | 'trailhead' | 'place';
 export interface RatingSummaryV1 {

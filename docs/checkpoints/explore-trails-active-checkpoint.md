@@ -1093,3 +1093,25 @@ Verify `git diff --cached --name-only` before every commit.
 
 - Do not repeat the 28-park media review, batch 7, the cache-only quality rebuild, or the prior three Android preview publications.
 - Do not stage or overwrite protected/user-owned files, submit Android, publish production OTA, or promote the catalog.
+
+## Internal Explore request-path diagnostic implementation — 2026-07-31 17:18 CDT
+
+- Starting HEAD `6af5ab2f`. This packet adds fixed-code, privacy-minimal diagnostics only; it does not change catalog selection, data ranking, public stages, or production behavior.
+- The Explore preview middleware now records one bounded request code: `active`, `header_missing`, `server_stage_off`, `admin_required`, or `not_applicable`. It retains no token, account identifier, URL parameters, search text, coordinates, route, or response content.
+- Added admin-only `GET /api/explore/qa/preview-status`. It returns the request code, a sidecar code (`ready`, `sidecar_missing`, `sidecar_empty`, or `unchecked`), and only the bounded profile count.
+- The existing QA screen now performs that exact Explore-scoped request and displays Request, Data, and Profiles values. Because the endpoint path starts with `/api/explore/`, it proves whether the normal authenticated preview-header path is active on the installed update.
+- Verification passed: 7 backend preview tests, 5 mobile request-path contract tests, Python compilation, and full mobile TypeScript with no diagnostics.
+- No public API contract, native dependency, permission, runtime, mobile catalog cache, Offline store, production OTA, or store state changed.
+- Protected Explore-index and App Store copy hashes remain unchanged. Task-owned test, enrichment, Railway, EAS, Metro, Gradle, Maestro, and publisher processes: none.
+
+### Exact next action
+
+1. Commit and push only the middleware, internal endpoint, mobile QA surface, focused tests, and this checkpoint.
+2. Deploy backend compatibility first from the exact source while retaining `TRAILHEAD_EXPLORE_DATA_STAGE=internal`.
+3. Publish one Android-only diagnostic preview OTA from that exact source. Open the admin QA screen once and record the three fixed values.
+4. Correct only the evidenced boundary. Do not publish iOS or another Android update until this diagnostic identifies the cause.
+
+### Do not repeat
+
+- Do not repeat previous speculative Explore preview publications, catalog research, NPS fetches, media review, or broad Android crawls.
+- Do not submit Android, touch Apple review, publish production OTA, expose Community routes, or promote candidate data.

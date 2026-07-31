@@ -9,6 +9,10 @@ const guideSource = readFileSync(
   resolve(dirname(fileURLToPath(import.meta.url)), '../../app/(tabs)/guide.tsx'),
   'utf8',
 );
+const qaSource = readFileSync(
+  resolve(dirname(fileURLToPath(import.meta.url)), '../../app/qa/telemetry.tsx'),
+  'utf8',
+);
 
 test('internal Explore data header is build-scoped and authenticated', () => {
   assert.match(apiSource, /EXPO_PUBLIC_EXPLORE_DATA_PREVIEW/);
@@ -45,4 +49,12 @@ test('Explore waits for auth and sends the hydrated token on its first page', ()
 test('the authoritative first page owns order and internal review data is not cached', () => {
   assert.match(guideSource, /setExplorePlaces\(current => mergeById\(firstPlaces, current\)\)/);
   assert.match(guideSource, /if \(!firstPage\.internal_preview\?\.enabled\)/);
+});
+
+test('admin QA exposes fixed-code Explore preview request evidence', () => {
+  assert.match(apiSource, /exploreInternalPreviewDiagnostics/);
+  assert.match(apiSource, /\/api\/explore\/qa\/preview-status/);
+  assert.match(qaSource, /qa\.explore-preview\.request-code/);
+  assert.match(qaSource, /qa\.explore-preview\.data-code/);
+  assert.match(qaSource, /qa\.explore-preview\.profile-count/);
 });

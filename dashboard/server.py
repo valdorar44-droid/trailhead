@@ -545,6 +545,9 @@ _originals_preview_token_context: contextvars.ContextVar[str | None] = contextva
 _explore_internal_preview_context: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "explore_internal_preview", default=False,
 )
+_explore_internal_preview_status_context: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "explore_internal_preview_status", default="not_requested",
+)
 
 app = FastAPI(title="Trailhead API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -7228,6 +7231,19 @@ def _explore_internal_preview_authorized(authorization: str) -> bool:
     return bool(user and user.get("is_admin"))
 
 
+def _explore_internal_preview_request_code(path: str, preview_header: str, authorization: str) -> str:
+    """Return a fixed QA code without retaining request or account data."""
+    if not str(path or "").startswith("/api/explore/"):
+        return "not_applicable"
+    if str(preview_header or "").strip().lower() != "internal":
+        return "header_missing"
+    if not _explore_internal_preview_enabled():
+        return "server_stage_off"
+    if not _explore_internal_preview_authorized(authorization):
+        return "admin_required"
+    return "active"
+
+
 @app.middleware("http")
 async def explore_internal_preview_context(request: Request, call_next):
     """Allow the signed-in admin preview bundle to read reviewed sidecar data.
@@ -7236,18 +7252,18 @@ async def explore_internal_preview_context(request: Request, call_next):
     unless the server stage is internal and the bearer token belongs to an
     administrator. Everyone else continues to receive the normal catalog.
     """
-    requested = (
-        request.url.path.startswith("/api/explore/")
-        and request.headers.get("X-Trailhead-Explore-Preview", "").strip().lower() == "internal"
-        and _explore_internal_preview_enabled()
-    )
-    allowed = requested and _explore_internal_preview_authorized(
+    request_code = _explore_internal_preview_request_code(
+        request.url.path,
+        request.headers.get("X-Trailhead-Explore-Preview", ""),
         request.headers.get("Authorization", ""),
     )
+    allowed = request_code == "active"
     marker = _explore_internal_preview_context.set(allowed)
+    status_marker = _explore_internal_preview_status_context.set(request_code)
     try:
         return await call_next(request)
     finally:
+        _explore_internal_preview_status_context.reset(status_marker)
         _explore_internal_preview_context.reset(marker)
 
 def _safe_user(u: dict) -> dict:
@@ -10679,6 +10695,27 @@ async def admin_qa_diagnostics(admin: dict = Depends(_require_admin)):
             "ui_system_v2": _product_feature_enabled("UI_SYSTEM_V2_ENABLED", admin),
             "originals": _originals_feature_enabled(admin),
         },
+    }
+
+
+@app.get("/api/explore/qa/preview-status")
+async def explore_internal_preview_diagnostics(admin: dict = Depends(_require_admin)):
+    """Fixed-code evidence for the admin-only Explore preview request path."""
+    request_code = _explore_internal_preview_status_context.get()
+    profiles = _load_explore_internal_preview_profiles() if request_code == "active" else []
+    if request_code != "active":
+        data_code = "unchecked"
+    elif not EXPLORE_INTERNAL_PREVIEW.exists():
+        data_code = "sidecar_missing"
+    elif not profiles:
+        data_code = "sidecar_empty"
+    else:
+        data_code = "ready"
+    return {
+        "schema": "explore_internal_preview_diagnostics_v1",
+        "request_code": request_code,
+        "data_code": data_code,
+        "profile_count": min(len(profiles), 10_000),
     }
 
 class AccountDeletionAuthorizationRequest(BaseModel):

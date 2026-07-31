@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import tempfile
@@ -118,6 +119,42 @@ class ExploreInternalPreviewTests(unittest.TestCase):
         ):
             self.assertTrue(server._explore_internal_preview_authorized("Bearer admin"))
         self.assertFalse(server._explore_internal_preview_authorized(""))
+
+    def test_request_diagnostics_distinguish_header_stage_and_admin(self):
+        os.environ.pop("TRAILHEAD_EXPLORE_DATA_STAGE", None)
+        self.assertEqual(
+            server._explore_internal_preview_request_code("/api/explore/home", "", "Bearer admin"),
+            "header_missing",
+        )
+        self.assertEqual(
+            server._explore_internal_preview_request_code("/api/explore/home", "internal", "Bearer admin"),
+            "server_stage_off",
+        )
+        os.environ["TRAILHEAD_EXPLORE_DATA_STAGE"] = "internal"
+        with patch.object(server, "_explore_internal_preview_authorized", return_value=False):
+            self.assertEqual(
+                server._explore_internal_preview_request_code("/api/explore/home", "internal", "Bearer ordinary"),
+                "admin_required",
+            )
+        with patch.object(server, "_explore_internal_preview_authorized", return_value=True):
+            self.assertEqual(
+                server._explore_internal_preview_request_code("/api/explore/home", "internal", "Bearer admin"),
+                "active",
+            )
+
+    def test_active_request_diagnostics_report_ready_sidecar(self):
+        os.environ["TRAILHEAD_EXPLORE_DATA_STAGE"] = "internal"
+        marker = server._explore_internal_preview_status_context.set("active")
+        try:
+            result = asyncio.run(server.explore_internal_preview_diagnostics({"id": 9, "is_admin": True}))
+        finally:
+            server._explore_internal_preview_status_context.reset(marker)
+        self.assertEqual(result, {
+            "schema": "explore_internal_preview_diagnostics_v1",
+            "request_code": "active",
+            "data_code": "ready",
+            "profile_count": 1,
+        })
 
 
 if __name__ == "__main__":

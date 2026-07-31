@@ -694,3 +694,26 @@ Verify `git diff --cached --name-only` before every commit.
 
 - Do not repeat Trails discovery, destination selection, Peek/Full hydration, action reachability, route resolution, flyover playback, Builder, GPX, Offline, Follow, recording, NPS, Layers, Memory, Originals, Android Auto, or broad Map crawls.
 - Do not infer Full from asynchronous sheet state again; the controlled More menu owns that return contract.
+
+## Trails production closeout accepted — Android exact assertion (2026-07-31)
+
+- Accepted source: `c9c81988d14096697eddaf95204eab6e64078b54`, pushed to `origin/feat/trailhead-1.0.10-overhaul`.
+- Paired preview publication passed with Sentry source maps and atomic channel promotion.
+- Android update `019fb92d-a890-7a24-848c-a73efac5fc7f`, group `be3a56df-fe0f-4962-b6c4-da198a90cd46`, runtime `native-1.0.10-android.7`.
+- iOS update `019fb92d-a890-7de3-9aa7-71fb909cc8af`, group `9bca76b5-ac6c-4919-b873-80320a5106c5`, runtime `native-1.0.10-ios.6`.
+- Samsung identity passed on app `1.0.10`, build `69`, exact source and update above.
+- Bounded Android assertion passed: Trail Full -> More -> Preview in 3D -> Back restored the Full sheet (`1`), no Peek sheet (`0`), the same More action (`1`), the resolved route, camera, and finish marker (`1`).
+- Evidence: `C:\Users\User\Documents\Codex\trailhead-evidence\trail-back-full-c9c8198.png`, SHA-256 `5bd9066fc51e02f90686e522b02fb6de04355d8f7bb5a81bb1abc9848743afb4`.
+- Open Trails P0/P1: none. Trails are frozen for the paired `1.0.11` store candidate; no completed Trails crawl is reopened before store-candidate smoke testing.
+
+### Exact next action
+
+1. Create a clean `release/trailhead-1.0.11` worktree from this accepted checkpoint.
+2. Normalize app version `1.0.11` and paired runtime suffix `.1`, update guarded native-drift expectations, and run the release/native/pre-preview gates once.
+3. Commit and tag the immutable release SHA, then start exactly one Android production AAB build and one iOS production IPA build from it.
+4. Record EAS build IDs, remote build numbers, runtimes, source SHA, and artifact hashes before resuming NPS/USFS/BLM data-depth work.
+
+### Do not repeat
+
+- Do not repeat the 3D Back assertion, Trail discovery, sheets, Builder, GPX, Offline, Follow, recording, Flyover, Layers, Memory, Originals, or Android Auto before the built-candidate smoke test.
+- Do not include uncommitted NPS candidates, the protected Explore serving index, App Store copy, `.cursor/`, or unrelated dirty files in the release source.

@@ -12,6 +12,7 @@ const guideSource = readFileSync(
 
 test('internal Explore data header is build-scoped and authenticated', () => {
   assert.match(apiSource, /EXPO_PUBLIC_EXPLORE_DATA_PREVIEW/);
+  assert.match(apiSource, /Updates\.channel === 'preview'/);
   assert.match(apiSource, /token && EXPLORE_INTERNAL_DATA_PREVIEW/);
   assert.match(apiSource, /path\.startsWith\('\/api\/explore\/'\)/);
   assert.match(apiSource, /X-Trailhead-Explore-Preview'\] = 'internal'/);

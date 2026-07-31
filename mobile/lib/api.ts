@@ -1,5 +1,6 @@
 import { storage } from './storage';
 import { Platform } from 'react-native';
+import * as Updates from 'expo-updates';
 import { TRAILHEAD_API_BASE, TRAILHEAD_PRODUCTION_API_BASE } from './apiBase';
 import { guardedRequest, normalizeRequestText, stableNumber, stableRouteKey } from './requestGuard';
 import { getTripRepositoryOutbox } from './tripRepository';
@@ -39,7 +40,8 @@ import type {
 
 const BASE = TRAILHEAD_API_BASE;
 const EXPLORE_INTERNAL_DATA_PREVIEW =
-  process.env.EXPO_PUBLIC_EXPLORE_DATA_PREVIEW?.trim().toLowerCase() === 'internal';
+  process.env.EXPO_PUBLIC_EXPLORE_DATA_PREVIEW?.trim().toLowerCase() === 'internal'
+  || Updates.channel === 'preview';
 export type WeatherUnitMode = 'auto' | 'imperial' | 'metric';
 
 function isLocalWebProductionApi() {

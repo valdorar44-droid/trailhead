@@ -89,3 +89,12 @@ test('reviewed internal profile wins same-title Explore deduplication', () => {
   assert.equal(matches[0].id, reviewed.id);
   assert.equal(matches[0].summary.short_description, reviewed.summary.short_description);
 });
+
+test('reviewed internal profile replaces stale same-id card content', () => {
+  assert.match(
+    guideSource,
+    /const preferReviewedPreview = Boolean\(place\.internal_preview\) && !Boolean\(previous\.internal_preview\)/,
+  );
+  assert.match(guideSource, /\.\.\.\(preferReviewedPreview \? place : \{\}\)/);
+  assert.match(guideSource, /\{ \.\.\.previous\.summary, \.\.\.place\.summary \}/);
+});

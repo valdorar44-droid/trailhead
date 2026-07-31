@@ -532,11 +532,23 @@ function mergeMatchedExplorePlaces(current: ExplorePlaceProfile[], remotePlaces:
     if (seen.has(place.id)) {
       const index = merged.findIndex(item => item.id === place.id);
       if (index >= 0) {
-        const previousRank = Number((merged[index] as any).matched_explore_rank);
+        const previous = merged[index];
+        const previousRank = Number((previous as any).matched_explore_rank);
         const nextRank = Number((place as any).matched_explore_rank);
+        const preferReviewedPreview = Boolean(place.internal_preview) && !Boolean(previous.internal_preview);
         merged[index] = {
-          ...merged[index],
-          matched_explore_query: (place as any).matched_explore_query || (merged[index] as any).matched_explore_query,
+          ...previous,
+          ...(preferReviewedPreview ? place : {}),
+          summary: preferReviewedPreview
+            ? { ...previous.summary, ...place.summary }
+            : previous.summary,
+          profile: preferReviewedPreview
+            ? { ...(previous.profile ?? {}), ...(place.profile ?? {}) }
+            : previous.profile,
+          source_pack: preferReviewedPreview
+            ? { ...(previous.source_pack ?? {}), ...(place.source_pack ?? {}) }
+            : previous.source_pack,
+          matched_explore_query: (place as any).matched_explore_query || (previous as any).matched_explore_query,
           matched_explore_rank: Number.isFinite(previousRank) && Number.isFinite(nextRank) ? Math.min(previousRank, nextRank) : Number.isFinite(nextRank) ? nextRank : previousRank,
         } as ExplorePlaceProfile;
       }

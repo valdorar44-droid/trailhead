@@ -17,7 +17,10 @@ import {
   type SharedTrailRouteV1,
 } from '@/lib/trailRouteSharing';
 import {
+  clearSharedTrailRecipientRoute,
   consumeSharedTrailToken,
+  readSharedTrailRecipientRoute,
+  rememberSharedTrailRecipientRoute,
   subscribeSharedTrailToken,
 } from '@/lib/sharedTrailLinkHandoff';
 import { useStore } from '@/lib/store';
@@ -37,7 +40,10 @@ export default function SharedTrailRouteScreen() {
   const router = useRouter();
   const user = useStore(state => state.user);
   const setPendingSharedTrailRoute = useStore(state => state.setPendingSharedTrailRoute);
-  const [recipient, setRecipient] = useState<SharedTrailRecipientStateV1>({ status: 'loading' });
+  const [recipient, setRecipient] = useState<SharedTrailRecipientStateV1>(() => {
+    const remembered = readSharedTrailRecipientRoute();
+    return remembered ? { status: 'ready', route: remembered } : { status: 'loading' };
+  });
   const [saved, setSaved] = useState(false);
   const retryTokenRef = useRef('');
   const resolutionGenerationRef = useRef(0);
@@ -57,6 +63,7 @@ export default function SharedTrailRouteScreen() {
       if (generation !== resolutionGenerationRef.current) return;
       if (!isSharedTrailRouteV1(route)) throw new Error('invalid_shared_route');
       retryTokenRef.current = '';
+      rememberSharedTrailRecipientRoute(route);
       setRecipient({ status: 'ready', route });
     } catch (error) {
       if (generation !== resolutionGenerationRef.current) return;
@@ -79,11 +86,19 @@ export default function SharedTrailRouteScreen() {
 
   const route = recipient.status === 'ready' ? recipient.route : null;
 
-  const close = () => router.replace('/(tabs)/guide?view=trails' as any);
-  const back = () => router.canGoBack() ? router.back() : close();
+  const close = () => {
+    clearSharedTrailRecipientRoute();
+    router.replace('/(tabs)/guide?view=trails' as any);
+  };
+  const back = () => {
+    clearSharedTrailRecipientRoute();
+    if (router.canGoBack()) router.back();
+    else router.replace('/(tabs)/guide?view=trails' as any);
+  };
 
   const openOnMap = () => {
     if (!route) return;
+    rememberSharedTrailRecipientRoute(route);
     setPendingSharedTrailRoute(route);
     router.push('/(tabs)/map');
   };

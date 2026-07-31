@@ -6269,6 +6269,7 @@ function MapScreen() {
   const pendingSavedTrailId = useStore(st => st.pendingSavedTrailId);
   const setPendingSavedTrailId = useStore(st => st.setPendingSavedTrailId);
   const pendingSharedTrailRoute = useStore(st => st.pendingSharedTrailRoute);
+  const sharedTrailMapReturnRef = useRef(false);
   const setPendingSharedTrailRoute = useStore(st => st.setPendingSharedTrailRoute);
   const pendingRouteFlyover = useStore(st => st.pendingRouteFlyover);
   const setPendingRouteFlyover = useStore(st => st.setPendingRouteFlyover);
@@ -10672,6 +10673,7 @@ function MapScreen() {
     try {
       preview = offlineTrailFromSharedRoute(pendingSharedTrailRoute, Date.now());
     } catch {
+      sharedTrailMapReturnRef.current = false;
       setPendingSharedTrailRoute(null);
       setQuickToast('Shared route is unavailable');
       setTimeout(() => setQuickToast(''), 2600);
@@ -10679,6 +10681,7 @@ function MapScreen() {
     }
     const coords = primaryTrailLine(preview.geometry, [preview.trail.lng, preview.trail.lat]);
     if (coords.length < 2) {
+      sharedTrailMapReturnRef.current = false;
       setPendingSharedTrailRoute(null);
       setQuickToast('Shared route is unavailable');
       setTimeout(() => setQuickToast(''), 2600);
@@ -10697,6 +10700,7 @@ function MapScreen() {
       warnings: [],
       engine: 'Shared route',
     };
+    sharedTrailMapReturnRef.current = true;
     setSelectedTrail(preview.trail);
     setTrailCardCollapsed(true);
     // A recipient opens the immutable shared revision in view-only Map state.
@@ -22481,6 +22485,13 @@ function MapScreen() {
   }
 
   function closeSelectedTrailSheet() {
+    if (sharedTrailMapReturnRef.current) {
+      sharedTrailMapReturnRef.current = false;
+      trailDiscoveryReturnRef.current = null;
+      clearSelectedTrailSheetState();
+      router.back();
+      return;
+    }
     trailDiscoveryReturnRef.current = null;
     clearSelectedTrailSheetState();
   }
@@ -22529,6 +22540,13 @@ function MapScreen() {
   useFocusEffect(useCallback(() => {
     if (!selectedTrail) return undefined;
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (sharedTrailMapReturnRef.current) {
+        sharedTrailMapReturnRef.current = false;
+        trailDiscoveryReturnRef.current = null;
+        clearSelectedTrailSheetState();
+        router.back();
+        return true;
+      }
       if (trailPreviewOpen) {
         returnFromTrailPreview();
         return true;

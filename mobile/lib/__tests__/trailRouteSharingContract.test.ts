@@ -56,6 +56,16 @@ test('recipient opens the immutable shared revision without exposing Trail Build
   assert.doesNotMatch(handoff, /setTrailBuilderDirty\(true\)/);
 });
 
+test('shared route Map return restores the view-only recipient without retaining the bearer token', () => {
+  const map = readFileSync('app/(tabs)/map.tsx', 'utf8');
+  const recipient = readFileSync('app/shared-trails.tsx', 'utf8');
+  const handoff = readFileSync('lib/sharedTrailLinkHandoff.ts', 'utf8');
+  assert.match(map, /sharedTrailMapReturnRef\.current[\s\S]*router\.back\(\)/);
+  assert.match(recipient, /rememberSharedTrailRecipientRoute\(route\)[\s\S]*setPendingSharedTrailRoute\(route\)/);
+  assert.match(recipient, /readSharedTrailRecipientRoute\(\)/);
+  assert.doesNotMatch(handoff, /recipientRoute[\s\S]*AsyncStorage|recipientRoute[\s\S]*SecureStore/);
+});
+
 test('queued Account A write cannot start after Account B cleanup advances the epoch', async () => {
   const lifecycle = createAccountStorageLifecycle({
     get: async () => null,

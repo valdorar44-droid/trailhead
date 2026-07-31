@@ -183,7 +183,7 @@ test('hidden Native Map pauses renderer work without erasing route or selection 
   assert.match(mapSource, /visualWorkActive=\{mapVisualWorkActive\}/);
   assert.match(mapSource, /visualTreeMounted=\{mapVisualTreeMounted\}/);
   assert.match(mapSource, /waypoints=\{waypoints\}/);
-  assert.match(mapSource, /searchMarker=\{!mapMissionVisible && searchRouteCard/);
+  assert.match(mapSource, /searchMarker=\{!mapMissionVisible && !trailPreviewOpen && searchRouteCard/);
   assert.match(mapSource, /routeBuildCoords=\{routeBuildSession\?\.routeCoords \?\? \[\]\}/);
   assert.match(mapSource, /originalsRouteCoords=\{originalsMapExperience\.routeCoords\}/);
   assert.doesNotMatch(mapSource, /waypoints=\{mapVisualWorkActive \? waypoints : \[\]\}/);

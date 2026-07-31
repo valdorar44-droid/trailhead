@@ -1658,6 +1658,8 @@ class TripGraphV2StoreTests(unittest.TestCase):
             "TRAILHEAD_COMMUNITY_RATINGS_ENABLED": "0",
             "TRAILHEAD_BRIEF_AND_BACKUP_ENABLED": "0",
             "TRAILHEAD_DIGEST_PREFERENCES_ENABLED": "0",
+            "TRAILHEAD_PRIVATE_TRAIL_ROUTES_STAGE": "internal",
+            "TRAILHEAD_COMMUNITY_TRAILS_STAGE": "off",
         }):
             anonymous = asyncio.run(product_features(None))
             regular = asyncio.run(product_features({"is_admin": 0}))
@@ -1676,8 +1678,14 @@ class TripGraphV2StoreTests(unittest.TestCase):
             "community_ratings": False,
             "brief_and_backup": False,
             "digest_preferences": False,
+            "private_trail_routes": False,
+            "community_trails": False,
         })
-        self.assertTrue(all(admin.values()))
+        self.assertTrue(all(
+            enabled for feature, enabled in admin.items()
+            if feature != "community_trails"
+        ))
+        self.assertFalse(admin["community_trails"])
 
 
 if __name__ == "__main__":

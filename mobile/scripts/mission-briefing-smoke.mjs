@@ -401,6 +401,8 @@ assert(nativeMapContrast, 'NativeMap draws a high-contrast route casing');
 
 const routeBuilderSource = readFileSync(join(root, 'app/(tabs)/route-builder.tsx'), 'utf8');
 const footerDockSource = readFileSync(join(root, 'components/routeBuilder/RouteBuilderFooterDock.tsx'), 'utf8');
+const trailBuilderPanelSource = readFileSync(join(root, 'components/trails/TrailBuilderPanel.tsx'), 'utf8');
+const trailPreviewPlayerSource = readFileSync(join(root, 'components/trails/TrailPreviewPlayer.tsx'), 'utf8');
 const storeSource = readFileSync(join(root, 'lib/store.ts'), 'utf8');
 assert(storeSource.includes('pendingRouteFlyover') && storeSource.includes('setPendingRouteFlyover'),
   'store carries pending route-builder flyover handoff');
@@ -415,9 +417,15 @@ assert(footerDockSource.includes('secondaryActionLabel') && footerDockSource.inc
   'Route Builder footer supports a compact secondary action');
 assert(mapSource.includes('pendingRouteFlyover') && mapSource.includes("source: 'trail_builder'") && mapSource.includes('skipDirected: true'),
   'Map consumes Route Builder flyover requests through deterministic playback');
-assert(mapSource.includes('flyTrailRoutePlan') && mapSource.includes('missionRouteOverrideRef.current = plan.coords'),
+assert(mapSource.includes('flyTrailRoutePlan') && mapSource.includes('openTrailPreview(trail, plan)') &&
+  mapSource.includes('const candidatePlan = routePlanOverride') &&
+  mapSource.includes('ownedRoutePlan?.coords'),
   'Trail Builder flyover uses the selected trail route');
-assert(mapSource.includes("routeName: trail.name || plan.title || 'Trail route'") && mapSource.includes('skipDirected: true'),
+assert(mapSource.includes('buildLocalTrailPreviewManifest(trail, localProfile, candidatePlan)') &&
+  trailPreviewPlayerSource.includes('normalizeTrailPreviewKeyframes(manifest)') &&
+  trailPreviewPlayerSource.includes('requestAnimationFrame(tick)') &&
+  !trailPreviewPlayerSource.includes('directedCinematic') &&
+  !trailPreviewPlayerSource.includes('narration'),
   'Trail Builder flyover uses deterministic playback without directed storyboard');
 assert(mapSource.includes("postRN({type:'map_tapped',lat:e.lngLat.lat,lng:e.lngLat.lng})") &&
   mapSource.includes('trailPinCaptureMode &&') &&
@@ -437,11 +445,12 @@ assert(mapSource.includes("engineLabel = usedManualFallback ? 'Manual line' : 'T
   'WebView Trail Builder falls back to a reviewable manual route');
 assert(!mapSource.includes('Trail graph did not match'),
   'Trail Builder avoids technical route-copy in visible messages');
-assert(mapSource.includes('label="Flyover"') && mapSource.includes('play-circle-outline'),
+assert(trailBuilderPanelSource.includes('label="3D preview"') &&
+  trailBuilderPanelSource.includes('onPress={onPreview3d}'),
   'Trail Builder exposes a Flyover action after route build');
-assert(mapSource.includes("previewTrailDistanceM > 0 ? fmtTrailRouteDistance(previewTrailDistanceM) : 'Set route'"),
+assert(trailBuilderPanelSource.includes("pointCount > 1 ? `${distanceLabel} · ${pointCount} points` : 'Draw on the map'"),
   'Trail Builder capture panel avoids dead distance placeholders');
-assert(mapSource.includes("trailCapturePins.length ? String(trailCapturePins.length) : 'Start'"),
+assert(trailBuilderPanelSource.includes("pointCount > 1 ? `${distanceLabel} · ${pointCount} points` : 'Draw on the map'"),
   'Trail Builder capture panel avoids zero-value point copy');
 
 const tsc = spawnSync('npx', ['tsc', '--noEmit'], {

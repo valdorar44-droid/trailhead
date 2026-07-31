@@ -145,7 +145,7 @@ def summary_from_park(park: dict[str, Any], name: str) -> str:
     desc = compact_text(park.get("description"))
     if desc:
         return sentence_safe_preview(desc, 560)
-    return f"{name} is managed by the National Park Service. Check current access, fees, permits, alerts, road status, and weather before building a route around it."
+    return ""
 
 
 def activity_names(park: dict[str, Any]) -> list[str]:
@@ -471,11 +471,17 @@ def fee_pass_lines(items: list[dict[str, Any]]) -> list[str]:
     for item in items:
         if not isinstance(item, dict):
             continue
-        title = compact_text(item.get("title") or item.get("name"))
-        cost = compact_text(item.get("cost") or item.get("price"))
-        line = f"{title}: {format_cost(cost)}" if title and cost else title
-        if line and line not in out:
-            out.append(line)
+        candidates = [item]
+        for key in ("passes", "relatedMultiSitePasses"):
+            nested = item.get(key)
+            if isinstance(nested, list):
+                candidates.extend(value for value in nested if isinstance(value, dict))
+        for candidate in candidates:
+            title = compact_text(candidate.get("title") or candidate.get("name") or candidate.get("category"))
+            cost = compact_text(candidate.get("cost") or candidate.get("price"))
+            line = f"{title}: {format_cost(cost)}" if title and cost else title
+            if line and line not in out:
+                out.append(line)
     return out[:12]
 
 

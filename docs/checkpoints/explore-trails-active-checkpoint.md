@@ -717,3 +717,46 @@ Verify `git diff --cached --name-only` before every commit.
 
 - Do not repeat the 3D Back assertion, Trail discovery, sheets, Builder, GPX, Offline, Follow, recording, Flyover, Layers, Memory, Originals, or Android Auto before the built-candidate smoke test.
 - Do not include uncommitted NPS candidates, the protected Explore serving index, App Store copy, `.cursor/`, or unrelated dirty files in the release source.
+
+## Explore data-depth safety checkpoint — 2026-07-31 12:52 CDT
+
+- Feature branch: `feat/trailhead-1.0.10-overhaul`; exact pre-checkpoint HEAD `bd9a1fbe338491e7ca9910db63cf2fd9071f8f6f`.
+- Frozen release branch: `release/trailhead-1.0.11`; immutable tag `v1.0.11`; source `0f7431d32088405f4c381ed1a220fcb2169ec761`.
+- Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; App Store copy SHA-256 remains `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`. Neither file, `.cursor/`, nor unrelated dirty work is part of this packet.
+- Task-owned local Metro, Gradle, Maestro, test, and publisher processes: none. Two remote EAS production builds are the only active release jobs.
+
+### Paired 1.0.11 production-build status
+
+- iOS production build `712109e9-6b7f-4f72-ab51-2aa42a6095da` finished from exact release source `0f7431d`. Marketing version `1.0.11`, build `62`, runtime `native-1.0.11-ios.1`.
+- Downloaded IPA: `/tmp/trailhead-release-artifacts-1.0.11/trailhead-ios-1.0.11-build62.ipa`; `69,859,852` bytes; SHA-256 `9ca83267c03fc0fafa8664593e98645481b57ac0addd5ea5f9bbcf4861c4b3f1`.
+- Android production build `723dca56-01a3-416b-a22d-98c838a849ee` remains in the Expo queue. Marketing version `1.0.11`, version code `70`, runtime `native-1.0.11-android.1`, exact source `0f7431d`.
+- Do not start a replacement build, publish a production OTA, or submit either artifact until the Android build finishes and the paired artifacts are checked.
+
+### NPS candidate-safety tooling
+
+- `scripts/run_nps_hourly_enrichment.py` now enforces a source-controlled maximum of 700 NPS HTTP requests per invocation, supports a zero-request cache-only rebuild, and writes only to isolated candidate directories under `data/explore/audit_candidates/nps/`.
+- Candidate paths are rejected if they resolve inside `dashboard/`. The live serving index is never written by the enrichment runner; reviewed promotion remains a separate intentional action.
+- Candidate audits cover schema, stable IDs, duplicate park codes and name/location pairs, HTTPS official URLs, source licenses, media attribution, freshness, module coverage, artifact byte sizes, and SHA-256 hashes.
+- Generic NPS fallback prose is omitted when no official description exists. Nested pass records are parsed instead of discarded.
+- `python -m unittest tests.test_nps_hourly_enrichment`: 10 passed. Combined Explore-source and enrichment suite: 43 passed. Named-file whitespace checks passed.
+
+### NPS depth results
+
+- Cache-only baseline candidate `local-20260731-final` passed with 729 total places, 474 NPS places, 500 source records, 7 trail geometries, and 3,097 attributed media items.
+- Two live Railway-backed batches completed under the 700-call per-run cap: batch 1 used 339 requests for 28 parks; batch 2 used 308 requests for 27 parks. Cumulative requests were 647, rich-cache coverage increased from 5 to 60 parks, and 414 parks remain.
+- Latest isolated candidate `live-20260731-b02` is `promotion_ready: true` with no errors or warnings. It contains 729 places, 474 NPS places, 500 source records, 7 trail geometries, and 3,746 attributed media items.
+- Rich modules increased from baseline to latest candidate: Things to See `617 -> 1,783`; Things to Do `263 -> 771`; campgrounds `62 -> 177`; alerts `21 -> 135`; visitor centers `45 -> 151`; events `177 -> 664`; parking `49 -> 167`; guided items `30 -> 132`; passes `5 -> 26`.
+- Latest candidate artifact hashes: catalog `5a29390154c8edf6f72eacd97fdc3bb3423a4beeaac1a65397faad0dccb80a7f`; source records `f190d6f61041a05509d8bf31ffeea4e778cd63fc031ddf48b0d8c54976a030f8`; trail geometries `6325f3db6ddea71bcce70fcb91bbc8773a01d3fc11259f2d8d0ee52703a94772`.
+- Candidate promotion is intentionally withheld until manual duplicate, exact-image identity, licensing, freshness, and module-coverage review. No candidate data has replaced the user-owned serving index.
+
+### Exact next action
+
+1. Commit and push only the NPS importer, candidate runner, regression tests, and this checkpoint.
+2. Audit the existing Sierra/USFS and Moab/BLM fixtures/adapters, then generate isolated pilot candidates with source, duplicate, licensing, imagery, and real-module coverage reports.
+3. Continue monitoring the already-running Android build. When it finishes, download the AAB, compute its SHA-256, and record both paired artifacts. Do not spend another build if it fails; checkpoint the exact failure.
+4. Keep nationwide NPS continuation resumable. Do not promote the latest candidate until its manual review is complete, and do not exceed the source-controlled API budget.
+
+### Do not repeat
+
+- Do not repeat Trails T1-T6, 3D Back, destination search, shared trail sheets, Builder, GPX, Offline, Follow, recording, Layers, Memory, Originals, Android Auto, broad NPS research, or the protected pre-preview suite without new evidence.
+- Do not write candidates into `dashboard/`, auto-stage generated candidate data, fabricate agency modules, merge Community and Verified trails, or start additional native builds.

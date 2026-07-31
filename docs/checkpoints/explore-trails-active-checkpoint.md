@@ -1142,3 +1142,31 @@ Verify `git diff --cached --name-only` before every commit.
 
 - Do not repeat the internal-preview diagnostic, the two preview exports, the five-destination Android delta, NPS batches 1-7, the batch-7 media review, or broad Explore/Trails/Map crawls.
 - Do not submit Android, rebuild/resubmit iOS, publish production OTA, expose Community routes, overwrite the protected serving index, or change public feature stages without separate authorization.
+
+## NPS batch 8 and agency-candidate quality closeout - 2026-07-31 17:57 CDT
+
+- Branch: `feat/trailhead-1.0.10-overhaul`; starting HEAD `eb0c09da5704bb30cea241df692dcf14186f3961`. Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; App Store copy SHA-256 remains `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+- The next untouched NPS batch selected 28 park codes: `glca`, `glec`, `glde`, `goga`, `gosp`, `gois`, `para`, `grpo`, `grte`, `grko`, `grba`, `greg`, `grfa`, `grsa`, `grsp`, `gree`, `gumo`, `guco`, `guis`, `hafo`, `hagr`, `hamp`, `haha`, `hafe`, `hart`, `hatu`, `hstr`, and `heho`.
+- The bounded run used 326 of the source-controlled 700-request cap and produced isolated candidate `data/explore/audit_candidates/nps/live-20260731-b08`. Rich NPS coverage increased from 200 to 228 parks; 246 parks remain. The candidate is `promotion_ready: true` with zero errors and zero warnings. The Explore QA matrix passed and 59 focused official-place tests passed.
+- Module growth from `b07-quality` to `b08`: Things to See `4,603 -> 5,223`; Things to Do `1,617 -> 1,893`; campgrounds `336 -> 390`; alerts `317 -> 363`; visitor centers `346 -> 388`; events `1,616 -> 1,731`; parking `352 -> 408`; guided items `327 -> 388`; passes `50 -> 58`. Fees remain `441` across 120 parks.
+- Attributed NPS media increased from 5,505 to 5,809. Media-identity review of the 28 new parks found 28 lead images, 28 unique lead URLs, zero duplicate leads, zero missing captions, zero missing credits, and zero non-HTTPS URLs across all 5,809 NPS media records.
+- Stable intended-grain counts remain 729 Explore places, 474 NPS identities, 500 source records, and 7 existing trail geometries. Candidate hashes: catalog `4711b9ace48e4dbfdb5434c1543e6292c1ade307c49cbaeaa56dc2012ab5629b`; source records `95e1c0e8559e49ca4336c8c2c87489a10df7a2196b507b10c1f99c3b9c4c047c`; trail geometries `974326332df4757f2d6aa0269490b11aeb9243e42bd00e31f23aaf2a99e09d6b`.
+- Rebuilt the existing Sierra/USFS and Moab/BLM pilot cache without network requests into `data/explore/audit_candidates/agencies/live-20260731-b08-quality`. Deterministic intended-grain counts match the prior candidate: 1,281 source records, 1,117 places, 901 source route segments, 668 grouped trail systems, 106 reviewable places, and 2 destination hubs. The candidate is promotion-ready with zero errors and one intentional warning: 17 trails have unknown permitted use and remain unlabeled rather than guessed.
+- Agency-candidate hashes: source records `dc9731d7be7cad949de1137a9356695122ca7ca0360beff4467e853f03a30626`; places `d3be51d20b0195ce081b17a94f70f7686ed39225d8edf4335465766ead703115`; route segments `e7fd4c9e52a4a76df92077eaa0ddfbdd9a2596fb1e6abdf0ed66567b8cea394a`; trail systems `2659df549f807748146feec371208fb3420157286b547eb9596a502982bccd4f`; destinations `7afcec1581565332f46b08f97e057c735962fec54127f45e1726f29ba1f01784`; Explore catalog `472e456956a90bd3727b1d9e4435abc856c284d2bb6f32a5abe95302b61a6a46`; serving review `022854b8613d813dff81aaddbfb68a6fb6572b2be8fa1f8b2df6042a15382e1d`; promotion review `d693cf62b943949f20143aa1c3bd741500a11acba4ba45af8cb1acb7b5898451`; audit `9b77d6e67c420ff0c865c638b33b7499f2e2f74674c99dfee72004c14d984623`; merged serving review `dc3c6472c72b4b7d4a0b3f3bb08bb945520891b8c6d45d3d24a71a3106c842ac`. Generated files remain isolated and unstaged.
+- The agency audit preserved empty editorial summaries rather than generating filler. It did not fabricate permitted uses or NPS-style modules for geospatial-only records.
+- The authenticated NPS key remained process-only and was not printed or stored. Generated candidates remain isolated. No live serving-index change, public promotion, production OTA, Android production action, Community-trails stage change, or store action occurred.
+- Current preview remains Android `019fba50-2c27-79bf-a966-a46190152155` / group `20be7872-fda7-4fc7-80bf-958d11d6a8fa` / runtime `native-1.0.10-android.7` and iOS `019fba58-5fe3-7769-a553-c1a92a14b5ff` / group `8d8b21f6-fb43-4414-a261-7b93e7f83c68` / runtime `native-1.0.10-ios.6`, both on exact source `6b69014145a767319d064ace1bcd7906d5bd219e`.
+- Task-owned Railway, NPS enrichment, EAS, Expo, Metro, Gradle, Maestro, publisher, and test processes: none expected at checkpoint creation.
+
+### Exact next action
+
+1. Review and assemble an isolated, intentional serving candidate from accepted NPS `b08` plus the agency `b08-quality` artifacts without overwriting `dashboard/explore_serving_index_v2.json`.
+2. Audit the cross-agency reader-facing wrapper copy exposed on the Android Sierra card; remove legacy generic phrases only when source-backed modules can replace them.
+3. Run no new NPS network batch until a new request window and an explicit forward checkpoint. Keep the next untouched codes resumable.
+4. Promote data only after schema, source, license, freshness, image identity, duplicate, module-coverage, and device review pass.
+
+### Do not repeat
+
+- Do not rerun NPS batch 8, its 28 codes, media audit, agency cache rebuild, internal-preview handoff, App Store upload, or existing Android proof.
+- Do not submit Android, publish production OTA, promote candidates, expose Community routes, overwrite protected files, or change public stages without separate authorization.
+- Do not stage `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, or unrelated worktree changes.

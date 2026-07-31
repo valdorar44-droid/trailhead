@@ -514,6 +514,10 @@ EXPLORE_SERVING_INDEX = Path(
     os.getenv("TRAILHEAD_EXPLORE_SERVING_INDEX")
     or (Path(__file__).parent / "explore_serving_index_v2.json")
 )
+EXPLORE_INTERNAL_PREVIEW = Path(
+    os.getenv("TRAILHEAD_EXPLORE_INTERNAL_PREVIEW")
+    or (Path(__file__).parent / "explore_internal_preview_v1.json")
+)
 EXPLORE_ASSETS = Path(__file__).parent / "explore_assets"
 _DEFAULT_ORIGINALS_ASSET_DIR = (
     Path("/data/originals/assets")
@@ -537,6 +541,9 @@ APP_ICON = Path(__file__).resolve().parents[1] / "mobile" / "assets" / "icon.png
 
 _originals_preview_token_context: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "originals_preview_token", default=None,
+)
+_explore_internal_preview_context: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "explore_internal_preview", default=False,
 )
 
 app = FastAPI(title="Trailhead API")
@@ -3936,7 +3943,7 @@ def _merge_promoted_explore_serving_index(places: list[dict]) -> tuple[list[dict
     return promoted or places, payload
 
 
-def _load_explore_catalog() -> dict:
+def _load_explore_catalog_base() -> dict:
     cache_key = _explore_catalog_cache_key()
     cached = _EXPLORE_CATALOG_CACHE.get("catalog")
     if (
@@ -4045,6 +4052,75 @@ def _load_explore_catalog() -> dict:
         "future_pack_compatible": True,
         "places": [],
     })), persist=True)
+
+
+_EXPLORE_INTERNAL_PREVIEW_CACHE: dict[str, object] = {"key": None, "profiles": []}
+
+
+def _load_explore_internal_preview_profiles() -> list[dict]:
+    if not _explore_internal_preview_enabled() or not EXPLORE_INTERNAL_PREVIEW.exists():
+        return []
+    try:
+        stat = EXPLORE_INTERNAL_PREVIEW.stat()
+        cache_key = (str(EXPLORE_INTERNAL_PREVIEW), stat.st_mtime_ns, stat.st_size)
+    except Exception:
+        return []
+    if _EXPLORE_INTERNAL_PREVIEW_CACHE.get("key") == cache_key:
+        return list(_EXPLORE_INTERNAL_PREVIEW_CACHE.get("profiles") or [])
+    try:
+        payload = json.loads(EXPLORE_INTERNAL_PREVIEW.read_text())
+    except Exception:
+        return []
+    raw_places = [place for place in payload.get("places") or [] if isinstance(place, dict)]
+    profiles = [
+        _explore_v3_place_to_profile(place, rank=590000 + index)
+        for index, place in enumerate(raw_places, start=1)
+    ]
+    _attach_v3_nearby_source_items(profiles, raw_places)
+    _EXPLORE_INTERNAL_PREVIEW_CACHE.update({"key": cache_key, "profiles": profiles})
+    return list(profiles)
+
+
+def _merge_explore_internal_preview(catalog: dict) -> dict:
+    preview_profiles = _load_explore_internal_preview_profiles()
+    if not preview_profiles:
+        return catalog
+    places = list(catalog.get("places") or [])
+    id_to_index = {
+        str(place.get("id") or ""): index
+        for index, place in enumerate(places)
+        if isinstance(place, dict) and place.get("id")
+    }
+    for preview in preview_profiles:
+        place_id = str(preview.get("id") or "")
+        if not place_id:
+            continue
+        if place_id in id_to_index:
+            places[id_to_index[place_id]] = _merge_explore_sidecar_enrichment(
+                places[id_to_index[place_id]], preview,
+            )
+            continue
+        id_to_index[place_id] = len(places)
+        places.append(preview)
+    places = _apply_explore_legacy_wrapper_metadata(places)
+    return {
+        **catalog,
+        "catalog_id": f"{catalog.get('catalog_id') or 'trailhead-explore'}-internal-preview",
+        "count": len(places),
+        "places": places,
+        "internal_preview": {
+            "enabled": True,
+            "count": len(preview_profiles),
+            "artifact": EXPLORE_INTERNAL_PREVIEW.name,
+        },
+    }
+
+
+def _load_explore_catalog() -> dict:
+    catalog = _load_explore_catalog_base()
+    if not _explore_internal_preview_context.get():
+        return catalog
+    return _merge_explore_internal_preview(catalog)
 
 
 _CATALOG_PREWARM_TASK: asyncio.Task | None = None
@@ -7127,6 +7203,42 @@ def _optional_user(creds: HTTPAuthorizationCredentials | None = Depends(bearer))
         return None
     uid = _decode_token(creds.credentials)
     return get_user_by_id(uid) if uid else None
+
+
+def _explore_internal_preview_enabled() -> bool:
+    return str(os.getenv("TRAILHEAD_EXPLORE_DATA_STAGE", "off")).strip().lower() == "internal"
+
+
+def _explore_internal_preview_authorized(authorization: str) -> bool:
+    scheme, _, token = str(authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        return False
+    user_id = _decode_token(token)
+    user = get_user_by_id(user_id) if user_id else None
+    return bool(user and user.get("is_admin"))
+
+
+@app.middleware("http")
+async def explore_internal_preview_context(request: Request, call_next):
+    """Allow the signed-in admin preview bundle to read reviewed sidecar data.
+
+    The header is intentionally not an authorization credential. It is ignored
+    unless the server stage is internal and the bearer token belongs to an
+    administrator. Everyone else continues to receive the normal catalog.
+    """
+    requested = (
+        request.url.path.startswith("/api/explore/")
+        and request.headers.get("X-Trailhead-Explore-Preview", "").strip().lower() == "internal"
+        and _explore_internal_preview_enabled()
+    )
+    allowed = requested and _explore_internal_preview_authorized(
+        request.headers.get("Authorization", ""),
+    )
+    marker = _explore_internal_preview_context.set(allowed)
+    try:
+        return await call_next(request)
+    finally:
+        _explore_internal_preview_context.reset(marker)
 
 def _safe_user(u: dict) -> dict:
     safe = {

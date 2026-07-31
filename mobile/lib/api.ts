@@ -38,6 +38,8 @@ import type {
 } from './trailContributions';
 
 const BASE = TRAILHEAD_API_BASE;
+const EXPLORE_INTERNAL_DATA_PREVIEW =
+  process.env.EXPO_PUBLIC_EXPLORE_DATA_PREVIEW?.trim().toLowerCase() === 'internal';
 export type WeatherUnitMode = 'auto' | 'imperial' | 'metric';
 
 function isLocalWebProductionApi() {
@@ -285,6 +287,9 @@ async function reqWithToken<T>(path: string, opts: RequestInit = {}, tokenOverri
     ...(opts.headers as Record<string, string> ?? {}),
   };
   if (token) headers['Authorization'] = `Bearer ${token}`;
+  if (token && EXPLORE_INTERNAL_DATA_PREVIEW && path.startsWith('/api/explore/')) {
+    headers['X-Trailhead-Explore-Preview'] = 'internal';
+  }
   const res = await fetch(`${BASE}${path}`, { ...opts, headers });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));

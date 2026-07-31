@@ -904,3 +904,28 @@ Verify `git diff --cached --name-only` before every commit.
 - Do not start another native build, submit stores, publish a production OTA, or refetch the 116 completed NPS parks.
 - Do not repeat Trails T1-T6, 3D Back, Builder, GPX, Offline, Follow, recording, Flyover, Layers, Memory, Originals, Android Auto, or broad Explore/NPS research without new evidence.
 - Task-owned Metro, Gradle, Maestro, publisher, test, and enrichment processes: none.
+
+## Internal Explore data-preview implementation — 2026-07-31 14:28 CDT
+
+- Branch: `feat/trailhead-1.0.10-overhaul`; pre-change HEAD `ea672d9`. Protected Explore-index and App Store copy hashes remain unchanged.
+- Added a bounded reviewed sidecar, `dashboard/explore_internal_preview_v1.json`, containing exactly five proof destinations: Sierra National Forest, Moab BLM, Carlsbad Caverns, Catoctin Mountain Park, and Channel Islands National Park.
+- Sidecar size is `1,446,869` bytes; SHA-256 `7592f36bf3ec656075b69381d8ac00a45ed0c4bdae267b2d4abd1484258e838a`. It is reproducible from accepted agency candidate `b08` and NPS candidate `b04` through `scripts/build_explore_internal_preview.py`.
+- Backend preview data is request-scoped. It activates only when `TRAILHEAD_EXPLORE_DATA_STAGE=internal`, the request carries `X-Trailhead-Explore-Preview: internal`, and its bearer token resolves to an administrator. The header is not a credential; non-admin and unsigned requests continue to receive the ordinary catalog.
+- The mobile preview header is compiled only when `EXPO_PUBLIC_EXPLORE_DATA_PREVIEW=internal`. It is attached only to authenticated `/api/explore/` calls, not other APIs.
+- The public catalog cache, bundled serving index, Community-trails stage, normal clients, and production binaries are unchanged.
+- Real-artifact smoke passed: Sierra ranked first for its exact query, and the Moab BLM hub exposed 27 scenic items, 42 camps/stays, and 135 stable TrailSystem routes.
+- Focused verification passed: 30 Python Explore/NPS tests, 20 agency tests, 4 preview/handoff mobile tests, full Explore Trails, full NPS hub preservation, TypeScript, Python compilation, and whitespace checks.
+- No P0/P1 is open in the internal-preview implementation.
+
+### Exact next action
+
+1. Commit and push only the server, mobile header, reviewed sidecar, builder, focused tests, and this checkpoint.
+2. Deploy the backend compatibility change from a clean exact-source worktree and enable only `TRAILHEAD_EXPLORE_DATA_STAGE=internal`.
+3. Publish one Android preview OTA from that exact source with `EXPO_PUBLIC_EXPLORE_DATA_PREVIEW=internal`; do not publish iOS yet.
+4. Run the bounded Samsung Sierra, Moab BLM, and one NPS proof-park flow. If accepted, publish the identical source to iOS preview and then consider intentional data promotion.
+
+### Do not repeat
+
+- Do not mutate or stage `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, `.cursor/`, or unrelated work.
+- Do not submit the 1.0.11 artifacts, publish a production OTA, enable public Community routes, or promote the data sidecar before Android review.
+- Do not repeat completed Trails, Layers, Memory, Originals, Android Auto, or broad NPS/search crawls.

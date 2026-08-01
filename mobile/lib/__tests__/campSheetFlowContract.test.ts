@@ -47,6 +47,7 @@ test('campsite Back restores the parent campground and its scroll position', () 
 test('campground sheets clean metadata and omit invented summary fallbacks', () => {
   assert.match(campPeekSource, /cleanCampPeekMeta\(meta\)/);
   assert.match(campPeekSource, /essentialValue\} numberOfLines=\{2\}/);
+  assert.doesNotMatch(mapSource, /campBadgeLabel\(selectedCamp\.land_type\)/);
   assert.match(campPeekSource, /replace\(\/\\u00c2\\u00b7\/g, ' · '\)/);
   assert.match(mapSource, /check current access,\\s\*rules/);
   assert.match(mapSource, /if \(useful\) return useful;\s+return '';/);

@@ -29936,9 +29936,6 @@ function MapScreen() {
                     ? <Image source={{ uri: activePhoto.url }} style={s.quickCardPhoto} resizeMode="cover" resizeMethod="resize" />
                     : <View style={[s.quickCardPhotoPlaceholder, { backgroundColor: landColor(selectedCamp.land_type).bg }]}>
                         <Ionicons name={selectedCampPresentation!.tags.includes('Rv') ? 'car-outline' : selectedCampPresentation!.tags.includes('Dispersed') ? 'moon-outline' : 'bonfire-outline'} size={34} color={landColor(selectedCamp.land_type).text} />
-                        <Text style={{ fontSize: 9, color: landColor(selectedCamp.land_type).text, fontFamily: mono, marginTop: 4, fontWeight: '700' }}>
-                          {campBadgeLabel(selectedCamp.land_type).slice(0, 18)}
-                        </Text>
                       </View>
                   }
                   <View style={s.quickCardHeroShade} />

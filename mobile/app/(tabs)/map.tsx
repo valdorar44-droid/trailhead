@@ -94,8 +94,14 @@ import {
   type CarNavigationMode,
 } from '@/lib/carIntegration';
 import { api, ApiError, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, CampComment, Waypoint, TripResult, TrailProfile, MapCardResolveResponse, WaterNavigationLinesResponse, WaterConditionsResponse, WaterSpotCard, WaterSpotCardsResponse, FishingConditionsResponse, SuggestedWaterCorridorResponse, type BookableExperience, type BriefAndBackupV1, type CampgroundPlanningBriefV1, type GasStation, type GeocodePlace, type ExtremeConfig, type CopilotContext, type MapActionRequest, type MapSelectableFeature, type RouteCampWindowInput, type RouteCampWindowResult, type RouteScoutDayPlan, type RouteScoutState, type TrailPreviewManifest, type TrailDiscoveryItemV2, type TrailSystemV2, type DispersedLead, type MissionControlBrief, type OfflineAssetType, type SavedRouteGeometryPayload } from '@/lib/api';
+import { campgroundSheetPresentationV1 } from '@/lib/campSheetPresentation';
 import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
 import { trackPhase0Event, trackPhase0Once } from '@/lib/telemetry';
+import { captureMapCampSelectionErrorV1 } from '@/lib/telemetry/mapCampSelection';
+import {
+  clearMapCampSelectionPhaseV1,
+  markMapCampSelectionPhaseV1,
+} from '@/lib/telemetry/mapCampSelectionCore';
 import {
   planDownloadsReturnRequest,
   type OfflineManagerCloseReason,
@@ -6046,20 +6052,30 @@ function ThreeNeedleCompass({ heading, bearing, compact = false }: { heading: nu
 
 // ─── Error boundary ───────────────────────────────────────────────────────────
 
-class MapErrorBoundary extends Component<{ children: React.ReactNode }, { error: string | null }> {
-  state = { error: null };
-  static getDerivedStateFromError(e: any) { return { error: e?.message ?? String(e) }; }
+class MapErrorBoundary extends Component<{ children: React.ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() { return { failed: true }; }
+  componentDidCatch(error: Error) {
+    captureMapCampSelectionErrorV1(error);
+  }
+  private returnToMap = () => {
+    clearMapCampSelectionPhaseV1();
+    this.setState({ failed: false });
+  };
   render() {
-    if (this.state.error) {
+    if (this.state.failed) {
       return (
-        <View style={{ flex: 1, backgroundColor: '#0a0f0a', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
-          <Text style={{ color: '#ef4444', fontSize: 14, fontWeight: '900', marginBottom: 12 }}>MAP ERROR</Text>
-          <Text style={{ color: '#e4ddd2', fontSize: 11, fontFamily: 'Courier', textAlign: 'center', lineHeight: 18 }}>
-            {this.state.error}
-          </Text>
-          <TouchableOpacity onPress={() => this.setState({ error: null })} style={{ marginTop: 20, backgroundColor: '#22c55e', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 }}>
-            <Text style={{ color: '#fff', fontWeight: '800' }}>RETRY</Text>
-          </TouchableOpacity>
+        <View testID="map.error-recovery" style={{ flex: 1, backgroundColor: '#F7F8F6', alignItems: 'center', justifyContent: 'center', padding: 28 }}>
+          <View style={{ maxWidth: 360, width: '100%', padding: 24, borderRadius: 20, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#DFE2DE' }}>
+            <Text style={{ color: '#984F2F', fontSize: 12, lineHeight: 16, fontWeight: '800', letterSpacing: 0.5 }}>MAP</Text>
+            <Text style={{ color: '#111412', fontSize: 25, lineHeight: 31, fontWeight: '800', marginTop: 5 }}>Map unavailable</Text>
+            <Text style={{ color: '#4F5752', fontSize: 16, lineHeight: 23, marginTop: 9 }}>
+              Return to the map and try opening this place again.
+            </Text>
+            <TouchableOpacity testID="map.error-return" onPress={this.returnToMap} style={{ minHeight: 48, marginTop: 22, backgroundColor: '#AD5A33', paddingHorizontal: 20, borderRadius: 12, alignItems: 'center', justifyContent: 'center' }}>
+              <Text style={{ color: '#fff', fontSize: 16, fontWeight: '800' }}>Return to map</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       );
     }
@@ -7448,8 +7464,18 @@ function MapScreen() {
     }
   }, [selectedCamp?.id, selectedPlace?.id, selectedTrail?.id]);
   const selectedCampSheetModel = useMemo(
-    () => selectedCamp ? adaptCampgroundSheet(selectedCamp) : null,
+    () => {
+      if (!selectedCamp) return null;
+      markMapCampSelectionPhaseV1('sheet_identity');
+      return adaptCampgroundSheet(selectedCamp);
+    },
     [selectedCamp?.id, selectedCamp?.name, selectedCamp?.lat, selectedCamp?.lng, selectedCamp?.source, selectedCamp?.source_badge, selectedCamp?.verified_source],
+  );
+  const selectedCampPresentation = useMemo(
+    () => selectedCamp
+      ? campgroundSheetPresentationV1(selectedCamp, campDetail, { normalizeMediaUrl: mediaUrl })
+      : null,
+    [selectedCamp, campDetail],
   );
   const selectedCampRatingTarget = useMemo(() => communityRatingTarget({
     enabled: productFeatures?.community_ratings === true,
@@ -10858,6 +10884,7 @@ function MapScreen() {
     setTappedPoi(null);
     if (pendingMapSelection.kind === 'camp') {
       const camp = pendingMapSelection.camp;
+      markMapCampSelectionPhaseV1('selection_received');
       setSelectedPlace(null);
       setSelectedCamp(camp);
       setCampDetail(null);
@@ -10865,6 +10892,7 @@ function MapScreen() {
       setWikiArticles([]);
       setCampFullness(null);
       setCampWeather(null);
+      markMapCampSelectionPhaseV1('camera_handoff');
       focusMapSelectionPoint({ lat: camp.lat, lng: camp.lng, name: camp.name }, 12, 'place');
       loadSelectedCampAmbient(camp);
       return;
@@ -20292,6 +20320,7 @@ function MapScreen() {
     if (!requestIsCurrent()) {
       return;
     }
+    markMapCampSelectionPhaseV1('detail_commit');
     setCampDetail(detail);
     setCampDetailTimedOut(timedOut);
     setLoadingDetail(false);
@@ -26420,6 +26449,16 @@ function MapScreen() {
     || selectedTrailBuilderPlan?.warnings[0]
     || '';
 
+  if (selectedCamp) {
+    markMapCampSelectionPhaseV1(
+      placeSheetCoordinator.current?.kind === 'camp' && placeSheetCoordinator.presentation !== 'peek'
+        ? 'full_render'
+        : 'peek_render',
+    );
+  } else {
+    clearMapCampSelectionPhaseV1();
+  }
+
   const navLocateButton = navMode && userLoc && !trailFollowOwnsHud ? (
     <TouchableOpacity
       style={[s.navLocateBtn, navCameraFollow && s.navLocateBtnFollowing]}
@@ -29853,16 +29892,13 @@ function MapScreen() {
           scrollContentStyle={s.quickSnapContent}
           peekHeader={(
             <CampPlaceSheetPeek
-              model={{ ...selectedCampSheetModel!, title: campDisplayName(selectedCamp.name) }}
+              model={{ ...selectedCampSheetModel!, title: selectedCampPresentation!.title }}
               meta={[
-                selectedCamp.address,
-                campSourceDisplayLabel(selectedCamp.verified_source || selectedCamp.source || selectedCamp.land_type, 'Campground'),
+                selectedCampPresentation!.meta,
               ].filter(Boolean).join(' Â· ')}
-              siteType={cleanDisplayLabel(selectedCamp.site_types?.[0] || selectedCamp.tags?.find(tag => /tent|rv|cabin|walk-in/i.test(tag)) || selectedCamp.land_type || 'Campground')}
-              inventory={Number((selectedCamp as CampsitePin & { campsites_count?: number }).campsites_count) > 0
-                ? `${Number((selectedCamp as CampsitePin & { campsites_count?: number }).campsites_count)} sites`
-                : selectedCamp.reservable ? 'Reservable' : 'Not listed'}
-              fee={campCostLine(selectedCamp) || 'Not listed'}
+              siteType={selectedCampPresentation!.siteType}
+              inventory={selectedCampPresentation!.inventory}
+              fee={selectedCampPresentation!.fee}
               saved={favoriteCamps.some(f => f.id === selectedCamp.id)}
               onViewSites={() => dispatchPlaceSheet({ type: 'set_presentation', presentation: 'full' })}
               onSave={() => toggleCampPlaceSaved(selectedCamp)}
@@ -29887,7 +29923,7 @@ function MapScreen() {
           <PlaceSheetShell model={selectedCampSheetModel!} fill={false}>
             {/* Photo / placeholder */}
             {(() => {
-              const photos = campPhotoItems(selectedCamp, campDetail);
+              const photos = selectedCampPresentation!.photos;
               const safeIndex = photos.length ? quickCampPhotoIndex % photos.length : 0;
               const activePhoto = photos[safeIndex];
               return (
@@ -29899,7 +29935,7 @@ function MapScreen() {
                   {activePhoto
                     ? <Image source={{ uri: activePhoto.url }} style={s.quickCardPhoto} resizeMode="cover" resizeMethod="resize" />
                     : <View style={[s.quickCardPhotoPlaceholder, { backgroundColor: landColor(selectedCamp.land_type).bg }]}>
-                        <Ionicons name={(selectedCamp.tags ?? []).includes('rv') ? 'car-outline' : (selectedCamp.tags ?? []).includes('dispersed') ? 'moon-outline' : 'bonfire-outline'} size={34} color={landColor(selectedCamp.land_type).text} />
+                        <Ionicons name={selectedCampPresentation!.tags.includes('Rv') ? 'car-outline' : selectedCampPresentation!.tags.includes('Dispersed') ? 'moon-outline' : 'bonfire-outline'} size={34} color={landColor(selectedCamp.land_type).text} />
                         <Text style={{ fontSize: 9, color: landColor(selectedCamp.land_type).text, fontFamily: mono, marginTop: 4, fontWeight: '700' }}>
                           {campBadgeLabel(selectedCamp.land_type).slice(0, 18)}
                         </Text>
@@ -29920,8 +29956,8 @@ function MapScreen() {
                   <PlaceSheetHeroChrome
                     model={{
                       ...selectedCampSheetModel!,
-                      title: campDisplayName(selectedCamp.name),
-                      subtitle: campSourceDisplayLabel(selectedCamp.verified_source || selectedCamp.source || selectedCamp.land_type, 'Campsite'),
+                      title: selectedCampPresentation!.title,
+                      subtitle: selectedCampPresentation!.sourceLabel,
                     }}
                     top={Math.max(insets.top + 8, 12)}
                     saved={favoriteCamps.some(f => f.id === selectedCamp.id)}
@@ -29956,16 +29992,6 @@ function MapScreen() {
               );
             })()}
             <View style={s.quickCardBody}>
-            {campDetailTimedOut ? (
-              <View style={s.campNoteCard} testID={`${selectedCampSheetModel!.testID}-details-unavailable`}>
-                <Text style={s.campNoteTitle}>Some details are unavailable</Text>
-                <Text style={s.campNoteText}>Showing verified listing information.</Text>
-                <TouchableOpacity style={s.quickCardSecondaryBtn} onPress={openCampDetail}>
-                  <Ionicons name="refresh-outline" size={12} color={C.text2} />
-                  <Text style={s.quickCardSecondaryText}>Retry</Text>
-                </TouchableOpacity>
-              </View>
-            ) : null}
             {[
               selectedCamp.rating ? `${Number(selectedCamp.rating).toFixed(1)} (${selectedCamp.rating_count || 0})` : '',
               selectedCamp.address || '',
@@ -30050,7 +30076,7 @@ function MapScreen() {
               </View>
             ) : null}
             {!loadingDetail && !campDetail ? (() => {
-              const summaryText = campSummaryText(selectedCamp, null);
+              const summaryText = selectedCampPresentation!.summary;
               return summaryText ? (
                 <View style={s.detailSection} testID={`${selectedCampSheetModel!.testID}-summary`}>
                   <Text style={s.detailSectionTitle}>Summary</Text>
@@ -30059,10 +30085,10 @@ function MapScreen() {
               ) : null;
             })() : null}
             {campDetail ? (() => {
-              const summaryText = campSummaryText(selectedCamp, campDetail);
-              const featureItems = derivedCampFeatures(selectedCamp, campDetail);
-              const siteTypeItems = derivedCampSiteTypes(selectedCamp, campDetail);
-              const activityItems = derivedCampActivities(selectedCamp, campDetail);
+              const summaryText = selectedCampPresentation!.summary;
+              const featureItems = selectedCampPresentation!.features;
+              const siteTypeItems = selectedCampPresentation!.siteTypes;
+              const activityItems = selectedCampPresentation!.activities;
               return (
               <>
 	                {summaryText ? (
@@ -30727,7 +30753,7 @@ function MapScreen() {
 
       <TrailheadPhotoGallery
         visible={campGalleryIndex !== null}
-        photos={campPhotoItems(selectedCamp, campDetail)}
+        photos={selectedCampPresentation?.photos ?? []}
         initialIndex={campGalleryIndex ?? 0}
         title={campDetail?.name || selectedCamp?.name || 'Camp'}
         onClose={() => setCampGalleryIndex(null)}

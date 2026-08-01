@@ -11,6 +11,7 @@ const campPeekSource = readFileSync(join(mobileRoot, 'components/map/CampPlaceSh
 
 test('campground selection opens an identity-stable peek before the full sheet', () => {
   assert.match(mapSource, /<CampPlaceSheetPeek/);
+  assert.match(mapSource, /campgroundSheetPresentationV1\(selectedCamp, campDetail/);
   assert.match(mapSource, /initialStage="peek"/);
   assert.match(mapSource, /expandedLoading=\{loadingDetail && !campDetail\}/);
   assert.match(mapSource, /CAMP_DETAIL_REVEAL_TIMEOUT_MS = 6000/);
@@ -48,7 +49,7 @@ test('campground sheets clean metadata and omit invented summary fallbacks', () 
   assert.match(campPeekSource, /replace\(\/\\u00c2\\u00b7\/g, ' · '\)/);
   assert.match(mapSource, /check current access,\\s\*rules/);
   assert.match(mapSource, /if \(useful\) return useful;\s+return '';/);
-  assert.match(mapSource, /const summaryText = campSummaryText\(selectedCamp, null\)/);
+  assert.match(mapSource, /const summaryText = selectedCampPresentation!\.summary/);
 });
 
 test('campground action parity retains its existing offline area workflow', () => {
@@ -73,4 +74,13 @@ test('campground availability reports are explicit and require confirmation', ()
   assert.match(mapSource, /sheetActionTestIDV1\(selectedCampSheetModel!\.testID, 'report_full'\)/);
   assert.match(mapSource, /onPress=\{confirmReportFull\}/);
   assert.match(mapSource, /<Text style=\{s\.reportFullText\}>Report full<\/Text>/);
+});
+
+test('Map errors capture a fixed campground phase and offer a clean reset', () => {
+  assert.match(mapSource, /captureMapCampSelectionErrorV1\(error\)/);
+  assert.match(mapSource, /testID="map\.error-recovery"/);
+  assert.match(mapSource, /testID="map\.error-return"/);
+  assert.match(mapSource, />Map unavailable</);
+  assert.doesNotMatch(mapSource, />MAP ERROR</);
+  assert.doesNotMatch(mapSource, /\{this\.state\.error\}/);
 });

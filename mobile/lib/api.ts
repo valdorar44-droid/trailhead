@@ -289,7 +289,9 @@ async function reqWithToken<T>(path: string, opts: RequestInit = {}, tokenOverri
     ...(opts.headers as Record<string, string> ?? {}),
   };
   if (token) headers['Authorization'] = `Bearer ${token}`;
-  if (token && EXPLORE_INTERNAL_DATA_PREVIEW && path.startsWith('/api/explore/')) {
+  const usesExplorePreviewCatalog = path.startsWith('/api/explore/')
+    || path.startsWith('/api/campsites/');
+  if (token && EXPLORE_INTERNAL_DATA_PREVIEW && usesExplorePreviewCatalog) {
     headers['X-Trailhead-Explore-Preview'] = 'internal';
   }
   const res = await fetch(`${BASE}${path}`, { ...opts, headers });

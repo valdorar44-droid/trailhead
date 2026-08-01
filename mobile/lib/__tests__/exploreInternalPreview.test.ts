@@ -20,6 +20,7 @@ test('internal Explore data header is build-scoped and authenticated', () => {
   assert.match(apiSource, /Updates\.channel === 'preview'/);
   assert.match(apiSource, /token && EXPLORE_INTERNAL_DATA_PREVIEW/);
   assert.match(apiSource, /path\.startsWith\('\/api\/explore\/'\)/);
+  assert.match(apiSource, /path\.startsWith\('\/api\/campsites\/'\)/);
   assert.match(apiSource, /X-Trailhead-Explore-Preview'\] = 'internal'/);
 });
 

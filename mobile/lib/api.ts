@@ -1,5 +1,6 @@
 import { storage } from './storage';
 import { Platform } from 'react-native';
+import * as Updates from 'expo-updates';
 import { TRAILHEAD_API_BASE, TRAILHEAD_PRODUCTION_API_BASE } from './apiBase';
 import { guardedRequest, normalizeRequestText, stableNumber, stableRouteKey } from './requestGuard';
 import { getTripRepositoryOutbox } from './tripRepository';
@@ -23,6 +24,7 @@ import {
   resolveLegacyTripSaveToken,
 } from './legacyTripSaveContext';
 import { ridbFacilityIdFromCanonicalCampId } from './campDetailIdentity';
+import { withExplorePreviewAuthHeaderV1 } from './explorePreviewAuth';
 import type {
   OwnedTrailRouteCreateV1,
   OwnedTrailRouteUpdateV1,
@@ -38,6 +40,9 @@ import type {
 } from './trailContributions';
 
 const BASE = TRAILHEAD_API_BASE;
+const EXPLORE_INTERNAL_DATA_PREVIEW =
+  process.env.EXPO_PUBLIC_EXPLORE_DATA_PREVIEW?.trim().toLowerCase() === 'internal'
+  || Updates.channel === 'preview';
 export type WeatherUnitMode = 'auto' | 'imperial' | 'metric';
 
 function isLocalWebProductionApi() {
@@ -121,6 +126,11 @@ async function getToken(): Promise<string | null> {
 export async function authHeaders(): Promise<Record<string, string>> {
   const token = await getToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+export async function explorePreviewAuthHeaders(): Promise<Record<string, string>> {
+  const headers = await authHeaders();
+  return withExplorePreviewAuthHeaderV1(headers, EXPLORE_INTERNAL_DATA_PREVIEW);
 }
 
 export class PaywallError extends Error {
@@ -285,6 +295,11 @@ async function reqWithToken<T>(path: string, opts: RequestInit = {}, tokenOverri
     ...(opts.headers as Record<string, string> ?? {}),
   };
   if (token) headers['Authorization'] = `Bearer ${token}`;
+  const usesExplorePreviewCatalog = path.startsWith('/api/explore/')
+    || path.startsWith('/api/campsites/');
+  if (token && EXPLORE_INTERNAL_DATA_PREVIEW && usesExplorePreviewCatalog) {
+    headers['X-Trailhead-Explore-Preview'] = 'internal';
+  }
   const res = await fetch(`${BASE}${path}`, { ...opts, headers });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
@@ -424,6 +439,8 @@ export const api = {
   }),
   productFeatures: () => req<ProductFeatures>('/api/product/features'),
   adminQaDiagnostics: () => req<AdminQaDiagnosticsV1>('/api/admin/qa/diagnostics'),
+  exploreInternalPreviewDiagnostics: () =>
+    req<ExploreInternalPreviewDiagnosticsV1>('/api/explore/qa/preview-status'),
   getCommunicationPreferences: () =>
     req<CommunicationPreferences>('/api/communication-preferences'),
   updateCommunicationPreferences: (preferences: CommunicationPreferencesUpdate) =>
@@ -1023,7 +1040,10 @@ export const api = {
     }
     return req<ExploreCatalogIndex>(`/api/explore/catalog/index?${qs.toString()}`);
   },
-  getExploreHome: (params: { mode?: string; sort?: string; lat?: number; lng?: number; limit?: number } = {}) => {
+  getExploreHome: (
+    params: { mode?: string; sort?: string; lat?: number; lng?: number; limit?: number } = {},
+    tokenOverride?: string | null,
+  ) => {
     const qs = new URLSearchParams({
       mode: params.mode || 'featured',
       sort: params.sort || 'best',
@@ -1033,7 +1053,7 @@ export const api = {
       qs.set('lat', String(params.lat));
       qs.set('lng', String(params.lng));
     }
-    return req<ExploreHomeResponse>(`/api/explore/home?${qs.toString()}`);
+    return reqWithToken<ExploreHomeResponse>(`/api/explore/home?${qs.toString()}`, {}, tokenOverride);
   },
   getExplorePlaces: (lat?: number, lng?: number, mode: 'featured' | 'nearby' | 'trip' = 'featured', limit = 60, cursor = 0) => {
     const qs = new URLSearchParams({ mode, limit: String(limit), cursor: String(cursor) });
@@ -2618,6 +2638,12 @@ export interface AdminQaDiagnosticsV1 {
     ui_system_v2: boolean;
     originals: boolean;
   };
+}
+export interface ExploreInternalPreviewDiagnosticsV1 {
+  schema: 'explore_internal_preview_diagnostics_v1';
+  request_code: 'active' | 'header_missing' | 'server_stage_off' | 'admin_required' | 'not_applicable';
+  data_code: 'ready' | 'sidecar_missing' | 'sidecar_empty' | 'unchecked';
+  profile_count: number;
 }
 export type CommunityRatingKind = 'camp' | 'trail' | 'trailhead' | 'place';
 export interface RatingSummaryV1 {
@@ -4298,6 +4324,7 @@ export interface ExplorePlaceSummary {
 }
 export interface ExplorePlaceProfile {
   id: string;
+  internal_preview?: boolean;
   summary: ExplorePlaceSummary;
   card?: {
     title?: string;
@@ -4516,6 +4543,7 @@ export interface ExploreRouteRankResponse {
 }
 export interface ExploreCatalogIndexItem {
   id: string;
+  internal_preview?: boolean;
   title: string;
   category: string;
   explore_group?: string;
@@ -4580,6 +4608,11 @@ export interface ExploreCatalogIndex {
     [key: string]: unknown;
   };
   category_counts?: Record<string, number>;
+  internal_preview?: {
+    enabled?: boolean;
+    count?: number;
+    artifact?: string;
+  };
   places: ExploreCatalogIndexItem[];
 }
 export interface ExploreGuidedDestination {

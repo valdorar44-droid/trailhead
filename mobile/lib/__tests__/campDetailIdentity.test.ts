@@ -13,6 +13,18 @@ test('canonical RIDB campground IDs resolve to the facility detail identifier', 
   assert.equal(campDetailFetchId({ id: 'place:ridb:234059', source: 'trailhead_search' }), '234059');
 });
 
+test('reviewed agency campground IDs resolve through the stored catalog', () => {
+  assert.equal(
+    campDetailFetchId({
+      id: 'place:usfs:usfs-sierra-sites-83a6b34b-07f9-40a0-a98b-68de9b7b81a8',
+      source: 'trailhead_search',
+    }),
+    'place:usfs:usfs-sierra-sites-83a6b34b-07f9-40a0-a98b-68de9b7b81a8',
+  );
+  assert.equal(campDetailFetchId({ id: 'place:nps:yose-camp-4' }), 'place:nps:yose-camp-4');
+  assert.equal(campDetailFetchId({ id: 'place:blm:moab-camp-1' }), 'place:blm:moab-camp-1');
+});
+
 test('existing campsite detail identities keep their current behavior', () => {
   assert.equal(campDetailFetchId({ id: 'ridb_site:234059:123' }), 'ridb_site:234059:123');
   assert.equal(campDetailFetchId({ id: 'blm_42' }), 'blm_42');

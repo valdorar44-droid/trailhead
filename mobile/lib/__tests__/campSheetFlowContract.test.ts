@@ -6,15 +6,23 @@ import test from 'node:test';
 
 const mobileRoot = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const mapSource = readFileSync(join(mobileRoot, 'app/(tabs)/map.tsx'), 'utf8');
+const routeBuilderSource = readFileSync(join(mobileRoot, 'app/(tabs)/route-builder.tsx'), 'utf8');
 const snapSheetSource = readFileSync(join(mobileRoot, 'components/map/TrailheadSnapSheet.tsx'), 'utf8');
 const campPeekSource = readFileSync(join(mobileRoot, 'components/map/CampPlaceSheetPeek.tsx'), 'utf8');
 
 test('campground selection opens an identity-stable peek before the full sheet', () => {
   assert.match(mapSource, /<CampPlaceSheetPeek/);
+  assert.match(mapSource, /campPeekPresentationV1\(\{/);
+  assert.match(mapSource, /presentation=\{selectedCampPeekPresentation\}/);
+  assert.doesNotMatch(campPeekSource, /PlaceSheetModel/);
+  assert.doesNotMatch(campPeekSource, /model\.source/);
+  assert.match(mapSource, /campgroundSheetPresentationV1\(selectedCamp, campDetail/);
   assert.match(mapSource, /initialStage="peek"/);
   assert.match(mapSource, /expandedLoading=\{loadingDetail && !campDetail\}/);
+  assert.match(mapSource, /placeSheetCoordinator\.current\?\.kind === 'camp' && placeSheetCoordinator\.presentation !== 'peek' \? \(\s*<PlaceSheetShell/);
   assert.match(mapSource, /CAMP_DETAIL_REVEAL_TIMEOUT_MS = 6000/);
   assert.match(mapSource, /campDetailMatchesSelection\(camp, result\.value\)/);
+  assert.match(mapSource, /nativeMapRef\.current\?\.flyTo\?\.\(point\.lat, point\.lng, camera\.zoom, point\.name\)/);
 });
 
 test('the shared snap sheet supports controlled peek-to-full loading without partial children', () => {
@@ -44,10 +52,19 @@ test('campsite Back restores the parent campground and its scroll position', () 
 
 test('campground sheets clean metadata and omit invented summary fallbacks', () => {
   assert.match(campPeekSource, /cleanCampPeekMeta\(meta\)/);
+  assert.match(campPeekSource, /essentialValue\} numberOfLines=\{2\}/);
+  assert.doesNotMatch(mapSource, /campBadgeLabel\(selectedCamp\.land_type\)/);
   assert.match(campPeekSource, /replace\(\/\\u00c2\\u00b7\/g, ' · '\)/);
   assert.match(mapSource, /check current access,\\s\*rules/);
   assert.match(mapSource, /if \(useful\) return useful;\s+return '';/);
-  assert.match(mapSource, /const summaryText = campSummaryText\(selectedCamp, null\)/);
+  assert.match(mapSource, /const summaryText = selectedCampPresentation!\.summary/);
+});
+
+test('campground galleries normalize object photos before resolving media URLs', () => {
+  assert.match(mapSource, /source=\{\{ uri: campPhotoUrl\(uri\) \}\}/);
+  assert.match(routeBuilderSource, /source=\{\{ uri: campPhotoUrl\(uri\) \}\}/);
+  assert.doesNotMatch(mapSource, /source=\{\{ uri: mediaUrl\(uri\) \}\}/);
+  assert.doesNotMatch(routeBuilderSource, /source=\{\{ uri: mediaUrl\(uri\) \}\}/);
 });
 
 test('campground action parity retains its existing offline area workflow', () => {
@@ -71,5 +88,16 @@ test('campground availability reports are explicit and require confirmation', ()
   assert.match(mapSource, /'Report campground full\?'/);
   assert.match(mapSource, /sheetActionTestIDV1\(selectedCampSheetModel!\.testID, 'report_full'\)/);
   assert.match(mapSource, /onPress=\{confirmReportFull\}/);
-  assert.match(mapSource, /<Text style=\{s\.reportFullText\}>Report full<\/Text>/);
+  assert.match(mapSource, /<Text style=\{s\.reportFullText\}>Report availability<\/Text>/);
+  assert.match(mapSource, /\?\.booking_url \|\| \(camp as any\)\?\.official_url/);
+});
+
+test('Map errors capture a fixed campground phase and offer a clean reset', () => {
+  assert.match(mapSource, /const diagnosticCode = captureMapCampSelectionErrorV1\(error\)/);
+  assert.match(mapSource, /map\.error-return\.\$\{this\.state\.diagnosticCode\}/);
+  assert.match(mapSource, /testID="map\.error-recovery"/);
+  assert.match(mapSource, /: 'map\.error-return'/);
+  assert.match(mapSource, />Map unavailable</);
+  assert.doesNotMatch(mapSource, />MAP ERROR</);
+  assert.doesNotMatch(mapSource, /\{this\.state\.error\}/);
 });

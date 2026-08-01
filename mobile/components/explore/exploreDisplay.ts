@@ -926,6 +926,7 @@ export function exploreCategoryMatches(place: ExplorePlaceProfile, selected: Exp
   if (selected === 'guided' || selected === 'tours') return false;
   if (selected === 'nearby') return true;
   const key = getExploreCategoryKey(place);
+  if (selected === 'parks') return key === 'parks' || key === 'land';
   if (selected === 'views') {
     return ['views', 'scenic', 'waterfalls', 'peaks'].includes(key) && exploreLooksLikeViewItem(place);
   }

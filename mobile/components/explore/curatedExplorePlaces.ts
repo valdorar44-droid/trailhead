@@ -1447,6 +1447,10 @@ function curatedPlacePriority(place: ExplorePlaceProfile) {
     source_title: place.summary.source_title,
   }).toLowerCase();
   let score = 0;
+  // An authenticated internal-review record is the intentionally selected
+  // candidate for this session. Keep it ahead of an older same-title catalog
+  // record without changing the ordering of ordinary public Explore data.
+  if (place.internal_preview) score += 100000;
   if (place.id.startsWith('place:nps:')) score += 1000;
   if (/national park service|nps|official/.test(text)) score += 220;
   if (place.source_pack?.things_to_do?.length) score += place.source_pack.things_to_do.length;

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -13,7 +14,10 @@ from scripts.explore_sources.base.schema import ExplorePlaceV3, SourceRecord, Tr
 from scripts.explore_sources.base.source_policy import assert_source_allowed
 
 
-USFS_LICENSE = "USFS public geospatial data; verify current dataset terms before redistribution"
+USFS_LICENSE = (
+    "USFS geospatial data; no warranty is expressed or implied. "
+    "See the official dataset metadata for use constraints."
+)
 USFS_ATTRIBUTION = "USDA Forest Service"
 
 
@@ -58,40 +62,57 @@ def source_record_from_feature(feature: dict[str, Any], now: int) -> SourceRecor
     geometry = feature.get("geometry") if isinstance(feature.get("geometry"), dict) else props.get("geometry")
     lat, lng = representative_point(geometry)
     source_id = compact_text(
-        props.get("TRAIL_NO")
-        or props.get("TRAIL_CN")
-        or props.get("OBJECTID")
-        or props.get("GLOBALID")
-        or props.get("ID")
-        or props.get("id")
+        pget(
+            props,
+            "GLOBALID",
+            "OBJECTID",
+            "TRAIL_CN",
+            "SITE_CN",
+            "SITE_ID",
+            "NFFID",
+            "TRAIL_NO",
+            "ID",
+        )
     )
     name = compact_text(
-        props.get("TRAIL_NAME")
-        or props.get("TRAILNAME")
-        or props.get("NAME")
-        or props.get("SITE_NAME")
-        or props.get("RECAREANAME")
-        or props.get("ROAD_NAME")
-        or props.get("FORESTNAME")
+        pget(
+            props,
+            "PUBLIC_SITE_NAME",
+            "TRAIL_NAME",
+            "TRAILNAME",
+            "NAME",
+            "SITE_NAME",
+            "RECAREANAME",
+            "RECAREA_NAME",
+            "ROAD_NAME",
+            "FORESTNAME",
+            "NFSLANDUNITNAME",
+        )
     )
+    dataset_id = slugify(compact_text(pget(props, "_trailhead_dataset_id")))
     if not source_id:
         source_id = slugify(name or json.dumps(geometry or {}, sort_keys=True))[:80]
+    if dataset_id:
+        source_id = f"{dataset_id}:{source_id}"
     if not name:
-        name = category_for_props(props, geometry)[0].replace("_", " ").title()
+        return None
     if lat is None or lng is None:
-        lat = as_float(props.get("LATITUDE") or props.get("lat"))
-        lng = as_float(props.get("LONGITUDE") or props.get("lng") or props.get("lon"))
+        lat = as_float(pget(props, "LATITUDE", "LAT"))
+        lng = as_float(pget(props, "LONGITUDE", "LNG", "LON"))
     if lat is None or lng is None:
         return None
     category, subcategory = category_for_props(props, geometry)
-    url = compact_text(props.get("SOURCE_URL") or props.get("URL") or "https://data.fs.usda.gov/geodata/")
+    url = compact_text(
+        pget(props, "_trailhead_source_url", "SOURCE_URL", "URL")
+        or "https://data.fs.usda.gov/geodata/"
+    )
     return SourceRecord(
         id=f"usfs:{source_id}",
         source="usfs",
         source_id=source_id,
         source_url=url,
-        license=USFS_LICENSE,
-        attribution=USFS_ATTRIBUTION,
+        license=compact_text(pget(props, "_trailhead_license")) or USFS_LICENSE,
+        attribution=compact_text(pget(props, "_trailhead_attribution")) or USFS_ATTRIBUTION,
         fetched_at=now,
         last_seen_at=now,
         raw=feature,
@@ -107,15 +128,32 @@ def source_record_from_feature(feature: dict[str, Any], now: int) -> SourceRecor
 
 
 def category_for_props(props: dict[str, Any], geometry: dict[str, Any] | None) -> tuple[str, str]:
-    text = " ".join(compact_text(props.get(key)).lower() for key in (
-        "FEATURE_TYPE", "TYPE", "SITE_TYPE", "TRAIL_TYPE", "RECAREA_TYPE", "OPER_MAINT_LEVEL", "NAME", "TRAIL_NAME"
+    text = " ".join(compact_text(pget(props, key)).lower() for key in (
+        "_trailhead_feature_kind", "FEATURE_TYPE", "TYPE", "SITE_TYPE", "TRAIL_TYPE",
+        "RECAREA_TYPE", "OPER_MAINT_LEVEL", "NAME", "TRAIL_NAME", "SITE_NAME",
     ))
-    if "trailhead" in text:
+    if "trailhead" in text or "trail head" in text or "staging area" in text:
         return "trailhead", "trailhead"
     if "camp" in text:
         return "campground", "campground"
     if "shelter" in text or "cabin" in text or "lookout" in text:
         return "shelter", "shelter"
+    if "info site" in text or "information site" in text or "visitor center" in text or "fee station" in text:
+        return "visitor_center", "visitor_center"
+    if "observation site" in text or "overlook" in text or "viewpoint" in text:
+        return "viewpoint", "overlook"
+    if "interpretive" in text:
+        return "historic_site", "interpretive_site"
+    if "picnic" in text:
+        return "place", "picnic_site"
+    if "boating" in text or "boat ramp" in text:
+        return "place", "boat_access"
+    if "fishing" in text:
+        return "place", "fishing_access"
+    if "day use" in text:
+        return "place", "day_use_area"
+    if "sport site" in text or "snowplay" in text:
+        return "activity", "recreation_activity"
     if ("road" in text or "route" in text) and is_line_geometry(geometry):
         return "forest_road", "forest_road"
     if "forest" in text or "boundary" in text or "ranger district" in text:
@@ -128,7 +166,7 @@ def category_for_props(props: dict[str, Any], geometry: dict[str, Any] | None) -
 def trail_from_record(record: SourceRecord) -> TrailGeometry:
     props = record.properties
     category = record.category
-    distance = as_float(props.get("LENGTH_MILES") or props.get("MILES") or props.get("length_mi")) or line_distance_mi(record.geometry)
+    distance = as_float(pget(props, "LENGTH_MILES", "MILES", "LENGTH_MI", "GIS_MILES", "SEGMENT_LENGTH")) or line_distance_mi(record.geometry)
     allowed = allowed_uses(props)
     activities = activities_for_record(record, allowed)
     return TrailGeometry(
@@ -139,16 +177,16 @@ def trail_from_record(record: SourceRecord) -> TrailGeometry:
         representative_lat=record.lat,
         representative_lng=record.lng,
         distance_mi=round(distance, 2) if distance else None,
-        elevation_gain_ft=as_float(props.get("ELEV_GAIN") or props.get("elevation_gain_ft")),
-        elevation_loss_ft=as_float(props.get("ELEV_LOSS") or props.get("elevation_loss_ft")),
-        route_type="Forest road" if category == "forest_road" else compact_text(props.get("ROUTE_TYPE") or "Point or route"),
+        elevation_gain_ft=as_float(pget(props, "ELEV_GAIN", "ELEVATION_GAIN_FT")),
+        elevation_loss_ft=as_float(pget(props, "ELEV_LOSS", "ELEVATION_LOSS_FT")),
+        route_type="Forest road" if category == "forest_road" else compact_text(pget(props, "ROUTE_TYPE")) or "Trail",
         activities=activities,
-        difficulty=compact_text(props.get("TRAIL_DIFFICULTY") or props.get("DIFFICULTY") or ""),
-        surface=compact_text(props.get("SURFACE") or props.get("TRAIL_SURFACE") or ""),
-        access=compact_text(props.get("ACCESS_STATUS") or props.get("STATUS") or props.get("ACCESS") or ""),
+        difficulty=compact_text(pget(props, "TRAIL_DIFFICULTY", "DIFFICULTY")),
+        surface=compact_text(pget(props, "SURFACE", "TRAIL_SURFACE")),
+        access=clean_fact(pget(props, "ACCESS_STATUS", "STATUS", "ACCESS")),
         allowed_uses=allowed,
-        seasonal_notes=compact_text(props.get("SEASONAL") or props.get("SEASONAL_STATUS") or props.get("OPEN_SEASON") or ""),
-        land_manager=compact_text(props.get("FORESTNAME") or props.get("FOREST_NAME") or props.get("ADMIN_ORG") or "USDA Forest Service"),
+        seasonal_notes=clean_fact(pget(props, "SEASONAL", "SEASONAL_STATUS", "OPEN_SEASON", "SEASON_DESCRIPTION")),
+        land_manager=compact_text(pget(props, "FORESTNAME", "FOREST_NAME", "_trailhead_destination_name", "OPERATED_BY")) or USFS_ATTRIBUTION,
         source_quality=quality_for_source("usfs"),
         sources=[source_ref(record)],
     )
@@ -158,6 +196,7 @@ def place_from_record(record: SourceRecord) -> ExplorePlaceV3 | None:
     if record.lat is None or record.lng is None:
         return None
     props = record.properties
+    source_pack = operational_source_pack(props)
     place = ExplorePlaceV3(
         id=f"place:usfs:{slugify(record.source_id)}",
         source_ids=[record.id],
@@ -168,27 +207,38 @@ def place_from_record(record: SourceRecord) -> ExplorePlaceV3 | None:
         lng=record.lng,
         geometry=record.geometry,
         country="US",
-        region=compact_text(props.get("STATE") or props.get("STATE_ABBR") or props.get("REGION") or ""),
-        admin=compact_text(props.get("FORESTNAME") or props.get("FOREST_NAME") or props.get("DISTRICT") or ""),
+        region=reader_region(pget(props, "STATE", "STATE_ABBR", "STATES_SPANNED", "REGION")),
+        admin=compact_text(pget(props, "FORESTNAME", "FOREST_NAME", "_trailhead_destination_name", "DISTRICT")),
         summary=summary_from_record(record),
-        description=compact_text(props.get("DESCRIPTION") or props.get("COMMENTS") or props.get("NOTES") or ""),
+        description=reader_copy(pget(props, "DESCRIPTION", "RECAREA_DESCRIPTION", "IMPORTANT_INFO", "COMMENTS", "NOTES")),
         tags=sorted_unique([
             record.category,
             record.subcategory,
             "usfs",
             "forest service",
-            props.get("FORESTNAME") or props.get("FOREST_NAME"),
-            props.get("TRAIL_CLASS"),
+            pget(props, "FORESTNAME", "FOREST_NAME", "_trailhead_destination_name"),
+            pget(props, "TRAIL_CLASS"),
+            pget(props, "ACTIVITY_TYPE_LIST"),
         ]),
-        access=compact_text(props.get("ACCESS_STATUS") or props.get("STATUS") or props.get("ACCESS") or ""),
-        safety=compact_text(props.get("HAZARD") or props.get("SAFETY") or ""),
+        access=clean_fact(pget(props, "ACCESS_STATUS", "STATUS", "ACCESS", "SEASONAL_OPERATIONAL_STATUS")),
+        safety=clean_fact(pget(props, "HAZARD", "SAFETY")),
         amenities=amenities_from_props(props),
+        reservations=reservation_from_props(props),
+        source_pack=source_pack,
         sources=[source_ref(record)],
         quality=quality_for_source("usfs"),
         last_seen_at=record.last_seen_at,
         updated_at=record.fetched_at,
     )
-    return apply_aliases(build_card(score_place(place)))
+    source_summary = place.summary
+    source_description = place.description
+    place = apply_aliases(build_card(score_place(place)))
+    place.summary = source_summary
+    place.description = source_description
+    place.card["summary"] = source_summary or source_description
+    place.card["warnings"] = [place.safety] if place.safety else []
+    place.card["best_for"] = []
+    return place
 
 
 def source_ref(record: SourceRecord) -> dict[str, Any]:
@@ -204,28 +254,27 @@ def source_ref(record: SourceRecord) -> dict[str, Any]:
 
 def summary_from_record(record: SourceRecord) -> str:
     props = record.properties
-    if props.get("DESCRIPTION"):
-        return compact_text(props["DESCRIPTION"])[:420]
-    readable = record.category.replace("_", " ")
-    manager = compact_text(props.get("FORESTNAME") or props.get("FOREST_NAME") or "USFS")
-    return f"{record.name} is an official {manager} {readable} record. Verify access, seasonal closures, fire restrictions, road conditions, and local rules before relying on it."
+    return reader_summary(
+        pget(props, "DESCRIPTION", "RECAREA_DESCRIPTION", "IMPORTANT_INFO")
+    )
 
 
 def allowed_uses(props: dict[str, Any]) -> list[str]:
     values = []
     checks = [
-        ("HIKER_PEDESTRIAN", "hiking"),
-        ("BICYCLE", "bike"),
-        ("PACK_SADDLE", "horse"),
-        ("MOTORCYCLE", "motorcycle"),
-        ("ATV", "OHV"),
-        ("FOURWD", "4x4"),
-        ("SNOWMOBILE", "snowmobile"),
+        (("HIKER_PEDESTRIAN", "HIKER_PEDESTRIAN_MANAGED", "HIKER_PEDESTRIAN_ACCPT"), "hiking"),
+        (("BICYCLE", "BICYCLE_MANAGED", "BICYCLE_ACCPT"), "bike"),
+        (("PACK_SADDLE", "PACK_SADDLE_MANAGED", "PACK_SADDLE_ACCPT"), "horse"),
+        (("MOTORCYCLE", "MOTORCYCLE_MANAGED", "MOTORCYCLE_ACCPT"), "motorcycle"),
+        (("ATV", "ATV_MANAGED", "ATV_ACCPT"), "OHV"),
+        (("FOURWD", "FOURWD_MANAGED", "FOURWD_ACCPT"), "4x4"),
+        (("SNOWMOBILE", "SNOWMOBILE_MANAGED", "SNOWMOBILE_ACCPT"), "snowmobile"),
+        (("E_BIKE_CLASS1_MANAGED", "E_BIKE_CLASS1_ACCPT", "E_BIKE_CLASS2_MANAGED", "E_BIKE_CLASS2_ACCPT", "E_BIKE_CLASS3_MANAGED", "E_BIKE_CLASS3_ACCPT"), "e-bike"),
     ]
-    for key, label in checks:
-        if truthy(props.get(key)):
+    for keys, label in checks:
+        if any(truthy(pget(props, key)) for key in keys):
             values.append(label)
-    text = compact_text(props.get("ALLOWED_USES") or props.get("USES")).lower()
+    text = compact_text(pget(props, "ALLOWED_USES", "USES", "ACTIVITY_TYPE_LIST", "_trailhead_default_activity")).lower()
     for needle, label in [("hike", "hiking"), ("bike", "bike"), ("horse", "horse"), ("ohv", "OHV"), ("4x4", "4x4")]:
         if needle in text:
             values.append(label)
@@ -234,21 +283,22 @@ def allowed_uses(props: dict[str, Any]) -> list[str]:
 
 def activities_for_record(record: SourceRecord, allowed: list[str]) -> list[str]:
     if record.category == "forest_road":
-        return sorted_unique([*allowed, "overland"])
-    return sorted_unique(allowed or ["hiking"])
+        return sorted_unique([*allowed, "overland"]) if allowed else []
+    return sorted_unique(allowed)
 
 
 def amenities_from_props(props: dict[str, Any]) -> list[str]:
     values = []
-    for key, label in [
-        ("WATER", "water"),
-        ("TOILET", "toilets"),
-        ("PICNIC", "picnic"),
-        ("FEE", "fee"),
-        ("PARKING", "parking"),
+    for keys, label in [
+        (("WATER", "WATER_AVAILABILITY"), "water"),
+        (("TOILET", "RESTROOM_AVAILABILITY"), "toilets"),
+        (("PICNIC",), "picnic"),
+        (("FEE", "FEE_CHARGED"), "fee"),
+        (("PARKING",), "parking"),
     ]:
-        if truthy(props.get(key)):
+        if any(truthy(pget(props, key)) for key in keys):
             values.append(label)
+    values.extend(split_list(pget(props, "SERVICE_TYPE_LIST")))
     return sorted_unique(values)
 
 
@@ -263,7 +313,268 @@ def is_line_geometry(geometry: dict[str, Any] | None) -> bool:
 def truthy(value: Any) -> bool:
     if isinstance(value, bool):
         return value
-    return compact_text(value).lower() in {"yes", "y", "true", "1", "designated", "open", "allowed"}
+    text = compact_text(value).lower()
+    if not text or text in {"no", "n", "false", "0", "none", "unknown", "no data", "not available", "unavailable", "closed"} or text.startswith(("no ", "not ")):
+        return False
+    return text in {"yes", "y", "true", "1", "designated", "open", "allowed", "accepted", "managed"} or bool(text)
+
+
+def pget(props: dict[str, Any], *keys: str) -> Any:
+    folded = {str(key).casefold(): value for key, value in props.items()}
+    for key in keys:
+        value = folded.get(key.casefold())
+        if value not in (None, ""):
+            return value
+    return None
+
+
+def clean_fact(value: Any) -> str:
+    text = reader_copy(value)
+    if text.casefold() in {"", "none", "no data", "unknown", "not available", "n/a"}:
+        return ""
+    status_labels = {
+        "open": "Open",
+        "closed": "Closed",
+        "seasonal": "Seasonal",
+        "temporarily closed": "Temporarily closed",
+        "restricted": "Restricted",
+    }
+    if text.casefold() in status_labels:
+        return status_labels[text.casefold()]
+    return text
+
+
+def reader_region(value: Any) -> str:
+    """Keep a reader-facing state/region and omit internal numeric region codes."""
+    text = compact_text(value)
+    if not text or re.fullmatch(r"\d{1,3}", text):
+        return ""
+    return text
+
+
+def reader_copy(value: Any) -> str:
+    """Repair spacing artifacts in agency prose without changing factual wording."""
+    text = compact_text(value)
+    if not text:
+        return ""
+    for broken, repaired in (
+        ("â€™", "'"),
+        ("â€˜", "'"),
+        ("â€”", "—"),
+        ("â€“", "–"),
+        ("Â·", "·"),
+        ("Â", ""),
+    ):
+        text = text.replace(broken, repaired)
+    text = re.sub(r"(?<=[A-Za-z])(?=\d[\d,]*(?:\s|$))", " ", text)
+    text = re.sub(r"\b([A-Za-z]+)\s+['’]s\b", r"\1's", text)
+    text = re.sub(
+        r"(?<=[a-z0-9])(?=(?:All|Campers|Maximum|Minimum|No|Pets|Reservations|The|This|Visitors)\b)",
+        ". ",
+        text,
+    )
+    text = re.sub(r"(?<=[.!?])(?=[A-Z])", " ", text)
+    text = re.sub(
+        r"(?<=[a-z0-9])\s+(?=(?:All campsites|Maximum length|Maximum group|Minimum stay|"
+        r"Reservations|The campground|This campground|Visitors)\b)",
+        ". ",
+        text,
+    )
+    text = re.sub(r"\s+([,.;:!?])", r"\1", text)
+    return compact_text(text)
+
+
+def reader_summary(value: Any, limit: int = 420) -> str:
+    """Keep a bounded summary without cutting a sentence or word in half."""
+    text = reader_copy(value)
+    if len(text) <= limit:
+        return text
+    clipped = text[:limit]
+    sentence_ends = [match.end() for match in re.finditer(r"[.!?](?=\s|$)", clipped)]
+    if sentence_ends:
+        return clipped[:sentence_ends[-1]].strip()
+    word_safe = clipped.rsplit(" ", 1)[0].rstrip(" ,;:")
+    return f"{word_safe}…" if word_safe else ""
+
+
+def split_list(value: Any) -> list[str]:
+    text = clean_fact(value)
+    if not text:
+        return []
+    for separator in ("|", ";"):
+        text = text.replace(separator, ",")
+    return [item.strip() for item in text.split(",") if clean_fact(item)]
+
+
+RECREATION_CAMPGROUND_URL_RE = re.compile(
+    r"^https://(?:www\.)?recreation\.gov/camping/campgrounds/[A-Za-z0-9_-]+(?:[/?#]|$)",
+    re.I,
+)
+
+
+def reservation_from_props(props: dict[str, Any]) -> dict[str, Any]:
+    url = compact_text(pget(props, "REC1STOP_URL", "RESERVATION_URL"))
+    if not RECREATION_CAMPGROUND_URL_RE.match(url):
+        return {}
+    # ``url`` is the canonical Explore V3 key.  Keep the older spelling while
+    # both readers exist so a reviewed record never loses its booking action.
+    return {"url": url, "reservation_url": url, "reservable": True}
+
+
+def source_fact_list(*values: Any) -> list[str]:
+    facts: list[str] = []
+    normalized: list[str] = []
+    for value in values:
+        fact = clean_fact(value)
+        folded = re.sub(r"\bopen\b", "", fact.casefold())
+        folded = re.sub(r"[^a-z0-9]+", " ", folded).strip()
+        if not fact or not folded or folded in normalized:
+            continue
+        if any(folded in existing for existing in normalized):
+            continue
+        facts.append(fact)
+        normalized.append(folded)
+    return facts
+
+
+MONTH_NAME_RE = re.compile(
+    r"\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|"
+    r"aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b",
+    re.I,
+)
+CLOCK_OR_STAY_RE = re.compile(
+    r"\b(?:\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)|day use|night minimum|"
+    r"minimum stay|check[- ]?in|check[- ]?out)\b",
+    re.I,
+)
+
+
+def season_like_operational_value(value: Any) -> str:
+    """Use an hours field as season only when its content is clearly seasonal."""
+    text = clean_fact(value)
+    month = (
+        r"Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|"
+        r"Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?"
+    )
+    text = re.sub(rf"\b({month})\s*[-–—]\s*({month})\b", r"\1 - \2", text, flags=re.I)
+    if not text or CLOCK_OR_STAY_RE.search(text):
+        return ""
+    if re.search(r"\b(?:all year|year[- ]round)\b", text, re.I):
+        return text
+    return text if len(MONTH_NAME_RE.findall(text)) >= 2 else ""
+
+
+def reader_site_type(value: Any) -> str:
+    text = clean_fact(value).replace("_", " ")
+    if not text:
+        return ""
+    return text.title() if text.upper() == text else text
+
+
+def positive_people_capacity(props: dict[str, Any]) -> int | None:
+    """Return source-labelled people capacity, never an inferred site count."""
+    raw = pget(
+        props,
+        "MAX_NBR_PEOPLE",
+        "PEOPLE_AT_ONE_TIME",
+        "TOTAL_CAPACITY",
+        "MAX_PEOPLE",
+    )
+    if raw in (None, ""):
+        return None
+    match = re.fullmatch(r"\s*([0-9][0-9,]*)(?:\.0+)?\s*", str(raw))
+    if not match:
+        return None
+    value = int(match.group(1).replace(",", ""))
+    return value if 0 < value <= 100_000 else None
+
+
+PHONE_RE = re.compile(
+    r"(?<!\d)(?:\+?1[-.\s]?)?(?:\(\d{3}\)|\d{3})[-.\s]\d{3}[-.\s]\d{4}"
+    r"(?:\s*(?:x|ext\.?)[-.\s]*\d{1,6})?(?!\d)",
+    re.I,
+)
+
+
+def contact_phone_from_props(props: dict[str, Any]) -> str:
+    explicit = compact_text(pget(props, "PHONE", "SITE_PHONE", "CONTACT_PHONE", "TELEPHONE"))
+    for candidate in (
+        explicit,
+        reader_copy(pget(props, "INFORMATION_CENTER")),
+        reader_copy(pget(props, "SITE_CONTACT_NOTES")),
+    ):
+        match = PHONE_RE.search(candidate)
+        if match:
+            return compact_text(match.group(0)).strip(" ,.;")
+    return ""
+
+
+def fee_text_from_props(props: dict[str, Any]) -> str:
+    detail = reader_copy(pget(props, "FEE_DESCRIPTION", "FEE_TEXT"))
+    if detail:
+        detail = detail.replace("\\", "")
+        detail = re.sub(r"^Overnight Use:\s*", "", detail, flags=re.I)
+        detail = re.sub(
+            r"(?<![.;:])\s+(?=(?:Single Site|Double Site|Group Site|Additional Holiday Fee|Additional Vehicle Fee):)",
+            ". ",
+            detail,
+            flags=re.I,
+        )
+        detail = re.sub(r":\s*\.", ":", detail)
+        detail = re.sub(r"(?<=per night)\s+(?=\$\d)", ". ", detail, flags=re.I)
+        return compact_text(detail)
+    charged = compact_text(pget(props, "FEE_CHARGED")).casefold()
+    if charged in {"y", "yes", "true", "1"}:
+        return "Fee charged"
+    if charged in {"n", "no", "false", "0"}:
+        return "No fee"
+    return ""
+
+
+def operational_source_pack(props: dict[str, Any]) -> dict[str, Any]:
+    """Keep official campground operations intact through candidate builds."""
+    site_type = reader_site_type(pget(props, "SITE_TYPE", "FEATURE_TYPE", "TYPE"))
+    people_capacity = positive_people_capacity(props)
+    fee_text = fee_text_from_props(props)
+    raw_hours = clean_fact(pget(props, "OPERATIONAL_HOURS"))
+    seasonal_hours = season_like_operational_value(raw_hours)
+    hours = [] if seasonal_hours else source_fact_list(raw_hours)
+    seasons = source_fact_list(
+        pget(props, "SEASON_DESCRIPTION"),
+        pget(props, "BEST_SEASON"),
+        seasonal_hours,
+        pget(props, "OPEN_SEASON"),
+    )
+    water = clean_fact(pget(props, "WATER_AVAILABILITY", "WATER"))
+    restrooms = clean_fact(pget(props, "RESTROOM_AVAILABILITY", "TOILET"))
+    rules = clean_fact(pget(props, "RESTRICTIONS"))
+    official_url = compact_text(pget(props, "USDA_PORTAL_URL", "OFFICIAL_URL"))
+    booking_url = compact_text(pget(props, "REC1STOP_URL", "RESERVATION_URL"))
+    phone = contact_phone_from_props(props)
+    pack: dict[str, Any] = {}
+    if site_type:
+        pack["site_type"] = site_type
+    if people_capacity is not None:
+        pack["people_capacity"] = people_capacity
+    if fee_text:
+        pack["fees"] = [fee_text]
+    if hours:
+        pack["operating_hours"] = hours
+    if seasons:
+        pack["operating_season"] = seasons
+    if water:
+        pack["water"] = water
+    if restrooms:
+        pack["restrooms"] = restrooms
+    if rules:
+        pack["rules"] = rules
+    if official_url.startswith("https://"):
+        pack["official_url"] = official_url
+    if RECREATION_CAMPGROUND_URL_RE.match(booking_url):
+        pack["booking_url"] = booking_url
+    if phone:
+        pack["phone"] = phone
+    return pack
 
 
 def as_float(value: Any) -> float | None:

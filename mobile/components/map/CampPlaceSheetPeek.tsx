@@ -3,17 +3,12 @@ import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme, type ColorPalette } from '@/lib/design';
-import type { PlaceSheetModel } from '@/lib/placeSheetAdapters';
+import type { CampPeekPresentationV1 } from '@/lib/campPeekPresentation';
 import { sheetActionTestIDV1 } from '@/lib/sheetActions';
 import { trailheadFonts } from '@/lib/typography';
 
 type Props = {
-  model: PlaceSheetModel;
-  meta: string;
-  siteType: string;
-  inventory: string;
-  fee: string;
-  saved: boolean;
+  presentation: CampPeekPresentationV1;
   onViewSites: () => void;
   onSave: () => void;
   onClose: () => void;
@@ -29,36 +24,32 @@ export function cleanCampPeekMeta(value: string): string {
 }
 
 export default function CampPlaceSheetPeek({
-  model,
-  meta,
-  siteType,
-  inventory,
-  fee,
-  saved,
+  presentation,
   onViewSites,
   onSave,
   onClose,
 }: Props) {
   const C = useTheme();
   const s = makeStyles(C);
+  const { testID, title, meta, siteType, inventory, fee, saved } = presentation;
   return (
-    <View style={s.wrap} testID={`${model.testID}-peek`}>
+    <View style={s.wrap} testID={`${testID}-peek`}>
       <View style={s.identityCard}>
         <TouchableOpacity
           accessibilityRole="button"
-          accessibilityLabel={`Open details for ${model.title}`}
+          accessibilityLabel={`Open details for ${title}`}
           style={s.identityCopy}
           onPress={onViewSites}
           activeOpacity={0.86}
         >
           <Text style={s.kicker}>CAMPGROUND</Text>
-          <Text style={s.title} numberOfLines={2}>{model.title}</Text>
+          <Text style={s.title} numberOfLines={2}>{title}</Text>
           <Text style={s.meta} numberOfLines={1}>{cleanCampPeekMeta(meta)}</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          testID={`${model.testID}-peek-close`}
+          testID={`${testID}-peek-close`}
           accessibilityRole="button"
-          accessibilityLabel={`Close ${model.title}`}
+          accessibilityLabel={`Close ${title}`}
           style={s.closeButton}
           onPress={onClose}
         >
@@ -74,7 +65,7 @@ export default function CampPlaceSheetPeek({
 
       <View style={s.actions}>
         <TouchableOpacity
-          testID={`${model.testID}-view-sites`}
+          testID={`${testID}-view-sites`}
           accessibilityRole="button"
           style={s.primaryButton}
           onPress={onViewSites}
@@ -82,7 +73,7 @@ export default function CampPlaceSheetPeek({
           <Text style={s.primaryButtonText}>View sites</Text>
         </TouchableOpacity>
         <TouchableOpacity
-          testID={sheetActionTestIDV1(model.testID, 'save')}
+          testID={sheetActionTestIDV1(testID, 'save')}
           accessibilityRole="button"
           accessibilityState={{ selected: saved }}
           style={s.secondaryButton}
@@ -108,7 +99,7 @@ function Essential({
   return (
     <View style={styles.essentialItem}>
       <Text style={styles.essentialLabel}>{label}</Text>
-      <Text style={styles.essentialValue} numberOfLines={1}>{value}</Text>
+      <Text style={styles.essentialValue} numberOfLines={2}>{value}</Text>
     </View>
   );
 }
@@ -141,7 +132,7 @@ function makeStyles(C: ColorPalette) {
       marginRight: -8,
     },
     essentials: {
-      minHeight: 60,
+      minHeight: 72,
       flexDirection: 'row',
       borderRadius: 12,
       borderWidth: 1,
@@ -151,7 +142,7 @@ function makeStyles(C: ColorPalette) {
     },
     essentialItem: { flex: 1, minWidth: 0, paddingHorizontal: 11, paddingVertical: 10 },
     essentialLabel: { color: C.orange, fontSize: 11, lineHeight: 14, fontWeight: '700', letterSpacing: 0.35 },
-    essentialValue: { color: C.text, fontSize: 14, lineHeight: 20, fontWeight: '600', marginTop: 3 },
+    essentialValue: { color: C.text, fontSize: 14, lineHeight: 18, fontWeight: '600', marginTop: 3 },
     actions: { minHeight: 48, flexDirection: 'row', gap: 12 },
     primaryButton: {
       flex: 1,

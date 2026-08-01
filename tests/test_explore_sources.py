@@ -21,7 +21,7 @@ from scripts.explore_sources.nps.fetch_nps import (
     park_codes_for_item,
     request_params,
 )
-from scripts.explore_sources.nps.import_nps import import_nps_fixture
+from scripts.explore_sources.nps.import_nps import import_nps_fixture, nps_absolute_url, nps_designation
 from scripts.explore_sources.openbeta.import_openbeta import import_openbeta_fixture
 from scripts.explore_sources.osm.import_geofabrik import import_osm_fixture
 from scripts.explore_sources.ridb.fetch_ridb import fetch_ridb_facilities_to_cache, request_params as ridb_request_params
@@ -391,6 +391,17 @@ class ExploreSourcePipelineTests(unittest.TestCase):
         self.assertIn("Hiking", place.amenities)
         self.assertIn("national park", place.search_blob)
         self.assertIn("National Park Service", records[0].attribution)
+
+    def test_nps_missing_designation_uses_reader_facing_park_label(self):
+        self.assertEqual(nps_designation({}), "Park")
+        self.assertEqual(nps_designation({"designation": "National Historic Site"}), "National Historic Site")
+
+    def test_nps_relative_media_url_resolves_to_official_https_host(self):
+        self.assertEqual(
+            nps_absolute_url("/common/uploads/event_calendar/photo.jpg"),
+            "https://www.nps.gov/common/uploads/event_calendar/photo.jpg",
+        )
+        self.assertEqual(nps_absolute_url("https://www.nps.gov/yell/photo.jpg"), "https://www.nps.gov/yell/photo.jpg")
 
     def test_nps_importer_builds_rich_source_pack(self):
         with tempfile.TemporaryDirectory() as tmp:

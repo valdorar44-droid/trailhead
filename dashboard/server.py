@@ -1,6 +1,6 @@
 """Trailhead FastAPI server. All API routes."""
 from __future__ import annotations
-import asyncio, os, sys, json, uuid, secrets, xml.etree.ElementTree as ET, time, hashlib, hmac, re, sqlite3, smtplib, html, base64, binascii, math, heapq, threading, functools, logging, contextvars, ipaddress, io, wave, gzip
+import asyncio, os, sys, json, uuid, secrets, xml.etree.ElementTree as ET, time, hashlib, hmac, re, sqlite3, smtplib, html, base64, binascii, math, heapq, threading, functools, logging, contextvars, ipaddress, io, wave, gzip, copy
 from concurrent.futures import Future as ConcurrentFuture, ThreadPoolExecutor
 from datetime import datetime, timezone
 from email.message import EmailMessage
@@ -514,6 +514,10 @@ EXPLORE_SERVING_INDEX = Path(
     os.getenv("TRAILHEAD_EXPLORE_SERVING_INDEX")
     or (Path(__file__).parent / "explore_serving_index_v2.json")
 )
+EXPLORE_INTERNAL_PREVIEW = Path(
+    os.getenv("TRAILHEAD_EXPLORE_INTERNAL_PREVIEW")
+    or (Path(__file__).parent / "explore_internal_preview_v1.json")
+)
 EXPLORE_ASSETS = Path(__file__).parent / "explore_assets"
 _DEFAULT_ORIGINALS_ASSET_DIR = (
     Path("/data/originals/assets")
@@ -537,6 +541,12 @@ APP_ICON = Path(__file__).resolve().parents[1] / "mobile" / "assets" / "icon.png
 
 _originals_preview_token_context: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "originals_preview_token", default=None,
+)
+_explore_internal_preview_context: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "explore_internal_preview", default=False,
+)
+_explore_internal_preview_status_context: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "explore_internal_preview_status", default="not_requested",
 )
 
 app = FastAPI(title="Trailhead API")
@@ -1279,7 +1289,10 @@ def _explore_v3_place_to_profile(place: dict, rank: int = 900000) -> dict:
         "topics": tags,
         "source_note": card.get("source_badge") or source_title,
         "extract": description,
-        "booking_url": (place.get("reservations") or {}).get("url") if isinstance(place.get("reservations"), dict) else "",
+        "booking_url": (
+            (place.get("reservations") or {}).get("url")
+            or (place.get("reservations") or {}).get("reservation_url")
+        ) if isinstance(place.get("reservations"), dict) else "",
         "license": primary_source.get("license") or existing_source_pack.get("license") or "",
     }
     profile = {
@@ -3534,16 +3547,29 @@ def _merge_unique_dicts(primary: list, secondary: list, key_fields: tuple[str, .
     return merged
 
 
-def _merge_explore_sidecar_enrichment(base: dict, sidecar: dict) -> dict:
+def _merge_explore_sidecar_enrichment(
+    base: dict,
+    sidecar: dict,
+    *,
+    prefer_sidecar_text: bool = False,
+) -> dict:
     enriched = dict(base)
     base_summary = dict(enriched.get("summary") or {})
     side_summary = sidecar.get("summary") if isinstance(sidecar.get("summary"), dict) else {}
     for key in ("image_url", "thumbnail_url", "image_credit", "image_license", "source_url", "source_title"):
         if not base_summary.get(key) and side_summary.get(key):
             base_summary[key] = side_summary.get(key)
+    if prefer_sidecar_text:
+        for key in ("title", "category", "explore_group", "state", "region"):
+            if side_summary.get(key):
+                base_summary[key] = side_summary.get(key)
     for key in ("hook", "short_description"):
         if side_summary.get(key):
-            base_summary[key] = _explore_richer_text(base_summary.get(key), side_summary.get(key))
+            base_summary[key] = (
+                side_summary.get(key)
+                if prefer_sidecar_text
+                else _explore_richer_text(base_summary.get(key), side_summary.get(key))
+            )
     enriched["summary"] = base_summary
 
     for key in ("canonical_role", "parent_hub_id", "parent_hub_title", "module_target"):
@@ -3570,8 +3596,21 @@ def _merge_explore_sidecar_enrichment(base: dict, sidecar: dict) -> dict:
     side_profile = sidecar.get("profile") if isinstance(sidecar.get("profile"), dict) else {}
     for key in ("summary", "story", "why_it_matters", "what_to_know", "best_time_to_stop", "access_notes", "nearby_context"):
         if side_profile.get(key):
-            base_profile[key] = _explore_richer_text(base_profile.get(key), side_profile.get(key))
+            base_profile[key] = (
+                side_profile.get(key)
+                if prefer_sidecar_text
+                else _explore_richer_text(base_profile.get(key), side_profile.get(key))
+            )
     enriched["profile"] = base_profile
+
+    base_card = dict(enriched.get("card") or {})
+    side_card = sidecar.get("card") if isinstance(sidecar.get("card"), dict) else {}
+    if prefer_sidecar_text:
+        for key in ("title", "headline", "summary", "highlight", "region"):
+            if side_card.get(key):
+                base_card[key] = side_card.get(key)
+    if base_card:
+        enriched["card"] = base_card
 
     base_pack = enriched.get("source_pack") if isinstance(enriched.get("source_pack"), dict) else {}
     side_pack = sidecar.get("source_pack") if isinstance(sidecar.get("source_pack"), dict) else {}
@@ -3743,6 +3782,9 @@ def _promoted_explore_item_to_profile(item: dict, index: int, existing: dict | N
     if not description:
         description = _official_cache_description_fallback(title, category_label, "")
     image_url = _safe_explore_image_url(item.get("image_url"))
+    image_credit = str(item.get("image_credit") or "").strip()
+    image_license = str(item.get("image_license") or "").strip()
+    image_source_url = str(item.get("image_source_url") or item.get("source_url") or "").strip()
     try:
         lat = float(item.get("lat"))
         lng = float(item.get("lng"))
@@ -3776,7 +3818,7 @@ def _promoted_explore_item_to_profile(item: dict, index: int, existing: dict | N
             "access": "",
             "safety": "",
             "amenities": [],
-            "media": ([{"url": image_url, "caption": title, "credit": "", "license": ""}] if image_url else []),
+            "media": ([{"url": image_url, "caption": title, "credit": image_credit, "license": image_license}] if image_url else []),
             "card": {"title": title, "headline": title, "summary": description, "highlight": description, "region": "", "facts": [category_label]},
             "summary": {
                 "id": place_id,
@@ -3795,8 +3837,8 @@ def _promoted_explore_item_to_profile(item: dict, index: int, existing: dict | N
                 "short_description": description,
                 "thumbnail_url": image_url,
                 "image_url": image_url,
-                "image_credit": "",
-                "image_license": "",
+                "image_credit": image_credit,
+                "image_license": image_license,
                 "source_url": str(item.get("source_url") or ""),
                 "source_title": "Trailhead",
             },
@@ -3848,6 +3890,8 @@ def _promoted_explore_item_to_profile(item: dict, index: int, existing: dict | N
         "short_description": description,
         "image_url": image_url or summary.get("image_url") or "",
         "thumbnail_url": image_url or summary.get("thumbnail_url") or "",
+        "image_credit": image_credit or summary.get("image_credit") or "",
+        "image_license": image_license or summary.get("image_license") or "",
         "source_title": source_label,
         "source_url": str(item.get("source_url") or summary.get("source_url") or ""),
     })
@@ -3862,6 +3906,9 @@ def _promoted_explore_item_to_profile(item: dict, index: int, existing: dict | N
         card["facts"] = fact_values[:4]
     if area and not card.get("region"):
         card["region"] = area
+    if image_url:
+        card["image_url"] = image_url
+        card["thumbnail_url"] = image_url
     profile["card"] = card
     source_pack = dict(profile.get("source_pack") or {})
     source_pack.update({
@@ -3869,6 +3916,17 @@ def _promoted_explore_item_to_profile(item: dict, index: int, existing: dict | N
         "official_url": str(item.get("source_url") or source_pack.get("official_url") or ""),
         "sources": public_sources,
     })
+    if image_url:
+        photos = [photo for photo in source_pack.get("photos") or [] if isinstance(photo, dict)]
+        if not any(str(photo.get("url") or "") == image_url for photo in photos):
+            photos.insert(0, {
+                "url": image_url,
+                "caption": title,
+                "credit": image_credit,
+                "license": image_license,
+                "source_url": image_source_url,
+            })
+        source_pack["photos"] = photos
     profile["source_pack"] = source_pack
     profile["sources"] = public_sources
     profile["quality"] = str(item.get("enrichment_grade") or profile.get("quality") or "")
@@ -3936,7 +3994,7 @@ def _merge_promoted_explore_serving_index(places: list[dict]) -> tuple[list[dict
     return promoted or places, payload
 
 
-def _load_explore_catalog() -> dict:
+def _load_explore_catalog_base() -> dict:
     cache_key = _explore_catalog_cache_key()
     cached = _EXPLORE_CATALOG_CACHE.get("catalog")
     if (
@@ -4045,6 +4103,103 @@ def _load_explore_catalog() -> dict:
         "future_pack_compatible": True,
         "places": [],
     })), persist=True)
+
+
+_EXPLORE_INTERNAL_PREVIEW_CACHE: dict[str, object] = {"key": None, "profiles": []}
+
+
+def _load_explore_internal_preview_profiles() -> list[dict]:
+    if not _explore_internal_preview_enabled() or not EXPLORE_INTERNAL_PREVIEW.exists():
+        return []
+    try:
+        stat = EXPLORE_INTERNAL_PREVIEW.stat()
+        cache_key = (str(EXPLORE_INTERNAL_PREVIEW), stat.st_mtime_ns, stat.st_size)
+    except Exception:
+        return []
+    if _EXPLORE_INTERNAL_PREVIEW_CACHE.get("key") == cache_key:
+        return list(_EXPLORE_INTERNAL_PREVIEW_CACHE.get("profiles") or [])
+    try:
+        payload = json.loads(EXPLORE_INTERNAL_PREVIEW.read_text())
+    except Exception:
+        return []
+    raw_places = [place for place in payload.get("places") or [] if isinstance(place, dict)]
+    profiles = []
+    for index, place in enumerate(raw_places, start=1):
+        profile = _explore_v3_place_to_profile(place, rank=590000 + index)
+        # These records exist only inside an authenticated internal-review
+        # request. Keep the public catalog untouched, but place the bounded
+        # proof set ahead of the normal catalog so a reviewer can actually
+        # reach it on a phone without paging through thousands of places.
+        summary = dict(profile.get("summary") or {})
+        summary["rank"] = -1000 + index
+        summary["hero_rank"] = -1000 + index
+        profile["summary"] = summary
+        profile["promoted_serving"] = True
+        profile["internal_preview"] = True
+        profiles.append(profile)
+    _attach_v3_nearby_source_items(profiles, raw_places)
+    _EXPLORE_INTERNAL_PREVIEW_CACHE.update({"key": cache_key, "profiles": profiles})
+    return list(profiles)
+
+
+def _merge_explore_internal_preview(catalog: dict) -> dict:
+    # Both catalogs are process-cached. Legacy-wrapper enrichment mutates
+    # records in place, so request-local preview work must own its complete
+    # object graph before applying it. A shallow list copy can otherwise let a
+    # future sidecar alter the public catalog or the cached preview profiles.
+    preview_profiles = copy.deepcopy(_load_explore_internal_preview_profiles())
+    if not preview_profiles:
+        return catalog
+    places = copy.deepcopy(list(catalog.get("places") or []))
+    id_to_index = {
+        str(place.get("id") or ""): index
+        for index, place in enumerate(places)
+        if isinstance(place, dict) and place.get("id")
+    }
+    for preview in preview_profiles:
+        place_id = str(preview.get("id") or "")
+        if not place_id:
+            continue
+        if place_id in id_to_index:
+            merged_place = _merge_explore_sidecar_enrichment(
+                places[id_to_index[place_id]],
+                preview,
+                prefer_sidecar_text=True,
+            )
+            preview_summary = preview.get("summary") if isinstance(preview.get("summary"), dict) else {}
+            merged_summary = dict(merged_place.get("summary") or {})
+            for rank_key in ("rank", "hero_rank"):
+                if preview_summary.get(rank_key) is not None:
+                    merged_summary[rank_key] = preview_summary[rank_key]
+            merged_place["summary"] = merged_summary
+            merged_place["promoted_serving"] = True
+            merged_place["internal_preview"] = True
+            merged_place["promoted_category"] = str(
+                preview.get("promoted_category") or preview.get("category") or ""
+            )
+            places[id_to_index[place_id]] = merged_place
+            continue
+        id_to_index[place_id] = len(places)
+        places.append(preview)
+    places = _apply_explore_legacy_wrapper_metadata(places)
+    return {
+        **catalog,
+        "catalog_id": f"{catalog.get('catalog_id') or 'trailhead-explore'}-internal-preview",
+        "count": len(places),
+        "places": places,
+        "internal_preview": {
+            "enabled": True,
+            "count": len(preview_profiles),
+            "artifact": EXPLORE_INTERNAL_PREVIEW.name,
+        },
+    }
+
+
+def _load_explore_catalog() -> dict:
+    catalog = _load_explore_catalog_base()
+    if not _explore_internal_preview_context.get():
+        return catalog
+    return _merge_explore_internal_preview(catalog)
 
 
 _CATALOG_PREWARM_TASK: asyncio.Task | None = None
@@ -5281,6 +5436,7 @@ def _explore_place_index_item(place: dict) -> dict:
         "parent_hub_title": place.get("parent_hub_title") or "",
         "module_target": place.get("module_target") or "",
         "hidden_from_featured": bool(place.get("hidden_from_featured")),
+        "internal_preview": bool(place.get("internal_preview")),
         "subcategories": place.get("subcategories") or [],
         "sources": place.get("sources") or [],
         "source_ids": place.get("source_ids") or [],
@@ -5396,6 +5552,231 @@ def _explore_place_to_camp(place: dict, center_lat: float, center_lng: float) ->
         "source_freshness": nearby.get("source_freshness"),
         "amenities": [],
         "site_types": ["Campground area"],
+    }
+
+
+def _source_pack_first_text(value: object) -> str:
+    values = value if isinstance(value, list) else [value]
+    return next((str(item).strip() for item in values if str(item or "").strip()), "")
+
+
+_RECREATION_CAMPGROUND_BOOKING_RE = re.compile(
+    r"^https://(?:www\.)?recreation\.gov/camping/campgrounds/[A-Za-z0-9_-]+(?:[/?#]|$)",
+    re.I,
+)
+
+
+def _direct_recreation_campground_booking(value: object) -> str:
+    url = str(value or "").strip()
+    return url if _RECREATION_CAMPGROUND_BOOKING_RE.match(url) else ""
+
+
+def _explore_place_identity_tokens(place: dict) -> set[str]:
+    values: set[str] = set()
+
+    def add(value: object) -> None:
+        text = str(value or "").strip().lower()
+        if text:
+            values.add(text)
+
+    add(place.get("id"))
+    for value in place.get("source_ids") or []:
+        add(value)
+    for source in place.get("sources") or []:
+        if not isinstance(source, dict):
+            continue
+        source_name = str(source.get("source") or "").strip().lower()
+        source_id = str(source.get("source_id") or "").strip().lower()
+        add(source_id)
+        if source_name and source_id:
+            add(f"{source_name}:{source_id}")
+            add(f"place:{source_name}:{source_id}")
+    return values
+
+
+def _explore_identity_request_tokens(value: object) -> set[str]:
+    clean = str(value or "").strip().lower()
+    if not clean:
+        return set()
+    values = {clean}
+    ridb = re.fullmatch(r"(?:place:)?ridb:([^:]+)", clean, re.I)
+    ridb_id = ridb.group(1).lower() if ridb else (clean if clean.isdigit() else "")
+    if ridb_id:
+        values.update({ridb_id, f"ridb:{ridb_id}", f"place:ridb:{ridb_id}"})
+    return values
+
+
+def _explore_catalog_camp_detail(identifier: str) -> dict | None:
+    """Resolve a campground detail from Trailhead's stored Explore catalog.
+
+    This is intentionally local-only. A reviewed catalog record is complete
+    enough to render the stable campground sheet without waiting for RIDB or
+    another upstream provider. Live context can be loaded by its own modules;
+    it must not gate or replace this identity-bound detail.
+    """
+    requested = unquote(str(identifier or "")).strip()
+    if not requested:
+        return None
+
+    requested_lower = requested.lower()
+    requested_ridb = re.fullmatch(r"(?:place:)?ridb:([^:]+)", requested, re.I)
+    requested_ridb_id = requested_ridb.group(1).lower() if requested_ridb else (
+        requested_lower if requested.isdigit() else ""
+    )
+
+    preview_active = _explore_internal_preview_context.get()
+    public_match: dict | None = None
+    preview_matches: dict[str, dict] = {}
+    for place in _load_explore_catalog().get("places") or []:
+        if not isinstance(place, dict):
+            continue
+        category = str(place.get("category") or (place.get("summary") or {}).get("category") or "").lower()
+        if not re.search(r"\bcamp(?:ground|site|ing)?\b", category):
+            continue
+        tokens = _explore_place_identity_tokens(place)
+        requested_token_match = requested_lower in tokens
+        ridb_alias_match = bool(requested_ridb_id) and any(
+            token == requested_ridb_id
+            or token == f"ridb:{requested_ridb_id}"
+            or token == f"place:ridb:{requested_ridb_id}"
+            for token in tokens
+        )
+        if not requested_token_match and not ridb_alias_match:
+            continue
+
+        # Internal preview replacements intentionally keep the upstream RIDB
+        # identity as provenance while the reviewed agency record becomes the
+        # authoritative campground. The base catalog is ordered before the
+        # sidecar, so returning the first alias silently selects the stale RIDB
+        # record. Preserve the historical first-match rule for every public
+        # request, but allow the authenticated request-local sidecar record to
+        # replace that match. This never changes the public catalog or the
+        # process-global Search V2 index/cache.
+        if not preview_active:
+            public_match = place
+            break
+        if public_match is None:
+            public_match = place
+        if place.get("internal_preview") is True:
+            preview_id = str(place.get("id") or "").strip()
+            if preview_id:
+                preview_matches[preview_id] = place
+
+    # An upstream alias can legitimately be preserved by one reviewed agency
+    # replacement. If more than one preview record claims it, fail closed to
+    # the ordinary first match rather than choosing an identity arbitrarily.
+    matched = next(iter(preview_matches.values())) if len(preview_matches) == 1 else public_match
+    if not matched:
+        return None
+
+    summary = matched.get("summary") if isinstance(matched.get("summary"), dict) else {}
+    profile = matched.get("profile") if isinstance(matched.get("profile"), dict) else {}
+    source_pack = matched.get("source_pack") if isinstance(matched.get("source_pack"), dict) else {}
+    reservations = matched.get("reservations") if isinstance(matched.get("reservations"), dict) else {}
+    provenance = matched.get("provenance") if isinstance(matched.get("provenance"), dict) else {}
+    primary = provenance.get("primary") if isinstance(provenance.get("primary"), dict) else {}
+    raw_sources = [source for source in matched.get("sources") or [] if isinstance(source, dict)]
+    first_source = raw_sources[0] if raw_sources else {}
+    facts = {
+        str(fact.get("key") or "").strip().lower(): str(fact.get("value") or "").strip()
+        for fact in matched.get("planning_facts") or []
+        if isinstance(fact, dict) and str(fact.get("value") or "").strip()
+    }
+    photos: list[dict] = []
+    seen_photo_urls: set[str] = set()
+    for photo in [*(source_pack.get("photos") or []), *(matched.get("media") or [])]:
+        if not isinstance(photo, dict):
+            continue
+        photo_url = str(photo.get("url") or "").strip()
+        if not photo_url or photo_url in seen_photo_urls:
+            continue
+        seen_photo_urls.add(photo_url)
+        photos.append(photo)
+    source_label = str(
+        primary.get("attribution")
+        or first_source.get("attribution")
+        or source_pack.get("primary")
+        or summary.get("source_title")
+        or matched.get("attribution")
+        or "Official source"
+    ).strip()
+    source_name = str(primary.get("source") or first_source.get("source") or "trailhead_catalog").strip().lower()
+    official_url = str(source_pack.get("official_url") or summary.get("source_url") or primary.get("url") or "").strip()
+    booking_url = next((
+        reviewed
+        for candidate in (
+            reservations.get("url"),
+            reservations.get("reservation_url"),
+            source_pack.get("booking_url"),
+        )
+        if (reviewed := _direct_recreation_campground_booking(candidate))
+    ), "")
+    description = str(
+        profile.get("story")
+        or profile.get("summary")
+        or summary.get("short_description")
+        or matched.get("description")
+        or ""
+    ).strip()
+    lat = summary.get("lat")
+    lng = summary.get("lng")
+    site_type = str(
+        source_pack.get("site_type")
+        or facts.get("site_type")
+        or facts.get("place_type")
+        or summary.get("category")
+        or "Campground"
+    ).strip()
+    site_types = [site_type] if site_type else []
+    amenities = [str(value).strip() for value in matched.get("amenities") or [] if str(value).strip()]
+    fee_text = str(
+        facts.get("fee")
+        or facts.get("fees")
+        or _source_pack_first_text(source_pack.get("fees"))
+        or ""
+    ).strip()
+    operating_season = str(
+        matched.get("best_season")
+        or facts.get("operating_season")
+        or facts.get("season")
+        or _source_pack_first_text(source_pack.get("operating_season"))
+        or ""
+    ).strip()
+    phone = str(facts.get("phone") or source_pack.get("phone") or "").strip()
+    return {
+        "id": str(matched.get("id") or requested),
+        "requested_id": requested,
+        "name": str(summary.get("title") or matched.get("name") or "Campground").strip(),
+        "lat": lat,
+        "lng": lng,
+        "land_type": site_type or "Campground",
+        "description": description,
+        "summary": description,
+        "cost": fee_text,
+        "reservable": bool(reservations.get("reservable") or booking_url),
+        "url": booking_url or official_url,
+        "official_url": official_url,
+        "booking_url": booking_url,
+        "access_notes": str(matched.get("access") or facts.get("access") or "").strip(),
+        "best_season": operating_season,
+        "amenities": amenities,
+        "site_types": site_types,
+        "campsites_count": 0,
+        "activities": [str(value).strip() for value in source_pack.get("activities") or [] if str(value).strip()],
+        "tags": [str(value).strip() for value in summary.get("tags") or [] if str(value).strip()],
+        "photos": photos,
+        "photo_url": str((photos[0] if photos else {}).get("url") or ""),
+        "source": source_name,
+        "verified_source": source_label,
+        "source_badge": source_label,
+        "source_freshness": source_label,
+        "last_checked": matched.get("checked_at") or matched.get("updated_at"),
+        "phone": phone,
+        "address": facts.get("address") or "",
+        "planning_facts": list(matched.get("planning_facts") or []),
+        "sources": list(matched.get("sources") or source_pack.get("sources") or []),
+        "provenance": provenance,
+        "catalog_detail": True,
     }
 
 _canonical_explore_index_cache: dict[str, Any] = {"path": "", "mtime": 0.0, "items": [], "generated_at": 0}
@@ -7127,6 +7508,56 @@ def _optional_user(creds: HTTPAuthorizationCredentials | None = Depends(bearer))
         return None
     uid = _decode_token(creds.credentials)
     return get_user_by_id(uid) if uid else None
+
+
+def _explore_internal_preview_enabled() -> bool:
+    return str(os.getenv("TRAILHEAD_EXPLORE_DATA_STAGE", "off")).strip().lower() == "internal"
+
+
+def _explore_internal_preview_authorized(authorization: str) -> bool:
+    scheme, _, token = str(authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        return False
+    user_id = _decode_token(token)
+    user = get_user_by_id(user_id) if user_id else None
+    return bool(user and user.get("is_admin"))
+
+
+def _explore_internal_preview_request_code(path: str, preview_header: str, authorization: str) -> str:
+    """Return a fixed QA code without retaining request or account data."""
+    preview_path = str(path or "")
+    if not preview_path.startswith(("/api/explore/", "/api/campsites/", "/api/search/v2/")):
+        return "not_applicable"
+    if str(preview_header or "").strip().lower() != "internal":
+        return "header_missing"
+    if not _explore_internal_preview_enabled():
+        return "server_stage_off"
+    if not _explore_internal_preview_authorized(authorization):
+        return "admin_required"
+    return "active"
+
+
+@app.middleware("http")
+async def explore_internal_preview_context(request: Request, call_next):
+    """Allow the signed-in admin preview bundle to read reviewed sidecar data.
+
+    The header is intentionally not an authorization credential. It is ignored
+    unless the server stage is internal and the bearer token belongs to an
+    administrator. Everyone else continues to receive the normal catalog.
+    """
+    request_code = _explore_internal_preview_request_code(
+        request.url.path,
+        request.headers.get("X-Trailhead-Explore-Preview", ""),
+        request.headers.get("Authorization", ""),
+    )
+    allowed = request_code == "active"
+    marker = _explore_internal_preview_context.set(allowed)
+    status_marker = _explore_internal_preview_status_context.set(request_code)
+    try:
+        return await call_next(request)
+    finally:
+        _explore_internal_preview_status_context.reset(status_marker)
+        _explore_internal_preview_context.reset(marker)
 
 def _safe_user(u: dict) -> dict:
     safe = {
@@ -10557,6 +10988,27 @@ async def admin_qa_diagnostics(admin: dict = Depends(_require_admin)):
             "ui_system_v2": _product_feature_enabled("UI_SYSTEM_V2_ENABLED", admin),
             "originals": _originals_feature_enabled(admin),
         },
+    }
+
+
+@app.get("/api/explore/qa/preview-status")
+async def explore_internal_preview_diagnostics(admin: dict = Depends(_require_admin)):
+    """Fixed-code evidence for the admin-only Explore preview request path."""
+    request_code = _explore_internal_preview_status_context.get()
+    profiles = _load_explore_internal_preview_profiles() if request_code == "active" else []
+    if request_code != "active":
+        data_code = "unchecked"
+    elif not EXPLORE_INTERNAL_PREVIEW.exists():
+        data_code = "sidecar_missing"
+    elif not profiles:
+        data_code = "sidecar_empty"
+    else:
+        data_code = "ready"
+    return {
+        "schema": "explore_internal_preview_diagnostics_v1",
+        "request_code": request_code,
+        "data_code": data_code,
+        "profile_count": min(len(profiles), 10_000),
     }
 
 class AccountDeletionAuthorizationRequest(BaseModel):
@@ -20338,6 +20790,101 @@ def _authorize_search_v2_request(
     return request.model_copy(update={"route_ref": f"trip:{trip_id}", "bounds": bounds})
 
 
+def _search_v2_internal_preview_profile(result: SearchResultV2) -> dict | None:
+    """Resolve one public Search result to one reviewed request-local profile.
+
+    Search V2's SQLite index and page cache are process-global. Internal review
+    data must therefore be applied after paging and only while the authenticated
+    preview request context is active. Ambiguous aliases fail closed.
+    """
+    if not _explore_internal_preview_context.get():
+        return None
+    lookup_tokens: set[str] = set()
+    for value in (result.result_id, result.canonical_place_id, result.detail_ref):
+        lookup_tokens.update(_explore_identity_request_tokens(value))
+    if not lookup_tokens:
+        return None
+
+    matches: dict[str, dict] = {}
+    for profile in _load_explore_internal_preview_profiles():
+        if not isinstance(profile, dict) or profile.get("internal_preview") is not True:
+            continue
+        summary = profile.get("summary") if isinstance(profile.get("summary"), dict) else {}
+        category = str(profile.get("category") or summary.get("category") or "").lower()
+        if not re.search(r"\bcamp(?:ground|site|ing)?\b", category):
+            continue
+        if not lookup_tokens.intersection(_explore_place_identity_tokens(profile)):
+            continue
+        profile_id = str(profile.get("id") or "").strip()
+        if profile_id:
+            matches[profile_id] = profile
+    return next(iter(matches.values())) if len(matches) == 1 else None
+
+
+def _search_v2_apply_internal_preview_result(result: SearchResultV2) -> SearchResultV2:
+    profile = _search_v2_internal_preview_profile(result)
+    if not profile:
+        return result
+    profile_id = str(profile.get("id") or "").strip()
+    if not profile_id:
+        return result
+
+    summary = profile.get("summary") if isinstance(profile.get("summary"), dict) else {}
+    source_pack = profile.get("source_pack") if isinstance(profile.get("source_pack"), dict) else {}
+    source_label = (
+        _explore_public_source_label(source_pack.get("primary"))
+        or _explore_public_source_label(summary.get("source_title"))
+        or _explore_public_source_label(profile.get("attribution"))
+        or "Official source"
+    )
+    title = str(summary.get("title") or result.title).strip() or result.title
+    coordinates = result.coordinates
+    try:
+        lat = float(summary.get("lat"))
+        lng = float(summary.get("lng"))
+        if math.isfinite(lat) and math.isfinite(lng) and -90 <= lat <= 90 and -180 <= lng <= 180:
+            coordinates = SearchCenterV2(lat=lat, lng=lng)
+    except (TypeError, ValueError):
+        pass
+    provenance = result.provenance.model_copy(update={
+        "provider": "trailhead",
+        "source_label": source_label,
+        "provider_result_id": profile_id,
+        "attribution": source_label,
+        "temporary_use_only": False,
+    })
+    return result.model_copy(update={
+        "result_id": profile_id,
+        "canonical_place_id": profile_id,
+        "title": title,
+        "coordinates": coordinates,
+        "provenance": provenance,
+        "persistence_policy": "canonical",
+        "detail_ref": profile_id,
+    })
+
+
+def _search_v2_apply_internal_preview_page(page: SearchPageV2) -> SearchPageV2:
+    if not _explore_internal_preview_context.get():
+        return page
+    results = [_search_v2_apply_internal_preview_result(result) for result in page.results]
+    return page.model_copy(update={"results": results})
+
+
+def _search_v2_apply_internal_preview_resolve(
+    response: SearchResolveResponseV2,
+) -> SearchResolveResponseV2:
+    if not _explore_internal_preview_context.get():
+        return response
+    return response.model_copy(update={
+        "selected": _search_v2_apply_internal_preview_result(response.selected) if response.selected else None,
+        "alternatives": [
+            _search_v2_apply_internal_preview_result(result)
+            for result in response.alternatives
+        ],
+    })
+
+
 async def _search_v2_page(
     request: SearchRequestV2,
     *,
@@ -20345,9 +20892,10 @@ async def _search_v2_page(
     external_subject: str | None = None,
 ) -> SearchPageV2:
     try:
-        return await _search_v2_service.page(
+        page = await _search_v2_service.page(
             request, mode=mode, external_subject=external_subject,
         )
+        return _search_v2_apply_internal_preview_page(page)
     except SearchCursorError as exc:
         raise HTTPException(400, {
             "code": "invalid_search_cursor", "message": str(exc),
@@ -20477,10 +21025,11 @@ async def api_search_v2_resolve(
             revision=page.revision,
         )
     try:
-        return await _search_v2_service.resolve(
+        response = await _search_v2_service.resolve(
             request,
             external_subject=_search_v2_external_subject(http_request, user),
         )
+        return _search_v2_apply_internal_preview_resolve(response)
     except SearchCursorError as exc:
         raise HTTPException(400, {
             "code": "invalid_search_cursor", "message": str(exc),
@@ -21282,6 +21831,12 @@ async def campsites_search(
 
 async def _load_campsite_detail(facility_id: str, user: dict | None = None) -> dict:
     requested_facility_id = facility_id
+    stored_detail = _explore_catalog_camp_detail(requested_facility_id)
+    if stored_detail:
+        override = get_camp_profile_override(requested_facility_id)
+        if override:
+            stored_detail = {**stored_detail, **override, "admin_edited": True}
+        return stored_detail
     canonical_ridb = re.fullmatch(r"(?:place:)?ridb:([^:]+)", facility_id, re.I)
     if canonical_ridb:
         facility_id = canonical_ridb.group(1)
@@ -33871,7 +34426,7 @@ EXPLORE_VISIBLE_FACETS = (
 EXPLORE_PROMOTED_FILTER_CATEGORIES = {
     "camp": {"campground", "rv_park", "dispersed_camp", "overnight_parking"},
     "trails": {"trail", "trailhead"},
-    "parks": {"park"},
+    "parks": {"park", "forest", "public_land"},
     "water": {"lake", "water"},
     "views": {"viewpoint"},
     "things": {"activity", "historic", "permit_required", "visitor_center"},
@@ -34306,7 +34861,9 @@ def _explore_place_matches_indexed_category(place: dict, category: str) -> bool:
             re.search(r"\b(cabins?|huts?|lodges?|lodging|shelters?|lookouts?|hotels?|inns?)\b", title)
         )
     if normalized == "park":
-        return bool(primary.intersection({"park", "forest", "national_park", "recreation_area"})) or bool(
+        return bool(primary.intersection({
+            "park", "forest", "national_park", "recreation_area", "public_land", "land", "wilderness",
+        })) or bool(
             re.search(r"\b(national|state|provincial|regional)\s+(park|monument|preserve|forest)\b", title)
         )
     if normalized == "fuel":
@@ -34611,7 +35168,7 @@ def _explore_serving_response(
         page = [_clean_explore_public_response_profile(place) for place in page_profiles]
     next_cursor = safe_cursor + safe_limit if safe_cursor + safe_limit < len(places) else None
     category_counts = result["category_counts"]
-    return {
+    response = {
         "schema_version": EXPLORE_SERVING_SCHEMA_VERSION,
         "catalog_schema_version": catalog.get("schema_version", 1),
         "catalog_id": catalog.get("catalog_id", ""),
@@ -34633,6 +35190,9 @@ def _explore_serving_response(
         "category_counts": category_counts,
         "places": page,
     }
+    if isinstance(catalog.get("internal_preview"), dict):
+        response["internal_preview"] = dict(catalog["internal_preview"])
+    return response
 
 @app.get("/api/explore/catalog")
 async def explore_catalog():

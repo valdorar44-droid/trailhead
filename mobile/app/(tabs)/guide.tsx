@@ -127,6 +127,7 @@ import {
   resolveExploreNearbySearchCenter,
   serviceDestinationQueryFromExploreQuery,
 } from '@/lib/exploreNearbyContext';
+import { sourcePackItemCampPin } from '@/lib/exploreSourcePackHandoff';
 import {
   boundedExploreImageUrl,
   exploreImageSource,
@@ -531,11 +532,23 @@ function mergeMatchedExplorePlaces(current: ExplorePlaceProfile[], remotePlaces:
     if (seen.has(place.id)) {
       const index = merged.findIndex(item => item.id === place.id);
       if (index >= 0) {
-        const previousRank = Number((merged[index] as any).matched_explore_rank);
+        const previous = merged[index];
+        const previousRank = Number((previous as any).matched_explore_rank);
         const nextRank = Number((place as any).matched_explore_rank);
+        const preferReviewedPreview = Boolean(place.internal_preview) && !Boolean(previous.internal_preview);
         merged[index] = {
-          ...merged[index],
-          matched_explore_query: (place as any).matched_explore_query || (merged[index] as any).matched_explore_query,
+          ...previous,
+          ...(preferReviewedPreview ? place : {}),
+          summary: preferReviewedPreview
+            ? { ...previous.summary, ...place.summary }
+            : previous.summary,
+          profile: preferReviewedPreview
+            ? { ...(previous.profile ?? {}), ...(place.profile ?? {}) }
+            : previous.profile,
+          source_pack: preferReviewedPreview
+            ? { ...(previous.source_pack ?? {}), ...(place.source_pack ?? {}) }
+            : previous.source_pack,
+          matched_explore_query: (place as any).matched_explore_query || (previous as any).matched_explore_query,
           matched_explore_rank: Number.isFinite(previousRank) && Number.isFinite(nextRank) ? Math.min(previousRank, nextRank) : Number.isFinite(nextRank) ? nextRank : previousRank,
         } as ExplorePlaceProfile;
       }
@@ -1650,6 +1663,7 @@ function exploreIndexItemToProfile(item: ExploreCatalogIndexItem): ExplorePlaceP
   }).filter(source => source.title || source.publisher || source.url);
   return {
     id: item.id,
+    internal_preview: Boolean(item.internal_preview),
     category: item.v3_category || item.category,
     canonical_role: item.canonical_role || '',
     parent_hub_id: item.parent_hub_id || '',
@@ -2192,6 +2206,7 @@ function GuideScreenContent() {
     setExploreAccountLifecycle({ cleaning, epoch });
   }), []);
   const authToken = useStore(st => st.token);
+  const authHydrated = useStore(st => st.authHydrated);
   const activeTrip = useStore(st => st.activeTrip);
   const setActiveTrip = useStore(st => st.setActiveTrip);
   const userLoc = useStore(st => st.userLoc);
@@ -2789,6 +2804,7 @@ function GuideScreenContent() {
   }, [exploreCategory, exploreQuery, guidedTourDraft]);
 
   useEffect(() => {
+    if (!authHydrated) return;
     let cancelled = false;
     const homePageSpec = exploreCatalogPageSpec('', '', 'best');
 
@@ -2841,22 +2857,31 @@ function GuideScreenContent() {
         const firstPlaces = (firstPage.places ?? []).map(exploreIndexItemToProfile);
         const remoteDestinations = guidedDestinationsFromApi(firstPage.guided_destinations ?? firstPage.guided?.destinations);
         if (remoteDestinations.length) setGuidedDestinations(remoteDestinations);
-        setExplorePlaces(current => current.length ? mergeById(current, firstPlaces) : firstPlaces);
+        // The first server page owns ordering. Retain any already-loaded later
+        // pages, but never bury a newly ranked first page behind stale cache.
+        setExplorePlaces(current => mergeById(firstPlaces, current));
         setExploreFacetCounts(exploreFacetCountsFromCatalog(firstPage, firstPlaces));
         const totalCount = Number(firstPage.total_count || firstPage.count || firstPlaces.length);
         const nextCursor = firstPage.next_cursor ?? null;
         updateExploreCatalogPage(homePageSpec.key, { nextCursor, totalCount, loading: false });
-        storage.set(EXPLORE_CACHE_KEY, JSON.stringify({
-          places: firstPlaces,
-          next_cursor: nextCursor,
-          total_count: totalCount,
-          fetched_at: Date.now(),
-        })).catch(() => {});
+        // Internal agency candidates are request-scoped admin review data. Do
+        // not persist them into the ordinary signed-out Explore cache.
+        if (!firstPage.internal_preview?.enabled) {
+          storage.set(EXPLORE_CACHE_KEY, JSON.stringify({
+            places: firstPlaces,
+            next_cursor: nextCursor,
+            total_count: totalCount,
+            fetched_at: Date.now(),
+          })).catch(() => {});
+        }
         setExploreError('');
         setExploreCatalogNotice('');
         setExploreLoading(false);
       };
-      const firstPageRequest = api.getExploreHome({ mode: 'featured', sort: 'best', limit: 48 });
+      const firstPageRequest = api.getExploreHome(
+        { mode: 'featured', sort: 'best', limit: 48 },
+        authToken ?? null,
+      );
       try {
         const firstPage = await withExploreTimeout(firstPageRequest);
         if (cancelled) return;
@@ -2896,7 +2921,7 @@ function GuideScreenContent() {
     return () => {
       cancelled = true;
     };
-  }, [exploreCatalogReloadId, updateExploreCatalogPage]);
+  }, [authHydrated, authToken, exploreCatalogReloadId, updateExploreCatalogPage]);
 
 
 
@@ -3483,7 +3508,10 @@ function GuideScreenContent() {
   const waypoints = useMemo(() => activeTrip?.plan.waypoints.filter(w => w.lat && w.lng) ?? [], [activeTrip?.trip_id, activeTrip?.updated_at]);
   const displayName = useMemo(() => (user?.username || '').trim().split(/\s+/)[0] || '', [user?.username]);
   const enrichedExplorePlaces = useMemo(() => (
-    mergeCuratedExplorePlaces(explorePlaces).map(place => exploreTrailAreasById[place.id] ?? place)
+    mergeCuratedExplorePlaces(explorePlaces).map(place => {
+      const trailArea = exploreTrailAreasById[place.id];
+      return trailArea ? mergeDynamicTrailArea(place, trailArea) : place;
+    })
   ), [explorePlaces, exploreTrailAreasById]);
   const filteredLiveExplorePlaces = useMemo(
     () => liveExplorePlaces.filter(place => livePlaceMatchesCategory(place, exploreCategory)),
@@ -4496,6 +4524,13 @@ function GuideScreenContent() {
       if (item.url) Linking.openURL(item.url);
       return;
     }
+    const camp = sourcePackItemCampPin(item);
+    if (camp) {
+      setPendingMapSelection({ kind: 'camp', camp });
+      suspendSelectedExploreForMap();
+      router.push('/(tabs)/map');
+      return;
+    }
     const sourceKey = String(item.source_id || item.title || item.kind || 'detail')
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
@@ -4806,7 +4841,8 @@ function GuideScreenContent() {
 
   function showExploreSheet(place: ExplorePlaceProfile, initialTab: ExploreDetailTab) {
     setProfileReadMode(initialTab);
-    const local = exploreTrailAreasById[place.id] ?? place;
+    const trailArea = exploreTrailAreasById[place.id];
+    const local = trailArea ? mergeDynamicTrailArea(place, trailArea) : place;
     setSelectedExploreNavigation(createExploreDetailNavigationState(local.id, initialTab));
     const model = adaptExploreHubSheet({
       id: local.id,
@@ -4868,13 +4904,13 @@ function GuideScreenContent() {
       const detail = await api.getExplorePlace(place.id);
       if (!exploreSheetRequestIsCurrent(sheetRequest) || selectedExploreRef.current?.id !== place.id) return;
       setExplorePlaces(prev => prev.map(item => item.id === detail.id ? detail : item));
-      const hydrated = exploreTrailAreasById[detail.id] ?? detail;
+      const trailArea = exploreTrailAreasById[detail.id];
+      const hydrated = trailArea ? mergeDynamicTrailArea(detail, trailArea) : detail;
       const retainedTrailArea = hasExploreTrailCards(local) && !hasExploreTrailCards(hydrated)
         ? mergeDynamicTrailArea(hydrated, local)
         : hydrated;
       setSelectedExplore(current => {
         if (current?.id !== place.id) return current;
-        if (exploreTrailAreasById[detail.id]) return exploreTrailAreasById[detail.id];
         return retainedTrailArea;
       });
       setProfileReadMode(initialTab);

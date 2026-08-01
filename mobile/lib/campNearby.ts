@@ -74,6 +74,7 @@ export function normalizeCampDetailArrays(detail: CampsiteDetail): CampsiteDetai
     activities: Array.isArray(detail.activities) ? detail.activities : [],
     campsites: Array.isArray(detail.campsites) ? detail.campsites : [],
     reviews: Array.isArray((detail as { reviews?: unknown[] }).reviews) ? ((detail as { reviews?: unknown[] }).reviews as CampsiteDetail['reviews']) : [],
+    provider_notices: Array.isArray(detail.provider_notices) ? detail.provider_notices : [],
     things_to_do: usefulRail(detail.things_to_do),
     things_to_see: usefulRail(detail.things_to_see),
     visitor_centers: Array.isArray(detail.visitor_centers) ? detail.visitor_centers : [],

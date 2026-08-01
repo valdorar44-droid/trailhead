@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import html
+import ipaddress
 import json
 import re
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 from scripts.explore_sources.base.aliases import apply_aliases
 from scripts.explore_sources.base.cards import build_card
@@ -18,6 +20,85 @@ from scripts.explore_sources.base.source_policy import assert_source_allowed
 NPS_LICENSE = "National Park Service public data"
 NPS_ATTRIBUTION = "National Park Service"
 NPS_CHILD_ITEM_LIMIT = 48
+NPS_PUBLIC_HOSTS = frozenset({"nps.gov", "www.nps.gov"})
+UNSAFE_HOST_SUFFIXES = (".local", ".internal", ".localhost", ".cms.nps.doi.net")
+URL_IN_TEXT_RE = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
+MOJIBAKE_MARKER_RE = re.compile(r"[ÂÃâÊÉÅÌ]|ï¿½|�")
+
+
+def _public_web_host(host: str) -> bool:
+    normalized = host.strip().rstrip(".").casefold()
+    if (
+        not normalized
+        or normalized in {"localhost", "cms.nps.doi.net"}
+        or normalized.endswith(UNSAFE_HOST_SUFFIXES)
+    ):
+        return False
+    try:
+        return ipaddress.ip_address(normalized).is_global
+    except ValueError:
+        return "." in normalized
+
+
+def nps_absolute_url(value: Any) -> str:
+    """Return a safe public URL, upgrading HTTP only for official NPS hosts."""
+    raw = html.unescape(compact_text(value))
+    if not raw:
+        return ""
+    if raw.startswith("/") and not raw.startswith("//"):
+        raw = urljoin("https://www.nps.gov/", raw)
+    parsed = urlsplit(raw)
+    host = (parsed.hostname or "").strip().rstrip(".").casefold()
+    if not parsed.scheme and not parsed.netloc:
+        parsed = urlsplit(urljoin("https://www.nps.gov/", raw))
+        host = (parsed.hostname or "").strip().rstrip(".").casefold()
+    if parsed.scheme.casefold() not in {"http", "https"} or not _public_web_host(host):
+        return ""
+    scheme = parsed.scheme.casefold()
+    if scheme == "http":
+        if host not in NPS_PUBLIC_HOSTS:
+            return ""
+        scheme = "https"
+    return urlunsplit((scheme, parsed.netloc, parsed.path, parsed.query, parsed.fragment))
+
+
+def repair_mojibake(value: Any) -> str:
+    """Repair common UTF-8-as-Windows-1252 damage without altering clean text."""
+    text = str(value or "")
+    if not text or not MOJIBAKE_MARKER_RE.search(text):
+        return text
+    best = text
+    best_score = len(MOJIBAKE_MARKER_RE.findall(text))
+    for encoding in ("cp1252", "latin1"):
+        try:
+            candidate = text.encode(encoding).decode("utf-8")
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            continue
+        score = len(MOJIBAKE_MARKER_RE.findall(candidate))
+        if score < best_score:
+            best, best_score = candidate, score
+    return best
+
+
+def safe_reader_text(value: Any) -> str:
+    """Keep reader copy while removing links that cannot be safely promoted."""
+    text = compact_text(repair_mojibake(value))
+    if not text:
+        return ""
+
+    def replace(match: re.Match[str]) -> str:
+        token = match.group(0)
+        trailing = ""
+        while token and token[-1] in ".,;:!?)]:":
+            trailing = token[-1] + trailing
+            token = token[:-1]
+        safe = nps_absolute_url(token)
+        return f"{safe}{trailing}" if safe else trailing.lstrip(")]")
+
+    cleaned = URL_IN_TEXT_RE.sub(replace, text)
+    cleaned = re.sub(r"\s+([,.;:!?])", r"\1", cleaned)
+    cleaned = re.sub(r"\s+\b(?:at|online at|visit)\s*([.!?])", r"\1", cleaned, flags=re.IGNORECASE)
+    return compact_text(cleaned)
 
 
 def load_parks(path: str | Path) -> list[dict[str, Any]]:
@@ -83,7 +164,7 @@ def source_record_from_park(park: dict[str, Any], now: int) -> SourceRecord | No
     lng = as_float(park.get("longitude") or park.get("lng"))
     if not source_id or not name or lat is None or lng is None:
         return None
-    url = compact_text(park.get("url") or f"https://www.nps.gov/{source_id}/index.htm")
+    url = nps_absolute_url(park.get("url") or f"https://www.nps.gov/{source_id}/index.htm")
     return SourceRecord(
         id=f"nps:{source_id}",
         source="nps",
@@ -96,13 +177,18 @@ def source_record_from_park(park: dict[str, Any], now: int) -> SourceRecord | No
         raw=park,
         name=name,
         category="park",
-        subcategory=compact_text(park.get("designation") or "national_park"),
+        subcategory=nps_designation(park),
         lat=lat,
         lng=lng,
         geometry={"type": "Point", "coordinates": [lng, lat]},
         properties=park,
         confidence=0.95,
     )
+
+
+def nps_designation(park: dict[str, Any]) -> str:
+    """Return a reader-facing designation without exposing an internal enum."""
+    return compact_text(park.get("designation")) or "Park"
 
 
 def place_from_record(record: SourceRecord, related: dict[str, list[dict[str, Any]]] | None = None) -> ExplorePlaceV3:
@@ -145,7 +231,7 @@ def summary_from_park(park: dict[str, Any], name: str) -> str:
     desc = compact_text(park.get("description"))
     if desc:
         return sentence_safe_preview(desc, 560)
-    return f"{name} is managed by the National Park Service. Check current access, fees, permits, alerts, road status, and weather before building a route around it."
+    return ""
 
 
 def activity_names(park: dict[str, Any]) -> list[str]:
@@ -227,7 +313,7 @@ def source_pack_from_park(park: dict[str, Any], record: SourceRecord, related: d
         "fees": fee_lines(park),
         "passes": fee_pass_lines(related.get("feespasses", [])),
         "operating_hours": operating_hours(park),
-        "alerts": alert_items(related.get("alerts", [])),
+        "alerts": alert_items(related.get("alerts", []), park_code=record.source_id),
         "source_note": "Official National Park Service data",
         "extract": compact_text(park.get("description")) or summary_from_park(park, record.name),
         "license": NPS_LICENSE,
@@ -235,7 +321,7 @@ def source_pack_from_park(park: dict[str, Any], record: SourceRecord, related: d
 
 
 def add_media(media: list[dict[str, Any]], item: dict[str, Any], fallback_title: str = "") -> None:
-    url = compact_text(item.get("url"))
+    url = nps_absolute_url(item.get("url"))
     if not url:
         return
     photo = {
@@ -255,18 +341,18 @@ def source_pack_item(item: dict[str, Any], kind: str, park_code: str) -> dict[st
     return {
         "kind": kind,
         "source": "nps",
-        "source_id": compact_text(item.get("id") or item.get("url") or slugify(title)),
+        "source_id": compact_text(item.get("id") or child_url(item, park_code) or slugify(title)),
         "title": title,
         "description": child_description(item),
         "url": child_url(item, park_code),
         "lat": lat,
         "lng": lng,
-        "image_url": image.get("url") or "",
+        "image_url": nps_absolute_url(image.get("url")),
         "image_caption": compact_text(image.get("caption") or image.get("title") or title),
         "image_credit": compact_text(image.get("credit") or NPS_ATTRIBUTION),
         "image_license": NPS_LICENSE,
         "source_label": NPS_ATTRIBUTION,
-        **child_detail_fields(item),
+        **child_detail_fields(item, park_code=park_code),
     }
 
 
@@ -279,13 +365,13 @@ def event_item(item: dict[str, Any], park_code: str) -> dict[str, Any]:
     return {
         "kind": "event",
         "source": "nps",
-        "source_id": compact_text(item.get("id") or item.get("url") or slugify(title)),
+        "source_id": compact_text(item.get("id") or child_url(item, park_code) or slugify(title)),
         "title": title,
         "description": child_description(item),
         "url": child_url(item, park_code),
         "lat": lat,
         "lng": lng,
-        "image_url": image.get("url") or "",
+        "image_url": nps_absolute_url(image.get("url")),
         "image_caption": compact_text(image.get("caption") or image.get("title") or title),
         "image_credit": compact_text(image.get("credit") or NPS_ATTRIBUTION),
         "image_license": NPS_LICENSE,
@@ -300,9 +386,9 @@ def event_item(item: dict[str, Any], park_code: str) -> dict[str, Any]:
     }
 
 
-def child_detail_fields(item: dict[str, Any]) -> dict[str, Any]:
+def child_detail_fields(item: dict[str, Any], park_code: str = "") -> dict[str, Any]:
     fields: dict[str, Any] = {}
-    directions = compact_text(item.get("directionsInfo") or item.get("directions") or item.get("directionsUrl"))
+    directions = safe_reader_text(item.get("directionsInfo") or item.get("directions") or item.get("directionsUrl"))
     if directions:
         fields["directions"] = directions
     hours = operating_hours(item)
@@ -313,7 +399,9 @@ def child_detail_fields(item: dict[str, Any]) -> dict[str, Any]:
         values = sorted_unique([compact_text(value.get("name") if isinstance(value, dict) else value) for value in amenities])
         if values:
             fields["amenities"] = values
-    reservation_url = compact_text(item.get("reservationUrl") or item.get("reservationURL") or item.get("bookingUrl"))
+    reservation_url = nps_absolute_url(
+        item.get("reservationUrl") or item.get("reservationURL") or item.get("bookingUrl")
+    )
     if reservation_url:
         fields["reservation_url"] = reservation_url
     address = address_line(item)
@@ -340,7 +428,7 @@ def plain_text(value: Any) -> str:
     text = re.sub(r"<br\s*/?>", " ", text, flags=re.IGNORECASE)
     text = re.sub(r"</p\s*>", " ", text, flags=re.IGNORECASE)
     text = re.sub(r"<[^>]+>", " ", text)
-    return compact_text(text)
+    return safe_reader_text(text)
 
 
 def sentence_safe_preview(value: Any, max_chars: int) -> str:
@@ -390,7 +478,7 @@ def address_line(item: dict[str, Any]) -> str:
 
 
 def child_url(item: dict[str, Any], park_code: str) -> str:
-    url = compact_text(item.get("url"))
+    url = nps_absolute_url(item.get("url"))
     if url:
         return url
     if park_code:
@@ -471,11 +559,17 @@ def fee_pass_lines(items: list[dict[str, Any]]) -> list[str]:
     for item in items:
         if not isinstance(item, dict):
             continue
-        title = compact_text(item.get("title") or item.get("name"))
-        cost = compact_text(item.get("cost") or item.get("price"))
-        line = f"{title}: {format_cost(cost)}" if title and cost else title
-        if line and line not in out:
-            out.append(line)
+        candidates = [item]
+        for key in ("passes", "relatedMultiSitePasses"):
+            nested = item.get(key)
+            if isinstance(nested, list):
+                candidates.extend(value for value in nested if isinstance(value, dict))
+        for candidate in candidates:
+            title = compact_text(candidate.get("title") or candidate.get("name") or candidate.get("category"))
+            cost = compact_text(candidate.get("cost") or candidate.get("price"))
+            line = f"{title}: {format_cost(cost)}" if title and cost else title
+            if line and line not in out:
+                out.append(line)
     return out[:12]
 
 
@@ -494,7 +588,7 @@ def operating_hours(park: dict[str, Any]) -> str:
         if not isinstance(item, dict):
             continue
         name = compact_text(item.get("name"))
-        description = compact_text(item.get("description"))
+        description = safe_reader_text(item.get("description"))
         if description and name:
             return f"{name}: {description}"[:360]
         if description:
@@ -506,7 +600,7 @@ def operating_hours(park: dict[str, Any]) -> str:
     return ""
 
 
-def alert_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def alert_items(items: list[dict[str, Any]], park_code: str = "") -> list[dict[str, Any]]:
     out = []
     for item in items:
         if not isinstance(item, dict):
@@ -514,10 +608,11 @@ def alert_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         title = compact_text(item.get("title"))
         if not title:
             continue
+        url = nps_absolute_url(item.get("url"))
         out.append({
             "title": title,
             "category": compact_text(item.get("category")),
-            "url": compact_text(item.get("url")),
+            "url": url or (f"https://www.nps.gov/{park_code}/index.htm" if park_code else ""),
         })
     return out[:8]
 

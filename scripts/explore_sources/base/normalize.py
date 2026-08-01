@@ -53,6 +53,10 @@ def representative_point(geometry: dict[str, Any] | None) -> tuple[float | None,
     elif gtype == "Polygon":
         ring = (coords or [[]])[0]
         points = [p for p in (coord_pair(item) for item in ring or []) if p]
+    elif gtype == "MultiPolygon":
+        for polygon in coords or []:
+            ring = (polygon or [[]])[0]
+            points.extend([p for p in (coord_pair(item) for item in ring or []) if p])
     if not points:
         return None, None
     mid = points[len(points) // 2]

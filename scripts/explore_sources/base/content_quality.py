@@ -183,8 +183,20 @@ def sanitize_source_pack_item(item: dict[str, Any], *, parent: dict[str, Any]) -
     category = clean.get("category") or clean.get("kind") or parent_summary.get("category") or parent.get("category")
     group = parent_summary.get("explore_group") or parent.get("category") or ""
     region = parent_summary.get("region") or parent_summary.get("state") or parent.get("region") or parent.get("admin") or parent.get("country") or ""
-    description = clean_description(clean.get("description") or clean.get("summary") or "", title=title, category=category, group=group, region=region)
-    clean["description"] = description
+    source_description = compact_text(clean.get("description") or clean.get("summary") or "")
+    if source_description and not is_weak_description(
+        source_description,
+        title=title,
+        category=category,
+        group=group,
+    ):
+        clean["description"] = source_description
+    else:
+        # A destination module is useful with an official title, location and
+        # source even when the agency does not publish editorial copy.  Do not
+        # turn that gap into generic consumer guidance.
+        clean.pop("description", None)
+        clean.pop("summary", None)
 
     parent_lat = parent_summary.get("lat", parent.get("lat"))
     parent_lng = parent_summary.get("lng", parent.get("lng"))

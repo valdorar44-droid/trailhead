@@ -14,7 +14,7 @@ import { useRootNavigationState, useRouter } from 'expo-router';
 import * as Application from 'expo-application';
 import Constants from 'expo-constants';
 import * as Updates from 'expo-updates';
-import { api } from '@/lib/api';
+import { api, type ExploreInternalPreviewDiagnosticsV1 } from '@/lib/api';
 import { useTheme } from '@/lib/design';
 import { getOfflinePlacePackDiagnosticsInventory } from '@/lib/offlinePlacePacks';
 import { createExpoOfflineV2Persistence } from '@/lib/offlineV2/expoAdapters';
@@ -75,6 +75,7 @@ export default function TelemetryQaScreen() {
     surfaceAllowed,
   });
   const [snapshot, setSnapshot] = useState<QaDiagnosticsSnapshotV1 | null>(null);
+  const [explorePreview, setExplorePreview] = useState<ExploreInternalPreviewDiagnosticsV1 | null>(null);
   const [snapshotState, setSnapshotState] = useState<'loading' | 'ready' | 'unavailable'>('loading');
   const [probeStatus, setProbeStatus] = useState<ProbeStatus>('idle');
   const [nativeCrashAcknowledgement, setNativeCrashAcknowledgement] = useState('');
@@ -108,11 +109,13 @@ export default function TelemetryQaScreen() {
       const persistence = createExpoOfflineV2Persistence(ownerScope);
       const [
         serverDiagnostics,
+        explorePreviewDiagnostics,
         installations,
         offlinePlacePacksV1,
         activeTripStateFileBytes,
       ] = await Promise.all([
         api.adminQaDiagnostics(),
+        api.exploreInternalPreviewDiagnostics(),
         persistence.repository.listCurrentInstallations(),
         getOfflinePlacePackDiagnosticsInventory(),
         getActiveTripStateFileBytes(),
@@ -136,6 +139,7 @@ export default function TelemetryQaScreen() {
       const tripRepositoryInstrumentation = getTripRepositoryQaInstrumentation(
         tripRepositoryScopeKey(tripRepositorySnapshot.ownerScope),
       );
+      setExplorePreview(explorePreviewDiagnostics);
       setSnapshot(buildQaDiagnosticsSnapshotV1({
         release: releaseIdentity,
         accountRole: 'admin',
@@ -185,6 +189,7 @@ export default function TelemetryQaScreen() {
       setSnapshotState('ready');
     } catch {
       setSnapshot(null);
+      setExplorePreview(null);
       setSnapshotState('unavailable');
     }
   }, [access, activeTrip, originals.manifest, originals.session, releaseIdentity, user?.id]);
@@ -375,6 +380,19 @@ export default function TelemetryQaScreen() {
               <Text testID="qa.search-race.explicit-selection" style={[styles.body, { color: C.text }]}>Explicit selection confirmed</Text>
             </View>
           ) : null}
+        </View>
+
+        <View style={[styles.card, { backgroundColor: C.s1, borderColor: C.border }]}>
+          <Text style={[styles.cardTitle, { color: C.text }]}>Explore data preview</Text>
+          <Text testID="qa.explore-preview.request-code" style={[styles.body, { color: C.text }]}>
+            Request: {explorePreview?.request_code || 'unavailable'}
+          </Text>
+          <Text testID="qa.explore-preview.data-code" style={[styles.body, { color: C.text2 }]}>
+            Data: {explorePreview?.data_code || 'unavailable'}
+          </Text>
+          <Text testID="qa.explore-preview.profile-count" style={[styles.body, { color: C.text2 }]}>
+            Profiles: {explorePreview?.profile_count ?? 0}
+          </Text>
         </View>
 
         <View style={[styles.card, { backgroundColor: C.s1, borderColor: C.border }]}>

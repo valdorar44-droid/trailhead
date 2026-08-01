@@ -246,7 +246,7 @@ def build_planning_facts(place: dict[str, Any], checked_at: int) -> list[dict[st
             add("elevation", "Elevation", f"{elevation_match.group(1)} ft", "description")
 
     reservations = place.get("reservations") if isinstance(place.get("reservations"), dict) else {}
-    reservation_url = reservations.get("reservation_url")
+    reservation_url = reservations.get("url") or reservations.get("reservation_url")
     if "reservable" in reservations:
         add(
             "reservations",
@@ -256,12 +256,29 @@ def build_planning_facts(place: dict[str, Any], checked_at: int) -> list[dict[st
             url=reservation_url,
         )
     elif URL_RE.match(compact_text(reservation_url)):
-        add("reservations", "Reservations", "Booking link", "reservations.reservation_url", url=reservation_url)
+        add("reservations", "Reservations", "Booking link", "reservations.url", url=reservation_url)
 
     pack = place.get("source_pack") if isinstance(place.get("source_pack"), dict) else {}
+    add("site_type", "Site type", pack.get("site_type"), "source_pack.site_type")
+    try:
+        people_capacity = int(pack.get("people_capacity") or 0)
+    except (TypeError, ValueError):
+        people_capacity = 0
+    if people_capacity > 0:
+        add(
+            "people_capacity",
+            "People capacity",
+            f"{people_capacity:,} people",
+            "source_pack.people_capacity",
+        )
+    add("water", "Water", pack.get("water"), "source_pack.water")
+    add("restrooms", "Restrooms", pack.get("restrooms"), "source_pack.restrooms")
+    add("phone", "Phone", pack.get("phone"), "source_pack.phone")
     for key, label, pack_key in (
         ("fees", "Fees", "fees"),
-        ("hours", "Hours", "operating_hours"),
+        ("operating_season", "Operating season", "operating_season"),
+        ("operating_hours", "Hours", "operating_hours"),
+        ("rules", "Rules", "rules"),
     ):
         raw = pack.get(pack_key)
         values = raw if isinstance(raw, list) else [raw]

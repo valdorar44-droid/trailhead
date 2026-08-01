@@ -32,6 +32,13 @@ const FIXED_ERROR_CODES = new Set([
   'qa_js_nonfatal',
   'qa_native_crash',
   'qa_performance',
+  'map_camp_selection_received',
+  'map_camp_camera_handoff',
+  'map_camp_sheet_identity',
+  'map_camp_peek_render',
+  'map_camp_detail_commit',
+  'map_camp_full_render',
+  'map_camp_unknown_phase',
 ]);
 
 const STATIC_TRANSACTION_NAMES = new Set([

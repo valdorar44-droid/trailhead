@@ -2,10 +2,12 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  devilsGardenStoredDetailV1,
   kirchFlatSourceItemV1,
   kirchFlatStoredDetailV1,
   portalDispersedSourceItemV1,
 } from '../__fixtures__/kirchFlatCampground';
+import { normalizeCampDetailArrays } from '../campNearby';
 import { campgroundSheetPresentationV1 } from '../campSheetPresentation';
 import type { CampsiteDetail, CampsitePin } from '../api';
 
@@ -76,4 +78,13 @@ test('malformed provider arrays normalize to safe empty lists without changing i
   assert.equal(presentation.photos[0]?.url, kirchFlatSourceItemV1.photo_url);
   assert.deepEqual(presentation.activities, []);
   assert.deepEqual(presentation.siteTypes, ['Group Campground', 'Campground']);
+});
+
+test('Devils Garden null provider notices normalize before the full sheet renders', () => {
+  const normalized = normalizeCampDetailArrays(devilsGardenStoredDetailV1);
+
+  assert.deepEqual(normalized.provider_notices, []);
+  assert.deepEqual(normalized.campsites, []);
+  assert.deepEqual(normalized.reviews, []);
+  assert.doesNotThrow(() => normalized.provider_notices?.slice(0, 3));
 });

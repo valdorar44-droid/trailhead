@@ -65,3 +65,27 @@ export const portalDispersedSourceItemV1: CampsitePin = {
   url: 'https://www.fs.usda.gov/recarea/sierra/recreation/camping-cabins',
   ada: false,
 };
+
+export const devilsGardenStoredDetailV1 = {
+  id: 'place:ridb:234059',
+  name: 'Devils Garden Campground',
+  lat: 38.7769444,
+  lng: -109.5891667,
+  land_type: 'Campground',
+  description: 'Devils Garden Campground is located in Arches National Park.',
+  tags: ['Campground'],
+  photos: [{
+    url: 'https://cdn.recreation.gov/public/2019/10/03/14/33/234059_71942c9a-c262-4a4d-b664-46c1e2a47e48_1440.webp',
+  }],
+  amenities: [],
+  site_types: ['Campground'],
+  activities: ['Campground'],
+  campsites: null,
+  reviews: null,
+  provider_notices: null,
+  source: 'ridb',
+  source_badge: 'Recreation.gov',
+  verified_source: 'Recreation.gov',
+  reservable: true,
+  ada: false,
+} as unknown as CampsiteDetail;

@@ -189,7 +189,7 @@ class OfficialPlaceEnrichmentTests(unittest.TestCase):
 
 
 class OfficialPlaceEndpointTests(unittest.IsolatedAsyncioTestCase):
-    async def test_canonical_ridb_camp_detail_preserves_the_full_facility_payload(self):
+    async def test_unreviewed_ridb_camp_detail_preserves_the_full_facility_payload(self):
         facility = {
             "id": "234059",
             "name": "Devils Garden Campground",
@@ -199,12 +199,13 @@ class OfficialPlaceEndpointTests(unittest.IsolatedAsyncioTestCase):
         }
         get_detail = AsyncMock(return_value=facility)
         with (
+            patch.object(server, "_explore_catalog_camp_detail", return_value=None),
             patch.object(server, "get_facility_detail", new=get_detail),
             patch.object(server, "get_camp_profile_override", return_value=None),
         ):
-            result = await server.campsite_detail("place:ridb:234059", user=None)
+            result = await server.campsite_detail("place:ridb:999999", user=None)
 
-        get_detail.assert_awaited_once_with("234059")
+        get_detail.assert_awaited_once_with("999999")
         self.assertEqual(result["site_types"], facility["site_types"])
         self.assertEqual(result["campsites"], facility["campsites"])
         self.assertEqual(result["amenities"], facility["amenities"])

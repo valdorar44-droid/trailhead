@@ -1171,6 +1171,32 @@ Verify `git diff --cached --name-only` before every commit.
 - Do not submit Android, publish production OTA, promote candidates, expose Community routes, overwrite protected files, or change public stages without separate authorization.
 - Do not stage `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, or unrelated worktree changes.
 
+## Internal Explore compact-card closeout - 2026-07-31 19:03 CDT
+
+- Branch: `feat/trailhead-1.0.10-overhaul`; implementation HEAD `539342ff083b8c03f5df434fb9f5d657e05fc9ea`. Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; App Store copy SHA-256 remains `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+- Railway deployment `961af141-c031-4ecf-9262-acf7e8ccdd54` remains healthy. The internal sidecar SHA-256 is `f408cdae5aacf1220fc83bf510d12169daccb3ce54170d36eb38b46cdc057977` and contains eight reviewed profiles. Public Explore data and the protected serving index remain unchanged.
+- The backend compact response was verified locally under the internal request context: `place:usfs:9006` returns the reviewed Sierra National Forest summary, region `CA`, and `internal_preview: true`. The mobile preview remains authenticated and reports `Request: active`, `Data: ready`, and `Profiles: 8`.
+- One evidenced mobile merge defect was corrected: when a reviewed internal profile arrives for an already-present stable ID, `mergeMatchedExplorePlaces` now refreshes its display fields while retaining existing hydrated modules and the best matched rank. The same-title curated dedupe also continues to prefer reviewed internal records.
+- Focused verification passed: seven internal-preview mobile contract tests and full mobile TypeScript. No native project, dependency, permission, runtime, public API, production channel, or store state changed.
+- Android-only preview update `019fba9c-b38c-742f-a85c-2cb062b97fc5`, group `a7c45085-19d8-437d-b24f-df2be5d9c578`, runtime `native-1.0.10-android.7`, is bound to exact source `539342ff083b8c03f5df434fb9f5d657e05fc9ea`. The paired iOS preview remains group `8d8b21f6-fb43-4414-a261-7b93e7f83c68`, runtime `native-1.0.10-ios.6`; no iOS preview was replaced for a failed Android assertion. Sentry source maps uploaded for the Android update.
+- The Samsung `SM_A326U1`, binary `1.0.10` build `69`, applied the exact Android update. QA identity, request state, and sidecar state passed. Moab BLM rendered the reviewed agency summary and attribution.
+- One deterministic internal-preview P1 remains: before opening Sierra detail, the compact `Parks & Land` card still renders the older generic catalog sentence and legacy area label. Opening the detail hydrates the reviewed source-backed profile correctly. The single evidence-backed correction did not clear the compact-card assertion, so this packet stops here under the no-loop rule. Public users are unaffected because the sidecar is internal/admin-only and no candidate data was promoted.
+- Evidence: `C:\Users\User\AppData\Local\Temp\qa-539342ff-top.png` SHA-256 `eba94114ae5e715ebd3b1c0244023fb71695f604fbf962d920a222d5a7b2ac90`; `C:\Users\User\AppData\Local\Temp\qa-539342ff-mid.png` SHA-256 `04040f519a2bb101a0db7c2c2ee2ed5185fc0915362db732478b288531072293`; `C:\Users\User\AppData\Local\Temp\explore-539342ff-visible.png` SHA-256 `87ada548c65e5f715f7b6f0bfb9e6d9ae9d21a9bfd5dd95d4670e8b8fde3fd48`; `C:\Users\User\AppData\Local\Temp\explore-539342ff-visible.xml` SHA-256 `e73ffc1b14c1ddf953230420ee84969539bf0ebb39aaa8f9f7b150049b7cce9f`.
+- The iOS 1.0.11 build 62 was already uploaded successfully to App Store Connect through EAS submission `ea91a45b-e545-4492-89b6-7b98e6bbfcfa`; it was not rebuilt or resubmitted in this packet. Android production submission, production AAB, and Android production OTA remain entirely user-owned and untouched.
+- Task-owned Railway, EAS, Expo, Metro, Gradle, Maestro, test, publisher, and enrichment processes: none.
+
+### Exact next action
+
+1. Commit and push this checkpoint only, leaving every protected and unrelated worktree file unstaged.
+2. Treat the compact Sierra card as a bounded internal-preview P1. The next diagnostic must inspect the final rendered-card selector/input identity rather than alter auth, backend sidecar merge, or public data.
+3. Continue non-promoting data-depth work only where it does not hide this defect: audit the next untouched NPS coverage batch and agency module gaps under the isolated candidate directory.
+4. Do not promote the combined serving candidate until the compact-card identity path is resolved and the bounded Android sample passes.
+
+### Do not repeat
+
+- Do not repeat the authenticated request diagnostic, backend sidecar merge proof, reviewed same-title priority fix, current Android OTA, NPS batches 1-8, agency cache build, or broad Explore/Trails/Map crawls.
+- Do not submit Android, publish an Android production OTA/build, rebuild/resubmit iOS, overwrite the protected serving index, promote candidate data, expose Community routes, or change public stages.
+
 ## Combined NPS and agency serving-candidate gate - 2026-07-31 18:10 CDT
 
 - Branch: `feat/trailhead-1.0.10-overhaul`; implementation HEAD `a6430b0848f24e5053d09790fbcb3f6722fc08cb`. Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; App Store copy SHA-256 remains `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.

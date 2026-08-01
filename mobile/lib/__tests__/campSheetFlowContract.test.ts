@@ -14,6 +14,7 @@ test('campground selection opens an identity-stable peek before the full sheet',
   assert.match(mapSource, /campgroundSheetPresentationV1\(selectedCamp, campDetail/);
   assert.match(mapSource, /initialStage="peek"/);
   assert.match(mapSource, /expandedLoading=\{loadingDetail && !campDetail\}/);
+  assert.match(mapSource, /placeSheetCoordinator\.current\?\.kind === 'camp' && placeSheetCoordinator\.presentation !== 'peek' \? \(\s*<PlaceSheetShell/);
   assert.match(mapSource, /CAMP_DETAIL_REVEAL_TIMEOUT_MS = 6000/);
   assert.match(mapSource, /campDetailMatchesSelection\(camp, result\.value\)/);
   assert.match(mapSource, /nativeMapRef\.current\?\.flyTo\?\.\(point\.lat, point\.lng, camera\.zoom, point\.name\)/);

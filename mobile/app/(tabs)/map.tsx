@@ -29928,6 +29928,7 @@ function MapScreen() {
           scrollRestoreKey={campSheetScrollRestore.key}
           onScrollYChange={scrollY => { campSheetScrollYRef.current = scrollY; }}
         >
+          {placeSheetCoordinator.current?.kind === 'camp' && placeSheetCoordinator.presentation !== 'peek' ? (
           <PlaceSheetShell model={selectedCampSheetModel!} fill={false}>
             {/* Photo / placeholder */}
             {(() => {
@@ -30430,6 +30431,7 @@ function MapScreen() {
               </View>
               </View>
           </PlaceSheetShell>
+          ) : null}
         </TrailheadSnapSheet>
       )}
 

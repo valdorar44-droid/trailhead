@@ -1,4 +1,4 @@
-import { authHeaders, type ProductFeatures } from '../api';
+import { explorePreviewAuthHeaders, type ProductFeatures } from '../api';
 import { TRAILHEAD_API_BASE } from '../apiBase';
 import { HttpSearchV2Client, type SearchV2FeatureGate } from './client';
 
@@ -12,7 +12,6 @@ export function createAppSearchV2Client(isEnabled: SearchV2FeatureGate): HttpSea
   return new HttpSearchV2Client({
     baseUrl: TRAILHEAD_API_BASE,
     isEnabled,
-    getHeaders: authHeaders,
+    getHeaders: explorePreviewAuthHeaders,
   });
 }
-

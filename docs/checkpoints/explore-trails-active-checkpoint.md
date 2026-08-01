@@ -1514,3 +1514,32 @@ Verify `git diff --cached --name-only` before every commit.
 - Do not repeat the Camp Peek fee correction, earlier canonical camp crash work, broad campground/Explore/Map crawls, Memory, Layers, Trails, NPS fetch/research, Originals, Android Auto, or store work.
 - Do not weaken database-first rendering, fabricate fee/source facts, overwrite the protected serving index, publish production, or change public stages while this P1 remains.
 - Do not stage `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, Valhalla work, Android helper-script changes, or unrelated files.
+
+## b08 canonical campground alias implementation checkpoint - 2026-08-01 16:53 CDT
+
+- Branch: `feat/trailhead-1.0.10-overhaul`; pre-change HEAD `33d81ffff1b2f5634d22d8f639ae62731ad18de8`. Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; App Store copy SHA-256 remains `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+- Baseline backend remains source `d79ecf121e2abeeffd93b2738492e3b01fd03bb9`, Railway deployment `841d4e87-78f6-418e-ada3-3910db4e5762`, terminal `SUCCESS`. Baseline Android preview remains update `019fbed7-830d-7364-95b8-db68d32131b8`, group `a9105c31-7eec-4344-aef2-0fb43fe4064a`, runtime `native-1.0.10-android.7`, exact mobile source `3309b29ce913de18f3930f853f17dfe38ce18b55`.
+- Root cause is proven: Search V2 returned the public RIDB canonical identity `place:ridb:10182463`; campground detail then selected that earlier public record before the appended reviewed b08 USFS alias. No presentation or live-provider fallback caused this P1.
+- Implemented request-local authenticated preview remapping for Search V2 suggest, results, and resolve. It changes only the returned model after the shared service/cache page is built; the process-global Search index, page cache, public order, and public catalog remain unchanged.
+- Internal campground detail now preserves the historical first public match, selects one unique reviewed alias, and fails closed to public data when multiple reviewed records claim the same upstream identity. Public detail exits on its first match and does not scan the remaining catalog.
+- Search remapping derives identity, source, title, and coordinates directly from the bounded reviewed profile rather than scanning/deep-copying the full catalog per result. Request-local Explore merges deep-copy both cached input graphs before applying legacy wrapper metadata, preventing future sidecars from mutating shared public or preview caches.
+- Mobile Search sends the internal-preview header only when an Authorization header exists and the build is explicitly internal/preview. Search controllers are recreated and stale visible state is suppressed when the account-storage epoch changes, so admin-only rows cannot survive an account transition.
+- Exact fixtures now match accepted b08 data. Kirch Flat is Forest Service-led, non-reservable, has no approved photo, uses the official Forest Service URL, and carries the reviewed fee, capacity, water, restroom, phone, and season facts. Mammoth Pool covers the complementary source-backed reservable path and retains its Recreation.gov booking URL while Forest Service remains primary.
+- Focused verification passed: 95 backend tests plus 17 subtests across internal preview, Search V2, campground operational depth, and canonical serving; campground brief/presentation; Search V2 mobile contracts; functional preview-header rules; account-scope cache isolation contract; privacy controls; copy audit; TypeScript; and scoped whitespace checks.
+- Intentional implementation files: `dashboard/server.py`, `tests/test_explore_internal_preview.py`, `tests/test_search_v2.py`, `mobile/lib/api.ts`, `mobile/lib/explorePreviewAuth.ts`, `mobile/lib/searchV2/appClient.ts`, `mobile/lib/searchV2/react.ts`, `mobile/lib/__fixtures__/kirchFlatCampground.ts`, `mobile/lib/__tests__/campSheetPresentation.test.ts`, and `mobile/lib/__tests__/exploreInternalPreview.test.ts`. This checkpoint is the only additional intentional file.
+- Open P0/P1: the original P1 remains open only until the committed backend and Android preview pass the exact Kirch Flat and Mammoth Pool device assertions. No iOS publication, production OTA, catalog promotion, NPS refetch, or public-stage change has occurred.
+- Task-owned Railway, EAS, Expo, Metro, Gradle, Maestro, pytest, screen-recording, or NPS-enrichment processes: none. The connected ADB server remains available for the bounded Android delta.
+
+### Exact next action
+
+1. Commit only the named implementation/checkpoint files and push the branch.
+2. Deploy that immutable SHA from a clean detached worktree. Require Railway terminal `SUCCESS`, public health `status=ok`, and the unchanged authenticated-admin-plus-header boundary.
+3. Publish one Android preview OTA from the same clean SHA with Sentry source maps. Verify source, runtime, group, and update identity.
+4. Run Search -> Kirch Flat Peek -> Full once, then Mammoth Pool once. Require stable identity, Forest Service primary source, exact reviewed facts, no fabricated media, and the valid Mammoth booking action.
+5. If Android passes, publish the identical SHA to iOS and perform the shared spot check. Otherwise record the one deterministic remaining assertion and stop.
+
+### Do not repeat
+
+- Do not repeat broad campground, Explore, Map, Search, NPS, Trails, Memory, Layers, Originals, Android Auto, or store crawls.
+- Do not refetch b08/NPS data, mutate the serving index, fabricate media or fees, reintroduce a live initial-detail dependency, or promote any public stage.
+- Do not stage `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, Valhalla files, Android helper scripts, or unrelated dirty worktree files.

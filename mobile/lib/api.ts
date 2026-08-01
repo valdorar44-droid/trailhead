@@ -24,6 +24,7 @@ import {
   resolveLegacyTripSaveToken,
 } from './legacyTripSaveContext';
 import { ridbFacilityIdFromCanonicalCampId } from './campDetailIdentity';
+import { withExplorePreviewAuthHeaderV1 } from './explorePreviewAuth';
 import type {
   OwnedTrailRouteCreateV1,
   OwnedTrailRouteUpdateV1,
@@ -125,6 +126,11 @@ async function getToken(): Promise<string | null> {
 export async function authHeaders(): Promise<Record<string, string>> {
   const token = await getToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+export async function explorePreviewAuthHeaders(): Promise<Record<string, string>> {
+  const headers = await authHeaders();
+  return withExplorePreviewAuthHeaderV1(headers, EXPLORE_INTERNAL_DATA_PREVIEW);
 }
 
 export class PaywallError extends Error {

@@ -1,6 +1,6 @@
 """Trailhead FastAPI server. All API routes."""
 from __future__ import annotations
-import asyncio, os, sys, json, uuid, secrets, xml.etree.ElementTree as ET, time, hashlib, hmac, re, sqlite3, smtplib, html, base64, binascii, math, heapq, threading, functools, logging, contextvars, ipaddress, io, wave, gzip
+import asyncio, os, sys, json, uuid, secrets, xml.etree.ElementTree as ET, time, hashlib, hmac, re, sqlite3, smtplib, html, base64, binascii, math, heapq, threading, functools, logging, contextvars, ipaddress, io, wave, gzip, copy
 from concurrent.futures import Future as ConcurrentFuture, ThreadPoolExecutor
 from datetime import datetime, timezone
 from email.message import EmailMessage
@@ -4143,10 +4143,14 @@ def _load_explore_internal_preview_profiles() -> list[dict]:
 
 
 def _merge_explore_internal_preview(catalog: dict) -> dict:
-    preview_profiles = _load_explore_internal_preview_profiles()
+    # Both catalogs are process-cached. Legacy-wrapper enrichment mutates
+    # records in place, so request-local preview work must own its complete
+    # object graph before applying it. A shallow list copy can otherwise let a
+    # future sidecar alter the public catalog or the cached preview profiles.
+    preview_profiles = copy.deepcopy(_load_explore_internal_preview_profiles())
     if not preview_profiles:
         return catalog
-    places = list(catalog.get("places") or [])
+    places = copy.deepcopy(list(catalog.get("places") or []))
     id_to_index = {
         str(place.get("id") or ""): index
         for index, place in enumerate(places)
@@ -5567,6 +5571,41 @@ def _direct_recreation_campground_booking(value: object) -> str:
     return url if _RECREATION_CAMPGROUND_BOOKING_RE.match(url) else ""
 
 
+def _explore_place_identity_tokens(place: dict) -> set[str]:
+    values: set[str] = set()
+
+    def add(value: object) -> None:
+        text = str(value or "").strip().lower()
+        if text:
+            values.add(text)
+
+    add(place.get("id"))
+    for value in place.get("source_ids") or []:
+        add(value)
+    for source in place.get("sources") or []:
+        if not isinstance(source, dict):
+            continue
+        source_name = str(source.get("source") or "").strip().lower()
+        source_id = str(source.get("source_id") or "").strip().lower()
+        add(source_id)
+        if source_name and source_id:
+            add(f"{source_name}:{source_id}")
+            add(f"place:{source_name}:{source_id}")
+    return values
+
+
+def _explore_identity_request_tokens(value: object) -> set[str]:
+    clean = str(value or "").strip().lower()
+    if not clean:
+        return set()
+    values = {clean}
+    ridb = re.fullmatch(r"(?:place:)?ridb:([^:]+)", clean, re.I)
+    ridb_id = ridb.group(1).lower() if ridb else (clean if clean.isdigit() else "")
+    if ridb_id:
+        values.update({ridb_id, f"ridb:{ridb_id}", f"place:ridb:{ridb_id}"})
+    return values
+
+
 def _explore_catalog_camp_detail(identifier: str) -> dict | None:
     """Resolve a campground detail from Trailhead's stored Explore catalog.
 
@@ -5585,47 +5624,48 @@ def _explore_catalog_camp_detail(identifier: str) -> dict | None:
         requested_lower if requested.isdigit() else ""
     )
 
-    def identity_tokens(place: dict) -> set[str]:
-        values: set[str] = set()
-
-        def add(value: object) -> None:
-            text = str(value or "").strip().lower()
-            if text:
-                values.add(text)
-
-        add(place.get("id"))
-        for value in place.get("source_ids") or []:
-            add(value)
-        for source in place.get("sources") or []:
-            if not isinstance(source, dict):
-                continue
-            source_name = str(source.get("source") or "").strip().lower()
-            source_id = str(source.get("source_id") or "").strip().lower()
-            add(source_id)
-            if source_name and source_id:
-                add(f"{source_name}:{source_id}")
-                add(f"place:{source_name}:{source_id}")
-        return values
-
-    matched: dict | None = None
+    preview_active = _explore_internal_preview_context.get()
+    public_match: dict | None = None
+    preview_matches: dict[str, dict] = {}
     for place in _load_explore_catalog().get("places") or []:
         if not isinstance(place, dict):
             continue
         category = str(place.get("category") or (place.get("summary") or {}).get("category") or "").lower()
         if not re.search(r"\bcamp(?:ground|site|ing)?\b", category):
             continue
-        tokens = identity_tokens(place)
-        if requested_lower in tokens:
-            matched = place
-            break
-        if requested_ridb_id and any(
+        tokens = _explore_place_identity_tokens(place)
+        requested_token_match = requested_lower in tokens
+        ridb_alias_match = bool(requested_ridb_id) and any(
             token == requested_ridb_id
             or token == f"ridb:{requested_ridb_id}"
             or token == f"place:ridb:{requested_ridb_id}"
             for token in tokens
-        ):
-            matched = place
+        )
+        if not requested_token_match and not ridb_alias_match:
+            continue
+
+        # Internal preview replacements intentionally keep the upstream RIDB
+        # identity as provenance while the reviewed agency record becomes the
+        # authoritative campground. The base catalog is ordered before the
+        # sidecar, so returning the first alias silently selects the stale RIDB
+        # record. Preserve the historical first-match rule for every public
+        # request, but allow the authenticated request-local sidecar record to
+        # replace that match. This never changes the public catalog or the
+        # process-global Search V2 index/cache.
+        if not preview_active:
+            public_match = place
             break
+        if public_match is None:
+            public_match = place
+        if place.get("internal_preview") is True:
+            preview_id = str(place.get("id") or "").strip()
+            if preview_id:
+                preview_matches[preview_id] = place
+
+    # An upstream alias can legitimately be preserved by one reviewed agency
+    # replacement. If more than one preview record claims it, fail closed to
+    # the ordinary first match rather than choosing an identity arbitrarily.
+    matched = next(iter(preview_matches.values())) if len(preview_matches) == 1 else public_match
     if not matched:
         return None
 
@@ -7486,7 +7526,7 @@ def _explore_internal_preview_authorized(authorization: str) -> bool:
 def _explore_internal_preview_request_code(path: str, preview_header: str, authorization: str) -> str:
     """Return a fixed QA code without retaining request or account data."""
     preview_path = str(path or "")
-    if not preview_path.startswith(("/api/explore/", "/api/campsites/")):
+    if not preview_path.startswith(("/api/explore/", "/api/campsites/", "/api/search/v2/")):
         return "not_applicable"
     if str(preview_header or "").strip().lower() != "internal":
         return "header_missing"
@@ -20750,6 +20790,101 @@ def _authorize_search_v2_request(
     return request.model_copy(update={"route_ref": f"trip:{trip_id}", "bounds": bounds})
 
 
+def _search_v2_internal_preview_profile(result: SearchResultV2) -> dict | None:
+    """Resolve one public Search result to one reviewed request-local profile.
+
+    Search V2's SQLite index and page cache are process-global. Internal review
+    data must therefore be applied after paging and only while the authenticated
+    preview request context is active. Ambiguous aliases fail closed.
+    """
+    if not _explore_internal_preview_context.get():
+        return None
+    lookup_tokens: set[str] = set()
+    for value in (result.result_id, result.canonical_place_id, result.detail_ref):
+        lookup_tokens.update(_explore_identity_request_tokens(value))
+    if not lookup_tokens:
+        return None
+
+    matches: dict[str, dict] = {}
+    for profile in _load_explore_internal_preview_profiles():
+        if not isinstance(profile, dict) or profile.get("internal_preview") is not True:
+            continue
+        summary = profile.get("summary") if isinstance(profile.get("summary"), dict) else {}
+        category = str(profile.get("category") or summary.get("category") or "").lower()
+        if not re.search(r"\bcamp(?:ground|site|ing)?\b", category):
+            continue
+        if not lookup_tokens.intersection(_explore_place_identity_tokens(profile)):
+            continue
+        profile_id = str(profile.get("id") or "").strip()
+        if profile_id:
+            matches[profile_id] = profile
+    return next(iter(matches.values())) if len(matches) == 1 else None
+
+
+def _search_v2_apply_internal_preview_result(result: SearchResultV2) -> SearchResultV2:
+    profile = _search_v2_internal_preview_profile(result)
+    if not profile:
+        return result
+    profile_id = str(profile.get("id") or "").strip()
+    if not profile_id:
+        return result
+
+    summary = profile.get("summary") if isinstance(profile.get("summary"), dict) else {}
+    source_pack = profile.get("source_pack") if isinstance(profile.get("source_pack"), dict) else {}
+    source_label = (
+        _explore_public_source_label(source_pack.get("primary"))
+        or _explore_public_source_label(summary.get("source_title"))
+        or _explore_public_source_label(profile.get("attribution"))
+        or "Official source"
+    )
+    title = str(summary.get("title") or result.title).strip() or result.title
+    coordinates = result.coordinates
+    try:
+        lat = float(summary.get("lat"))
+        lng = float(summary.get("lng"))
+        if math.isfinite(lat) and math.isfinite(lng) and -90 <= lat <= 90 and -180 <= lng <= 180:
+            coordinates = SearchCenterV2(lat=lat, lng=lng)
+    except (TypeError, ValueError):
+        pass
+    provenance = result.provenance.model_copy(update={
+        "provider": "trailhead",
+        "source_label": source_label,
+        "provider_result_id": profile_id,
+        "attribution": source_label,
+        "temporary_use_only": False,
+    })
+    return result.model_copy(update={
+        "result_id": profile_id,
+        "canonical_place_id": profile_id,
+        "title": title,
+        "coordinates": coordinates,
+        "provenance": provenance,
+        "persistence_policy": "canonical",
+        "detail_ref": profile_id,
+    })
+
+
+def _search_v2_apply_internal_preview_page(page: SearchPageV2) -> SearchPageV2:
+    if not _explore_internal_preview_context.get():
+        return page
+    results = [_search_v2_apply_internal_preview_result(result) for result in page.results]
+    return page.model_copy(update={"results": results})
+
+
+def _search_v2_apply_internal_preview_resolve(
+    response: SearchResolveResponseV2,
+) -> SearchResolveResponseV2:
+    if not _explore_internal_preview_context.get():
+        return response
+    return response.model_copy(update={
+        "selected": _search_v2_apply_internal_preview_result(response.selected) if response.selected else None,
+        "alternatives": [
+            _search_v2_apply_internal_preview_result(result)
+            for result in response.alternatives
+        ],
+    })
+
+
 async def _search_v2_page(
     request: SearchRequestV2,
     *,
@@ -20757,9 +20892,10 @@ async def _search_v2_page(
     external_subject: str | None = None,
 ) -> SearchPageV2:
     try:
-        return await _search_v2_service.page(
+        page = await _search_v2_service.page(
             request, mode=mode, external_subject=external_subject,
         )
+        return _search_v2_apply_internal_preview_page(page)
     except SearchCursorError as exc:
         raise HTTPException(400, {
             "code": "invalid_search_cursor", "message": str(exc),
@@ -20889,10 +21025,11 @@ async def api_search_v2_resolve(
             revision=page.revision,
         )
     try:
-        return await _search_v2_service.resolve(
+        response = await _search_v2_service.resolve(
             request,
             external_subject=_search_v2_external_subject(http_request, user),
         )
+        return _search_v2_apply_internal_preview_resolve(response)
     except SearchCursorError as exc:
         raise HTTPException(400, {
             "code": "invalid_search_cursor", "message": str(exc),

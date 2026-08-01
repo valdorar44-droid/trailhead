@@ -2078,6 +2078,89 @@ class SearchV2ApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["results"][0]["result_id"], "destination:moab-utah")
 
+    def test_internal_admin_search_endpoints_remap_reviewed_camp_request_locally(self):
+        ridb_id = "place:ridb:10182463"
+        reviewed_id = "place:usfs:usfs-sierra-sites-83a6b34b-07f9-40a0-a98b-68de9b7b81a8"
+        reviewed = server._explore_v3_place_to_profile({
+            "id": reviewed_id,
+            "name": "Kirch Flat Group Campground",
+            "category": "campground",
+            "lat": 36.87922085429918,
+            "lng": -119.14895040173735,
+            "sources": [
+                {
+                    "source": "usfs",
+                    "source_id": "usfs-sierra-sites:{83A6B34B-07F9-40A0-A98B-68DE9B7B81A8}",
+                    "attribution": "USDA Forest Service",
+                },
+                {
+                    "source": "ridb",
+                    "source_id": "10182463",
+                    "attribution": "Recreation.gov",
+                },
+            ],
+            "verified": True,
+        })
+        reviewed["internal_preview"] = True
+        service = SearchV2Service(lambda: ([
+            _document(
+                ridb_id,
+                "Kirch Flat Group Campground",
+                kind="campground",
+                categories=("campground",),
+                lat=36.87921576,
+                lng=-119.1490899,
+            ),
+        ], "kirch-public-v1"))
+        headers = {
+            "Authorization": "Bearer internal-admin",
+            "X-Trailhead-Explore-Preview": "internal",
+        }
+        params = {
+            "q": "Kirch Flat",
+            "intent": "camp",
+            "include_external": "false",
+        }
+
+        with (
+            patch.dict(os.environ, {"TRAILHEAD_SEARCH_V2_ENABLED": "1"}),
+            patch.object(server, "_search_v2_service", service),
+            patch.object(server, "_load_explore_internal_preview_profiles", return_value=[reviewed]),
+            patch.object(server, "_explore_internal_preview_enabled", return_value=True),
+            patch.object(server, "_explore_internal_preview_authorized", return_value=False),
+        ):
+            ordinary = self.client.get("/api/search/v2/results", params=params, headers=headers)
+
+        with (
+            patch.dict(os.environ, {"TRAILHEAD_SEARCH_V2_ENABLED": "1"}),
+            patch.object(server, "_search_v2_service", service),
+            patch.object(server, "_load_explore_internal_preview_profiles", return_value=[reviewed]),
+            patch.object(server, "_explore_internal_preview_enabled", return_value=True),
+            patch.object(server, "_explore_internal_preview_authorized", return_value=True),
+        ):
+            suggested = self.client.get("/api/search/v2/suggest", params=params, headers=headers)
+            results = self.client.get("/api/search/v2/results", params=params, headers=headers)
+            resolved = self.client.post("/api/search/v2/resolve", headers=headers, json={
+                "query": "Kirch Flat",
+                "intent": "camp",
+                "include_external": False,
+                "selected_result_id": reviewed_id,
+                "selected_detail_ref": reviewed_id,
+            })
+
+        self.assertEqual(ordinary.status_code, 200)
+        self.assertEqual(ordinary.json()["results"][0]["result_id"], ridb_id)
+        for response in (suggested, results):
+            self.assertEqual(response.status_code, 200)
+            item = response.json()["results"][0]
+            self.assertEqual(item["result_id"], reviewed_id)
+            self.assertEqual(item["canonical_place_id"], reviewed_id)
+            self.assertEqual(item["detail_ref"], reviewed_id)
+            self.assertEqual(item["provenance"]["source_label"], "US Forest Service")
+        self.assertEqual(resolved.status_code, 200)
+        self.assertEqual(resolved.json()["status"], "resolved")
+        self.assertEqual(resolved.json()["selected"]["result_id"], reviewed_id)
+
     def test_routes_validate_bounds_and_return_contract(self):
         with (
             patch.dict(os.environ, {"TRAILHEAD_SEARCH_V2_ENABLED": "1"}),

@@ -4,8 +4,17 @@ import { dirname, resolve } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { mergeCuratedExplorePlaces } from '../../components/explore/curatedExplorePlaces';
+import { withExplorePreviewAuthHeaderV1 } from '../explorePreviewAuth';
 
 const apiSource = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../api.ts'), 'utf8');
+const searchAppClientSource = readFileSync(
+  resolve(dirname(fileURLToPath(import.meta.url)), '../searchV2/appClient.ts'),
+  'utf8',
+);
+const searchReactSource = readFileSync(
+  resolve(dirname(fileURLToPath(import.meta.url)), '../searchV2/react.ts'),
+  'utf8',
+);
 const guideSource = readFileSync(
   resolve(dirname(fileURLToPath(import.meta.url)), '../../app/(tabs)/guide.tsx'),
   'utf8',
@@ -22,17 +31,36 @@ test('internal Explore data header is build-scoped and authenticated', () => {
   assert.match(apiSource, /path\.startsWith\('\/api\/explore\/'\)/);
   assert.match(apiSource, /path\.startsWith\('\/api\/campsites\/'\)/);
   assert.match(apiSource, /X-Trailhead-Explore-Preview'\] = 'internal'/);
+  assert.match(apiSource, /export async function explorePreviewAuthHeaders/);
+  assert.match(searchAppClientSource, /getHeaders: explorePreviewAuthHeaders/);
 });
 
 test('ordinary API requests do not receive the Explore preview header', () => {
-  const guardedAssignment = apiSource.match(
-    /if \(token && EXPLORE_INTERNAL_DATA_PREVIEW[\s\S]+?X-Trailhead-Explore-Preview'\] = 'internal';[\s\S]+?\}/,
+  const requestGuard = apiSource.match(
+    /if \(token && EXPLORE_INTERNAL_DATA_PREVIEW && usesExplorePreviewCatalog\) \{[\s\S]+?X-Trailhead-Explore-Preview'\] = 'internal';[\s\S]+?\}/,
   );
-  assert.ok(guardedAssignment);
-  assert.doesNotMatch(
-    apiSource.slice(guardedAssignment.index! + guardedAssignment[0].length),
-    /X-Trailhead-Explore-Preview'\] = 'internal'/,
+  assert.ok(requestGuard);
+  assert.match(apiSource, /withExplorePreviewAuthHeaderV1\(headers, EXPLORE_INTERNAL_DATA_PREVIEW\)/);
+  assert.deepEqual(withExplorePreviewAuthHeaderV1({}, true), {});
+  assert.deepEqual(
+    withExplorePreviewAuthHeaderV1({ Authorization: 'Bearer test' }, false),
+    { Authorization: 'Bearer test' },
   );
+  assert.deepEqual(
+    withExplorePreviewAuthHeaderV1({ Authorization: 'Bearer test' }, true),
+    {
+      Authorization: 'Bearer test',
+      'X-Trailhead-Explore-Preview': 'internal',
+    },
+  );
+});
+
+test('Search drops request-local preview rows when the account storage scope changes', () => {
+  assert.match(searchReactSource, /accountStorage\.subscribe/);
+  assert.match(searchReactSource, /new SearchV2SessionController/);
+  assert.match(searchReactSource, /\[accountEpoch\]/);
+  assert.match(searchReactSource, /snapshot\.controller === controller/);
+  assert.match(searchReactSource, /controller\.dispose\(\)/);
 });
 
 test('Explore waits for auth and sends the hydrated token on its first page', () => {

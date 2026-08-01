@@ -7,6 +7,7 @@ import {
   type SearchV2SessionState,
 } from './session';
 import { normalizeSearchV2Query } from './cache';
+import { accountStorage } from '../storage';
 import {
   nextFrozenSearchCenterStateV2,
   type FrozenSearchCenterStateV2,
@@ -40,19 +41,37 @@ export function useSearchV2Session({
 }: UseSearchV2SessionOptions) {
   const enabledRef = useRef(enabled);
   const offlineProviderRef = useRef(offlineProvider);
+  const [accountEpoch, setAccountEpoch] = useState(() => accountStorage.epoch());
   enabledRef.current = enabled;
   offlineProviderRef.current = offlineProvider;
+
+  useEffect(() => accountStorage.subscribe((_cleaning, epoch) => {
+    setAccountEpoch(epoch);
+  }), []);
 
   const controller = useMemo(() => new SearchV2SessionController({
     client: createAppSearchV2Client(() => enabledRef.current),
     context,
     debounceMs,
     offlineProvider: request => offlineProviderRef.current?.(request) ?? [],
-  }), []);
-  const [state, setState] = useState<SearchV2SessionState>(() => controller.getState());
+  }), [accountEpoch]);
+  const [snapshot, setSnapshot] = useState<{
+    controller: SearchV2SessionController;
+    state: SearchV2SessionState;
+  }>(() => ({ controller, state: controller.getState() }));
+  const state = snapshot.controller === controller ? snapshot.state : controller.getState();
   const contextKey = stableContextKey(context);
 
-  useEffect(() => controller.subscribe(setState), [controller]);
+  useEffect(() => {
+    setSnapshot({ controller, state: controller.getState() });
+    const unsubscribe = controller.subscribe(nextState => {
+      setSnapshot({ controller, state: nextState });
+    });
+    return () => {
+      unsubscribe();
+      controller.dispose();
+    };
+  }, [controller]);
   useEffect(() => {
     if (!enabled || !active) {
       controller.pause();

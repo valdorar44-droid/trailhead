@@ -22,30 +22,31 @@ test('exact Kirch Flat source item and stored detail produce one stable presenta
   assert.equal(peek.title, 'Kirch Flat Group Campground');
   assert.equal(peek.sourceLabel, 'US Forest Service');
   assert.equal(peek.siteType, 'Group Campground');
-  assert.equal(peek.inventory, 'Reservable');
+  assert.equal(peek.inventory, 'Not listed');
   assert.equal(peek.fee, 'Not listed');
-  assert.equal(peek.photos.length, 1);
-  assert.equal(peek.bookingUrl, kirchFlatSourceItemV1.booking_url);
-  assert.equal(peek.primaryLinkUrl, kirchFlatSourceItemV1.booking_url);
+  assert.equal(peek.photos.length, 0);
+  assert.equal(peek.bookingUrl, '');
+  assert.equal(peek.primaryLinkUrl, kirchFlatSourceItemV1.official_url);
 
   assert.equal(full.title, peek.title);
   assert.equal(full.sourceLabel, peek.sourceLabel);
-  assert.equal(full.photos.length, 1);
+  assert.equal(full.fee, kirchFlatStoredDetailV1.cost);
+  assert.equal(full.photos.length, 0);
   assert.equal(full.summary, kirchFlatSourceItemV1.description);
   assert.ok(full.features.includes('Toilets'));
-  assert.ok(full.features.includes('Reservable'));
-  assert.equal(full.bookingUrl, kirchFlatStoredDetailV1.booking_url);
-  assert.equal(full.primaryLinkUrl, kirchFlatStoredDetailV1.booking_url);
+  assert.doesNotMatch(full.features.join(' '), /Reservable/);
+  assert.equal(full.bookingUrl, '');
+  assert.equal(full.primaryLinkUrl, kirchFlatStoredDetailV1.official_url);
 });
 
 test('a stored campground fee replaces the Peek placeholder without repeating reservability', () => {
   const full = campgroundSheetPresentationV1(kirchFlatSourceItemV1, {
     ...kirchFlatStoredDetailV1,
-    cost: 'Single Site: $10 per night. Group Site: $100 per night',
+    cost: 'Updated official fee: $125 per night',
   });
 
-  assert.equal(full.inventory, 'Reservable');
-  assert.equal(full.fee, 'Single Site: $10 per night. Group Site: $100 per night');
+  assert.equal(full.inventory, 'Not listed');
+  assert.equal(full.fee, 'Updated official fee: $125 per night');
   assert.doesNotMatch(full.fee, /Reservable/);
 });
 
@@ -89,8 +90,7 @@ test('malformed provider arrays normalize to safe empty lists without changing i
   const presentation = campgroundSheetPresentationV1(pin, malformed);
   assert.equal(presentation.title, 'Kirch Flat Group Campground');
   assert.equal(presentation.sourceLabel, 'US Forest Service');
-  assert.equal(presentation.photos.length, 1);
-  assert.equal(presentation.photos[0]?.url, kirchFlatSourceItemV1.photo_url);
+  assert.equal(presentation.photos.length, 0);
   assert.deepEqual(presentation.activities, []);
   assert.deepEqual(presentation.siteTypes, ['Group Campground', 'Campground']);
 });

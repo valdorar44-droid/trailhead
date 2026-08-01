@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import os
 import tempfile
@@ -111,6 +112,41 @@ class ExploreInternalPreviewTests(unittest.TestCase):
         self.assertTrue(place["promoted_serving"])
         self.assertTrue(place["internal_preview"])
 
+    def test_request_local_merge_cannot_mutate_cached_catalog_or_preview_profiles(self):
+        os.environ["TRAILHEAD_EXPLORE_DATA_STAGE"] = "internal"
+        base = {
+            "catalog_id": "public",
+            "places": [{
+                "id": "place:nps:parent",
+                "summary": {"title": "Parent Park"},
+                "source_pack": {},
+                "search_blob": "public baseline",
+            }],
+        }
+        preview = server._explore_v3_place_to_profile(
+            preview_place("place:nps:child", "Child Place", "Reviewed child description."),
+        )
+        preview["internal_preview"] = True
+        base_before = copy.deepcopy(base)
+        preview_before = copy.deepcopy(preview)
+
+        def mutate_request_owned_records(places: list[dict]) -> list[dict]:
+            places[0]["search_blob"] = "request-local wrapper text"
+            places[-1]["summary"]["title"] = "Request-local child title"
+            return places
+
+        with patch.object(server, "_load_explore_internal_preview_profiles", return_value=[preview]), patch.object(
+            server,
+            "_apply_explore_legacy_wrapper_metadata",
+            side_effect=mutate_request_owned_records,
+        ):
+            merged = server._merge_explore_internal_preview(base)
+
+        self.assertEqual(base, base_before)
+        self.assertEqual(preview, preview_before)
+        self.assertEqual(merged["places"][0]["search_blob"], "request-local wrapper text")
+        self.assertEqual(merged["places"][-1]["summary"]["title"], "Request-local child title")
+
     def test_internal_proof_destination_is_reachable_before_public_catalog(self):
         os.environ["TRAILHEAD_EXPLORE_DATA_STAGE"] = "internal"
         base = {
@@ -177,6 +213,10 @@ class ExploreInternalPreviewTests(unittest.TestCase):
             )
             self.assertEqual(
                 server._explore_internal_preview_request_code("/api/campsites/123/detail", "internal", "Bearer admin"),
+                "active",
+            )
+            self.assertEqual(
+                server._explore_internal_preview_request_code("/api/search/v2/results", "internal", "Bearer admin"),
                 "active",
             )
 
@@ -251,6 +291,342 @@ class ExploreInternalPreviewTests(unittest.TestCase):
         self.assertEqual(detail["photo_url"], "https://cdn.recreation.gov/camp.webp")
         ridb_detail.assert_not_awaited()
         live_context.assert_not_awaited()
+
+    def test_reviewed_camp_alias_outranks_earlier_ridb_record_in_internal_preview(self):
+        official_fee = (
+            "Single Site: $10 per night. $20 per night starting in 2026. "
+            "Group Site: $100 per night"
+        )
+        ridb_record = server._explore_v3_place_to_profile({
+            "id": "place:ridb:10182463",
+            "name": "Kirch Flat Group Campground",
+            "category": "campground",
+            "lat": 36.87922085429918,
+            "lng": -119.14895040173735,
+            "sources": [{
+                "source": "ridb",
+                "source_id": "10182463",
+                "url": "https://www.recreation.gov/camping/campgrounds/10182463",
+                "attribution": "Recreation.gov",
+            }],
+            "verified": True,
+        })
+        reviewed_replacement = server._explore_v3_place_to_profile({
+            "id": "place:usfs:usfs-sierra-sites-83a6b34b-07f9-40a0-a98b-68de9b7b81a8",
+            "name": "Kirch Flat Group Campground",
+            "category": "campground",
+            "lat": 36.87922085429918,
+            "lng": -119.14895040173735,
+            "description": "A reviewed Forest Service campground on the Kings River.",
+            "sources": [
+                {
+                    "source": "usfs",
+                    "source_id": "usfs-sierra-sites-kirch-flat",
+                    "url": "https://www.fs.usda.gov/recarea/sierra/recarea/?recid=45570",
+                    "attribution": "USDA Forest Service",
+                },
+                {
+                    "source": "ridb",
+                    "source_id": "10182463",
+                    "url": "https://www.recreation.gov/camping/campgrounds/10182463",
+                    "attribution": "Recreation.gov",
+                },
+            ],
+            "source_pack": {
+                "site_type": "Group Campground",
+                "people_capacity": 50,
+                "fees": [official_fee],
+                "operating_season": ["All year"],
+                "water": "No water is available",
+                "restrooms": "Vault toilet(s)",
+                "official_url": "https://www.fs.usda.gov/recarea/sierra/recarea/?recid=45570",
+                "phone": "(559) 855-5355",
+            },
+            "planning_facts": [{"key": "fees", "label": "Fees", "value": official_fee}],
+            "verified": True,
+        })
+        reviewed_replacement["internal_preview"] = True
+        reviewed_replacement["planning_facts"] = [
+            {"key": "fees", "label": "Fees", "value": official_fee},
+        ]
+
+        marker = server._explore_internal_preview_context.set(True)
+        try:
+            with patch.object(
+                server,
+                "_load_explore_catalog",
+                return_value={"places": [ridb_record, reviewed_replacement]},
+            ):
+                detail = server._explore_catalog_camp_detail("place:ridb:10182463")
+                numeric_detail = server._explore_catalog_camp_detail("10182463")
+        finally:
+            server._explore_internal_preview_context.reset(marker)
+
+        self.assertEqual(detail["id"], "place:usfs:usfs-sierra-sites-83a6b34b-07f9-40a0-a98b-68de9b7b81a8")
+        self.assertEqual(detail["requested_id"], "place:ridb:10182463")
+        self.assertEqual(detail["verified_source"], "USDA Forest Service")
+        self.assertEqual(detail["cost"], official_fee)
+        self.assertFalse(detail["reservable"])
+        self.assertEqual(detail["booking_url"], "")
+        self.assertEqual(
+            detail["official_url"],
+            "https://www.fs.usda.gov/recarea/sierra/recarea/?recid=45570",
+        )
+        self.assertEqual(detail["photos"], [])
+        self.assertEqual({source["source"] for source in detail["sources"]}, {"usfs", "ridb"})
+        self.assertEqual(numeric_detail["id"], detail["id"])
+        self.assertEqual(numeric_detail["requested_id"], "10182463")
+
+    def test_public_camp_alias_keeps_exact_ridb_record(self):
+        ridb_record = server._explore_v3_place_to_profile({
+            "id": "place:ridb:10182463",
+            "name": "Kirch Flat Group Campground",
+            "category": "campground",
+            "sources": [{
+                "source": "ridb",
+                "source_id": "10182463",
+                "attribution": "Recreation.gov",
+            }],
+            "verified": True,
+        })
+        agency_alias = server._explore_v3_place_to_profile({
+            "id": "place:usfs:kirch-flat",
+            "name": "Kirch Flat Group Campground",
+            "category": "campground",
+            "sources": [
+                {"source": "usfs", "source_id": "kirch-flat", "attribution": "USDA Forest Service"},
+                {"source": "ridb", "source_id": "10182463", "attribution": "Recreation.gov"},
+            ],
+            "verified": True,
+        })
+        with patch.object(
+            server,
+            "_load_explore_catalog",
+            return_value={"places": [ridb_record, agency_alias]},
+        ):
+            detail = server._explore_catalog_camp_detail("10182463")
+
+        self.assertEqual(detail["id"], "place:ridb:10182463")
+        self.assertEqual(detail["verified_source"], "Recreation.gov")
+
+    def test_internal_search_page_remaps_unique_ridb_alias_without_mutating_public_page(self):
+        ridb_record = server._explore_v3_place_to_profile({
+            "id": "place:ridb:10182463",
+            "name": "Kirch Flat Group Campground",
+            "category": "campground",
+            "lat": 36.87922085429918,
+            "lng": -119.14895040173735,
+            "sources": [{"source": "ridb", "source_id": "10182463", "attribution": "Recreation.gov"}],
+            "verified": True,
+        })
+        reviewed = server._explore_v3_place_to_profile({
+            "id": "place:usfs:usfs-sierra-sites-83a6b34b-07f9-40a0-a98b-68de9b7b81a8",
+            "name": "Kirch Flat Group Campground",
+            "category": "campground",
+            "lat": 36.87922085429918,
+            "lng": -119.14895040173735,
+            "sources": [
+                {"source": "usfs", "source_id": "usfs-sierra-sites-83a6b34b-07f9-40a0-a98b-68de9b7b81a8", "attribution": "USDA Forest Service"},
+                {"source": "ridb", "source_id": "10182463", "attribution": "Recreation.gov"},
+            ],
+            "verified": True,
+        })
+        reviewed["internal_preview"] = True
+        result = server.SearchResultV2(
+            result_id="place:ridb:10182463",
+            canonical_place_id="place:ridb:10182463",
+            title="Kirch Flat Group Campground",
+            subtitle="Sierra National Forest",
+            kind="campground",
+            categories=["campground"],
+            coordinates=server.SearchCenterV2(lat=36.87922085429918, lng=-119.14895040173735),
+            provenance=server.SearchProvenanceV2(
+                provider="trailhead",
+                source_label="Recreation.gov",
+                provider_result_id="10182463",
+                attribution="Recreation.gov",
+            ),
+            persistence_policy="canonical",
+            detail_ref="place:ridb:10182463",
+            score=100,
+        )
+        public_page = server.SearchPageV2(
+            query="Kirch Flat",
+            results=[result],
+            revision="public-revision",
+            elapsed_ms=7,
+        )
+
+        with patch.object(server, "_load_explore_internal_preview_profiles", return_value=[reviewed]), patch.object(
+            server,
+            "_explore_catalog_camp_detail",
+            side_effect=AssertionError("Search remapping must not scan the campground catalog"),
+        ):
+            marker = server._explore_internal_preview_context.set(True)
+            try:
+                internal_page = server._search_v2_apply_internal_preview_page(public_page)
+            finally:
+                server._explore_internal_preview_context.reset(marker)
+
+        self.assertEqual(public_page.results[0].result_id, "place:ridb:10182463")
+        self.assertEqual(internal_page.results[0].result_id, reviewed["id"])
+        self.assertEqual(internal_page.results[0].canonical_place_id, reviewed["id"])
+        self.assertEqual(internal_page.results[0].detail_ref, reviewed["id"])
+        self.assertEqual(internal_page.results[0].provenance.source_label, "US Forest Service")
+        self.assertEqual(internal_page.revision, public_page.revision)
+
+    def test_internal_search_alias_preserves_reviewed_mammoth_pool_booking(self):
+        booking_url = "https://www.recreation.gov/camping/campgrounds/232817"
+        official_url = "https://www.fs.usda.gov/recarea/sierra/recarea/?recid=45454"
+        official_fee = (
+            "Single Site: $41 per night. Additional Holiday Fee: $2 per night. "
+            "Additional Vehicle Fee: $10 per vehicle per night"
+        )
+        ridb_record = server._explore_v3_place_to_profile({
+            "id": "place:ridb:232817",
+            "name": "Mammoth Pool Campground",
+            "category": "campground",
+            "lat": 37.3447131267116,
+            "lng": -119.33321268225046,
+            "sources": [{
+                "source": "ridb",
+                "source_id": "232817",
+                "url": booking_url,
+                "attribution": "Recreation.gov",
+            }],
+            "verified": True,
+        })
+        reviewed = server._explore_v3_place_to_profile({
+            "id": "place:usfs:usfs-sierra-sites-5f618db8-3fe8-4011-a735-18a738acfb43",
+            "name": "Mammoth Pool Campground",
+            "category": "campground",
+            "lat": 37.3447131267116,
+            "lng": -119.33321268225046,
+            "sources": [
+                {
+                    "source": "usfs",
+                    "source_id": "usfs-sierra-sites:{5F618DB8-3FE8-4011-A735-18A738ACFB43}",
+                    "attribution": "USDA Forest Service",
+                },
+                {
+                    "source": "ridb",
+                    "source_id": "232817",
+                    "url": "https://www.recreation.gov/",
+                    "attribution": "Recreation.gov",
+                },
+            ],
+            "reservations": {
+                "reservable": True,
+                "url": booking_url,
+                "reservation_url": booking_url,
+            },
+            "source_pack": {
+                "site_type": "Campground",
+                "people_capacity": 235,
+                "fees": [official_fee],
+                "operating_season": ["June - October"],
+                "water": "No water is available",
+                "restrooms": "Vault toilet(s)",
+                "official_url": official_url,
+                "booking_url": booking_url,
+            },
+            "planning_facts": [
+                {"key": "reservations", "label": "Reservations", "value": "Available", "url": booking_url},
+                {"key": "fees", "label": "Fees", "value": official_fee},
+            ],
+            "verified": True,
+        })
+        reviewed["internal_preview"] = True
+        result = server.SearchResultV2(
+            result_id="place:ridb:232817",
+            canonical_place_id="place:ridb:232817",
+            title="Mammoth Pool Campground",
+            kind="campground",
+            categories=["campground"],
+            coordinates=server.SearchCenterV2(lat=37.3447131267116, lng=-119.33321268225046),
+            provenance=server.SearchProvenanceV2(
+                provider="trailhead",
+                source_label="Recreation.gov",
+                provider_result_id="232817",
+                attribution="Recreation.gov",
+            ),
+            persistence_policy="canonical",
+            detail_ref="place:ridb:232817",
+        )
+
+        marker = server._explore_internal_preview_context.set(True)
+        try:
+            with patch.object(server, "_load_explore_internal_preview_profiles", return_value=[reviewed]), patch.object(
+                server,
+                "_load_explore_catalog",
+                return_value={"places": [ridb_record, reviewed]},
+            ):
+                remapped = server._search_v2_apply_internal_preview_result(result)
+                detail = server._explore_catalog_camp_detail("place:ridb:232817")
+        finally:
+            server._explore_internal_preview_context.reset(marker)
+
+        self.assertEqual(remapped.result_id, reviewed["id"])
+        self.assertEqual(remapped.provenance.source_label, "US Forest Service")
+        self.assertEqual(detail["id"], reviewed["id"])
+        self.assertTrue(detail["reservable"])
+        self.assertEqual(detail["booking_url"], booking_url)
+        self.assertEqual(detail["official_url"], official_url)
+        self.assertEqual(detail["cost"], official_fee)
+        self.assertEqual(detail["photos"], [])
+
+    def test_internal_search_alias_fails_closed_when_multiple_reviewed_profiles_match(self):
+        def reviewed(profile_id: str) -> dict:
+            profile = server._explore_v3_place_to_profile({
+                "id": profile_id,
+                "name": "Duplicate Campground",
+                "category": "campground",
+                "sources": [
+                    {"source": "usfs", "source_id": profile_id.rsplit(":", 1)[-1], "attribution": "USDA Forest Service"},
+                    {"source": "ridb", "source_id": "10182463", "attribution": "Recreation.gov"},
+                ],
+            })
+            profile["internal_preview"] = True
+            return profile
+
+        result = server.SearchResultV2(
+            result_id="place:ridb:10182463",
+            canonical_place_id="place:ridb:10182463",
+            title="Duplicate Campground",
+            kind="campground",
+            categories=["campground"],
+            provenance=server.SearchProvenanceV2(provider="trailhead", source_label="Recreation.gov"),
+            persistence_policy="canonical",
+            detail_ref="place:ridb:10182463",
+        )
+        public = server._explore_v3_place_to_profile({
+            "id": "place:ridb:10182463",
+            "name": "Duplicate Campground",
+            "category": "campground",
+            "sources": [
+                {"source": "ridb", "source_id": "10182463", "attribution": "Recreation.gov"},
+            ],
+        })
+        reviewed_profiles = [reviewed("place:usfs:one"), reviewed("place:usfs:two")]
+        marker = server._explore_internal_preview_context.set(True)
+        try:
+            with patch.object(
+                server,
+                "_load_explore_internal_preview_profiles",
+                return_value=reviewed_profiles,
+            ), patch.object(
+                server,
+                "_load_explore_catalog",
+                return_value={"places": [public, *reviewed_profiles]},
+            ):
+                remapped = server._search_v2_apply_internal_preview_result(result)
+                detail = server._explore_catalog_camp_detail("place:ridb:10182463")
+        finally:
+            server._explore_internal_preview_context.reset(marker)
+
+        self.assertIs(remapped, result)
+        self.assertEqual(detail["id"], "place:ridb:10182463")
+        self.assertEqual(detail["verified_source"], "Recreation.gov")
 
     def test_reviewed_camp_detail_preserves_exact_top_level_media_and_booking(self):
         reviewed_camp = {

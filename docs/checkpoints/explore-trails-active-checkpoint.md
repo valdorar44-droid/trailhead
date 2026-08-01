@@ -1543,3 +1543,27 @@ Verify `git diff --cached --name-only` before every commit.
 - Do not repeat broad campground, Explore, Map, Search, NPS, Trails, Memory, Layers, Originals, Android Auto, or store crawls.
 - Do not refetch b08/NPS data, mutate the serving index, fabricate media or fees, reintroduce a live initial-detail dependency, or promote any public stage.
 - Do not stage `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, Valhalla files, Android helper scripts, or unrelated dirty worktree files.
+
+## b08 canonical campground aliases accepted on Android — 2026-08-01 17:22 CDT
+
+- Branch: `feat/trailhead-1.0.10-overhaul`; exact implementation and preview source `2d5f9de6c461904e4667b3b9dba6aff538ac30c4`. Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; App Store copy SHA-256 remains `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`. `.cursor/` and both protected files remain unstaged.
+- Backend deployment `e3e37ed2-00a7-4eaa-81c9-2c186516033e` reached Railway terminal `SUCCESS`; `/api/health` returned `status=ok`. A request with the preview header but no bearer token returned `401`, preserving the authenticated-admin authorization boundary.
+- Android preview update `019fbf59-81ed-7890-babc-065de79576a8`, group `7fe3e423-8126-4f11-b888-956a523d268d`, runtime `native-1.0.10-android.7`, build `69`, loaded exact source `2d5f9de6c461904e4667b3b9dba6aff538ac30c4` on Samsung `SM_A326U1`. The admin QA screen reported internal Explore request `active`, data `ready`, and `13` reviewed profiles.
+- Kirch Flat passed the bounded device assertion. Search returned stable canonical ID `place:usfs:usfs-sierra-sites-83a6b34b-07f9-40a0-a98b-68de9b7b81a8`; Peek and Full remained `US Forest Service`, the reviewed fee rendered exactly, no booking action or fabricated photo appeared, the official-site and phone actions remained available, and no blank frame, identity swap, family swap, Map recovery boundary, or Retry flash occurred.
+- Mammoth Pool passed the complementary assertion. Search returned stable canonical ID `place:usfs:usfs-sierra-sites-5f618db8-3fe8-4011-a735-18a738acfb43`; Peek and Full remained `US Forest Service`, the reviewed fee rendered exactly, no fabricated photo appeared, and the source-backed Recreation.gov `Booking` action remained available.
+- The bounded device log contained no `FATAL EXCEPTION`, React Native JavaScript error, `MAP ERROR`, `TypeError`, `ReferenceError`, or unhandled-JS match during either flow.
+- iOS preview update `019fbf6a-0717-73e6-9149-730a5242e957`, group `1c4725f5-0da6-4c1a-aba3-0a621f9ab882`, runtime `native-1.0.10-ios.6`, was published from the identical source. iOS Sentry source maps uploaded with debug ID `862b5bb6-fe37-48fe-a8b4-13154aa408b0`. The physical shared-flow spot-check remains pending because no iPhone was available to the desktop tooling.
+- Evidence directory: `C:\Users\User\Documents\Codex\evidence\trailhead\explore-b08-alias-2d5f9de6`. QA preview screenshot SHA-256 `eb9913b42e08b416605b94b118c54c6df878453932ede5dfce4c957711fd4448`; Kirch search `2bb4b17f14ef5b8f060442ea08b8397f591bf20d48c40b1833e50fa25572fb47`; Kirch Peek `987f2fa9a74e56af02e235149a7e783ef3fb3c22009e8a3d4e7c56c08f6d242d`; Kirch Full `cc5eab8de31902b74144c58d1b7c8ec677717d6a9b00bf003a553103d3cfb5b5`; Mammoth search `a7d93da22fe98fd6786287f90ca8b2985123a401ee59c0ea03e274fe68056f22`; Mammoth Peek `e0dbe6834e651d41643cc4c9d2229a38fcc0116942e2cb52ba16594c2c236398`; Mammoth Full top `ef593b441f59403f51ebb81e27cabb96e83980a6e215a42559e6b3e96963b895`; Mammoth Full bottom `69084f687ff1423a2b161b75966e0bd1167a71ecb0e9466a3c9e4d25860fba17`.
+- Open P0/P1: none for this Android packet. Remaining acceptance item: one shared Kirch or Mammoth iOS spot-check on the published identical SHA.
+- Task-owned EAS, Expo, Metro, Gradle, Maestro, pytest, Railway-tail, screen-recording, and NPS-enrichment processes: none after publication completed.
+
+### Exact next action
+
+1. When an iPhone is available, load iOS update `019fbf6a-0717-73e6-9149-730a5242e957` and spot-check one reviewed campground from Search to Full; do not repeat Android or backend work.
+2. After that shared assertion, mark b08 internally accepted and start the separate Explore data-gap packet from the existing b08 audit artifacts. Do not refetch b08 or overwrite the protected serving index.
+
+### Do not repeat
+
+- Do not repeat Kirch/Mammoth Android, broad campground, Explore, Map, Search, NPS, Trails, Memory, Layers, Originals, Android Auto, or store crawls without new evidence.
+- Do not refetch b08/NPS data, mutate the serving index, fabricate media or facts, publish production, promote a public catalog/stage, or reopen the resolved alias path.
+- Do not stage `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, Valhalla files, Android helper scripts, or unrelated dirty files.

@@ -211,9 +211,10 @@ export function campgroundSheetPresentationV1(
   const address = String(detail.address || camp.address || '').trim();
   const rawCost = String(detail.cost || camp.cost || '').trim();
   const reservable = Boolean(detail.reservable || camp.reservable);
-  const fee = rawCost
-    ? reservable && !/reservable/i.test(rawCost) ? `Reservable · ${rawCost}` : rawCost
-    : reservable ? 'Reservable' : 'Not listed';
+  // Reservability is already represented by Inventory and the feature list.
+  // Repeating it under Fee is both misleading and visually noisy when the
+  // source has not supplied a price.
+  const fee = rawCost || 'Not listed';
   const inventoryCount = Number(detail.campsites_count ?? camp.campsites_count);
   const inventory = Number.isFinite(inventoryCount) && inventoryCount > 0
     ? `${inventoryCount} sites`

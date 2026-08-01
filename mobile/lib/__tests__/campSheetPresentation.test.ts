@@ -23,7 +23,7 @@ test('exact Kirch Flat source item and stored detail produce one stable presenta
   assert.equal(peek.sourceLabel, 'US Forest Service');
   assert.equal(peek.siteType, 'Group Campground');
   assert.equal(peek.inventory, 'Reservable');
-  assert.equal(peek.fee, 'Reservable');
+  assert.equal(peek.fee, 'Not listed');
   assert.equal(peek.photos.length, 1);
   assert.equal(peek.bookingUrl, kirchFlatSourceItemV1.booking_url);
   assert.equal(peek.primaryLinkUrl, kirchFlatSourceItemV1.booking_url);
@@ -36,6 +36,17 @@ test('exact Kirch Flat source item and stored detail produce one stable presenta
   assert.ok(full.features.includes('Reservable'));
   assert.equal(full.bookingUrl, kirchFlatStoredDetailV1.booking_url);
   assert.equal(full.primaryLinkUrl, kirchFlatStoredDetailV1.booking_url);
+});
+
+test('a stored campground fee replaces the Peek placeholder without repeating reservability', () => {
+  const full = campgroundSheetPresentationV1(kirchFlatSourceItemV1, {
+    ...kirchFlatStoredDetailV1,
+    cost: 'Single Site: $10 per night. Group Site: $100 per night',
+  });
+
+  assert.equal(full.inventory, 'Reservable');
+  assert.equal(full.fee, 'Single Site: $10 per night. Group Site: $100 per night');
+  assert.doesNotMatch(full.fee, /Reservable/);
 });
 
 test('source-named dispersed camps are classified without discarding the generic source type', () => {

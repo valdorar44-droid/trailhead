@@ -18,6 +18,11 @@ export function campDetailFetchId(camp: CampDetailIdentitySource | null | undefi
   if (!id) return null;
   const canonicalRidbId = ridbFacilityIdFromCanonicalCampId(id);
   if (canonicalRidbId) return canonicalRidbId;
+  // Durable agency-backed Explore identities resolve against Trailhead's
+  // stored catalog before the server considers any live provider. Keeping the
+  // full identity is important because the reviewed USFS/NPS/BLM record owns
+  // the operational facts shown in the campground sheet.
+  if (/^place:(?:usfs|nps|blm|osm|trailhead):[^:]+/i.test(id)) return id;
   if (id.startsWith('ridb_site:')) return id;
   if (/^(blm_|thp_|dsl_|dispersed_lead:)/i.test(id)) return id;
   const source = `${camp?.source || ''} ${camp?.source_badge || ''} ${camp?.verified_source || ''}`.toLowerCase();

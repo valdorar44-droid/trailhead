@@ -264,7 +264,10 @@ run('npx', [
   '--output-dir', 'dist',
   '--source-maps',
   '--clear',
-  '--max-workers', '2',
+  // Exporting Android, iOS, and web concurrently can exceed the bounded WSL
+  // release runner even when the bundles themselves are valid. A single Metro
+  // worker is slower but deterministic and keeps production publication safe.
+  '--max-workers', '1',
 ]);
 // Upload the exact exported artifacts first. If Sentry rejects any map, no OTA
 // has been published and the current candidate remains untouched.

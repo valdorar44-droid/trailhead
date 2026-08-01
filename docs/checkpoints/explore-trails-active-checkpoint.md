@@ -1222,3 +1222,26 @@ Verify `git diff --cached --name-only` before every commit.
 - Do not repeat NPS batch 8, the agency cache rebuild, combined candidate construction, child-copy failure flood, media audit, or previous internal handoff proof.
 - Do not submit Android, publish production OTA, overwrite the protected serving index or catalog, promote data, expose Community routes, or change public stages without separate authorization.
 - Do not stage `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, or unrelated worktree changes.
+
+## Forward checkpoint — b08 internal acceptance continuation — 2026-07-31 21:42 CDT
+
+- Branch: `feat/trailhead-1.0.10-overhaul`; starting HEAD `dcf9f607bac648d518abd57ec43161cbbf2f0182`.
+- Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; App Store copy SHA-256 remains `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+- Historical NPS candidate `b06` is complete and superseded. This packet uses accepted NPS `live-20260731-b08`, agency `live-20260731-b08-quality`, and combined `combined/live-20260731-b08` artifacts with zero new source requests.
+- The existing isolated `internal_preview_review.json` contains eight reviewed profiles sourced explicitly from b08: Sierra National Forest, Moab BLM, Carlsbad Caverns, Catoctin Mountain Park, Channel Islands, Golden Gate, Grand Teton, and Guadalupe Mountains. No live serving index has been changed.
+- System cleanup completed before this packet. Standard DiskPart compaction increased Windows C free space from `1,351,360,512` to `34,758,172,672` bytes. Ubuntu, Git, Node, Python, Gradle, and the preserved Android SDK/ADB were verified afterward; protected hashes are unchanged.
+- The remaining bounded P1 is the compact Sierra card. Existing request, authentication, sidecar, stable-ID replacement, backend detail, and Android preview evidence are accepted and will not be repeated.
+- Evidence-backed cause to verify: `enrichedExplorePlaces` and sheet-open paths may select a stale `exploreTrailAreasById[place.id]` object wholesale after the reviewed profile has replaced the base catalog record. The cached trail-area data must enrich the current reviewed identity, not replace it.
+- Task-owned NPS, Railway, EAS, Expo, Metro, Gradle, Maestro, publisher, and test processes: none.
+
+### Exact next action
+
+1. Add a characterization test for reviewed-profile precedence when a stale same-ID trail-area cache exists.
+2. Merge cached trail modules into the current reviewed profile at the final selector and sheet-open boundary; do not alter backend auth, sidecar construction, public data, or catalog ranking.
+3. Run focused Explore/internal-preview tests, TypeScript, copy/privacy checks, then one Android internal delta covering Sierra, Moab, representative NPS profiles, and the five RIDB-to-USFS replacements.
+4. Stop after one evidence-backed correction if the compact-card assertion remains unresolved.
+
+### Do not repeat
+
+- Do not refetch NPS batches 1-8, rebuild accepted agency/NPS caches, repeat authenticated request diagnostics, change public stages, overwrite the protected serving index, or promote candidate data.
+- Do not stage `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, Valhalla work, Android helper-script work, or unrelated files.

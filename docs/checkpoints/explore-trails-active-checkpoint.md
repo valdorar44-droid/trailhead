@@ -1245,3 +1245,41 @@ Verify `git diff --cached --name-only` before every commit.
 
 - Do not refetch NPS batches 1-8, rebuild accepted agency/NPS caches, repeat authenticated request diagnostics, change public stages, overwrite the protected serving index, or promote candidate data.
 - Do not stage `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, Valhalla work, Android helper-script work, or unrelated files.
+
+## Database-first campground detail and isolated Map P1 — 2026-07-31 23:11 CDT
+
+- Branch: `feat/trailhead-1.0.10-overhaul`; current HEAD `42444b1fc427c9d0793d5b2a736be3838d0530df`.
+- Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; App Store copy SHA-256 remains `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`. `.cursor/`, the protected files, Valhalla work, and Android helper-script work remain unstaged.
+- System cleanup is complete and preserved in `C:\Users\User\Documents\Codex\evidence\trailhead\system-clean-2026-07-31-baseline.md`. Windows C free space increased by approximately 32.4 GB and the Ubuntu VHD compacted from approximately 154.6 GB to 130.24 GB; Ubuntu, Git, Node, Python, Gradle, and ADB reopened successfully.
+- Accepted b08 data remains isolated. No serving-index write, source refetch, public data promotion, production OTA, Community-stage change, or store action occurred.
+- Commit `39168b33` added database-first campground resolution. Exact reviewed campground identities are now served synchronously from the stored Explore catalog with preserved USFS attribution, RIDB booking/media licensing, amenities, facts, and access data. Live RIDB/context enrichment is skipped when the reviewed record is complete.
+- The mobile full-detail contract now commits that reviewed database record as the first stable layout. It does not intentionally render a placeholder sheet and replace it with another sheet family. Later same-identity content may fill reserved rows only; it cannot change the header, actions, identity, or scroll position.
+- Railway deployment `25d3f93f-dc1c-4d3c-b6a3-d4ffa2b8f910` succeeded and `/api/health` is healthy. Internal campsite detail authorization requires both authenticated admin access and the internal-preview header.
+- Commit `01caa053` carries the internal-preview header on both `/api/explore/*` and `/api/campsites/*`. Focused preview-contract tests and TypeScript passed.
+- Android preview update `019fbb71-d012-7367-a0ef-fbdbf707e6e0`, group `101111a1-0353-4eb3-a2d2-481c5f788665`, first proved the corrected request boundary on runtime `native-1.0.10-android.7`.
+- The exact `Kirch Flat Group Campground` flow exposed a separate full-screen `MAP ERROR — undefined is not a function` before a campground sheet could render. This is a Map render/handoff P1, not a database retry or campground enrichment flash.
+- Commit `42444b1f` safely guards the candidate `NativeMap.flyTo` handoff and adds a contract test. Fifteen focused subtests, TypeScript, and whitespace checks passed. Android preview update `019fbb81-4ad2-700a-be1c-66915ae0ebb4`, group `2cd2c1c9-dc7d-4136-928c-161d5cb5a1b3`, runtime `native-1.0.10-android.7`, is bound to exact source `42444b1fc427c9d0793d5b2a736be3838d0530df`; Sentry source maps uploaded.
+- Device identity passed on app `1.0.10`, build `69`, preview channel, exact source `42444b1f...`, and update `019fbb81...`. The single bounded Kirch Flat replay still produced the same Map error, proving the guarded camera call was not the root cause.
+- Evidence: `C:\Users\User\Documents\Codex\evidence\trailhead\b08-424-camp-stable-failed.mp4` SHA-256 `a9401b7748cdf24d1687eccd73323bdcf42107f793215c99b4f375c1c200e874`; `C:\Users\User\Documents\Codex\evidence\trailhead\b08-424-camp-peek.png` SHA-256 `4c68265ae41de8e18d483745c2cffdab9fff556490a6d54c766be20a7af6bc1`; `C:\Users\User\Documents\Codex\evidence\trailhead\b08-android-qa-42444b1f.xml` SHA-256 `c94908d258b207d2b8f23f346da83e20419a154ee0356598a45617507d3b84d3`.
+- The paired iOS preview was intentionally not published because Android still has this P1. iOS remains group `8d8b21f6-fb43-4414-a261-7b93e7f83c68`, runtime `native-1.0.10-ios.6`.
+- The no-loop rule was honored: one deterministic reproduction and one evidence-backed correction were completed; there was no third replay, broad Explore crawl, data refetch, or speculative OTA.
+- Task-owned Railway, EAS, Expo, Metro, Gradle, Maestro, publisher, screen-recording, and test processes: none. The ADB server and Codex/MCP Node processes are environment-owned and remain available.
+
+### Open defects
+
+- **P1 — selected reviewed campground crashes the Map before sheet presentation.** Exact path: internal Explore → Parks & Land → Sierra National Forest → Where to Stay → Kirch Flat Group Campground. The reviewed database response is accepted; the remaining failure is in the selected-camp Map render/handoff path.
+- The b08 internal candidate is not accepted on device and iOS publication remains blocked until this assertion passes.
+
+### Exact next action
+
+1. Add narrow preview-safe Map-error diagnostics with fixed error codes and component-phase markers; do not collect coordinates, route geometry, search text, or arbitrary exception messages.
+2. Isolate the first failing selected-camp render phase from the existing evidence or one instrumented replay, then correct only that demonstrated call site.
+3. Rerun only Kirch Flat selection and stable sheet presentation. Require no full-screen Map error, no skeleton-to-different-sheet swap, no Retry/header flash, and no identity or scroll change.
+4. If Android passes, publish the identical SHA to iOS and run only the shared campground assertion. Then close b08 acceptance with one paired checkpoint.
+
+### Do not repeat
+
+- Do not repeat system cleanup, NPS b08 fetching, combined-candidate construction, database/auth/header proof, broad Explore/NPS/Map crawls, Memory, Layers, Yellowstone, Trails, Originals, Android Auto, or campground retry loops.
+- Do not weaken the nonflashing database-first contract or reintroduce a live network dependency into initial campground presentation.
+- Do not overwrite or stage `dashboard/explore_serving_index_v2.json`, `.cursor/`, `docs/app-store-copy.md`, Valhalla changes, Android helper-script changes, or unrelated worktree files.
+- Do not publish iOS, production OTA, catalog promotion, public stage changes, or store actions while the P1 remains.

@@ -11,6 +11,10 @@ const campPeekSource = readFileSync(join(mobileRoot, 'components/map/CampPlaceSh
 
 test('campground selection opens an identity-stable peek before the full sheet', () => {
   assert.match(mapSource, /<CampPlaceSheetPeek/);
+  assert.match(mapSource, /campPeekPresentationV1\(\{/);
+  assert.match(mapSource, /presentation=\{selectedCampPeekPresentation\}/);
+  assert.doesNotMatch(campPeekSource, /PlaceSheetModel/);
+  assert.doesNotMatch(campPeekSource, /model\.source/);
   assert.match(mapSource, /campgroundSheetPresentationV1\(selectedCamp, campDetail/);
   assert.match(mapSource, /initialStage="peek"/);
   assert.match(mapSource, /expandedLoading=\{loadingDetail && !campDetail\}/);

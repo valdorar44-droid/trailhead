@@ -95,6 +95,7 @@ import {
 } from '@/lib/carIntegration';
 import { api, ApiError, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, CampComment, Waypoint, TripResult, TrailProfile, MapCardResolveResponse, WaterNavigationLinesResponse, WaterConditionsResponse, WaterSpotCard, WaterSpotCardsResponse, FishingConditionsResponse, SuggestedWaterCorridorResponse, type BookableExperience, type BriefAndBackupV1, type CampgroundPlanningBriefV1, type GasStation, type GeocodePlace, type ExtremeConfig, type CopilotContext, type MapActionRequest, type MapSelectableFeature, type RouteCampWindowInput, type RouteCampWindowResult, type RouteScoutDayPlan, type RouteScoutState, type TrailPreviewManifest, type TrailDiscoveryItemV2, type TrailSystemV2, type DispersedLead, type MissionControlBrief, type OfflineAssetType, type SavedRouteGeometryPayload } from '@/lib/api';
 import { campgroundSheetPresentationV1 } from '@/lib/campSheetPresentation';
+import { campPeekPresentationV1 } from '@/lib/campPeekPresentation';
 import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
 import { trackPhase0Event, trackPhase0Once } from '@/lib/telemetry';
 import { captureMapCampSelectionErrorV1 } from '@/lib/telemetry/mapCampSelection';
@@ -7485,6 +7486,33 @@ function MapScreen() {
       : null,
     [selectedCamp, campDetail],
   );
+  const selectedCampSaved = selectedCamp
+    ? favoriteCamps.some(camp => camp.id === selectedCamp.id)
+    : false;
+  const selectedCampPeekPresentation = useMemo(
+    () => selectedCampSheetModel && selectedCampPresentation
+      ? campPeekPresentationV1({
+          entityId: selectedCampSheetModel.identity.entityId,
+          testID: selectedCampSheetModel.testID,
+          title: selectedCampPresentation.title,
+          meta: selectedCampPresentation.meta,
+          siteType: selectedCampPresentation.siteType,
+          inventory: selectedCampPresentation.inventory,
+          fee: selectedCampPresentation.fee,
+          saved: selectedCampSaved,
+        })
+      : null,
+    [
+      selectedCampPresentation?.fee,
+      selectedCampPresentation?.inventory,
+      selectedCampPresentation?.meta,
+      selectedCampPresentation?.siteType,
+      selectedCampPresentation?.title,
+      selectedCampSaved,
+      selectedCampSheetModel?.identity.entityId,
+      selectedCampSheetModel?.testID,
+    ],
+  );
   const selectedCampRatingTarget = useMemo(() => communityRatingTarget({
     enabled: productFeatures?.community_ratings === true,
     signedIn: !!user,
@@ -7571,7 +7599,7 @@ function MapScreen() {
       admin_publish: Boolean(privateLeadKeyFromCamp(selectedCamp, campDetail) && user?.is_admin),
     },
     returnContext: placeSheetCoordinator.returnContext,
-    saved: favoriteCamps.some(camp => camp.id === selectedCamp.id),
+    saved: selectedCampSaved,
     privateFieldLead: Boolean(privateLeadKeyFromCamp(selectedCamp, campDetail)),
   }) : [];
   const selectedCampAction = (id: Parameters<typeof sheetActionByIdV1>[1]) => {
@@ -29883,9 +29911,9 @@ function MapScreen() {
       />
 
       {/* ── Campsite quick card ── */}
-      {selectedCamp && !navMode && !safeWaterPlanningActive && (
+      {selectedCamp && selectedCampSheetModel && selectedCampPresentation && selectedCampPeekPresentation && !navMode && !safeWaterPlanningActive && (
         <TrailheadSnapSheet
-          key={`camp-sheet:${selectedCampSheetModel!.identity.entityId}`}
+          key={`camp-sheet:${selectedCampPeekPresentation.entityId}`}
           initialStage="peek"
           stage={placeSheetCoordinator.current?.kind === 'camp' ? placeSheetCoordinator.presentation : 'peek'}
           onStageChange={presentation => dispatchPlaceSheet({ type: 'set_presentation', presentation })}
@@ -29900,14 +29928,7 @@ function MapScreen() {
           scrollContentStyle={s.quickSnapContent}
           peekHeader={(
             <CampPlaceSheetPeek
-              model={{ ...selectedCampSheetModel!, title: selectedCampPresentation!.title }}
-              meta={[
-                selectedCampPresentation!.meta,
-              ].filter(Boolean).join(' Â· ')}
-              siteType={selectedCampPresentation!.siteType}
-              inventory={selectedCampPresentation!.inventory}
-              fee={selectedCampPresentation!.fee}
-              saved={favoriteCamps.some(f => f.id === selectedCamp.id)}
+              presentation={selectedCampPeekPresentation}
               onViewSites={() => dispatchPlaceSheet({ type: 'set_presentation', presentation: 'full' })}
               onSave={() => toggleCampPlaceSaved(selectedCamp)}
               onClose={() => {

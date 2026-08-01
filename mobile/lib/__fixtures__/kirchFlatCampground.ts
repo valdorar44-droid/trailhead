@@ -1,4 +1,5 @@
 import type { CampsiteDetail, CampsitePin } from '../api';
+import type { SearchResultV2 } from '../searchV2';
 
 export const kirchFlatSourceItemV1: CampsitePin = {
   id: 'place:usfs:usfs-sierra-sites-83a6b34b-07f9-40a0-a98b-68de9b7b81a8',
@@ -89,3 +90,44 @@ export const devilsGardenStoredDetailV1 = {
   reservable: true,
   ada: false,
 } as unknown as CampsiteDetail;
+
+export const devilsGardenResolvedSearchResultV2: SearchResultV2 = {
+  result_id: 'place:ridb:234059',
+  canonical_place_id: 'place:ridb:234059',
+  title: 'Devils Garden Campground',
+  subtitle: 'Arches National Park, Utah',
+  kind: 'campground',
+  categories: ['campground'],
+  coordinates: { lat: 38.7769444, lng: -109.5891667 },
+  parent: 'Arches National Park',
+  provenance: {
+    provider: 'trailhead',
+    source_label: 'Recreation.gov',
+    provider_result_id: '234059',
+    attribution: 'Recreation.gov',
+    temporary_use_only: false,
+  },
+  persistence_policy: 'canonical',
+  detail_ref: '/api/campsites/place%3Aridb%3A234059/detail',
+  score: 100,
+  match_reason: 'Exact canonical campground',
+};
+
+export const devilsGardenResolvedCampPinV1: CampsitePin = {
+  id: 'place:ridb:234059',
+  place_id: 'place:ridb:234059',
+  provider_place_id: '234059',
+  name: 'Devils Garden Campground',
+  lat: 38.7769444,
+  lng: -109.5891667,
+  tags: ['campground', 'tent'],
+  land_type: 'Campground',
+  description: 'Arches National Park, Utah',
+  reservable: false,
+  cost: '',
+  url: '',
+  source: 'trailhead_search',
+  source_badge: 'Recreation.gov',
+  verified_source: 'Recreation.gov',
+  ada: false,
+};

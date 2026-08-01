@@ -2,13 +2,17 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  devilsGardenResolvedCampPinV1,
+  devilsGardenResolvedSearchResultV2,
   devilsGardenStoredDetailV1,
   kirchFlatSourceItemV1,
   kirchFlatStoredDetailV1,
   portalDispersedSourceItemV1,
 } from '../__fixtures__/kirchFlatCampground';
 import { normalizeCampDetailArrays } from '../campNearby';
+import { campPeekPresentationV1 } from '../campPeekPresentation';
 import { campgroundSheetPresentationV1 } from '../campSheetPresentation';
+import { searchResultV2ToLegacyPlace } from '../searchV2/presentation';
 import type { CampsiteDetail, CampsitePin } from '../api';
 
 test('exact Kirch Flat source item and stored detail produce one stable presentation', () => {
@@ -87,4 +91,59 @@ test('Devils Garden null provider notices normalize before the full sheet render
   assert.deepEqual(normalized.campsites, []);
   assert.deepEqual(normalized.reviews, []);
   assert.doesNotThrow(() => normalized.provider_notices?.slice(0, 3));
+});
+
+test('canonical Devils Garden Search V2 selection produces a primitive-only Peek', () => {
+  const searchPlace = searchResultV2ToLegacyPlace(devilsGardenResolvedSearchResultV2);
+  assert.ok(searchPlace);
+  assert.equal(searchPlace.id, devilsGardenResolvedCampPinV1.id);
+  assert.equal(searchPlace.source, 'trailhead_search');
+
+  const sheet = campgroundSheetPresentationV1(devilsGardenResolvedCampPinV1);
+  const peek = campPeekPresentationV1({
+    entityId: `camp:${devilsGardenResolvedCampPinV1.id}`,
+    testID: 'place-sheet-camp-camp-place-ridb-234059',
+    title: sheet.title,
+    meta: sheet.meta,
+    siteType: sheet.siteType,
+    inventory: sheet.inventory,
+    fee: sheet.fee,
+    saved: false,
+  });
+
+  assert.deepEqual(peek, {
+    entityId: 'camp:place:ridb:234059',
+    testID: 'place-sheet-camp-camp-place-ridb-234059',
+    title: 'Devils Garden Campground',
+    meta: 'Recreation.gov',
+    siteType: 'Tent Sites',
+    inventory: 'Not listed',
+    fee: 'Not listed',
+    saved: false,
+  });
+  assert.ok(Object.values(peek).every(value => ['string', 'boolean'].includes(typeof value)));
+});
+
+test('camp Peek rejects nested provider values instead of stringifying them', () => {
+  const peek = campPeekPresentationV1({
+    entityId: { id: 'place:ridb:234059' },
+    testID: ['place-sheet-camp'],
+    title: { text: 'Devils Garden Campground' },
+    meta: ['Recreation.gov'],
+    siteType: null,
+    inventory: { count: 51 },
+    fee: Number.NaN,
+    saved: 'yes',
+  });
+
+  assert.deepEqual(peek, {
+    entityId: 'camp:campground',
+    testID: 'place-sheet-camp-campground',
+    title: 'Campground',
+    meta: 'Campground',
+    siteType: 'Campground',
+    inventory: 'Not listed',
+    fee: 'Not listed',
+    saved: false,
+  });
 });

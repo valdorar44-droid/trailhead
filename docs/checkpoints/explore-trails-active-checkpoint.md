@@ -1308,3 +1308,24 @@ Verify `git diff --cached --name-only` before every commit.
 
 - Do not repeat the Kirch/Portal Android delta, Map diagnostic instrumentation, database/auth/header proof, NPS b08 fetch, combined-candidate construction, system cleanup, or broad Explore/Map/Trails crawls.
 - Do not weaken database-first rendering, restore a live initial-detail dependency, overwrite the protected serving index, publish production OTA, promote catalog data, expose Community routes, or change public stages in the next data-only packet.
+
+## 1.0.11 campground polish and OTA baseline — 2026-08-01 00:43 CDT
+
+- Branch: `feat/trailhead-1.0.10-overhaul`; starting HEAD `d0a73cd013187b1f6f92ce32aa9275ad74bc7d95`. Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; App Store copy SHA-256 remains `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+- Frozen store binaries remain exact source `0f7431d32088405f4c381ed1a220fcb2169ec761`: Android EAS `723dca56-01a3-416b-a22d-98c838a849ee`, version code `70`, runtime `native-1.0.11-android.1`; iOS EAS `712109e9-6b7f-4f72-ab51-2aa42a6095da`, build `62`, runtime `native-1.0.11-ios.1`.
+- Current production channel contains preserved legacy and 1.0.10 runtime groups but no `native-1.0.11-*` group. The 1.0.11 binaries therefore use their embedded release source until a matching update is safely published.
+- Source inspection corrected the prior shorthand: `Report full` is a real, confirmation-gated availability contribution, not a source-status leak. Preserve the capability and use clearer sheet copy. Kirch Flat Campground has no exact licensed photo in the accepted record; retaining its clean placeholder is correct. The plumbing must still deliver exact licensed media when a record actually supplies it.
+- Bounded fixes for this packet: source-backed dispersed-type classification, clear availability-report copy, correct booking-link priority, and regression proof that exact media/booking fields remain available through the database-first presentation. No invented image, source fetch, public catalog promotion, or native change is authorized.
+- Task-owned EAS, Expo, Metro, Gradle, Maestro, test, Railway, NPS enrichment, and screen-recording processes: none.
+
+### Exact next action
+
+1. Add pure presentation/action tests for Portal Dispersed Camp, exact Kirch licensed media, and booking URL selection.
+2. Apply the minimal mobile/backend-safe corrections and run focused campground, sheet, privacy, copy, TypeScript, and backend tests.
+3. Publish Android preview, run only the affected campground delta, then publish the identical SHA to iOS if Android passes.
+4. Create a clean descendant of the frozen 1.0.11 release source, prove native-input/fingerprint compatibility, and publish one paired 1.0.11 production OTA while preserving all existing runtime groups.
+
+### Do not repeat
+
+- Do not rerun broad Explore, Map, Trails, Memory, Layers, NPS, Originals, Android Auto, or store-screenshot work.
+- Do not stage `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, or unrelated changes. Do not fabricate media or weaken exact-place licensing.

@@ -1354,6 +1354,37 @@ Verify `git diff --cached --name-only` before every commit.
 - Do not weaken database-first rendering, change the serving index, refetch NPS, publish production, or expose public stages while this P1 remains.
 - Do not stage `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, Valhalla work, Android helper-script changes, or unrelated files.
 
+## Active continuation pointer — 2026-08-01 02:32 CDT
+
+- The newest completed packet is `Primitive-only campground Peek tested; broader render P1 remains` at source `4cf74da1483389e9c2fd3397ba0a13d32a3eb9c2`, not the older `22d0b603` section that follows earlier in this append-only history.
+- Android update `019fbc37-48c5-7794-9208-c94ecfb33fe9` reproduced `map_camp_peek_render` for canonical Devils Garden after the primitive-only boundary. Production remains blocked.
+- Exact next action: obtain the symbolicated Sentry stack using Android debug ID `648a7aa7-3266-43ce-8e4c-43ab88021401`, then fix only the proven failing expression. Do not repeat another model/sheet guess or broad crawl.
+
+## Primitive-only campground Peek tested; broader render P1 remains — 2026-08-01 02:31 CDT
+
+- Branch: `feat/trailhead-1.0.10-overhaul`; exact implementation HEAD `4cf74da1483389e9c2fd3397ba0a13d32a3eb9c2`. Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; App Store copy SHA-256 remains `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`. `.cursor/` and both protected files remain unstaged.
+- Commit `4cf74da1` added `CampPeekPresentationV1`, an explicit primitive-only boundary containing stable identity, test ID, title, metadata, site type, inventory, fee, and saved state. `CampPlaceSheetPeek` no longer accepts `PlaceSheetModel`, `CampsitePin`, `SearchResultV2`, provider metadata, media, arrays, or the raw canonical result.
+- The exact canonical Devils Garden Search V2 result, its resolved campground pin, nullable stored detail, and hostile null/object/array values now have focused fixtures. Nested source values are omitted rather than stringified into React children.
+- `npm run test:campground-brief`, `npm run test:sheet-actions`, `npm run test:search-v2`, `npm run test:telemetry`, `npm run test:privacy-controls`, `npx tsc --noEmit`, and `git diff --check` passed. The only test adjustment was correcting the fixture's sourced tent classification from the mistaken expected `Campground` to the actual `Tent Sites`.
+- Paired preview published from exact source `4cf74da1483389e9c2fd3397ba0a13d32a3eb9c2`: Android update `019fbc37-48c5-7794-9208-c94ecfb33fe9`, group `ae554ae3-1804-4bc8-b82d-3b0326b63d9c`, runtime `native-1.0.10-android.7`; iOS update `019fbc37-48c5-7055-899c-2f8ebdd68a0d`, group `316e9e9f-76ee-4eac-ba70-035ad0543dfd`, runtime `native-1.0.10-ios.6`. Android and iOS Sentry source maps uploaded with debug IDs `648a7aa7-3266-43ce-8e4c-43ab88021401` and `9407b75c-0e4c-4dc1-a5c2-274561b826bd`.
+- Samsung `SM_A326U1` build `69` verified the exact source, preview channel, Android runtime, and update ID. One canonical search replay selected `place:ridb:234059`; it still reached the recovery boundary with fixed code `map_camp_peek_render`. Because the Peek subtree now receives primitives only, raw/nested provider data in `CampPlaceSheetPeek` is disproven as the cause. The phase code is broader than the component and still covers the shared snap-sheet wrapper and sibling selected-camp calculations.
+- Evidence directory: `C:\Users\User\Documents\Codex\evidence\trailhead\camp-devils-4cf74da1`. QA identity XML SHA-256 `878a03ef1a43900f32e8e5b0e8b837e85dc39baf8641cf497ad7078814021900`; search-results hierarchy `2c2496546c028c94edf5c39fefd3c73bb22d7d03f0ed79f0d04b491985badf1b`; failed Peek hierarchy `2160684ea7256de4cecd81081624f9c8f793da20130bbf439ef04b421454b47b`; failed recovery screenshot `f68be7a05c5daf78bdbea22931af98310b90382b072853643e019bed3f2244f4`.
+- Open P0/P1: **P1 — canonical Recreation.gov campground selection still throws inside the wider selected-camp render boundary before a usable Peek appears.** The identical iOS update was published but not spot-checked because Android did not pass. Production OTA, catalog promotion, and public-stage changes remain blocked.
+- Task-owned EAS, Expo, Metro, Gradle, Maestro, test, Railway, and screen-recording processes: none. The paired publisher and focused tests exited.
+
+### Exact next action
+
+1. Use the already-uploaded Android source map and update/debug identity to read the symbolicated Sentry stack for this single reproduction. Do not make another UI-model guess.
+2. Narrow the fixed phase around the shared `TrailheadSnapSheet` construction and the pre-sheet selected-camp action calculations only if the symbolicated stack remains unavailable.
+3. Add the exact failing expression to the Devils Garden fixture, apply one evidence-backed correction, and rerun only Devils Garden. Test one different canonical developed campground only after Devils passes.
+4. Publish/verify iOS from the identical accepted SHA before reconsidering production.
+
+### Do not repeat
+
+- Do not repeat primitive Peek extraction, provider-array normalization, hidden-Full deferral, Portal/Kirch crawls, broad Explore/Map/Trails work, Memory, Layers, NPS, Originals, Android Auto, or store work.
+- Do not publish production, promote b08, refetch providers/NPS, weaken database-first rendering, or change public stages while this P1 remains.
+- Do not stage `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, Valhalla work, Android helper-script changes, or unrelated files.
+
 ## Canonical campground Peek boundary isolated — 2026-08-01 02:06 CDT
 
 - Branch: `feat/trailhead-1.0.10-overhaul`; exact implementation HEAD `22d0b6031d9574e769284a9af6fcc452a5532414`. Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; App Store copy SHA-256 remains `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`. `.cursor/` and both protected files remain unstaged.
@@ -1379,3 +1410,9 @@ Verify `git diff --cached --name-only` before every commit.
 - Do not repeat the phase instrumentation, nullable-detail normalization, hidden-Full deferral, Portal/Kirch crawls, broad Explore/Map/Trails work, Memory, Layers, NPS, Originals, Android Auto, or store work.
 - Do not refetch providers, weaken database-first behavior, overwrite the serving index, publish production, or change public feature stages while this P1 remains.
 - Do not stage `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, Valhalla work, Android helper-script changes, or unrelated files.
+
+## Active continuation pointer — 2026-08-01 02:32 CDT
+
+- The newest completed packet is `Primitive-only campground Peek tested; broader render P1 remains` at source `4cf74da1483389e9c2fd3397ba0a13d32a3eb9c2`, not the older `22d0b603` section immediately above in this append-only history.
+- Android update `019fbc37-48c5-7794-9208-c94ecfb33fe9` reproduced `map_camp_peek_render` for canonical Devils Garden after the primitive-only boundary. Production remains blocked.
+- Exact next action: obtain the symbolicated Sentry stack using Android debug ID `648a7aa7-3266-43ce-8e4c-43ab88021401`, then fix only the proven failing expression. Do not repeat another model/sheet guess or broad crawl.

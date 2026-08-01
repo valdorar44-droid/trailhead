@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from scripts.explore_sources.base.aliases import apply_aliases
 from scripts.explore_sources.base.cards import build_card
@@ -18,6 +20,9 @@ BLM_LICENSE = (
     "Cite the Bureau of Land Management as the data source."
 )
 BLM_ATTRIBUTION = "Bureau of Land Management"
+BLM_FEATURED_DATASET = "blm-moab-featured-sites"
+BLM_NO_FEE_VALUES = {"$0", "0", "free", "no", "no fee", "none"}
+BLM_PUBLIC_READER_HOSTS = {"blm.gov", "www.blm.gov"}
 
 
 def load_features(path: str | Path) -> list[dict[str, Any]]:
@@ -230,6 +235,7 @@ def place_from_record(record: SourceRecord) -> ExplorePlaceV3 | None:
         access=access_from_props(props),
         safety=clean_fact(pget(props, "HAZARD", "SAFETY", "TRAVEL_NOTES")),
         amenities=amenities_from_props(props),
+        source_pack=featured_source_pack(props),
         sources=[source_ref(record)],
         quality=quality_for_source("blm"),
         last_seen_at=record.last_seen_at,
@@ -260,6 +266,65 @@ def source_ref(record: SourceRecord) -> dict[str, Any]:
 def summary_from_record(record: SourceRecord) -> str:
     props = record.properties
     return compact_text(pget(props, "DESCRIPTION", "DESCRIPTIO"))[:420]
+
+
+def public_blm_url(value: Any) -> str:
+    """Return a reader-facing BLM URL only when its public origin is explicit."""
+    url = compact_text(value)
+    if not url:
+        return ""
+    try:
+        parsed = urlparse(url)
+        port = parsed.port
+    except ValueError:
+        return ""
+    host = (parsed.hostname or "").casefold()
+    if (
+        parsed.scheme.casefold() != "https"
+        or host not in BLM_PUBLIC_READER_HOSTS
+        or parsed.username is not None
+        or parsed.password is not None
+        or port is not None
+    ):
+        return ""
+    return url
+
+
+def featured_fee(value: Any) -> str:
+    text = compact_text(value)
+    if text.casefold() in BLM_NO_FEE_VALUES:
+        return "No fee"
+    return clean_fact(text)
+
+
+def featured_season(value: Any) -> str:
+    text = clean_fact(value)
+    return re.sub(r"\bdecmeber\b", "December", text, flags=re.I)
+
+
+def featured_source_pack(props: dict[str, Any]) -> dict[str, Any]:
+    """Normalize cached BLM featured-site reader facts without importing media."""
+    dataset_id = slugify(compact_text(pget(props, "_trailhead_dataset_id")))
+    if dataset_id != BLM_FEATURED_DATASET:
+        return {}
+
+    official_url = public_blm_url(pget(props, "WEBLINK"))
+    fee = featured_fee(pget(props, "RECSITEFEE"))
+    season = featured_season(pget(props, "RECSITESEASON"))
+    phone = clean_fact(pget(props, "CONTACTPHONENUMBER"))
+    activity = clean_fact(pget(props, "FEATUREDACTIVITY"))
+    pack: dict[str, Any] = {}
+    if fee:
+        pack["fees"] = [fee]
+    if season:
+        pack["operating_season"] = [season]
+    if phone:
+        pack["phone"] = phone
+    if activity:
+        pack["activities"] = [activity]
+    if official_url:
+        pack["official_url"] = official_url
+    return pack
 
 
 def allowed_uses(props: dict[str, Any]) -> list[str]:

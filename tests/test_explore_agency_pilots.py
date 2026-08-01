@@ -16,6 +16,7 @@ from scripts.build_explore_agency_pilots import (
     source_item,
 )
 from scripts.explore_sources.base.content_quality import sanitize_source_pack_item
+from scripts.explore_sources.base.dedupe import dedupe_places
 from scripts.explore_sources.base.enrichment import enrich_place_dict
 from scripts.explore_sources.base.schema import ExplorePlaceV3
 from scripts.explore_sources.blm.import_blm import import_blm_fixture
@@ -283,6 +284,191 @@ def test_blm_official_subtypes_keep_distinct_capabilities(tmp_path: Path, subtyp
     _records, places, _trails = import_blm_fixture(path, fetched_at=123)
     assert places[0].category == category
     assert places[0].subcategories == [subcategory]
+
+
+def test_blm_featured_site_builds_reader_source_pack_without_unreviewed_media(tmp_path: Path):
+    source_url = "https://gis.blm.gov/arcgis/rest/services/recreation/BLM_Natl_Recreation/MapServer/12"
+    path = write_feature_collection(tmp_path, "blm-featured.geojson", [{
+        "type": "Feature",
+        "properties": {
+            "OBJECTID": 146,
+            "RecSiteName": "Fisher Towers",
+            "Description": "Official BLM description for the Fisher Towers recreation site.",
+            "WebLink": "https://www.blm.gov/visit/search-details/2149/2",
+            "RecSiteFee": "None",
+            "RecSiteSeason": "January 1 - Decmeber 31",
+            "ContactPhoneNumber": "435-259-2100",
+            "FeaturedActivity": "Climbing",
+            "FlickrAlbumImage": "https://live.staticflickr.com/example.jpg",
+            "_trailhead_dataset_id": "blm_moab_featured_sites",
+            "_trailhead_source_url": source_url,
+            "_trailhead_feature_kind": "featured recreation site",
+        },
+        "geometry": {"type": "Point", "coordinates": [-109.3083, 38.724]},
+    }])
+
+    _records, places, _trails = import_blm_fixture(path, fetched_at=123)
+    place = places[0].to_dict()
+
+    assert place["source_pack"] == {
+        "fees": ["No fee"],
+        "operating_season": ["January 1 - December 31"],
+        "phone": "435-259-2100",
+        "activities": ["Climbing"],
+        "official_url": "https://www.blm.gov/visit/search-details/2149/2",
+    }
+    assert place["media"] == []
+    assert place["sources"][0]["url"] == source_url
+
+
+@pytest.mark.parametrize("official_url", [
+    "http://www.blm.gov/visit/example",
+    "https://blm.gov.evil.example/visit/example",
+    "https://gis.blm.gov/arcgis/rest/services/example",
+    "https://user@blm.gov/visit/example",
+    "https://www.blm.gov:443/visit/example",
+    "https://www.blm.gov:444/visit/example",
+    "https://localhost/visit/example",
+])
+def test_blm_featured_site_rejects_non_public_or_non_blm_reader_urls(tmp_path: Path, official_url: str):
+    path = write_feature_collection(tmp_path, "blm-featured-unsafe.geojson", [{
+        "type": "Feature",
+        "properties": {
+            "OBJECTID": 145,
+            "RecSiteName": "Castleton Tower",
+            "Description": "Official BLM description for Castleton Tower.",
+            "WebLink": official_url,
+            "_trailhead_dataset_id": "blm_moab_featured_sites",
+            "_trailhead_source_url": "https://gis.blm.gov/arcgis/rest/services/recreation/BLM_Natl_Recreation/MapServer/12",
+            "_trailhead_feature_kind": "featured recreation site",
+        },
+        "geometry": {"type": "Point", "coordinates": [-109.422694, 38.683611]},
+    }])
+
+    _records, places, _trails = import_blm_fixture(path, fetched_at=123)
+
+    assert "official_url" not in places[0].source_pack
+
+
+def test_blm_featured_source_pack_merges_into_existing_canonical_opportunity(tmp_path: Path):
+    source_url = "https://gis.blm.gov/arcgis/rest/services/recreation/BLM_Natl_Recreation/MapServer"
+    path = write_feature_collection(tmp_path, "blm-featured-merge.geojson", [
+        {
+            "type": "Feature",
+            "properties": {
+                "OBJECTID": 19,
+                "MBT_NAME": "Klondike Bluff Trails",
+                "Descriptio": "Official mountain-bike opportunity description.",
+                "_trailhead_dataset_id": "blm_moab_mtb_opportunities",
+                "_trailhead_source_url": f"{source_url}/4",
+                "_trailhead_feature_kind": "mountain bike opportunity",
+            },
+            "geometry": {"type": "Point", "coordinates": [-109.73393, 38.74083]},
+        },
+        {
+            "type": "Feature",
+            "properties": {
+                "OBJECTID": 97,
+                "RecSiteName": "Klondike Bluff Trails",
+                "Description": "Official featured-site description.",
+                "WebLink": "https://blm.gov/programs/recreation/mountainbike/moab",
+                "RecSiteFee": "Varies",
+                "RecSiteSeason": "Varies",
+                "ContactPhoneNumber": "435-259-2100",
+                "FeaturedActivity": "Mountain Biking",
+                "FlickrAlbumImage": "https://live.staticflickr.com/example.jpg",
+                "_trailhead_dataset_id": "blm_moab_featured_sites",
+                "_trailhead_source_url": f"{source_url}/12",
+                "_trailhead_feature_kind": "featured recreation site",
+            },
+            "geometry": {"type": "Point", "coordinates": [-109.73393, 38.74083]},
+        },
+    ])
+
+    _records, places, _trails = import_blm_fixture(path, fetched_at=123)
+    merged = dedupe_places(places)
+
+    assert len(merged) == 1
+    assert merged[0].id == "place:blm:blm-moab-mtb-opportunities-19"
+    assert merged[0].source_ids == [
+        "blm:blm-moab-mtb-opportunities:19",
+        "blm:blm-moab-featured-sites:97",
+    ]
+    assert merged[0].source_pack == {
+        "fees": ["Varies"],
+        "operating_season": ["Varies"],
+        "phone": "435-259-2100",
+        "activities": ["Mountain Biking"],
+        "official_url": "https://blm.gov/programs/recreation/mountainbike/moab",
+    }
+    assert merged[0].media == []
+
+
+def test_blm_reader_source_pack_is_scoped_to_featured_dataset(tmp_path: Path):
+    path = write_feature_collection(tmp_path, "blm-non-featured-reader-fields.geojson", [{
+        "type": "Feature",
+        "properties": {
+            "OBJECTID": 19,
+            "MBT_NAME": "Klondike Bluff Trails",
+            "WebLink": "https://blm.gov/programs/recreation/mountainbike/moab",
+            "RecSiteFee": "Varies",
+            "RecSiteSeason": "Varies",
+            "ContactPhoneNumber": "435-259-2100",
+            "FeaturedActivity": "Mountain Biking",
+            "_trailhead_dataset_id": "blm_moab_mtb_opportunities",
+            "_trailhead_source_url": "https://gis.blm.gov/example",
+            "_trailhead_feature_kind": "mountain bike opportunity",
+        },
+        "geometry": {"type": "Point", "coordinates": [-109.73393, 38.74083]},
+    }])
+
+    _records, places, _trails = import_blm_fixture(path, fetched_at=123)
+
+    assert places[0].source_pack == {}
+
+
+def test_blm_reader_depth_does_not_admit_captain_ahab_without_filler_suppression(tmp_path: Path):
+    path = write_feature_collection(tmp_path, "blm-captain-boundary.geojson", [
+        {
+            "type": "Feature",
+            "properties": {
+                "OBJECTID": 21,
+                "MBT_NAME": "Captain Ahab Trail",
+                "Descriptio": "Description Not Available",
+                "_trailhead_dataset_id": "blm_moab_mtb_opportunities",
+                "_trailhead_source_url": "https://gis.blm.gov/arcgis/rest/services/example/4",
+                "_trailhead_feature_kind": "mountain bike opportunity",
+            },
+            "geometry": {"type": "Point", "coordinates": [-109.61079855253209, 38.51629316266615]},
+        },
+        {
+            "type": "Feature",
+            "properties": {
+                "OBJECTID": 99,
+                "RecSiteName": "Captain Ahab Trail",
+                "Description": "Official BLM mountain-bike recreation description.",
+                "WebLink": "https://blm.gov/programs/recreation/mountainbike/moab",
+                "RecSiteFee": "Varies",
+                "RecSiteSeason": "Varies",
+                "ContactPhoneNumber": "435-259-2100",
+                "FeaturedActivity": "Mountain Biking",
+                "_trailhead_dataset_id": "blm_moab_featured_sites",
+                "_trailhead_source_url": "https://gis.blm.gov/arcgis/rest/services/example/12",
+                "_trailhead_feature_kind": "featured recreation site",
+            },
+            "geometry": {"type": "Point", "coordinates": [-109.59701805699996, 38.52821133500004]},
+        },
+    ])
+
+    _records, places, _trails = import_blm_fixture(path, fetched_at=123)
+    merged = dedupe_places(places)
+    captain = next(place for place in merged if place.id == "place:blm:blm-moab-mtb-opportunities-21")
+    enriched = enrich_place_dict(captain.to_dict())
+
+    assert captain.description == "Description Not Available"
+    assert captain.source_pack["official_url"] == "https://blm.gov/programs/recreation/mountainbike/moab"
+    assert enriched["reviewable"] is False
+    assert captain.id not in [item["id"] for item in [enriched] if item.get("reviewable")]
 
 
 def test_agency_audit_blocks_filler_but_allows_unknown_activity():

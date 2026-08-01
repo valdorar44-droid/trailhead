@@ -273,6 +273,10 @@ class ExploreInternalPreviewTests(unittest.TestCase):
                 server,
                 "_load_explore_catalog",
                 return_value={"places": [reviewed_camp]},
+            ), patch.object(
+                server,
+                "get_camp_profile_override",
+                return_value={},
             ), patch.object(server, "get_facility_detail", new=AsyncMock()) as ridb_detail, patch.object(
                 server,
                 "_build_place_context",

@@ -11,6 +11,28 @@ Read this file before every Explore and Community Trails work session and after 
 3. Never stage `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, the Valhalla/Railway work, Android Auto scripts, or other unrelated dirty files.
 4. Continue from **Next exact packet**. Do not restart completed Trails T1-T6, broad Map/Search/Offline crawls, NPS research, Layers, Memory Gate, Originals, Android Auto, or screenshot work.
 
+## Forward checkpoint — b08 operational depth and promotion safety — 2026-08-01 11:23 CDT
+
+- Branch: `feat/trailhead-1.0.10-overhaul`; starting HEAD `e6c145fa7ee13ffc78497b7541b5d8013a54129b`. Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; App Store copy SHA-256 remains `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`. `.cursor/` and both protected files remain unstaged.
+- Accepted inputs remain NPS `live-20260731-b08`, agency `live-20260731-b08-quality-r2`, and combined `combined/live-20260731-b08`. No NPS, RIDB, USFS, BLM, Mapbox, or other source request is authorized in this packet.
+- The existing 13-place internal sidecar passes its deterministic QA at SHA-256 `875d8da7f90563b2c6103e3b129667645463b14f24642b9f9b87a6649a5fe804`. The five RIDB-to-USFS campground replacements are spatially consistent within 44 meters and retain both source identities.
+- The read-only data audit found one concrete operational loss boundary: the cached USFS records contain site type, people capacity, fee text, operating season, water, restroom, official-page, and Recreation.gov booking facts, but the importer does not carry those fields into `ExplorePlaceV3`. `build_planning_facts()` also reads `reservations.reservation_url` while current records write `reservations.url`.
+- The wider combined candidate still references the older `live-20260731-b08-quality` agency revision. It is not eligible for promotion until rebuilt immutably from `b08-quality-r2` and checked for reader-facing region/status/copy parity.
+- Media remains internal unless rights are explicit. NPS states that material credited to an entity other than NPS must not be presumed public domain; RIDB terms also require source integrity. This packet adds promotion evidence rather than treating blanket placeholder licenses as approval.
+
+### Exact packet
+
+1. Preserve source-backed campground operational facts through the USFS importer, generic enrichment facts, stored campground detail, and the existing sheet contract. Keep people capacity distinct from campsite count.
+2. Align internal-preview defaults and a new immutable combined review with `b08-quality-r2`; never overwrite the protected serving index.
+3. Add deterministic gates for source revision/hash parity, nested HTTPS/host safety, exact media-rights state, AI-modified-media exclusion, and reader-facing agency geography/copy.
+4. Rebuild only from cached accepted inputs, run focused backend/mobile/data-quality tests, and use one bounded Android campground/destination delta if automated gates pass.
+
+### Do not repeat
+
+- Do not refetch NPS batches 1-8, Recreation.gov, USFS, BLM, Mapbox, or any provider. Do not repeat the closed Devils/Watchman/Kirch/Portal crash crawls.
+- Do not change public Explore stages, promote the candidate, publish production OTA, expose Community routes, or touch store submissions in this packet.
+- Do not stage `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, or unrelated files.
+
 ## Current continuation — campground gallery P1 closed on Android
 
 - Branch: `feat/trailhead-1.0.10-overhaul`; implementation commit `2b12925f1e805fe6e4ce37694cd581cb67369e64` is pushed. Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; App Store copy SHA-256 remains `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`. `.cursor/` and both protected files remain unstaged.

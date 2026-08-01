@@ -5623,10 +5623,16 @@ def _explore_catalog_camp_detail(identifier: str) -> dict | None:
         for fact in matched.get("planning_facts") or []
         if isinstance(fact, dict) and str(fact.get("value") or "").strip()
     }
-    photos = [
-        photo for photo in source_pack.get("photos") or []
-        if isinstance(photo, dict) and str(photo.get("url") or "").strip()
-    ]
+    photos: list[dict] = []
+    seen_photo_urls: set[str] = set()
+    for photo in [*(source_pack.get("photos") or []), *(matched.get("media") or [])]:
+        if not isinstance(photo, dict):
+            continue
+        photo_url = str(photo.get("url") or "").strip()
+        if not photo_url or photo_url in seen_photo_urls:
+            continue
+        seen_photo_urls.add(photo_url)
+        photos.append(photo)
     source_label = str(
         primary.get("attribution")
         or first_source.get("attribution")

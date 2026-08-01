@@ -73,7 +73,8 @@ test('campground availability reports are explicit and require confirmation', ()
   assert.match(mapSource, /'Report campground full\?'/);
   assert.match(mapSource, /sheetActionTestIDV1\(selectedCampSheetModel!\.testID, 'report_full'\)/);
   assert.match(mapSource, /onPress=\{confirmReportFull\}/);
-  assert.match(mapSource, /<Text style=\{s\.reportFullText\}>Report full<\/Text>/);
+  assert.match(mapSource, /<Text style=\{s\.reportFullText\}>Report availability<\/Text>/);
+  assert.match(mapSource, /\?\.booking_url \|\| \(camp as any\)\?\.official_url/);
 });
 
 test('Map errors capture a fixed campground phase and offer a clean reset', () => {

@@ -20,6 +20,10 @@ export type CampgroundSheetPresentationV1 = {
   siteTypes: string[];
   activities: string[];
   tags: string[];
+  bookingUrl: string;
+  officialUrl: string;
+  primaryLinkUrl: string;
+  phone: string;
 };
 
 type CampRecord = Partial<CampsitePin & CampsiteDetail> & Record<string, unknown>;
@@ -104,6 +108,11 @@ function meaningfulFeatureLabels(values: unknown[]): string[] {
   ));
 }
 
+function safeUrl(value: unknown): string {
+  const text = String(value ?? '').trim();
+  return /^https:\/\//i.test(text) ? text : '';
+}
+
 function photoItems(
   camp: CampRecord,
   detail: CampRecord,
@@ -165,11 +174,32 @@ export function campgroundSheetPresentationV1(
   if (/fire rings?|fire pits?/.test(sourceText)) rawFeatures.push('Fire ring');
   if (camp.reservable || detail.reservable) rawFeatures.push('Reservable');
 
-  const siteTypes = uniqueLabels([...strings(camp.site_types), ...strings(detail.site_types)]);
+  const identityText = [
+    detail.name,
+    camp.name,
+    detail.description,
+    camp.description,
+    ...tags,
+  ].map(value => String(value ?? '').toLowerCase()).join(' ');
+  const sourcedSiteTypes: unknown[] = [];
+  if (/\bdispersed\b|\bprimitive camping\b/.test(identityText)) sourcedSiteTypes.push('Dispersed camping');
+  if (/\bgroup campground\b|\bgroup camp\b|\bgroup site\b/.test(identityText)) sourcedSiteTypes.push('Group campground');
+  if (/\brv park\b|\brv campground\b/.test(identityText)) sourcedSiteTypes.push('RV campground');
+  const siteTypes = uniqueLabels([
+    ...sourcedSiteTypes,
+    ...strings(camp.site_types),
+    ...strings(detail.site_types),
+  ]);
   if (tags.some(tag => /\brv\b/i.test(tag))) siteTypes.push(...uniqueLabels(['RV sites']));
   if (tags.some(tag => /tent/i.test(tag))) siteTypes.push(...uniqueLabels(['Tent sites']));
-  if (tags.some(tag => /group/i.test(tag))) siteTypes.push(...uniqueLabels(['Group sites']));
-  if (tags.some(tag => /dispersed/i.test(tag))) siteTypes.push(...uniqueLabels(['Dispersed']));
+  if (
+    tags.some(tag => /group/i.test(tag))
+    && !siteTypes.some(label => /group/i.test(label))
+  ) siteTypes.push(...uniqueLabels(['Group sites']));
+  if (
+    tags.some(tag => /dispersed|primitive/i.test(tag))
+    && !siteTypes.some(label => /dispersed|primitive/i.test(label))
+  ) siteTypes.push(...uniqueLabels(['Dispersed camping']));
 
   const activities = uniqueLabels(strings(detail.activities));
   if (tags.some(tag => /hik/i.test(tag))) activities.push(...uniqueLabels(['Hiking']));
@@ -192,6 +222,8 @@ export function campgroundSheetPresentationV1(
     || cleanLabel(tags.find(tag => /tent|\brv\b|cabin|walk.?in|group|dispersed/i.test(tag)))
     || cleanLabel(detail.land_type || camp.land_type)
     || 'Campground';
+  const bookingUrl = safeUrl(detail.booking_url || camp.booking_url);
+  const officialUrl = safeUrl(detail.official_url || camp.official_url || detail.url || camp.url);
 
   return {
     title: displayName(detail.name || camp.name),
@@ -206,5 +238,9 @@ export function campgroundSheetPresentationV1(
     siteTypes: uniqueLabels(siteTypes).slice(0, 8),
     activities: uniqueLabels(activities).slice(0, 8),
     tags: uniqueLabels(tags),
+    bookingUrl,
+    officialUrl,
+    primaryLinkUrl: bookingUrl || officialUrl,
+    phone: String(detail.phone || camp.phone || '').trim(),
   };
 }

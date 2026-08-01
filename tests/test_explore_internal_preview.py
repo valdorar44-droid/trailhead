@@ -252,6 +252,51 @@ class ExploreInternalPreviewTests(unittest.TestCase):
         ridb_detail.assert_not_awaited()
         live_context.assert_not_awaited()
 
+    def test_reviewed_camp_detail_preserves_exact_top_level_media_and_booking(self):
+        reviewed_camp = {
+            "id": "place:usfs:camp-media",
+            "name": "Exact River Campground",
+            "category": "campground",
+            "summary": {
+                "title": "Exact River Campground",
+                "category": "campground",
+                "lat": 37.2,
+                "lng": -119.3,
+                "tags": ["campground"],
+            },
+            "profile": {"summary": "A source-backed campground beside the river."},
+            "reservations": {
+                "url": "https://www.recreation.gov/camping/campgrounds/456",
+                "reservable": True,
+            },
+            "media": [{
+                "url": "https://cdn.recreation.gov/exact-camp.webp",
+                "caption": "Exact River Campground",
+                "credit": "Recreation.gov",
+                "license": "RIDB public API terms",
+            }],
+            "source_pack": {},
+            "sources": [{
+                "source": "usfs",
+                "source_id": "camp-media",
+                "url": "https://www.fs.usda.gov/recarea/example",
+                "attribution": "USDA Forest Service",
+            }],
+            "provenance": {"primary": {
+                "source": "usfs",
+                "source_id": "camp-media",
+                "url": "https://www.fs.usda.gov/recarea/example",
+                "attribution": "USDA Forest Service",
+            }},
+            "planning_facts": [{"key": "place_type", "value": "Campground"}],
+        }
+        with patch.object(server, "_load_explore_catalog", return_value={"places": [reviewed_camp]}):
+            detail = server._explore_catalog_camp_detail("place:usfs:camp-media")
+
+        self.assertEqual(detail["booking_url"], "https://www.recreation.gov/camping/campgrounds/456")
+        self.assertEqual(detail["photo_url"], "https://cdn.recreation.gov/exact-camp.webp")
+        self.assertEqual(detail["photos"][0]["caption"], "Exact River Campground")
+
     def test_active_request_diagnostics_report_ready_sidecar(self):
         os.environ["TRAILHEAD_EXPLORE_DATA_STAGE"] = "internal"
         marker = server._explore_internal_preview_status_context.set("active")

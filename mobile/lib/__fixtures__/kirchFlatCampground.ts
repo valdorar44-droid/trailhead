@@ -46,3 +46,22 @@ export const kirchFlatStoredDetailV1 = {
     { key: 'amenities', label: 'Amenities', value: 'toilets' },
   ],
 } as CampsiteDetail & { catalog_detail: true; requested_id: string; summary: string };
+
+export const portalDispersedSourceItemV1: CampsitePin = {
+  id: 'place:usfs:usfs-sierra-sites-eba69754-2291-4aa7-858e-d85fc2d85b8b',
+  place_id: 'place:usfs:usfs-sierra-sites-eba69754-2291-4aa7-858e-d85fc2d85b8b',
+  name: 'PORTAL DISPERSED CAMP',
+  lat: 37.317237212442286,
+  lng: -119.07052015589264,
+  land_type: 'Campground',
+  description: 'PORTAL DISPERSED CAMP (Camping Area)',
+  tags: ['campground', 'usfs', 'forest service', 'Sierra National Forest'],
+  site_types: ['campground'],
+  source: 'usfs',
+  source_badge: 'USDA Forest Service',
+  verified_source: 'USDA Forest Service',
+  official_url: 'https://www.fs.usda.gov/recarea/sierra/recreation/camping-cabins',
+  reservable: false,
+  url: 'https://www.fs.usda.gov/recarea/sierra/recreation/camping-cabins',
+  ada: false,
+};

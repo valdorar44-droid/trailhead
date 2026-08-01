@@ -7549,9 +7549,9 @@ function MapScreen() {
       savable: true,
       trip_edit: Boolean(activeTrip),
       offline_download: true,
-      official_url: Boolean((campDetail || selectedCamp).official_url || (campDetail || selectedCamp).url),
-      booking_url: Boolean((campDetail || selectedCamp).booking_url),
-      phone_number: Boolean((campDetail || selectedCamp).phone),
+      official_url: Boolean(selectedCampPresentation?.officialUrl),
+      booking_url: Boolean(selectedCampPresentation?.bookingUrl),
+      phone_number: Boolean(selectedCampPresentation?.phone),
       shareable: true,
       comments: !privateLeadKeyFromCamp(selectedCamp, campDetail),
       ratings: Boolean(selectedCampRatingTarget),
@@ -10049,7 +10049,7 @@ function MapScreen() {
   }
 
   function campSourceUrl(camp?: Partial<CampsitePin | CampsiteDetail> | null) {
-    return String((camp as any)?.official_url || (camp as any)?.booking_url || (camp as any)?.url || '').trim();
+    return String((camp as any)?.booking_url || (camp as any)?.official_url || (camp as any)?.url || '').trim();
   }
 
   function closeSelectedCampProfile() {
@@ -30054,7 +30054,7 @@ function MapScreen() {
                 disabled={fullnessVoting}
               >
                 <Ionicons name="warning-outline" size={12} color="#f59e0b" />
-                <Text style={s.reportFullText}>Report full</Text>
+                <Text style={s.reportFullText}>Report availability</Text>
               </TouchableOpacity>
             ) : null}
             {activeTrip && (

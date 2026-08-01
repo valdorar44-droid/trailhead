@@ -1096,7 +1096,7 @@ export function ExploreDetailSheet({
       item.operating_hours && { icon: 'time-outline' as const, label: 'Hours', value: item.operating_hours },
       item.directions && { icon: 'navigate-outline' as const, label: 'Directions', value: item.directions },
       item.location && { icon: 'pin-outline' as const, label: 'Location', value: item.location },
-      item.category && { icon: 'pricetag-outline' as const, label: 'Type', value: item.category },
+      item.category && { icon: 'pricetag-outline' as const, label: 'Type', value: titleCaseLabel(item.category) },
     ].filter(Boolean) as Array<{ icon: keyof typeof Ionicons.glyphMap; label: string; value: string }>;
     if (!rows.length && !(item.amenities?.length)) return null;
     return (

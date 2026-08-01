@@ -6,7 +6,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import dashboard.server as server
 from scripts.build_explore_internal_preview import _merge_serving_context
@@ -175,6 +175,82 @@ class ExploreInternalPreviewTests(unittest.TestCase):
                 server._explore_internal_preview_request_code("/api/explore/home", "internal", "Bearer admin"),
                 "active",
             )
+            self.assertEqual(
+                server._explore_internal_preview_request_code("/api/campsites/123/detail", "internal", "Bearer admin"),
+                "active",
+            )
+
+    def test_reviewed_camp_detail_is_database_first_and_does_not_wait_for_ridb(self):
+        reviewed_camp = server._explore_v3_place_to_profile({
+            "id": "place:usfs:camp-1",
+            "name": "River Campground",
+            "category": "campground",
+            "lat": 37.1,
+            "lng": -119.2,
+            "description": "A Forest Service campground beside the river.",
+            "access": "Open",
+            "amenities": ["toilets"],
+            "reservations": {"url": "https://www.recreation.gov/camping/campgrounds/123", "reservable": True},
+            "media": [{
+                "url": "https://cdn.recreation.gov/camp.webp",
+                "caption": "River Campground",
+                "credit": "Recreation.gov",
+                "license": "RIDB public API terms",
+            }],
+            "sources": [
+                {
+                    "source": "usfs",
+                    "source_id": "camp-1",
+                    "url": "https://www.fs.usda.gov/recarea/example",
+                    "attribution": "USDA Forest Service",
+                    "quality": "official_source",
+                },
+                {
+                    "source": "ridb",
+                    "source_id": "123",
+                    "url": "https://www.recreation.gov/camping/campgrounds/123",
+                    "attribution": "Recreation.gov",
+                    "quality": "official_source",
+                },
+            ],
+            "provenance": {
+                "primary": {
+                    "source": "usfs",
+                    "source_id": "camp-1",
+                    "url": "https://www.fs.usda.gov/recarea/example",
+                    "attribution": "USDA Forest Service",
+                }
+            },
+            "planning_facts": [
+                {"key": "place_type", "label": "Type", "value": "Campground"},
+                {"key": "access", "label": "Access", "value": "Open"},
+            ],
+            "verified": True,
+        })
+        marker = server._explore_internal_preview_context.set(True)
+        try:
+            with patch.object(
+                server,
+                "_load_explore_catalog",
+                return_value={"places": [reviewed_camp]},
+            ), patch.object(server, "get_facility_detail", new=AsyncMock()) as ridb_detail, patch.object(
+                server,
+                "_build_place_context",
+                new=AsyncMock(),
+            ) as live_context:
+                detail = asyncio.run(server._load_campsite_detail("123"))
+        finally:
+            server._explore_internal_preview_context.reset(marker)
+
+        self.assertTrue(detail["catalog_detail"])
+        self.assertEqual(detail["id"], "place:usfs:camp-1")
+        self.assertEqual(detail["verified_source"], "USDA Forest Service")
+        self.assertEqual(detail["access_notes"], "Open")
+        self.assertEqual(detail["amenities"], ["toilets"])
+        self.assertTrue(detail["reservable"])
+        self.assertEqual(detail["photo_url"], "https://cdn.recreation.gov/camp.webp")
+        ridb_detail.assert_not_awaited()
+        live_context.assert_not_awaited()
 
     def test_active_request_diagnostics_report_ready_sidecar(self):
         os.environ["TRAILHEAD_EXPLORE_DATA_STAGE"] = "internal"

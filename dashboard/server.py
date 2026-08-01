@@ -5547,6 +5547,145 @@ def _explore_place_to_camp(place: dict, center_lat: float, center_lng: float) ->
         "site_types": ["Campground area"],
     }
 
+
+def _explore_catalog_camp_detail(identifier: str) -> dict | None:
+    """Resolve a campground detail from Trailhead's stored Explore catalog.
+
+    This is intentionally local-only. A reviewed catalog record is complete
+    enough to render the stable campground sheet without waiting for RIDB or
+    another upstream provider. Live context can be loaded by its own modules;
+    it must not gate or replace this identity-bound detail.
+    """
+    requested = unquote(str(identifier or "")).strip()
+    if not requested:
+        return None
+
+    requested_lower = requested.lower()
+    requested_ridb = re.fullmatch(r"(?:place:)?ridb:([^:]+)", requested, re.I)
+    requested_ridb_id = requested_ridb.group(1).lower() if requested_ridb else (
+        requested_lower if requested.isdigit() else ""
+    )
+
+    def identity_tokens(place: dict) -> set[str]:
+        values: set[str] = set()
+
+        def add(value: object) -> None:
+            text = str(value or "").strip().lower()
+            if text:
+                values.add(text)
+
+        add(place.get("id"))
+        for value in place.get("source_ids") or []:
+            add(value)
+        for source in place.get("sources") or []:
+            if not isinstance(source, dict):
+                continue
+            source_name = str(source.get("source") or "").strip().lower()
+            source_id = str(source.get("source_id") or "").strip().lower()
+            add(source_id)
+            if source_name and source_id:
+                add(f"{source_name}:{source_id}")
+                add(f"place:{source_name}:{source_id}")
+        return values
+
+    matched: dict | None = None
+    for place in _load_explore_catalog().get("places") or []:
+        if not isinstance(place, dict):
+            continue
+        category = str(place.get("category") or (place.get("summary") or {}).get("category") or "").lower()
+        if not re.search(r"\bcamp(?:ground|site|ing)?\b", category):
+            continue
+        tokens = identity_tokens(place)
+        if requested_lower in tokens:
+            matched = place
+            break
+        if requested_ridb_id and any(
+            token == requested_ridb_id
+            or token == f"ridb:{requested_ridb_id}"
+            or token == f"place:ridb:{requested_ridb_id}"
+            for token in tokens
+        ):
+            matched = place
+            break
+    if not matched:
+        return None
+
+    summary = matched.get("summary") if isinstance(matched.get("summary"), dict) else {}
+    profile = matched.get("profile") if isinstance(matched.get("profile"), dict) else {}
+    source_pack = matched.get("source_pack") if isinstance(matched.get("source_pack"), dict) else {}
+    reservations = matched.get("reservations") if isinstance(matched.get("reservations"), dict) else {}
+    provenance = matched.get("provenance") if isinstance(matched.get("provenance"), dict) else {}
+    primary = provenance.get("primary") if isinstance(provenance.get("primary"), dict) else {}
+    raw_sources = [source for source in matched.get("sources") or [] if isinstance(source, dict)]
+    first_source = raw_sources[0] if raw_sources else {}
+    facts = {
+        str(fact.get("key") or "").strip().lower(): str(fact.get("value") or "").strip()
+        for fact in matched.get("planning_facts") or []
+        if isinstance(fact, dict) and str(fact.get("value") or "").strip()
+    }
+    photos = [
+        photo for photo in source_pack.get("photos") or []
+        if isinstance(photo, dict) and str(photo.get("url") or "").strip()
+    ]
+    source_label = str(
+        primary.get("attribution")
+        or first_source.get("attribution")
+        or source_pack.get("primary")
+        or summary.get("source_title")
+        or matched.get("attribution")
+        or "Official source"
+    ).strip()
+    source_name = str(primary.get("source") or first_source.get("source") or "trailhead_catalog").strip().lower()
+    official_url = str(source_pack.get("official_url") or summary.get("source_url") or primary.get("url") or "").strip()
+    booking_url = str(reservations.get("url") or source_pack.get("booking_url") or "").strip()
+    description = str(
+        profile.get("story")
+        or profile.get("summary")
+        or summary.get("short_description")
+        or matched.get("description")
+        or ""
+    ).strip()
+    lat = summary.get("lat")
+    lng = summary.get("lng")
+    site_type = facts.get("place_type") or str(summary.get("category") or "Campground").strip()
+    site_types = [site_type] if site_type else []
+    amenities = [str(value).strip() for value in matched.get("amenities") or [] if str(value).strip()]
+
+    return {
+        "id": str(matched.get("id") or requested),
+        "requested_id": requested,
+        "name": str(summary.get("title") or matched.get("name") or "Campground").strip(),
+        "lat": lat,
+        "lng": lng,
+        "land_type": site_type or "Campground",
+        "description": description,
+        "summary": description,
+        "cost": facts.get("fee") or facts.get("fees") or "",
+        "reservable": bool(reservations.get("reservable") or booking_url),
+        "url": booking_url or official_url,
+        "official_url": official_url,
+        "booking_url": booking_url,
+        "access_notes": str(matched.get("access") or facts.get("access") or "").strip(),
+        "best_season": str(matched.get("best_season") or facts.get("season") or "").strip(),
+        "amenities": amenities,
+        "site_types": site_types,
+        "activities": [str(value).strip() for value in source_pack.get("activities") or [] if str(value).strip()],
+        "tags": [str(value).strip() for value in summary.get("tags") or [] if str(value).strip()],
+        "photos": photos,
+        "photo_url": str((photos[0] if photos else {}).get("url") or ""),
+        "source": source_name,
+        "verified_source": source_label,
+        "source_badge": source_label,
+        "source_freshness": source_label,
+        "last_checked": matched.get("checked_at") or matched.get("updated_at"),
+        "phone": facts.get("phone") or "",
+        "address": facts.get("address") or "",
+        "planning_facts": list(matched.get("planning_facts") or []),
+        "sources": list(matched.get("sources") or source_pack.get("sources") or []),
+        "provenance": provenance,
+        "catalog_detail": True,
+    }
+
 _canonical_explore_index_cache: dict[str, Any] = {"path": "", "mtime": 0.0, "items": [], "generated_at": 0}
 _canonical_trail_index_cache: dict[str, Any] = {"path": "", "mtime": 0.0, "items": [], "generated_at": 0}
 _canonical_trail_bundled_index_cache: dict[str, Any] = {"path": "", "mtime": 0.0, "items": [], "generated_at": 0}
@@ -7293,7 +7432,8 @@ def _explore_internal_preview_authorized(authorization: str) -> bool:
 
 def _explore_internal_preview_request_code(path: str, preview_header: str, authorization: str) -> str:
     """Return a fixed QA code without retaining request or account data."""
-    if not str(path or "").startswith("/api/explore/"):
+    preview_path = str(path or "")
+    if not preview_path.startswith(("/api/explore/", "/api/campsites/")):
         return "not_applicable"
     if str(preview_header or "").strip().lower() != "internal":
         return "header_missing"
@@ -21501,6 +21641,12 @@ async def campsites_search(
 
 async def _load_campsite_detail(facility_id: str, user: dict | None = None) -> dict:
     requested_facility_id = facility_id
+    stored_detail = _explore_catalog_camp_detail(requested_facility_id)
+    if stored_detail:
+        override = get_camp_profile_override(requested_facility_id)
+        if override:
+            stored_detail = {**stored_detail, **override, "admin_edited": True}
+        return stored_detail
     canonical_ridb = re.fullmatch(r"(?:place:)?ridb:([^:]+)", facility_id, re.I)
     if canonical_ridb:
         facility_id = canonical_ridb.group(1)

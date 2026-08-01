@@ -15936,7 +15936,7 @@ function MapScreen() {
       postWebMessage(JSON.stringify({ type: 'fly_to', lat: place.lat, lng: place.lng, zoom: scenicZoom, pitch: 64, bearing: -28, name: place.name }));
       return;
     }
-    nativeMapRef.current?.flyTo(place.lat, place.lng, zoom, place.name);
+    nativeMapRef.current?.flyTo?.(place.lat, place.lng, zoom, place.name);
     postWebMessage(JSON.stringify({ type: 'fly_to', lat: place.lat, lng: place.lng, zoom, name: place.name }));
   }
 
@@ -15967,7 +15967,7 @@ function MapScreen() {
         mode: 'flyTo',
       });
     } else {
-      nativeMapRef.current?.flyTo(point.lat, point.lng, camera.zoom, point.name);
+      nativeMapRef.current?.flyTo?.(point.lat, point.lng, camera.zoom, point.name);
     }
     postWebMessage(JSON.stringify({
       type: 'fly_to',

@@ -15,6 +15,7 @@ test('campground selection opens an identity-stable peek before the full sheet',
   assert.match(mapSource, /expandedLoading=\{loadingDetail && !campDetail\}/);
   assert.match(mapSource, /CAMP_DETAIL_REVEAL_TIMEOUT_MS = 6000/);
   assert.match(mapSource, /campDetailMatchesSelection\(camp, result\.value\)/);
+  assert.match(mapSource, /nativeMapRef\.current\?\.flyTo\?\.\(point\.lat, point\.lng, camera\.zoom, point\.name\)/);
 });
 
 test('the shared snap sheet supports controlled peek-to-full loading without partial children', () => {

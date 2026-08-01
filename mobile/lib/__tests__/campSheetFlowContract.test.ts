@@ -6,6 +6,7 @@ import test from 'node:test';
 
 const mobileRoot = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const mapSource = readFileSync(join(mobileRoot, 'app/(tabs)/map.tsx'), 'utf8');
+const routeBuilderSource = readFileSync(join(mobileRoot, 'app/(tabs)/route-builder.tsx'), 'utf8');
 const snapSheetSource = readFileSync(join(mobileRoot, 'components/map/TrailheadSnapSheet.tsx'), 'utf8');
 const campPeekSource = readFileSync(join(mobileRoot, 'components/map/CampPlaceSheetPeek.tsx'), 'utf8');
 
@@ -57,6 +58,13 @@ test('campground sheets clean metadata and omit invented summary fallbacks', () 
   assert.match(mapSource, /check current access,\\s\*rules/);
   assert.match(mapSource, /if \(useful\) return useful;\s+return '';/);
   assert.match(mapSource, /const summaryText = selectedCampPresentation!\.summary/);
+});
+
+test('campground galleries normalize object photos before resolving media URLs', () => {
+  assert.match(mapSource, /source=\{\{ uri: campPhotoUrl\(uri\) \}\}/);
+  assert.match(routeBuilderSource, /source=\{\{ uri: campPhotoUrl\(uri\) \}\}/);
+  assert.doesNotMatch(mapSource, /source=\{\{ uri: mediaUrl\(uri\) \}\}/);
+  assert.doesNotMatch(routeBuilderSource, /source=\{\{ uri: mediaUrl\(uri\) \}\}/);
 });
 
 test('campground action parity retains its existing offline area workflow', () => {

@@ -30467,7 +30467,7 @@ function MapScreen() {
                   <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false} style={s.photoGallery}>
                     {(campDetail.photos ?? []).map((uri, i) => (
                       <TouchableOpacity key={i} activeOpacity={0.9} onPress={() => setCampGalleryIndex(i)}>
-                        <Image source={{ uri: mediaUrl(uri) }} style={[s.galleryPhoto, { width: windowWidth }]} resizeMode="cover" resizeMethod="resize" />
+                        <Image source={{ uri: campPhotoUrl(uri) }} style={[s.galleryPhoto, { width: windowWidth }]} resizeMode="cover" resizeMethod="resize" />
                       </TouchableOpacity>
                     ))}
                   </ScrollView>

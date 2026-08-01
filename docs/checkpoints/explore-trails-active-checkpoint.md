@@ -1329,3 +1329,27 @@ Verify `git diff --cached --name-only` before every commit.
 
 - Do not rerun broad Explore, Map, Trails, Memory, Layers, NPS, Originals, Android Auto, or store-screenshot work.
 - Do not stage `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, or unrelated changes. Do not fabricate media or weaken exact-place licensing.
+
+## Canonical campground follow-up blocked after bounded correction — 2026-08-01 01:19 CDT
+
+- Branch: `feat/trailhead-1.0.10-overhaul`; exact HEAD `55845fdf39a5c7c51ef38989d39c28b0eabb72b4`. Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; App Store copy SHA-256 remains `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+- Campground presentation polish from commits `8d5c52d5`, `460f3ad5`, and `496a0a82` passed the bounded Portal Dispersed Camp device assertion. `Dispersed Camping` wraps without truncation, the raw `poi` fallback label is omitted, and the availability action reads `Report availability`. These are presentation fixes, not TypeScript source appearing in the UI.
+- A second developed-camp assertion exposed a separate P1: selecting the canonical Search V2 result `Devils Garden Campground` reaches the caught `Map unavailable` boundary before the campground sheet is usable.
+- Live source evidence for `/api/campsites/234059/detail` returned valid optional nulls including `provider_notices: null`, `campsites: null`, and `reviews: null`. The raw Full renderer calls `.slice()` on provider notices, while `normalizeCampDetailArrays` previously omitted that field. Commit `55845fdf` added the missing normalization plus an exact Devils Garden regression fixture. Campground tests, TypeScript, and whitespace checks passed.
+- Android preview update `019fbbf5-9959-798e-a5df-7044ebaf1c9d`, group `decc4f58-e64d-41f8-a23f-7db5da8a7470`, runtime `native-1.0.10-android.7`, was published from exact source `55845fdf39a5c7c51ef38989d39c28b0eabb72b4`; Sentry debug ID `20d429c8-5a70-4ff2-a767-51431debcd15`. Samsung build `69` verified that source, runtime, and update.
+- The single allowed Devils Garden rerun still produced `TypeError: undefined is not a function` in `MapScreen` and the `Map unavailable` recovery UI. The normalization was therefore necessary but not sufficient. Per the no-loop rule, no second speculative correction, paired iOS publication, production OTA, backend deployment, catalog promotion, or public-stage change was attempted.
+- Evidence directory: `C:\Users\User\Documents\Codex\evidence\trailhead\camp-devils-55845fdf`. QA XML SHA-256 `a134ba133fa1a9e79668e869a21245b421763a964e17c2b5ca6c702d0cd2fe61`; QA screenshot `79d00dacc9c6b2eb8358e286d943de38e9528f56e1d4fe29d49c9a00c68014a5`; failed Devils hierarchy `83dfcc308d84c8c6cbeef0a56778d89cff7a7dbf9a14cea7f814d98da2bdf8d5`; failed Devils screenshot `6158beb726e280bbba10b3b49f194a569723f2003a2d1a82fd8545e5d2ca7c49`.
+- Open P0/P1: **P1 — canonical Recreation.gov campground selection can still crash Map before the shared campground sheet appears.** Production promotion is blocked.
+- Task-owned EAS, Expo, Metro, Gradle, Maestro, test, Railway, and screen-recording processes: none. The preview publisher and focused tests exited.
+
+### Exact next action
+
+1. Read the fixed phase code from the existing Sentry event or add a locally observable fixed phase only if Sentry access remains unavailable; do not include identity, coordinates, route geometry, search text, or arbitrary exception text.
+2. Use that phase to isolate the next unguarded optional-array/function call in the canonical Search V2 camp path. Add the exact Devils Garden resolved-result/detail fixture before changing code.
+3. Apply one evidence-backed correction in a new packet, then rerun only canonical Devils Garden selection. If it passes, publish the identical SHA to iOS and perform one shared assertion before reconsidering production.
+
+### Do not repeat
+
+- Do not rerun Portal Dispersed Camp, Kirch Flat, broad Camp/Explore/Map crawls, Memory, Layers, NPS, Trails, Originals, Android Auto, or store work without new evidence.
+- Do not weaken database-first rendering, change the serving index, refetch NPS, publish production, or expose public stages while this P1 remains.
+- Do not stage `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, Valhalla work, Android helper-script changes, or unrelated files.

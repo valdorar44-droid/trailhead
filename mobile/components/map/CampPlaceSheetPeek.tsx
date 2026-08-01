@@ -108,7 +108,7 @@ function Essential({
   return (
     <View style={styles.essentialItem}>
       <Text style={styles.essentialLabel}>{label}</Text>
-      <Text style={styles.essentialValue} numberOfLines={1}>{value}</Text>
+      <Text style={styles.essentialValue} numberOfLines={2}>{value}</Text>
     </View>
   );
 }
@@ -141,7 +141,7 @@ function makeStyles(C: ColorPalette) {
       marginRight: -8,
     },
     essentials: {
-      minHeight: 60,
+      minHeight: 72,
       flexDirection: 'row',
       borderRadius: 12,
       borderWidth: 1,
@@ -151,7 +151,7 @@ function makeStyles(C: ColorPalette) {
     },
     essentialItem: { flex: 1, minWidth: 0, paddingHorizontal: 11, paddingVertical: 10 },
     essentialLabel: { color: C.orange, fontSize: 11, lineHeight: 14, fontWeight: '700', letterSpacing: 0.35 },
-    essentialValue: { color: C.text, fontSize: 14, lineHeight: 20, fontWeight: '600', marginTop: 3 },
+    essentialValue: { color: C.text, fontSize: 14, lineHeight: 18, fontWeight: '600', marginTop: 3 },
     actions: { minHeight: 48, flexDirection: 'row', gap: 12 },
     primaryButton: {
       flex: 1,

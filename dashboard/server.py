@@ -34892,6 +34892,24 @@ def _explore_visible_category_counts(catalog: dict) -> dict[str, int]:
     return dict(counts)
 
 
+def _explore_is_trail_result_card(place: dict) -> bool:
+    """Reject transactional containers that only mention a trail activity."""
+    if not _explore_profile_matches_trail_result(place):
+        return False
+    summary = place.get("summary") if isinstance(place.get("summary"), dict) else {}
+    card = place.get("card") if isinstance(place.get("card"), dict) else {}
+    displayed = _explore_index_display_category(
+        place,
+        str(summary.get("category") or place.get("category") or "Place"),
+    )
+    title = str(summary.get("title") or card.get("title") or "").lower()
+    if displayed not in {"Trail", "Trailhead"} and re.search(
+        r"\b(lottery|permit|reservation)\b", title
+    ):
+        return False
+    return True
+
+
 def _explore_serving_query(
     *,
     q: str = "",
@@ -35018,9 +35036,11 @@ def _explore_serving_query(
         if stay_request:
             places = [place for place in places if _explore_profile_matches_stay_result(place)]
         elif trail_request:
+            # An explicit Trails result set contains trail or trailhead cards,
+            # not destination containers that merely expose a Trails module.
             places = [
                 place for place in places
-                if _explore_place_matches_category_request(place, {"trail"})
+                if _explore_is_trail_result_card(place)
             ]
         elif effective_category:
             places = [

@@ -354,6 +354,7 @@ class TrailCatalogTests(unittest.TestCase):
         payload = asyncio.run(server.explore_catalog_index(q="Sedona Arizona", category="trails", limit=8))
 
         self.assertGreater(payload["count"], 0)
+        self.assertNotIn("place:ridb:10090620", {item["id"] for item in payload["places"]})
         for item in payload["places"]:
             self.assertIn(item["category"], {"Trail", "Trailhead"})
             self.assertIsNotNone(item.get("lat"))

@@ -313,8 +313,13 @@ const checks = [
   {
     label: 'Full backend regression suite',
     cwd: repoRoot,
-    cmd: 'python',
-    args: ['-m', 'unittest', 'discover', '-s', 'tests'],
+    cmd: 'uv',
+    args: [
+      'run',
+      '--with', 'pytest',
+      '--with-requirements', 'requirements.txt',
+      'python', '-m', 'pytest', '-q', 'tests',
+    ],
     env: prepreviewDbEnvironment,
   },
   {

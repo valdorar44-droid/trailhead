@@ -1,6 +1,6 @@
 # Trailhead Explore and Community Trails Active Checkpoint
 
-Last updated: 2026-08-01 13:38 CDT (America/Winnipeg)
+Last updated: 2026-08-01 14:47 CDT (America/Winnipeg)
 
 ## Resume protocol
 
@@ -1489,3 +1489,28 @@ Verify `git diff --cached --name-only` before every commit.
 - The newest completed packet is `Primitive-only campground Peek tested; broader render P1 remains` at source `4cf74da1483389e9c2fd3397ba0a13d32a3eb9c2`, not the older `22d0b603` section immediately above in this append-only history.
 - Android update `019fbc37-48c5-7794-9208-c94ecfb33fe9` reproduced `map_camp_peek_render` for canonical Devils Garden after the primitive-only boundary. Production remains blocked.
 - Exact next action: obtain the symbolicated Sentry stack using Android debug ID `648a7aa7-3266-43ce-8e4c-43ab88021401`, then fix only the proven failing expression. Do not repeat another model/sheet guess or broad crawl.
+## b08 campground source hydration remains blocked - 2026-08-01 14:47 CDT
+
+- Branch: `feat/trailhead-1.0.10-overhaul`; exact implementation HEAD `3309b29ce913de18f3930f853f17dfe38ce18b55`. Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; App Store copy SHA-256 remains `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`. `.cursor/` and both protected files remain unstaged.
+- Backend source `d79ecf121e2abeeffd93b2738492e3b01fd03bb9` is deployed in Railway deployment `841d4e87-78f6-418e-ada3-3910db4e5762`, which reached terminal `SUCCESS`; `/api/health` returned `status=ok`. `TRAILHEAD_EXPLORE_DATA_STAGE` remains `internal`, and the live authorization boundary still requires an authenticated administrator plus `X-Trailhead-Explore-Preview: internal`.
+- Commit `3309b29c` accepts durable reviewed agency place IDs in the campground detail identity adapter and separates Inventory from Fee. Focused campground, sheet-action, Search V2, copy, privacy, TypeScript, and whitespace checks passed.
+- Android preview update `019fbed7-830d-7364-95b8-db68d32131b8`, group `a9105c31-7eec-4344-aef2-0fb43fe4064a`, runtime `native-1.0.10-android.7`, was published from exact source `3309b29ce913de18f3930f853f17dfe38ce18b55`; Android Sentry source maps uploaded successfully.
+- Samsung `SM_A326U1`, app version `1.0.10`, build `69`, verified the exact source, preview channel, Android runtime, and update ID. Exact Search V2 selection `place:ridb:10182463` opened Kirch Flat Group Campground without a Map crash, blank frame, sheet-family swap, or identity flash. Peek now shows `Inventory: Not listed` and `Fee: Not listed`; the former duplicated `Reservable` fee is fixed.
+- The Full sheet still remains bound to `Recreation.gov` and does not hydrate the reviewed US Forest Service identity or official fee text. The b08 RIDB-to-USFS replacement therefore is not reaching the canonical Search-to-detail path. This is a deterministic remaining P1, not a rendering failure.
+- Per the one-correction/no-loop rule, no second campground correction, different-camp crawl, iOS publication, production OTA, catalog promotion, serving-index mutation, NPS refetch, or public-stage change was attempted.
+- Evidence directory: `C:\Users\User\Documents\Codex\evidence\trailhead\explore-b08-camp-fix-3309b29c`. QA/Map identity hierarchy SHA-256 `9efcc55262752a4b91b081a5fa0d8cf2cf4d659c3d38c7e61e89d71f1cab5d96`; Kirch result hierarchy `505b588690a3c7dfabbe4e277e8c0fe2c2dddfb31e9f35f1d186905d4e4352fc`; Peek hierarchy `ac560fb13e409c7c85f3db3a50839c247a1c60351c0f3313971349efc29ef582`; Full hierarchy `9634440d363d43dc2b9912638e09d465304cd5c8f2d28bb8d806e496a471c8ea`; Peek screenshot `9bdc0c926f652e3d955f2cae97af51a5c29b86f49103d502949908c0df9553fe`; Full screenshot `0d00f6b51d2fb94f510f8db83d8561224a2eed54a5fc7e62e71e77a8edeb9549`.
+- Open P0/P1: **P1 - reviewed b08 campground replacement data is bypassed by the canonical Search V2 detail path.** iOS remains on the previous accepted preview until Android passes this assertion.
+- Task-owned EAS, Expo, Metro, Gradle, Maestro, test, Railway, and screen-recording processes: none.
+
+### Exact next action
+
+1. Trace `place:ridb:10182463` through the Search V2 canonical resolver and internal-preview merge to the reviewed b08 replacement identity. Prove where the replacement is lost before changing presentation code.
+2. Add an exact Kirch Search result plus internal-preview replacement fixture and require one source-preserving canonical ID/detail response.
+3. Apply one backend/data-selection correction, deploy compatibility first, then rerun only Kirch Peek to Full. Test one other reviewed replacement only after Kirch passes.
+4. Publish the identical accepted SHA to iOS and perform one shared assertion before marking b08 accepted.
+
+### Do not repeat
+
+- Do not repeat the Camp Peek fee correction, earlier canonical camp crash work, broad campground/Explore/Map crawls, Memory, Layers, Trails, NPS fetch/research, Originals, Android Auto, or store work.
+- Do not weaken database-first rendering, fabricate fee/source facts, overwrite the protected serving index, publish production, or change public stages while this P1 remains.
+- Do not stage `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, Valhalla work, Android helper-script changes, or unrelated files.

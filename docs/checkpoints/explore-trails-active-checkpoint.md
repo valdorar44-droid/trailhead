@@ -1,6 +1,6 @@
 # Trailhead Explore and Community Trails Active Checkpoint
 
-Last updated: 2026-08-01 03:07 CDT (America/Winnipeg)
+Last updated: 2026-08-01 13:38 CDT (America/Winnipeg)
 
 ## Resume protocol
 
@@ -10,6 +10,33 @@ Read this file before every Explore and Community Trails work session and after 
 2. Verify the protected Explore index remains untouched. The current Git object is `f39f30fdbb33477dacd8fcf5016612a8729dc69e`; the accepted pre-existing file SHA-256 remains recorded in the parent Trails checkpoint.
 3. Never stage `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, the Valhalla/Railway work, Android Auto scripts, or other unrelated dirty files.
 4. Continue from **Next exact packet**. Do not restart completed Trails T1-T6, broad Map/Search/Offline crawls, NPS research, Layers, Memory Gate, Originals, Android Auto, or screenshot work.
+
+## Implementation checkpoint — b08 operational r8 internal candidate — 2026-08-01 13:38 CDT
+
+- Branch: `feat/trailhead-1.0.10-overhaul`; implementation commit `d79ecf121e2abeeffd93b2738492e3b01fd03bb9` (`feat(explore): validate b08 operational preview`). Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; App Store copy SHA-256 remains `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`. `.cursor/` and both protected files remain unstaged.
+- This packet used only cached accepted source objects. It made zero NPS, RIDB, USFS, BLM, Mapbox, or other provider requests and did not overwrite the public serving index.
+- Accepted agency candidate: `live-20260801-b08-operational-r8`, manifest SHA-256 `5be23a802d14e17be42ad779b9fee2dc7367ec91a56191464f147401c5a5dcc2`. Accepted combined candidate: `combined/live-20260801-b08-operational-r8`, manifest SHA-256 `c0bb0cb923ff1879f4fac76a68cd6ea60dfc46fbf22aa86ac4b16a01e1b627fe`.
+- The combined review contains 993 catalog records and 5,435 serving records. Five spatially matched RIDB campground records were replaced by richer USFS records while preserving both source identities; match distances are 8.4 to 43.4 meters. The internal preview sidecar contains 13 reviewed records at SHA-256 `0ce3990f83178c980d740d55c139164070804166f8e40a56f698df5fc9d3656a`.
+- Source-backed USFS facts now preserve site type, people capacity, fee, operating season and hours, water, restrooms, rules, phone, official source, and only direct Recreation.gov campground booking links. People capacity remains distinct from campsite count; missing facts remain absent.
+- The cached NPS media gate reviewed 133 selected images. Eighty-six exact, traceable NPS-credited images are approved for the internal candidate and 47 third-party, restricted, ambiguous, AI-modified, or insufficiently evidenced images are stripped. Text fallback remains valid when media rights are not proven.
+- Promotion remains structurally closed: `catalog_gate_passed` records deterministic schema/source/media checks, while `promotion_ready` remains false. The internal sidecar still requires internal stage, authenticated administrator access, and `X-Trailhead-Explore-Preview: internal`; the header alone is never a credential.
+- Verification passed: 179 focused backend/data tests, 15 expected warnings, four subtests; Python compilation; TypeScript; copy/privacy/NPS preservation audits; deterministic r8 rebuild/hash comparison; and `git diff --check`. An independent code audit found no P0/P1 blocker.
+- Existing mobile preview identities are unchanged because this is backend/data-only: Android update `019fbc54-2510-7741-9c6b-b2e00c5be503`, runtime `native-1.0.10-android.7`; iOS update `019fbc5c-65fe-721a-ab3a-02b5d0d35d77`, runtime `native-1.0.10-ios.6`.
+- Open P0/P1: none in automated validation. Internal backend deployment, live authorization-boundary proof, and the bounded Android destination/campground delta remain pending. P2: the combined candidate retains a cosmetic historical `r2` catalog label even though all authoritative revision/hash bindings are r8.
+- Task-owned Metro, Gradle, Maestro, test, EAS, Railway, and recording processes: none.
+
+### Next exact action
+
+1. Commit and push this checkpoint without staging protected or unrelated files.
+2. Deploy exact committed backend/data source to the internal environment and verify terminal deployment state, `/api/health`, authenticated admin plus preview-header access, and rejection of header-only access.
+3. Run one bounded Android delta: Sierra National Forest, Moab BLM, one rich NPS destination, one sparse NPS destination, and the five reviewed campgrounds through hub -> module -> child -> shared sheet -> map -> Back.
+4. If Android passes, perform only the equivalent shared iOS spot check. Stop after internal b08 acceptance; do not promote publicly or fetch b09.
+
+### Do not repeat
+
+- Do not refetch b06 or b08, spend provider quota, rebuild historical candidates, repeat broad NPS/Explore/Map/Trails crawls, or reopen closed campground crash work without new evidence.
+- Do not publish an OTA or native build for this data-only packet. Do not change public Explore stages, production catalogs, Community-route exposure, advertising, or store assets.
+- Do not stage `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, or unrelated worktree files.
 
 ## Forward checkpoint — b08 operational depth and promotion safety — 2026-08-01 11:23 CDT
 

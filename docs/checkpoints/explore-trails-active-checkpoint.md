@@ -1353,3 +1353,29 @@ Verify `git diff --cached --name-only` before every commit.
 - Do not rerun Portal Dispersed Camp, Kirch Flat, broad Camp/Explore/Map crawls, Memory, Layers, NPS, Trails, Originals, Android Auto, or store work without new evidence.
 - Do not weaken database-first rendering, change the serving index, refetch NPS, publish production, or expose public stages while this P1 remains.
 - Do not stage `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, Valhalla work, Android helper-script changes, or unrelated files.
+
+## Canonical campground Peek boundary isolated — 2026-08-01 02:06 CDT
+
+- Branch: `feat/trailhead-1.0.10-overhaul`; exact implementation HEAD `22d0b6031d9574e769284a9af6fcc452a5532414`. Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; App Store copy SHA-256 remains `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`. `.cursor/` and both protected files remain unstaged.
+- Commit `b3936c1d` made the existing privacy-safe phase code locally observable only for an authenticated preview administrator. No campground identity, coordinates, route geometry, search text, arbitrary exception text, or user/request data is logged or transmitted.
+- Diagnostic paired preview: Android update `019fbc0a-b113-7067-bf65-3cb6c645d067`, group `f0db6f97-9f98-473f-9e44-bd79a9210116`, runtime `native-1.0.10-android.7`; iOS update `019fbc0a-b113-7eba-a04c-a033f3398711`, group `09dffb0e-e67e-42bf-9a66-663bc69c345e`, runtime `native-1.0.10-ios.6`.
+- The exact canonical Search V2 selection `place:ridb:234059` deterministically reported `map_camp_peek_render`. This proves the exception happens before stored detail commit and Full rendering; the valid Recreation.gov detail payload and its nullable campsite/review/provider-notice arrays are not the immediate failing boundary.
+- Commit `22d0b603` stopped the Peek state from eagerly constructing the hidden Full sheet tree. Fifteen focused campground, presentation, telemetry/privacy, and sheet-contract tests passed, as did TypeScript and whitespace checks. This is retained because it removes unnecessary hidden work for every campground and preserves the intended Peek-first contract.
+- Corrected paired preview: Android update `019fbc1f-d994-7ea6-82c9-691b0a9baa87`, group `69de7f8c-1045-4c22-9914-fa5da11bbf97`, runtime `native-1.0.10-android.7`; iOS update `019fbc1f-d994-7d7b-ad74-b2307d59a373`, group `9b404e1a-14ee-4d25-a518-5db3f6f00990`, runtime `native-1.0.10-ios.6`. Samsung build `69` verified exact source `22d0b6031d9574e769284a9af6fcc452a5532414` and the Android update ID.
+- The one allowed corrected Devils Garden replay still failed with `map_camp_peek_render`. The remaining P1 is therefore confined to the canonical Peek presentation/header/model path, not the hidden Full tree. Per the packet rule, no second speculative correction, second replay, different-camp crawl, production OTA, catalog promotion, or public-stage change was attempted.
+- Evidence directory: `C:\Users\User\Documents\Codex\evidence\trailhead\camp-devils-22d0b603`. QA identity XML SHA-256 `692b586f76d8f9bdfdc75a2673ef6547ad8a6c64cdbbd6fa1ca737b9f9b8af13`; failed Peek screenshot `dcce56f5a3e9d6134ecba11a14bf619d7926b9d2bf0a0f8fb9363d70a935f084`; failed Peek hierarchy `c94887e585a3f837f2972c2fbe4eb6480ee1861cf50d511650def7be8843b065`; fixed-code log `8619aac57832e706e24bd75f7a9c5430e453f225e25a1a5426aa542b1247b212`.
+- Open P0/P1: **P1 — a canonical Search V2 campground can fail while constructing the immediate shared Peek.** Confirmed for Devils Garden. Portal Dispersed Camp and Kirch Flat use different source/selection shapes and previously passed; no claim is made that every developed campground fails.
+- Task-owned EAS, Expo, Metro, Gradle, Maestro, test, Railway, and screen-recording processes: none. The preview publishers and focused tests exited.
+
+### Exact next action
+
+1. Add the exact resolved Search V2 result-to-camp-pin fixture for `place:ridb:234059`, not only its stored detail fixture.
+2. Extract a pure primitive-only `CampPeekPresentationV1` from the selected camp, including stable identity, saved state, title, metadata, site type, inventory and fee. The Peek subtree must not receive or inspect the raw canonical result object.
+3. Unit-render that Peek model and test null/object/array variations before changing the Map call site. Apply one bounded correction, then replay only Devils Garden Peek → Full and one different canonical developed campground if Devils passes.
+4. Keep production blocked until Android passes and the identical iOS SHA receives the shared assertion.
+
+### Do not repeat
+
+- Do not repeat the phase instrumentation, nullable-detail normalization, hidden-Full deferral, Portal/Kirch crawls, broad Explore/Map/Trails work, Memory, Layers, NPS, Originals, Android Auto, or store work.
+- Do not refetch providers, weaken database-first behavior, overwrite the serving index, publish production, or change public feature stages while this P1 remains.
+- Do not stage `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, Valhalla work, Android helper-script changes, or unrelated files.

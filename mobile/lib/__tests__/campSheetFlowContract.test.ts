@@ -80,9 +80,10 @@ test('campground availability reports are explicit and require confirmation', ()
 });
 
 test('Map errors capture a fixed campground phase and offer a clean reset', () => {
-  assert.match(mapSource, /captureMapCampSelectionErrorV1\(error\)/);
+  assert.match(mapSource, /const diagnosticCode = captureMapCampSelectionErrorV1\(error\)/);
+  assert.match(mapSource, /map\.error-return\.\$\{this\.state\.diagnosticCode\}/);
   assert.match(mapSource, /testID="map\.error-recovery"/);
-  assert.match(mapSource, /testID="map\.error-return"/);
+  assert.match(mapSource, /: 'map\.error-return'/);
   assert.match(mapSource, />Map unavailable</);
   assert.doesNotMatch(mapSource, />MAP ERROR</);
   assert.doesNotMatch(mapSource, /\{this\.state\.error\}/);

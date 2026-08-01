@@ -6052,15 +6052,19 @@ function ThreeNeedleCompass({ heading, bearing, compact = false }: { heading: nu
 
 // ─── Error boundary ───────────────────────────────────────────────────────────
 
-class MapErrorBoundary extends Component<{ children: React.ReactNode }, { failed: boolean }> {
-  state = { failed: false };
+class MapErrorBoundary extends Component<{ children: React.ReactNode }, { failed: boolean; diagnosticCode?: string }> {
+  state: { failed: boolean; diagnosticCode?: string } = { failed: false };
   static getDerivedStateFromError() { return { failed: true }; }
   componentDidCatch(error: Error) {
-    captureMapCampSelectionErrorV1(error);
+    const diagnosticCode = captureMapCampSelectionErrorV1(error);
+    if (diagnosticCode) {
+      console.info('[Trailhead Map]', diagnosticCode);
+      this.setState({ diagnosticCode });
+    }
   }
   private returnToMap = () => {
     clearMapCampSelectionPhaseV1();
-    this.setState({ failed: false });
+    this.setState({ failed: false, diagnosticCode: undefined });
   };
   render() {
     if (this.state.failed) {
@@ -6072,7 +6076,11 @@ class MapErrorBoundary extends Component<{ children: React.ReactNode }, { failed
             <Text style={{ color: '#4F5752', fontSize: 16, lineHeight: 23, marginTop: 9 }}>
               Return to the map and try opening this place again.
             </Text>
-            <TouchableOpacity testID="map.error-return" onPress={this.returnToMap} style={{ minHeight: 48, marginTop: 22, backgroundColor: '#AD5A33', paddingHorizontal: 20, borderRadius: 12, alignItems: 'center', justifyContent: 'center' }}>
+            <TouchableOpacity
+              testID={this.state.diagnosticCode ? `map.error-return.${this.state.diagnosticCode}` : 'map.error-return'}
+              onPress={this.returnToMap}
+              style={{ minHeight: 48, marginTop: 22, backgroundColor: '#AD5A33', paddingHorizontal: 20, borderRadius: 12, alignItems: 'center', justifyContent: 'center' }}
+            >
               <Text style={{ color: '#fff', fontSize: 16, fontWeight: '800' }}>Return to map</Text>
             </TouchableOpacity>
           </View>

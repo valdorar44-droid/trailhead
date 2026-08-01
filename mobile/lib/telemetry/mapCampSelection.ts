@@ -17,11 +17,10 @@ export function captureMapCampSelectionErrorV1(error: unknown): string | undefin
   })) return undefined;
 
   const errorCode = mapCampSelectionErrorCodeV1(currentMapCampSelectionPhaseV1());
-  let eventId: string | undefined;
   Sentry.withScope(scope => {
     scope.setTag('error_code', errorCode);
     const captured = error instanceof Error ? error : new Error('trailhead.map.camp.render');
-    eventId = Sentry.captureException(captured);
+    Sentry.captureException(captured);
   });
-  return eventId;
+  return errorCode;
 }

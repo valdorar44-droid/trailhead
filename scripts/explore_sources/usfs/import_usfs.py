@@ -196,6 +196,7 @@ def place_from_record(record: SourceRecord) -> ExplorePlaceV3 | None:
     if record.lat is None or record.lng is None:
         return None
     props = record.properties
+    source_pack = operational_source_pack(props)
     place = ExplorePlaceV3(
         id=f"place:usfs:{slugify(record.source_id)}",
         source_ids=[record.id],
@@ -220,9 +221,10 @@ def place_from_record(record: SourceRecord) -> ExplorePlaceV3 | None:
             pget(props, "ACTIVITY_TYPE_LIST"),
         ]),
         access=clean_fact(pget(props, "ACCESS_STATUS", "STATUS", "ACCESS", "SEASONAL_OPERATIONAL_STATUS")),
-        safety=clean_fact(pget(props, "HAZARD", "SAFETY", "RESTRICTIONS")),
+        safety=clean_fact(pget(props, "HAZARD", "SAFETY")),
         amenities=amenities_from_props(props),
         reservations=reservation_from_props(props),
+        source_pack=source_pack,
         sources=[source_ref(record)],
         quality=quality_for_source("usfs"),
         last_seen_at=record.last_seen_at,
@@ -252,9 +254,9 @@ def source_ref(record: SourceRecord) -> dict[str, Any]:
 
 def summary_from_record(record: SourceRecord) -> str:
     props = record.properties
-    return reader_copy(
+    return reader_summary(
         pget(props, "DESCRIPTION", "RECAREA_DESCRIPTION", "IMPORTANT_INFO")
-    )[:420]
+    )
 
 
 def allowed_uses(props: dict[str, Any]) -> list[str]:
@@ -355,6 +357,15 @@ def reader_copy(value: Any) -> str:
     text = compact_text(value)
     if not text:
         return ""
+    for broken, repaired in (
+        ("â€™", "'"),
+        ("â€˜", "'"),
+        ("â€”", "—"),
+        ("â€“", "–"),
+        ("Â·", "·"),
+        ("Â", ""),
+    ):
+        text = text.replace(broken, repaired)
     text = re.sub(r"(?<=[A-Za-z])(?=\d[\d,]*(?:\s|$))", " ", text)
     text = re.sub(r"\b([A-Za-z]+)\s+['’]s\b", r"\1's", text)
     text = re.sub(
@@ -362,8 +373,28 @@ def reader_copy(value: Any) -> str:
         ". ",
         text,
     )
+    text = re.sub(r"(?<=[.!?])(?=[A-Z])", " ", text)
+    text = re.sub(
+        r"(?<=[a-z0-9])\s+(?=(?:All campsites|Maximum length|Maximum group|Minimum stay|"
+        r"Reservations|The campground|This campground|Visitors)\b)",
+        ". ",
+        text,
+    )
     text = re.sub(r"\s+([,.;:!?])", r"\1", text)
     return compact_text(text)
+
+
+def reader_summary(value: Any, limit: int = 420) -> str:
+    """Keep a bounded summary without cutting a sentence or word in half."""
+    text = reader_copy(value)
+    if len(text) <= limit:
+        return text
+    clipped = text[:limit]
+    sentence_ends = [match.end() for match in re.finditer(r"[.!?](?=\s|$)", clipped)]
+    if sentence_ends:
+        return clipped[:sentence_ends[-1]].strip()
+    word_safe = clipped.rsplit(" ", 1)[0].rstrip(" ,;:")
+    return f"{word_safe}…" if word_safe else ""
 
 
 def split_list(value: Any) -> list[str]:
@@ -375,9 +406,175 @@ def split_list(value: Any) -> list[str]:
     return [item.strip() for item in text.split(",") if clean_fact(item)]
 
 
+RECREATION_CAMPGROUND_URL_RE = re.compile(
+    r"^https://(?:www\.)?recreation\.gov/camping/campgrounds/[A-Za-z0-9_-]+(?:[/?#]|$)",
+    re.I,
+)
+
+
 def reservation_from_props(props: dict[str, Any]) -> dict[str, Any]:
-    url = compact_text(pget(props, "REC1STOP_URL", "USDA_PORTAL_URL"))
-    return {"url": url} if url.startswith("https://") else {}
+    url = compact_text(pget(props, "REC1STOP_URL", "RESERVATION_URL"))
+    if not RECREATION_CAMPGROUND_URL_RE.match(url):
+        return {}
+    # ``url`` is the canonical Explore V3 key.  Keep the older spelling while
+    # both readers exist so a reviewed record never loses its booking action.
+    return {"url": url, "reservation_url": url, "reservable": True}
+
+
+def source_fact_list(*values: Any) -> list[str]:
+    facts: list[str] = []
+    normalized: list[str] = []
+    for value in values:
+        fact = clean_fact(value)
+        folded = re.sub(r"\bopen\b", "", fact.casefold())
+        folded = re.sub(r"[^a-z0-9]+", " ", folded).strip()
+        if not fact or not folded or folded in normalized:
+            continue
+        if any(folded in existing for existing in normalized):
+            continue
+        facts.append(fact)
+        normalized.append(folded)
+    return facts
+
+
+MONTH_NAME_RE = re.compile(
+    r"\b(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|"
+    r"aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b",
+    re.I,
+)
+CLOCK_OR_STAY_RE = re.compile(
+    r"\b(?:\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)|day use|night minimum|"
+    r"minimum stay|check[- ]?in|check[- ]?out)\b",
+    re.I,
+)
+
+
+def season_like_operational_value(value: Any) -> str:
+    """Use an hours field as season only when its content is clearly seasonal."""
+    text = clean_fact(value)
+    month = (
+        r"Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|June?|July?|"
+        r"Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?"
+    )
+    text = re.sub(rf"\b({month})\s*[-–—]\s*({month})\b", r"\1 - \2", text, flags=re.I)
+    if not text or CLOCK_OR_STAY_RE.search(text):
+        return ""
+    if re.search(r"\b(?:all year|year[- ]round)\b", text, re.I):
+        return text
+    return text if len(MONTH_NAME_RE.findall(text)) >= 2 else ""
+
+
+def reader_site_type(value: Any) -> str:
+    text = clean_fact(value).replace("_", " ")
+    if not text:
+        return ""
+    return text.title() if text.upper() == text else text
+
+
+def positive_people_capacity(props: dict[str, Any]) -> int | None:
+    """Return source-labelled people capacity, never an inferred site count."""
+    raw = pget(
+        props,
+        "MAX_NBR_PEOPLE",
+        "PEOPLE_AT_ONE_TIME",
+        "TOTAL_CAPACITY",
+        "MAX_PEOPLE",
+    )
+    if raw in (None, ""):
+        return None
+    match = re.fullmatch(r"\s*([0-9][0-9,]*)(?:\.0+)?\s*", str(raw))
+    if not match:
+        return None
+    value = int(match.group(1).replace(",", ""))
+    return value if 0 < value <= 100_000 else None
+
+
+PHONE_RE = re.compile(
+    r"(?<!\d)(?:\+?1[-.\s]?)?(?:\(\d{3}\)|\d{3})[-.\s]\d{3}[-.\s]\d{4}"
+    r"(?:\s*(?:x|ext\.?)[-.\s]*\d{1,6})?(?!\d)",
+    re.I,
+)
+
+
+def contact_phone_from_props(props: dict[str, Any]) -> str:
+    explicit = compact_text(pget(props, "PHONE", "SITE_PHONE", "CONTACT_PHONE", "TELEPHONE"))
+    for candidate in (
+        explicit,
+        reader_copy(pget(props, "INFORMATION_CENTER")),
+        reader_copy(pget(props, "SITE_CONTACT_NOTES")),
+    ):
+        match = PHONE_RE.search(candidate)
+        if match:
+            return compact_text(match.group(0)).strip(" ,.;")
+    return ""
+
+
+def fee_text_from_props(props: dict[str, Any]) -> str:
+    detail = reader_copy(pget(props, "FEE_DESCRIPTION", "FEE_TEXT"))
+    if detail:
+        detail = detail.replace("\\", "")
+        detail = re.sub(r"^Overnight Use:\s*", "", detail, flags=re.I)
+        detail = re.sub(
+            r"(?<![.;:])\s+(?=(?:Single Site|Double Site|Group Site|Additional Holiday Fee|Additional Vehicle Fee):)",
+            ". ",
+            detail,
+            flags=re.I,
+        )
+        detail = re.sub(r":\s*\.", ":", detail)
+        detail = re.sub(r"(?<=per night)\s+(?=\$\d)", ". ", detail, flags=re.I)
+        return compact_text(detail)
+    charged = compact_text(pget(props, "FEE_CHARGED")).casefold()
+    if charged in {"y", "yes", "true", "1"}:
+        return "Fee charged"
+    if charged in {"n", "no", "false", "0"}:
+        return "No fee"
+    return ""
+
+
+def operational_source_pack(props: dict[str, Any]) -> dict[str, Any]:
+    """Keep official campground operations intact through candidate builds."""
+    site_type = reader_site_type(pget(props, "SITE_TYPE", "FEATURE_TYPE", "TYPE"))
+    people_capacity = positive_people_capacity(props)
+    fee_text = fee_text_from_props(props)
+    raw_hours = clean_fact(pget(props, "OPERATIONAL_HOURS"))
+    seasonal_hours = season_like_operational_value(raw_hours)
+    hours = [] if seasonal_hours else source_fact_list(raw_hours)
+    seasons = source_fact_list(
+        pget(props, "SEASON_DESCRIPTION"),
+        pget(props, "BEST_SEASON"),
+        seasonal_hours,
+        pget(props, "OPEN_SEASON"),
+    )
+    water = clean_fact(pget(props, "WATER_AVAILABILITY", "WATER"))
+    restrooms = clean_fact(pget(props, "RESTROOM_AVAILABILITY", "TOILET"))
+    rules = clean_fact(pget(props, "RESTRICTIONS"))
+    official_url = compact_text(pget(props, "USDA_PORTAL_URL", "OFFICIAL_URL"))
+    booking_url = compact_text(pget(props, "REC1STOP_URL", "RESERVATION_URL"))
+    phone = contact_phone_from_props(props)
+    pack: dict[str, Any] = {}
+    if site_type:
+        pack["site_type"] = site_type
+    if people_capacity is not None:
+        pack["people_capacity"] = people_capacity
+    if fee_text:
+        pack["fees"] = [fee_text]
+    if hours:
+        pack["operating_hours"] = hours
+    if seasons:
+        pack["operating_season"] = seasons
+    if water:
+        pack["water"] = water
+    if restrooms:
+        pack["restrooms"] = restrooms
+    if rules:
+        pack["rules"] = rules
+    if official_url.startswith("https://"):
+        pack["official_url"] = official_url
+    if RECREATION_CAMPGROUND_URL_RE.match(booking_url):
+        pack["booking_url"] = booking_url
+    if phone:
+        pack["phone"] = phone
+    return pack
 
 
 def as_float(value: Any) -> float | None:

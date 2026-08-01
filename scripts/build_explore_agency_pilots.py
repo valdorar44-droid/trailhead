@@ -633,7 +633,27 @@ def build_serving_review(
     }
 
 
-def build_candidate(out_dir: Path, max_requests: int, timeout: float, reuse_source_dir: Path | None = None) -> dict[str, Any]:
+def _reused_generated_at(reuse_source_dir: Path | None) -> int | None:
+    if not reuse_source_dir:
+        return None
+    manifest_path = reuse_source_dir.parent / "manifest.json"
+    if not manifest_path.is_file():
+        return None
+    try:
+        generated_at = int(json.loads(manifest_path.read_text()).get("generated_at") or 0)
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+    return generated_at if generated_at > 0 else None
+
+
+def build_candidate(
+    out_dir: Path,
+    max_requests: int,
+    timeout: float,
+    reuse_source_dir: Path | None = None,
+    *,
+    generated_at: int | None = None,
+) -> dict[str, Any]:
     budget = RequestBudget(max_requests)
     source_dir = out_dir / "source"
     feature_counts: dict[str, int] = {}
@@ -657,7 +677,7 @@ def build_candidate(out_dir: Path, max_requests: int, timeout: float, reuse_sour
     write_json(usfs_path, usfs_bundle)
     write_json(blm_path, blm_bundle)
 
-    fetched_at = int(time.time())
+    fetched_at = generated_at or _reused_generated_at(reuse_source_dir) or int(time.time())
     usfs_records, usfs_places, usfs_trails = import_usfs_fixture(usfs_path, fetched_at=fetched_at)
     blm_records, blm_places, blm_trails = import_blm_fixture(blm_path, fetched_at=fetched_at)
     records = usfs_records + blm_records
@@ -766,12 +786,19 @@ def main() -> int:
     parser.add_argument("--max-requests", type=int, default=40, help="Hard ArcGIS request cap (1-60).")
     parser.add_argument("--timeout", type=float, default=45.0)
     parser.add_argument("--reuse-source-dir", help="Rebuild from a prior candidate's source directory without network calls.")
+    parser.add_argument("--generated-at", type=int, help="Fixed source revision time for deterministic cached rebuilds.")
     args = parser.parse_args()
     out_dir = Path(args.out_dir).resolve()
     if "audit_candidates" not in out_dir.parts:
         raise SystemExit("refusing to write outside an audit_candidates directory")
     reuse_source_dir = Path(args.reuse_source_dir).resolve() if args.reuse_source_dir else None
-    manifest = build_candidate(out_dir, args.max_requests, args.timeout, reuse_source_dir=reuse_source_dir)
+    manifest = build_candidate(
+        out_dir,
+        args.max_requests,
+        args.timeout,
+        reuse_source_dir=reuse_source_dir,
+        generated_at=args.generated_at,
+    )
     print(json.dumps(manifest, indent=2))
     return 0 if manifest["promotion_ready"] else 2
 

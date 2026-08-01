@@ -16,6 +16,7 @@ from scripts.build_explore_agency_pilots import (
     source_item,
 )
 from scripts.explore_sources.base.content_quality import sanitize_source_pack_item
+from scripts.explore_sources.base.enrichment import enrich_place_dict
 from scripts.explore_sources.base.schema import ExplorePlaceV3
 from scripts.explore_sources.blm.import_blm import import_blm_fixture
 from scripts.explore_sources.usfs.import_usfs import import_usfs_fixture
@@ -90,6 +91,84 @@ def test_usfs_site_fields_preserve_source_facts_only(tmp_path: Path):
     assert "fee" not in places[0].amenities
 
 
+def test_usfs_camp_operational_facts_survive_without_inventing_site_count(tmp_path: Path):
+    path = write_feature_collection(tmp_path, "usfs-camp-operations.geojson", [{
+        "type": "Feature",
+        "properties": {
+            "site_cn": "camp-operations-1",
+            "public_site_name": "Rancheria Campground",
+            "site_type": "CAMPGROUND",
+            "total_capacity": 765,
+            "fee_charged": "Y",
+            "fee_description": "Single site: $47 per night",
+            "operational_hours": "June - October",
+            "open_season": "June",
+            "water_availability": "Yes, drinking water is available from a hand pump",
+            "restroom_availability": "Flush toilet(s)",
+            "rec1stop_url": "https://www.recreation.gov/camping/campgrounds/232815",
+            "usda_portal_url": "https://www.fs.usda.gov/recarea/sierra/recarea/?recid=45434",
+            "information_center": "Recreation.gov or 1-877-444-6777 for reservations.",
+        },
+        "geometry": {"type": "Point", "coordinates": [-119.1606, 37.2537]},
+    }])
+
+    _records, places, _trails = import_usfs_fixture(path, fetched_at=123)
+    raw = places[0].to_dict()
+    pack = raw["source_pack"]
+
+    assert pack == {
+        "site_type": "Campground",
+        "people_capacity": 765,
+        "fees": ["Single site: $47 per night"],
+        "operating_season": ["June - October"],
+        "water": "Yes, drinking water is available from a hand pump",
+        "restrooms": "Flush toilet(s)",
+        "official_url": "https://www.fs.usda.gov/recarea/sierra/recarea/?recid=45434",
+        "booking_url": "https://www.recreation.gov/camping/campgrounds/232815",
+        "phone": "1-877-444-6777",
+    }
+    assert raw["reservations"] == {
+        "url": "https://www.recreation.gov/camping/campgrounds/232815",
+        "reservation_url": "https://www.recreation.gov/camping/campgrounds/232815",
+        "reservable": True,
+    }
+    assert "campsites_count" not in raw
+    assert "site_count" not in raw["source_pack"]
+
+    enriched = enrich_place_dict(raw)
+    facts = {fact["key"]: fact["value"] for fact in enriched["planning_facts"]}
+    assert facts["site_type"] == "Campground"
+    assert facts["people_capacity"] == "765 people"
+    assert facts["water"] == "Yes, drinking water is available from a hand pump"
+    assert facts["restrooms"] == "Flush toilet(s)"
+    assert facts["phone"] == "1-877-444-6777"
+    assert facts["fees"] == "Single site: $47 per night"
+    assert facts["operating_season"] == "June - October"
+    assert "season" not in facts
+    assert "operating_hours" not in facts
+    reservation_fact = next(fact for fact in enriched["planning_facts"] if fact["key"] == "reservations")
+    assert reservation_fact["url"] == "https://www.recreation.gov/camping/campgrounds/232815"
+
+
+def test_usfs_official_page_without_recreation_url_is_not_reservable(tmp_path: Path):
+    path = write_feature_collection(tmp_path, "usfs-no-booking.geojson", [{
+        "type": "Feature",
+        "properties": {
+            "site_cn": "camp-no-booking",
+            "public_site_name": "Forest Camp",
+            "site_type": "CAMPGROUND",
+            "usda_portal_url": "https://www.fs.usda.gov/recarea/example",
+        },
+        "geometry": {"type": "Point", "coordinates": [-119.1, 37.1]},
+    }])
+
+    _records, places, _trails = import_usfs_fixture(path, fetched_at=123)
+
+    assert places[0].reservations == {}
+    assert places[0].source_pack["official_url"] == "https://www.fs.usda.gov/recarea/example"
+    assert "booking_url" not in places[0].source_pack
+
+
 def test_usfs_reader_copy_and_status_hide_source_formatting_codes(tmp_path: Path):
     path = write_feature_collection(tmp_path, "usfs-reader-copy.geojson", [{
         "type": "Feature",
@@ -113,7 +192,8 @@ def test_usfs_reader_copy_and_status_hide_source_formatting_codes(tmp_path: Path
     assert place.admin == "Sierra National Forest"
     assert place.access == "Open"
     assert place.summary == "At approximately 1,000 feet, the river's edge has a 50 person group site."
-    assert place.safety == "Maximum stay is 14 days. All campsites are walk-in"
+    assert place.safety == ""
+    assert place.source_pack["rules"] == "Maximum stay is 14 days. All campsites are walk-in"
     assert place.card["quick_facts"] == ["Campground", "Open"]
 
 

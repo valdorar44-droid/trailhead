@@ -1289,7 +1289,10 @@ def _explore_v3_place_to_profile(place: dict, rank: int = 900000) -> dict:
         "topics": tags,
         "source_note": card.get("source_badge") or source_title,
         "extract": description,
-        "booking_url": (place.get("reservations") or {}).get("url") if isinstance(place.get("reservations"), dict) else "",
+        "booking_url": (
+            (place.get("reservations") or {}).get("url")
+            or (place.get("reservations") or {}).get("reservation_url")
+        ) if isinstance(place.get("reservations"), dict) else "",
         "license": primary_source.get("license") or existing_source_pack.get("license") or "",
     }
     profile = {
@@ -5548,6 +5551,22 @@ def _explore_place_to_camp(place: dict, center_lat: float, center_lng: float) ->
     }
 
 
+def _source_pack_first_text(value: object) -> str:
+    values = value if isinstance(value, list) else [value]
+    return next((str(item).strip() for item in values if str(item or "").strip()), "")
+
+
+_RECREATION_CAMPGROUND_BOOKING_RE = re.compile(
+    r"^https://(?:www\.)?recreation\.gov/camping/campgrounds/[A-Za-z0-9_-]+(?:[/?#]|$)",
+    re.I,
+)
+
+
+def _direct_recreation_campground_booking(value: object) -> str:
+    url = str(value or "").strip()
+    return url if _RECREATION_CAMPGROUND_BOOKING_RE.match(url) else ""
+
+
 def _explore_catalog_camp_detail(identifier: str) -> dict | None:
     """Resolve a campground detail from Trailhead's stored Explore catalog.
 
@@ -5643,7 +5662,15 @@ def _explore_catalog_camp_detail(identifier: str) -> dict | None:
     ).strip()
     source_name = str(primary.get("source") or first_source.get("source") or "trailhead_catalog").strip().lower()
     official_url = str(source_pack.get("official_url") or summary.get("source_url") or primary.get("url") or "").strip()
-    booking_url = str(reservations.get("url") or source_pack.get("booking_url") or "").strip()
+    booking_url = next((
+        reviewed
+        for candidate in (
+            reservations.get("url"),
+            reservations.get("reservation_url"),
+            source_pack.get("booking_url"),
+        )
+        if (reviewed := _direct_recreation_campground_booking(candidate))
+    ), "")
     description = str(
         profile.get("story")
         or profile.get("summary")
@@ -5653,10 +5680,29 @@ def _explore_catalog_camp_detail(identifier: str) -> dict | None:
     ).strip()
     lat = summary.get("lat")
     lng = summary.get("lng")
-    site_type = facts.get("place_type") or str(summary.get("category") or "Campground").strip()
+    site_type = str(
+        source_pack.get("site_type")
+        or facts.get("site_type")
+        or facts.get("place_type")
+        or summary.get("category")
+        or "Campground"
+    ).strip()
     site_types = [site_type] if site_type else []
     amenities = [str(value).strip() for value in matched.get("amenities") or [] if str(value).strip()]
-
+    fee_text = str(
+        facts.get("fee")
+        or facts.get("fees")
+        or _source_pack_first_text(source_pack.get("fees"))
+        or ""
+    ).strip()
+    operating_season = str(
+        matched.get("best_season")
+        or facts.get("operating_season")
+        or facts.get("season")
+        or _source_pack_first_text(source_pack.get("operating_season"))
+        or ""
+    ).strip()
+    phone = str(facts.get("phone") or source_pack.get("phone") or "").strip()
     return {
         "id": str(matched.get("id") or requested),
         "requested_id": requested,
@@ -5666,15 +5712,16 @@ def _explore_catalog_camp_detail(identifier: str) -> dict | None:
         "land_type": site_type or "Campground",
         "description": description,
         "summary": description,
-        "cost": facts.get("fee") or facts.get("fees") or "",
+        "cost": fee_text,
         "reservable": bool(reservations.get("reservable") or booking_url),
         "url": booking_url or official_url,
         "official_url": official_url,
         "booking_url": booking_url,
         "access_notes": str(matched.get("access") or facts.get("access") or "").strip(),
-        "best_season": str(matched.get("best_season") or facts.get("season") or "").strip(),
+        "best_season": operating_season,
         "amenities": amenities,
         "site_types": site_types,
+        "campsites_count": 0,
         "activities": [str(value).strip() for value in source_pack.get("activities") or [] if str(value).strip()],
         "tags": [str(value).strip() for value in summary.get("tags") or [] if str(value).strip()],
         "photos": photos,
@@ -5684,7 +5731,7 @@ def _explore_catalog_camp_detail(identifier: str) -> dict | None:
         "source_badge": source_label,
         "source_freshness": source_label,
         "last_checked": matched.get("checked_at") or matched.get("updated_at"),
-        "phone": facts.get("phone") or "",
+        "phone": phone,
         "address": facts.get("address") or "",
         "planning_facts": list(matched.get("planning_facts") or []),
         "sources": list(matched.get("sources") or source_pack.get("sources") or []),

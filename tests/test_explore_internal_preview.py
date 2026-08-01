@@ -344,9 +344,17 @@ class ExploreInternalPreviewTests(unittest.TestCase):
         self.assertEqual(merged["summary"], reviewed["summary"])
         self.assertEqual(merged["description"], reviewed["description"])
         self.assertTrue(merged["reservations"]["reservable"])
-        self.assertEqual(merged["reservations"]["url"], reviewed["reservations"]["url"])
-        self.assertEqual(merged["media"][0]["credit"], "Recreation.gov")
+        self.assertEqual(merged["reservations"]["url"], "https://www.recreation.gov/camping/campgrounds/123")
+        self.assertEqual(
+            merged["reservations"]["reservation_url"],
+            "https://www.recreation.gov/camping/campgrounds/123",
+        )
+        self.assertEqual(merged["media"], [])
         self.assertEqual({source["source"] for source in merged["sources"]}, {"usfs", "ridb"})
+
+        serving["image_rights_state"] = "source_terms_reviewed"
+        merged_with_reviewed_media = _merge_serving_context(reviewed, serving)
+        self.assertEqual(merged_with_reviewed_media["media"][0]["credit"], "Recreation.gov")
 
 
 if __name__ == "__main__":

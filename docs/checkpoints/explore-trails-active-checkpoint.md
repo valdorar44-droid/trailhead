@@ -1,6 +1,6 @@
 # Trailhead Explore and Community Trails Active Checkpoint
 
-Last updated: 2026-07-30 17:54 CDT (America/Winnipeg)
+Last updated: 2026-08-01 03:07 CDT (America/Winnipeg)
 
 ## Resume protocol
 
@@ -10,6 +10,30 @@ Read this file before every Explore and Community Trails work session and after 
 2. Verify the protected Explore index remains untouched. The current Git object is `f39f30fdbb33477dacd8fcf5016612a8729dc69e`; the accepted pre-existing file SHA-256 remains recorded in the parent Trails checkpoint.
 3. Never stage `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, the Valhalla/Railway work, Android Auto scripts, or other unrelated dirty files.
 4. Continue from **Next exact packet**. Do not restart completed Trails T1-T6, broad Map/Search/Offline crawls, NPS research, Layers, Memory Gate, Originals, Android Auto, or screenshot work.
+
+## Current continuation — campground gallery P1 closed on Android
+
+- Branch: `feat/trailhead-1.0.10-overhaul`; implementation commit `2b12925f1e805fe6e4ce37694cd581cb67369e64` is pushed. Protected Explore-index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`; App Store copy SHA-256 remains `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`. `.cursor/` and both protected files remain unstaged.
+- The existing signed-in Sentry event `TRAILHEAD-MOBILE-2` supplied the decisive symbolicated stack. `TypeError` originated at `mediaUrl()` in `mobile/app/(tabs)/map.tsx:645`, called from the legacy campground photo gallery at source line `30470`. Recreation.gov supplies photo records as objects, while that gallery passed each record to a string-only URL helper and invoked `startsWith()` on the object. The fixed phase `map_camp_peek_render` was coarse because the hidden legacy Full modal rendered alongside Peek.
+- The correction routes campground gallery values through the existing `campPhotoUrl(unknown)` boundary in both Map and Route Builder. This is the same demonstrated unsafe expression in both flows; no Mapbox renderer, style, camera, native project, API, schema, catalog, or permission change was needed. A source-contract regression test prevents either gallery from returning to the unsafe call.
+- Focused verification passed: `test:campground-brief` (29 subtests across its four files), `test:sheet-actions`, `test:search-v2`, `test:telemetry`, `test:privacy-controls`, `audit:copy`, `npx tsc --noEmit`, and `git diff --check`.
+- Android preview update `019fbc54-2510-7741-9c6b-b2e00c5be503`, group `d57d36f8-3dde-4f10-aa80-a9b3e46515f7`, runtime `native-1.0.10-android.7`, Sentry debug ID `d3704ddd-c591-4bfe-b657-f5da743fe7df`, is bound to exact source `2b12925f1e805fe6e4ce37694cd581cb67369e64`. Samsung `SM_A326U1`, app `1.0.10`, build `69`, verified that exact identity.
+- The bounded Android delta passed. Canonical RIDB `Devils Garden Campground` and `Watchman Campground` each opened a stable Peek and Full sheet, displayed their real Recreation.gov photo and source content, retained the selected identity, and produced zero React Native JS errors. No `Map unavailable`, blank frame, sheet swap, or retry flash occurred.
+- Paired iOS preview update `019fbc5c-65fe-721a-ab3a-02b5d0d35d77`, group `d8d21749-54b3-4df4-aeb7-5ae72c43a763`, runtime `native-1.0.10-ios.6`, Sentry debug ID `1cc4edc1-2c64-4ad9-a316-b22a49e4f7c3`, was published from the identical source. The physical iOS shared assertion remains pending until an iPhone is attached; no republish is required.
+- Evidence directory: `C:\Users\User\Documents\Codex\evidence\trailhead\camp-devils-2b12925f`. Key SHA-256 values: QA identity `f2db3cb8b5a808e0229a8ce1cd47b955e81fbada0233abaf0f0f6118d4b24edf`; Devils Peek hierarchy `79b7b033d314e2e58f60bafad2d5ce443f2dca844df08ea25d07942943c921d1`; Devils Full screenshot `cd2947d80c57429ef845807d1f410e99515c1829ca7b9f562345a846ceb564d0`; Watchman Peek hierarchy `061c962ed9abafa67755ae8a25c24961eb0cf5f17edb300f7a078db4ba1f95bb`; Watchman Full screenshot `f44d01a1b08126c5780529c1c0cc1e69516d51881d750a29701ae0d474860c50`.
+- Open P0/P1 for this campground packet: none on Android. Task-owned EAS, Expo, Metro, Gradle, Maestro, test, Railway, and recording processes: none after publication.
+
+### Next exact packet
+
+1. Run the single shared Devils Garden Peek-to-Full assertion on the already-published iOS update when an iPhone is attached; do not publish again.
+2. Resume the separate Explore data-depth/data-gap queue from accepted b08 artifacts. Audit missing campground fields and destination-module coverage without refetching completed NPS batches or changing the protected serving index.
+3. Keep production OTA, public catalog promotion, Community-route exposure, and public feature stages separate until the next packet is accepted.
+
+### Do not repeat
+
+- Do not repeat the Sentry diagnosis, primitive Peek extraction, nullable-array normalization, Devils/Watchman Android delta, Portal/Kirch crawl, broad Explore/Map/Trails work, Memory, Layers, NPS research, Originals, Android Auto, or store work without new evidence.
+- Do not change Mapbox code for this closed defect: the symbolicated stack proved it was a media-shape boundary, not a renderer/camera/style failure.
+- Do not overwrite or stage `dashboard/explore_serving_index_v2.json`, `.cursor/`, `docs/app-store-copy.md`, or unrelated worktree files.
 
 ## Baseline
 

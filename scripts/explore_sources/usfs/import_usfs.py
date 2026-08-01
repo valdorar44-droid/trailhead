@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -205,10 +206,10 @@ def place_from_record(record: SourceRecord) -> ExplorePlaceV3 | None:
         lng=record.lng,
         geometry=record.geometry,
         country="US",
-        region=compact_text(pget(props, "STATE", "STATE_ABBR", "STATES_SPANNED", "REGION")),
+        region=reader_region(pget(props, "STATE", "STATE_ABBR", "STATES_SPANNED", "REGION")),
         admin=compact_text(pget(props, "FORESTNAME", "FOREST_NAME", "_trailhead_destination_name", "DISTRICT")),
         summary=summary_from_record(record),
-        description=compact_text(pget(props, "DESCRIPTION", "RECAREA_DESCRIPTION", "IMPORTANT_INFO", "COMMENTS", "NOTES")),
+        description=reader_copy(pget(props, "DESCRIPTION", "RECAREA_DESCRIPTION", "IMPORTANT_INFO", "COMMENTS", "NOTES")),
         tags=sorted_unique([
             record.category,
             record.subcategory,
@@ -251,7 +252,7 @@ def source_ref(record: SourceRecord) -> dict[str, Any]:
 
 def summary_from_record(record: SourceRecord) -> str:
     props = record.properties
-    return compact_text(
+    return reader_copy(
         pget(props, "DESCRIPTION", "RECAREA_DESCRIPTION", "IMPORTANT_INFO")
     )[:420]
 
@@ -326,10 +327,43 @@ def pget(props: dict[str, Any], *keys: str) -> Any:
 
 
 def clean_fact(value: Any) -> str:
-    text = compact_text(value)
+    text = reader_copy(value)
     if text.casefold() in {"", "none", "no data", "unknown", "not available", "n/a"}:
         return ""
+    status_labels = {
+        "open": "Open",
+        "closed": "Closed",
+        "seasonal": "Seasonal",
+        "temporarily closed": "Temporarily closed",
+        "restricted": "Restricted",
+    }
+    if text.casefold() in status_labels:
+        return status_labels[text.casefold()]
     return text
+
+
+def reader_region(value: Any) -> str:
+    """Keep a reader-facing state/region and omit internal numeric region codes."""
+    text = compact_text(value)
+    if not text or re.fullmatch(r"\d{1,3}", text):
+        return ""
+    return text
+
+
+def reader_copy(value: Any) -> str:
+    """Repair spacing artifacts in agency prose without changing factual wording."""
+    text = compact_text(value)
+    if not text:
+        return ""
+    text = re.sub(r"(?<=[A-Za-z])(?=\d[\d,]*(?:\s|$))", " ", text)
+    text = re.sub(r"\b([A-Za-z]+)\s+['’]s\b", r"\1's", text)
+    text = re.sub(
+        r"(?<=[a-z0-9])(?=(?:All|Campers|Maximum|Minimum|No|Pets|Reservations|The|This|Visitors)\b)",
+        ". ",
+        text,
+    )
+    text = re.sub(r"\s+([,.;:!?])", r"\1", text)
+    return compact_text(text)
 
 
 def split_list(value: Any) -> list[str]:

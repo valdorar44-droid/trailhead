@@ -3508,7 +3508,10 @@ function GuideScreenContent() {
   const waypoints = useMemo(() => activeTrip?.plan.waypoints.filter(w => w.lat && w.lng) ?? [], [activeTrip?.trip_id, activeTrip?.updated_at]);
   const displayName = useMemo(() => (user?.username || '').trim().split(/\s+/)[0] || '', [user?.username]);
   const enrichedExplorePlaces = useMemo(() => (
-    mergeCuratedExplorePlaces(explorePlaces).map(place => exploreTrailAreasById[place.id] ?? place)
+    mergeCuratedExplorePlaces(explorePlaces).map(place => {
+      const trailArea = exploreTrailAreasById[place.id];
+      return trailArea ? mergeDynamicTrailArea(place, trailArea) : place;
+    })
   ), [explorePlaces, exploreTrailAreasById]);
   const filteredLiveExplorePlaces = useMemo(
     () => liveExplorePlaces.filter(place => livePlaceMatchesCategory(place, exploreCategory)),
@@ -4838,7 +4841,8 @@ function GuideScreenContent() {
 
   function showExploreSheet(place: ExplorePlaceProfile, initialTab: ExploreDetailTab) {
     setProfileReadMode(initialTab);
-    const local = exploreTrailAreasById[place.id] ?? place;
+    const trailArea = exploreTrailAreasById[place.id];
+    const local = trailArea ? mergeDynamicTrailArea(place, trailArea) : place;
     setSelectedExploreNavigation(createExploreDetailNavigationState(local.id, initialTab));
     const model = adaptExploreHubSheet({
       id: local.id,
@@ -4900,13 +4904,13 @@ function GuideScreenContent() {
       const detail = await api.getExplorePlace(place.id);
       if (!exploreSheetRequestIsCurrent(sheetRequest) || selectedExploreRef.current?.id !== place.id) return;
       setExplorePlaces(prev => prev.map(item => item.id === detail.id ? detail : item));
-      const hydrated = exploreTrailAreasById[detail.id] ?? detail;
+      const trailArea = exploreTrailAreasById[detail.id];
+      const hydrated = trailArea ? mergeDynamicTrailArea(detail, trailArea) : detail;
       const retainedTrailArea = hasExploreTrailCards(local) && !hasExploreTrailCards(hydrated)
         ? mergeDynamicTrailArea(hydrated, local)
         : hydrated;
       setSelectedExplore(current => {
         if (current?.id !== place.id) return current;
-        if (exploreTrailAreasById[detail.id]) return exploreTrailAreasById[detail.id];
         return retainedTrailArea;
       });
       setProfileReadMode(initialTab);

@@ -90,6 +90,33 @@ def test_usfs_site_fields_preserve_source_facts_only(tmp_path: Path):
     assert "fee" not in places[0].amenities
 
 
+def test_usfs_reader_copy_and_status_hide_source_formatting_codes(tmp_path: Path):
+    path = write_feature_collection(tmp_path, "usfs-reader-copy.geojson", [{
+        "type": "Feature",
+        "properties": {
+            "site_cn": "camp-1",
+            "public_site_name": "River Campground",
+            "site_type": "CAMPGROUND",
+            "recarea_description": "At approximately1,000 feet, the river 's edge has a50 person group site.",
+            "region": "05",
+            "forest_name": "Sierra National Forest",
+            "access_status": "OPEN",
+            "restrictions": "Maximum stay is 14 daysAll campsites are walk-in",
+        },
+        "geometry": {"type": "Point", "coordinates": [-119.1, 37.1]},
+    }])
+
+    _records, places, _trails = import_usfs_fixture(path, fetched_at=123)
+
+    place = places[0]
+    assert place.region == ""
+    assert place.admin == "Sierra National Forest"
+    assert place.access == "Open"
+    assert place.summary == "At approximately 1,000 feet, the river's edge has a 50 person group site."
+    assert place.safety == "Maximum stay is 14 days. All campsites are walk-in"
+    assert place.card["quick_facts"] == ["Campground", "Open"]
+
+
 @pytest.mark.parametrize(("site_type", "category", "subcategory"), [
     ("INFO SITE/FEE STATION", "visitor_center", "visitor_center"),
     ("OBSERVATION SITE", "viewpoint", "overlook"),

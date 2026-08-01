@@ -9,6 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import dashboard.server as server
+from scripts.build_explore_internal_preview import _merge_serving_context
 
 
 def preview_place(place_id: str, name: str, description: str) -> dict:
@@ -188,6 +189,43 @@ class ExploreInternalPreviewTests(unittest.TestCase):
             "data_code": "ready",
             "profile_count": 1,
         })
+
+    def test_cross_agency_preview_context_preserves_reviewed_copy_and_booking(self):
+        reviewed = {
+            "id": "place:usfs:camp-1",
+            "name": "River Campground",
+            "summary": "Reviewed Forest Service campground description.",
+            "description": "Reviewed Forest Service campground description.",
+            "reservations": {"url": "https://www.fs.usda.gov/recarea/example"},
+            "sources": [{"source": "usfs", "source_id": "camp-1"}],
+            "media": [],
+        }
+        serving = {
+            "id": "place:usfs:camp-1",
+            "description": "Older compact description must not replace reviewed copy.",
+            "image_url": "https://cdn.recreation.gov/camp.webp",
+            "image_credit": "Recreation.gov",
+            "image_license": "RIDB public API terms",
+            "image_source_url": "https://www.recreation.gov/camping/campgrounds/123",
+            "planning_facts": [{"key": "reservations", "value": "Available"}],
+            "provenance": {"sources": [{
+                "source": "ridb",
+                "source_id": "123",
+                "url": "https://www.recreation.gov/camping/campgrounds/123",
+                "attribution": "Recreation.gov",
+                "license": "RIDB public API terms",
+                "quality": "official_source",
+            }]},
+        }
+
+        merged = _merge_serving_context(reviewed, serving)
+
+        self.assertEqual(merged["summary"], reviewed["summary"])
+        self.assertEqual(merged["description"], reviewed["description"])
+        self.assertTrue(merged["reservations"]["reservable"])
+        self.assertEqual(merged["reservations"]["url"], reviewed["reservations"]["url"])
+        self.assertEqual(merged["media"][0]["credit"], "Recreation.gov")
+        self.assertEqual({source["source"] for source in merged["sources"]}, {"usfs", "ridb"})
 
 
 if __name__ == "__main__":

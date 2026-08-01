@@ -98,3 +98,22 @@ test('reviewed internal profile replaces stale same-id card content', () => {
   assert.match(guideSource, /\.\.\.\(preferReviewedPreview \? place : \{\}\)/);
   assert.match(guideSource, /\{ \.\.\.previous\.summary, \.\.\.place\.summary \}/);
 });
+
+test('cached trail enrichment cannot replace reviewed card or sheet identity', () => {
+  assert.match(
+    guideSource,
+    /mergeCuratedExplorePlaces\(explorePlaces\)\.map\(place => \{[\s\S]+?mergeDynamicTrailArea\(place, trailArea\)/,
+  );
+  assert.match(
+    guideSource,
+    /function showExploreSheet[\s\S]+?const local = trailArea \? mergeDynamicTrailArea\(place, trailArea\) : place;/,
+  );
+  assert.match(
+    guideSource,
+    /const hydrated = trailArea \? mergeDynamicTrailArea\(detail, trailArea\) : detail;/,
+  );
+  assert.doesNotMatch(
+    guideSource,
+    /if \(exploreTrailAreasById\[detail\.id\]\) return exploreTrailAreasById\[detail\.id\]/,
+  );
+});

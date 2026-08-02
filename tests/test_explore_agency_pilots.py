@@ -12,6 +12,7 @@ from scripts.build_explore_agency_pilots import (
     audit_candidate,
     build_destination_hub,
     is_technical_route_name,
+    link_audited_agency_reader_facts,
     merge_colocated_agency_amenities,
     source_item,
 )
@@ -402,6 +403,60 @@ def test_blm_featured_source_pack_merges_into_existing_canonical_opportunity(tmp
         "official_url": "https://blm.gov/programs/recreation/mountainbike/moab",
     }
     assert merged[0].media == []
+
+
+def test_fisher_towers_reader_facts_link_without_merging_or_copying_unscoped_fields(tmp_path: Path):
+    path = write_feature_collection(tmp_path, "blm-fisher-reader-link.geojson", [
+        {
+            "type": "Feature",
+            "properties": {
+                "OBJECTID": 3149,
+                "GlobalID": "{D49F54BD-DEF2-4B04-8A23-2BE2FD1FDEDB}",
+                "FET_NAME": "Fisher Towers Hiking Trail",
+                "FET_SUBTYPE": "Trail Head",
+                "DESCRIPTION": "Parking and Trailhead for Fisher Towers Hiking Trail.",
+                "_trailhead_dataset_id": "blm_moab_sites_point",
+                "_trailhead_source_url": "https://gis.blm.gov/utarcgis/rest/services/Recreation/BLM_UT_RECS/FeatureServer/0",
+            },
+            "geometry": {"type": "Point", "coordinates": [-109.3088364573, 38.7248681586]},
+        },
+        {
+            "type": "Feature",
+            "properties": {
+                "OBJECTID": 146,
+                "RecSiteName": "Fisher Towers",
+                "Description": "Official BLM description for the Fisher Towers recreation site.",
+                "WebLink": "https://www.blm.gov/visit/search-details/2149/2",
+                "RecSiteFee": "None",
+                "RecSiteSeason": "January 1 - December 31",
+                "ContactPhoneNumber": "435-259-2100",
+                "FeaturedActivity": "Climbing",
+                "FlickrAlbumImage": "https://live.staticflickr.com/example.jpg",
+                "_trailhead_dataset_id": "blm_moab_featured_sites",
+                "_trailhead_source_url": "https://gis.blm.gov/arcgis/rest/services/recreation/BLM_Natl_Recreation/MapServer/12",
+            },
+            "geometry": {"type": "Point", "coordinates": [-109.3083, 38.724]},
+        },
+    ])
+    _records, places, _trails = import_blm_fixture(path, fetched_at=123)
+
+    linked = link_audited_agency_reader_facts(dedupe_places(places))
+    trailhead = next(place for place in linked if place.name == "Fisher Towers Hiking Trail")
+    reader = next(place for place in linked if place.name == "Fisher Towers")
+
+    assert len(linked) == 2
+    assert reader.id in trailhead.linked_place_ids
+    assert trailhead.id in reader.linked_place_ids
+    assert trailhead.source_ids == ["blm:blm-moab-sites-point:{D49F54BD-DEF2-4B04-8A23-2BE2FD1FDEDB}"]
+    assert trailhead.source_pack == {
+        "official_url": "https://www.blm.gov/visit/search-details/2149/2",
+        "phone": "435-259-2100",
+        "operating_season": ["January 1 - December 31"],
+    }
+    assert "fees" not in trailhead.source_pack
+    assert "activities" not in trailhead.source_pack
+    assert trailhead.media == []
+    assert trailhead.provenance["reader_fact_source"]["place_id"] == reader.id
 
 
 def test_blm_reader_source_pack_is_scoped_to_featured_dataset(tmp_path: Path):

@@ -127,11 +127,7 @@ def source_record_from_feature(feature: dict[str, Any], now: int) -> SourceRecor
     )
 
 
-def category_for_props(props: dict[str, Any], geometry: dict[str, Any] | None) -> tuple[str, str]:
-    text = " ".join(compact_text(pget(props, key)).lower() for key in (
-        "_trailhead_feature_kind", "FEATURE_TYPE", "TYPE", "SITE_TYPE", "TRAIL_TYPE",
-        "RECAREA_TYPE", "OPER_MAINT_LEVEL", "NAME", "TRAIL_NAME", "SITE_NAME",
-    ))
+def _category_for_site_text(text: str, geometry: dict[str, Any] | None) -> tuple[str, str] | None:
     if "trailhead" in text or "trail head" in text or "staging area" in text:
         return "trailhead", "trailhead"
     if "camp" in text:
@@ -158,6 +154,26 @@ def category_for_props(props: dict[str, Any], geometry: dict[str, Any] | None) -
         return "forest_road", "forest_road"
     if "forest" in text or "boundary" in text or "ranger district" in text:
         return "forest", "national_forest"
+    return None
+
+
+def category_for_props(props: dict[str, Any], geometry: dict[str, Any] | None) -> tuple[str, str]:
+    # Prefer the agency's explicit site classification before searching names.
+    # Otherwise names such as ``Central Camp Springs`` can override an official
+    # ``SPECIALIZED SPORT SITE`` type and create unsupported camping claims.
+    explicit_site_type = compact_text(
+        pget(props, "SITE_TYPE", "FEATURE_TYPE", "RECAREA_TYPE", "TYPE")
+    ).lower()
+    explicit_category = _category_for_site_text(explicit_site_type, geometry)
+    if explicit_category:
+        return explicit_category
+
+    text = " ".join(compact_text(pget(props, key)).lower() for key in (
+        "_trailhead_feature_kind", "TRAIL_TYPE", "OPER_MAINT_LEVEL", "NAME", "TRAIL_NAME", "SITE_NAME",
+    ))
+    inferred_category = _category_for_site_text(text, geometry)
+    if inferred_category:
+        return inferred_category
     if is_line_geometry(geometry):
         return "trail", "trail"
     return "public_land", "usfs_recreation"
@@ -537,6 +553,14 @@ def operational_source_pack(props: dict[str, Any]) -> dict[str, Any]:
     people_capacity = positive_people_capacity(props)
     fee_text = fee_text_from_props(props)
     raw_hours = clean_fact(pget(props, "OPERATIONAL_HOURS"))
+    authoritative_status = clean_fact(
+        pget(props, "SEASONAL_OPERATIONAL_STATUS", "ACCESS_STATUS", "STATUS", "ACCESS")
+    )
+    if authoritative_status == "Open" and raw_hours in {"Closed", "Temporarily closed"}:
+        # A status value is not a clock.  When the source marks the site open,
+        # suppress a contradictory status accidentally stored in its hours
+        # field instead of presenting both values to readers.
+        raw_hours = ""
     seasonal_hours = season_like_operational_value(raw_hours)
     hours = [] if seasonal_hours else source_fact_list(raw_hours)
     seasons = source_fact_list(

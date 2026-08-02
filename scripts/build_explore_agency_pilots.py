@@ -19,6 +19,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.explore_sources.base.dedupe import dedupe_places, disambiguate_duplicate_display_names, link_trailheads_to_trails
+from scripts.explore_sources.base.content_quality import distance_mi
 from scripts.explore_sources.base.enrichment import enrich_place_dict
 from scripts.explore_sources.blm.import_blm import BLM_ATTRIBUTION, BLM_LICENSE, import_blm_fixture
 from scripts.explore_sources.usfs.import_usfs import USFS_ATTRIBUTION, USFS_LICENSE, import_usfs_fixture
@@ -254,6 +255,60 @@ def merge_colocated_agency_amenities(places: list[Any]) -> list[Any]:
             }.values())
             removed.add(item.id)
     return [place for place in places if place.id not in removed]
+
+
+AUDITED_READER_FACT_LINKS = (
+    {
+        "target_source_id": "blm:blm-moab-sites-point:{D49F54BD-DEF2-4B04-8A23-2BE2FD1FDEDB}",
+        "reader_source_id": "blm:blm-moab-featured-sites:146",
+        "target_name": "Fisher Towers Hiking Trail",
+        "reader_name": "Fisher Towers",
+        "max_distance_mi": 0.15,
+        "fact_keys": ("official_url", "phone", "operating_season"),
+    },
+)
+
+
+def link_audited_agency_reader_facts(places: list[Any]) -> list[Any]:
+    """Link reviewed agency records without fuzzy merging their identities.
+
+    These relationships are deliberately stable-ID based. They may expose only
+    the explicitly reviewed reader facts named by the relation; activities,
+    fees, and media stay scoped to their original place.
+    """
+    by_source_id = {
+        source_id: place
+        for place in places
+        for source_id in place.source_ids
+    }
+    for relation in AUDITED_READER_FACT_LINKS:
+        target = by_source_id.get(relation["target_source_id"])
+        reader = by_source_id.get(relation["reader_source_id"])
+        if target is None or reader is None:
+            continue
+        if target.name != relation["target_name"] or reader.name != relation["reader_name"]:
+            continue
+        distance = distance_mi(target.lat, target.lng, reader.lat, reader.lng)
+        if distance is None or distance > relation["max_distance_mi"]:
+            continue
+
+        target.linked_place_ids = list(dict.fromkeys([*target.linked_place_ids, reader.id]))
+        reader.linked_place_ids = list(dict.fromkeys([*reader.linked_place_ids, target.id]))
+        reader_pack = reader.source_pack if isinstance(reader.source_pack, dict) else {}
+        target_pack = dict(target.source_pack) if isinstance(target.source_pack, dict) else {}
+        for key in relation["fact_keys"]:
+            value = reader_pack.get(key)
+            if value and not target_pack.get(key):
+                target_pack[key] = value
+        target.source_pack = target_pack
+        target.provenance = {
+            **(target.provenance if isinstance(target.provenance, dict) else {}),
+            "reader_fact_source": {
+                "place_id": reader.id,
+                "source_id": relation["reader_source_id"],
+            },
+        }
+    return places
 
 
 def visible_text(place: dict[str, Any]) -> str:
@@ -681,7 +736,9 @@ def build_candidate(
     usfs_records, usfs_places, usfs_trails = import_usfs_fixture(usfs_path, fetched_at=fetched_at)
     blm_records, blm_places, blm_trails = import_blm_fixture(blm_path, fetched_at=fetched_at)
     records = usfs_records + blm_records
-    places = merge_colocated_agency_amenities(dedupe_places(usfs_places + blm_places))
+    places = link_audited_agency_reader_facts(
+        merge_colocated_agency_amenities(dedupe_places(usfs_places + blm_places))
+    )
     trails = usfs_trails + blm_trails
     disambiguate_duplicate_display_names(places)
     link_trailheads_to_trails(places, trails)

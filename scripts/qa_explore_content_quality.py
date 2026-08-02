@@ -21,6 +21,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.explore_sources.base.content_quality import (
+    FACTS_ONLY_DESCRIPTION_KEYS,
     SOURCE_PACK_LIST_KEYS,
     category_key,
     distance_mi,
@@ -64,6 +65,7 @@ def group_for(place: dict[str, Any]) -> str:
 
 def description_for(place: dict[str, Any]) -> str:
     summary = summary_for(place)
+    scalar_summary = place.get("summary") if not isinstance(place.get("summary"), dict) else ""
     profile = place.get("profile") if isinstance(place.get("profile"), dict) else {}
     card = place.get("card") if isinstance(place.get("card"), dict) else {}
     return str(
@@ -71,7 +73,7 @@ def description_for(place: dict[str, Any]) -> str:
         or profile.get("summary")
         or card.get("summary")
         or place.get("description")
-        or place.get("summary")
+        or scalar_summary
         or ""
     ).strip()
 
@@ -108,10 +110,20 @@ def audit_catalog(path: Path, *, sample_limit: int) -> tuple[list[str], list[str
         clean_desc = description_for(clean)
         key = category_key(clean_category, clean_group, clean_title)
         category_counts[key] += 1
+        source_pack = clean.get("source_pack") if isinstance(clean.get("source_pack"), dict) else {}
+        sources = clean.get("sources") if isinstance(clean.get("sources"), list) else []
+        facts_only_omission = (
+            key in FACTS_ONLY_DESCRIPTION_KEYS
+            and not clean_desc
+            and bool(source_pack or sources)
+        )
 
         if not clean_title:
             failures.append(f"{path.name}: missing title for {place.get('id')}")
-        if is_weak_description(clean_desc, title=clean_title, category=clean_category, group=clean_group):
+        if (
+            is_weak_description(clean_desc, title=clean_title, category=clean_category, group=clean_group)
+            and not facts_only_omission
+        ):
             normalized_weak.append(clean_title or str(place.get("id") or "missing-title"))
 
         lat, lng = coord_for(clean)
@@ -121,8 +133,6 @@ def audit_catalog(path: Path, *, sample_limit: int) -> tuple[list[str], list[str
             else:
                 coord_counts[f"{float(lat):.4f},{float(lng):.4f}"] += 1
 
-        source_pack = clean.get("source_pack") if isinstance(clean.get("source_pack"), dict) else {}
-        sources = clean.get("sources") if isinstance(clean.get("sources"), list) else []
         summary = summary_for(clean)
         source_url = (
             source_pack.get("official_url")

@@ -43,6 +43,7 @@ CATEGORY_COPY: dict[str, str] = {
     "activity": "{title} is an activity option near {region}. Check current access, timing, reservations, closures, and conditions before planning around it.",
     "fuel": "{title} is a service stop near {region}. Verify hours, fuel availability, payment options, road access, and backup stops before depending on it.",
     "resupply": "{title} is a resupply stop near {region}. Verify hours, inventory, payment options, road access, and backup stops before depending on it.",
+    "visitor_center": "{title} provides visitor information near {region}. Hours and available services can change by season.",
 }
 
 GROUP_CATEGORY_HINTS = (
@@ -100,6 +101,16 @@ BOOKABLE_THINGS_TO_DO_PATTERNS = (
     re.compile(r"\b(guided tour|private tour|day tour|half[- ]day tour|full[- ]day tour|tour operator)\b", re.I),
 )
 
+CONCRETE_OPERATIONAL_COPY_PATTERNS = (
+    # Short official copy can still state a concrete facility capability. Keep
+    # these narrow patterns separate from generic geographic/editorial prose.
+    re.compile(r"\b(?:boat ramp|launch(?:ing)? site)\b.*\b(?:boat|boats|launch(?:ing)?)\b", re.I),
+    re.compile(r"\bparking\b.*\btrail\s*head\b|\btrail\s*head\b.*\bparking\b", re.I),
+)
+
+CANONICAL_CATEGORY_KEYS = frozenset(CATEGORY_COPY)
+FACTS_ONLY_DESCRIPTION_KEYS = frozenset({"activity", "visitor_center"})
+
 
 def valid_lat_lng(lat: Any, lng: Any) -> bool:
     try:
@@ -127,6 +138,9 @@ def distance_mi(lat1: Any, lng1: Any, lat2: Any, lng2: Any) -> float | None:
 
 
 def category_key(category: Any = "", group: Any = "", title: Any = "") -> str:
+    canonical_category = compact_text(category).lower().replace(" ", "_")
+    if canonical_category in CANONICAL_CATEGORY_KEYS:
+        return canonical_category
     hay = " ".join(compact_text(value).lower().replace("&", "and").replace("_", " ") for value in (category, group, title))
     for needle, key in GROUP_CATEGORY_HINTS:
         if needle in hay:
@@ -138,9 +152,11 @@ def is_weak_description(text: Any, *, title: Any = "", category: Any = "", group
     clean = compact_text(text)
     if not clean:
         return True
-    if len(clean) < 58:
-        return True
     if any(pattern.search(clean) for pattern in GENERIC_COPY_PATTERNS):
+        return True
+    if any(pattern.search(clean) for pattern in CONCRETE_OPERATIONAL_COPY_PATTERNS):
+        return False
+    if len(clean) < 58:
         return True
     title_text = compact_text(title)
     if title_text and clean.lower() in {title_text.lower(), f"{title_text.lower()}."}:
@@ -162,6 +178,8 @@ def fallback_description(*, title: Any, category: Any = "", group: Any = "", reg
 def clean_description(text: Any, *, title: Any, category: Any = "", group: Any = "", region: Any = "") -> str:
     clean = compact_text(text)
     if is_weak_description(clean, title=title, category=category, group=group):
+        if category_key(category, group, title) in FACTS_ONLY_DESCRIPTION_KEYS:
+            return ""
         return fallback_description(title=title, category=category, group=group, region=region)
     return clean
 
@@ -238,6 +256,12 @@ def sanitize_place_profile(place: dict[str, Any]) -> dict[str, Any]:
         or profile.get("story")
         or ""
     )
+    source_text_is_weak = is_weak_description(
+        source_text,
+        title=title,
+        category=category,
+        group=group,
+    )
     description = clean_description(source_text, title=title, category=category, group=group, region=region)
 
     summary = dict(summary)
@@ -261,6 +285,8 @@ def sanitize_place_profile(place: dict[str, Any]) -> dict[str, Any]:
     clean["summary"] = summary
     clean["profile"] = profile
     clean["card"] = card
+    if source_text_is_weak and category_key(category, group, title) in FACTS_ONLY_DESCRIPTION_KEYS:
+        clean.pop("description", None)
     if is_weak_description(clean.get("audio_script"), title=title, category=category, group=group):
         clean["audio_script"] = profile.get("story") or description
 
@@ -268,7 +294,11 @@ def sanitize_place_profile(place: dict[str, Any]) -> dict[str, Any]:
     if pack:
         pack = dict(pack)
         if is_weak_description(pack.get("extract"), title=title, category=category, group=group):
-            pack["extract"] = profile.get("story") or description
+            replacement = profile.get("story") or description
+            if replacement:
+                pack["extract"] = replacement
+            else:
+                pack.pop("extract", None)
         for key in SOURCE_PACK_LIST_KEYS:
             values = []
             for item in pack.get(key) or []:

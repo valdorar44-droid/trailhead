@@ -42,3 +42,29 @@ def test_audit_accepts_sourced_child_when_weak_copy_is_omitted(tmp_path):
     failures, _warnings = audit_catalog(catalog, sample_limit=5)
 
     assert failures == []
+
+
+def test_audit_accepts_facts_only_place_without_generic_description(tmp_path):
+    catalog = tmp_path / "facts-only.json"
+    catalog.write_text(json.dumps({
+        "schema_version": 3,
+        "places": [{
+            "id": "place:usfs:visitor-center",
+            "name": "Bass Lake Recreation Office Info Site",
+            "category": "visitor_center",
+            "lat": 37.2,
+            "lng": -119.2,
+            "description": "Bass Lake Recreation Office Info Site/fee Station",
+            "sources": [{"source": "usfs", "url": "https://www.fs.usda.gov/"}],
+            "source_pack": {
+                "official_url": "https://www.fs.usda.gov/",
+                "operating_season": ["All year"],
+                "people_capacity": 35,
+                "restrooms": "Vault toilets",
+            },
+        }],
+    }))
+
+    failures, _warnings = audit_catalog(catalog, sample_limit=5)
+
+    assert failures == []

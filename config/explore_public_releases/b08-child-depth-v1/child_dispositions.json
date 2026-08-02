@@ -1,0 +1,2746 @@
+{
+  "child_dispositions": [
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:dino:places:00923bca-681f-4f2f-852d-ce030181855e",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:00923bca-681f-4f2f-852d-ce030181855e"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:blri:visitorcenters:0128b257-d489-4c15-807e-6c73a76cd8f9",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:0128b257-d489-4c15-807e-6c73a76cd8f9"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:seki:thingstodo:012abf99-7067-498a-9dbd-4d7c8253b28b",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:012abf99-7067-498a-9dbd-4d7c8253b28b"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:jotr:places:013a1c84-4949-4cdc-958f-7283f1bc9ac5",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:013a1c84-4949-4cdc-958f-7283f1bc9ac5"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:blri:campgrounds:0158c072-f1f3-4904-98f2-9994bf2f116a",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:0158c072-f1f3-4904-98f2-9994bf2f116a"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:ever:thingstodo:019c3d0f-0ad1-4a1b-8e5f-601a65918303",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:019c3d0f-0ad1-4a1b-8e5f-601a65918303"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:bibe:places:01d291e3-2b29-41bf-b424-65781bbf4491",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:01d291e3-2b29-41bf-b424-65781bbf4491"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:bibe:thingstodo:02304e24-cabf-40d1-904f-e67e4c837fe7",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:02304e24-cabf-40d1-904f-e67e4c837fe7"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:shen:thingstodo:0289592d-52c8-462f-9e4e-8cad6062e80d",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:0289592d-52c8-462f-9e4e-8cad6062e80d"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:shen:places:029b7f06-5f8f-4fe2-978b-69f1b579330b",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:029b7f06-5f8f-4fe2-978b-69f1b579330b"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:ever:places:0369ba31-b7f2-4109-b096-dfc2d45bf40a",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:0369ba31-b7f2-4109-b096-dfc2d45bf40a"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:gumo:places:03c44186-78cb-4a4a-b035-48583e5919c4",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:03c44186-78cb-4a4a-b035-48583e5919c4"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:buff:thingstodo:041c9dff-74c2-4692-a6b8-640d3ba6d24c",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:041c9dff-74c2-4692-a6b8-640d3ba6d24c"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:blri:campgrounds:04662d80-18f0-4e2c-8c6a-461e244db0a7",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:04662d80-18f0-4e2c-8c6a-461e244db0a7"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:olym:campgrounds:04bd1762-2db8-47d1-bf95-2aab3564a4dd",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:04bd1762-2db8-47d1-bf95-2aab3564a4dd"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:cuva:places:059c2207-a681-43bc-b622-14b073c73051",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:059c2207-a681-43bc-b622-14b073c73051"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:buff:thingstodo:05ebad7f-7c05-4606-9d40-68ce394fa351",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:05ebad7f-7c05-4606-9d40-68ce394fa351"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:olym:campgrounds:061815d1-a285-4df5-9079-32f6b4990cf5",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:061815d1-a285-4df5-9079-32f6b4990cf5"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:ever:places:072b1ad8-573c-4dce-9884-b9ca54cf0557",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:072b1ad8-573c-4dce-9884-b9ca54cf0557"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:brca:places:07ced136-0541-4746-a395-7b81f3414da2",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:07ced136-0541-4746-a395-7b81f3414da2"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:jotr:campgrounds:07e7e764-4d4f-4615-adeb-28ab6bd87471",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:07e7e764-4d4f-4615-adeb-28ab6bd87471"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:seki:visitorcenters:083b958f-780c-41c1-83b5-b06bc819d61f",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:083b958f-780c-41c1-83b5-b06bc819d61f"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:seki:thingstodo:09540cb2-986b-4602-93bd-56747499e599",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:09540cb2-986b-4602-93bd-56747499e599"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:shen:visitorcenters:097281e1-9541-464b-bd87-7bec00d25a82",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:097281e1-9541-464b-bd87-7bec00d25a82"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:gumo:campgrounds:0a45c29d-7ce3-455d-ba28-1c982b68f5a6",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:0a45c29d-7ce3-455d-ba28-1c982b68f5a6"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:blri:places:0a9dcfa1-b464-4a0c-b712-bb966bde244c",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:0a9dcfa1-b464-4a0c-b712-bb966bde244c"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:dino:campgrounds:0ad1c4e8-ed05-426e-8332-ea369022b8c5",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:0ad1c4e8-ed05-426e-8332-ea369022b8c5"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:buff:campgrounds:0b860b12-04e9-46db-a1c3-e7fba8b1a3de",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:0b860b12-04e9-46db-a1c3-e7fba8b1a3de"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:deva:places:0dcf40d6-8f1f-40b2-970d-b7ff5eef0ed5",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:0dcf40d6-8f1f-40b2-970d-b7ff5eef0ed5"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:olym:places:0ecb6cf3-6a8b-4151-a6c0-e5e10ec303e9",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:0ecb6cf3-6a8b-4151-a6c0-e5e10ec303e9"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:ever:visitorcenters:0ffa634b-a937-4fa6-97e5-8f9707fb8e97",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:0ffa634b-a937-4fa6-97e5-8f9707fb8e97"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:shen:places:11319578-84d9-4826-99ed-6a203a9f96c4",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:11319578-84d9-4826-99ed-6a203a9f96c4"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:bibe:places:1144f6d6-fdde-40bb-9f03-51749c2a17af",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:1144f6d6-fdde-40bb-9f03-51749c2a17af"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:havo:places:11d2b3b5-fd05-477d-9ae7-efcd75533d43",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:11d2b3b5-fd05-477d-9ae7-efcd75533d43"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:bibe:campgrounds:127199ac-a753-4b49-b3ff-1f8484b61cbe",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:127199ac-a753-4b49-b3ff-1f8484b61cbe"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:ever:places:127de052-0b8b-46bc-9526-5cd3b32cc9bc",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:127de052-0b8b-46bc-9526-5cd3b32cc9bc"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:jotr:places:12b04780-1834-432c-8189-18316d2977ba",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:12b04780-1834-432c-8189-18316d2977ba"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:olym:visitorcenters:131cd1a1-8ab3-4d1e-a22f-4f239741372b",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:131cd1a1-8ab3-4d1e-a22f-4f239741372b"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:buff:campgrounds:150af6e6-881a-4420-b535-7b31e3905549",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:150af6e6-881a-4420-b535-7b31e3905549"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:dino:places:1715d452-d335-4364-a316-ec78223784b5",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:1715d452-d335-4364-a316-ec78223784b5"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:jotr:places:177077fa-27ae-4f41-bb09-f51c49e0b14c",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:177077fa-27ae-4f41-bb09-f51c49e0b14c"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:brca:campgrounds:17b8a379-66c5-4225-8ee3-2d3cb3cf0ca4",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:17b8a379-66c5-4225-8ee3-2d3cb3cf0ca4"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:cuva:visitorcenters:18c3cbc0-556a-4e4f-8486-16723df55255",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:18c3cbc0-556a-4e4f-8486-16723df55255"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:seki:places:18ded976-f6d7-4fbb-8fdd-dd5a61ed4c52",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:18ded976-f6d7-4fbb-8fdd-dd5a61ed4c52"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:deva:thingstodo:1912b806-5ab5-4596-961a-903663b0a4bb",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:1912b806-5ab5-4596-961a-903663b0a4bb"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:seki:campgrounds:191f3831-ac51-41b2-8bab-92a4d1bc7685",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:191f3831-ac51-41b2-8bab-92a4d1bc7685"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:cuva:places:1958276c-b543-4ec9-97de-b692a2c54ef6",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:1958276c-b543-4ec9-97de-b692a2c54ef6"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:romo:places:195a80b6-04f9-4647-b68e-16232d4a8ea8",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:195a80b6-04f9-4647-b68e-16232d4a8ea8"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:gumo:places:196f27b8-ce01-489e-9cb7-0e0ab3b14e17",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:196f27b8-ce01-489e-9cb7-0e0ab3b14e17"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:blri:visitorcenters:1aae8238-cf5a-4cad-8139-d97f42557d86",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:1aae8238-cf5a-4cad-8139-d97f42557d86"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:jotr:places:1b235af1-a84d-4019-a5c1-a13fad873fe8",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:1b235af1-a84d-4019-a5c1-a13fad873fe8"
+    },
+    {
+      "disposition": "canonical_merge",
+      "public_id": "place:ridb:234182",
+      "reason": "Resolve the reviewed duplicate NPS campground to its existing canonical Recreation.gov identity.",
+      "source_id": "nps:item:1b9bb56f-9ff5-4ad4-b966-f3b7310aed49"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:ever:places:1bca5c56-d067-432b-b9b5-d68bb4d1d14d",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:1bca5c56-d067-432b-b9b5-d68bb4d1d14d"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:deva:campgrounds:1c8ed3af-8abc-478a-a5ab-c8bb7098431e",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:1c8ed3af-8abc-478a-a5ab-c8bb7098431e"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:jotr:places:1ca74975-5472-459e-8b62-076177342fa5",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:1ca74975-5472-459e-8b62-076177342fa5"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:dino:thingstodo:1cac0c21-a12c-48e0-950f-675501b3bc5e",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:1cac0c21-a12c-48e0-950f-675501b3bc5e"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:brca:places:1cb920a2-fecb-4d9b-85db-e4babbe9b4b3",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:1cb920a2-fecb-4d9b-85db-e4babbe9b4b3"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:gumo:thingstodo:1e1e7bed-b37a-4244-a7ad-c83ff67e0417",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:1e1e7bed-b37a-4244-a7ad-c83ff67e0417"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:buff:places:1e4f958a-1942-481e-936f-730830796ab8",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:1e4f958a-1942-481e-936f-730830796ab8"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:ever:thingstodo:1f4ed17e-86eb-498c-9656-d7ca3f12b552",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:1f4ed17e-86eb-498c-9656-d7ca3f12b552"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:olym:campgrounds:1f9a5ca2-8d09-4444-abd6-532b22c404b7",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:1f9a5ca2-8d09-4444-abd6-532b22c404b7"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:romo:visitorcenters:1fba44b1-ad80-485d-81b9-940fc3c64e0b",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:1fba44b1-ad80-485d-81b9-940fc3c64e0b"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:buff:campgrounds:1febd642-4de4-49fd-9df1-3ef8e499ac03",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:1febd642-4de4-49fd-9df1-3ef8e499ac03"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:gumo:places:20317653-2cca-40a9-89a8-f7f27e117751",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:20317653-2cca-40a9-89a8-f7f27e117751"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:romo:places:203765dc-466a-42b6-8529-b3797e7f9a51",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:203765dc-466a-42b6-8529-b3797e7f9a51"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:deva:visitorcenters:208bd658-63b3-455b-bfb1-257148e89a29",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:208bd658-63b3-455b-bfb1-257148e89a29"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:gumo:places:20ff6b35-e5ca-4c3f-aae4-81709987cde0",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:20ff6b35-e5ca-4c3f-aae4-81709987cde0"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:seki:campgrounds:21432caa-2722-40b3-a56b-c7f90a8f1467",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:21432caa-2722-40b3-a56b-c7f90a8f1467"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:gumo:places:2279b24c-e262-495f-9d94-776dfffe20ef",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:2279b24c-e262-495f-9d94-776dfffe20ef"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:deva:places:22aa91fe-3d4c-49e9-a472-ddc6299d42df",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:22aa91fe-3d4c-49e9-a472-ddc6299d42df"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:buff:visitorcenters:22d08eeb-1c9e-40dc-b791-e1db29646ee7",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:22d08eeb-1c9e-40dc-b791-e1db29646ee7"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:havo:thingstodo:22ea5ace-3f25-4e46-8d8d-6acbccf934dd",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:22ea5ace-3f25-4e46-8d8d-6acbccf934dd"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:buff:visitorcenters:230e3359-63ab-474b-a11c-d2726f1a1fc9",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:230e3359-63ab-474b-a11c-d2726f1a1fc9"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:cuva:thingstodo:23c34a8f-49ce-4459-9079-3273312d5361",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:23c34a8f-49ce-4459-9079-3273312d5361"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:gumo:thingstodo:23e00bfd-20bb-46fa-bd0d-8c4319a60bf4",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:23e00bfd-20bb-46fa-bd0d-8c4319a60bf4"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:blri:places:24b4a37f-d4bd-4cb4-9daf-40f1fccc6b7f",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:24b4a37f-d4bd-4cb4-9daf-40f1fccc6b7f"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:olym:campgrounds:24d983cd-f853-49b3-a368-25dc3832f628",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:24d983cd-f853-49b3-a368-25dc3832f628"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:brca:places:2514e404-074e-4ed5-96c7-1a5f24f5dbe2",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:2514e404-074e-4ed5-96c7-1a5f24f5dbe2"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:bibe:thingstodo:26087fec-d6bd-4dbe-adf6-ee5c63260a70",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:26087fec-d6bd-4dbe-adf6-ee5c63260a70"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:dino:thingstodo:268eff74-b491-446f-b841-239f2cb95e2c",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:268eff74-b491-446f-b841-239f2cb95e2c"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:deva:thingstodo:28c27ade-a237-47d5-b512-7b93c9a5213b",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:28c27ade-a237-47d5-b512-7b93c9a5213b"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:bibe:campgrounds:2940af6f-d2f2-4aee-91e3-1d0ddda7b84b",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:2940af6f-d2f2-4aee-91e3-1d0ddda7b84b"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:shen:thingstodo:29502cbf-07cb-4109-9b69-7e5b7169604c",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:29502cbf-07cb-4109-9b69-7e5b7169604c"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:blri:campgrounds:298c9fe2-25b3-4a60-be23-76e43a703fc5",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:298c9fe2-25b3-4a60-be23-76e43a703fc5"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:seki:visitorcenters:2b402f30-b155-4e22-b1d4-de13d83f0032",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:2b402f30-b155-4e22-b1d4-de13d83f0032"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:buff:places:2b86b851-d041-4772-88f8-3683c4771012",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:2b86b851-d041-4772-88f8-3683c4771012"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:deva:campgrounds:2bb05b85-183a-49d2-b9b6-612a7bbf3793",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:2bb05b85-183a-49d2-b9b6-612a7bbf3793"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:bibe:visitorcenters:2cf658fe-c619-48d3-96d5-9cabbe50e0be",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:2cf658fe-c619-48d3-96d5-9cabbe50e0be"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:deva:campgrounds:2dcec434-825e-46b0-af59-21be27a849a1",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:2dcec434-825e-46b0-af59-21be27a849a1"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:olym:campgrounds:2ea47e1b-6ea8-476d-a491-376f850ef923",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:2ea47e1b-6ea8-476d-a491-376f850ef923"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:gumo:places:2f40b14d-c149-4db4-a802-9e0221f1b023",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:2f40b14d-c149-4db4-a802-9e0221f1b023"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:cuva:places:2f4c5231-aba4-45e1-8e5b-f33d4b04334e",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:2f4c5231-aba4-45e1-8e5b-f33d4b04334e"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:blri:visitorcenters:2fc73af9-095d-40df-8d7c-2314c3866295",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:2fc73af9-095d-40df-8d7c-2314c3866295"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:olym:visitorcenters:30fcba69-55a9-40f4-a345-2e1f68c621ee",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:30fcba69-55a9-40f4-a345-2e1f68c621ee"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:bibe:places:3117062b-5d27-4be6-b964-c76c67edb95d",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:3117062b-5d27-4be6-b964-c76c67edb95d"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:deva:campgrounds:322e9fdf-a46a-4c15-a726-99da7113764a",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:322e9fdf-a46a-4c15-a726-99da7113764a"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:deva:places:32602c1e-b97e-4eca-852f-7bf4fdcaed3d",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:32602c1e-b97e-4eca-852f-7bf4fdcaed3d"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:dino:campgrounds:32c0e210-8389-49f0-bfdf-b434678fcfee",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:32c0e210-8389-49f0-bfdf-b434678fcfee"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:shen:thingstodo:33074d0f-e40e-46ba-9d39-41683bed788c",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:33074d0f-e40e-46ba-9d39-41683bed788c"
+    },
+    {
+      "disposition": "canonical_merge",
+      "public_id": "place:ridb:253917",
+      "reason": "Resolve the reviewed duplicate NPS campground to its existing canonical Recreation.gov identity.",
+      "source_id": "nps:item:3322dbc8-a9d9-4c2a-9f79-67aa12670789"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:jotr:campgrounds:33aa5642-343e-425b-89e9-69a0918a8502",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:33aa5642-343e-425b-89e9-69a0918a8502"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:blri:places:33e25d2f-f608-4fbb-b9cc-72530c73224f",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:33e25d2f-f608-4fbb-b9cc-72530c73224f"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:buff:places:3440d1ce-6209-4f47-9bad-53f1bd1ac316",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:3440d1ce-6209-4f47-9bad-53f1bd1ac316"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:gumo:thingstodo:3478390d-1a00-42f0-b8a6-1962a5a2175c",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:3478390d-1a00-42f0-b8a6-1962a5a2175c"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:havo:places:358952d5-6a34-40d6-aa2d-0cd88eddf84e",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:358952d5-6a34-40d6-aa2d-0cd88eddf84e"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:brca:visitorcenters:35e77922-f40e-4e5c-bb39-f8f5db8166e6",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:35e77922-f40e-4e5c-bb39-f8f5db8166e6"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:blri:places:36734bd1-c5c8-46bc-857f-891c2a2513b4",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:36734bd1-c5c8-46bc-857f-891c2a2513b4"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:olym:campgrounds:368e0896-3b0d-4331-8882-5fbabbef7739",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:368e0896-3b0d-4331-8882-5fbabbef7739"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:romo:places:36ffbdb6-c83b-4732-b735-92174677b047",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:36ffbdb6-c83b-4732-b735-92174677b047"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:dino:places:37ca3ef9-25f1-489a-b3ad-2b4e3b15610b",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:37ca3ef9-25f1-489a-b3ad-2b4e3b15610b"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:blri:visitorcenters:3800d3aa-5049-4fa0-9200-7b828a37009f",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:3800d3aa-5049-4fa0-9200-7b828a37009f"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:seki:campgrounds:3851b132-fea2-45bd-9f47-ce177ac59489",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:3851b132-fea2-45bd-9f47-ce177ac59489"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:seki:places:3988a44c-1d3a-43b5-a0e0-ecff5854b0ae",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:3988a44c-1d3a-43b5-a0e0-ecff5854b0ae"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:brca:thingstodo:3ab2fba2-bff5-460f-bb76-46fefdd69fce",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:3ab2fba2-bff5-460f-bb76-46fefdd69fce"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:havo:places:3b7a2948-9a58-4c72-9211-968bfdda543f",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:3b7a2948-9a58-4c72-9211-968bfdda543f"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:olym:places:3b7ff2f3-fc6a-4dcd-accb-d4ce9e7b5a66",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:3b7ff2f3-fc6a-4dcd-accb-d4ce9e7b5a66"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:brca:places:3c20ff91-185d-426e-aa45-06ba3ddcbb7a",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:3c20ff91-185d-426e-aa45-06ba3ddcbb7a"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:dino:thingstodo:3c2eef39-0f25-470b-a901-0ebe89d86c1c",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:3c2eef39-0f25-470b-a901-0ebe89d86c1c"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:buff:thingstodo:3d6daa8a-36a5-4a3e-bcb5-9aeb97fe8ad4",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:3d6daa8a-36a5-4a3e-bcb5-9aeb97fe8ad4"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:deva:places:3db1b042-7122-4ea0-b30f-06926ec956fb",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:3db1b042-7122-4ea0-b30f-06926ec956fb"
+    },
+    {
+      "disposition": "remapped",
+      "public_id": "place:nps-child:brca:places:3e291d70-1c59-4f58-ad7d-d262642e897f",
+      "reason": "Use the source-ID-qualified public identity selected during sibling-collision review.",
+      "source_id": "nps:item:3e291d70-1c59-4f58-ad7d-d262642e897f"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:buff:campgrounds:3ea23346-5c4d-4e01-a4e0-748033e92446",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:3ea23346-5c4d-4e01-a4e0-748033e92446"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:blri:places:3f0e3477-1d9c-4afe-8328-bfe3cf0b462f",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:3f0e3477-1d9c-4afe-8328-bfe3cf0b462f"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:cuva:places:3f184e8b-81bc-4674-8e00-6f0369d3aa3b",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:3f184e8b-81bc-4674-8e00-6f0369d3aa3b"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:romo:places:3f2538b1-c50d-47c1-8c5e-bfd58579ccc8",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:3f2538b1-c50d-47c1-8c5e-bfd58579ccc8"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:romo:places:3fa10fc4-c78b-41d6-9314-56262ac99bc5",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:3fa10fc4-c78b-41d6-9314-56262ac99bc5"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:romo:places:40d0b6a4-8db4-4a9d-9dc8-93e74cf78287",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:40d0b6a4-8db4-4a9d-9dc8-93e74cf78287"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:dino:visitorcenters:40efbcbe-9244-4abf-9bb6-b7ae77944007",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:40efbcbe-9244-4abf-9bb6-b7ae77944007"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:seki:thingstodo:424685b2-ec75-4e4b-a895-fd2c0bd7b14b",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:424685b2-ec75-4e4b-a895-fd2c0bd7b14b"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:deva:places:427e0cba-166d-4460-9091-3c750fc8d6c4",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:427e0cba-166d-4460-9091-3c750fc8d6c4"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:cuva:places:4290f11c-3864-49e4-8eaa-a878ab8be888",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:4290f11c-3864-49e4-8eaa-a878ab8be888"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:gumo:thingstodo:42a71734-0905-42c6-8089-e262a301f648",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:42a71734-0905-42c6-8089-e262a301f648"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:dino:places:432572a4-6a46-4a35-86ef-29126a5c0add",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:432572a4-6a46-4a35-86ef-29126a5c0add"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:gumo:campgrounds:4356d077-ae68-4822-b67e-3cf48a8bbddb",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:4356d077-ae68-4822-b67e-3cf48a8bbddb"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:seki:thingstodo:43e5928d-45e3-4e06-b569-30037d24252e",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:43e5928d-45e3-4e06-b569-30037d24252e"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:havo:campgrounds:46225547-072d-45aa-9261-558b27d92db4",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:46225547-072d-45aa-9261-558b27d92db4"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:olym:places:46f8c92a-c05a-4f4c-b6f8-f381457cc1ed",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:46f8c92a-c05a-4f4c-b6f8-f381457cc1ed"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:dino:places:4793ad46-2a5b-4eb0-84fb-63815177063a",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:4793ad46-2a5b-4eb0-84fb-63815177063a"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:olym:thingstodo:47ddcf03-ded7-4b66-9e4c-3364fe3d0db9",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:47ddcf03-ded7-4b66-9e4c-3364fe3d0db9"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:blri:thingstodo:4809daef-da9c-4bf2-bb25-705456927d08",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:4809daef-da9c-4bf2-bb25-705456927d08"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:ever:places:4910ee52-3168-434e-9b19-913e1bf1ca2c",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:4910ee52-3168-434e-9b19-913e1bf1ca2c"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:brca:places:49250a28-31ef-4a61-822f-788e0f3b2424",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:49250a28-31ef-4a61-822f-788e0f3b2424"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:shen:places:49b0daca-186b-4ce2-ab2b-0ab9b08b610f",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:49b0daca-186b-4ce2-ab2b-0ab9b08b610f"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:seki:campgrounds:4a08d24e-f719-429a-9a04-75004b564822",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:4a08d24e-f719-429a-9a04-75004b564822"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:buff:thingstodo:4a51b320-7b2a-4671-a673-9c44b85ab8ad",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:4a51b320-7b2a-4671-a673-9c44b85ab8ad"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:jotr:thingstodo:4b6d0fab-7f6b-4b19-b3fe-6c07566b8050",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:4b6d0fab-7f6b-4b19-b3fe-6c07566b8050"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:blri:thingstodo:4b99ac92-afc5-4cb2-9f2e-f1823d8021be",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:4b99ac92-afc5-4cb2-9f2e-f1823d8021be"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:bibe:visitorcenters:4be03f6a-7757-45e7-83ee-a16b60aef2a1",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:4be03f6a-7757-45e7-83ee-a16b60aef2a1"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:olym:places:4d1ab23a-1fb5-4398-82d8-4b623e303c19",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:4d1ab23a-1fb5-4398-82d8-4b623e303c19"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:olym:places:4d95b82f-81e0-4a9e-b4da-0ba649cc963d",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:4d95b82f-81e0-4a9e-b4da-0ba649cc963d"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:buff:thingstodo:4ea6d201-d640-4dd3-b4b1-64869851fa4d",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:4ea6d201-d640-4dd3-b4b1-64869851fa4d"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:ever:campgrounds:4f5128ad-453f-4b40-91f0-388fd662d110",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:4f5128ad-453f-4b40-91f0-388fd662d110"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:havo:thingstodo:4fd7dae2-2a35-406e-8017-99a698cdaade",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:4fd7dae2-2a35-406e-8017-99a698cdaade"
+    },
+    {
+      "disposition": "remapped",
+      "public_id": "place:nps-child:brca:thingstodo:5011ba4f-e4a2-4a60-a723-18e2aa391728",
+      "reason": "Use the source-ID-qualified public identity selected during sibling-collision review.",
+      "source_id": "nps:item:5011ba4f-e4a2-4a60-a723-18e2aa391728"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:buff:places:50ff4fc5-1682-4886-b784-0be6697b8641",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:50ff4fc5-1682-4886-b784-0be6697b8641"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:bibe:places:51128474-5625-4aca-91b7-bcd31fd25fd7",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:51128474-5625-4aca-91b7-bcd31fd25fd7"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:blri:thingstodo:515fd25b-463b-41e5-9f98-133f2f692634",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:515fd25b-463b-41e5-9f98-133f2f692634"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:cuva:places:517b46dd-0301-433b-ac54-8a0068930f29",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:517b46dd-0301-433b-ac54-8a0068930f29"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:buff:campgrounds:517ba74f-ffc6-4b85-af59-0df4fbf65899",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:517ba74f-ffc6-4b85-af59-0df4fbf65899"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:dino:campgrounds:522a398c-d05c-4f67-b1e4-e4f8df7ed18d",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:522a398c-d05c-4f67-b1e4-e4f8df7ed18d"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:ever:places:52b7989f-b4f9-4dd4-b7fd-787145aa49bf",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:52b7989f-b4f9-4dd4-b7fd-787145aa49bf"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:ever:visitorcenters:52d781e2-1439-4202-b6ce-8d2d8f30757e",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:52d781e2-1439-4202-b6ce-8d2d8f30757e"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:blri:places:5408922b-9d6c-4a26-a78c-ff70ceb4b4ee",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:5408922b-9d6c-4a26-a78c-ff70ceb4b4ee"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:bibe:thingstodo:5445f630-848c-4110-ae34-99a53d9faa59",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:5445f630-848c-4110-ae34-99a53d9faa59"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:seki:visitorcenters:548286f9-4a1a-4be7-a9c4-3b8f2f227a19",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:548286f9-4a1a-4be7-a9c4-3b8f2f227a19"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:jotr:thingstodo:55ceade9-3225-4478-9fc0-a05111f07621",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:55ceade9-3225-4478-9fc0-a05111f07621"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:dino:thingstodo:55d41fcc-0cbf-4565-a3f3-c62c3f9d3115",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:55d41fcc-0cbf-4565-a3f3-c62c3f9d3115"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:deva:campgrounds:5730203b-95d6-4866-91ee-09d3b2107d1b",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:5730203b-95d6-4866-91ee-09d3b2107d1b"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:blri:places:574f5561-2a0a-409c-86d8-2b89b0fe63c1",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:574f5561-2a0a-409c-86d8-2b89b0fe63c1"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:ever:thingstodo:58de5168-a37a-4197-af24-3d227bee1d1c",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:58de5168-a37a-4197-af24-3d227bee1d1c"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:romo:visitorcenters:593c4e0b-88ae-4ce3-8150-dc1ee862ada2",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:593c4e0b-88ae-4ce3-8150-dc1ee862ada2"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:buff:places:59aeaf7d-c1dd-4e3d-b9f9-cde9c3e24c29",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:59aeaf7d-c1dd-4e3d-b9f9-cde9c3e24c29"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:gumo:places:5a0bbcd9-3d9c-4af8-ba00-7a377918ed40",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:5a0bbcd9-3d9c-4af8-ba00-7a377918ed40"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:olym:visitorcenters:5a32c014-1c40-4187-a04a-845aea3730d5",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:5a32c014-1c40-4187-a04a-845aea3730d5"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:havo:places:5a8524b6-dad2-4e89-b71f-f653b4e90b03",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:5a8524b6-dad2-4e89-b71f-f653b4e90b03"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:buff:campgrounds:5aa6174e-b53c-46f7-9f7b-cc275dd91cbc",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:5aa6174e-b53c-46f7-9f7b-cc275dd91cbc"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:cuva:thingstodo:5acd5e72-ada8-4b57-9052-f454e23144d4",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:5acd5e72-ada8-4b57-9052-f454e23144d4"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:seki:places:5bbba016-0457-4a6b-b40c-4d5ac46cc23f",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:5bbba016-0457-4a6b-b40c-4d5ac46cc23f"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:shen:places:5ca0bdb6-16ea-4eab-bc4a-0fbea1875091",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:5ca0bdb6-16ea-4eab-bc4a-0fbea1875091"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:buff:campgrounds:5cea9f21-8cbb-4b5d-ab2f-7d6fc31ae52e",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:5cea9f21-8cbb-4b5d-ab2f-7d6fc31ae52e"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:jotr:visitorcenters:5e311c9f-3320-4f60-9dc7-2d33f5b329ba",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:5e311c9f-3320-4f60-9dc7-2d33f5b329ba"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:havo:places:5f25ace7-e4cc-4389-8d31-d56ab1d730e6",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:5f25ace7-e4cc-4389-8d31-d56ab1d730e6"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:dino:places:5f6ca2b8-db93-41c3-917e-49938f418cca",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:5f6ca2b8-db93-41c3-917e-49938f418cca"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:romo:visitorcenters:6024adbb-9505-45fd-a9ae-ff50cda658a0",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:6024adbb-9505-45fd-a9ae-ff50cda658a0"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:gumo:campgrounds:60a9f911-9c8c-4b0e-91f0-da9803b46794",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:60a9f911-9c8c-4b0e-91f0-da9803b46794"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:havo:thingstodo:6105b977-a999-4e87-a602-768e2e4c04a5",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:6105b977-a999-4e87-a602-768e2e4c04a5"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:bibe:campgrounds:6134a1e6-4a8b-473e-9fa5-7daeeaa3fd14",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:6134a1e6-4a8b-473e-9fa5-7daeeaa3fd14"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:jotr:thingstodo:62acb291-3d9e-4dbe-ba06-729e9e72d4f6",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:62acb291-3d9e-4dbe-ba06-729e9e72d4f6"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:shen:thingstodo:6310f4f6-5370-4451-8851-4a455dc8c87b",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:6310f4f6-5370-4451-8851-4a455dc8c87b"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:seki:visitorcenters:6381513e-b3a4-481b-b15f-b9930d10045e",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:6381513e-b3a4-481b-b15f-b9930d10045e"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:blri:places:63d02ac0-03e1-40a4-aa7c-c4c95caa45b6",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:63d02ac0-03e1-40a4-aa7c-c4c95caa45b6"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:havo:thingstodo:64075fe4-5d7d-4700-b3fb-e44eee8c5e8f",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:64075fe4-5d7d-4700-b3fb-e44eee8c5e8f"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:olym:places:640ac8c0-ea3c-4ce8-85dc-cecaac3369d9",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:640ac8c0-ea3c-4ce8-85dc-cecaac3369d9"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:shen:thingstodo:64172dec-915e-4f31-9fca-deb77fb9a026",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:64172dec-915e-4f31-9fca-deb77fb9a026"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:buff:thingstodo:64473ff3-8acb-4092-af9f-c701895ba001",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:64473ff3-8acb-4092-af9f-c701895ba001"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:shen:thingstodo:6457e629-733b-432d-88ad-3e69c1103d5c",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:6457e629-733b-432d-88ad-3e69c1103d5c"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:ever:places:65a50eb9-48bb-4b85-b993-6639f38ee895",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:65a50eb9-48bb-4b85-b993-6639f38ee895"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:jotr:places:65dbedf0-4ab1-490f-ad5d-4692dc0dc62f",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:65dbedf0-4ab1-490f-ad5d-4692dc0dc62f"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:blri:thingstodo:661e396b-76e7-4cf0-b41a-bfd3997772e5",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:661e396b-76e7-4cf0-b41a-bfd3997772e5"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:brca:thingstodo:665b4637-0137-4229-8923-4d8d8032ce12",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:665b4637-0137-4229-8923-4d8d8032ce12"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:shen:thingstodo:66c91d0c-3808-4c64-acbe-d8779f7e8a4b",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:66c91d0c-3808-4c64-acbe-d8779f7e8a4b"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:gumo:campgrounds:66da0c26-4d6e-4c02-aa89-794655df2c38",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:66da0c26-4d6e-4c02-aa89-794655df2c38"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:dino:places:66f8d83e-49cb-4f56-b82a-b2365c2b33ff",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:66f8d83e-49cb-4f56-b82a-b2365c2b33ff"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:cuva:places:670a3eca-8f3c-47f1-babf-e666e2a09b20",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:670a3eca-8f3c-47f1-babf-e666e2a09b20"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:romo:campgrounds:6715a7cc-280c-4093-85d3-492004c2db48",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:6715a7cc-280c-4093-85d3-492004c2db48"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:jotr:campgrounds:6742b85d-65da-447c-95c2-80e110aa5e6a",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:6742b85d-65da-447c-95c2-80e110aa5e6a"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:romo:visitorcenters:674b1262-7caf-40ba-9cf8-608703a95a8a",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:674b1262-7caf-40ba-9cf8-608703a95a8a"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:romo:thingstodo:67a639e0-7bfa-49e8-8735-dee9aebc2c9b",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:67a639e0-7bfa-49e8-8735-dee9aebc2c9b"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:romo:places:67c254fb-313d-4caa-b424-f06358df7cc3",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:67c254fb-313d-4caa-b424-f06358df7cc3"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:deva:places:68306042-98b4-41a8-80cd-5e2b33f4b61e",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:68306042-98b4-41a8-80cd-5e2b33f4b61e"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:dino:visitorcenters:683abc17-a371-4482-80e1-244fc8715a10",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:683abc17-a371-4482-80e1-244fc8715a10"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:gumo:campgrounds:68b2fab6-1857-4c5d-b025-1aa2712a7bfd",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:68b2fab6-1857-4c5d-b025-1aa2712a7bfd"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:dino:thingstodo:6961472e-4c31-49c9-b2ff-759ec0a58c94",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:6961472e-4c31-49c9-b2ff-759ec0a58c94"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:jotr:places:699dd6d5-3231-4299-91cd-3a3341f0529e",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:699dd6d5-3231-4299-91cd-3a3341f0529e"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:shen:places:69cb063d-170f-4fdd-84c3-f6b7f4351e12",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:69cb063d-170f-4fdd-84c3-f6b7f4351e12"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:blri:places:69d6caf6-967b-4b60-b5da-9de73ce4a641",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:69d6caf6-967b-4b60-b5da-9de73ce4a641"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:ever:places:6a7fa980-588a-44a1-b38f-a75898d4e34f",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:6a7fa980-588a-44a1-b38f-a75898d4e34f"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:jotr:visitorcenters:6b114330-167a-4792-b52a-bf98035e9d7f",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:6b114330-167a-4792-b52a-bf98035e9d7f"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:seki:campgrounds:6bcf7f8d-71b1-4b29-a925-5dcfdd0cb38e",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:6bcf7f8d-71b1-4b29-a925-5dcfdd0cb38e"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:romo:thingstodo:6c0575f5-a657-42a0-a9c2-78b6b37eb89e",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:6c0575f5-a657-42a0-a9c2-78b6b37eb89e"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:cuva:places:6c4691f6-4c41-4591-bfcd-8064a1a11dd7",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:6c4691f6-4c41-4591-bfcd-8064a1a11dd7"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:seki:campgrounds:6d44aac6-2a52-416e-8087-6202b8ad52bb",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:6d44aac6-2a52-416e-8087-6202b8ad52bb"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:bibe:places:716b8384-9cc9-47bc-a72a-202497ffc3b8",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:716b8384-9cc9-47bc-a72a-202497ffc3b8"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:deva:places:72383840-0fce-44a7-a740-099d7af1f0f2",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:72383840-0fce-44a7-a740-099d7af1f0f2"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:deva:places:7273f2e9-5cb3-4143-b747-5180c6879f5b",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:7273f2e9-5cb3-4143-b747-5180c6879f5b"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:seki:visitorcenters:72aa323f-7c0e-48d6-81ba-fa20345db75d",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:72aa323f-7c0e-48d6-81ba-fa20345db75d"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:blri:visitorcenters:72c788fb-b248-454e-a6e2-e728210b913d",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:72c788fb-b248-454e-a6e2-e728210b913d"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:ever:places:72f42026-7388-4c7f-8cb1-db3db6da457e",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:72f42026-7388-4c7f-8cb1-db3db6da457e"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:cuva:thingstodo:73300e7a-4dd9-4e33-b605-12442ff36818",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:73300e7a-4dd9-4e33-b605-12442ff36818"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:gumo:campgrounds:7398124d-9099-4d3b-9b90-ea82ee919960",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:7398124d-9099-4d3b-9b90-ea82ee919960"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:buff:campgrounds:739ce881-991f-42ce-885b-3f0410d82ed5",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:739ce881-991f-42ce-885b-3f0410d82ed5"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:buff:places:74174f6e-ac7e-4169-a8b1-a1de236968ba",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:74174f6e-ac7e-4169-a8b1-a1de236968ba"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:buff:campgrounds:74277392-66f4-4feb-b95b-a9fd2b6d4258",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:74277392-66f4-4feb-b95b-a9fd2b6d4258"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:romo:campgrounds:7475825b-e844-4012-841b-0e29e05d4540",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:7475825b-e844-4012-841b-0e29e05d4540"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:seki:visitorcenters:7506d754-4d1b-4a70-9043-ec66ebc3906b",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:7506d754-4d1b-4a70-9043-ec66ebc3906b"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:ever:places:75496e65-1bdc-40a9-aa95-e5c855d4e0f5",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:75496e65-1bdc-40a9-aa95-e5c855d4e0f5"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:gumo:campgrounds:75b2ef77-b8a3-4fab-8e68-b4c9d7894f68",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:75b2ef77-b8a3-4fab-8e68-b4c9d7894f68"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:deva:places:75b5cddd-8349-45fe-99ef-f0b8411f60f5",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:75b5cddd-8349-45fe-99ef-f0b8411f60f5"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:gumo:thingstodo:75ceb327-a510-4261-9888-cbe2e8199ec1",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:75ceb327-a510-4261-9888-cbe2e8199ec1"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:shen:campgrounds:75e4dc88-1332-456c-9f06-05e9f4e1cab6",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:75e4dc88-1332-456c-9f06-05e9f4e1cab6"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:bibe:thingstodo:76078ee8-363e-4bb6-b3e7-2d54d2efdd82",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:76078ee8-363e-4bb6-b3e7-2d54d2efdd82"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:jotr:campgrounds:760fd8ad-0493-43ce-8d6f-c58438bd8212",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:760fd8ad-0493-43ce-8d6f-c58438bd8212"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:romo:places:767a8d55-aa03-431c-ae64-173551fabb6e",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:767a8d55-aa03-431c-ae64-173551fabb6e"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:havo:places:7696444d-7626-4fa5-b2c0-d0ab15951dda",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:7696444d-7626-4fa5-b2c0-d0ab15951dda"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:olym:thingstodo:77216bb8-c04d-4d30-af9b-28997ada8efa",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:77216bb8-c04d-4d30-af9b-28997ada8efa"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:jotr:places:7766d1e9-6201-47fc-8dc5-124d89f2fda7",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:7766d1e9-6201-47fc-8dc5-124d89f2fda7"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:olym:places:7920cb20-a4c0-4881-88d9-0b8a93e8e129",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:7920cb20-a4c0-4881-88d9-0b8a93e8e129"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:jotr:places:795c35c3-53b7-4458-afac-92f229b99935",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:795c35c3-53b7-4458-afac-92f229b99935"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:brca:places:797cb625-5e25-4cb9-8da2-d787443d3d76",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:797cb625-5e25-4cb9-8da2-d787443d3d76"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:havo:visitorcenters:79dd24ea-8639-4309-a53d-17b97aedcd50",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:79dd24ea-8639-4309-a53d-17b97aedcd50"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:dino:campgrounds:7afe0d29-866b-4025-a403-3bce20e4cf32",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:7afe0d29-866b-4025-a403-3bce20e4cf32"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:gumo:campgrounds:7b17e712-1ea9-4fe8-a8b2-b677ed81b385",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:7b17e712-1ea9-4fe8-a8b2-b677ed81b385"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:olym:visitorcenters:7b570feb-479e-4b29-bd2e-8dc63017033d",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:7b570feb-479e-4b29-bd2e-8dc63017033d"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:blri:places:7beb1bdf-6b89-42a4-acfa-efe6c775028e",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:7beb1bdf-6b89-42a4-acfa-efe6c775028e"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:ever:places:7dcc17be-2c09-4763-80ae-b9ccd4a62c82",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:7dcc17be-2c09-4763-80ae-b9ccd4a62c82"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:deva:campgrounds:7e6e57be-02ed-4440-ae5c-1bd6a8de82c1",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:7e6e57be-02ed-4440-ae5c-1bd6a8de82c1"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:havo:visitorcenters:7fb37395-4782-401e-997d-88b13870f7c9",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:7fb37395-4782-401e-997d-88b13870f7c9"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:deva:thingstodo:7fe0c782-22f1-40a0-a6b9-9d9a9ce0526a",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:7fe0c782-22f1-40a0-a6b9-9d9a9ce0526a"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:deva:thingstodo:814ae548-1f23-4d9e-8aec-d893051c1c53",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:814ae548-1f23-4d9e-8aec-d893051c1c53"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:havo:places:820f47b2-c043-4e61-9c04-64dab7afe2ee",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:820f47b2-c043-4e61-9c04-64dab7afe2ee"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:jotr:campgrounds:8271d39a-48e1-4693-b3e2-2dbe4c3511d2",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:8271d39a-48e1-4693-b3e2-2dbe4c3511d2"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:bibe:places:8327e2bb-1451-4af2-aab0-615dff15ee94",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:8327e2bb-1451-4af2-aab0-615dff15ee94"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:brca:places:83faafd4-17bd-4b49-a1d3-3d002aa3287c",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:83faafd4-17bd-4b49-a1d3-3d002aa3287c"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:cuva:places:84952755-8ddc-4599-a7c9-52f918c98de6",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:84952755-8ddc-4599-a7c9-52f918c98de6"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:shen:places:84fae593-d61a-4723-9c05-5772bf808ec4",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:84fae593-d61a-4723-9c05-5772bf808ec4"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:blri:thingstodo:86c90230-1f14-45d7-bfea-e72ba289e987",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:86c90230-1f14-45d7-bfea-e72ba289e987"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:havo:places:8795f9c3-c863-4a44-ab6f-db50396e1181",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:8795f9c3-c863-4a44-ab6f-db50396e1181"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:bibe:visitorcenters:8a1b0cbb-a862-4658-8587-d282a756ccb3",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:8a1b0cbb-a862-4658-8587-d282a756ccb3"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:dino:thingstodo:8a504884-74c2-4ae8-ade5-4e13f895c5e3",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:8a504884-74c2-4ae8-ade5-4e13f895c5e3"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:havo:places:8b9118d5-8b97-4a47-b108-9a3820507080",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:8b9118d5-8b97-4a47-b108-9a3820507080"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:olym:places:8d1b7960-3cc9-4052-ba3e-adc54893f77d",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:8d1b7960-3cc9-4052-ba3e-adc54893f77d"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:romo:visitorcenters:8e0d534d-3945-42d6-8143-4f00007638f5",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:8e0d534d-3945-42d6-8143-4f00007638f5"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:dino:campgrounds:8e2351cd-649c-41c3-b1ea-5ede58f33cdd",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:8e2351cd-649c-41c3-b1ea-5ede58f33cdd"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:deva:campgrounds:8e2a7f5b-fd6e-4367-b2e8-ca5c41758eed",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:8e2a7f5b-fd6e-4367-b2e8-ca5c41758eed"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:bibe:thingstodo:8e7e6012-1fa7-4165-91a6-e3e2f12f5a0f",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:8e7e6012-1fa7-4165-91a6-e3e2f12f5a0f"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:buff:thingstodo:90310a7f-28ba-4c02-b59b-135eb133f337",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:90310a7f-28ba-4c02-b59b-135eb133f337"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:ever:visitorcenters:907915c0-2adb-4d82-a45d-d5a7754354a2",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:907915c0-2adb-4d82-a45d-d5a7754354a2"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:havo:thingstodo:925299c3-a9a2-424c-b0be-48adfadc25c8",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:925299c3-a9a2-424c-b0be-48adfadc25c8"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:seki:places:94bc28ea-0568-44ed-8caa-3b5bd43d2609",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:94bc28ea-0568-44ed-8caa-3b5bd43d2609"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:deva:thingstodo:94cd408c-6e8c-442c-9704-6ee97836d233",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:94cd408c-6e8c-442c-9704-6ee97836d233"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:seki:thingstodo:977399c4-0bfb-4f99-8b94-c69da420d515",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:977399c4-0bfb-4f99-8b94-c69da420d515"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:seki:campgrounds:97a7c642-b9c6-463b-8fac-b9480fe5503a",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:97a7c642-b9c6-463b-8fac-b9480fe5503a"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:olym:visitorcenters:97a7fd63-11f7-4d5d-800f-3ca42fab6bea",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:97a7fd63-11f7-4d5d-800f-3ca42fab6bea"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:gumo:visitorcenters:982a05ab-229d-43d7-905b-f230d655586a",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:982a05ab-229d-43d7-905b-f230d655586a"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:cuva:places:983650de-b35b-4f5c-ac71-b69915c0b83b",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:983650de-b35b-4f5c-ac71-b69915c0b83b"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:dino:thingstodo:99802c3b-2782-46b3-bfb5-13685cda6fe3",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:99802c3b-2782-46b3-bfb5-13685cda6fe3"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:brca:campgrounds:99ca90b7-e669-41ee-8744-2bbf8215c2a8",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:99ca90b7-e669-41ee-8744-2bbf8215c2a8"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:dino:places:9abaac60-acb5-4a0e-af17-ad5cf31e1afc",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:9abaac60-acb5-4a0e-af17-ad5cf31e1afc"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:shen:places:9ad7819a-e975-409e-93de-82f4799c5c7a",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:9ad7819a-e975-409e-93de-82f4799c5c7a"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:jotr:campgrounds:9b5a7b2b-e147-429f-b52f-edbf1b48ebb0",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:9b5a7b2b-e147-429f-b52f-edbf1b48ebb0"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:deva:thingstodo:9c3da5d5-6973-4b85-9388-92e0a804b333",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:9c3da5d5-6973-4b85-9388-92e0a804b333"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:shen:places:9cbc4fa2-5616-4146-be8b-65379993d712",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:9cbc4fa2-5616-4146-be8b-65379993d712"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:ever:thingstodo:9cd88771-f8f1-4db0-939c-155c8f5edbbb",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:9cd88771-f8f1-4db0-939c-155c8f5edbbb"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:gumo:places:9cf4cbb0-c9df-4344-9a95-f6dbeb775cb9",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:9cf4cbb0-c9df-4344-9a95-f6dbeb775cb9"
+    },
+    {
+      "disposition": "canonical_merge",
+      "public_id": "place:ridb:233403",
+      "reason": "Resolve the reviewed duplicate NPS campground to its existing canonical Recreation.gov identity.",
+      "source_id": "nps:item:9d607267-5063-463f-8487-df928f788339"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:cuva:places:9d78b743-e7c7-4ecf-9aad-90b27e90a8c9",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:9d78b743-e7c7-4ecf-9aad-90b27e90a8c9"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:buff:visitorcenters:9e702f42-1153-4c94-8c88-e2d802a13df1",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:9e702f42-1153-4c94-8c88-e2d802a13df1"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:blri:places:a0c7ea00-614a-4370-88df-5bd0f2709c02",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:a0c7ea00-614a-4370-88df-5bd0f2709c02"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:bibe:places:a1233e15-9c27-4b46-a3ae-86b0154e3deb",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:a1233e15-9c27-4b46-a3ae-86b0154e3deb"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:romo:places:a1742f25-bbf2-4ed0-89fb-63a01d963497",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:a1742f25-bbf2-4ed0-89fb-63a01d963497"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:havo:thingstodo:a252383a-6c06-4570-b11a-5e0c35d3fe49",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:a252383a-6c06-4570-b11a-5e0c35d3fe49"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:shen:places:a28fc342-0252-40b3-b2c9-e38da50a4ef6",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:a28fc342-0252-40b3-b2c9-e38da50a4ef6"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:gumo:campgrounds:a3196d33-288f-4484-a075-33b8d2695937",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:a3196d33-288f-4484-a075-33b8d2695937"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:shen:visitorcenters:a34f5343-2429-47c9-8f20-af4e41042907",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:a34f5343-2429-47c9-8f20-af4e41042907"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:seki:places:a3750881-a580-462f-8bc6-9c1626c8967a",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:a3750881-a580-462f-8bc6-9c1626c8967a"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:brca:thingstodo:a5182852-e474-4c11-97e6-6697978efd71",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:a5182852-e474-4c11-97e6-6697978efd71"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:blri:thingstodo:a5955c80-7cd7-4699-9ad9-1c11a390a488",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:a5955c80-7cd7-4699-9ad9-1c11a390a488"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:ever:places:a5e3e630-c6a2-4a5e-8da0-b3054ba5579e",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:a5e3e630-c6a2-4a5e-8da0-b3054ba5579e"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:jotr:visitorcenters:a61f3a76-8cbb-4706-aaa1-f585b80106ae",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:a61f3a76-8cbb-4706-aaa1-f585b80106ae"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:deva:places:a6220b7e-747a-4af9-9fbe-96ca8205c120",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:a6220b7e-747a-4af9-9fbe-96ca8205c120"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:olym:thingstodo:a6fc71f4-d045-4773-a60a-34f67b1a4a4e",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:a6fc71f4-d045-4773-a60a-34f67b1a4a4e"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:havo:campgrounds:a859e76b-fa23-43ce-8bed-904fb4d41b60",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:a859e76b-fa23-43ce-8bed-904fb4d41b60"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:gumo:campgrounds:a93dccb5-ee82-4091-9744-387d1649c0c0",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:a93dccb5-ee82-4091-9744-387d1649c0c0"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:romo:thingstodo:aa3a1f19-2ded-4f4a-8572-55300cfb0685",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:aa3a1f19-2ded-4f4a-8572-55300cfb0685"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:gumo:thingstodo:aa9c11d9-033f-42ff-8a53-e76bd609515c",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:aa9c11d9-033f-42ff-8a53-e76bd609515c"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:blri:campgrounds:aacb05f2-f5e2-47cf-8d26-ee42b70df978",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:aacb05f2-f5e2-47cf-8d26-ee42b70df978"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:ever:thingstodo:ac662b43-c71d-4b57-b3a4-9430e39f91ce",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:ac662b43-c71d-4b57-b3a4-9430e39f91ce"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:deva:visitorcenters:adfd6475-95af-497d-b29c-2a20d4bb2724",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:adfd6475-95af-497d-b29c-2a20d4bb2724"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:ever:campgrounds:ae149158-1191-4835-8457-e6e899f5ea48",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:ae149158-1191-4835-8457-e6e899f5ea48"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:cuva:visitorcenters:aed09a89-ca84-4cae-9949-9591688b05fc",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:aed09a89-ca84-4cae-9949-9591688b05fc"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:gumo:visitorcenters:af14f6d0-70ed-4815-963e-e87564f1135c",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:af14f6d0-70ed-4815-963e-e87564f1135c"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:romo:thingstodo:af9e76d1-e9b6-4c9e-a2c4-bd2b3f272ea5",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:af9e76d1-e9b6-4c9e-a2c4-bd2b3f272ea5"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:shen:thingstodo:b14e6f7a-b0bf-4a90-85d4-ffd4cbcb2460",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:b14e6f7a-b0bf-4a90-85d4-ffd4cbcb2460"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:bibe:places:b19652ef-1340-4753-a6f2-679df44c8560",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:b19652ef-1340-4753-a6f2-679df44c8560"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:brca:places:b2a4e730-7027-463d-ab86-a77924b20b3d",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:b2a4e730-7027-463d-ab86-a77924b20b3d"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:brca:places:b2de5046-d5c7-4734-b911-31680cc61857",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:b2de5046-d5c7-4734-b911-31680cc61857"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:olym:places:b340cd12-f8e3-40af-b9ea-f00928240554",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:b340cd12-f8e3-40af-b9ea-f00928240554"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:bibe:visitorcenters:b3ce9c66-2c24-43a1-a543-f92e67558e3d",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:b3ce9c66-2c24-43a1-a543-f92e67558e3d"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:bibe:places:b3fdf34c-0dd0-4d4f-b5b2-fc667b920530",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:b3fdf34c-0dd0-4d4f-b5b2-fc667b920530"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:olym:places:b48a8fb9-ecd6-475e-abc8-811d5a5f0c30",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:b48a8fb9-ecd6-475e-abc8-811d5a5f0c30"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:olym:campgrounds:b4d16ca6-183b-492c-bdea-a41da6349edd",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:b4d16ca6-183b-492c-bdea-a41da6349edd"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:gumo:visitorcenters:b579fd1c-2bdd-4793-a65a-9a3e8ab4112f",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:b579fd1c-2bdd-4793-a65a-9a3e8ab4112f"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:deva:campgrounds:b60a752c-4a67-4a7f-806f-2876df00243e",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:b60a752c-4a67-4a7f-806f-2876df00243e"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:jotr:places:b6472cbc-b01c-4c15-9e4b-64806e145bda",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:b6472cbc-b01c-4c15-9e4b-64806e145bda"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:shen:places:b6dff506-d994-48d3-8557-1d98db7956c4",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:b6dff506-d994-48d3-8557-1d98db7956c4"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:blri:campgrounds:b7fff416-1181-4457-931b-6f9920c0efe7",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:b7fff416-1181-4457-931b-6f9920c0efe7"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:olym:places:b805447e-b6e9-4a6c-81f9-dda4e189f46d",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:b805447e-b6e9-4a6c-81f9-dda4e189f46d"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:romo:visitorcenters:b9076d87-29b0-4624-adfe-eefa5ac631ee",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:b9076d87-29b0-4624-adfe-eefa5ac631ee"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:cuva:thingstodo:b94bf39e-5c89-4e12-93a0-a4bf92b095c6",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:b94bf39e-5c89-4e12-93a0-a4bf92b095c6"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:buff:campgrounds:b94fe8b9-2ef1-4464-a2e1-5803c9ae7648",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:b94fe8b9-2ef1-4464-a2e1-5803c9ae7648"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:gumo:campgrounds:b9ccd51f-22e2-45c1-a3e4-f352999558ff",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:b9ccd51f-22e2-45c1-a3e4-f352999558ff"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:olym:thingstodo:b9f2869c-30c5-44c0-9df2-fb03ff6468df",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:b9f2869c-30c5-44c0-9df2-fb03ff6468df"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:shen:places:ba6345e3-fd1a-4eee-b047-cc66bef0fb73",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:ba6345e3-fd1a-4eee-b047-cc66bef0fb73"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:jotr:visitorcenters:baadc057-e381-40ac-aa35-1110501e1cec",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:baadc057-e381-40ac-aa35-1110501e1cec"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:shen:campgrounds:bac9e60c-2fd0-479d-b676-1eb623edae60",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:bac9e60c-2fd0-479d-b676-1eb623edae60"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:deva:places:bb85de49-9989-42f5-830d-64198d6e800a",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:bb85de49-9989-42f5-830d-64198d6e800a"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:ever:thingstodo:bc316cc1-cf34-4e95-99aa-66e4752d5727",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:bc316cc1-cf34-4e95-99aa-66e4752d5727"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:seki:campgrounds:bc707fa3-f575-4734-8e62-34689982f615",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:bc707fa3-f575-4734-8e62-34689982f615"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:gumo:places:bdaa9256-e251-4618-9793-92444884af13",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:bdaa9256-e251-4618-9793-92444884af13"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:seki:thingstodo:be386ff0-496f-4a02-b8f4-377fa915cb10",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:be386ff0-496f-4a02-b8f4-377fa915cb10"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:havo:thingstodo:bf4e7fc2-1d4e-4994-9e1a-c72e6e748212",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:bf4e7fc2-1d4e-4994-9e1a-c72e6e748212"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:shen:campgrounds:bfbda380-305a-4821-bb62-c72a939c78fc",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:bfbda380-305a-4821-bb62-c72a939c78fc"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:gumo:thingstodo:bfc02f95-78ee-4d43-b3ef-eaf62b07d721",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:bfc02f95-78ee-4d43-b3ef-eaf62b07d721"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:blri:visitorcenters:c00fddd1-6e2e-4b20-8cad-f18a38c28e4d",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:c00fddd1-6e2e-4b20-8cad-f18a38c28e4d"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:dino:thingstodo:c0ca0ba0-3e42-4d12-95ca-3f38a5df63ed",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:c0ca0ba0-3e42-4d12-95ca-3f38a5df63ed"
+    },
+    {
+      "disposition": "remapped",
+      "public_id": "place:nps-child:gumo:places:c1b14c7b-24f4-4a37-8481-7238dec96bfb",
+      "reason": "Use the source-ID-qualified public identity selected during sibling-collision review.",
+      "source_id": "nps:item:c1b14c7b-24f4-4a37-8481-7238dec96bfb"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:brca:places:c1c69bf0-7eb9-467f-8fbc-e1aba1b48e7f",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:c1c69bf0-7eb9-467f-8fbc-e1aba1b48e7f"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:romo:places:c2a149b7-33bb-40f3-96b5-0e396e541251",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:c2a149b7-33bb-40f3-96b5-0e396e541251"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:blri:campgrounds:c32cb41b-1c35-454b-b9fd-ae3f71eebdc8",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:c32cb41b-1c35-454b-b9fd-ae3f71eebdc8"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:dino:campgrounds:c37b6aa5-24c5-4982-9058-8bbea3e07de3",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:c37b6aa5-24c5-4982-9058-8bbea3e07de3"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:romo:places:c3a54769-e360-4591-8650-cc7cf92fb7bc",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:c3a54769-e360-4591-8650-cc7cf92fb7bc"
+    },
+    {
+      "disposition": "canonical_merge",
+      "public_id": "place:ridb:258852",
+      "reason": "Resolve the reviewed duplicate NPS campground to its existing canonical Recreation.gov identity.",
+      "source_id": "nps:item:c46d4dbb-5b16-4f5a-bbfa-34c350639b98"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:shen:campgrounds:c4944ef0-e744-47f8-aceb-f6283723afca",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:c4944ef0-e744-47f8-aceb-f6283723afca"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:olym:campgrounds:c4c0acbd-0ae4-4970-9c6a-e75a0153050d",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:c4c0acbd-0ae4-4970-9c6a-e75a0153050d"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:jotr:places:c517ed8d-d6f0-4c80-ba10-2de9feb9bedd",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:c517ed8d-d6f0-4c80-ba10-2de9feb9bedd"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:blri:thingstodo:c5429e7e-2b04-44f6-840c-98c1b7b8c620",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:c5429e7e-2b04-44f6-840c-98c1b7b8c620"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:deva:campgrounds:c56c81f5-bf2c-481c-a63e-ffab374f5664",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:c56c81f5-bf2c-481c-a63e-ffab374f5664"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:brca:places:c5e1fbf0-0752-4db9-8ab6-aceb4498dfba",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:c5e1fbf0-0752-4db9-8ab6-aceb4498dfba"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:bibe:visitorcenters:c5f00e54-bf45-46e1-8acf-bbe615867b78",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:c5f00e54-bf45-46e1-8acf-bbe615867b78"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:jotr:places:c7b1df6c-1d9b-4815-a4b5-c0306da68f89",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:c7b1df6c-1d9b-4815-a4b5-c0306da68f89"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:deva:places:c8ab3088-8218-466a-b4d1-01c9a84cfb3a",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:c8ab3088-8218-466a-b4d1-01c9a84cfb3a"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:romo:visitorcenters:c8dcf727-a024-419f-96a7-b341a8fa6721",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:c8dcf727-a024-419f-96a7-b341a8fa6721"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:seki:thingstodo:c8f0aaae-53aa-4f1b-8b96-0a88c4ccd80a",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:c8f0aaae-53aa-4f1b-8b96-0a88c4ccd80a"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:olym:places:c94c1fcf-99e8-4432-9e89-08f2e76e4ceb",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:c94c1fcf-99e8-4432-9e89-08f2e76e4ceb"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:olym:places:ca40f87e-3d4b-4ac8-9284-2db8be0e3f9b",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:ca40f87e-3d4b-4ac8-9284-2db8be0e3f9b"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:ever:thingstodo:cb6e3d68-c82c-42bf-86e8-d269d7f942fd",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:cb6e3d68-c82c-42bf-86e8-d269d7f942fd"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:havo:places:cc6aa1eb-8257-4dab-bcb0-16b4611e8ff1",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:cc6aa1eb-8257-4dab-bcb0-16b4611e8ff1"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:romo:thingstodo:cc6c0fc5-8276-408e-8329-3a8a6042f7b1",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:cc6c0fc5-8276-408e-8329-3a8a6042f7b1"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:brca:thingstodo:cd5c8e15-7422-4e97-a767-3c36733e1b23",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:cd5c8e15-7422-4e97-a767-3c36733e1b23"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:seki:thingstodo:ce153873-521d-4419-9af7-0812800def68",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:ce153873-521d-4419-9af7-0812800def68"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:ever:visitorcenters:d0065f69-a55b-478b-9749-db5a99ec3c1f",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:d0065f69-a55b-478b-9749-db5a99ec3c1f"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:cuva:places:d26e34db-cdea-4e16-8f6d-ca74ba4515a2",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:d26e34db-cdea-4e16-8f6d-ca74ba4515a2"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:romo:places:d2749746-ea23-4830-83c3-ec6b5972eab5",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:d2749746-ea23-4830-83c3-ec6b5972eab5"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:romo:visitorcenters:d27be956-ff88-4467-b0c8-a50e8457c422",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:d27be956-ff88-4467-b0c8-a50e8457c422"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:romo:campgrounds:d322e1e9-8058-4c42-80a3-9fbc82583190",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:d322e1e9-8058-4c42-80a3-9fbc82583190"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:brca:places:d4731420-0b3a-4e2c-a33b-923f5771d491",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:d4731420-0b3a-4e2c-a33b-923f5771d491"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:bibe:thingstodo:d5418162-39a6-4b1a-9198-de40c9cf8d7a",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:d5418162-39a6-4b1a-9198-de40c9cf8d7a"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:gumo:places:d58f3b0d-8f65-41f2-be8a-dc6137c03a1b",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:d58f3b0d-8f65-41f2-be8a-dc6137c03a1b"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:blri:visitorcenters:d5a81d25-1f20-476d-af29-60205a3f057f",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:d5a81d25-1f20-476d-af29-60205a3f057f"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:bibe:campgrounds:d7143083-b16f-45c0-8493-e717ceda7c3b",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:d7143083-b16f-45c0-8493-e717ceda7c3b"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:havo:places:d745c915-5cbb-4c76-93c5-58798450b456",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:d745c915-5cbb-4c76-93c5-58798450b456"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:seki:campgrounds:d82d2d01-80e6-4394-bec0-c41ecac12798",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:d82d2d01-80e6-4394-bec0-c41ecac12798"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:bibe:places:d83e0c57-8618-40f0-a2a8-7f04ff4cce7b",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:d83e0c57-8618-40f0-a2a8-7f04ff4cce7b"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:brca:thingstodo:d8d5e034-958d-4af2-a908-89e35be5a650",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:d8d5e034-958d-4af2-a908-89e35be5a650"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:dino:places:d8f2c6ba-0b22-4f2e-9586-f7e4d37d27fe",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:d8f2c6ba-0b22-4f2e-9586-f7e4d37d27fe"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:seki:places:db33046b-5c7a-4185-bcc2-4d2476718b2a",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:db33046b-5c7a-4185-bcc2-4d2476718b2a"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:buff:campgrounds:dc5b8982-c3b5-40a4-b5c1-be320c39f637",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:dc5b8982-c3b5-40a4-b5c1-be320c39f637"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:shen:places:dc7c5ed0-0063-40a3-9f50-a8a8f5421f4c",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:dc7c5ed0-0063-40a3-9f50-a8a8f5421f4c"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:romo:places:dca2f356-3a01-4091-93bd-7beba09687a3",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:dca2f356-3a01-4091-93bd-7beba09687a3"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:brca:thingstodo:dcbd1568-6960-4cd0-a403-380c5a8b2204",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:dcbd1568-6960-4cd0-a403-380c5a8b2204"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:deva:places:dd5f5f5c-d9d3-4eb2-ae45-c78f1bfd68d7",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:dd5f5f5c-d9d3-4eb2-ae45-c78f1bfd68d7"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:havo:places:de0fe66b-330d-44d4-bccf-b413a0343321",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:de0fe66b-330d-44d4-bccf-b413a0343321"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:havo:places:de687d26-9743-40a1-8d17-fe22ff5ddfb9",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:de687d26-9743-40a1-8d17-fe22ff5ddfb9"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:deva:campgrounds:df55b96a-d2a8-4df7-8d54-75bd36c266e2",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:df55b96a-d2a8-4df7-8d54-75bd36c266e2"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:gumo:thingstodo:df5e98a8-895c-44b9-b11b-a815a6a93d46",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:df5e98a8-895c-44b9-b11b-a815a6a93d46"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:jotr:thingstodo:dfb3c323-bc3f-4eae-a044-2232e033b828",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:dfb3c323-bc3f-4eae-a044-2232e033b828"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:bibe:places:e07b79ec-fcf2-49d2-bf0c-01d35082a597",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:e07b79ec-fcf2-49d2-bf0c-01d35082a597"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:blri:thingstodo:e1d11fa3-e2ba-4a1c-aebb-cfa531a05133",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:e1d11fa3-e2ba-4a1c-aebb-cfa531a05133"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:seki:campgrounds:e2472655-e82d-4c38-a9b6-0c374bee7828",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:e2472655-e82d-4c38-a9b6-0c374bee7828"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:ever:places:e3910ef1-d4c4-4c0f-83ab-0b7b779d8800",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:e3910ef1-d4c4-4c0f-83ab-0b7b779d8800"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:brca:places:e3adef29-4bff-4bc8-aa86-81ff8bef3b35",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:e3adef29-4bff-4bc8-aa86-81ff8bef3b35"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:seki:campgrounds:e43beb8f-1ee3-4cdd-88eb-ed8262628f95",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:e43beb8f-1ee3-4cdd-88eb-ed8262628f95"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:jotr:campgrounds:e456a79a-b17d-4d7c-8866-c3ffe9290283",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:e456a79a-b17d-4d7c-8866-c3ffe9290283"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:olym:campgrounds:e4f0bec0-d410-41aa-902d-41a539dea564",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:e4f0bec0-d410-41aa-902d-41a539dea564"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:dino:places:e740e840-85fe-4add-9ff5-90016e50b7c4",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:e740e840-85fe-4add-9ff5-90016e50b7c4"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:seki:campgrounds:e7668917-5d14-4c03-9516-26e3d5a51c38",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:e7668917-5d14-4c03-9516-26e3d5a51c38"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:seki:campgrounds:e8221d31-0b2b-4606-9061-1f91794ad45a",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:e8221d31-0b2b-4606-9061-1f91794ad45a"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:cuva:visitorcenters:e92ea080-1dab-47c5-b8c5-4a21533a6fe0",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:e92ea080-1dab-47c5-b8c5-4a21533a6fe0"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:seki:places:e9907a47-b69e-49b7-8d17-e0786aeeb9ad",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:e9907a47-b69e-49b7-8d17-e0786aeeb9ad"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:blri:places:eaa37edc-076f-4cf7-a6db-8c6a299501b8",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:eaa37edc-076f-4cf7-a6db-8c6a299501b8"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:gumo:campgrounds:eaa68679-d1df-4327-aa61-7b1293ea17e5",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:eaa68679-d1df-4327-aa61-7b1293ea17e5"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:gumo:places:eb7ab020-6762-4eaf-9708-a843aae4fefc",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:eb7ab020-6762-4eaf-9708-a843aae4fefc"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:bibe:places:ec99b0fe-0e85-4909-a3a6-a47087fae987",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:ec99b0fe-0e85-4909-a3a6-a47087fae987"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:shen:places:eff9847c-04d1-47e1-886a-281b4a9bbac0",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:eff9847c-04d1-47e1-886a-281b4a9bbac0"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:buff:thingstodo:f05df125-4e11-49b6-a306-6f488ff8ad15",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:f05df125-4e11-49b6-a306-6f488ff8ad15"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:romo:thingstodo:f0879cb4-958c-41f8-938c-cbe0e62788a7",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:f0879cb4-958c-41f8-938c-cbe0e62788a7"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:jotr:campgrounds:f08972f9-3943-4003-8499-b0b2ea41a1c7",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:f08972f9-3943-4003-8499-b0b2ea41a1c7"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:jotr:places:f10950cf-cb71-46db-ac5a-49c114f29d36",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:f10950cf-cb71-46db-ac5a-49c114f29d36"
+    },
+    {
+      "disposition": "canonical_merge",
+      "public_id": "place:ridb:259084",
+      "reason": "Resolve the reviewed duplicate NPS campground to its existing canonical Recreation.gov identity.",
+      "source_id": "nps:item:f15d3521-c877-4da6-be0a-e78b83d39ac7"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:jotr:thingstodo:f1cc6723-a016-4599-9743-b3064c7338cc",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:f1cc6723-a016-4599-9743-b3064c7338cc"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:shen:places:f2375d97-5bcf-4745-bd82-3bf8577eb446",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:f2375d97-5bcf-4745-bd82-3bf8577eb446"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:deva:campgrounds:f3361651-ffa0-4671-b15e-ff496b65ea98",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:f3361651-ffa0-4671-b15e-ff496b65ea98"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:deva:places:f34a1a27-067d-40a8-a9ee-a0fe554abc4d",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:f34a1a27-067d-40a8-a9ee-a0fe554abc4d"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:cuva:places:f4066420-e660-464e-9a2e-d355be1e2909",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:f4066420-e660-464e-9a2e-d355be1e2909"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:deva:campgrounds:f448d6d4-aa8f-48ba-b5b8-fec826541394",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:f448d6d4-aa8f-48ba-b5b8-fec826541394"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:brca:thingstodo:f508d902-8095-4133-a57a-006007a2d3e6",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:f508d902-8095-4133-a57a-006007a2d3e6"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:jotr:places:f5b45c0d-01c1-400a-ac74-87530aa8279d",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:f5b45c0d-01c1-400a-ac74-87530aa8279d"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:seki:campgrounds:f727b83f-b8cb-49ac-a0ec-76dfab6140fe",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:f727b83f-b8cb-49ac-a0ec-76dfab6140fe"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:bibe:places:f75fabb8-f930-4fd7-a846-d23a8d6e1895",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:f75fabb8-f930-4fd7-a846-d23a8d6e1895"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:romo:campgrounds:f7965b87-3035-49d4-b55a-d55d6cad0c93",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:f7965b87-3035-49d4-b55a-d55d6cad0c93"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:romo:campgrounds:f7ce47a2-a770-449f-8085-0df17dd432eb",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:f7ce47a2-a770-449f-8085-0df17dd432eb"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:jotr:campgrounds:f825ca55-5923-48fe-b11d-cd55b5f53b88",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:f825ca55-5923-48fe-b11d-cd55b5f53b88"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:ever:places:f849ad34-eec3-47b1-9902-ffef61d77476",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:f849ad34-eec3-47b1-9902-ffef61d77476"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:dino:places:f89deacc-1f76-4820-abc5-636e66cc61b3",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:f89deacc-1f76-4820-abc5-636e66cc61b3"
+    },
+    {
+      "disposition": "canonical_merge",
+      "public_id": "place:ridb:232464",
+      "reason": "Resolve the reviewed duplicate NPS campground to its existing canonical Recreation.gov identity.",
+      "source_id": "nps:item:f8dfab23-efe0-4f31-98d0-cd5a871596a9"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:dino:places:f9a4a567-286d-4cca-bd64-d847c65cef62",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:f9a4a567-286d-4cca-bd64-d847c65cef62"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:bibe:places:fa2bb966-4ff8-4e39-a345-3b26398b6699",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:fa2bb966-4ff8-4e39-a345-3b26398b6699"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:jotr:thingstodo:fb40ad8f-2676-4e34-a294-c73a9524f8ee",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:fb40ad8f-2676-4e34-a294-c73a9524f8ee"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:blri:visitorcenters:fb928789-b6f1-4be8-ba1d-8b9a59be4954",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:fb928789-b6f1-4be8-ba1d-8b9a59be4954"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:havo:places:fb9e9d8b-1ebb-47ed-b74f-10bc17fd0ba6",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:fb9e9d8b-1ebb-47ed-b74f-10bc17fd0ba6"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:bibe:thingstodo:fd7958ce-2cc6-4e18-9f87-c7504b976ffa",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:fd7958ce-2cc6-4e18-9f87-c7504b976ffa"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:dino:places:fda0ae88-5df7-4c36-b657-504d8f48b400",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:fda0ae88-5df7-4c36-b657-504d8f48b400"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:cuva:places:fde9deac-6315-45bb-aff2-21823da2b767",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:fde9deac-6315-45bb-aff2-21823da2b767"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:dino:visitorcenters:fe69ee9b-2b78-4ab2-bbf1-4e776ca2f794",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:fe69ee9b-2b78-4ab2-bbf1-4e776ca2f794"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:dino:places:ff3df796-7121-4c20-a9ee-d750ad416d6d",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:ff3df796-7121-4c20-a9ee-d750ad416d6d"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:olym:places:ffab59cc-3470-4f58-899e-15bbe820a6b5",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:ffab59cc-3470-4f58-899e-15bbe820a6b5"
+    },
+    {
+      "disposition": "published",
+      "public_id": "place:nps-child:olym:campgrounds:ffd42463-76e6-4540-898a-0a70a8a8f747",
+      "reason": "Publish the reviewed NPS child at its stable source-backed identity.",
+      "source_id": "nps:item:ffd42463-76e6-4540-898a-0a70a8a8f747"
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "expected_base_catalog_count": 991,
+  "expected_base_serving_count": 5421,
+  "expected_disposition_counts": {
+    "canonical_merge": 6,
+    "published": 448,
+    "rejected": 0,
+    "remapped": 3
+  },
+  "expected_output_catalog_count": 1442,
+  "expected_output_serving_count": 5867,
+  "schema_version": 1,
+  "source_inputs": [
+    {
+      "batch_id": "b1",
+      "count": 156,
+      "path": "data/explore/audit_candidates/internal/post-b08-nps-child-depth-b1-r7/nps_child_depth_v1.json",
+      "sha256": "66abda311a4734cc05bf3b4d9c99834cd5d3ec119e5a295e68b6cb7a3199ade9"
+    },
+    {
+      "batch_id": "b2",
+      "count": 170,
+      "path": "data/explore/audit_candidates/internal/post-b08-nps-child-depth-b2-r7/nps_child_depth_v1.json",
+      "sha256": "16416e6fe8e9ece6de5c08787b8c284366d7dc0b4951d4819f4deb50c59a5d86"
+    },
+    {
+      "batch_id": "b3",
+      "count": 131,
+      "path": "data/explore/audit_candidates/internal/post-b08-nps-child-depth-b3-r5/nps_child_depth_v1.json",
+      "sha256": "db4f0b94bcde127a903f4db9c1ef91b43d98149c72e016c2b47b8a0ce051ced5"
+    }
+  ],
+  "upstream_release_config": {
+    "aliases": {
+      "count": 19,
+      "path": "config/explore_public_releases/b08-top-level-v2/aliases.json",
+      "sha256": "adeb42d79b7471370073abf10d4bb7f9be39a8f78379c0b41b2f49c32f75336d"
+    },
+    "reviewed_exceptions": {
+      "path": "config/explore_public_releases/b08-top-level-v2/reviewed_exceptions.json",
+      "sha256": "9a9d122fe50e855ba5392b83604f06b8799b5b380c156b9b1d1da1e155e5cec2"
+    }
+  }
+}

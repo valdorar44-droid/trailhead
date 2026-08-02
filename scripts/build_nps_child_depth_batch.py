@@ -57,9 +57,18 @@ BATCH_2_DESTINATIONS: tuple[tuple[str, str], ...] = (
     ("jotr", "Joshua Tree National Park"),
     ("romo", "Rocky Mountain National Park"),
 )
+BATCH_3_ID = "post-b08-nps-child-depth-b3"
+BATCH_3_DESTINATIONS: tuple[tuple[str, str], ...] = (
+    ("bibe", "Big Bend National Park"),
+    ("ever", "Everglades National Park"),
+    ("cuva", "Cuyahoga Valley National Park"),
+    ("havo", "Hawaiʻi Volcanoes National Park"),
+    ("buff", "Buffalo National River"),
+)
 BATCH_DEFINITIONS: dict[str, tuple[tuple[str, str], ...]] = {
     BATCH_ID: BATCH_DESTINATIONS,
     BATCH_2_ID: BATCH_2_DESTINATIONS,
+    BATCH_3_ID: BATCH_3_DESTINATIONS,
 }
 RENDERED_RAIL_ENDPOINT_PRIORITY = {
     "visitorcenters": 0,
@@ -71,6 +80,24 @@ DISPLAY_NAME_OVERRIDES = {
     "place:nps-child:olym:campgrounds:f8dfab23-efe0-4f31-98d0-cd5a871596a9": (
         "Kalaloch Campround",
         "Kalaloch Campground",
+    ),
+}
+EXACT_CLASSIFICATION_OVERRIDES: dict[str, tuple[str, str]] = {
+    "place:nps-child:ever:places:e3910ef1-d4c4-4c0f-83ab-0b7b779d8800": (
+        "campground",
+        "stay",
+    ),
+    "place:nps-child:cuva:places:517b46dd-0301-433b-ac54-8a0068930f29": (
+        "historic_site",
+        "see",
+    ),
+    "place:nps-child:havo:thingstodo:4fd7dae2-2a35-406e-8017-99a698cdaade": (
+        "activity",
+        "do",
+    ),
+    "place:nps-child:buff:places:2b86b851-d041-4772-88f8-3683c4771012": (
+        "historic_site",
+        "see",
     ),
 }
 EXACT_COPY_REPLACEMENTS: dict[str, tuple[tuple[str, str], ...]] = {
@@ -116,6 +143,124 @@ EXACT_COPY_REPLACEMENTS: dict[str, tuple[tuple[str, str], ...]] = {
         "one way(16 miles round trip)",
         "one way (16 miles round trip)",
     ),),
+    "place:nps-child:ever:places:52b7989f-b4f9-4dd4-b7fd-787145aa49bf": ((
+        "accessible .2 miles trail",
+        "accessible 0.2-mile trail",
+    ), (
+        "accessible.2 miles trail",
+        "accessible 0.2-mile trail",
+    )),
+    "place:nps-child:buff:campgrounds:5aa6174e-b53c-46f7-9f7b-cc275dd91cbc": ((
+        (
+            "Some sites at Buffalo Point are available for reservation at "
+            "www.recreation.gov (1-877-444-6777) and others are first-come, "
+            "first-serve."
+        ),
+        (
+            "Some sites at Buffalo Point can be reserved through Recreation.gov "
+            "or by calling 1-877-444-6777; others are first come, first served."
+        ),
+    ),),
+    "place:nps-child:buff:thingstodo:3d6daa8a-36a5-4a3e-bcb5-9aeb97fe8ad4": (
+        (
+            "This .25 mile to 1.5 mile trail",
+            "This 0.25- to 1.5-mile trail",
+        ),
+        (
+            "This.25 mile to 1.5 mile trail",
+            "This 0.25- to 1.5-mile trail",
+        ),
+        ("historic, mining, landscape", "historic mining landscape"),
+    ),
+    "place:nps-child:bibe:visitorcenters:c5f00e54-bf45-46e1-8acf-bbe615867b78": (
+        ("best place to begin your . Backcountry", "best place to begin your visit. Backcountry"),
+        ("best place to begin your. Backcountry", "best place to begin your visit. Backcountry"),
+        ("shown upon request.The", "shown upon request. The"),
+    ),
+    "place:nps-child:bibe:places:8327e2bb-1451-4af2-aab0-615dff15ee94": ((
+        "10 mile trail",
+        "10-mile trail",
+    ),),
+    "place:nps-child:ever:thingstodo:58de5168-a37a-4197-af24-3d227bee1d1c": (
+        ("hisotry", "history"),
+        ("opportunitys", "opportunities"),
+        ("Shark valley Observation tower", "Shark Valley Observation Tower"),
+    ),
+    "place:nps-child:ever:places:6a7fa980-588a-44a1-b38f-a75898d4e34f": ((
+        "1200meters",
+        "1,200 meters",
+    ),),
+    "place:nps-child:ever:places:1bca5c56-d067-432b-b9b5-d68bb4d1d14d": ((
+        "This trial is 7.5 miles one way.",
+        "This trail is 7.5 miles one way.",
+    ),),
+    "place:nps-child:havo:places:5a8524b6-dad2-4e89-b71f-f653b4e90b03": ((
+        "years.Today",
+        "years. Today",
+    ),),
+    "place:nps-child:buff:campgrounds:1febd642-4de4-49fd-9df1-3ef8e499ac03": ((
+        "recreation.gov",
+        "Recreation.gov",
+    ),),
+    "place:nps-child:buff:campgrounds:74277392-66f4-4feb-b95b-a9fd2b6d4258": ((
+        "recreation.gov",
+        "Recreation.gov",
+    ),),
+    "place:nps-child:buff:campgrounds:5cea9f21-8cbb-4b5d-ab2f-7d6fc31ae52e": ((
+        "recreation.gov",
+        "Recreation.gov",
+    ),),
+    "place:nps-child:buff:campgrounds:150af6e6-881a-4420-b535-7b31e3905549": ((
+        "recreation.gov",
+        "Recreation.gov",
+    ),),
+    "place:nps-child:buff:campgrounds:3ea23346-5c4d-4e01-a4e0-748033e92446": ((
+        "recreation.gov",
+        "Recreation.gov",
+    ),),
+    "place:nps-child:buff:campgrounds:dc5b8982-c3b5-40a4-b5c1-be320c39f637": ((
+        "recreation.gov",
+        "Recreation.gov",
+    ),),
+}
+SEMANTIC_DUPLICATE_PREFERENCES = {
+    ("place:nps:havo", "devastation trail"): {
+        "kept_id": (
+            "place:nps-child:havo:places:"
+            "7696444d-7626-4fa5-b2c0-d0ab15951dda"
+        ),
+        "expected_dropped_ids": (
+            "place:nps-child:havo:thingstodo:"
+            "c59589f9-5f4b-4629-8655-58384e69bc60",
+        ),
+        "reason": (
+            "The official place record is the source-backed trailhead, has an "
+            "exact-page rights-approved image, and represents the same named "
+            "reader destination as the uncredited activity record."
+        ),
+    },
+}
+BATCH_3_SHARED_COORDINATE_REVIEWS: dict[tuple[str, ...], str] = {
+    tuple(sorted((
+        "place:nps-child:ever:thingstodo:019c3d0f-0ad1-4a1b-8e5f-601a65918303",
+        "place:nps-child:ever:thingstodo:bc316cc1-cf34-4e95-99aa-66e4752d5727",
+    ))): "Birding and walking are distinct official activities sharing the Anhinga Trail access point.",
+    tuple(sorted((
+        "place:nps-child:ever:visitorcenters:52d781e2-1439-4202-b6ce-8d2d8f30757e",
+        "place:nps-child:ever:thingstodo:9cd88771-f8f1-4db0-939c-155c8f5edbbb",
+    ))): "The visitor center and biking activity are distinct records sharing the Shark Valley access point.",
+    tuple(sorted((
+        "place:nps-child:bibe:visitorcenters:c5f00e54-bf45-46e1-8acf-bbe615867b78",
+        "place:nps-child:bibe:thingstodo:8e7e6012-1fa7-4165-91a6-e3e2f12f5a0f",
+    ))): "The visitor center and passport-stamp activity are distinct records at Panther Junction.",
+    tuple(sorted((
+        "place:nps-child:cuva:visitorcenters:aed09a89-ca84-4cae-9949-9591688b05fc",
+        "place:nps-child:cuva:thingstodo:73300e7a-4dd9-4e33-b605-12442ff36818",
+    ))): "The Boston Mill facility and its visit activity are separate official endpoint records.",
+    tuple(sorted((
+        "place:nps-child:cuva:visitorcenters:18c3cbc0-556a-4e4f-8486-16723df55255",
+        "place:nps-child:cuva:thingstodo:5acd5e72-ada8-4b57-9052-f454e23144d4",
+    ))): "The Canal Exploration Center facility and visit activity are separate official endpoint records.",
 }
 MAX_PER_DESTINATION = 36
 MAX_TOTAL = 180
@@ -308,10 +453,15 @@ def _normalize_child_reader_link(
     place: dict[str, Any],
     park: dict[str, Any],
     source_item: dict[str, Any],
+    *,
+    batch_id: str = BATCH_ID,
 ) -> str:
     pack = place.get("source_pack") if isinstance(place.get("source_pack"), dict) else {}
+    item_url = source_item.get("url") or source_item.get("relatedUrl")
+    if batch_id != BATCH_3_ID:
+        item_url = item_url or pack.get("official_url")
     safe_url, action = _safe_nps_reader_url(
-        source_item.get("url") or source_item.get("relatedUrl") or pack.get("official_url"),
+        item_url,
         park.get("url"),
     )
     if not safe_url:
@@ -345,6 +495,8 @@ def _normalize_child_classification(
     place: dict[str, Any],
     endpoint: str,
     source_item: dict[str, Any],
+    *,
+    batch_id: str = BATCH_ID,
 ) -> None:
     """Classify from endpoint and structured NPS facts, not incidental title tokens."""
     title = str(place.get("name") or "").casefold()
@@ -437,6 +589,14 @@ def _normalize_child_classification(
             if place.get("category") in {"trail", "trailhead", "campground", "visitor_center", "activity"}:
                 place["category"] = "place"
 
+    exact_override = (
+        EXACT_CLASSIFICATION_OVERRIDES.get(str(place.get("id") or ""))
+        if batch_id == BATCH_3_ID
+        else None
+    )
+    if exact_override:
+        place["category"], place["module_target"] = exact_override
+
     final_category = str(place.get("category") or "")
     if final_category == original_category:
         return
@@ -449,6 +609,19 @@ def _normalize_child_classification(
         "trailhead": "Trailhead",
         "visitor_center": "Visitor center",
     }
+    if batch_id == BATCH_3_ID:
+        category_labels.update({
+            "climbing_area": "Climbing area",
+            "historic_site": "Historic site",
+            "hot_spring": "Hot spring",
+            "lake": "Lake",
+            "monument": "Monument",
+            "peak": "Peak",
+            "river": "River",
+            "shore": "Shore",
+            "viewpoint": "Viewpoint",
+            "waterfall": "Waterfall",
+        })
     classification_tokens = {key.casefold() for key in category_labels}
     classification_tokens.update(label.casefold() for label in category_labels.values())
 
@@ -589,6 +762,87 @@ def _dedupe_rendered_rail_children(
         [place for place in children if str(place.get("id") or "") not in dropped_ids],
         diagnostics,
     )
+
+
+def _dedupe_semantic_children(
+    children: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Apply only reviewed, exact-identity cross-endpoint dedupe decisions."""
+    by_scope: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for place in children:
+        scope = (
+            str(place.get("parent_hub_id") or ""),
+            title_key(place.get("name")),
+        )
+        by_scope.setdefault(scope, []).append(place)
+
+    dropped_ids: set[str] = set()
+    diagnostics: list[dict[str, Any]] = []
+    for scope, decision in sorted(SEMANTIC_DUPLICATE_PREFERENCES.items()):
+        group = by_scope.get(scope, [])
+        if len(group) < 2:
+            continue
+        kept_id = str(decision["kept_id"])
+        expected_dropped_ids = tuple(sorted(str(value) for value in decision["expected_dropped_ids"]))
+        group_ids = {str(place.get("id") or "") for place in group}
+        if kept_id not in group_ids:
+            raise ValueError(f"semantic dedupe is missing its reviewed keeper: {kept_id}")
+        actual_dropped_ids = tuple(sorted(group_ids - {kept_id}))
+        if actual_dropped_ids != expected_dropped_ids:
+            raise ValueError(
+                "semantic dedupe membership changed for "
+                f"{scope[0]} / {scope[1]}: {actual_dropped_ids!r}"
+            )
+        dropped_ids.update(actual_dropped_ids)
+        kept = next(place for place in group if str(place.get("id") or "") == kept_id)
+        diagnostics.append({
+            "parent_hub_id": scope[0],
+            "title": str(kept.get("name") or ""),
+            "kept_id": kept_id,
+            "kept_endpoint": _endpoint_from_place(kept),
+            "kept_media_count": len(kept.get("media") or []),
+            "dropped": [
+                {
+                    "id": place.get("id"),
+                    "endpoint": _endpoint_from_place(place),
+                    "media_count": len(place.get("media") or []),
+                }
+                for place in sorted(group, key=lambda value: str(value.get("id") or ""))
+                if str(place.get("id") or "") != kept_id
+            ],
+            "reason": decision["reason"],
+        })
+    return (
+        [place for place in children if str(place.get("id") or "") not in dropped_ids],
+        diagnostics,
+    )
+
+
+def _review_shared_coordinates(audit: dict[str, Any], *, batch_id: str) -> list[dict[str, Any]]:
+    clusters: list[dict[str, Any]] = []
+    for warning in audit.get("warnings") or []:
+        if warning.get("code") == "shared_coordinate_clusters":
+            clusters.extend(warning.get("samples") or [])
+    if batch_id != BATCH_3_ID:
+        return []
+
+    reviewed: list[dict[str, Any]] = []
+    for cluster in clusters:
+        place_ids = tuple(sorted(str(value) for value in cluster.get("place_ids") or []))
+        reason = BATCH_3_SHARED_COORDINATE_REVIEWS.get(place_ids)
+        if not reason:
+            raise ValueError(f"unreviewed Batch 3 shared-coordinate cluster: {place_ids!r}")
+        reviewed.append({
+            "place_ids": list(place_ids),
+            "decision": "keep_distinct",
+            "reason": reason,
+        })
+    if len(reviewed) != len(BATCH_3_SHARED_COORDINATE_REVIEWS):
+        raise ValueError(
+            "Batch 3 shared-coordinate review set changed: "
+            f"expected {len(BATCH_3_SHARED_COORDINATE_REVIEWS)}, got {len(reviewed)}"
+        )
+    return reviewed
 
 
 def _rebuild_search_blob(
@@ -826,6 +1080,7 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
     source_indexes: dict[str, dict[str, dict[str, Any]]] = {}
     destination_review: list[dict[str, Any]] = []
     link_actions: Counter[str] = Counter()
+    parent_page_fallbacks: list[dict[str, Any]] = []
     for code, expected_name in batch_destinations:
         fixture = _fixture_for_code(source_cache, code)
         park, related, source_fetched_at = _fixture_park(fixture, code, expected_name)
@@ -843,9 +1098,33 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
             source_item = _resolve_source_item(child, endpoint, source_indexes[code])
             if source_item is None:
                 continue
-            _normalize_child_classification(child, endpoint, source_item)
+            _normalize_child_classification(
+                child,
+                endpoint,
+                source_item,
+                batch_id=batch_id,
+            )
             _apply_exact_child_copy_fixes(child)
-            link_actions[_normalize_child_reader_link(child, park, source_item)] += 1
+            link_action = _normalize_child_reader_link(
+                child,
+                park,
+                source_item,
+                batch_id=batch_id,
+            )
+            link_actions[link_action] += 1
+            if link_action == "used_parent_nps_url":
+                parent_page_fallbacks.append({
+                    "place_id": child.get("id"),
+                    "name": child.get("name"),
+                    "endpoint": endpoint,
+                    "parent_hub_id": child.get("parent_hub_id"),
+                    "official_url": (
+                        child.get("source_pack", {}).get("official_url")
+                        if isinstance(child.get("source_pack"), dict)
+                        else None
+                    ),
+                    "reason": "The cached official child record has no reader URL; use the official parent park page.",
+                })
             _rebuild_search_blob(child, endpoint, source_item)
         children.extend(additions)
         module_counts = Counter(str(item.get("module_target") or "") for item in additions)
@@ -866,6 +1145,7 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         fixture_refs[code] = _source_ref(fixture, f"nps/{code}/{fixture.name}")
 
     children, rendered_rail_dedupe = _dedupe_rendered_rail_children(children)
+    children, semantic_dedupe = _dedupe_semantic_children(children)
     for destination in destination_review:
         code = str(destination.get("park_code") or "")
         final_children = [
@@ -888,11 +1168,24 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         evidence_root=evidence_root,
     )
     _stabilize_evidence_paths(children)
+    if batch_id == BATCH_3_ID:
+        for child in children:
+            endpoint = _endpoint_from_place(child)
+            code = str(child.get("parent_hub_id") or "").removeprefix("place:nps:")
+            source_item = _resolve_source_item(
+                child,
+                endpoint,
+                source_indexes.get(code, {}),
+            )
+            _apply_exact_child_copy_fixes(child)
+            if source_item is not None:
+                _rebuild_search_blob(child, endpoint, source_item)
     media_after_policy = sum(len(item.get("media") or []) for item in children)
     audit = _audit_children(children, source_indexes, batch_id=batch_id)
     if not audit["passed"]:
         codes = sorted({str(item.get("code") or "unknown") for item in audit["errors"]})
         raise ValueError(f"NPS child-depth audit failed: {', '.join(codes)}")
+    shared_coordinate_review = _review_shared_coordinates(audit, batch_id=batch_id)
 
     sidecar = {
         "schema_version": 1,
@@ -939,6 +1232,19 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
             "header_is_not_a_credential": True,
         },
     }
+    if batch_id == BATCH_3_ID:
+        review.update({
+            "parent_page_source_fallbacks": sorted(
+                parent_page_fallbacks,
+                key=lambda item: str(item.get("place_id") or ""),
+            ),
+            "semantic_dedupe": {
+                "rule": "reviewed exact parent and normalized-title decisions only",
+                "dropped_count": sum(len(item["dropped"]) for item in semantic_dedupe),
+                "records": semantic_dedupe,
+            },
+            "shared_coordinate_review": shared_coordinate_review,
+        })
 
     out_dir.mkdir(parents=True, exist_ok=True)
     artifacts = {

@@ -11,13 +11,16 @@ from scripts.build_nps_child_depth_batch import (
     AUDIT_CANDIDATE_ROOT,
     BATCH_2_DESTINATIONS,
     BATCH_2_ID,
+    BATCH_3_ID,
     BATCH_DESTINATIONS,
     BATCH_ID,
     ROOT,
     _apply_exact_child_copy_fixes,
     _audit_children,
     _dedupe_rendered_rail_children,
+    _dedupe_semantic_children,
     _normalize_child_classification,
+    _normalize_child_reader_link,
     build,
 )
 
@@ -168,6 +171,81 @@ class NpsChildDepthBatchTests(unittest.TestCase):
                 item["source_fetched_at"] == 1785550000
                 for item in review["destinations"]
             ))
+
+    def test_batch3_parent_page_fallback_is_explicit_and_legacy_selection_is_stable(self):
+        def child() -> dict:
+            return {
+                "source_pack": {
+                    "official_url": "https://www.nps.gov/places/exact-child.htm",
+                    "sources": [{"url": "https://www.nps.gov/places/exact-child.htm"}],
+                },
+                "sources": [{"url": "https://www.nps.gov/places/exact-child.htm"}],
+            }
+
+        legacy = child()
+        legacy_action = _normalize_child_reader_link(
+            legacy,
+            {"url": "https://www.nps.gov/example/index.htm"},
+            {},
+            batch_id=BATCH_2_ID,
+        )
+        self.assertEqual(legacy_action, "kept_item_url")
+        self.assertEqual(
+            legacy["source_pack"]["official_url"],
+            "https://www.nps.gov/places/exact-child.htm",
+        )
+
+        batch3 = child()
+        batch3_action = _normalize_child_reader_link(
+            batch3,
+            {"url": "https://www.nps.gov/example/index.htm"},
+            {},
+            batch_id=BATCH_3_ID,
+        )
+        self.assertEqual(batch3_action, "used_parent_nps_url")
+        self.assertEqual(
+            batch3["source_pack"]["official_url"],
+            "https://www.nps.gov/example/index.htm",
+        )
+
+    def test_batch3_reviewed_classification_and_semantic_dedupe_are_identity_bound(self):
+        camp_lonesome = {
+            "id": "place:nps-child:ever:places:e3910ef1-d4c4-4c0f-83ab-0b7b779d8800",
+            "name": "Camp Lonesome",
+            "category": "place",
+            "module_target": "see",
+            "card": {"quick_facts": ["Place"]},
+        }
+        _normalize_child_classification(
+            camp_lonesome,
+            "places",
+            {"tags": ["backcountry camping"]},
+            batch_id=BATCH_3_ID,
+        )
+        self.assertEqual(
+            (camp_lonesome["category"], camp_lonesome["module_target"]),
+            ("campground", "stay"),
+        )
+        self.assertEqual(camp_lonesome["card"]["quick_facts"], ["Campground"])
+
+        children = [{
+            "id": "place:nps-child:havo:thingstodo:c59589f9-5f4b-4629-8655-58384e69bc60",
+            "name": "Devastation Trail",
+            "parent_hub_id": "place:nps:havo",
+            "media": [],
+        }, {
+            "id": "place:nps-child:havo:places:7696444d-7626-4fa5-b2c0-d0ab15951dda",
+            "name": "Devastation Trail",
+            "parent_hub_id": "place:nps:havo",
+            "media": [{"url": "https://www.nps.gov/example.jpg"}],
+        }]
+        deduped, diagnostics = _dedupe_semantic_children(children)
+        self.assertEqual(
+            [item["id"] for item in deduped],
+            ["place:nps-child:havo:places:7696444d-7626-4fa5-b2c0-d0ab15951dda"],
+        )
+        self.assertEqual(diagnostics[0]["kept_endpoint"], "places")
+        self.assertEqual(diagnostics[0]["dropped"][0]["endpoint"], "thingstodo")
 
     def test_non_nps_official_url_blocks_the_candidate(self):
         with tempfile.TemporaryDirectory(dir=AUDIT_CANDIDATE_ROOT) as temp:

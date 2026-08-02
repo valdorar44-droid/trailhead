@@ -179,3 +179,99 @@ non-NPS-prefixed credits.
 Resolve any independent audit findings once, then record the implementation
 commit and stop. Do not deploy, push, merge, edit the internal-preview sidecar,
 or promote this candidate in this packet.
+
+## Batch 2 r7 accepted — 2026-08-01 22:26 CDT
+
+The independently audited immutable candidate is:
+
+`data/explore/audit_candidates/internal/post-b08-nps-child-depth-b2-r7`
+
+Its byte-identical rebuild is:
+
+`data/explore/audit_candidates/internal/post-b08-nps-child-depth-b2-r7-rebuild`
+
+r7 supersedes r3-r6. Those earlier outputs remain audit history only and must
+not be integrated or promoted.
+
+### Accepted profile
+
+- Official child records: 170
+- Destination counts: Guadalupe Mountains 36, Olympic 35, Death Valley 34,
+  Joshua Tree 33, Rocky Mountain 32
+- Module counts: Stay 52, Visitor Information 22, Trails 42, Activities 16,
+  See 38
+- Candidate images: 167
+- Approved exact-page NPS images: 150
+- Conservatively stripped images: 17
+- Provider/network requests: 0
+- Promotion ready: false
+- Live catalog and serving index modified: false
+- Candidate/rebuild differing relative-file hashes: 0 of 4
+
+Artifact SHA-256 values:
+
+- Manifest:
+  `523b23375b909de4752a7d98fe448dd52f5ef6d8bcb815c7d3f329d7aa348295`
+- Child sidecar:
+  `16416e6fe8e9ece6de5c08787b8c284366d7dc0b4951d4819f4deb50c59a5d86`
+- Audit:
+  `dff1636e93c61e1f376d6b01c2a69eaea0086f3ab2454a6fcc71998bccd64468`
+- Review:
+  `683c6bff03b3a7a98cfe0d1315f172a6803869e4790ae18c0d17cac6572c2fef`
+
+### Closed audit findings
+
+- Removed the duplicate Beaver Meadows Visitor Center rendered in the same
+  destination rail while preserving the canonical visitor-center endpoint.
+- Classified Beach Access Trail from Kalaloch Campground as a trailhead, not a
+  campground.
+- Classified Tour Artists Drive and Trail Ridge Road as scenic-driving
+  activities, not trails.
+- Synchronized corrected categories into card facts, tags, aliases and source
+  topics so stale labels cannot leak into Search or sheets.
+- Corrected the reviewed Kalaloch, Arch Rock, Information Office, Fall River,
+  Aurora Ridge, Rocky Mountain campground and Boy Scout Trail source-copy
+  defects without inventing replacement facts.
+
+### Final verification
+
+- Builder/media/candidate focused tests: 24 passed.
+- Broader Explore, NPS, serving, source, content and Search compatibility suite:
+  179 passed plus 17 parameterized subtests.
+- Python compilation: passed.
+- `git diff --check`: passed.
+- Candidate/rebuild byte comparison: passed.
+- Independent source audit: 170/170 rows resolve to pinned cached NPS source
+  items; 150/150 retained images pass the exact-page rights policy.
+- Open P0/P1: none.
+- Nonblocking P2: `reader_link_actions` in review metadata is a pre-dedupe
+  counter and therefore totals 171 while the accepted sidecar totals 170. The
+  reader data, manifest, artifact hashes and per-destination counts are correct;
+  this is recorded rather than starting another rebuild loop.
+- Task-owned test/build processes after verification: none.
+
+Protected tracked hashes in the isolated worktree remain unchanged:
+
+- Explore serving index:
+  `c0726d8166ab7d110f437ff4e6acde7aa09702354f053103e3f6630a0129b869`
+- App Store copy:
+  `126af147b650c2f1077fb73036d26f34f940422c07a3193bade047c73b5c225a`
+
+The user-owned dirty copies in the main worktree retain the hashes recorded in
+the pre-change checkpoint and remain excluded from every commit.
+
+### Exact next action
+
+Commit and push this accepted candidate and its checkpoint. In a separate
+packet, merge r7 into the authenticated internal Explore preview, run the
+bounded Android destination-hub delta, and stop before public catalog
+promotion.
+
+### Do not repeat
+
+- Do not refetch these five parks or rebuild r1-r7.
+- Do not repeat production OTA, Batch 1, Map, Search, Layers, campground,
+  Trails, Originals, Android Auto, Memory, NPS research or screenshot work.
+- Do not expose this sidecar without both internal stage and authenticated
+  administrator authorization.
+- Do not overwrite or stage the user-owned Explore serving index.

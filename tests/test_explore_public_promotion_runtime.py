@@ -308,6 +308,48 @@ class ExplorePublicPromotionRuntimeTests(unittest.TestCase):
         self.assertEqual(normalized.detail_ref, "place:usfs:new-camp")
         self.assertEqual(normalized.provenance.provider_result_id, "place:ridb:old-camp")
 
+    def test_search_uses_reviewed_public_category_instead_of_stale_volume_record(self):
+        stale_volume_item = {
+            "id": "place:nps:ania",
+            "title": "Aniakchak National Monument & Preserve",
+            "category": "campground",
+            "group": "camps",
+            "lat": 56.9,
+            "lng": -158.2,
+        }
+        reviewed_public_item = {
+            "id": "place:nps:ania",
+            "title": "Aniakchak National Monument & Preserve",
+            "category": "park",
+            "group": "parks",
+            "lat": 56.9,
+            "lng": -158.2,
+            "description": "A remote National Park Service destination.",
+            "verified": True,
+            "reviewable": True,
+        }
+        with (
+            patch.object(
+                server,
+                "_load_canonical_serving_index",
+                return_value=([stale_volume_item], 1),
+            ) as stale_loader,
+            patch.object(server, "_load_explore_promoted_index", return_value={
+                "generated_at": 1785553072,
+                "items": [reviewed_public_item],
+            }),
+        ):
+            explore_items, generated_at = server._load_canonical_explore_index()
+
+        stale_loader.assert_not_called()
+        self.assertEqual(generated_at, 1785553072)
+        documents = server.documents_from_canonical(explore_items, [])
+        self.assertEqual(len(documents), 1)
+        self.assertEqual(documents[0].result_id, "place:nps:ania")
+        self.assertEqual(documents[0].kind, "park")
+        self.assertIn("park", documents[0].categories)
+        self.assertNotIn("campground", documents[0].categories)
+
     def test_alias_target_must_exist_in_the_public_release(self):
         self._write_manifest(
             lambda manifest: manifest["aliases"][0].update({"to_id": "place:missing"}),

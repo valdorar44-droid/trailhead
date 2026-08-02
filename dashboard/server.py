@@ -6383,6 +6383,18 @@ def _load_canonical_serving_index(
         return items, generated_at
 
 def _load_canonical_explore_index() -> tuple[list[dict], int]:
+    if _explore_public_release_active():
+        promoted = _load_explore_promoted_index()
+        items = promoted.get("items") if isinstance(promoted, dict) else None
+        if not isinstance(items, list):
+            raise RuntimeError("Configured Explore public release has no searchable serving items")
+        try:
+            generated_at = int(promoted.get("generated_at") or 0)
+        except (TypeError, ValueError):
+            generated_at = 0
+        if generated_at <= 0:
+            generated_at = int(_explore_active_serving_index_path().stat().st_mtime)
+        return [item for item in items if isinstance(item, dict)], generated_at
     return _load_canonical_serving_index(
         CANONICAL_EXPLORE_INDEX_PATH,
         _canonical_explore_index_cache,
@@ -20314,7 +20326,11 @@ def _search_v2_source_loader() -> tuple[list[SearchDocumentV2], str]:
         # Bump whenever index/filter semantics change so cursors issued by an
         # older backend fail closed instead of paging through a new ordering.
         "v": 4,
-        "explore_source": "canonical" if explore_items else "catalog_fallback",
+        "explore_source": (
+            "promoted_public"
+            if _explore_public_release_active()
+            else "canonical" if explore_items else "catalog_fallback"
+        ),
         "explore_generated_at": int(explore_generated_at or 0),
         "trail_generated_at": int(trail_generated_at or 0),
         "explore_count": len(explore_items) if explore_items else len(fallback_places),
@@ -20324,6 +20340,15 @@ def _search_v2_source_loader() -> tuple[list[SearchDocumentV2], str]:
             _search_v2_file_revision(CANONICAL_EXPLORE_INDEX_PATH),
             _search_v2_file_revision(CANONICAL_TRAIL_INDEX_PATH),
             _search_v2_file_revision(CANONICAL_TRAIL_INDEX_BUNDLED_PATH),
+            *(
+                [
+                    _search_v2_file_revision(_explore_active_serving_index_path()),
+                    _search_v2_file_revision(EXPLORE_PUBLIC_PROMOTION_MANIFEST),
+                ]
+                if _explore_public_release_active()
+                and EXPLORE_PUBLIC_PROMOTION_MANIFEST is not None
+                else []
+            ),
         ],
     }
     source_signature = hashlib.sha256(

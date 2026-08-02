@@ -61,6 +61,62 @@ BATCH_DEFINITIONS: dict[str, tuple[tuple[str, str], ...]] = {
     BATCH_ID: BATCH_DESTINATIONS,
     BATCH_2_ID: BATCH_2_DESTINATIONS,
 }
+RENDERED_RAIL_ENDPOINT_PRIORITY = {
+    "visitorcenters": 0,
+    "campgrounds": 0,
+    "thingstodo": 1,
+    "places": 2,
+}
+DISPLAY_NAME_OVERRIDES = {
+    "place:nps-child:olym:campgrounds:f8dfab23-efe0-4f31-98d0-cd5a871596a9": (
+        "Kalaloch Campround",
+        "Kalaloch Campground",
+    ),
+}
+EXACT_COPY_REPLACEMENTS: dict[str, tuple[tuple[str, str], ...]] = {
+    "place:nps-child:jotr:thingstodo:4b6d0fab-7f6b-4b19-b3fe-6c07566b8050": (
+        (
+            "A .6-mile trail leads to a .2-mile loop.",
+            "A 0.6-mile trail leads to a 0.2-mile loop.",
+        ),
+        (
+            "A.6-mile trail leads to a.2-mile loop.",
+            "A 0.6-mile trail leads to a 0.2-mile loop.",
+        ),
+    ),
+    "place:nps-child:romo:visitorcenters:593c4e0b-88ae-4ce3-8150-dc1ee862ada2": ((
+        "help your plan your trips",
+        "help you plan your trip",
+    ),),
+    "place:nps-child:romo:places:c3a54769-e360-4591-8650-cc7cf92fb7bc": (
+        ("What to Expect? .", "What to expect?"),
+        ("What to Expect?.", "What to expect?"),
+    ),
+    "place:nps-child:olym:places:b340cd12-f8e3-40af-b9ea-f00928240554": ((
+        "Visit nps.gov/olym/planyourvisit/wic.htm to plan a backpacking trip!",
+        "",
+    ),),
+    "place:nps-child:romo:campgrounds:7475825b-e844-4012-841b-0e29e05d4540": ((
+        "To make a reservation, visit www.recreation.gov online, use the Recreation.gov Mobile App or call 1-877-444-6777 and search for Rocky Mountain National Park - Aspenglen Campground",
+        "",
+    ),),
+    "place:nps-child:romo:campgrounds:6715a7cc-280c-4093-85d3-492004c2db48": ((
+        "To make a reservation, visit www.recreation.gov online, use the Recreation.gov Mobile App or call 1-877-444-6777 and search for Rocky Mountain National Park - Glacier Basin Campground",
+        "",
+    ),),
+    "place:nps-child:romo:campgrounds:d322e1e9-8058-4c42-80a3-9fbc82583190": ((
+        "To make a reservation, visit www.recreation.gov online, use the Recreation.gov Mobile App or call 1-877-444-6777 and search for Rocky Mountain National Park - Moraine Park Campground",
+        "",
+    ),),
+    "place:nps-child:romo:campgrounds:f7965b87-3035-49d4-b55a-d55d6cad0c93": ((
+        "To make a reservation, visit www.recreation.gov online, use the Recreation.gov Mobile App or call 1-877-444-6777 and search for Rocky Mountain National Park - Timber Creek Campground",
+        "",
+    ),),
+    "place:nps-child:jotr:places:013a1c84-4949-4cdc-958f-7283f1bc9ac5": ((
+        "one way(16 miles round trip)",
+        "one way (16 miles round trip)",
+    ),),
+}
 MAX_PER_DESTINATION = 36
 MAX_TOTAL = 180
 ALLOWED_MODULE_TARGETS = {"stay", "visitor", "trails", "do", "see"}
@@ -292,16 +348,29 @@ def _normalize_child_classification(
 ) -> None:
     """Classify from endpoint and structured NPS facts, not incidental title tokens."""
     title = str(place.get("name") or "").casefold()
+    original_category = str(place.get("category") or "")
     activity_terms = _structured_terms(source_item, "activities")
     tag_terms = _structured_terms(source_item, "tags", "topics")
-    structured = " ".join(sorted(activity_terms | tag_terms))
-    guided_activity = bool(re.search(r"\b(?:guided|ranger|tour|program|talk)\b", structured))
+    facility_terms = _structured_terms(source_item, "amenities", "facilities")
+    # Explicit NPS activities are authoritative. Tags/topics are a fallback,
+    # not a reason to override a populated activity field.
+    activity_basis = " ".join(sorted(activity_terms or tag_terms))
+    guided_activity = bool(re.search(r"\b(?:guided|ranger|tour|program|talk)\b", activity_basis))
     trail_activity = bool(
         re.search(
             r"\b(?:hiking|backcountry hiking|front-country hiking|biking|cycling|"
             r"horseback riding|mountain biking|walking|snowshoeing|cross-country skiing)\b",
-            structured,
+            activity_basis,
         )
+    )
+    explicit_nontrail_route_activity = bool(
+        re.search(
+            r"\b(?:scenic driving|auto touring|driving|road touring)\b",
+            " ".join(sorted(activity_terms)),
+        )
+    )
+    structured_trailhead = bool(
+        re.search(r"\btrailheads?\b", " ".join(sorted(facility_terms)))
     )
     facility_title = bool(
         re.search(
@@ -318,11 +387,16 @@ def _normalize_child_classification(
         place["category"] = "visitor_center"
         place["module_target"] = "visitor"
     elif endpoint == "thingstodo":
-        is_trail = trail_activity and not guided_activity
+        is_trail = (
+            trail_activity or (trail_title and not explicit_nontrail_route_activity)
+        ) and not guided_activity
         place["category"] = "trail" if is_trail else "activity"
         place["module_target"] = "trails" if is_trail else "do"
     elif endpoint == "places":
-        if re.search(r"\b(?:campground|campsite)\b", title):
+        if structured_trailhead and trail_title:
+            place["category"] = "trailhead"
+            place["module_target"] = "trails"
+        elif re.search(r"\b(?:campground|campsite)\b", title):
             place["category"] = "campground"
             place["module_target"] = "stay"
         elif re.search(r"\btrailhead\b", title) and not facility_title:
@@ -362,6 +436,159 @@ def _normalize_child_classification(
             place["module_target"] = "see"
             if place.get("category") in {"trail", "trailhead", "campground", "visitor_center", "activity"}:
                 place["category"] = "place"
+
+    final_category = str(place.get("category") or "")
+    if final_category == original_category:
+        return
+
+    category_labels = {
+        "activity": "Activity",
+        "campground": "Campground",
+        "place": "Place",
+        "trail": "Trail",
+        "trailhead": "Trailhead",
+        "visitor_center": "Visitor center",
+    }
+    classification_tokens = {key.casefold() for key in category_labels}
+    classification_tokens.update(label.casefold() for label in category_labels.values())
+
+    def aligned_terms(values: Any) -> list[str]:
+        clean = [str(value).strip() for value in values or [] if str(value).strip()]
+        clean = [value for value in clean if value.casefold() not in classification_tokens]
+        label = category_labels.get(final_category, final_category.replace("_", " ").title())
+        if label and label.casefold() not in {value.casefold() for value in clean}:
+            clean.append(label)
+        return clean
+
+    place["tags"] = aligned_terms(place.get("tags"))
+    place["search_aliases"] = aligned_terms(place.get("search_aliases"))
+    if isinstance(place.get("subcategories"), list):
+        place["subcategories"] = aligned_terms(place.get("subcategories"))
+    pack = place.get("source_pack") if isinstance(place.get("source_pack"), dict) else {}
+    if isinstance(pack.get("topics"), list):
+        pack["topics"] = aligned_terms(pack.get("topics"))
+    card = place.get("card") if isinstance(place.get("card"), dict) else {}
+    quick_facts = [str(value).strip() for value in card.get("quick_facts") or [] if str(value).strip()]
+    label = category_labels.get(final_category, final_category.replace("_", " ").title())
+    replaced = False
+    for index, value in enumerate(quick_facts):
+        if value.casefold() in classification_tokens:
+            quick_facts[index] = label
+            replaced = True
+    if not replaced and label:
+        quick_facts.append(label)
+    if quick_facts:
+        card["quick_facts"] = list(dict.fromkeys(quick_facts))
+
+
+def _apply_exact_child_copy_fixes(place: dict[str, Any]) -> None:
+    """Apply reviewed, identity-bound source-copy corrections only."""
+    place_id = str(place.get("id") or "")
+    name_override = DISPLAY_NAME_OVERRIDES.get(place_id)
+    if name_override:
+        old_name, new_name = name_override
+        if str(place.get("name") or "") == old_name:
+            place["name"] = new_name
+            aliases = [str(value).strip() for value in place.get("search_aliases") or [] if str(value).strip()]
+            if old_name not in aliases:
+                aliases.append(old_name)
+            place["search_aliases"] = aliases
+            card = place.get("card") if isinstance(place.get("card"), dict) else {}
+            if card.get("title") == old_name:
+                card["title"] = new_name
+            if card.get("headline") == old_name:
+                card["headline"] = new_name
+            pack = place.get("source_pack") if isinstance(place.get("source_pack"), dict) else {}
+            for source in pack.get("sources") or []:
+                if isinstance(source, dict) and source.get("title") == old_name:
+                    source["title"] = new_name
+            for source in place.get("sources") or []:
+                if isinstance(source, dict) and source.get("title") == old_name:
+                    source["title"] = new_name
+
+    replacements = EXACT_COPY_REPLACEMENTS.get(place_id, ())
+    if not replacements:
+        return
+
+    def cleaned(value: Any) -> Any:
+        if not isinstance(value, str):
+            return value
+        result = value
+        for old, new in replacements:
+            result = result.replace(old, new)
+        return re.sub(r"\s+", " ", result).strip()
+
+    for key in ("summary", "description"):
+        if key in place:
+            place[key] = cleaned(place.get(key))
+    card = place.get("card") if isinstance(place.get("card"), dict) else {}
+    for key in ("summary", "highlight"):
+        if key in card:
+            card[key] = cleaned(card.get(key))
+    pack = place.get("source_pack") if isinstance(place.get("source_pack"), dict) else {}
+    if "extract" in pack:
+        pack["extract"] = cleaned(pack.get("extract"))
+
+
+def _rendered_rail_identity(
+    place: dict[str, Any],
+) -> tuple[str, str, str, float | None, float | None]:
+    try:
+        lat = round(float(place.get("lat")), 5)
+        lng = round(float(place.get("lng")), 5)
+    except (TypeError, ValueError):
+        lat = None
+        lng = None
+    return (
+        str(place.get("parent_hub_id") or ""),
+        str(place.get("module_target") or ""),
+        title_key(place.get("name")),
+        lat,
+        lng,
+    )
+
+
+def _dedupe_rendered_rail_children(
+    children: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Keep one deterministic record per parent, rail, title, and exact point."""
+    grouped: dict[tuple[str, str, str, float | None, float | None], list[dict[str, Any]]] = {}
+    for place in children:
+        key = _rendered_rail_identity(place)
+        grouped.setdefault(key, []).append(place)
+
+    dropped_ids: set[str] = set()
+    diagnostics: list[dict[str, Any]] = []
+    for key, group in sorted(grouped.items()):
+        if len(group) < 2:
+            continue
+        ranked = sorted(
+            group,
+            key=lambda place: (
+                RENDERED_RAIL_ENDPOINT_PRIORITY.get(_endpoint_from_place(place), 99),
+                str(place.get("id") or ""),
+            ),
+        )
+        kept = ranked[0]
+        dropped = ranked[1:]
+        dropped_ids.update(str(place.get("id") or "") for place in dropped)
+        diagnostics.append({
+            "parent_hub_id": key[0],
+            "module_target": key[1],
+            "title": str(kept.get("name") or ""),
+            "lat": key[3],
+            "lng": key[4],
+            "kept_id": kept.get("id"),
+            "kept_endpoint": _endpoint_from_place(kept),
+            "dropped": [
+                {"id": place.get("id"), "endpoint": _endpoint_from_place(place)}
+                for place in dropped
+            ],
+        })
+    return (
+        [place for place in children if str(place.get("id") or "") not in dropped_ids],
+        diagnostics,
+    )
 
 
 def _rebuild_search_blob(
@@ -444,6 +671,7 @@ def _audit_children(
         )
         for item in children
     ]
+    rendered_rail_scopes = [_rendered_rail_identity(item) for item in children]
 
     def fail(code: str, place: dict[str, Any], detail: str) -> None:
         errors.append({"code": code, "place_id": place.get("id"), "detail": detail})
@@ -454,6 +682,11 @@ def _audit_children(
         errors.append({
             "code": "duplicate_title_scope",
             "count": len(title_scopes) - len(set(title_scopes)),
+        })
+    if len(rendered_rail_scopes) != len(set(rendered_rail_scopes)):
+        errors.append({
+            "code": "duplicate_rendered_rail_identity",
+            "count": len(rendered_rail_scopes) - len(set(rendered_rail_scopes)),
         })
 
     module_counts: Counter[str] = Counter()
@@ -611,6 +844,7 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
             if source_item is None:
                 continue
             _normalize_child_classification(child, endpoint, source_item)
+            _apply_exact_child_copy_fixes(child)
             link_actions[_normalize_child_reader_link(child, park, source_item)] += 1
             _rebuild_search_blob(child, endpoint, source_item)
         children.extend(additions)
@@ -631,6 +865,19 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         )
         fixture_refs[code] = _source_ref(fixture, f"nps/{code}/{fixture.name}")
 
+    children, rendered_rail_dedupe = _dedupe_rendered_rail_children(children)
+    for destination in destination_review:
+        code = str(destination.get("park_code") or "")
+        final_children = [
+            child
+            for child in children
+            if str(child.get("parent_hub_id") or "") == f"place:nps:{code}"
+        ]
+        destination["accepted_before_dedupe"] = destination["accepted"]
+        destination["accepted"] = len(final_children)
+        destination["module_counts"] = dict(
+            Counter(str(child.get("module_target") or "") for child in final_children)
+        )
     if not children or len(children) > MAX_TOTAL:
         raise ValueError(f"bounded batch count must be between 1 and {MAX_TOTAL}, got {len(children)}")
     media_before_policy = sum(len(item.get("media") or []) for item in children)
@@ -676,6 +923,14 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
             "approved_images": media_after_policy,
             "stripped_images": media_before_policy - media_after_policy,
             "policy": "exact cached NPS media with NPS-prefixed credit only",
+        },
+        "rendered_rail_dedupe": {
+            "rule": (
+                "one stable child per parent, rendered module, normalized title, and "
+                "5-decimal point; endpoint priority then stable ID"
+            ),
+            "dropped_count": sum(len(item["dropped"]) for item in rendered_rail_dedupe),
+            "records": rendered_rail_dedupe,
         },
         "internal_preview_contract": {
             "stage": "internal",

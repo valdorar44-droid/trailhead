@@ -49,6 +49,18 @@ BATCH_DESTINATIONS: tuple[tuple[str, str], ...] = (
     ("shen", "Shenandoah National Park"),
     ("dino", "Dinosaur National Monument"),
 )
+BATCH_2_ID = "post-b08-nps-child-depth-b2"
+BATCH_2_DESTINATIONS: tuple[tuple[str, str], ...] = (
+    ("gumo", "Guadalupe Mountains National Park"),
+    ("olym", "Olympic National Park"),
+    ("deva", "Death Valley National Park"),
+    ("jotr", "Joshua Tree National Park"),
+    ("romo", "Rocky Mountain National Park"),
+)
+BATCH_DEFINITIONS: dict[str, tuple[tuple[str, str], ...]] = {
+    BATCH_ID: BATCH_DESTINATIONS,
+    BATCH_2_ID: BATCH_2_DESTINATIONS,
+}
 MAX_PER_DESTINATION = 36
 MAX_TOTAL = 180
 ALLOWED_MODULE_TARGETS = {"stay", "visitor", "trails", "do", "see"}
@@ -122,7 +134,11 @@ def _fixture_for_code(source_cache: Path, code: str) -> Path:
     return matches[0]
 
 
-def _fixture_park(path: Path, code: str, expected_name: str) -> tuple[dict[str, Any], dict[str, Any]]:
+def _fixture_park(
+    path: Path,
+    code: str,
+    expected_name: str,
+) -> tuple[dict[str, Any], dict[str, Any], int]:
     payload = _read_json(path)
     parks = [item for item in payload.get("data") or [] if isinstance(item, dict)]
     related = payload.get("related") if isinstance(payload.get("related"), dict) else {}
@@ -138,7 +154,10 @@ def _fixture_park(path: Path, code: str, expected_name: str) -> tuple[dict[str, 
     related_for_park = related.get(code)
     if not isinstance(related_for_park, dict):
         raise ValueError(f"cached fixture has no related records for {code}: {path}")
-    return park, related_for_park
+    fetched_at = int(payload.get("fetched_at") or 0)
+    if fetched_at <= 0:
+        raise ValueError(f"cached fixture has no fixed fetched_at timestamp for {code}: {path}")
+    return park, related_for_park, fetched_at
 
 
 def _nps_https_url(value: Any) -> bool:
@@ -411,6 +430,8 @@ def _visible_copy(place: dict[str, Any]) -> str:
 def _audit_children(
     children: list[dict[str, Any]],
     sources_by_destination: dict[str, dict[str, dict[str, Any]]],
+    *,
+    batch_id: str = BATCH_ID,
 ) -> dict[str, Any]:
     errors: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
@@ -525,7 +546,7 @@ def _audit_children(
         })
     return {
         "schema_version": 1,
-        "batch_id": BATCH_ID,
+        "batch_id": batch_id,
         "intended_grain": "one approved cached NPS child record per stable place ID",
         "count": len(children),
         "destination_counts": dict(destination_counts),
@@ -540,6 +561,12 @@ def _audit_children(
 
 
 def build(args: argparse.Namespace) -> dict[str, Any]:
+    batch_id = str(getattr(args, "batch_id", BATCH_ID) or BATCH_ID).strip()
+    try:
+        batch_destinations = BATCH_DEFINITIONS[batch_id]
+    except KeyError as exc:
+        supported = ", ".join(sorted(BATCH_DEFINITIONS))
+        raise ValueError(f"unsupported NPS child-depth batch {batch_id!r}; choose {supported}") from exc
     base_catalog = Path(args.base_catalog).resolve()
     source_cache = Path(args.source_cache).resolve()
     out_dir = Path(args.out_dir).resolve()
@@ -566,9 +593,9 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
     source_indexes: dict[str, dict[str, dict[str, Any]]] = {}
     destination_review: list[dict[str, Any]] = []
     link_actions: Counter[str] = Counter()
-    for code, expected_name in BATCH_DESTINATIONS:
+    for code, expected_name in batch_destinations:
         fixture = _fixture_for_code(source_cache, code)
-        park, related = _fixture_park(fixture, code, expected_name)
+        park, related, source_fetched_at = _fixture_park(fixture, code, expected_name)
         source_indexes[code] = _source_child_index(related)
         additions = promote_from_fixture(
             fixture,
@@ -599,6 +626,7 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
                     for endpoint in ("campgrounds", "visitorcenters", "thingstodo", "places")
                 },
                 "parent_hub_id": f"place:nps:{code}",
+                "source_fetched_at": source_fetched_at,
             }
         )
         fixture_refs[code] = _source_ref(fixture, f"nps/{code}/{fixture.name}")
@@ -614,14 +642,14 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
     )
     _stabilize_evidence_paths(children)
     media_after_policy = sum(len(item.get("media") or []) for item in children)
-    audit = _audit_children(children, source_indexes)
+    audit = _audit_children(children, source_indexes, batch_id=batch_id)
     if not audit["passed"]:
         codes = sorted({str(item.get("code") or "unknown") for item in audit["errors"]})
         raise ValueError(f"NPS child-depth audit failed: {', '.join(codes)}")
 
     sidecar = {
         "schema_version": 1,
-        "batch_id": BATCH_ID,
+        "batch_id": batch_id,
         "stage": "internal",
         "generated_at": generated_at,
         "source": "Cached official National Park Service child records",
@@ -630,7 +658,7 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
     }
     review = {
         "schema_version": 1,
-        "batch_id": BATCH_ID,
+        "batch_id": batch_id,
         "generated_at": generated_at,
         "requests_used": 0,
         "live_catalog_modified": False,
@@ -667,7 +695,7 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         _write_json(out_dir / name, payload)
     manifest = {
         "schema_version": 1,
-        "batch_id": BATCH_ID,
+        "batch_id": batch_id,
         "generated_at": generated_at,
         "requests_used": 0,
         "live_catalog_modified": False,
@@ -694,10 +722,14 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--batch-id", choices=sorted(BATCH_DEFINITIONS), default=BATCH_ID)
     parser.add_argument("--base-catalog", default=str(DEFAULT_BASE_CATALOG))
     parser.add_argument("--source-cache", default=str(DEFAULT_SOURCE_CACHE))
-    parser.add_argument("--out-dir", default=str(DEFAULT_OUTPUT))
-    return parser.parse_args()
+    parser.add_argument("--out-dir")
+    args = parser.parse_args()
+    if not args.out_dir:
+        args.out_dir = str(AUDIT_CANDIDATE_ROOT / f"internal/{args.batch_id}")
+    return args
 
 
 if __name__ == "__main__":

@@ -173,6 +173,30 @@ class ExploreNpsMediaRightsTests(unittest.TestCase):
             "/related/cave/places/0/images/0",
         )
 
+    def test_exact_nps_http_page_is_upgraded_before_media_evidence_matching(self):
+        self.cache_payload["related"]["cave"]["places"][0]["url"] = (
+            "http://www.nps.gov/places/example.htm"
+        )
+        self.cache_path.write_text(json.dumps(self.cache_payload))
+        child = {
+            "id": "place:nps-child:cave:places:example",
+            "name": "Example place",
+            "media": [{"url": self.child_image, "credit": "National Park Service"}],
+            "source_pack": {
+                "nps_park_code": "cave",
+                "official_url": "https://www.nps.gov/places/example.htm",
+                "photos": [{"url": self.child_image, "credit": "National Park Service"}],
+            },
+        }
+
+        normalized = self._normalize([child])[0]
+
+        self.assertEqual(len(normalized["media"]), 1)
+        self.assertEqual(
+            normalized["media"][0]["source_page_url"],
+            "https://www.nps.gov/places/example.htm",
+        )
+
     def test_reader_links_are_sanitized_and_only_generated_warnings_are_removed(self):
         place = self._normalize()[0]
         self.assertIn("https://www.nps.gov/cave/visit", place["description"])

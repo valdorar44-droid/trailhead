@@ -9,7 +9,10 @@ from pathlib import Path
 
 from scripts.build_nps_child_depth_batch import (
     AUDIT_CANDIDATE_ROOT,
+    BATCH_2_DESTINATIONS,
+    BATCH_2_ID,
     BATCH_DESTINATIONS,
+    BATCH_ID,
     ROOT,
     _audit_children,
     _normalize_child_classification,
@@ -111,13 +114,58 @@ class NpsChildDepthBatchTests(unittest.TestCase):
             manifest = json.loads((first / "manifest.json").read_text())
             sidecar = json.loads((first / "nps_child_depth_v1.json").read_text())
             audit = json.loads((first / "audit.json").read_text())
+            self.assertEqual(manifest["batch_id"], BATCH_ID)
             self.assertEqual(manifest["requests_used"], 0)
             self.assertFalse(manifest["promotion_ready"])
             self.assertFalse(manifest["live_serving_index_modified"])
+            review = json.loads((first / "review.json").read_text())
+            self.assertTrue(all(
+                item["source_fetched_at"] == 1785550000
+                for item in review["destinations"]
+            ))
             self.assertEqual(sidecar["stage"], "internal")
             self.assertTrue(audit["passed"])
             self.assertTrue(all(item["canonical_role"] == "child" for item in sidecar["places"]))
         self.assertEqual(sha256(protected), protected_before)
+
+    def test_batch2_preset_is_cached_only_and_keeps_batch1_default_intact(self):
+        with tempfile.TemporaryDirectory(dir=AUDIT_CANDIDATE_ROOT) as temp:
+            root = Path(temp)
+            base = root / "base.json"
+            write_json(base, {
+                "schema_version": 3,
+                "generated_at": 1785553072,
+                "count": 1,
+                "places": [{"id": "place:existing", "name": "Existing Place"}],
+            })
+            cache = root / "cache"
+            for code, name in BATCH_2_DESTINATIONS:
+                make_fixture(cache, code, name)
+            out_dir = root / "candidate"
+            result = build(argparse.Namespace(
+                batch_id=BATCH_2_ID,
+                base_catalog=str(base),
+                source_cache=str(cache),
+                out_dir=str(out_dir),
+            ))
+
+            self.assertEqual(result["count"], 20)
+            self.assertEqual(
+                result["destination_counts"],
+                {code: 4 for code, _ in BATCH_2_DESTINATIONS},
+            )
+            manifest = json.loads((out_dir / "manifest.json").read_text())
+            sidecar = json.loads((out_dir / "nps_child_depth_v1.json").read_text())
+            self.assertEqual(manifest["batch_id"], BATCH_2_ID)
+            self.assertEqual(sidecar["batch_id"], BATCH_2_ID)
+            self.assertEqual(manifest["requests_used"], 0)
+            self.assertFalse(manifest["promotion_ready"])
+            self.assertFalse(manifest["live_serving_index_modified"])
+            review = json.loads((out_dir / "review.json").read_text())
+            self.assertTrue(all(
+                item["source_fetched_at"] == 1785550000
+                for item in review["destinations"]
+            ))
 
     def test_non_nps_official_url_blocks_the_candidate(self):
         with tempfile.TemporaryDirectory(dir=AUDIT_CANDIDATE_ROOT) as temp:

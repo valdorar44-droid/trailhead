@@ -95,6 +95,24 @@ def _is_https_nps_url(value: Any) -> bool:
 
 def _source_page(value: Any) -> str:
     url = str(value or "").strip()
+    try:
+        parsed = urlsplit(url)
+        host = (parsed.hostname or "").strip().rstrip(".").casefold()
+        port = parsed.port
+    except ValueError:
+        return ""
+    if (
+        parsed.scheme.casefold() == "http"
+        and bool(parsed.path)
+        and not parsed.username
+        and not parsed.password
+        and port in (None, 80)
+        and (host == "nps.gov" or host.endswith(".nps.gov"))
+    ):
+        # Older NPS API records still carry canonical page links as HTTP.
+        # Preserve the exact host/path/query while normalizing transport so
+        # exact-page media evidence can match the reader's HTTPS-only URL.
+        url = parsed._replace(scheme="https", netloc=str(parsed.hostname or host)).geturl()
     if not _is_https_nps_url(url):
         return ""
     parsed = urlsplit(url)

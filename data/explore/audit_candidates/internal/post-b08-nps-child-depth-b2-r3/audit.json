@@ -1,0 +1,117 @@
+{
+  "schema_version": 1,
+  "batch_id": "post-b08-nps-child-depth-b2",
+  "intended_grain": "one approved cached NPS child record per stable place ID",
+  "count": 171,
+  "destination_counts": {
+    "gumo": 36,
+    "olym": 35,
+    "deva": 34,
+    "jotr": 33,
+    "romo": 33
+  },
+  "module_counts": {
+    "stay": 53,
+    "visitor": 23,
+    "trails": 42,
+    "do": 15,
+    "see": 38
+  },
+  "media_count": 151,
+  "unique_ids": true,
+  "unique_title_scopes": true,
+  "errors": [],
+  "warnings": [
+    {
+      "code": "shared_coordinate_clusters",
+      "count": 10,
+      "samples": [
+        {
+          "lat": 31.9078,
+          "lng": -104.8012,
+          "place_ids": [
+            "place:nps-child:gumo:thingstodo:23e00bfd-20bb-46fa-bd0d-8c4319a60bf4",
+            "place:nps-child:gumo:places:5a0bbcd9-3d9c-4af8-ba00-7a377918ed40"
+          ]
+        },
+        {
+          "lat": 31.9978,
+          "lng": -104.7703,
+          "place_ids": [
+            "place:nps-child:gumo:campgrounds:60a9f911-9c8c-4b0e-91f0-da9803b46794",
+            "place:nps-child:gumo:thingstodo:3478390d-1a00-42f0-b8a6-1962a5a2175c"
+          ]
+        },
+        {
+          "lat": 34.0411,
+          "lng": -116.1858,
+          "place_ids": [
+            "place:nps-child:jotr:thingstodo:62acb291-3d9e-4dbe-ba06-729e9e72d4f6",
+            "place:nps-child:jotr:places:013a1c84-4949-4cdc-958f-7283f1bc9ac5"
+          ]
+        },
+        {
+          "lat": 36.2503,
+          "lng": -116.8258,
+          "place_ids": [
+            "place:nps-child:deva:thingstodo:7fe0c782-22f1-40a0-a6b9-9d9a9ce0526a",
+            "place:nps-child:deva:thingstodo:28c27ade-a237-47d5-b512-7b93c9a5213b",
+            "place:nps-child:deva:places:32602c1e-b97e-4eca-852f-7bf4fdcaed3d"
+          ]
+        },
+        {
+          "lat": 36.4618,
+          "lng": -116.8667,
+          "place_ids": [
+            "place:nps-child:deva:visitorcenters:adfd6475-95af-497d-b29c-2a20d4bb2724",
+            "place:nps-child:deva:thingstodo:1912b806-5ab5-4596-961a-903663b0a4bb"
+          ]
+        },
+        {
+          "lat": 40.2668,
+          "lng": -105.8327,
+          "place_ids": [
+            "place:nps-child:romo:visitorcenters:674b1262-7caf-40ba-9cf8-608703a95a8a",
+            "place:nps-child:romo:thingstodo:cc6c0fc5-8276-408e-8329-3a8a6042f7b1"
+          ]
+        },
+        {
+          "lat": 40.3662,
+          "lng": -105.561,
+          "place_ids": [
+            "place:nps-child:romo:visitorcenters:1fba44b1-ad80-485d-81b9-940fc3c64e0b",
+            "place:nps-child:romo:thingstodo:6c0575f5-a657-42a0-a9c2-78b6b37eb89e",
+            "place:nps-child:romo:places:1b6cd12f-e6b5-4ea7-b985-3afa22b9ddcc"
+          ]
+        },
+        {
+          "lat": 40.3727,
+          "lng": -105.8546,
+          "place_ids": [
+            "place:nps-child:romo:thingstodo:67a639e0-7bfa-49e8-8735-dee9aebc2c9b",
+            "place:nps-child:romo:places:203765dc-466a-42b6-8529-b3797e7f9a51",
+            "place:nps-child:romo:places:a1742f25-bbf2-4ed0-89fb-63a01d963497"
+          ]
+        },
+        {
+          "lat": 40.4054,
+          "lng": -105.5932,
+          "place_ids": [
+            "place:nps-child:romo:places:c3a54769-e360-4591-8650-cc7cf92fb7bc",
+            "place:nps-child:romo:places:195a80b6-04f9-4647-b68e-16232d4a8ea8"
+          ]
+        },
+        {
+          "lat": 48.0994,
+          "lng": -123.4258,
+          "place_ids": [
+            "place:nps-child:olym:visitorcenters:131cd1a1-8ab3-4d1e-a22f-4f239741372b",
+            "place:nps-child:olym:thingstodo:a6fc71f4-d045-4773-a60a-34f67b1a4a4e"
+          ]
+        }
+      ],
+      "detail": "Distinct official child records can share an access point; review but do not merge by coordinate alone."
+    }
+  ],
+  "passed": true
+}

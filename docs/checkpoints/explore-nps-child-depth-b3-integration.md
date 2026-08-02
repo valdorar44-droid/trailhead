@@ -182,3 +182,32 @@ Evidence directory:
 Exact next action: diagnose the render-only warm-return black frame from this
 single evidence set before promoting the JS correction. Do not refetch or
 rebuild the accepted NPS batches, and do not repeat the broader Explore crawl.
+
+## Evidence correction — 2026-08-02
+
+The reported render-only black frame was a viewer artifact, not an application
+frame. Both saved PNG files decode as the same complete Explore home:
+
+- `04-back.png` and `05-back-settled.png` are both 720 x 1600 RGB captures.
+- Only 127 of 1,152,000 pixels differ (0.011%).
+- The difference bounds are `(558, 16, 589, 36)`, entirely inside the Android
+  status bar.
+- The mean absolute RGB difference is `(0.0022, 0.0030, 0.0042)`.
+- The saved SHA-256 values still match the hashes recorded above.
+- Focused logcat remains empty.
+
+The source review also found no Explore visibility suppression: the Explore
+root remains mounted with an explicit background, screen activity pauses work
+without hiding the UI, and the direct-search campground handoff clears the
+stale hub before opening Map. The prior black rectangle appeared only while the
+second PNG was being rendered by the evidence viewer.
+
+Open P0/P1 after evidence correction: none. No Mapbox, lifecycle, or mobile
+code change is warranted, and no corrective OTA should be published for this
+false positive.
+
+Exact next action: run the bounded shared-flow checks on the iPhone, then apply
+the already tested direct-search return-context correction to a clean
+1.0.11-production descendant. Prove native-input compatibility before moving
+the production channel. Do not repeat the NPS batches, Explore crawl, Mapbox
+lifecycle work, or the Android return-context investigation.

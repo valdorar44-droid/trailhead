@@ -101,3 +101,81 @@ files.
 - Do not deploy, push, promote, or publish a mobile OTA.
 - Do not repeat production, Map, Search, Layers, campground, Trails, Originals,
   Android Auto, Memory, or screenshot work.
+
+## Batch 2 r3 candidate built — 2026-08-01 21:38 CDT
+
+- Pre-change checkpoint commit:
+  `2cb56ada41d9488b68be95a9a519bcd6217ffc6b`
+- Implementation commit:
+  `0a5eabdb5e8f33a7163cc9ed8997e26bfbcac960`
+
+Accepted candidate path:
+`data/explore/audit_candidates/internal/post-b08-nps-child-depth-b2-r3`
+
+Independent rebuild path:
+`data/explore/audit_candidates/internal/post-b08-nps-child-depth-b2-r3-rebuild`
+
+Earlier local r1/r2 outputs are superseded, ignored development artifacts and
+must not be staged. r3 adds fixed source-freshness evidence and normalizes only
+canonical NPS HTTP page links to the same HTTPS host/path before exact-page
+media matching.
+
+### Candidate profile
+
+- Official child records: 171
+- Destination counts: Guadalupe Mountains 36, Olympic 35, Death Valley 34,
+  Joshua Tree 33, Rocky Mountain 33
+- Module counts: Stay 53, Visitor Information 23, Trails 42, Activities 15,
+  See 38
+- Candidate images: 168
+- Approved exact-page images: 151
+- Conservatively stripped images: 17
+- Provider/network requests: 0
+- Promotion ready: false
+- Live catalog and serving index modified: false
+- Candidate/rebuild differing relative-file hashes: 0 of 4
+
+Artifact SHA-256 values:
+
+- Manifest:
+  `ba5bd17aa2be9dae27a27dd5e8920e194edbda336df5ee00b890c603f6c2e579`
+- Child sidecar:
+  `9e5f9cbbfaea02787b8c28161ae30b008da28c090bf33b74a3fbd89f134fc41c`
+- Audit:
+  `24ab4dcdad62c3ffb897cf154af3a182b8908ed51bb49b6b7d6948289d05f443`
+- Review:
+  `921fc03c2c9f18e3dbbc9341c3bad9b43531a1db48cecba37792a04349a27197`
+
+### Media evidence resolution
+
+The preliminary coverage audit expected 151 approved images while the unchanged
+r7 media matcher initially approved 148. The three differences were Black Rock
+Nature Center, Cottonwood Visitor Center, and Joshua Tree Visitor Center. Each
+cached item had an HTTPS NPS image, an NPS-prefixed exact credit, and the exact
+official child page recorded with legacy `http://www.nps.gov/...` transport.
+
+The media-rights normalizer now upgrades only credential-free NPS HTTP pages on
+port 80/default to the same HTTPS host/path/query before exact-page matching.
+It does not approve third-party hosts, missing credits, non-NPS credits,
+ambiguous reused images, AI-modified media, or other rights warnings. The 17
+remaining stripped images comprise nine missing exact credits and eight
+non-NPS-prefixed credits.
+
+### Verification so far
+
+- Builder/media focused tests: `22 passed`.
+- Final focused Explore/NPS/source/preview/content suite: `122 passed`.
+- Content-quality QA: `PASS`, with one reviewed same-facility title across two
+  distinct NPS endpoint records and ten reviewed shared-coordinate clusters.
+- Python compilation: passed.
+- Candidate/rebuild byte comparison: passed.
+- `git diff --check`: passed.
+- Protected tracked hashes in this isolated worktree remain unchanged.
+- Open P0/P1: none found by the builder; independent read-only audit pending.
+- Task-owned test/build processes after the final suite: none.
+
+### Exact next action
+
+Resolve any independent audit findings once, then record the implementation
+commit and stop. Do not deploy, push, merge, edit the internal-preview sidecar,
+or promote this candidate in this packet.

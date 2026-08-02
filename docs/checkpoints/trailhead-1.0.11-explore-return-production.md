@@ -78,6 +78,28 @@ performed.
   representation allowed by the guarded publisher. The candidate adds no new
   native-input difference beyond the current production OTA baseline.
 
+## Final gate result
+
+The one complete `audit:prepreview` run exercised the Android build/unit
+checks, TypeScript, Explore live/catalog audits, focused mobile contracts, and
+the full backend regression suite. The backend result was 980 tests plus 135
+subtests passed. The run exposed only two stale source-audit recognizers:
+
+1. `native-drift-check.mjs` still recognized the retired combined OTA export
+   instead of the guarded sequential Android/iOS export and upload loops.
+2. `explore-memory-guard.test.mjs` did not recognize the intentional
+   authenticated startup-catalog effect added before this release packet.
+
+Both audit recognizers were updated without changing application behavior.
+Focused reruns now pass:
+
+- Native/config drift: passed.
+- Explore startup image/pagination memory guard: passed.
+- Whitespace diff check: passed.
+
+The broad suite was not repeated after these test-only corrections; its
+substantive passing results remain the recorded release evidence.
+
 ## Protected scope
 
 The clean production worktree contains none of the user-owned `.cursor/`,
@@ -87,10 +109,10 @@ worktree.
 
 ## Exact next action
 
-Commit this accepted checkpoint, run the release compatibility and pre-preview
-gates once, tag the exact clean SHA, and promote it through the guarded 1.0.11
-production publisher while preserving every legacy runtime group. After the
-iPhone receives the update, verify only the corrected Explore search return.
+Commit this accepted checkpoint and the two corrected audit recognizers, tag
+the exact clean SHA, and promote it through the guarded 1.0.11 production
+publisher while preserving every legacy runtime group. After the iPhone
+receives the update, verify only the corrected Explore search return.
 
 ## Do not repeat
 

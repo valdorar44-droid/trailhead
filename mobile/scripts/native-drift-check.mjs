@@ -291,17 +291,30 @@ contains('scripts/release-identity.test.mjs', 'must outrank', 'Release identity 
     otaPublisher.includes("['scripts/upload-sentry-update-sourcemaps.mjs', '--check-env']"),
     'Guarded publisher must validate Sentry credentials before publishing.',
   );
+const androidReleaseStage = otaPublisher.indexOf("{ platform: 'android', inputDir: 'dist-android' }");
+const iosReleaseStage = otaPublisher.indexOf("{ platform: 'ios', inputDir: 'dist-ios' }");
+const sentryStageInput = otaPublisher.indexOf("'--input-dir', stage.inputDir", iosReleaseStage);
+const sentryUpload = otaPublisher.lastIndexOf("'scripts/upload-sentry-update-sourcemaps.mjs',", sentryStageInput);
+const candidatePublish = otaPublisher.indexOf("run('npx', updateArgsFor(stage), { capture: true })", sentryStageInput);
+const sentryUploadLoop = otaPublisher.lastIndexOf('for (const stage of nativeReleaseStages) {', sentryUpload);
+const candidatePublishLoop = otaPublisher.lastIndexOf('for (const stage of nativeReleaseStages) {', candidatePublish);
 expect(
-  otaPublisher.includes("'--skip-bundler'")
-    && otaPublisher.includes("'--input-dir', 'dist'")
+  androidReleaseStage >= 0
+    && androidReleaseStage < iosReleaseStage
+    && otaPublisher.includes('for (const [index, stage] of nativeReleaseStages.entries())')
+    && otaPublisher.includes("'--platform', stage.platform")
+    && otaPublisher.includes("'--output-dir', stage.inputDir")
     && otaPublisher.includes("'--source-maps'")
-    && otaPublisher.includes("'--max-workers', '2'"),
-  'OTA publisher must publish the exact source-mapped export.',
+    && otaPublisher.includes("'--max-workers', '1'"),
+  'OTA publisher must sequentially export Android and iOS source maps with one Metro worker.',
 );
 expect(
-  otaPublisher.lastIndexOf("['scripts/upload-sentry-update-sourcemaps.mjs']")
-    < otaPublisher.lastIndexOf("run('npx', updateArgs, { capture: true })"),
-  'Sentry source maps must upload successfully before OTA publication.',
+  sentryUploadLoop >= 0
+    && sentryUpload > sentryUploadLoop
+    && sentryStageInput > sentryUpload
+    && candidatePublishLoop > sentryStageInput
+    && candidatePublish > candidatePublishLoop,
+  'Both native Sentry source-map uploads must complete before either OTA publication.',
 );
   expect(
     otaPublisher.includes('assertCommittedReleaseSource()'),

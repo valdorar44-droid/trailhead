@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
@@ -227,18 +227,24 @@ if (target === 'production' && !dryRun) {
   );
 }
 
-const updateArgs = [
-  '--yes', 'eas-cli@21.0.2', 'update',
-  '--branch', candidateBranch,
-  '--platform', 'all',
-  '--message', message,
-  '--environment', target,
-  '--input-dir', 'dist',
-  '--skip-bundler',
-  '--emit-metadata',
-  '--json',
-  '--non-interactive',
+const nativeReleaseStages = [
+  { platform: 'android', inputDir: 'dist-android' },
+  { platform: 'ios', inputDir: 'dist-ios' },
 ];
+
+function updateArgsFor({ platform, inputDir }) {
+  return [
+    '--yes', 'eas-cli@21.0.2', 'update',
+    '--branch', candidateBranch,
+    '--platform', platform,
+    '--message', message,
+    '--environment', target,
+    '--input-dir', inputDir,
+    '--skip-bundler',
+    '--json',
+    '--non-interactive',
+  ];
+}
 
 if (dryRun) {
   console.log(JSON.stringify({
@@ -246,7 +252,8 @@ if (dryRun) {
     candidateBranch,
     channel: target,
     message,
-    platform: 'all',
+    platforms: nativeReleaseStages.map(stage => stage.platform),
+    export_mode: 'sequential-native',
     repository_sha: fullSha,
     source_maps: true,
   }));
@@ -258,23 +265,33 @@ if (dryRun) {
 // leave symlinks pointing at a different checkout and make Metro fail midway.
 run(process.execPath, ['scripts/local-expo-module-resolution.test.mjs']);
 run(process.execPath, ['scripts/upload-sentry-update-sourcemaps.mjs', '--check-env']);
-run('npx', [
-  '--yes', 'expo', 'export',
-  '--platform', 'all',
-  '--output-dir', 'dist',
-  '--source-maps',
-  '--clear',
-  // Exporting Android, iOS, and web concurrently can exceed the bounded WSL
-  // release runner even when the bundles themselves are valid. A single Metro
-  // worker is slower but deterministic and keeps production publication safe.
-  '--max-workers', '1',
-]);
-// Upload the exact exported artifacts first. If Sentry rejects any map, no OTA
-// has been published and the current candidate remains untouched.
-run(process.execPath, ['scripts/upload-sentry-update-sourcemaps.mjs']);
-// Capture and intentionally ignore the publish command's unreliable JSON
-// stream. Authoritative evidence is queried from EAS after publication.
-run('npx', updateArgs, { capture: true });
+// A combined `--platform all` export starts web, Android, and iOS bundlers in
+// parallel and can exhaust the bounded WSL release runner. Export each native
+// platform synchronously into its own metadata directory instead. Both exports
+// and both Sentry uploads must succeed before either candidate update exists.
+for (const [index, stage] of nativeReleaseStages.entries()) {
+  rmSync(new URL(`../${stage.inputDir}`, import.meta.url), { recursive: true, force: true });
+  run('npx', [
+    '--yes', 'expo', 'export',
+    '--platform', stage.platform,
+    '--output-dir', stage.inputDir,
+    '--source-maps',
+    '--dump-assetmap',
+    ...(index === 0 ? ['--clear'] : []),
+    '--max-workers', '1',
+  ]);
+}
+for (const stage of nativeReleaseStages) {
+  run(process.execPath, [
+    'scripts/upload-sentry-update-sourcemaps.mjs',
+    '--input-dir', stage.inputDir,
+  ]);
+}
+for (const stage of nativeReleaseStages) {
+  // Capture and intentionally ignore each publish command's unreliable JSON
+  // stream. Authoritative paired evidence is queried after both publications.
+  run('npx', updateArgsFor(stage), { capture: true });
+}
 if (productionSnapshot) {
   for (const group of productionSnapshot.groups) {
     run('npx', [

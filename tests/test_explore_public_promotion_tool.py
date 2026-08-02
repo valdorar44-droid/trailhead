@@ -294,6 +294,50 @@ class ExplorePublicPromotionToolTests(unittest.TestCase):
             with self.assertRaisesRegex(promoter.PromotionError, "already exists"):
                 promoter.promote(self.args(apply=True), repo_root=self.root)
 
+    def test_top_level_aliases_remove_reviewed_duplicate_sources_from_artifacts(self) -> None:
+        catalog = json.loads(self.candidate_catalog.read_text(encoding="utf-8"))
+        catalog["places"].append({
+            "id": "place:ridb:duplicate",
+            "name": "Test National Park",
+            "category": "park",
+            "lat": 44.0,
+            "lng": -110.0,
+            "description": "A duplicate source record.",
+        })
+        catalog["count"] = 2
+        serving = json.loads(self.candidate_serving.read_text(encoding="utf-8"))
+        serving["items"].append({
+            "id": "place:ridb:duplicate",
+            "title": "Test National Park",
+            "category": "park",
+            "group": "parks",
+            "lat": 44.0,
+            "lng": -110.0,
+            "description": "A duplicate source record.",
+            "reviewable": True,
+            "enrichment_grade": "complete",
+            "enrichment_score": 80,
+        })
+        serving["count"] = 2
+        serving["reviewable_count"] = 2
+        write_json(self.candidate_catalog, catalog)
+        write_json(self.candidate_serving, serving)
+        write_json(self.aliases, {"aliases": [{
+            "from_id": "place:ridb:duplicate",
+            "to_id": "place:nps:test",
+            "reason": "Reviewed duplicate source identity.",
+        }]})
+
+        with patch.object(promoter, "_validate_stage_evidence", return_value={"ready": True}):
+            report = promoter.promote(self.args(), repo_root=self.root)
+
+        self.assertEqual(report["catalog_count"], 1)
+        self.assertEqual(report["serving_count"], 1)
+        self.assertEqual(
+            [item["from_id"] for item in report["manifest"]["aliases"]],
+            ["place:ridb:duplicate"],
+        )
+
     def test_expected_current_hash_drift_blocks_before_write(self) -> None:
         args = self.args(
             apply=True,

@@ -40,6 +40,22 @@ B08_R1_IMAGE_CORRECTIONS = {
     "place:ridb:261716": "https://cdn.recreation.gov/public/2021/06/01/14/10/261716_b60960bd-92b5-4404-8f02-e8c82dc0ac65_700.webp",
     "place:ridb:269134": "https://cdn.recreation.gov/public/images/83803_1440.webp",
 }
+B08_R1_RUNTIME_DUPLICATE_REPLACEMENTS = {
+    "place:ridb:10171274": "place:nps-child:glac:campgrounds:apgar-campground",
+    "place:ridb:232445": "place:nps-child:zion:campgrounds:watchman-campground",
+    "place:ridb:232447": "place:nps-child:yose:campgrounds:upper-pines-campground",
+    "place:ridb:232449": "place:nps-child:yose:campgrounds:north-pines-campground",
+    "place:ridb:232450": "place:nps-child:yose:campgrounds:lower-pines-campground",
+    "place:ridb:232451": "place:nps-child:yose:campgrounds:hodgdon-meadow-campground",
+    "place:ridb:232453": "place:nps-child:yose:campgrounds:bridalveil-creek-campground",
+    "place:ridb:232492": "place:nps-child:glac:campgrounds:st-mary-campground",
+    "place:ridb:232881": "place:usfs:usfs-sierra-sites-d813c6eb-01cc-4d97-b35d-8b43cde5ce4b",
+    "place:ridb:233362": "place:nps:meve",
+    "place:ridb:233837": "place:usfs:usfs-sierra-sites-5ee429ef-a49c-4af4-87c7-9d5bd6da1768",
+    "place:ridb:251869": "place:nps-child:glac:campgrounds:many-glacier-campground",
+    "place:wikidata:q1579682": "place:pakistan_gov:punjab-lal-suhanra-national-park",
+    "place:wikidata:q2641970": "place:pakistan_gov:gb-deosai-national-park",
+}
 B08_CHILD_CORRECTIONS = {
     "nps:item:7475825b-e844-4012-841b-0e29e05d4540": {
         "summary": "Aspenglen Campground offers tent and RV campsites by reservation during its summer operating season.",
@@ -383,6 +399,8 @@ def _validate_r1_evidence(
     aliases: list[dict[str, str]],
     reviewed_exceptions: dict[str, Any],
     serving: dict[str, Any],
+    catalog_input_ids: set[str],
+    serving_input_ids: set[str],
     apply: bool,
 ) -> None:
     combined = _evidence_v1(evidence, "combined_manifest")
@@ -396,22 +414,46 @@ def _validate_r1_evidence(
     promotion = _evidence_v1(evidence, "promotion_review")
     if not isinstance(promotion.get("gate"), dict) or not promotion["gate"].get("passed"):
         raise PromotionError("promotion_review gate did not pass")
-    if int((promotion.get("counts") or {}).get("merged") or -1) != serving_count:
-        raise PromotionError("promotion_review count does not match serving output")
+    promotion_count = int((promotion.get("counts") or {}).get("merged") or -1)
     displaced = {
         (str(item.get("old_id") or ""), str(item.get("replacement_id") or ""))
         for item in promotion.get("displaced_records") or []
         if isinstance(item, dict)
     }
     alias_pairs = {(item["from_id"], item["to_id"]) for item in aliases}
-    if displaced != alias_pairs or (apply and len(alias_pairs) != 5):
-        raise PromotionError("promotion_review displaced records do not exactly match five aliases")
+    runtime_replacements = reviewed_exceptions.get("runtime_duplicate_replacements") or []
+    if not isinstance(runtime_replacements, list):
+        raise PromotionError("runtime duplicate replacements must be an array")
+    runtime_pairs = {
+        (str(item.get("from_id") or ""), str(item.get("to_id") or ""))
+        for item in runtime_replacements
+        if isinstance(item, dict) and str(item.get("reason") or "").strip()
+    }
+    if len(runtime_pairs) != len(runtime_replacements):
+        raise PromotionError("runtime duplicate replacements require unique IDs and reasons")
+    expected_alias_pairs = displaced | runtime_pairs
+    if alias_pairs != expected_alias_pairs or (apply and len(displaced) != 5):
+        raise PromotionError("reviewed displacement records do not exactly match aliases")
+    if apply and runtime_pairs:
+        if dict(runtime_pairs) != B08_R1_RUNTIME_DUPLICATE_REPLACEMENTS:
+            raise PromotionError("b08 runtime duplicate replacements changed")
+        if any(source not in serving_input_ids for source, _target in runtime_pairs):
+            raise PromotionError("runtime duplicate replacement source is absent from serving input")
+    expected_serving_count = promotion_count - sum(
+        1 for source, _target in runtime_pairs if source in serving_input_ids
+    )
+    if expected_serving_count != serving_count:
+        raise PromotionError("promotion_review count does not match reviewed serving output")
 
     catalog_review = _evidence_v1(evidence, "catalog_merge_review")
     if catalog_review.get("unique_ids") is not True:
         raise PromotionError("catalog_merge_review unique_ids did not pass")
-    if int((catalog_review.get("counts") or {}).get("merged") or -1) != catalog_count:
-        raise PromotionError("catalog_merge_review count does not match catalog output")
+    catalog_review_count = int((catalog_review.get("counts") or {}).get("merged") or -1)
+    expected_catalog_count = catalog_review_count - sum(
+        1 for source, _target in runtime_pairs if source in catalog_input_ids
+    )
+    if expected_catalog_count != catalog_count:
+        raise PromotionError("catalog_merge_review count does not match reviewed catalog output")
 
     corrections = reviewed_exceptions.get("approved_image_corrections") or []
     actual = {
@@ -538,6 +580,8 @@ def _validate_stage_evidence(
             aliases=context["aliases"],
             reviewed_exceptions=context["reviewed_exceptions"],
             serving=context["serving"],
+            catalog_input_ids=context["catalog_input_ids"],
+            serving_input_ids=context["serving_input_ids"],
             apply=apply,
         )
     else:
@@ -948,6 +992,15 @@ def promote(args: argparse.Namespace, *, repo_root: Path = ROOT) -> dict[str, An
             raise PromotionError("top_level releases must have no child inputs or child dispositions")
         output_catalog = copy.deepcopy(catalog)
         output_serving = copy.deepcopy(serving)
+        alias_sources = {item["from_id"] for item in aliases}
+        output_catalog["places"] = [
+            item for item in output_catalog.get("places") or []
+            if str(item.get("id") or "") not in alias_sources
+        ]
+        output_serving["items"] = [
+            item for item in output_serving.get("items") or []
+            if str(item.get("id") or "") not in alias_sources
+        ]
     else:
         if not child_payloads:
             raise PromotionError("child_depth releases require at least one --child-input")
@@ -1016,6 +1069,8 @@ def promote(args: argparse.Namespace, *, repo_root: Path = ROOT) -> dict[str, An
         aliases=aliases,
         reviewed_exceptions=reviewed_exceptions,
         serving=output_serving,
+        catalog_input_ids={str(item.get("id") or "") for item in catalog.get("places") or []},
+        serving_input_ids={str(item.get("id") or "") for item in serving.get("items") or []},
         child_payloads=child_payloads,
         child_input_refs=child_input_refs,
         dispositions=dispositions,

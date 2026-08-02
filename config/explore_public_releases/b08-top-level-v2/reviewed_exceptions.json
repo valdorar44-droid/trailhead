@@ -1,0 +1,88 @@
+{
+  "approved_image_corrections": [
+    {
+      "id": "place:ridb:261716",
+      "image_url": "https://cdn.recreation.gov/public/2021/06/01/14/10/261716_b60960bd-92b5-4404-8f02-e8c82dc0ac65_700.webp",
+      "reason": "Replace a non-image YouTube URL with the reviewed Recreation.gov image."
+    },
+    {
+      "id": "place:ridb:269134",
+      "image_url": "https://cdn.recreation.gov/public/images/83803_1440.webp",
+      "reason": "Replace a non-image YouTube URL with the reviewed Recreation.gov image."
+    }
+  ],
+  "child_corrections": {},
+  "reviewed_displacements": 19,
+  "runtime_duplicate_replacements": [
+    {
+      "from_id": "place:ridb:10171274",
+      "reason": "Use Glacier National Park's reviewed Apgar Campground child and remove the duplicate RIDB rail item.",
+      "to_id": "place:nps-child:glac:campgrounds:apgar-campground"
+    },
+    {
+      "from_id": "place:ridb:232445",
+      "reason": "Use Zion National Park's reviewed Watchman Campground child and remove the duplicate RIDB rail item.",
+      "to_id": "place:nps-child:zion:campgrounds:watchman-campground"
+    },
+    {
+      "from_id": "place:ridb:232447",
+      "reason": "Use Yosemite National Park's reviewed Upper Pines Campground child and remove the duplicate RIDB rail item.",
+      "to_id": "place:nps-child:yose:campgrounds:upper-pines-campground"
+    },
+    {
+      "from_id": "place:ridb:232449",
+      "reason": "Use Yosemite National Park's reviewed North Pines Campground child and remove the duplicate RIDB rail item.",
+      "to_id": "place:nps-child:yose:campgrounds:north-pines-campground"
+    },
+    {
+      "from_id": "place:ridb:232450",
+      "reason": "Use Yosemite National Park's reviewed Lower Pines Campground child and remove the duplicate RIDB rail item.",
+      "to_id": "place:nps-child:yose:campgrounds:lower-pines-campground"
+    },
+    {
+      "from_id": "place:ridb:232451",
+      "reason": "Use Yosemite National Park's reviewed Hodgdon Meadow Campground child and remove the duplicate RIDB rail item.",
+      "to_id": "place:nps-child:yose:campgrounds:hodgdon-meadow-campground"
+    },
+    {
+      "from_id": "place:ridb:232453",
+      "reason": "Use Yosemite National Park's reviewed Bridalveil Creek Campground child and remove the duplicate RIDB rail item.",
+      "to_id": "place:nps-child:yose:campgrounds:bridalveil-creek-campground"
+    },
+    {
+      "from_id": "place:ridb:232492",
+      "reason": "Use Glacier National Park's reviewed St. Mary Campground child and remove the duplicate RIDB rail item.",
+      "to_id": "place:nps-child:glac:campgrounds:st-mary-campground"
+    },
+    {
+      "from_id": "place:ridb:232881",
+      "reason": "Use the reviewed USFS Soquel Campground record and remove the duplicate RIDB rail item.",
+      "to_id": "place:usfs:usfs-sierra-sites-d813c6eb-01cc-4d97-b35d-8b43cde5ce4b"
+    },
+    {
+      "from_id": "place:ridb:233362",
+      "reason": "Use the reviewed National Park Service Mesa Verde destination and remove the duplicate RIDB rail item.",
+      "to_id": "place:nps:meve"
+    },
+    {
+      "from_id": "place:ridb:233837",
+      "reason": "Use the reviewed USFS Summerdale Campground record and remove the duplicate RIDB rail item.",
+      "to_id": "place:usfs:usfs-sierra-sites-5ee429ef-a49c-4af4-87c7-9d5bd6da1768"
+    },
+    {
+      "from_id": "place:ridb:251869",
+      "reason": "Use Glacier National Park's reviewed Many Glacier Campground child and remove the duplicate RIDB rail item.",
+      "to_id": "place:nps-child:glac:campgrounds:many-glacier-campground"
+    },
+    {
+      "from_id": "place:wikidata:q1579682",
+      "reason": "Use the reviewed Punjab government Lal Suhanra National Park record and remove the duplicate Wikidata rail item.",
+      "to_id": "place:pakistan_gov:punjab-lal-suhanra-national-park"
+    },
+    {
+      "from_id": "place:wikidata:q2641970",
+      "reason": "Use the reviewed Gilgit-Baltistan government Deosai National Park record and remove the duplicate Wikidata rail item.",
+      "to_id": "place:pakistan_gov:gb-deosai-national-park"
+    }
+  ]
+}

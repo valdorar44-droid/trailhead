@@ -5,6 +5,7 @@ import ipaddress
 import json
 import re
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin, urlsplit, urlunsplit
@@ -96,8 +97,8 @@ def safe_reader_text(value: Any) -> str:
         return f"{safe}{trailing}" if safe else trailing.lstrip(")]")
 
     cleaned = URL_IN_TEXT_RE.sub(replace, text)
-    cleaned = re.sub(r"\s+([,.;:!?])", r"\1", cleaned)
-    cleaned = re.sub(r"\s+\b(?:at|online at|visit)\s*([.!?])", r"\1", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s+([,;:!?]|\.(?!\d))", r"\1", cleaned)
+    cleaned = re.sub(r"\s+\b(?:at|online at)\s*([.!?])", r"\1", cleaned, flags=re.IGNORECASE)
     return compact_text(cleaned)
 
 
@@ -283,6 +284,7 @@ def source_pack_from_park(park: dict[str, Any], record: SourceRecord, related: d
     events = dedupe_items([
         event_item(item, park_code=record.source_id)
         for item in related.get("events", [])
+        if event_is_current(item, as_of_timestamp=record.fetched_at)
     ])
     parking_lots = dedupe_items([
         source_pack_item(item, "parking", park_code=record.source_id)
@@ -384,6 +386,26 @@ def event_item(item: dict[str, Any], park_code: str) -> dict[str, Any]:
         "category": compact_text(item.get("category") or item.get("type")),
         "tags": sorted_unique(event_type_names(item)),
     }
+
+
+def event_is_current(item: dict[str, Any], *, as_of_timestamp: int) -> bool:
+    """Exclude completed events from the current calendar without inventing dates."""
+    date_text = compact_text(
+        item.get("dateend")
+        or item.get("dateEnd")
+        or item.get("endDate")
+        or item.get("datestart")
+        or item.get("dateStart")
+        or item.get("startDate")
+    )
+    if not date_text:
+        return True
+    try:
+        event_date = datetime.fromisoformat(date_text[:10]).date()
+        as_of_date = datetime.fromtimestamp(int(as_of_timestamp), tz=timezone.utc).date()
+    except (TypeError, ValueError, OSError):
+        return True
+    return event_date >= as_of_date
 
 
 def child_detail_fields(item: dict[str, Any], park_code: str = "") -> dict[str, Any]:

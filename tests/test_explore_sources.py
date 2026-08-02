@@ -7,13 +7,13 @@ from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 from pathlib import Path
 
-from scripts.build_explore_catalog_v3 import build_catalog
+from scripts.build_explore_catalog_v3 import build_catalog, dedupe_source_records, source_fixture_timestamp
 from scripts.explore_sources.base.aliases import aliases_for_category
 from scripts.explore_sources.base.cards import build_card
 from scripts.explore_sources.base.dedupe import dedupe_places
 from scripts.explore_sources.base.fetch import parse_headers, resolve_input_paths
 from scripts.explore_sources.base.quality import score_place
-from scripts.explore_sources.base.schema import ExplorePlaceV3
+from scripts.explore_sources.base.schema import ExplorePlaceV3, SourceRecord
 from scripts.explore_sources.blm.import_blm import import_blm_fixture
 from scripts.explore_sources.nps.fetch_nps import (
     NpsRequestBudget,
@@ -24,7 +24,13 @@ from scripts.explore_sources.nps.fetch_nps import (
     park_codes_for_item,
     request_params,
 )
-from scripts.explore_sources.nps.import_nps import import_nps_fixture, nps_absolute_url, nps_designation
+from scripts.explore_sources.nps.import_nps import (
+    event_is_current,
+    import_nps_fixture,
+    nps_absolute_url,
+    nps_designation,
+    safe_reader_text,
+)
 from scripts.explore_sources.openbeta.import_openbeta import import_openbeta_fixture
 from scripts.explore_sources.osm.import_geofabrik import import_osm_fixture
 from scripts.explore_sources.ridb.fetch_ridb import fetch_ridb_facilities_to_cache, request_params as ridb_request_params
@@ -845,6 +851,91 @@ class ExploreSourcePipelineTests(unittest.TestCase):
         for term in ["camping", "hiking", "trailhead", "waterfalls", "fuel", "resupply", "k2", "hunza", "national park", "forest road", "ohv", "monuments", "boondocking", "gojal lake", "concordia approach", "rock climbing", "big wall"]:
             self.assertIn(term, blobs)
 
+    def test_nps_reader_text_preserves_visit_and_fractional_mile_spacing(self):
+        self.assertEqual(
+            safe_reader_text("Staff can help you plan your visit."),
+            "Staff can help you plan your visit.",
+        )
+        self.assertEqual(
+            safe_reader_text("Access is via a .6 mile portage or a .4 mile portage."),
+            "Access is via a .6 mile portage or a .4 mile portage.",
+        )
+
+    def test_nps_current_calendar_excludes_completed_events(self):
+        as_of = 1_785_704_580  # 2026-08-02 UTC
+        self.assertFalse(event_is_current({"dateend": "2026-08-01"}, as_of_timestamp=as_of))
+        self.assertTrue(event_is_current({"dateend": "2026-08-02"}, as_of_timestamp=as_of))
+        self.assertTrue(event_is_current({"datestart": "2026-08-03"}, as_of_timestamp=as_of))
+        self.assertTrue(event_is_current({"dateend": "not-a-date"}, as_of_timestamp=as_of))
+
+    def test_source_fixture_timestamp_preserves_cached_fetch_time(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            fixture = Path(tmp) / "source.json"
+            fixture.write_text(json.dumps({"fetched_at": 1234567890, "data": []}))
+            self.assertEqual(source_fixture_timestamp(fixture, fallback=999), 1234567890)
+
+            fixture.write_text(json.dumps({"data": []}))
+            self.assertEqual(source_fixture_timestamp(fixture, fallback=999), 999)
+
+    def test_duplicate_place_and_source_record_keep_latest_source_freshness(self):
+        older_place = ExplorePlaceV3(
+            id="place:nps:jame",
+            source_ids=["nps:jame"],
+            name="Historic Jamestowne",
+            category="park",
+            quality_score=1,
+            checked_at=100,
+            updated_at=100,
+            last_seen_at=100,
+        )
+        newer_place = ExplorePlaceV3(
+            id="place:nps:jame",
+            source_ids=["nps:jame"],
+            name="Historic Jamestowne",
+            category="park",
+            quality_score=1,
+            checked_at=200,
+            updated_at=200,
+            last_seen_at=200,
+        )
+        merged = dedupe_places([older_place, newer_place])[0]
+        self.assertEqual((merged.checked_at, merged.updated_at, merged.last_seen_at), (200, 200, 200))
+
+        records = dedupe_source_records([
+            SourceRecord(id="nps:jame", source="nps", source_id="jame", fetched_at=100, last_seen_at=100),
+            SourceRecord(id="nps:jame", source="nps", source_id="jame", fetched_at=200, last_seen_at=200),
+        ])
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].fetched_at, 200)
+
+    def test_cross_source_merge_does_not_relabel_primary_freshness(self):
+        official = ExplorePlaceV3(
+            id="place:nps:jame",
+            source_ids=["nps:jame"],
+            name="Historic Jamestowne",
+            category="park",
+            quality_score=10,
+            checked_at=100,
+            updated_at=100,
+            last_seen_at=100,
+        )
+        community = ExplorePlaceV3(
+            id="place:osm:jame",
+            source_ids=["osm:way:1"],
+            name="Historic Jamestowne",
+            category="park",
+            lat=37.2065,
+            lng=-76.7538,
+            quality_score=1,
+            checked_at=500,
+            updated_at=500,
+            last_seen_at=500,
+        )
+        official.lat = community.lat
+        official.lng = community.lng
+        merged = dedupe_places([official, community])[0]
+        self.assertEqual((merged.checked_at, merged.updated_at, merged.last_seen_at), (100, 100, 100))
+
     def test_command_writes_outputs(self):
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "explore_catalog_v3.json"
@@ -869,6 +960,7 @@ class ExploreSourcePipelineTests(unittest.TestCase):
                     "--trails-out", str(trails_out),
                     "--source-records-out", str(records_out),
                     "--imports-out", str(Path(tmp) / "imports"),
+                    "--snapshot-timestamp", "1234567890",
                 ]
                 self.assertEqual(main(), 0)
             finally:
@@ -877,7 +969,9 @@ class ExploreSourcePipelineTests(unittest.TestCase):
             self.assertTrue(trails_out.exists())
             self.assertTrue(records_out.exists())
             self.assertTrue(any((cache_dir / "nps").glob("*.json")))
-            self.assertEqual(json.loads(out.read_text())["schema_version"], 3)
+            output = json.loads(out.read_text())
+            self.assertEqual(output["schema_version"], 3)
+            self.assertEqual(output["generated_at"], 1234567890)
 
     def test_build_catalog_accepts_cached_live_nps_path(self):
         with tempfile.TemporaryDirectory() as tmp:

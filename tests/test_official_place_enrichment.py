@@ -1,8 +1,12 @@
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import dashboard.server as server
 import ingestors.nps as nps
+from config.settings import settings
+from db import store
 
 
 class OfficialPlaceEnrichmentTests(unittest.TestCase):
@@ -189,6 +193,16 @@ class OfficialPlaceEnrichmentTests(unittest.TestCase):
 
 
 class OfficialPlaceEndpointTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.temp_dir = tempfile.TemporaryDirectory()
+        self.original_db_path = settings.db_path
+        settings.db_path = str(Path(self.temp_dir.name) / "official-place-enrichment.db")
+        store.init_db()
+
+    def tearDown(self):
+        settings.db_path = self.original_db_path
+        self.temp_dir.cleanup()
+
     async def test_unreviewed_ridb_camp_detail_preserves_the_full_facility_payload(self):
         facility = {
             "id": "234059",

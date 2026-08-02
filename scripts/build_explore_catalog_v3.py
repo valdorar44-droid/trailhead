@@ -79,11 +79,12 @@ def build_catalog(
     wikidata_class_qids: list[str] | None = None,
     wikidata_country_qids: list[str] | None = None,
     wikidata_limit: int = 500,
+    snapshot_timestamp: int | None = None,
 ) -> tuple[list, list, list]:
     all_records = []
     all_places = []
     all_trails = []
-    fetched_at = int(time.time())
+    fetched_at = int(snapshot_timestamp or time.time())
     source_paths = resolve_input_paths(source_fixtures, source_urls, source="osm", cache_dir=source_cache_dir, headers=http_headers, timeout=http_timeout, force=force_fetch)
     ridb_paths = resolve_input_paths(ridb_fixtures, ridb_urls, source="ridb", cache_dir=source_cache_dir, headers=http_headers, timeout=http_timeout, force=force_fetch)
     if ridb_live:
@@ -167,10 +168,12 @@ def build_catalog(
     if not import_jobs:
         raise ValueError("at least one source fixture or source URL is required")
     for _source, fixture, importer in import_jobs:
-        records, places, trails = importer(fixture, fetched_at=fetched_at)
+        fixture_timestamp = source_fixture_timestamp(fixture, fallback=fetched_at)
+        records, places, trails = importer(fixture, fetched_at=fixture_timestamp)
         all_records.extend(records)
         all_places.extend(places)
         all_trails.extend(trails)
+    all_records = dedupe_source_records(all_records)
     places = dedupe_places(all_places)
     disambiguate_duplicate_display_names(places)
     link_trailheads_to_trails(places, all_trails)
@@ -184,6 +187,52 @@ def build_catalog(
     if import_out_dir:
         write_import_outputs(all_records, places, all_trails, import_out_dir)
     return all_records, places, all_trails
+
+
+def dedupe_source_records(records: list) -> list:
+    """Keep one stable source record per identity, preferring the freshest snapshot."""
+    output: list = []
+    index_by_id: dict[str, int] = {}
+    for record in records:
+        record_id = str(getattr(record, "id", "") or "").strip()
+        if not record_id or record_id not in index_by_id:
+            if record_id:
+                index_by_id[record_id] = len(output)
+            output.append(record)
+            continue
+        index = index_by_id[record_id]
+        current = output[index]
+        current_freshness = max(
+            int(getattr(current, "fetched_at", 0) or 0),
+            int(getattr(current, "last_seen_at", 0) or 0),
+        )
+        candidate_freshness = max(
+            int(getattr(record, "fetched_at", 0) or 0),
+            int(getattr(record, "last_seen_at", 0) or 0),
+        )
+        if candidate_freshness >= current_freshness:
+            output[index] = record
+    return output
+
+
+def source_fixture_timestamp(path: str | Path | None, *, fallback: int) -> int:
+    """Use a source snapshot's own fetch time without making rebuilds look fresh."""
+    if not path:
+        return int(fallback)
+    try:
+        payload = json.loads(Path(path).read_text())
+    except (OSError, ValueError, TypeError):
+        return int(fallback)
+    if not isinstance(payload, dict):
+        return int(fallback)
+    for key in ("fetched_at", "checked_at", "generated_at"):
+        try:
+            value = int(payload.get(key) or 0)
+        except (TypeError, ValueError):
+            value = 0
+        if value > 0:
+            return value
+    return int(fallback)
 
 
 def write_json(path: str | Path, payload: dict | list) -> None:
@@ -246,6 +295,12 @@ def main() -> int:
     parser.add_argument("--wikidata-class-qid", action="append", default=[], help="Wikidata class QID to fetch, e.g. Q35666 for glaciers. May be repeated.")
     parser.add_argument("--wikidata-country-qid", action="append", default=[], help="Wikidata country QID filter, e.g. Q843 for Pakistan. May be repeated.")
     parser.add_argument("--wikidata-limit", type=int, default=500, help="Maximum Wikidata SPARQL rows to cache/import.")
+    parser.add_argument(
+        "--snapshot-timestamp",
+        type=int,
+        default=None,
+        help="Stable build timestamp for reproducible cache-only candidates.",
+    )
     parser.add_argument("--out", default="dashboard/explore_catalog_v3.json")
     parser.add_argument("--trails-out", default="dashboard/explore_trail_geometries_v1.json")
     parser.add_argument("--source-records-out", default="dashboard/explore_source_records_sample.jsonl")
@@ -300,8 +355,9 @@ def main() -> int:
         wikidata_class_qids=args.wikidata_class_qid,
         wikidata_country_qids=args.wikidata_country_qid,
         wikidata_limit=args.wikidata_limit,
+        snapshot_timestamp=args.snapshot_timestamp,
     )
-    generated_at = int(time.time())
+    generated_at = int(args.snapshot_timestamp or time.time())
     catalog = {
         "schema_version": 3,
         "catalog_id": "trailhead-explore-v3-real-data-foundation",

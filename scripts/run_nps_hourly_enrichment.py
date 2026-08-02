@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Iterable
@@ -63,6 +64,7 @@ NPS_DESTINATION_MODULE_KEYS = (
 )
 
 AUDIT_ENV_BLOCKLIST = {
+    "NPS_API_KEY",
     "GEOAPIFY_API_KEY",
     "GOOGLE_API_KEY",
     "GOOGLE_MAPS_API_KEY",
@@ -127,6 +129,8 @@ def main() -> int:
     parser.add_argument("--run-audits", action="store_true", help="Run the existing read-only Explore QA after the candidate audit passes.")
     parser.add_argument("--candidate-root", default=str(DEFAULT_CANDIDATE_ROOT), help="Root directory for candidate-only catalog builds.")
     parser.add_argument("--candidate-run-id", default="", help="Optional stable candidate directory name for CI or review.")
+    parser.add_argument("--base-candidate-dir", default="", help="Accepted candidate whose non-selected records must remain unchanged.")
+    parser.add_argument("--replace-park-code", action="append", default=[], help="NPS parent code to replace when layering over --base-candidate-dir.")
     parser.add_argument("--use-railway-env", action=argparse.BooleanOptionalAction, default=True, help="Re-exec under railway run when NPS_API_KEY is not local.")
     parser.add_argument("--source-cache-dir", default="data/explore/source_cache")
     parser.add_argument("--state", default="data/explore/nps_enrichment_state.json")
@@ -157,19 +161,27 @@ def rerun_with_railway_env(args: argparse.Namespace) -> int:
 
 def run_batch(args: argparse.Namespace) -> int:
     cache_dir = Path(args.source_cache_dir)
-    state_path = Path(args.state)
+    state_path = validate_state_path(Path(args.state))
     targets = requested_or_default_targets(args.park_code, cache_dir)
     completed_before = completed_codes(cache_dir)
     if args.force_fetch:
         remaining = targets
     else:
         remaining = [code for code in targets if code not in completed_before]
-    selected = select_batch(
+    selected = [] if args.rebuild_cache_only else select_batch(
         remaining,
         max_api_calls=args.max_api_calls,
         estimated_calls_per_park=args.estimated_calls_per_park,
         batch_size=args.batch_size,
     )
+    replacement_codes = unique_codes(getattr(args, "replace_park_code", []))
+    if bool(getattr(args, "base_candidate_dir", "")) != bool(replacement_codes):
+        raise SystemExit("--base-candidate-dir and --replace-park-code must be used together.")
+    if not args.rebuild_cache_only and replacement_codes and set(replacement_codes) != set(selected):
+        raise SystemExit(
+            "Live NPS delta replacement codes must exactly match the parks selected for this fetch. "
+            "Use --rebuild-cache-only to layer a reviewed multi-run cache set."
+        )
     summary = {
         "selected_codes": selected,
         "max_api_calls": args.max_api_calls,
@@ -177,11 +189,16 @@ def run_batch(args: argparse.Namespace) -> int:
         "completed_before": len(completed_before),
         "remaining_before": len(remaining),
         "dry_run": args.dry_run,
+        "replacement_codes": sorted(replacement_codes),
     }
     print(json.dumps(summary, indent=2))
     if args.dry_run or (not selected and not args.rebuild_cache_only):
         write_state(state_path, args, selected, completed_before, request_count=0, status="dry_run" if args.dry_run else "complete")
         return 0
+
+    candidate_dir: Path | None = None
+    if not args.skip_rebuild:
+        candidate_dir = preflight_candidate_build(args)
 
     budget = NpsRequestBudget(args.max_api_calls)
     fetched: list[str] = []
@@ -232,12 +249,23 @@ def run_batch(args: argparse.Namespace) -> int:
                 fetched=fetched,
             )
             raise
+        if replacement_codes and set(fetched_codes) != set(replacement_codes):
+            raise SystemExit("Fetched NPS parks do not exactly match the requested delta replacement set.")
 
-    candidate_dir: Path | None = None
     audit_report: dict | None = None
     if not args.skip_rebuild:
-        candidate_dir = resolve_candidate_dir(Path(args.candidate_root), args.candidate_run_id)
-        outputs = rebuild_catalog(cache_dir, candidate_dir)
+        assert candidate_dir is not None
+        outputs = rebuild_catalog(
+            cache_dir,
+            candidate_dir,
+            base_candidate_dir=(
+                Path(args.base_candidate_dir)
+                if getattr(args, "base_candidate_dir", "")
+                else None
+            ),
+            replace_park_codes=getattr(args, "replace_park_code", []),
+            request_count=budget.used,
+        )
         audit_report = audit_candidate_catalog(
             **outputs,
             completed_park_codes=completed_codes(cache_dir),
@@ -259,7 +287,16 @@ def run_batch(args: argparse.Namespace) -> int:
         try:
             run_audits()
         except subprocess.CalledProcessError:
-            write_state(state_path, args, selected, completed_codes(cache_dir), request_count=budget.used, status="audit_failed", fetched=fetched)
+            write_state(
+                state_path,
+                args,
+                selected,
+                completed_codes(cache_dir),
+                request_count=budget.used,
+                status="audit_failed",
+                fetched=fetched,
+                candidate_dir=str(candidate_dir) if candidate_dir else "",
+            )
             raise
     completed_after = completed_codes(cache_dir)
     write_state(
@@ -352,45 +389,369 @@ def resolve_candidate_dir(root: Path, run_id: str = "", *, now: int | None = Non
         raise SystemExit("--candidate-run-id must be one directory name.")
     candidate = root / run_name
     resolved = (ROOT / candidate).resolve() if not candidate.is_absolute() else candidate.resolve()
-    dashboard = (ROOT / "dashboard").resolve()
-    if resolved == dashboard or dashboard in resolved.parents:
-        raise SystemExit("NPS candidates cannot be written inside dashboard/. Promote reviewed data separately.")
+    if is_protected_project_path(resolved):
+        raise SystemExit("NPS candidates cannot be written to a protected project path. Promote reviewed data separately.")
     return resolved
 
 
-def rebuild_catalog(cache_dir: Path, candidate_dir: Path) -> dict[str, Path]:
+def is_protected_project_path(path: Path) -> bool:
+    resolved = path.resolve()
+    parts = tuple(part.casefold() for part in resolved.parts)
+    if ".cursor" in parts:
+        return True
+    if len(parts) >= 2 and parts[-2:] == ("dashboard", "explore_serving_index_v2.json"):
+        return True
+    if len(parts) >= 2 and parts[-2:] == ("docs", "app-store-copy.md"):
+        return True
+    local_dashboard = (ROOT / "dashboard").resolve()
+    return resolved == local_dashboard or local_dashboard in resolved.parents
+
+
+def validate_state_path(path: Path) -> Path:
+    resolved = (ROOT / path).resolve() if not path.is_absolute() else path.resolve()
+    if is_protected_project_path(resolved):
+        raise SystemExit("NPS enrichment state cannot be written to a protected project path.")
+    return resolved
+
+
+def paths_overlap(first: Path, second: Path) -> bool:
+    a = first.resolve()
+    b = second.resolve()
+    return a == b or a in b.parents or b in a.parents
+
+
+def validate_base_candidate(base_dir: Path) -> dict:
+    base_dir = base_dir.resolve()
+    audit_path = base_dir / "audit-report.json"
+    if not audit_path.is_file():
+        raise SystemExit(f"Accepted NPS delta base has no audit report: {audit_path}")
+    try:
+        audit = json.loads(audit_path.read_text())
+    except (OSError, ValueError, TypeError) as exc:
+        raise SystemExit(f"Accepted NPS delta base audit is unreadable: {audit_path}") from exc
+    if not isinstance(audit, dict) or audit.get("promotion_ready") is not True:
+        raise SystemExit(f"Accepted NPS delta base did not pass its audit: {audit_path}")
+    artifacts = audit.get("artifacts") if isinstance(audit.get("artifacts"), dict) else {}
+    expected_files = {
+        "catalog": base_dir / "explore_catalog_v3.json",
+        "trails": base_dir / "explore_trail_geometries_v1.json",
+        "source_records": base_dir / "explore_source_records.jsonl",
+    }
+    verified: dict[str, str] = {}
+    for label, path in expected_files.items():
+        expected = artifacts.get(label) if isinstance(artifacts.get(label), dict) else {}
+        expected_hash = str(expected.get("sha256") or "").strip().lower()
+        if not path.is_file() or not expected_hash:
+            raise SystemExit(f"Accepted NPS delta base is missing audited {label} evidence.")
+        actual_hash = file_sha256(path)
+        if actual_hash != expected_hash:
+            raise SystemExit(f"Accepted NPS delta base {label} hash does not match its audit report.")
+        verified[label] = actual_hash
+    return {"release_id": base_dir.name, "artifact_hashes": verified}
+
+
+def preflight_candidate_build(args: argparse.Namespace) -> Path:
+    candidate_dir = resolve_candidate_dir(Path(args.candidate_root), args.candidate_run_id)
+    if candidate_dir.exists():
+        raise SystemExit(f"NPS candidate output already exists; choose a new run ID: {candidate_dir}")
+    replacement_codes = unique_codes(getattr(args, "replace_park_code", []))
+    base_raw = str(getattr(args, "base_candidate_dir", "") or "").strip()
+    if bool(base_raw) != bool(replacement_codes):
+        raise SystemExit("--base-candidate-dir and --replace-park-code must be used together.")
+    if base_raw:
+        base_dir = Path(base_raw).resolve()
+        if paths_overlap(base_dir, candidate_dir):
+            raise SystemExit("NPS delta base and candidate output must be separate sibling trees.")
+        validate_base_candidate(base_dir)
+    return candidate_dir
+
+
+def rebuild_catalog(
+    cache_dir: Path,
+    candidate_dir: Path,
+    *,
+    base_candidate_dir: Path | None = None,
+    replace_park_codes: list[str] | None = None,
+    request_count: int = 0,
+) -> dict[str, Path]:
     nps_fixtures = nps_fixture_args(cache_dir)
     if not nps_fixtures:
         raise SystemExit("No NPS fixtures found; cannot rebuild Explore catalog.")
-    candidate_dir.mkdir(parents=True, exist_ok=True)
-    catalog_path = candidate_dir / "explore_catalog_v3.json"
-    trails_path = candidate_dir / "explore_trail_geometries_v1.json"
-    source_records_path = candidate_dir / "explore_source_records.jsonl"
-    imports_path = candidate_dir / "imports"
-    cmd = [
-        sys.executable,
-        "scripts/build_explore_catalog_v3.py",
-        *BASE_CATALOG_ARGS,
-        *nps_fixtures,
-        *wikidata_fixture_args(cache_dir),
-        "--nps-rich",
-        "--source-cache-dir",
-        str(cache_dir),
-        "--out",
-        str(catalog_path),
-        "--trails-out",
-        str(trails_path),
-        "--source-records-out",
-        str(source_records_path),
-        "--imports-out",
-        str(imports_path),
-    ]
-    subprocess.run(cmd, cwd=ROOT, check=True)
+    wikidata_args = wikidata_fixture_args(cache_dir)
+    snapshot_timestamp = latest_source_snapshot_timestamp(
+        [*nps_fixtures[1::2], *wikidata_args[1::2]],
+    )
+    candidate_dir = candidate_dir.resolve()
+    candidate_dir.parent.mkdir(parents=True, exist_ok=True)
+    if candidate_dir.exists():
+        raise SystemExit(f"NPS candidate output already exists; choose a new run ID: {candidate_dir}")
+    codes = sorted({str(code).strip().lower() for code in (replace_park_codes or []) if str(code).strip()})
+    if bool(base_candidate_dir) != bool(codes):
+        raise SystemExit("--base-candidate-dir and --replace-park-code must be used together.")
+    base_evidence: dict | None = None
+    if base_candidate_dir:
+        base_candidate_dir = base_candidate_dir.resolve()
+        if paths_overlap(base_candidate_dir, candidate_dir):
+            raise SystemExit("NPS delta base and candidate output must be separate sibling trees.")
+        base_evidence = validate_base_candidate(base_candidate_dir)
+
+    build_parent = candidate_dir.parent
+    with tempfile.TemporaryDirectory(prefix=f".{candidate_dir.name}-stage-", dir=build_parent) as tmp:
+        stage_root = Path(tmp)
+        full_dir = stage_root / "full"
+        staged_candidate = stage_root / "candidate"
+        full_dir.mkdir()
+        staged_candidate.mkdir()
+        full_catalog = full_dir / "explore_catalog_v3.json"
+        full_trails = full_dir / "explore_trail_geometries_v1.json"
+        full_records = full_dir / "explore_source_records.jsonl"
+        cmd = [
+            sys.executable,
+            "scripts/build_explore_catalog_v3.py",
+            *BASE_CATALOG_ARGS,
+            *nps_fixtures,
+            *wikidata_args,
+            "--nps-rich",
+            "--snapshot-timestamp",
+            str(snapshot_timestamp),
+            "--source-cache-dir",
+            str(cache_dir),
+            "--out",
+            str(full_catalog),
+            "--trails-out",
+            str(full_trails),
+            "--source-records-out",
+            str(full_records),
+            "--imports-out",
+            str(full_dir / "imports"),
+        ]
+        subprocess.run(cmd, cwd=ROOT, check=True)
+        if base_candidate_dir:
+            layer_nps_candidate_delta(
+                base_dir=base_candidate_dir,
+                rebuilt_dir=full_dir,
+                candidate_dir=staged_candidate,
+                park_codes=codes,
+                request_count=request_count,
+                release_id=candidate_dir.name,
+                base_evidence=base_evidence,
+            )
+        else:
+            shutil.copy2(full_catalog, staged_candidate / "explore_catalog_v3.json")
+            shutil.copy2(full_trails, staged_candidate / "explore_trail_geometries_v1.json")
+            shutil.copy2(full_records, staged_candidate / "explore_source_records.jsonl")
+        os.replace(staged_candidate, candidate_dir)
     return {
-        "catalog_path": catalog_path,
-        "trails_path": trails_path,
-        "source_records_path": source_records_path,
+        "catalog_path": candidate_dir / "explore_catalog_v3.json",
+        "trails_path": candidate_dir / "explore_trail_geometries_v1.json",
+        "source_records_path": candidate_dir / "explore_source_records.jsonl",
     }
+
+
+def layer_nps_candidate_delta(
+    *,
+    base_dir: Path,
+    rebuilt_dir: Path,
+    candidate_dir: Path,
+    park_codes: list[str],
+    request_count: int = 0,
+    release_id: str = "",
+    base_evidence: dict | None = None,
+) -> None:
+    base_catalog_path = base_dir / "explore_catalog_v3.json"
+    rebuilt_catalog_path = rebuilt_dir / "explore_catalog_v3.json"
+    base_records_path = base_dir / "explore_source_records.jsonl"
+    rebuilt_records_path = rebuilt_dir / "explore_source_records.jsonl"
+    base_trails_path = base_dir / "explore_trail_geometries_v1.json"
+    rebuilt_trails_path = rebuilt_dir / "explore_trail_geometries_v1.json"
+    required = [
+        base_catalog_path,
+        rebuilt_catalog_path,
+        base_records_path,
+        rebuilt_records_path,
+        base_trails_path,
+        rebuilt_trails_path,
+    ]
+    missing = [str(path) for path in required if not path.is_file()]
+    if missing:
+        raise SystemExit(f"NPS delta candidate is missing required inputs: {', '.join(missing)}")
+
+    selected = set(park_codes)
+    if not selected:
+        raise SystemExit("NPS delta candidate requires at least one replacement park code.")
+    if paths_overlap(base_dir, candidate_dir):
+        raise SystemExit("NPS delta base and candidate output must not overlap.")
+    verified_base = base_evidence or validate_base_candidate(base_dir)
+    base_catalog = json.loads(base_catalog_path.read_text())
+    rebuilt_catalog = json.loads(rebuilt_catalog_path.read_text())
+    exact_selected_rows(
+        base_catalog.get("places") or [],
+        selected,
+        code_getter=nps_place_code,
+        label="base NPS parents",
+    )
+    rebuilt_by_code = exact_selected_rows(
+        rebuilt_catalog.get("places") or [],
+        selected,
+        code_getter=nps_place_code,
+        label="rebuilt NPS parents",
+    )
+    if set(rebuilt_by_code) != selected:
+        missing_codes = sorted(selected - set(rebuilt_by_code))
+        raise SystemExit(f"NPS delta rebuild is missing selected parks: {', '.join(missing_codes)}")
+
+    replaced: set[str] = set()
+    places: list[dict] = []
+    for place in base_catalog.get("places") or []:
+        code = nps_place_code(place)
+        if code in selected:
+            places.append(rebuilt_by_code[code])
+            replaced.add(code)
+        else:
+            places.append(place)
+    if replaced != selected:
+        missing_codes = sorted(selected - replaced)
+        raise SystemExit(f"NPS delta base is missing selected parks: {', '.join(missing_codes)}")
+    layered_catalog = {
+        **base_catalog,
+        "generated_at": rebuilt_catalog.get("generated_at"),
+        "count": len(places),
+        "places": places,
+    }
+    write_json(candidate_dir / "explore_catalog_v3.json", layered_catalog)
+
+    base_records = read_jsonl(base_records_path)
+    rebuilt_records = read_jsonl(rebuilt_records_path)
+    nps_record_code = lambda record: (
+        str(record.get("source_id") or "").strip().lower()
+        if isinstance(record, dict) and str(record.get("source") or "").strip().lower() == "nps"
+        else ""
+    )
+    exact_selected_rows(
+        base_records,
+        selected,
+        code_getter=nps_record_code,
+        label="base NPS source records",
+    )
+    rebuilt_record_by_code = exact_selected_rows(
+        rebuilt_records,
+        selected,
+        code_getter=nps_record_code,
+        label="rebuilt NPS source records",
+    )
+    if set(rebuilt_record_by_code) != selected:
+        missing_codes = sorted(selected - set(rebuilt_record_by_code))
+        raise SystemExit(f"NPS delta source records are missing selected parks: {', '.join(missing_codes)}")
+    layered_records: list[dict] = []
+    replaced_records: set[str] = set()
+    for record in base_records:
+        code = str(record.get("source_id") or "").strip().lower()
+        if str(record.get("source") or "").strip().lower() == "nps" and code in selected:
+            layered_records.append(rebuilt_record_by_code[code])
+            replaced_records.add(code)
+        else:
+            layered_records.append(record)
+    if replaced_records != selected:
+        missing_codes = sorted(selected - replaced_records)
+        raise SystemExit(f"NPS delta base source records are missing selected parks: {', '.join(missing_codes)}")
+    write_jsonl(candidate_dir / "explore_source_records.jsonl", layered_records)
+    shutil.copy2(base_trails_path, candidate_dir / "explore_trail_geometries_v1.json")
+
+    final_catalog_path = candidate_dir / "explore_catalog_v3.json"
+    final_records_path = candidate_dir / "explore_source_records.jsonl"
+    final_trails_path = candidate_dir / "explore_trail_geometries_v1.json"
+    manifest = {
+        "schema_version": 1,
+        "kind": "nps_parent_delta_candidate",
+        "release_id": release_id or candidate_dir.name,
+        "base_release_id": str(verified_base.get("release_id") or base_dir.name),
+        "input_artifacts": {
+            "base": verified_base.get("artifact_hashes") or {},
+            "rebuilt": {
+                "catalog": file_sha256(rebuilt_catalog_path),
+                "trails": file_sha256(rebuilt_trails_path),
+                "source_records": file_sha256(rebuilt_records_path),
+            },
+        },
+        "output_artifacts": {
+            "catalog": file_sha256(final_catalog_path),
+            "trails": file_sha256(final_trails_path),
+            "source_records": file_sha256(final_records_path),
+        },
+        "park_codes": park_codes,
+        "replaced_places": len(replaced),
+        "replaced_source_records": len(replaced_records),
+        "requests_used_this_run": int(request_count),
+        "network_mode": "cache_only" if int(request_count) == 0 else "live_fetch",
+        "stage": "internal",
+    }
+    write_json(candidate_dir / "delta-manifest.json", manifest)
+
+
+def nps_place_code(place: object) -> str:
+    if not isinstance(place, dict):
+        return ""
+    source_pack = place.get("source_pack") if isinstance(place.get("source_pack"), dict) else {}
+    return str(source_pack.get("nps_park_code") or "").strip().lower()
+
+
+def exact_selected_rows(
+    rows: Iterable[object],
+    selected: set[str],
+    *,
+    code_getter,
+    label: str,
+) -> dict[str, object]:
+    grouped: dict[str, list[object]] = {code: [] for code in selected}
+    for row in rows:
+        code = str(code_getter(row) or "").strip().lower()
+        if code in grouped:
+            grouped[code].append(row)
+    missing = sorted(code for code, matches in grouped.items() if not matches)
+    duplicates = sorted(code for code, matches in grouped.items() if len(matches) > 1)
+    if missing or duplicates:
+        details = []
+        if missing:
+            details.append(f"missing: {', '.join(missing)}")
+        if duplicates:
+            details.append(f"duplicates: {', '.join(duplicates)}")
+        raise SystemExit(f"NPS delta {label} must contain exactly one row per selected park ({'; '.join(details)}).")
+    return {code: matches[0] for code, matches in grouped.items()}
+
+
+def read_jsonl(path: Path) -> list[dict]:
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+
+def write_jsonl(path: Path, records: list[dict]) -> None:
+    atomic_write_text(
+        path,
+        "\n".join(json.dumps(record, ensure_ascii=False) for record in records) + ("\n" if records else ""),
+    )
+
+
+def file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def latest_source_snapshot_timestamp(paths: list[str]) -> int:
+    timestamps: list[int] = []
+    for raw_path in paths:
+        try:
+            payload = json.loads(Path(raw_path).read_text())
+        except (OSError, ValueError, TypeError):
+            continue
+        if not isinstance(payload, dict):
+            continue
+        try:
+            fetched_at = int(payload.get("fetched_at") or 0)
+        except (TypeError, ValueError):
+            fetched_at = 0
+        if fetched_at > 0:
+            timestamps.append(fetched_at)
+    if not timestamps:
+        raise SystemExit("Cached Explore sources have no stable fetched_at timestamp.")
+    return max(timestamps)
 
 
 def audit_candidate_catalog(
@@ -418,6 +779,20 @@ def audit_candidate_catalog(
     if not isinstance(trail_rows, list):
         errors.append({"code": "trail_rows", "message": "Trail candidate trails must be a list."})
         trail_rows = []
+
+    source_records = read_jsonl(source_records_path) if source_records_path.is_file() else []
+    nps_source_freshness: dict[str, set[int]] = {}
+    for record in source_records:
+        if str(record.get("source") or "").strip().lower() != "nps":
+            continue
+        code = str(record.get("source_id") or "").strip().lower()
+        if not code:
+            continue
+        try:
+            timestamp = int(record.get("fetched_at") or record.get("last_seen_at") or 0)
+        except (TypeError, ValueError):
+            timestamp = 0
+        nps_source_freshness.setdefault(code, set()).add(timestamp)
 
     ids: set[str] = set()
     nps_codes: set[str] = set()
@@ -489,7 +864,13 @@ def audit_candidate_catalog(
         if not str(source_pack.get("license") or "").strip():
             errors.append({"code": "source_license", "message": f"NPS place lacks source licensing: {place_id}"})
 
-        updated_at = int(place.get("updated_at") or place.get("last_seen_at") or 0)
+        source_timestamps = nps_source_freshness.get(nps_code, set())
+        if len(source_timestamps) != 1:
+            errors.append({
+                "code": "nps_source_freshness",
+                "message": f"NPS place requires exactly one source freshness record: {place_id}",
+            })
+        updated_at = next(iter(source_timestamps)) if len(source_timestamps) == 1 else 0
         age = max(0, checked_at - updated_at) if updated_at else None
         if age is None or age > 180 * 86400:
             stale_editorial += 1
@@ -541,10 +922,7 @@ def audit_candidate_catalog(
             "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
         }
 
-    source_record_count = 0
-    if source_records_path.exists():
-        with source_records_path.open("r", encoding="utf-8") as handle:
-            source_record_count = sum(1 for line in handle if line.strip())
+    source_record_count = len(source_records)
 
     report = {
         "schema_version": 1,
@@ -582,8 +960,28 @@ def audit_candidate_catalog(
 
 
 def write_json(path: Path, payload: dict) -> None:
+    atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
+
+
+def atomic_write_text(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    temp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            prefix=f".{path.name}.",
+            delete=False,
+        ) as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+            temp_path = Path(handle.name)
+        os.replace(temp_path, path)
+    finally:
+        if temp_path is not None and temp_path.exists():
+            temp_path.unlink()
 
 
 def nps_fixture_args(cache_dir: Path) -> list[str]:
@@ -650,6 +1048,11 @@ def write_state(
         "max_api_calls": args.max_api_calls,
         "estimated_calls_per_park": args.estimated_calls_per_park,
         "selected_codes": selected,
+        "replacement_codes": sorted({
+            str(code).strip().lower()
+            for code in getattr(args, "replace_park_code", [])
+            if str(code).strip()
+        }),
         "nps_requests_used": request_count,
         "fetched": fetched or [],
         "candidate_dir": candidate_dir,
@@ -657,8 +1060,7 @@ def write_state(
         "completed_count": len(completed),
         "remaining_codes": [code for code in targets if code not in completed],
     }
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2) + "\n")
+    atomic_write_text(path, json.dumps(payload, indent=2) + "\n")
 
 
 class single_process_lock:

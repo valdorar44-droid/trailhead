@@ -80,6 +80,7 @@ def should_merge(a: ExplorePlaceV3, b: ExplorePlaceV3) -> bool:
 
 
 def merge_places(a: ExplorePlaceV3, b: ExplorePlaceV3) -> ExplorePlaceV3:
+    shares_source_identity = same_source_key(a, b)
     primary, secondary = (a, b) if a.quality_score >= b.quality_score else (b, a)
     primary.source_ids = sorted_unique([*primary.source_ids, *secondary.source_ids])
     primary.sources = [*primary.sources, *[src for src in secondary.sources if src not in primary.sources]]
@@ -88,6 +89,10 @@ def merge_places(a: ExplorePlaceV3, b: ExplorePlaceV3) -> ExplorePlaceV3:
     primary.search_aliases = sorted_unique([*primary.search_aliases, *secondary.search_aliases])
     primary.media = [*primary.media, *[item for item in secondary.media if item not in primary.media]]
     primary.source_pack = merge_source_pack(primary.source_pack, secondary.source_pack)
+    if shares_source_identity:
+        primary.last_seen_at = max(primary.last_seen_at, secondary.last_seen_at)
+        primary.updated_at = max(primary.updated_at, secondary.updated_at)
+        primary.checked_at = max(primary.checked_at, secondary.checked_at)
     primary.linked_trail_ids = sorted_unique([*primary.linked_trail_ids, *secondary.linked_trail_ids])
     primary.linked_place_ids = sorted_unique([*primary.linked_place_ids, *secondary.linked_place_ids])
     if not primary.summary:

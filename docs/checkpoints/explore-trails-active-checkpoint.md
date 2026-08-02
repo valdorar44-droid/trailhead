@@ -1,6 +1,14 @@
 # Trailhead Explore and Community Trails Active Checkpoint
 
-Last updated: 2026-08-01 14:47 CDT (America/Winnipeg)
+Last updated: 2026-08-01 19:25 CDT (America/Winnipeg)
+
+## Current continuation pointer
+
+Read [`trailhead-1.0.11-production-and-explore-gap.md`](./trailhead-1.0.11-production-and-explore-gap.md)
+first. Production OTA and matching Railway backend deployment are complete at
+release source `c1155793`. Feature HEAD `db2add34` contains the accepted cached
+BLM Moab reader-depth packet. Continue only with the next explicit Explore
+data-gap audit recorded there; do not repeat release work or completed crawls.
 
 ## Resume protocol
 

@@ -121,3 +121,47 @@ promotion.
   Android Auto, Memory, NPS research or screenshot work.
 - Do not publish these children into the public catalog.
 - Do not overwrite or stage the user-owned Explore serving index.
+
+## Deployment and bounded Android closeout — 2026-08-01
+
+- Integrated main HEAD:
+  `4baf89b7a2c1fccec7b5b66d90cb711a850ed6c8`
+- Railway deployment:
+  `ccbd02db-1cf9-4a09-bf39-05ca493a54ad`
+- Railway terminal status: `SUCCESS`
+- Image digest:
+  `sha256:9478f7371380af4a5642e0eb05b74ebf95660cd332d2c0eb7c90f9d8f4a44b70`
+- Production API health: `ok`
+- Header-only internal-preview request: `401`, confirming the preview header is
+  not a credential.
+- Device: Samsung SM-A326U1, package `com.trailhead.app`, existing signed-in
+  preview account preserved.
+- Evidence directory:
+  `C:\Users\User\Documents\Codex\evidence\trailhead\explore-nps-child-b2-4baf89b7`
+
+The bounded Android proof searched the newly integrated official NPS child
+`Dog Canyon Campground`, selected the exact internal result, opened the shared
+campground Peek over the Map, expanded to the full details surface, and
+returned to the invoking Explore state. The sheet remained nonblank and
+identity-stable; the focused logcat error capture was empty. No provider fetch,
+catalog promotion, app reset, download mutation, or broad crawl occurred.
+
+Representative evidence hashes:
+
+- Search result:
+  `bb0b118b955448fcb869a7161dc79c1b6fff6920180a37d6f5619042aed1ac01`
+- Campground Peek:
+  `7cf3a6e37c167a7587aa4cd860fb5c4d75632e81e1c48ea6c8f3c45f7f2e4c76`
+- Full campground detail:
+  `d5102afc51bfb9a9634e7f4649a96557e246c6da083cf4fa8a92a02fa5c3aa40`
+- Focused logcat error capture:
+  `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
+
+Open P0/P1: none. A generic parent-park search selection remained on Explore
+during the bounded check; this matches the already-recorded direct-search
+return P2 and is not reopened in this data-only packet.
+
+The next untouched data-depth packet is Batch 3 using the audited candidate
+set `bibe`, `ever`, `cuva`, `havo`, and `buff`. It must first resolve the
+documented semantic duplicate, classification, copy, and source-link review
+gates. Do not fetch providers or promote publicly without a new checkpoint.

@@ -1,0 +1,278 @@
+{
+  "schema_version": 1,
+  "batch_id": "post-b08-nps-child-depth-b3",
+  "generated_at": 1785553072,
+  "requests_used": 0,
+  "live_catalog_modified": false,
+  "live_serving_index_modified": false,
+  "promotion_ready": false,
+  "destinations": [
+    {
+      "park_code": "bibe",
+      "name": "Big Bend National Park",
+      "accepted": 30,
+      "module_counts": {
+        "stay": 4,
+        "visitor": 5,
+        "do": 4,
+        "trails": 11,
+        "see": 6
+      },
+      "cached_counts": {
+        "campgrounds": 4,
+        "visitorcenters": 5,
+        "thingstodo": 19,
+        "places": 100
+      },
+      "parent_hub_id": "place:nps:bibe",
+      "source_fetched_at": 1785519805,
+      "accepted_before_dedupe": 30
+    },
+    {
+      "park_code": "ever",
+      "name": "Everglades National Park",
+      "accepted": 27,
+      "module_counts": {
+        "stay": 3,
+        "visitor": 4,
+        "do": 3,
+        "trails": 17
+      },
+      "cached_counts": {
+        "campgrounds": 2,
+        "visitorcenters": 4,
+        "thingstodo": 10,
+        "places": 92
+      },
+      "parent_hub_id": "place:nps:ever",
+      "source_fetched_at": 1785519778,
+      "accepted_before_dedupe": 27
+    },
+    {
+      "park_code": "cuva",
+      "name": "Cuyahoga Valley National Park",
+      "accepted": 21,
+      "module_counts": {
+        "visitor": 3,
+        "trails": 8,
+        "do": 2,
+        "see": 8
+      },
+      "cached_counts": {
+        "campgrounds": 0,
+        "visitorcenters": 3,
+        "thingstodo": 18,
+        "places": 97
+      },
+      "parent_hub_id": "place:nps:cuva",
+      "source_fetched_at": 1785529778,
+      "accepted_before_dedupe": 21
+    },
+    {
+      "park_code": "havo",
+      "name": "Hawaiʻi Volcanoes National Park",
+      "accepted": 25,
+      "module_counts": {
+        "stay": 2,
+        "visitor": 2,
+        "trails": 6,
+        "do": 2,
+        "see": 13
+      },
+      "cached_counts": {
+        "campgrounds": 2,
+        "visitorcenters": 2,
+        "thingstodo": 24,
+        "places": 67
+      },
+      "parent_hub_id": "place:nps:havo",
+      "source_fetched_at": 1785519797,
+      "accepted_before_dedupe": 26
+    },
+    {
+      "park_code": "buff",
+      "name": "Buffalo National River",
+      "accepted": 28,
+      "module_counts": {
+        "stay": 11,
+        "visitor": 3,
+        "do": 2,
+        "trails": 10,
+        "see": 2
+      },
+      "cached_counts": {
+        "campgrounds": 11,
+        "visitorcenters": 3,
+        "thingstodo": 37,
+        "places": 10
+      },
+      "parent_hub_id": "place:nps:buff",
+      "source_fetched_at": 1785523742,
+      "accepted_before_dedupe": 28
+    }
+  ],
+  "counts": {
+    "base_places": 993,
+    "sidecar_places": 131,
+    "destination_count": 5
+  },
+  "reader_link_actions": {
+    "kept_item_url": 120,
+    "used_parent_nps_url": 9,
+    "upgraded_nps_https": 3
+  },
+  "media_policy": {
+    "candidate_images": 131,
+    "approved_images": 111,
+    "stripped_images": 20,
+    "policy": "exact cached NPS media with NPS-prefixed credit only"
+  },
+  "rendered_rail_dedupe": {
+    "rule": "one stable child per parent, rendered module, normalized title, and 5-decimal point; endpoint priority then stable ID",
+    "dropped_count": 0,
+    "records": []
+  },
+  "internal_preview_contract": {
+    "stage": "internal",
+    "requires_authenticated_admin": true,
+    "required_header": "X-Trailhead-Explore-Preview: internal",
+    "header_is_not_a_credential": true
+  },
+  "parent_page_source_fallbacks": [
+    {
+      "place_id": "place:nps-child:buff:campgrounds:739ce881-991f-42ce-885b-3f0410d82ed5",
+      "name": "South Maumee",
+      "endpoint": "campgrounds",
+      "parent_hub_id": "place:nps:buff",
+      "official_url": "https://www.nps.gov/buff/index.htm",
+      "reason": "The cached official child record has no reader URL; use the official parent park page."
+    },
+    {
+      "place_id": "place:nps-child:buff:campgrounds:b94fe8b9-2ef1-4464-a2e1-5803c9ae7648",
+      "name": "Woolum",
+      "endpoint": "campgrounds",
+      "parent_hub_id": "place:nps:buff",
+      "official_url": "https://www.nps.gov/buff/index.htm",
+      "reason": "The cached official child record has no reader URL; use the official parent park page."
+    },
+    {
+      "place_id": "place:nps-child:buff:visitorcenters:230e3359-63ab-474b-a11c-d2726f1a1fc9",
+      "name": "Tyler Bend Visitor Center",
+      "endpoint": "visitorcenters",
+      "parent_hub_id": "place:nps:buff",
+      "official_url": "https://www.nps.gov/buff/index.htm",
+      "reason": "The cached official child record has no reader URL; use the official parent park page."
+    },
+    {
+      "place_id": "place:nps-child:buff:visitorcenters:9e702f42-1153-4c94-8c88-e2d802a13df1",
+      "name": "Buffalo Point Visitor Contact Station",
+      "endpoint": "visitorcenters",
+      "parent_hub_id": "place:nps:buff",
+      "official_url": "https://www.nps.gov/buff/index.htm",
+      "reason": "The cached official child record has no reader URL; use the official parent park page."
+    },
+    {
+      "place_id": "place:nps-child:cuva:visitorcenters:18c3cbc0-556a-4e4f-8486-16723df55255",
+      "name": "Canal Exploration Center",
+      "endpoint": "visitorcenters",
+      "parent_hub_id": "place:nps:cuva",
+      "official_url": "https://www.nps.gov/cuva/index.htm",
+      "reason": "The cached official child record has no reader URL; use the official parent park page."
+    },
+    {
+      "place_id": "place:nps-child:cuva:visitorcenters:aed09a89-ca84-4cae-9949-9591688b05fc",
+      "name": "Boston Mill Visitor Center",
+      "endpoint": "visitorcenters",
+      "parent_hub_id": "place:nps:cuva",
+      "official_url": "https://www.nps.gov/cuva/index.htm",
+      "reason": "The cached official child record has no reader URL; use the official parent park page."
+    },
+    {
+      "place_id": "place:nps-child:cuva:visitorcenters:e92ea080-1dab-47c5-b8c5-4a21533a6fe0",
+      "name": "Hunt House",
+      "endpoint": "visitorcenters",
+      "parent_hub_id": "place:nps:cuva",
+      "official_url": "https://www.nps.gov/cuva/index.htm",
+      "reason": "The cached official child record has no reader URL; use the official parent park page."
+    },
+    {
+      "place_id": "place:nps-child:ever:campgrounds:4f5128ad-453f-4b40-91f0-388fd662d110",
+      "name": "Flamingo Campground",
+      "endpoint": "campgrounds",
+      "parent_hub_id": "place:nps:ever",
+      "official_url": "https://www.nps.gov/ever/index.htm",
+      "reason": "The cached official child record has no reader URL; use the official parent park page."
+    },
+    {
+      "place_id": "place:nps-child:havo:visitorcenters:7fb37395-4782-401e-997d-88b13870f7c9",
+      "name": "Kahuku Visitor Contact Station",
+      "endpoint": "visitorcenters",
+      "parent_hub_id": "place:nps:havo",
+      "official_url": "https://www.nps.gov/havo/index.htm",
+      "reason": "The cached official child record has no reader URL; use the official parent park page."
+    }
+  ],
+  "semantic_dedupe": {
+    "rule": "reviewed exact parent and normalized-title decisions only",
+    "dropped_count": 1,
+    "records": [
+      {
+        "parent_hub_id": "place:nps:havo",
+        "title": "Devastation Trail",
+        "kept_id": "place:nps-child:havo:places:7696444d-7626-4fa5-b2c0-d0ab15951dda",
+        "kept_endpoint": "places",
+        "kept_media_count": 1,
+        "dropped": [
+          {
+            "id": "place:nps-child:havo:thingstodo:c59589f9-5f4b-4629-8655-58384e69bc60",
+            "endpoint": "thingstodo",
+            "media_count": 1
+          }
+        ],
+        "reason": "The official place record is the source-backed trailhead, has an exact-page rights-approved image, and represents the same named reader destination as the uncredited activity record."
+      }
+    ]
+  },
+  "shared_coordinate_review": [
+    {
+      "place_ids": [
+        "place:nps-child:ever:thingstodo:019c3d0f-0ad1-4a1b-8e5f-601a65918303",
+        "place:nps-child:ever:thingstodo:bc316cc1-cf34-4e95-99aa-66e4752d5727"
+      ],
+      "decision": "keep_distinct",
+      "reason": "Birding and walking are distinct official activities sharing the Anhinga Trail access point."
+    },
+    {
+      "place_ids": [
+        "place:nps-child:ever:thingstodo:9cd88771-f8f1-4db0-939c-155c8f5edbbb",
+        "place:nps-child:ever:visitorcenters:52d781e2-1439-4202-b6ce-8d2d8f30757e"
+      ],
+      "decision": "keep_distinct",
+      "reason": "The visitor center and biking activity are distinct records sharing the Shark Valley access point."
+    },
+    {
+      "place_ids": [
+        "place:nps-child:bibe:thingstodo:8e7e6012-1fa7-4165-91a6-e3e2f12f5a0f",
+        "place:nps-child:bibe:visitorcenters:c5f00e54-bf45-46e1-8acf-bbe615867b78"
+      ],
+      "decision": "keep_distinct",
+      "reason": "The visitor center and passport-stamp activity are distinct records at Panther Junction."
+    },
+    {
+      "place_ids": [
+        "place:nps-child:cuva:thingstodo:73300e7a-4dd9-4e33-b605-12442ff36818",
+        "place:nps-child:cuva:visitorcenters:aed09a89-ca84-4cae-9949-9591688b05fc"
+      ],
+      "decision": "keep_distinct",
+      "reason": "The Boston Mill facility and its visit activity are separate official endpoint records."
+    },
+    {
+      "place_ids": [
+        "place:nps-child:cuva:thingstodo:5acd5e72-ada8-4b57-9052-f454e23144d4",
+        "place:nps-child:cuva:visitorcenters:18c3cbc0-556a-4e4f-8486-16723df55255"
+      ],
+      "decision": "keep_distinct",
+      "reason": "The Canal Exploration Center facility and visit activity are separate official endpoint records."
+    }
+  ]
+}

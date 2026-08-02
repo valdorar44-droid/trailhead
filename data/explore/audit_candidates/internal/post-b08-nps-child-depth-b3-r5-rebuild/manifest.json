@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "batch_id": "post-b08-nps-child-depth-b3",
+  "generated_at": 1785553072,
+  "requests_used": 0,
+  "live_catalog_modified": false,
+  "live_serving_index_modified": false,
+  "promotion_ready": false,
+  "inputs": {
+    "base_catalog": {
+      "path": "base_catalog/explore_catalog_v3_review.json",
+      "bytes": 28099396,
+      "sha256": "462ab1a8313e84073b2ce5347411b25771c19ebd17079b00227deb922e18a080"
+    },
+    "fixtures": {
+      "bibe": {
+        "path": "nps/bibe/source-pack_codes-bibe_with-places-thingstodo-campgrounds-visitorcenters-alerts-articles-events-tours-parkin_max-500.json",
+        "bytes": 1469050,
+        "sha256": "fe9aac8ce5049f1cc1a00551cc10ccf5bc2ac9253839045e05f68dd05e42a66d"
+      },
+      "ever": {
+        "path": "nps/ever/source-pack_codes-ever_with-places-thingstodo-campgrounds-visitorcenters-alerts-articles-events-tours-parkin_max-500.json",
+        "bytes": 1025503,
+        "sha256": "f2b8fe33083fb19c30cecf45010567635d458df37eeca49cd5ee3db7046bc783"
+      },
+      "cuva": {
+        "path": "nps/cuva/source-pack_codes-cuva_with-places-thingstodo-campgrounds-visitorcenters-alerts-articles-events-tours-parkin_max-500.json",
+        "bytes": 1798699,
+        "sha256": "575005f160ad7d4417477d88f6ff19f7f3596c01b83bf142f3ce5021bfe6c6bc"
+      },
+      "havo": {
+        "path": "nps/havo/source-pack_codes-havo_with-places-thingstodo-campgrounds-visitorcenters-alerts-articles-events-tours-parkin_max-500.json",
+        "bytes": 1011517,
+        "sha256": "818a748b14a25b7aa4efeb35624b61076d4bcbba79c7bd15b354bb06b7a62985"
+      },
+      "buff": {
+        "path": "nps/buff/source-pack_codes-buff_with-places-thingstodo-campgrounds-visitorcenters-alerts-articles-events-tours-parkin_max-500.json",
+        "bytes": 762216,
+        "sha256": "91e27db7598fa1202e03e2152215545ef0f614afccc13c748f95802891499baf"
+      }
+    }
+  },
+  "artifacts": [
+    {
+      "path": "audit.json",
+      "bytes": 2142,
+      "sha256": "d811752e6975efd16a4327567340b9c8dcfff2c87130fb3729d982d77dad47a6"
+    },
+    {
+      "path": "nps_child_depth_v1.json",
+      "bytes": 945095,
+      "sha256": "db4f0b94bcde127a903f4db9c1ef91b43d98149c72e016c2b47b8a0ce051ced5"
+    },
+    {
+      "path": "review.json",
+      "bytes": 9581,
+      "sha256": "7ae2871be90b5e628e4a719202c45e700eaeb842e8451cbe20cc4893c687d348"
+    }
+  ]
+}

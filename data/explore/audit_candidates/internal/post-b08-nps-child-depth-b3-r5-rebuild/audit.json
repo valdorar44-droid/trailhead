@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "batch_id": "post-b08-nps-child-depth-b3",
+  "intended_grain": "one approved cached NPS child record per stable place ID",
+  "count": 131,
+  "destination_counts": {
+    "bibe": 30,
+    "ever": 27,
+    "cuva": 21,
+    "havo": 25,
+    "buff": 28
+  },
+  "module_counts": {
+    "stay": 20,
+    "visitor": 17,
+    "do": 13,
+    "trails": 52,
+    "see": 29
+  },
+  "media_count": 111,
+  "unique_ids": true,
+  "unique_title_scopes": true,
+  "errors": [],
+  "warnings": [
+    {
+      "code": "shared_coordinate_clusters",
+      "count": 5,
+      "samples": [
+        {
+          "lat": 25.3821,
+          "lng": -80.6087,
+          "place_ids": [
+            "place:nps-child:ever:thingstodo:019c3d0f-0ad1-4a1b-8e5f-601a65918303",
+            "place:nps-child:ever:thingstodo:bc316cc1-cf34-4e95-99aa-66e4752d5727"
+          ]
+        },
+        {
+          "lat": 25.757,
+          "lng": -80.7654,
+          "place_ids": [
+            "place:nps-child:ever:visitorcenters:52d781e2-1439-4202-b6ce-8d2d8f30757e",
+            "place:nps-child:ever:thingstodo:9cd88771-f8f1-4db0-939c-155c8f5edbbb"
+          ]
+        },
+        {
+          "lat": 29.3278,
+          "lng": -103.2059,
+          "place_ids": [
+            "place:nps-child:bibe:visitorcenters:c5f00e54-bf45-46e1-8acf-bbe615867b78",
+            "place:nps-child:bibe:thingstodo:8e7e6012-1fa7-4165-91a6-e3e2f12f5a0f"
+          ]
+        },
+        {
+          "lat": 41.2626,
+          "lng": -81.5603,
+          "place_ids": [
+            "place:nps-child:cuva:visitorcenters:aed09a89-ca84-4cae-9949-9591688b05fc",
+            "place:nps-child:cuva:thingstodo:73300e7a-4dd9-4e33-b605-12442ff36818"
+          ]
+        },
+        {
+          "lat": 41.3726,
+          "lng": -81.613,
+          "place_ids": [
+            "place:nps-child:cuva:visitorcenters:18c3cbc0-556a-4e4f-8486-16723df55255",
+            "place:nps-child:cuva:thingstodo:5acd5e72-ada8-4b57-9052-f454e23144d4"
+          ]
+        }
+      ],
+      "detail": "Distinct official child records can share an access point; review but do not merge by coordinate alone."
+    }
+  ],
+  "passed": true
+}

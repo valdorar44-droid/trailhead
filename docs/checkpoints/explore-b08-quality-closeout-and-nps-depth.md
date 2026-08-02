@@ -6,6 +6,7 @@ Checkpoint created 2026-08-01 19:47 CDT (America/Winnipeg).
 
 - Branch: `feat/trailhead-1.0.10-overhaul`
 - Pre-change HEAD: `c121153b3018299f712f009d5e6af670080aecf9`
+- Implementation commit: `3544360475df8ce53e7f1a18de673b56eff80eef`
 - Protected Explore index SHA-256: `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`
 - Protected App Store copy SHA-256: `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`
 - Never stage `.cursor/`, `dashboard/explore_serving_index_v2.json`, or

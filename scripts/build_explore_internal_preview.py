@@ -34,6 +34,18 @@ DEFAULT_COMBINED_CATALOG_REVIEW = ROOT / f"data/explore/audit_candidates/combine
 DEFAULT_COMBINED_PROMOTION_REVIEW = ROOT / f"data/explore/audit_candidates/combined/{ACCEPTED_COMBINED_REVISION}/promotion_review.json"
 DEFAULT_OUTPUT = ROOT / "dashboard/explore_internal_preview_v1.json"
 DEFAULT_NPS_CACHE = ROOT / "data/explore/source_cache/nps"
+ACCEPTED_NPS_CHILD_BATCH = "post-b08-nps-child-depth-b1-r7"
+DEFAULT_NPS_CHILD_DIR = ROOT / f"data/explore/audit_candidates/internal/{ACCEPTED_NPS_CHILD_BATCH}"
+DEFAULT_NPS_CHILDREN = DEFAULT_NPS_CHILD_DIR / "nps_child_depth_v1.json"
+DEFAULT_NPS_CHILD_MANIFEST = DEFAULT_NPS_CHILD_DIR / "manifest.json"
+DEFAULT_NPS_CHILD_AUDIT = DEFAULT_NPS_CHILD_DIR / "audit.json"
+DEFAULT_NPS_CHILD_REVIEW = DEFAULT_NPS_CHILD_DIR / "review.json"
+ACCEPTED_NPS_CHILD_HASHES = {
+    "manifest.json": "6956e4b8bdc238501feee49215470e6d0a8785be31188fbddcc2abe7c196266d",
+    "nps_child_depth_v1.json": "66abda311a4734cc05bf3b4d9c99834cd5d3ec119e5a295e68b6cb7a3199ade9",
+    "audit.json": "b5fc24c29e376a20d694c339d23c636c3937092669e52d998795a0981d251923",
+    "review.json": "8ecfe03c074dd0da8a753693db801651d73b08610af82a009a7fcde1b376aee1",
+}
 DEFAULT_AGENCY_IDS = (
     "place:usfs:9006",
     "place:blm:moab-field-office",
@@ -215,6 +227,83 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _validated_nps_child_depth(
+    child_path: Path,
+    manifest_path: Path,
+    audit_path: Path,
+    review_path: Path,
+) -> tuple[list[dict], dict]:
+    """Load one immutable, audited child batch without treating it as promotable."""
+    accepted_paths = {
+        DEFAULT_NPS_CHILDREN.resolve(), DEFAULT_NPS_CHILD_MANIFEST.resolve(),
+        DEFAULT_NPS_CHILD_AUDIT.resolve(), DEFAULT_NPS_CHILD_REVIEW.resolve(),
+    }
+    for path in (child_path, manifest_path, audit_path, review_path):
+        if not path.is_file():
+            raise SystemExit(f"NPS child-depth artifact is missing: {path}")
+        accepted_hash = ACCEPTED_NPS_CHILD_HASHES.get(path.name) if path.resolve() in accepted_paths else None
+        if accepted_hash and _sha256(path) != accepted_hash:
+            raise SystemExit(f"NPS child-depth accepted hash mismatch: {path.name}")
+    manifest = json.loads(manifest_path.read_text())
+    audit = json.loads(audit_path.read_text())
+    review = json.loads(review_path.read_text())
+    if any(str(item.get("batch_id") or "") != "post-b08-nps-child-depth-b1" for item in (manifest, audit, review)):
+        raise SystemExit("NPS child-depth batch identity differs from accepted r7")
+    if manifest.get("promotion_ready") is not False or review.get("promotion_ready") is not False:
+        raise SystemExit("NPS child-depth batch must remain an internal, non-promotable candidate")
+    for payload in (manifest, review):
+        if payload.get("live_serving_index_modified") is not False:
+            raise SystemExit("NPS child-depth batch altered the live serving index")
+        if payload.get("live_catalog_modified") not in {None, False}:
+            raise SystemExit("NPS child-depth batch altered the live catalog")
+    if audit.get("passed") is not True or audit.get("errors") not in ([], None):
+        raise SystemExit("NPS child-depth audit did not pass")
+    declared = {
+        str(item.get("path") or ""): item
+        for item in manifest.get("artifacts") or []
+        if isinstance(item, dict)
+    }
+    for path in (child_path, audit_path, review_path):
+        entry = declared.get(path.name)
+        if not entry or str(entry.get("sha256") or "") != _sha256(path):
+            raise SystemExit(f"NPS child-depth manifest hash mismatch: {path.name}")
+        if int(entry.get("bytes") or -1) != path.stat().st_size:
+            raise SystemExit(f"NPS child-depth manifest size mismatch: {path.name}")
+    payload = json.loads(child_path.read_text())
+    children = [item for item in payload.get("places") or [] if isinstance(item, dict)]
+    ids = [str(item.get("id") or "") for item in children]
+    if (
+        payload.get("stage") != "internal"
+        or int(payload.get("count") or -1) != len(children)
+        or int(audit.get("count") or -1) != len(children)
+        or not children
+        or any(not item_id for item_id in ids)
+        or len(ids) != len(set(ids))
+    ):
+        raise SystemExit("NPS child-depth candidate has invalid count or stable identities")
+    normalized: list[dict] = []
+    for child in children:
+        item = json.loads(json.dumps(child))
+        if str(item.get("canonical_role") or "") != "child" or not str(item.get("parent_hub_id") or ""):
+            raise SystemExit(f"NPS child-depth record is not parent-bound: {item.get('id')}")
+        item["hidden_from_featured"] = True
+        normalized.append(item)
+    return normalized, {
+        "batch_id": str(payload.get("batch_id") or manifest.get("batch_id") or ""),
+        "manifest_path": str(manifest_path.relative_to(ROOT)),
+        "manifest_sha256": _sha256(manifest_path),
+        "artifact_path": str(child_path.relative_to(ROOT)),
+        "artifact_sha256": _sha256(child_path),
+        "audit_path": str(audit_path.relative_to(ROOT)),
+        "audit_sha256": _sha256(audit_path),
+        "review_path": str(review_path.relative_to(ROOT)),
+        "review_sha256": _sha256(review_path),
+        "promotion_ready": False,
+        "live_serving_index_modified": False,
+        "audit_passed": True,
+    }
+
+
 def _write_payload_atomically(
     output: Path,
     payload: dict[str, Any],
@@ -285,6 +374,16 @@ def build(
     combined_catalog_review_path = combined_manifest_path.parent / "catalog_merge_review.json"
     combined_promotion_review_path = combined_manifest_path.parent / "promotion_review.json"
     output = Path(args.output).resolve()
+    child_path = Path(getattr(args, "nps_children", DEFAULT_NPS_CHILDREN)).resolve()
+    child_manifest_path = Path(getattr(args, "nps_child_manifest", DEFAULT_NPS_CHILD_MANIFEST)).resolve()
+    child_audit_path = Path(getattr(args, "nps_child_audit", DEFAULT_NPS_CHILD_AUDIT)).resolve()
+    child_review_path = Path(getattr(args, "nps_child_review", DEFAULT_NPS_CHILD_REVIEW)).resolve()
+    accepted_child_paths = (
+        DEFAULT_NPS_CHILDREN.resolve(), DEFAULT_NPS_CHILD_MANIFEST.resolve(),
+        DEFAULT_NPS_CHILD_AUDIT.resolve(), DEFAULT_NPS_CHILD_REVIEW.resolve(),
+    )
+    if (child_path, child_manifest_path, child_audit_path, child_review_path) != accepted_child_paths:
+        raise SystemExit("Internal preview builds accept only the immutable r7 NPS child-depth artifacts")
     agency_binding = _validated_manifest_artifact(agency_manifest_path, agency_path)
     nps_binding = _validated_manifest_artifact(
         combined_manifest_path,
@@ -319,11 +418,18 @@ def build(
         cache_dir=Path(args.nps_cache_dir).resolve(),
         evidence_root=ROOT,
     )
+    children, child_binding = _validated_nps_child_depth(
+        child_path,
+        child_manifest_path,
+        child_audit_path,
+        child_review_path,
+    )
     payload = {
         "schema_version": 1,
         "catalog_id": "trailhead-explore-internal-preview-v1",
         "stage": "internal",
         "count": len(selected),
+        "child_count": len(children),
         "candidate": {
             "agency_revision": agency_path.parent.name,
             "nps_revision": nps_path.parent.name,
@@ -339,6 +445,7 @@ def build(
                     "promotion_review": combined_promotion_binding,
                 },
             },
+            "nps_child_depth": child_binding,
         },
         "sources": {
             "agency_catalog": {
@@ -358,6 +465,7 @@ def build(
             },
         },
         "places": selected,
+        "children": children,
     }
     _write_payload_atomically(output, payload, validate_output=validate_output)
     return {
@@ -365,6 +473,7 @@ def build(
         "bytes": output.stat().st_size,
         "sha256": _sha256(output),
         "place_ids": [str(item.get("id") or "") for item in selected],
+        "child_ids": [str(item.get("id") or "") for item in children],
     }
 
 
@@ -377,6 +486,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--combined-manifest", default=str(DEFAULT_COMBINED_MANIFEST))
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT))
     parser.add_argument("--nps-cache-dir", default=str(DEFAULT_NPS_CACHE))
+    parser.add_argument("--nps-children", default=str(DEFAULT_NPS_CHILDREN))
+    parser.add_argument("--nps-child-manifest", default=str(DEFAULT_NPS_CHILD_MANIFEST))
+    parser.add_argument("--nps-child-audit", default=str(DEFAULT_NPS_CHILD_AUDIT))
+    parser.add_argument("--nps-child-review", default=str(DEFAULT_NPS_CHILD_REVIEW))
     parser.add_argument("--agency-id", action="append", default=list(DEFAULT_AGENCY_IDS))
     parser.add_argument("--nps-code", action="append", default=list(DEFAULT_NPS_CODES))
     return parser.parse_args()

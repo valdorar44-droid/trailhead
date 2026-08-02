@@ -452,16 +452,16 @@ class OfficialPlaceEndpointTests(unittest.IsolatedAsyncioTestCase):
         ):
             rails = server._canonical_explore_related_rails(body)
 
-        self.assertEqual([item["name"] for item in rails["things_to_do"]], ["Valley Loop"])
-        self.assertEqual([item["name"] for item in rails["things_to_see"]], ["Tunnel View"])
+        self.assertEqual([item["name"] for item in rails["visitor_centers"]], ["Valley Loop"])
+        self.assertEqual([item["name"] for item in rails["trails"]], ["Tunnel View"])
         self.assertEqual([item["name"] for item in rails["campgrounds_nearby"]], ["Bridalveil Creek Campground"])
-        self.assertEqual(rails["trails"], [])
-        self.assertEqual(rails["visitor_centers"], [])
-        self.assertEqual(rails["things_to_do"][0]["type"], "attraction")
-        self.assertEqual(rails["things_to_do"][0]["display_type"], "Activity")
-        self.assertEqual(rails["things_to_see"][0]["display_type"], "Place to see")
+        self.assertEqual(rails["things_to_do"], [])
+        self.assertEqual(rails["things_to_see"], [])
+        self.assertEqual(rails["visitor_centers"][0]["type"], "visitor_center")
+        self.assertEqual(rails["visitor_centers"][0]["display_type"], "Visitor Center")
+        self.assertEqual(rails["trails"][0]["display_type"], "Trail")
         self.assertEqual(rails["campgrounds_nearby"][0]["type"], "camp")
-        self.assertEqual(rails["things_to_do"][0]["source_label"], "National Park Service")
+        self.assertEqual(rails["visitor_centers"][0]["source_label"], "National Park Service")
 
     def test_canonical_explore_map_pin_source_receives_the_same_related_rails(self):
         child = {

@@ -37,6 +37,17 @@ EXPECTED_CANDIDATE = {
     "promotion_review_path": f"data/explore/audit_candidates/combined/{ACCEPTED_COMBINED_REVISION}/promotion_review.json",
     "promotion_review_sha256": "dfca76c582eddc2e9da057ef5cb07c6305c49f67c55421a1040cfcb4f5d81526",
 }
+EXPECTED_NPS_CHILD_BINDING = {
+    "batch_id": "post-b08-nps-child-depth-b1",
+    "manifest_path": "data/explore/audit_candidates/internal/post-b08-nps-child-depth-b1-r7/manifest.json",
+    "manifest_sha256": "6956e4b8bdc238501feee49215470e6d0a8785be31188fbddcc2abe7c196266d",
+    "artifact_path": "data/explore/audit_candidates/internal/post-b08-nps-child-depth-b1-r7/nps_child_depth_v1.json",
+    "artifact_sha256": "66abda311a4734cc05bf3b4d9c99834cd5d3ec119e5a295e68b6cb7a3199ade9",
+    "audit_path": "data/explore/audit_candidates/internal/post-b08-nps-child-depth-b1-r7/audit.json",
+    "audit_sha256": "b5fc24c29e376a20d694c339d23c636c3937092669e52d998795a0981d251923",
+    "review_path": "data/explore/audit_candidates/internal/post-b08-nps-child-depth-b1-r7/review.json",
+    "review_sha256": "8ecfe03c074dd0da8a753693db801651d73b08610af82a009a7fcde1b376aee1",
+}
 
 
 EXPECTED_IDS = (
@@ -321,6 +332,7 @@ def audit(
 ) -> dict[str, Any]:
     payload = json.loads(path.read_text())
     places = [item for item in payload.get("places") or [] if isinstance(item, dict)]
+    children = [item for item in payload.get("children") or [] if isinstance(item, dict)]
     failures: list[str] = []
     _validate_candidate_binding(payload, failures, root=root, expected=expected)
     ids = tuple(str(item.get("id") or "") for item in places)
@@ -332,8 +344,31 @@ def audit(
         failures.append("place IDs or deterministic order do not match the reviewed b08 set")
     if len(ids) != len(set(ids)):
         failures.append("duplicate stable IDs")
+    if children or "child_count" in payload:
+        child_ids = [str(item.get("id") or "") for item in children]
+        binding = (payload.get("candidate") or {}).get("nps_child_depth") or {}
+        if payload.get("child_count") != len(children) or len(children) != 156:
+            failures.append("NPS child count differs from the accepted 156-record batch")
+        if any(not item_id for item_id in child_ids) or len(child_ids) != len(set(child_ids)):
+            failures.append("NPS children lack unique stable IDs")
+        if any(
+            str(item.get("canonical_role") or "") != "child"
+            or not str(item.get("parent_hub_id") or "")
+            or item.get("hidden_from_featured") is not True
+            for item in children
+        ):
+            failures.append("NPS children are not parent-bound and hidden from Featured")
+        for key, expected_hash in EXPECTED_NPS_CHILD_BINDING.items():
+            if binding.get(key) != expected_hash:
+                failures.append(f"NPS child binding {key} differs from accepted r7")
+        if (
+            binding.get("promotion_ready") is not False
+            or binding.get("live_serving_index_modified") is not False
+            or binding.get("audit_passed") is not True
+        ):
+            failures.append("NPS child binding is not an audited internal-only candidate")
 
-    for place in places:
+    for place in [*places, *children]:
         place_id = str(place.get("id") or "")
         if not _valid_coordinates(place):
             failures.append(f"{place_id}: invalid coordinates")
@@ -422,6 +457,7 @@ def audit(
         "path": str(path),
         "sha256": _sha256(path),
         "count": len(places),
+        "child_count": len(children),
         "replacement_count": len(REPLACEMENT_IDS),
         "nps_count": sum(place_id.startswith("place:nps:") for place_id in ids),
         "passed": True,

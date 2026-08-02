@@ -90,6 +90,9 @@ from dashboard.search_v2 import (
     normalize_search_text,
     service_search_named_locality_v2,
     _external_result_for_request,
+    _expanded_category_values,
+    _filters_accept,
+    _intent_accepts,
 )
 from dashboard.offline_bundles_v2 import (
     OfflineBoundsV2,
@@ -4105,7 +4108,7 @@ def _load_explore_catalog_base() -> dict:
     })), persist=True)
 
 
-_EXPLORE_INTERNAL_PREVIEW_CACHE: dict[str, object] = {"key": None, "profiles": []}
+_EXPLORE_INTERNAL_PREVIEW_CACHE: dict[str, object] = {"key": None, "profiles": [], "children": []}
 
 
 def _load_explore_internal_preview_profiles() -> list[dict]:
@@ -4123,6 +4126,7 @@ def _load_explore_internal_preview_profiles() -> list[dict]:
     except Exception:
         return []
     raw_places = [place for place in payload.get("places") or [] if isinstance(place, dict)]
+    raw_children = [place for place in payload.get("children") or [] if isinstance(place, dict)]
     profiles = []
     for index, place in enumerate(raw_places, start=1):
         profile = _explore_v3_place_to_profile(place, rank=590000 + index)
@@ -4137,9 +4141,29 @@ def _load_explore_internal_preview_profiles() -> list[dict]:
         profile["promoted_serving"] = True
         profile["internal_preview"] = True
         profiles.append(profile)
-    _attach_v3_nearby_source_items(profiles, raw_places)
-    _EXPLORE_INTERNAL_PREVIEW_CACHE.update({"key": cache_key, "profiles": profiles})
+    children = []
+    for index, place in enumerate(raw_children, start=1):
+        profile = _explore_v3_place_to_profile(place, rank=980000 + index)
+        summary = dict(profile.get("summary") or {})
+        summary["rank"] = 980000 + index
+        summary["hero_rank"] = 980000 + index
+        profile["summary"] = summary
+        profile["hidden_from_featured"] = True
+        profile["promoted_serving"] = False
+        profile["internal_preview"] = True
+        children.append(profile)
+    _attach_v3_nearby_source_items([*profiles, *children], [*raw_places, *raw_children])
+    _EXPLORE_INTERNAL_PREVIEW_CACHE.update({
+        "key": cache_key,
+        "profiles": profiles,
+        "children": children,
+    })
     return list(profiles)
+
+
+def _load_explore_internal_preview_children() -> list[dict]:
+    _load_explore_internal_preview_profiles()
+    return list(_EXPLORE_INTERNAL_PREVIEW_CACHE.get("children") or [])
 
 
 def _merge_explore_internal_preview(catalog: dict) -> dict:
@@ -4148,7 +4172,8 @@ def _merge_explore_internal_preview(catalog: dict) -> dict:
     # object graph before applying it. A shallow list copy can otherwise let a
     # future sidecar alter the public catalog or the cached preview profiles.
     preview_profiles = copy.deepcopy(_load_explore_internal_preview_profiles())
-    if not preview_profiles:
+    preview_children = copy.deepcopy(_load_explore_internal_preview_children())
+    if not preview_profiles and not preview_children:
         return catalog
     places = copy.deepcopy(list(catalog.get("places") or []))
     id_to_index = {
@@ -4156,7 +4181,7 @@ def _merge_explore_internal_preview(catalog: dict) -> dict:
         for index, place in enumerate(places)
         if isinstance(place, dict) and place.get("id")
     }
-    for preview in preview_profiles:
+    for preview in [*preview_profiles, *preview_children]:
         place_id = str(preview.get("id") or "")
         if not place_id:
             continue
@@ -4172,7 +4197,7 @@ def _merge_explore_internal_preview(catalog: dict) -> dict:
                 if preview_summary.get(rank_key) is not None:
                     merged_summary[rank_key] = preview_summary[rank_key]
             merged_place["summary"] = merged_summary
-            merged_place["promoted_serving"] = True
+            merged_place["promoted_serving"] = bool(preview.get("promoted_serving"))
             merged_place["internal_preview"] = True
             merged_place["promoted_category"] = str(
                 preview.get("promoted_category") or preview.get("category") or ""
@@ -4190,6 +4215,7 @@ def _merge_explore_internal_preview(catalog: dict) -> dict:
         "internal_preview": {
             "enabled": True,
             "count": len(preview_profiles),
+            "child_count": len(preview_children),
             "artifact": EXPLORE_INTERNAL_PREVIEW.name,
         },
     }
@@ -20864,11 +20890,138 @@ def _search_v2_apply_internal_preview_result(result: SearchResultV2) -> SearchRe
     })
 
 
-def _search_v2_apply_internal_preview_page(page: SearchPageV2) -> SearchPageV2:
+def _search_v2_internal_preview_child_results(request: SearchRequestV2) -> list[SearchResultV2]:
+    if (
+        not _explore_internal_preview_context.get()
+        or request.cursor
+        or request.scope == "offline"
+        or len(str(request.query or "").strip()) < 2
+    ):
+        return []
+    normalized_query = normalize_search_text(request.query)
+    if not normalized_query:
+        return []
+    profiles = list(_load_explore_internal_preview_children())
+    alias_counts: dict[str, int] = {}
+    title_counts: dict[str, int] = {}
+    for candidate in profiles:
+        candidate_summary = candidate.get("summary") if isinstance(candidate.get("summary"), dict) else {}
+        candidate_title = normalize_search_text(candidate_summary.get("title") or (candidate.get("card") or {}).get("title") or "")
+        if candidate_title:
+            title_counts[candidate_title] = title_counts.get(candidate_title, 0) + 1
+        for value in candidate.get("search_aliases") or []:
+            alias = normalize_search_text(value)
+            if alias:
+                alias_counts[alias] = alias_counts.get(alias, 0) + 1
+    results: list[SearchResultV2] = []
+    for index, profile in enumerate(profiles):
+        summary = profile.get("summary") if isinstance(profile.get("summary"), dict) else {}
+        profile_id = str(profile.get("id") or "").strip()
+        title = str(summary.get("title") or (profile.get("card") or {}).get("title") or "").strip()
+        if not profile_id or not title:
+            continue
+        normalized_title = normalize_search_text(title)
+        exact_values = {
+            normalize_search_text(profile_id),
+            *(
+                normalize_search_text(value)
+                for value in profile.get("search_aliases") or []
+                if str(value or "").strip() and alias_counts.get(normalize_search_text(value)) == 1
+            ),
+        }
+        if title_counts.get(normalized_title) == 1:
+            exact_values.add(normalized_title)
+        if normalized_query not in exact_values:
+            continue
+        coordinates = None
+        try:
+            lat = float(summary.get("lat"))
+            lng = float(summary.get("lng"))
+            if math.isfinite(lat) and math.isfinite(lng) and -90 <= lat <= 90 and -180 <= lng <= 180:
+                coordinates = SearchCenterV2(lat=lat, lng=lng)
+        except (TypeError, ValueError):
+            pass
+        source_pack = profile.get("source_pack") if isinstance(profile.get("source_pack"), dict) else {}
+        source_label = _explore_public_source_label(source_pack.get("primary")) or "National Park Service"
+        category = str(profile.get("category") or summary.get("category") or "place").strip().lower()
+        kind = {"campground": "campground", "trail": "trail", "trailhead": "trailhead", "visitor_center": "visitor_center", "activity": "activity"}.get(category, "place")
+        values = {category, kind, *[str(item).strip().lower() for item in profile.get("subcategories") or []]}
+        if request.categories and not values.intersection(_expanded_category_values(request.categories)):
+            continue
+        if not _intent_accepts(request.intent, kind, tuple(values)):
+            continue
+        def filter_values(value: object) -> tuple[str, ...]:
+            if isinstance(value, (list, tuple, set)):
+                return tuple(str(item) for item in value if str(item or "").strip())
+            return (str(value),) if str(value or "").strip() else ()
+
+        if not _filters_accept(
+            request.filters,
+            kind=kind,
+            categories=tuple(values),
+            difficulty=filter_values(profile.get("difficulty")),
+            surface=filter_values(profile.get("surface")),
+            activities=filter_values(source_pack.get("activities") or profile.get("amenities")),
+            provider="trailhead",
+            verified=bool(profile.get("verified")),
+            has_coordinates=coordinates is not None,
+        ):
+            continue
+        if request.bounds and coordinates:
+            if not (
+                request.bounds.south <= coordinates.lat <= request.bounds.north
+                and (
+                    request.bounds.west <= coordinates.lng <= request.bounds.east
+                    if request.bounds.west < request.bounds.east
+                    else coordinates.lng >= request.bounds.west or coordinates.lng <= request.bounds.east
+                )
+            ):
+                continue
+        if request.scope in {"viewport", "nearby", "route"} and request.bounds and coordinates is None:
+            continue
+        if request.scope == "nearby" and request.center and coordinates:
+            radius = float(request.radius_meters or 50_000)
+            if _haversine_m(request.center.lat, request.center.lng, coordinates.lat, coordinates.lng) > radius:
+                continue
+        results.append(SearchResultV2(
+            result_id=profile_id, canonical_place_id=profile_id, title=title,
+            subtitle=str(profile.get("parent_hub_title") or summary.get("region") or "").strip() or None,
+            kind=kind, categories=[category], coordinates=coordinates,
+            parent=str(profile.get("parent_hub_title") or "").strip() or None,
+            provenance=SearchProvenanceV2(
+                provider="trailhead", source_label=source_label,
+                provider_result_id=profile_id, attribution=source_label,
+                temporary_use_only=False,
+            ),
+            persistence_policy="canonical", detail_ref=profile_id,
+            score=max(1.0, 1000.0 - index), match_reason="internal_preview_match",
+        ))
+    return results
+
+
+def _search_v2_apply_internal_preview_page(
+    page: SearchPageV2,
+    *,
+    request: SearchRequestV2 | None = None,
+    limit: int | None = None,
+) -> SearchPageV2:
     if not _explore_internal_preview_context.get():
         return page
-    results = [_search_v2_apply_internal_preview_result(result) for result in page.results]
-    return page.model_copy(update={"results": results})
+    effective_request = request or SearchRequestV2(query=page.query, limit=limit or max(len(page.results), 8))
+    reviewed = _search_v2_internal_preview_child_results(effective_request)
+    public = [_search_v2_apply_internal_preview_result(result) for result in page.results]
+    results: list[SearchResultV2] = []
+    seen: set[str] = set()
+    for result in [*reviewed, *public]:
+        if result.result_id in seen:
+            continue
+        seen.add(result.result_id)
+        results.append(result)
+    page_limit = max(1, int(limit if limit is not None else max(len(page.results), 8)))
+    source_counts = dict(page.source_counts)
+    if reviewed:
+        source_counts["trailhead_internal_preview"] = len(reviewed)
+    return page.model_copy(update={"results": results[:page_limit], "source_counts": source_counts})
 
 
 def _search_v2_apply_internal_preview_resolve(
@@ -20895,7 +21048,7 @@ async def _search_v2_page(
         page = await _search_v2_service.page(
             request, mode=mode, external_subject=external_subject,
         )
-        return _search_v2_apply_internal_preview_page(page)
+        return _search_v2_apply_internal_preview_page(page, request=request, limit=request.limit)
     except SearchCursorError as exc:
         raise HTTPException(400, {
             "code": "invalid_search_cursor", "message": str(exc),
@@ -32331,7 +32484,13 @@ def _canonical_explore_place_id(body: MapCardResolveRequest) -> str:
 
 def _explore_children_for_parent(parent_id: str) -> list[dict]:
     catalog = _load_explore_catalog()
-    cache_key = _EXPLORE_CATALOG_CACHE.get("key")
+    preview_metadata = catalog.get("internal_preview") if isinstance(catalog.get("internal_preview"), dict) else {}
+    cache_key = (
+        _EXPLORE_CATALOG_CACHE.get("key"),
+        str(catalog.get("catalog_id") or ""),
+        bool(_explore_internal_preview_context.get()),
+        int(preview_metadata.get("child_count") or 0),
+    )
     if _EXPLORE_CHILDREN_BY_PARENT_CACHE.get("key") != cache_key:
         by_parent: dict[str, list[dict]] = {}
         for place in catalog.get("places") or []:
@@ -32375,20 +32534,25 @@ def _canonical_explore_related_rails(body: MapCardResolveRequest) -> dict[str, l
         child_id = str(child.get("id") or "").strip().lower()
         match = re.search(r":nps-child:[^:]+:(thingstodo|places|visitorcenters|campgrounds):", child_id)
         nps_record_kind = match.group(1) if match else ""
-        target = rail_for_nps_record_kind.get(nps_record_kind) or rail_for_target.get(str(child.get("module_target") or "").strip().lower())
+        module_target = str(child.get("module_target") or "").strip().lower()
+        target = rail_for_target.get(module_target) or rail_for_nps_record_kind.get(nps_record_kind)
         if not target:
             continue
         item = _explore_place_to_nearby_place(child, float(body.lat), float(body.lng))
         if not item:
             continue
-        if nps_record_kind == "thingstodo":
-            item.update({"type": "attraction", "subtype": "Activity", "display_type": "Activity"})
-        elif nps_record_kind == "places" and _smart_pack_type(item.get("type")) not in {"historic", "viewpoint", "peak", "hot_spring"}:
-            item.update({"type": "attraction", "subtype": "Place to see", "display_type": "Place to see"})
-        elif nps_record_kind == "visitorcenters":
-            item.update({"type": "visitor_center", "subtype": "Visitor Center", "display_type": "Visitor Center"})
-        elif nps_record_kind == "campgrounds":
+        source_category = str(child.get("category") or "").strip().lower()
+        if source_category in {"trail", "trailhead"} or module_target == "trails":
+            label = "Trailhead" if source_category == "trailhead" else "Trail"
+            item.update({"type": source_category or "trail", "subtype": label, "display_type": label})
+        elif source_category == "campground" or module_target == "stay":
             item.update({"type": "camp", "subtype": "Campground", "display_type": "Campground"})
+        elif source_category == "visitor_center" or module_target == "visitor":
+            item.update({"type": "visitor_center", "subtype": "Visitor Center", "display_type": "Visitor Center"})
+        elif source_category == "activity" or module_target == "do":
+            item.update({"type": "attraction", "subtype": "Activity", "display_type": "Activity"})
+        elif module_target == "see" or (nps_record_kind == "places" and _smart_pack_type(item.get("type")) not in {"historic", "viewpoint", "peak", "hot_spring"}):
+            item.update({"type": "attraction", "subtype": "Place to see", "display_type": "Place to see"})
         source_candidates = [
             *(child.get("sources") or []),
             *((child.get("source_pack") or {}).get("sources") or []),
@@ -34878,7 +35042,10 @@ def _explore_visible_category_counts(catalog: dict) -> dict[str, int]:
     cache_key = (id(catalog), len(catalog.get("places") or []), _EXPLORE_GUIDED_DESTINATIONS_CACHE.get("mtime"), guided_count)
     if _EXPLORE_FACET_COUNTS_CACHE.get("key") == cache_key:
         return dict(_EXPLORE_FACET_COUNTS_CACHE.get("counts") or {})
-    places = _dedupe_ranked_explore_profiles(list(catalog.get("places") or []))
+    places = _dedupe_ranked_explore_profiles([
+        place for place in catalog.get("places") or []
+        if isinstance(place, dict) and not bool(place.get("hidden_from_featured"))
+    ])
     counts = {
         category: sum(1 for place in places if _explore_place_matches_indexed_category(place, category))
         for category in EXPLORE_VISIBLE_FACETS
@@ -34930,6 +35097,10 @@ def _explore_serving_query(
     normalized_category = _normalize_place_category(effective_category) if effective_category else ""
     guided_request = normalized_category == "guided"
     places = _explore_guided_destination_profiles() if guided_request else list(catalog.get("places") or [])
+    # Parent-bound internal-review children belong in explicit Search and hub
+    # modules, never in the ordinary Featured/category browse rankings.
+    if not str(q or "").strip() and not guided_request:
+        places = [place for place in places if not bool(place.get("hidden_from_featured"))]
     query_terms = _explore_query_terms_for_category(q, effective_category)
     global_profiles: list[dict] = []
     global_profile_ids: set[str] = set()
@@ -35555,7 +35726,8 @@ async def explore_enrich(q: str = "", category: str = "", place_id: str = "", li
     limit = max(1, min(int(limit or 6), 12))
     category = _normalize_place_category(category)
     cache_key = _explore_enrichment_cache_key(q=q, category=category, place_id=place_id)
-    if not force_refresh:
+    preview_active = _explore_internal_preview_context.get()
+    if not force_refresh and not preview_active:
         cached = get_cached("campsite_cache", cache_key, ttl_seconds=3600 * 24 * 7)
         if isinstance(cached, dict):
             return cached
@@ -35570,7 +35742,8 @@ async def explore_enrich(q: str = "", category: str = "", place_id: str = "", li
             "count": len(rich_candidates),
             "places": rich_candidates[:limit],
         }
-        set_cached("campsite_cache", cache_key, payload)
+        if not preview_active:
+            set_cached("campsite_cache", cache_key, payload)
         return payload
 
     live_places: list[dict] = []
@@ -35601,7 +35774,8 @@ async def explore_enrich(q: str = "", category: str = "", place_id: str = "", li
     }
     if not merged:
         payload["message"] = "More details are not available yet."
-    set_cached("campsite_cache", cache_key, payload)
+    if not preview_active:
+        set_cached("campsite_cache", cache_key, payload)
     return payload
 
 
@@ -35630,7 +35804,8 @@ async def explore_places_bulk(body: ExplorePlacesBulkRequest):
         return {"schema_version": 1, "count": 0, "places": [], "missing": []}
 
     cache_key = f"explore_places_bulk_v1:{hashlib.sha1(json.dumps(ids, sort_keys=True).encode('utf-8')).hexdigest()[:28]}"
-    if not body.force_refresh:
+    preview_active = _explore_internal_preview_context.get()
+    if not body.force_refresh and not preview_active:
         try:
             cached = get_cached("campsite_cache", cache_key, ttl_seconds=3600 * 24)
             if isinstance(cached, dict):
@@ -35660,10 +35835,13 @@ async def explore_places_bulk(body: ExplorePlacesBulkRequest):
         "missing": missing,
         "cache": {"status": "refresh", "ttl_hours": 24},
     }
-    try:
-        set_cached("campsite_cache", cache_key, payload)
-    except Exception:
+    if preview_active:
         payload["cache"] = {"status": "uncached", "ttl_hours": 0}
+    else:
+        try:
+            set_cached("campsite_cache", cache_key, payload)
+        except Exception:
+            payload["cache"] = {"status": "uncached", "ttl_hours": 0}
     return payload
 
 

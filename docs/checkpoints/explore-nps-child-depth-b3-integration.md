@@ -106,3 +106,79 @@ Review and merge the isolated branch. A later, separately authorized packet may
 deploy the authenticated internal sidecar and run a bounded Android proof. This
 checkpoint does not authorize deployment, public promotion, serving-index
 mutation, native work, or mobile code changes.
+
+## Post-merge deployment and Android evidence — 2026-08-02
+
+### Internal backend deployment
+
+- Integrated backend HEAD:
+  `767dc641de72353a8f1ca2e7865025f11473dabf`
+- Railway deployment:
+  `4fb0d22a-b0c4-407a-a7d7-91b57a305c57`
+- Terminal status: `SUCCESS`
+- Image digest:
+  `sha256:f2b99e1d5b2ea4c441f8cbd6024f98920e228a82c33150392f3d89f053adaa88`
+- Production API health: `ok`
+- Header-only internal-preview request: `401`
+- Public catalog or serving-index promotion: none
+
+The initial Samsung proof found that a Search V2 campground selection could
+restore an older mounted destination hub after returning from the Map. The
+evidence-backed cause was reuse of the hub-child handoff for a direct search
+selection. Commit `d2b8b4501d9a3c99cc99aac4c34178e7a3a496a6` added an explicit
+`hub|search` origin: hub children still preserve their parent, while search
+selections synchronously clear stale hub navigation before opening the Map.
+
+### Paired preview correction
+
+- Merged preview source:
+  `d9e58592ed29d5857236d555bdbd73baadceec87`
+- Preview branch:
+  `preview-candidate-d9e58592ed29d5857236d555bdbd73baadceec87-msbcovpp-e9291d4a7edd3ad500215609`
+- Preview channel ID:
+  `019dbc97-3cde-795b-a35d-e6aa985060d3`
+- Android update:
+  `019fc0f0-c167-7adb-8574-927d3bc26e1a`
+- Android group:
+  `68a56093-0e2e-43fd-a55f-9615e56f2c86`
+- Android runtime: `native-1.0.10-android.7`
+- iOS update:
+  `019fc0f1-18c5-7b67-84c2-ebe924081b29`
+- iOS group:
+  `a3982087-4039-4747-bebb-fd2043cc38fc`
+- iOS runtime: `native-1.0.10-ios.6`
+- Android and iOS Sentry source maps: uploaded
+
+Focused automated coverage passed: Search V2 76/76, NPS hub/return 22/22,
+sheet actions 8/8, campground 31/31, copy scan 175 files, privacy, telemetry,
+TypeScript, and `git diff --check`.
+
+### Bounded device result
+
+On Samsung SM-A326U1, the newly integrated `Chisos Basin Campground` exact
+result searched correctly, opened the stable campground Peek, expanded to the
+full detail, and no longer restored Guadalupe Mountains after Back. It reached
+the correct Explore home context. Focused logcat contained no fatal, React,
+Map, or ANR error.
+
+Open P1: the first post-Back screenshot, taken after four seconds, contained a
+black content frame even though its UI hierarchy already described the correct
+Explore home. Five seconds later the same hierarchy rendered normally. Per the
+one-correction rule, no second speculative fix was applied and this preview is
+not promoted to production.
+
+Evidence directory:
+`C:\Users\User\Documents\Codex\evidence\trailhead\explore-nps-child-b3-d9e58592`
+
+- Black-frame evidence:
+  `6f70b8c52e83ccb100ff91bb9f65111871aa17d204abad8bd9fcd2236c6b0c81`
+- Settled correct Explore home:
+  `15cf29cd0e026641eb7e2263ddfff5db87e5f98a44721a5509c600c7037b3751`
+- Shared UI hierarchy for both captures:
+  `a81bbfe18ac384d5859f31a802b4f066325a909ec12a309c53c69545806747d1`
+- Empty focused error log:
+  `e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855`
+
+Exact next action: diagnose the render-only warm-return black frame from this
+single evidence set before promoting the JS correction. Do not refetch or
+rebuild the accepted NPS batches, and do not repeat the broader Explore crawl.

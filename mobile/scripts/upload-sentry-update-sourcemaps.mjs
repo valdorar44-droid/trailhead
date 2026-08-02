@@ -1,11 +1,23 @@
 #!/usr/bin/env node
 import { existsSync, readdirSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { dirname, join } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const mobileRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const checkFilesOnly = process.argv.includes('--check-files');
+const inputDirIndex = process.argv.indexOf('--input-dir');
+if (inputDirIndex >= 0 && !String(process.argv[inputDirIndex + 1] || '').trim()) {
+  throw new Error('Cannot upload OTA source maps. --input-dir requires a directory.');
+}
+const inputDirArgument = inputDirIndex >= 0
+  ? String(process.argv[inputDirIndex + 1]).trim()
+  : 'dist';
+const inputDir = resolve(mobileRoot, inputDirArgument);
+const relativeInputDir = relative(mobileRoot, inputDir);
+if (!relativeInputDir || relativeInputDir === '..' || relativeInputDir.startsWith(`..${sep}`) || isAbsolute(relativeInputDir)) {
+  throw new Error('Cannot upload OTA source maps outside the mobile project.');
+}
 const required = ['EXPO_PUBLIC_SENTRY_DSN', 'SENTRY_AUTH_TOKEN', 'SENTRY_ORG', 'SENTRY_PROJECT'];
 const missing = checkFilesOnly ? [] : required.filter(name => !String(process.env[name] || '').trim());
 if (missing.length) {
@@ -15,8 +27,8 @@ if (process.argv.includes('--check-env')) {
   console.log('Sentry release environment is ready.');
   process.exit(0);
 }
-if (!existsSync(join(mobileRoot, 'dist'))) {
-  throw new Error('Cannot upload OTA source maps because the Expo dist directory is missing.');
+if (!existsSync(inputDir)) {
+  throw new Error(`Cannot upload OTA source maps because ${relativeInputDir} is missing.`);
 }
 
 function assetGroups(directory, groups = new Map()) {
@@ -36,7 +48,7 @@ function assetGroups(directory, groups = new Map()) {
   return groups;
 }
 
-const groups = assetGroups(join(mobileRoot, 'dist'));
+const groups = assetGroups(inputDir);
 const incomplete = [...groups.entries()].filter(([, files]) => files.bundle && !files.map);
 if (!groups.size || incomplete.length) {
   throw new Error(`Cannot upload OTA source maps: ${incomplete.length || 'no'} bundle group(s) lack a source map.`);
@@ -49,7 +61,7 @@ if (checkFilesOnly) {
 const cli = join(mobileRoot, 'node_modules', '.bin', process.platform === 'win32'
   ? 'sentry-expo-upload-sourcemaps.cmd'
   : 'sentry-expo-upload-sourcemaps');
-const result = spawnSync(cli, ['dist'], {
+const result = spawnSync(cli, [relativeInputDir], {
   cwd: mobileRoot,
   env: process.env,
   stdio: 'inherit',

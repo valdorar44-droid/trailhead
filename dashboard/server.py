@@ -823,9 +823,15 @@ def _validate_explore_public_promotion() -> dict:
     if not isinstance(aliases_raw, list):
         raise RuntimeError("Explore public promotion aliases must be an array")
     aliases: dict[str, str] = {}
+    catalog_ids = {
+        str(place.get("id") or "").strip()
+        for place in catalog.get("places") or []
+        if isinstance(place, dict)
+    }
     public_ids = {
-        *[str(place.get("id") or "").strip() for place in catalog.get("places") or [] if isinstance(place, dict)],
-        *[str(item.get("id") or "").strip() for item in serving_index.get("items") or [] if isinstance(item, dict)],
+        str(item.get("id") or "").strip()
+        for item in serving_index.get("items") or []
+        if isinstance(item, dict)
     }
     for index, item in enumerate(aliases_raw):
         if not isinstance(item, dict):
@@ -839,7 +845,7 @@ def _validate_explore_public_promotion() -> dict:
             raise RuntimeError(f"Explore public promotion alias target is not public: {to_id}")
         aliases[from_id] = to_id
     alias_sources = set(aliases)
-    if alias_sources.intersection(public_ids):
+    if alias_sources.intersection(catalog_ids | public_ids):
         raise RuntimeError("Explore public promotion alias source remains public")
     if any(target in alias_sources for target in aliases.values()):
         raise RuntimeError("Explore public promotion alias chains or cycles are not allowed")
@@ -864,22 +870,29 @@ def _validate_explore_public_promotion() -> dict:
         raise RuntimeError("Top-level Explore promotion must not publish child dispositions")
     if stage == "child_depth" and not child_dispositions:
         raise RuntimeError("Child-depth Explore promotion requires child dispositions")
-    for collection_name, records in (
-        ("catalog_v3", catalog.get("places") or []),
-        ("serving_index", serving_index.get("items") or []),
-    ):
-        for record in records:
-            if not isinstance(record, dict) or not str(record.get("parent_hub_id") or "").strip():
-                continue
-            parent_id = str(record.get("parent_hub_id") or "").strip()
-            if parent_id not in public_ids:
-                raise RuntimeError(f"Explore public promotion {collection_name} child parent is not public")
-            if (
-                str(record.get("canonical_role") or "").strip() != "child"
-                or not str(record.get("module_target") or "").strip()
-                or record.get("hidden_from_featured") is not True
-            ):
-                raise RuntimeError(f"Explore public promotion {collection_name} child structure is invalid")
+    for record in catalog.get("places") or []:
+        if not isinstance(record, dict) or not str(record.get("parent_hub_id") or "").strip():
+            continue
+        parent_id = str(record.get("parent_hub_id") or "").strip()
+        if parent_id not in public_ids:
+            raise RuntimeError("Explore public promotion catalog_v3 child parent is not public")
+        if (
+            str(record.get("canonical_role") or "").strip() != "child"
+            or not str(record.get("module_target") or "").strip()
+        ):
+            raise RuntimeError("Explore public promotion catalog_v3 child structure is invalid")
+    for record in serving_index.get("items") or []:
+        if not isinstance(record, dict) or not str(record.get("parent_hub_id") or "").strip():
+            continue
+        parent_id = str(record.get("parent_hub_id") or "").strip()
+        if parent_id not in public_ids:
+            raise RuntimeError("Explore public promotion serving_index child parent is not public")
+        if (
+            str(record.get("canonical_role") or "").strip() != "child"
+            or not str(record.get("module_target") or "").strip()
+            or record.get("hidden_from_featured") is not True
+        ):
+            raise RuntimeError("Explore public promotion serving_index child structure is invalid")
     if not isinstance(manifest.get("reviewed_exceptions"), dict):
         raise RuntimeError("Explore public promotion reviewed_exceptions must be an object")
     rollback = manifest.get("rollback")

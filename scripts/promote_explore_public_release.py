@@ -739,7 +739,7 @@ def _build_child_depth(
         for item in base_places
         if str(item.get("id") or "") not in alias_sources
     }
-    existing_public_ids = set(catalog_by_id) | {
+    existing_public_ids = {
         str(item.get("id") or "") for item in base_serving.get("items") or []
     }
     public_children: list[dict[str, Any]] = []
@@ -770,11 +770,11 @@ def _build_child_depth(
         catalog_by_id[public_id] = child
         public_children.append(child)
 
-    final_public_ids = set(catalog_by_id) | {
+    final_public_ids = {
         str(item.get("id") or "")
         for item in base_serving.get("items") or []
         if str(item.get("id") or "") not in alias_sources
-    }
+    } | {str(item.get("id") or "") for item in public_children}
     for alias in aliases:
         if alias["to_id"] not in final_public_ids:
             raise PromotionError(f"alias target is absent from release: {alias['to_id']}")
@@ -816,15 +816,20 @@ def _validate_alias_targets(
     catalog: dict[str, Any],
     serving: dict[str, Any],
 ) -> None:
-    ids = {
+    catalog_ids = {
         str(item.get("id") or "")
-        for item in [*(catalog.get("places") or []), *(serving.get("items") or [])]
+        for item in catalog.get("places") or []
+        if isinstance(item, dict)
+    }
+    public_ids = {
+        str(item.get("id") or "")
+        for item in serving.get("items") or []
         if isinstance(item, dict)
     }
     for alias in aliases:
-        if alias["to_id"] not in ids:
+        if alias["to_id"] not in public_ids:
             raise PromotionError(f"alias target is absent from release: {alias['to_id']}")
-        if alias["from_id"] in ids:
+        if alias["from_id"] in catalog_ids | public_ids:
             raise PromotionError(f"alias source remains in release artifacts: {alias['from_id']}")
 
 

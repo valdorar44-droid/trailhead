@@ -354,6 +354,34 @@ class ExplorePublicPromotionRuntimeTests(unittest.TestCase):
             ["place:nps:child-a", "place:nps:child-b"],
         )
 
+    def test_catalog_only_child_sidecar_is_valid_but_not_publicly_served(self):
+        catalog = copy.deepcopy(self.catalog)
+        catalog["places"].append({
+            "id": "place:nps-child:parent:places:sidecar",
+            "name": "Internal Child Sidecar",
+            "category": "viewpoint",
+            "lat": 37.21,
+            "lng": -119.21,
+            "canonical_role": "child",
+            "parent_hub_id": "place:nps:parent",
+            "module_target": "see",
+        })
+        catalog["count"] = len(catalog["places"])
+        self.catalog = catalog
+        self.catalog_path.write_text(json.dumps(catalog, sort_keys=True))
+        self._write_manifest()
+        self._clear_caches()
+
+        state = server._validate_explore_public_promotion()
+        served = server._prebuild_explore_public_served_catalog(catalog, self.index)
+
+        self.assertEqual(state["catalog_count"], 3)
+        self.assertEqual(state["index_count"], 2)
+        self.assertNotIn(
+            "place:nps-child:parent:places:sidecar",
+            {item["id"] for item in served["places"]},
+        )
+
     def test_configured_release_does_not_fall_back_when_catalog_loading_fails(self):
         broken_catalog = self.root / "broken-base.json"
         broken_catalog.write_text("not-json")

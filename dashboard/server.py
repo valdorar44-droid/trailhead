@@ -35642,20 +35642,10 @@ def _explore_visible_category_counts(catalog: dict) -> dict[str, int]:
     cache_key = (id(catalog), len(catalog.get("places") or []), _EXPLORE_GUIDED_DESTINATIONS_CACHE.get("mtime"), guided_count)
     if _EXPLORE_FACET_COUNTS_CACHE.get("key") == cache_key:
         return dict(_EXPLORE_FACET_COUNTS_CACHE.get("counts") or {})
-    visible_places = [
+    places = _dedupe_ranked_explore_profiles([
         place for place in catalog.get("places") or []
         if isinstance(place, dict) and not bool(place.get("hidden_from_featured"))
-    ]
-    # A validated public-promotion manifest already carries the reviewed
-    # displacement and identity decisions for every serving-index record.
-    # Re-running the legacy title/coordinate heuristic here can silently hide
-    # distinct reviewed identities and make the public count drift from the
-    # immutable artifact. Legacy catalogs still need that heuristic.
-    places = (
-        visible_places
-        if _explore_public_release_active()
-        else _dedupe_ranked_explore_profiles(visible_places)
-    )
+    ])
     counts = {
         category: sum(1 for place in places if _explore_place_matches_indexed_category(place, category))
         for category in EXPLORE_VISIBLE_FACETS
@@ -35887,20 +35877,7 @@ def _explore_serving_query(
             *_explore_query_sort_key(place, query_terms),
             str(place.get("id") or ""),
         ))
-    exact_promoted_browse = (
-        _explore_public_release_active()
-        and not str(q or "").strip()
-        and lat is None
-        and lng is None
-        and not guided_request
-    )
-    # Promotion artifacts are already identity-reviewed and hash-verified.
-    # Preserve their exact identities for ordinary/category browsing instead
-    # of applying the older title/coordinate heuristic a second time. Search
-    # and location-augmented result sets still merge dynamic sources and keep
-    # the existing runtime dedupe behavior.
-    if not exact_promoted_browse:
-        places = _dedupe_ranked_explore_profiles(places)
+    places = _dedupe_ranked_explore_profiles(places)
     if not places and stay_request:
         places = _explore_stay_fallback_profiles(q=q, limit=240, include_lodging=normalized_category in {"lodging", "huts_lodging", "cabin", "private_stay", "stay", "stays"})
         query_terms = _explore_query_terms_for_category(_explore_stay_destination_query(q), "camp")

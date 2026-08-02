@@ -49,6 +49,22 @@ class ExploreNpsChildInternalPreviewTests(unittest.TestCase):
         self.assertTrue(binding["audit_passed"])
         self.assertTrue(all(item["hidden_from_featured"] for item in children))
 
+        children_2, binding_2 = builder._validated_nps_child_depth(
+            builder.DEFAULT_NPS_CHILDREN_2,
+            builder.DEFAULT_NPS_CHILD_MANIFEST_2,
+            builder.DEFAULT_NPS_CHILD_AUDIT_2,
+            builder.DEFAULT_NPS_CHILD_REVIEW_2,
+            accepted_paths=(
+                builder.DEFAULT_NPS_CHILDREN_2, builder.DEFAULT_NPS_CHILD_MANIFEST_2,
+                builder.DEFAULT_NPS_CHILD_AUDIT_2, builder.DEFAULT_NPS_CHILD_REVIEW_2,
+            ),
+            accepted_hashes=builder.ACCEPTED_NPS_CHILD_HASHES_2,
+            accepted_batch_id="post-b08-nps-child-depth-b2",
+        )
+        self.assertEqual(len(children_2), 170)
+        self.assertEqual(binding_2["artifact_sha256"], builder.ACCEPTED_NPS_CHILD_HASHES_2["nps_child_depth_v1.json"])
+        self.assertFalse(set(item["id"] for item in children).intersection(item["id"] for item in children_2))
+
     def test_manifest_hash_mismatch_is_rejected(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -153,7 +169,7 @@ class ExploreNpsChildInternalPreviewTests(unittest.TestCase):
         }]}
         merged = server._merge_explore_internal_preview(base)
         self.assertEqual(merged["internal_preview"]["count"], 13)
-        self.assertEqual(merged["internal_preview"]["child_count"], 156)
+        self.assertEqual(merged["internal_preview"]["child_count"], 326)
         proof = next(item for item in merged["places"] if item["id"] == "place:usfs:9006")
         child = next(item for item in merged["places"] if item["id"].startswith("place:nps-child:blri:"))
         self.assertLess(proof["summary"]["rank"], 0)
@@ -209,6 +225,57 @@ class ExploreNpsChildInternalPreviewTests(unittest.TestCase):
             server._explore_internal_preview_context.reset(marker)
         self.assertEqual(fuel.results, [])
         self.assertEqual(bounded.results, [])
+        self.assertEqual(later_page.results, [])
+
+    def test_batch_2_child_reaches_detail_search_and_parent_rails_only_in_internal_preview(self):
+        payload = json.loads(builder.DEFAULT_OUTPUT.read_text())
+        batch_1 = json.loads(builder.DEFAULT_NPS_CHILDREN.read_text())["places"]
+        batch_2 = json.loads(builder.DEFAULT_NPS_CHILDREN_2.read_text())["places"]
+        expected_ids = [item["id"] for item in [*batch_1, *batch_2]]
+        self.assertEqual([item["id"] for item in payload["children"]], expected_ids)
+        self.assertEqual(payload["children"][len(batch_1)]["id"], batch_2[0]["id"])
+
+        os.environ["TRAILHEAD_EXPLORE_DATA_STAGE"] = "internal"
+        server.EXPLORE_INTERNAL_PREVIEW = builder.DEFAULT_OUTPUT
+        merged = server._merge_explore_internal_preview({"catalog_id": "public", "places": []})
+        dog_canyon_id = "place:nps-child:gumo:campgrounds:c46d4dbb-5b16-4f5a-bbfa-34c350639b98"
+        pinery_trail_id = "place:nps-child:gumo:thingstodo:df5e98a8-895c-44b9-b11b-a815a6a93d46"
+        visitor_center_id = "place:nps-child:gumo:visitorcenters:af14f6d0-70ed-4815-963e-e87564f1135c"
+
+        with patch.object(server, "_load_explore_catalog", return_value=merged):
+            server._EXPLORE_CHILDREN_BY_PARENT_CACHE.update({"key": None, "by_parent": {}})
+            parent_children = server._explore_children_for_parent("place:nps:gumo")
+            parent_ids = [item["id"] for item in parent_children]
+            self.assertIn(dog_canyon_id, parent_ids)
+            self.assertIn(pinery_trail_id, parent_ids)
+            self.assertIn(visitor_center_id, parent_ids)
+            self.assertEqual(server._find_explore_place(dog_canyon_id)["id"], dog_canyon_id)
+
+            rails = server._canonical_explore_related_rails(server.MapCardResolveRequest(
+                source="trailhead_explore", place_id="place:nps:gumo",
+                lat=31.92, lng=-104.87,
+            ))
+            self.assertIn("Dog Canyon Campground", {item.get("name") for item in rails["campgrounds_nearby"]})
+            self.assertIn("Pinery Trail", {item.get("name") for item in rails["trails"]})
+            self.assertIn("Pine Springs Visitor Center", {item.get("name") for item in rails["visitor_centers"]})
+
+        request = server.SearchRequestV2(query="Dog Canyon Campground", categories=["campground"], limit=8)
+        page = server.SearchPageV2(query=request.query, results=[], revision="public", elapsed_ms=1)
+        self.assertEqual(server._search_v2_apply_internal_preview_page(page, request=request).results, [])
+        marker = server._explore_internal_preview_context.set(True)
+        try:
+            searched = server._search_v2_apply_internal_preview_page(page, request=request)
+            later_page = server._search_v2_apply_internal_preview_page(
+                page,
+                request=server.SearchRequestV2(
+                    query=request.query, categories=["campground"], cursor="opaque-page-2", limit=8,
+                ),
+            )
+        finally:
+            server._explore_internal_preview_context.reset(marker)
+        self.assertEqual([item.result_id for item in searched.results], [dog_canyon_id])
+        self.assertEqual(searched.results[0].detail_ref, dog_canyon_id)
+        self.assertEqual(searched.results[0].kind, "campground")
         self.assertEqual(later_page.results, [])
 
 

@@ -48,6 +48,17 @@ EXPECTED_NPS_CHILD_BINDING = {
     "review_path": "data/explore/audit_candidates/internal/post-b08-nps-child-depth-b1-r7/review.json",
     "review_sha256": "8ecfe03c074dd0da8a753693db801651d73b08610af82a009a7fcde1b376aee1",
 }
+EXPECTED_NPS_CHILD_BINDING_2 = {
+    "batch_id": "post-b08-nps-child-depth-b2",
+    "manifest_path": "data/explore/audit_candidates/internal/post-b08-nps-child-depth-b2-r7/manifest.json",
+    "manifest_sha256": "523b23375b909de4752a7d98fe448dd52f5ef6d8bcb815c7d3f329d7aa348295",
+    "artifact_path": "data/explore/audit_candidates/internal/post-b08-nps-child-depth-b2-r7/nps_child_depth_v1.json",
+    "artifact_sha256": "16416e6fe8e9ece6de5c08787b8c284366d7dc0b4951d4819f4deb50c59a5d86",
+    "audit_path": "data/explore/audit_candidates/internal/post-b08-nps-child-depth-b2-r7/audit.json",
+    "audit_sha256": "dff1636e93c61e1f376d6b01c2a69eaea0086f3ab2454a6fcc71998bccd64468",
+    "review_path": "data/explore/audit_candidates/internal/post-b08-nps-child-depth-b2-r7/review.json",
+    "review_sha256": "683c6bff03b3a7a98cfe0d1315f172a6803869e4790ae18c0d17cac6572c2fef",
+}
 
 
 EXPECTED_IDS = (
@@ -346,9 +357,11 @@ def audit(
         failures.append("duplicate stable IDs")
     if children or "child_count" in payload:
         child_ids = [str(item.get("id") or "") for item in children]
-        binding = (payload.get("candidate") or {}).get("nps_child_depth") or {}
-        if payload.get("child_count") != len(children) or len(children) != 156:
-            failures.append("NPS child count differs from the accepted 156-record batch")
+        candidate = payload.get("candidate") or {}
+        binding = candidate.get("nps_child_depth") or {}
+        bindings = candidate.get("nps_child_depth_batches") or []
+        if payload.get("child_count") != len(children) or len(children) != 326:
+            failures.append("NPS child count differs from the accepted 326-record combined batches")
         if any(not item_id for item_id in child_ids) or len(child_ids) != len(set(child_ids)):
             failures.append("NPS children lack unique stable IDs")
         if any(
@@ -361,10 +374,31 @@ def audit(
         for key, expected_hash in EXPECTED_NPS_CHILD_BINDING.items():
             if binding.get(key) != expected_hash:
                 failures.append(f"NPS child binding {key} differs from accepted r7")
-        if (
-            binding.get("promotion_ready") is not False
-            or binding.get("live_serving_index_modified") is not False
-            or binding.get("audit_passed") is not True
+        expected_bindings = [EXPECTED_NPS_CHILD_BINDING, EXPECTED_NPS_CHILD_BINDING_2]
+        if len(bindings) != len(expected_bindings):
+            failures.append("NPS child batch bindings are incomplete")
+        else:
+            for index, expected_binding in enumerate(expected_bindings):
+                for key, expected_value in expected_binding.items():
+                    if bindings[index].get(key) != expected_value:
+                        failures.append(f"NPS child batch {index + 1} binding {key} differs from accepted r7")
+        expected_child_ids: list[str] = []
+        for expected_binding in expected_bindings:
+            artifact = root / expected_binding["artifact_path"]
+            if artifact.is_file():
+                source_payload = json.loads(artifact.read_text())
+                expected_child_ids.extend(
+                    str(item.get("id") or "")
+                    for item in source_payload.get("places") or []
+                    if isinstance(item, dict)
+                )
+        if len(expected_child_ids) == 326 and child_ids != expected_child_ids:
+            failures.append("NPS child IDs or deterministic batch order differ from accepted r7 inputs")
+        if any(
+            item.get("promotion_ready") is not False
+            or item.get("live_serving_index_modified") is not False
+            or item.get("audit_passed") is not True
+            for item in [binding, *bindings]
         ):
             failures.append("NPS child binding is not an audited internal-only candidate")
 

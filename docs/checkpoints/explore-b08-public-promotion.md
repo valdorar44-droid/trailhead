@@ -204,3 +204,4 @@ Wait for corrected Release 1 deployment `eb9c7a9d-54c1-4f7a-a4df-8f9bce054bf6` t
 - Task-owned Metro, Gradle, Maestro, pytest, Railway polling, and iOS tunnel processes: none.
 - Release 2 is accepted on both Android and iOS. No mobile OTA or native build is required for this backend-only promotion.
 - Next exact action: begin the next untouched Explore data-depth packet from `explore-b08-child-depth-v1`; do not repeat b08 promotion or accepted device checks without new evidence.
+- Forward checkpoint: `docs/checkpoints/explore-nps-depth-b09.md`.

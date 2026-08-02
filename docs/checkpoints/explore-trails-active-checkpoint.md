@@ -1607,3 +1607,31 @@ authorization. Do not overwrite the serving index or expose the batch publicly.
   the closed identity/classification/media/URL work without new evidence.
 - Do not repeat broad Map, Search, Layers, campground, Trails, Originals,
   Android Auto, Memory, or screenshot work.
+
+## Explore continuation — authenticated NPS child preview ready — 2026-08-01 21:00 CDT
+
+- Exact implementation: `11e7b84a9c7efc037e7fe7eb59ced90f9d43ad40`.
+- Accepted internal sidecar SHA-256:
+  `b93d785f346ac6b1b730a3778d60ac6e72fc9cc124174fb416e6bb45727ce27b`.
+- Contents: 13 reviewed proof hubs plus 156 parent-bound NPS children from
+  Blue Ridge, Sequoia/Kings Canyon, Bryce Canyon, Shenandoah, and Dinosaur.
+- Final gate: `132 passed, 21 subtests passed`; deterministic rebuild,
+  candidate QA, Python compilation, whitespace, and independent P0/P1/P2
+  audit all passed.
+- The protected serving index and App Store copy hashes remain unchanged.
+  `.cursor/` remains unstaged.
+- Public Featured, category browse, facet counts, and shared caches remain
+  isolated from the internal child records.
+
+### Exact next action
+
+Deploy `11e7b84a` as the internal backend/data candidate, verify the existing
+admin-plus-header authorization boundary, and run only the bounded Android hub
+to child to shared-sheet to map to Back delta. After acceptance, choose the next
+cached NPS module-coverage gap; do not refetch or promote publicly in this step.
+
+### Do not repeat
+
+- Do not repeat the accepted NPS child batch, agency quality work, broad Trails,
+  Search, Map, Layers, campground, Originals, Android Auto, Memory, or store
+  crawls without new evidence.

@@ -185,3 +185,65 @@ Do not mutate the protected serving index or public catalog.
   Android Auto, Memory, or screenshot work.
 - Do not publish or promote this candidate publicly until the authenticated
   internal preview and device delta are separately accepted.
+
+## NPS child-depth authenticated preview ready — 2026-08-01 21:00 CDT
+
+- Branch: `feat/trailhead-1.0.10-overhaul`
+- Implementation commit: `11e7b84a9c7efc037e7fe7eb59ced90f9d43ad40`
+- Accepted child candidate: `post-b08-nps-child-depth-b1-r7`
+- Internal sidecar SHA-256:
+  `b93d785f346ac6b1b730a3778d60ac6e72fc9cc124174fb416e6bb45727ce27b`
+- Sidecar contents: 13 reviewed proof hubs and 156 parent-bound NPS children.
+- Protected Explore-index SHA-256 remains
+  `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
+- Protected App Store copy SHA-256 remains
+  `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+- `.cursor/` and both protected files remain unstaged.
+
+### Accepted behavior
+
+- Reviewed children are available only inside the existing request-local
+  internal-preview boundary. Ordinary Featured/category browse and facet
+  counts exclude them.
+- The boundary still requires internal stage, authenticated administrator,
+  and `X-Trailhead-Explore-Preview: internal`; the header alone is not a
+  credential.
+- Parent modules preserve source-backed classifications for trails,
+  trailheads, campgrounds, activities, visitor information, and scenic
+  places. Endpoint type is only a fallback.
+- Search injection is first-page exact-only. Stable IDs always match; titles
+  and aliases match only when unique across the accepted batch. Category,
+  intent, filters, bounds, nearby/route scope, offline mode, and cursor rules
+  reuse Search V2 contracts.
+- Internal enrich and bulk hydration skip shared public response caches, so a
+  reviewed child cannot leak into a later public request.
+- The builder hard-binds all four immutable r7 artifacts by exact path, hash,
+  batch ID, audit result, and non-promotable state.
+
+### Verification
+
+- Final focused backend suite: `132 passed, 21 subtests passed`.
+- Independent read-only audit: no P0/P1/P2 blockers; all 330 normalized exact
+  identity tokens had no multi-result collision.
+- Candidate QA: 13 proof hubs, 156 children, pass.
+- Deterministic rebuild matched the sidecar byte for byte.
+- Python compilation and `git diff --check`: passed.
+- Open P0/P1: none before deployment.
+- Task-owned provider fetch, Metro, Gradle, Maestro, EAS, Railway, or recording
+  processes: none.
+
+### Exact next action
+
+Deploy exact commit `11e7b84a` from a clean detached worktree. Require Railway
+terminal `SUCCESS`, health `status=ok`, header-only denial, and authenticated
+internal diagnostics showing 13 hubs plus 156 children. Then run one bounded
+Android rich-parent child flow and one sparse-child return assertion. No mobile
+OTA or public catalog promotion is required for this backend/data-only packet.
+
+### Do not repeat
+
+- Do not rebuild r1-r7, refetch NPS, spend provider quota, or repeat the b08
+  agency/campground audits.
+- Do not repeat broad Map, Search, Layers, campground, Trails, Originals,
+  Android Auto, Memory, or screenshot work.
+- Do not stage the protected serving index, App Store copy, or `.cursor/`.

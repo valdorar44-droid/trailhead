@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from scripts.explore_sources.nps.fetch_nps import NpsRequestBudgetExceeded
 from scripts.explore_sources.nps.import_nps import fee_pass_lines, summary_from_park
 from scripts.run_nps_hourly_enrichment import (
     MAX_NPS_API_CALLS,
@@ -137,6 +138,115 @@ class NpsHourlyEnrichmentTests(unittest.TestCase):
             ]
             self.assertEqual(len(payloads), 1)
             self.assertEqual(json.loads(payloads[0])["fetched_codes"], [])
+
+    def test_live_batch_persists_partial_state_and_reraises_fetch_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cache = root / "cache"
+            cache.mkdir()
+            state = root / "state.json"
+            args = argparse.Namespace(
+                max_api_calls=MAX_NPS_API_CALLS,
+                estimated_calls_per_park=25,
+                batch_size=2,
+                park_code=[],
+                force_fetch=False,
+                dry_run=False,
+                rebuild_cache_only=False,
+                skip_rebuild=True,
+                run_audits=False,
+                candidate_root=str(root / "candidates"),
+                candidate_run_id="fixture",
+                use_railway_env=False,
+                source_cache_dir=str(cache),
+                state=str(state),
+                lock=str(root / "lock"),
+                nps_limit=500,
+                nps_max_records=500,
+                related_max_records=500,
+                http_timeout=1.0,
+                _inside_railway_env=False,
+            )
+
+            def fetch_side_effect(*, cache_dir, park_codes, **_kwargs):
+                if park_codes == ["jame"]:
+                    target = Path(cache_dir) / "nps" / "source-pack_codes-jame_with-places_max-500.json"
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text("{}")
+                    return target
+                raise RuntimeError("fixture provider failure")
+
+            with patch.dict(os.environ, {"NPS_API_KEY": "fixture-key"}), patch(
+                "scripts.run_nps_hourly_enrichment.requested_or_default_targets",
+                return_value=["jame", "hono"],
+            ), patch(
+                "scripts.run_nps_hourly_enrichment.fetch_nps_source_pack_to_cache",
+                side_effect=fetch_side_effect,
+            ):
+                with self.assertRaises(RuntimeError):
+                    run_batch(args)
+
+            state_text = state.read_text()
+            payload = json.loads(state_text)
+            self.assertEqual(payload["status"], "fetch_failed")
+            self.assertEqual(payload["selected_codes"], ["jame", "hono"])
+            self.assertEqual(payload["completed_codes"], ["jame"])
+            self.assertEqual(len(payload["fetched"]), 1)
+            self.assertTrue(payload["fetched"][0].endswith("source-pack_codes-jame_with-places_max-500.json"))
+            self.assertNotIn("fixture-key", state_text)
+            self.assertNotIn("fixture provider failure", state_text)
+
+    def test_live_batch_budget_state_preserves_partial_fetches(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            cache = root / "cache"
+            cache.mkdir()
+            state = root / "state.json"
+            args = argparse.Namespace(
+                max_api_calls=MAX_NPS_API_CALLS,
+                estimated_calls_per_park=25,
+                batch_size=2,
+                park_code=[],
+                force_fetch=False,
+                dry_run=False,
+                rebuild_cache_only=False,
+                skip_rebuild=True,
+                run_audits=False,
+                candidate_root=str(root / "candidates"),
+                candidate_run_id="fixture",
+                use_railway_env=False,
+                source_cache_dir=str(cache),
+                state=str(state),
+                lock=str(root / "lock"),
+                nps_limit=500,
+                nps_max_records=500,
+                related_max_records=500,
+                http_timeout=1.0,
+                _inside_railway_env=False,
+            )
+
+            def fetch_side_effect(*, cache_dir, park_codes, **_kwargs):
+                if park_codes == ["jame"]:
+                    target = Path(cache_dir) / "nps" / "source-pack_codes-jame_with-places_max-500.json"
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_text("{}")
+                    return target
+                raise NpsRequestBudgetExceeded("fixture budget exhausted")
+
+            with patch.dict(os.environ, {"NPS_API_KEY": "fixture-key"}), patch(
+                "scripts.run_nps_hourly_enrichment.requested_or_default_targets",
+                return_value=["jame", "hono"],
+            ), patch(
+                "scripts.run_nps_hourly_enrichment.fetch_nps_source_pack_to_cache",
+                side_effect=fetch_side_effect,
+            ):
+                with self.assertRaises(NpsRequestBudgetExceeded):
+                    run_batch(args)
+
+            payload = json.loads(state.read_text())
+            self.assertEqual(payload["status"], "budget_exhausted")
+            self.assertEqual(payload["completed_codes"], ["jame"])
+            self.assertEqual(len(payload["fetched"]), 1)
 
     def test_candidate_audit_reports_artifacts_and_module_coverage(self):
         with tempfile.TemporaryDirectory() as tmp:

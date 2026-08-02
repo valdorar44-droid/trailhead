@@ -211,7 +211,26 @@ def run_batch(args: argparse.Namespace) -> int:
                 fetched_codes.append(code)
                 print(f"fetched {code}: {target} ({budget.used}/{args.max_api_calls} NPS requests used)")
         except NpsRequestBudgetExceeded:
-            write_state(state_path, args, selected, completed_codes(cache_dir), request_count=budget.used, status="budget_exhausted")
+            write_state(
+                state_path,
+                args,
+                selected,
+                completed_codes(cache_dir),
+                request_count=budget.used,
+                status="budget_exhausted",
+                fetched=fetched,
+            )
+            raise
+        except Exception:
+            write_state(
+                state_path,
+                args,
+                selected,
+                completed_codes(cache_dir),
+                request_count=budget.used,
+                status="fetch_failed",
+                fetched=fetched,
+            )
             raise
 
     candidate_dir: Path | None = None

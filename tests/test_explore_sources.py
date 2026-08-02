@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 from pathlib import Path
 
@@ -15,9 +16,11 @@ from scripts.explore_sources.base.quality import score_place
 from scripts.explore_sources.base.schema import ExplorePlaceV3
 from scripts.explore_sources.blm.import_blm import import_blm_fixture
 from scripts.explore_sources.nps.fetch_nps import (
+    NpsRequestBudget,
     NpsRequestBudgetExceeded,
     fetch_nps_parks_to_cache,
     fetch_nps_source_pack_to_cache,
+    nps_get,
     park_codes_for_item,
     request_params,
 )
@@ -54,6 +57,11 @@ class FakeHttpResponse:
 
     def read(self) -> bytes:
         return json.dumps(self.payload).encode("utf-8")
+
+
+class TimeoutHttpResponse(FakeHttpResponse):
+    def read(self) -> bytes:
+        raise TimeoutError("fixture read timeout")
 
 
 class FakeNpsOpener:
@@ -651,6 +659,53 @@ class ExploreSourcePipelineTests(unittest.TestCase):
                 [urlparse(request.full_url).path.rstrip("/").split("/")[-1] for request, _timeout in opener.requests],
                 ["parks", "places"],
             )
+
+    def test_nps_get_retries_response_read_timeout_within_budget(self):
+        responses = [
+            TimeoutHttpResponse({}),
+            FakeHttpResponse({"total": "1", "data": [{"parkCode": "hono"}]}),
+        ]
+
+        def opener(_request, timeout):
+            self.assertEqual(timeout, 30.0)
+            return responses.pop(0)
+
+        budget = NpsRequestBudget(2)
+        with patch("scripts.explore_sources.nps.fetch_nps.time.sleep") as sleep:
+            payload = nps_get(
+                "parks",
+                api_key="test-key",
+                params={"parkCode": "hono"},
+                timeout=30.0,
+                request_budget=budget,
+                opener=opener,
+            )
+
+        self.assertEqual(payload["data"][0]["parkCode"], "hono")
+        self.assertEqual(budget.used, 2)
+        sleep.assert_called_once_with(2.0)
+
+    def test_nps_get_wraps_final_read_timeout_without_request_details(self):
+        responses = [TimeoutHttpResponse({}) for _ in range(4)]
+
+        def opener(_request, timeout):
+            self.assertEqual(timeout, 30.0)
+            return responses.pop(0)
+
+        budget = NpsRequestBudget(4)
+        with patch("scripts.explore_sources.nps.fetch_nps.time.sleep") as sleep:
+            with self.assertRaisesRegex(RuntimeError, "^NPS parks fetch timed out$"):
+                nps_get(
+                    "parks",
+                    api_key="secret-fixture-key",
+                    params={"parkCode": "hono"},
+                    timeout=30.0,
+                    request_budget=budget,
+                    opener=opener,
+                )
+
+        self.assertEqual(budget.used, 4)
+        self.assertEqual(sleep.call_count, 3)
 
     def test_nps_live_request_params(self):
         params = request_params(park_codes=["yose"], states=["CA", "UT"], query="waterfalls", limit=25, start=50)

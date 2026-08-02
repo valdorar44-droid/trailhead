@@ -93,6 +93,37 @@ Kaloko-Honokohau; and Katahdin Woods and Waters.
 Run the single bounded b09 fetch through the authenticated Railway environment,
 then inspect its audit before any retry, correction, or downstream integration.
 
+## Bounded fetch interruption and pipeline correction
+
+- First provider run: 2026-08-02, one process, no retry loop.
+- Historic Jamestowne, Home of Franklin D. Roosevelt, and Homestead completed
+  atomically using 35 logged requests before the NPS response for Honouliuli
+  timed out during `response.read()`.
+- Honouliuli was not written, no candidate was built, no public state changed,
+  and the enrichment lock was released.
+- The old runner did not persist a state file for this raw `TimeoutError`.
+- Accepted partial source hashes:
+  - `jame` `70fe87c232c5d0c163edd4d6ec7353ef264f1930de71c45de37705735b912fa8`
+  - `hofr` `02dd0a46d23074ef46036961e05332e424ad42f04a06aa8539ba0f8ba41e4e67`
+  - `home` `ad36fd5352a987552f6e8d8cb0a658282e974a15af6948b88aec1dd7c491bc2b`
+- Each partial source contains the correct park identity and all ten requested
+  endpoint buckets. They must not be deleted or refetched.
+- The pipeline now retries read-time `TimeoutError` through its existing bounded
+  four-attempt backoff and charges every attempt to the request budget.
+- Live failures now persist fixed `fetch_failed` state with selected/completed
+  codes, request count, and successfully written paths before re-raising. No
+  exception text, request URL, API key, or response content is stored.
+- Budget exhaustion also preserves successfully written paths.
+- Focused source/runner verification: 51 passed; Python compilation and
+  `git diff --check` passed.
+
+### Revised exact next action
+
+Resume once with the same explicitly pinned 28-code list and without
+`--force-fetch`. The three accepted cache files must be skipped, leaving the
+original 25 parks rather than expanding the frozen b09 scope. Inspect the
+candidate audit before any further provider action.
+
 ## Do not repeat
 
 - Do not refetch NPS batches b01-b08 or rebuild the accepted b08 public release.

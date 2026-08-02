@@ -307,6 +307,11 @@ def nps_get(
                 time.sleep(retry_delay(exc, attempt))
                 continue
             raise RuntimeError(f"NPS {endpoint} fetch failed: {exc.reason}") from exc
+        except TimeoutError as exc:
+            if attempt < 3:
+                time.sleep(retry_delay(exc, attempt))
+                continue
+            raise RuntimeError(f"NPS {endpoint} fetch timed out") from exc
         except json.JSONDecodeError as exc:
             raise RuntimeError(f"NPS {endpoint} response was not valid JSON") from exc
     raise RuntimeError(f"NPS {endpoint} fetch failed after retries")

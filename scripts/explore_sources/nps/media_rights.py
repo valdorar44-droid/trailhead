@@ -339,17 +339,21 @@ def _approved_trace(
     traces = traces_by_url.get(url, [])
     if not traces:
         return None
+    desired = _source_page(desired_page)
+    if desired:
+        # Media URLs are sometimes reused across NPS pages. A request scoped to
+        # one page must be supported by that page's own cached evidence; an
+        # approval from a different page cannot fill an absent or rejected
+        # exact-page trace.
+        traces = [trace for trace in traces if trace.source_page_url == desired]
+        if not traces:
+            return None
     distinct_credits = {trace.exact_credit.casefold() for trace in traces if trace.exact_credit}
     if len(distinct_credits) != 1:
         return None
     approved = [trace for trace in traces if trace.approved]
     if not approved:
         return None
-    desired = _source_page(desired_page)
-    if desired:
-        same_page = [trace for trace in approved if trace.source_page_url == desired]
-        if same_page:
-            approved = same_page
     return sorted(
         approved,
         key=lambda trace: (trace.source_page_url, trace.json_pointer, trace.cache_path),

@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 
 from scripts.build_nps_child_depth_batch import (
+    AUDIT_CANDIDATE_ROOT,
     BATCH_DESTINATIONS,
     ROOT,
     _audit_children,
@@ -36,7 +37,7 @@ def related_item(code: str, endpoint: str) -> dict:
         f"{title} is an official National Park Service place with enough cached descriptive detail "
         "to support a specific reader card without adding generic instructions or unsupported claims."
     )
-    return {
+    item = {
         "id": f"{code}-{endpoint}",
         "title": title,
         "description": description,
@@ -49,6 +50,9 @@ def related_item(code: str, endpoint: str) -> dict:
             "credit": "National Park Service",
         }],
     }
+    if endpoint == "thingstodo":
+        item["activities"] = [{"name": "Front-Country Hiking"}]
+    return item
 
 
 def make_fixture(path: Path, code: str, name: str) -> None:
@@ -88,7 +92,7 @@ class NpsChildDepthBatchTests(unittest.TestCase):
     def test_cached_build_is_deterministic_and_capability_driven(self):
         protected = ROOT / "dashboard/explore_serving_index_v2.json"
         protected_before = sha256(protected)
-        with tempfile.TemporaryDirectory(dir=ROOT) as temp:
+        with tempfile.TemporaryDirectory(dir=AUDIT_CANDIDATE_ROOT) as temp:
             root = Path(temp)
             base, cache = self.fixture_tree(root)
             first = root / "first"
@@ -116,7 +120,7 @@ class NpsChildDepthBatchTests(unittest.TestCase):
         self.assertEqual(sha256(protected), protected_before)
 
     def test_non_nps_official_url_blocks_the_candidate(self):
-        with tempfile.TemporaryDirectory(dir=ROOT) as temp:
+        with tempfile.TemporaryDirectory(dir=AUDIT_CANDIDATE_ROOT) as temp:
             root = Path(temp)
             base, cache = self.fixture_tree(root)
             fixture = next(cache.glob("source-pack_codes-blri_*.json"))
@@ -127,7 +131,7 @@ class NpsChildDepthBatchTests(unittest.TestCase):
                 build(self.args(base, cache, root / "candidate"))
 
     def test_missing_cached_image_credit_strips_media_instead_of_inventing_rights(self):
-        with tempfile.TemporaryDirectory(dir=ROOT) as temp:
+        with tempfile.TemporaryDirectory(dir=AUDIT_CANDIDATE_ROOT) as temp:
             root = Path(temp)
             base, cache = self.fixture_tree(root)
             fixture = next(cache.glob("source-pack_codes-blri_*.json"))
@@ -151,7 +155,11 @@ class NpsChildDepthBatchTests(unittest.TestCase):
             "module_target": "trails",
             "description": "The visitor center activity mentions a nearby trail.",
         }
-        _normalize_child_classification(activity)
+        _normalize_child_classification(
+            activity,
+            "thingstodo",
+            {"activities": [{"name": "Junior Ranger Program"}]},
+        )
         self.assertEqual((activity["category"], activity["module_target"]), ("activity", "do"))
 
         trail = {
@@ -160,8 +168,60 @@ class NpsChildDepthBatchTests(unittest.TestCase):
             "category": "campground",
             "module_target": "stay",
         }
-        _normalize_child_classification(trail)
+        _normalize_child_classification(trail, "places", {"tags": ["hiking"]})
         self.assertEqual((trail["category"], trail["module_target"]), ("trail", "trails"))
+
+        ranger_walk = {
+            "id": "place:nps-child:brca:thingstodo:rim-walk-with-a-ranger",
+            "name": "Rim Walk with a Ranger",
+            "category": "trail",
+            "module_target": "trails",
+        }
+        _normalize_child_classification(
+            ranger_walk,
+            "thingstodo",
+            {"activities": [{"name": "Guided Tours"}]},
+        )
+        self.assertEqual((ranger_walk["category"], ranger_walk["module_target"]), ("activity", "do"))
+
+        wayside = {
+            "id": "place:nps-child:brca:places:bristlecone-loop-wayside",
+            "name": "Bristlecone Loop Wayside 107",
+            "category": "trail",
+            "module_target": "trails",
+        }
+        _normalize_child_classification(wayside, "places", {"tags": ["wayside"]})
+        self.assertEqual((wayside["category"], wayside["module_target"]), ("historic_site", "see"))
+
+        trail_stop = {
+            "id": "place:nps-child:dino:places:gates-of-lodore-trail-stop-1",
+            "name": "Gates of Lodore Trail Stop 1",
+            "category": "trail",
+            "module_target": "trails",
+        }
+        _normalize_child_classification(trail_stop, "places", {"tags": ["desert hiking"]})
+        self.assertEqual((trail_stop["category"], trail_stop["module_target"]), ("place", "see"))
+
+        overlook = {
+            "id": "place:nps-child:blri:places:camp-creek-overlook",
+            "name": "Camp Creek Overlook",
+            "category": "lake",
+            "module_target": "trails",
+        }
+        _normalize_child_classification(overlook, "places", {"tags": ["hiking"]})
+        self.assertEqual((overlook["category"], overlook["module_target"]), ("viewpoint", "see"))
+
+        visitor_trailhead = {
+            "id": "place:nps-child:dino:places:visitor-center-trailhead",
+            "name": "Fossil Discovery Trail - Visitor Center Trailhead",
+            "category": "visitor_center",
+            "module_target": "visitor",
+        }
+        _normalize_child_classification(visitor_trailhead, "places", {"tags": ["trailhead"]})
+        self.assertEqual(
+            (visitor_trailhead["category"], visitor_trailhead["module_target"]),
+            ("trailhead", "trails"),
+        )
 
     def test_exact_source_media_mismatch_is_rejected(self):
         child = {
@@ -177,6 +237,7 @@ class NpsChildDepthBatchTests(unittest.TestCase):
                 "primary": "National Park Service",
                 "license": "National Park Service public data",
                 "official_url": "https://www.nps.gov/places/valley-overlook.htm",
+                "nps_item_id": "blri-places",
                 "photos": [{
                     "url": "https://www.nps.gov/common/uploads/structured_data/wrong.jpg",
                     "credit": "National Park Service",
@@ -188,15 +249,16 @@ class NpsChildDepthBatchTests(unittest.TestCase):
                 "credit": "National Park Service",
                 "license": "National Park Service public data",
             }],
+            "sources": [{"source": "nps", "source_id": "blri-places"}],
         }
         source = related_item("blri", "places")
         source["title"] = "Valley Overlook"
-        audit = _audit_children([child], {"blri": {"places:valley overlook": source}})
+        audit = _audit_children([child], {"blri": {"places:id:blri-places": source}})
         self.assertFalse(audit["passed"])
         self.assertIn("media_identity_mismatch", {item["code"] for item in audit["errors"]})
 
     def test_candidate_directory_is_immutable(self):
-        with tempfile.TemporaryDirectory(dir=ROOT) as temp:
+        with tempfile.TemporaryDirectory(dir=AUDIT_CANDIDATE_ROOT) as temp:
             root = Path(temp)
             base, cache = self.fixture_tree(root)
             out_dir = root / "candidate"
@@ -206,11 +268,34 @@ class NpsChildDepthBatchTests(unittest.TestCase):
                 build(self.args(base, cache, out_dir))
 
     def test_live_dashboard_outputs_are_protected(self):
-        with tempfile.TemporaryDirectory(dir=ROOT) as temp:
+        with tempfile.TemporaryDirectory(dir=AUDIT_CANDIDATE_ROOT) as temp:
             root = Path(temp)
             base, cache = self.fixture_tree(root)
-            with self.assertRaisesRegex(ValueError, "protected live artifact"):
+            with self.assertRaisesRegex(ValueError, "below data/explore/audit_candidates"):
                 build(self.args(base, cache, ROOT / "dashboard"))
+
+    def test_manifest_is_deterministic_across_source_roots(self):
+        with (
+            tempfile.TemporaryDirectory(dir=AUDIT_CANDIDATE_ROOT) as first_temp,
+            tempfile.TemporaryDirectory(dir=AUDIT_CANDIDATE_ROOT) as second_temp,
+        ):
+            first_root = Path(first_temp)
+            second_root = Path(second_temp)
+            first_base, first_cache = self.fixture_tree(first_root)
+            second_base, second_cache = self.fixture_tree(second_root)
+            first_out = first_root / "candidate"
+            second_out = second_root / "candidate"
+
+            first_result = build(self.args(first_base, first_cache, first_out))
+            second_result = build(self.args(second_base, second_cache, second_out))
+
+            self.assertEqual(first_result["manifest_sha256"], second_result["manifest_sha256"])
+            first_manifest = json.loads((first_out / "manifest.json").read_text())
+            self.assertEqual(first_manifest["inputs"]["base_catalog"]["path"], "base_catalog/base.json")
+            self.assertTrue(all(
+                not Path(ref["path"]).is_absolute()
+                for ref in first_manifest["inputs"]["fixtures"].values()
+            ))
 
 
 if __name__ == "__main__":

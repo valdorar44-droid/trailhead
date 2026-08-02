@@ -194,12 +194,34 @@ class ExploreNpsMediaRightsTests(unittest.TestCase):
         }]
         self.assertEqual(self._normalize([place])[0]["media"], [])
 
-        self.cache_payload["related"]["cave"]["places"].append({
-            "url": "https://www.nps.gov/places/other.htm",
-            "images": [{"url": self.park_image, "credit": "NPS Photo / Different credit"}],
+        self.cache_payload["data"][0]["images"].append({
+            "url": self.park_image,
+            "credit": "NPS Photo / Different credit",
         })
         self.cache_path.write_text(json.dumps(self.cache_payload))
         self.assertEqual(self._normalize()[0]["media"], [])
+
+    def test_reused_image_requires_approved_evidence_for_the_exact_page(self):
+        self.cache_payload["related"]["cave"]["places"][0]["images"].append({
+            "url": self.park_image,
+            "credit": "NPS / Ranger Example",
+            "ai_modified": True,
+        })
+        self.cache_path.write_text(json.dumps(self.cache_payload))
+        place = self._place()
+        place["source_pack"]["things_to_see"] = [{
+            "title": "Reused park image",
+            "url": "https://www.nps.gov/places/example.htm",
+            "image_url": self.park_image,
+            "image_credit": "NPS / Ranger Example",
+            "image_license": "NPS data",
+        }]
+
+        child = self._normalize([place])[0]["source_pack"]["things_to_see"][0]
+
+        self.assertNotIn("image_url", child)
+        self.assertNotIn("image_credit", child)
+        self.assertNotIn("image_rights_evidence", child)
 
     def test_aggregate_cache_is_secondary_exact_evidence_only(self):
         aggregate_image = "https://www.nps.gov/common/uploads/structured_data/aggregate.jpg"

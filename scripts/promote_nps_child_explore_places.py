@@ -8,6 +8,7 @@ total promoted records so the mobile Explore home remains quick to hydrate.
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import re
 import time
@@ -25,10 +26,36 @@ ENDPOINT_LIMITS = {
     "thingstodo": 8,
     "places": 14,
 }
+NPS_ITEM_SOURCE_PREFIX = "nps:item:"
+NPS_TITLE_SCOPE_PREFIX = "nps-title:"
+READER_URL_TOKEN = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
+HTML_BREAK = re.compile(r"<\s*br\s*/?\s*>", re.IGNORECASE)
+HTML_TAG = re.compile(r"<[^>]+>")
+URL_MARKER = "TRAILHEAD_SOURCE_URL"
 
 
 def compact_text(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "").replace("\xa0", " ")).strip()
+
+
+def reader_text_without_urls(value: Any) -> str:
+    """Remove source-link sentences and HTML from reader-facing NPS copy."""
+    text = html.unescape(str(value or "").replace("\xa0", " "))
+    text = HTML_BREAK.sub(". ", text)
+    text = HTML_TAG.sub(" ", text)
+    text = READER_URL_TOKEN.sub(f" {URL_MARKER} ", text)
+    while URL_MARKER in text:
+        cleaned = re.sub(
+            rf"(^|[.!?])[^.!?]*{URL_MARKER}[^.!?]*(?:[.!?]|$)",
+            r"\1 ",
+            text,
+            count=1,
+        )
+        if cleaned == text:
+            text = text.replace(URL_MARKER, " ")
+            break
+        text = cleaned
+    return compact_text(text).strip(" .-;")
 
 
 def slugify(value: Any) -> str:
@@ -42,6 +69,61 @@ def title_key(value: Any) -> str:
     text = re.sub(r"&", " and ", text)
     text = re.sub(r"[^a-z0-9]+", " ", text)
     return re.sub(r"\s+", " ", text).strip()
+
+
+def stable_nps_item_id(item: dict[str, Any]) -> str:
+    """Return the source-owned NPS item ID when the endpoint supplied one."""
+    return compact_text(item.get("id"))
+
+
+def nps_item_source_identity(item_id: Any) -> str:
+    """Build a globally comparable identity for one stable NPS API item."""
+    normalized = compact_text(item_id)
+    return f"{NPS_ITEM_SOURCE_PREFIX}{slugify(normalized)}" if normalized else ""
+
+
+def nps_title_scope_key(park_code: Any, endpoint: Any, title: Any) -> str:
+    """Scope fuzzy title dedupe to the parent park and NPS endpoint."""
+    park = compact_text(park_code).lower()
+    endpoint_name = compact_text(endpoint).lower()
+    normalized_title = title_key(title)
+    if not park or not endpoint_name or not normalized_title:
+        return ""
+    return f"{NPS_TITLE_SCOPE_PREFIX}{park}:{endpoint_name}:{normalized_title}"
+
+
+def _nps_child_scope_from_place(place: dict[str, Any]) -> tuple[str, str]:
+    place_id = compact_text(place.get("id"))
+    parts = place_id.split(":")
+    if len(parts) >= 5 and parts[0] == "place" and parts[1] == "nps-child":
+        return parts[2].lower(), parts[3].lower()
+    source_pack = place.get("source_pack") if isinstance(place.get("source_pack"), dict) else {}
+    return (
+        compact_text(source_pack.get("nps_park_code")).lower(),
+        compact_text(source_pack.get("nps_endpoint")).lower(),
+    )
+
+
+def _nps_source_identity_keys(place: dict[str, Any]) -> set[str]:
+    """Extract global stable-item identities from current and legacy records."""
+    identities = {
+        compact_text(value).lower()
+        for value in place.get("source_ids") or []
+        if compact_text(value).lower().startswith(NPS_ITEM_SOURCE_PREFIX)
+    }
+    source_pack = place.get("source_pack") if isinstance(place.get("source_pack"), dict) else {}
+    packed_item_id = compact_text(source_pack.get("nps_item_id"))
+    if packed_item_id:
+        identities.add(nps_item_source_identity(packed_item_id))
+    for source in place.get("sources") or []:
+        if not isinstance(source, dict) or compact_text(source.get("source")).lower() != "nps":
+            continue
+        source_id = compact_text(source.get("source_id"))
+        # Legacy fallback identities were URLs or park:endpoint:title values.
+        # Neither is a source-owned item ID, so they must not dedupe globally.
+        if source_id and ":" not in source_id and not source_id.lower().startswith("http"):
+            identities.add(nps_item_source_identity(source_id))
+    return {identity for identity in identities if identity}
 
 
 def sentence_preview(value: str, max_chars: int = 520) -> str:
@@ -95,12 +177,16 @@ def child_title(item: dict[str, Any]) -> str:
 
 
 def child_description(item: dict[str, Any]) -> str:
-    return compact_text(
+    primary = (
         item.get("description")
         or item.get("shortDescription")
         or item.get("listingDescription")
         or item.get("bodyText")
     )
+    body = item.get("bodyText")
+    if READER_URL_TOKEN.search(str(primary or "")) and body:
+        primary = body
+    return reader_text_without_urls(primary)
 
 
 def child_url(item: dict[str, Any], park: dict[str, Any]) -> str:
@@ -199,7 +285,9 @@ def place_from_child(park: dict[str, Any], endpoint: str, item: dict[str, Any], 
     if not description:
         description = f"{title} is an official National Park Service {endpoint_label(endpoint).lower()} record in {park_name}. Check current access, hours, closures, fees, and local rules before relying on it."
     url = child_url(item, park)
-    source_id = compact_text(item.get("id") or item.get("url") or f"{park_code}:{endpoint}:{slugify(title)}")
+    nps_item_id = stable_nps_item_id(item)
+    source_id = compact_text(nps_item_id or item.get("url") or f"{park_code}:{endpoint}:{slugify(title)}")
+    source_identity = nps_item_source_identity(nps_item_id)
     category = category_for_item(endpoint, item)
     module_target = module_target_for_child(endpoint, category)
     image = first_image(item)
@@ -214,10 +302,11 @@ def place_from_child(park: dict[str, Any], endpoint: str, item: dict[str, Any], 
         park_name,
         park_code,
     })
-    place_id = f"place:nps-child:{park_code}:{endpoint}:{slugify(title)}"
-    return {
+    identity_token = slugify(nps_item_id) if nps_item_id else slugify(title)
+    place_id = f"place:nps-child:{park_code}:{endpoint}:{identity_token}"
+    place = {
         "id": place_id,
-        "source_ids": [f"nps:{park_code}:{endpoint}:{slugify(source_id)}"],
+        "source_ids": [source_identity or f"nps:{park_code}:{endpoint}:{slugify(source_id)}"],
         "name": title,
         "category": category,
         "canonical_role": "child",
@@ -248,6 +337,7 @@ def place_from_child(park: dict[str, Any], endpoint: str, item: dict[str, Any], 
             "primary": NPS_ATTRIBUTION,
             "official_url": url,
             "nps_park_code": park_code,
+            "nps_endpoint": endpoint,
             "sources": [{
                 "title": title,
                 "publisher": NPS_ATTRIBUTION,
@@ -287,6 +377,9 @@ def place_from_child(park: dict[str, Any], endpoint: str, item: dict[str, Any], 
             "source_badge": NPS_ATTRIBUTION,
         },
     }
+    if nps_item_id:
+        place["source_pack"]["nps_item_id"] = nps_item_id
+    return place
 
 
 def load_existing_keys(catalog: dict[str, Any]) -> tuple[set[str], set[str]]:
@@ -296,7 +389,13 @@ def load_existing_keys(catalog: dict[str, Any]) -> tuple[set[str], set[str]]:
         if not isinstance(place, dict):
             continue
         ids.add(compact_text(place.get("id")))
-        titles.add(title_key(place.get("name") or place.get("title") or (place.get("summary") or {}).get("title")))
+        ids.update(_nps_source_identity_keys(place))
+        title = place.get("name") or place.get("title") or (place.get("summary") or {}).get("title")
+        titles.add(title_key(title))
+        park_code, endpoint = _nps_child_scope_from_place(place)
+        scoped_title = nps_title_scope_key(park_code, endpoint, title)
+        if scoped_title:
+            titles.add(scoped_title)
     return ids, {key for key in titles if key}
 
 
@@ -334,14 +433,23 @@ def promote_from_fixture(path: Path, existing_ids: set[str], existing_titles: se
                 if not place:
                     continue
                 key = title_key(place.get("name"))
-                if place["id"] in existing_ids or key in existing_titles:
+                scoped_title = nps_title_scope_key(park_code, endpoint, place.get("name"))
+                source_identities = _nps_source_identity_keys(place)
+                if (
+                    place["id"] in existing_ids
+                    or bool(source_identities.intersection(existing_ids))
+                    or scoped_title in existing_titles
+                ):
                     added_for_park += 1
                     added_for_endpoint += 1
                     if added_for_endpoint >= ENDPOINT_LIMITS[endpoint] or added_for_park >= max_per_park:
                         break
                     continue
                 existing_ids.add(place["id"])
+                existing_ids.update(source_identities)
                 existing_titles.add(key)
+                if scoped_title:
+                    existing_titles.add(scoped_title)
                 promoted.append(place)
                 added_for_park += 1
                 added_for_endpoint += 1

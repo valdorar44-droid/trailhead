@@ -121,3 +121,28 @@ receives the update, verify only the corrected Explore search return.
 - Do not switch RNMapbox to TextureView for a viewer artifact.
 - Do not merge the divergent 1.0.10-overhaul native/config tree into this
   1.0.11 production descendant.
+
+## Production publication result
+
+Published successfully from immutable tag `v1.0.11-b08-ota4`, source
+`b8d9dc8b16883f97c6c44b15f33429dc4d4fb737`.
+
+- Production channel: `019dc26b-268a-794b-8aa8-3497b4d38487`.
+- Candidate branch: `production-candidate-b8d9dc8b16883f97c6c44b15f33429dc4d4fb737-msbf24qt-6122bfe38d18bcbce0f06c2a`.
+- Candidate branch ID: `019fc12e-500f-7a67-b1af-a1dd5a6549e0`.
+- Android update: `019fc12e-6e83-7a91-81e4-77c12217d906`.
+- Android group: `875d2507-b754-46d8-b273-6df94c6c7693`.
+- iOS update: `019fc12e-c01e-71e3-ad93-dd86ea9778bc`.
+- iOS group: `eec5cdc9-0ac2-4b30-95b8-eaa5741c146d`.
+- Runtime coverage: all 14 expected runtime/platform pairs preserved.
+- Previous rollback branch remains
+  `production-candidate-c115579341fbd68dd61495b18e620cc6992ab0d2-msb1ekop-b0699736346b07493d23ef47`.
+- Backend health: `GET https://api.gettrailhead.app/api/health` returned
+  HTTP 200 with `status: ok`.
+
+Open P0/P1 after publication: none.
+
+Exact next action: let the production iPhone fetch the update online, fully
+close and reopen it, then verify only Explore search -> campground -> X/Back
+return behavior. Do not repeat the accepted Plan, Downloads, Originals, NPS,
+Layers, Memory, Android Auto, or broad Explore checks.

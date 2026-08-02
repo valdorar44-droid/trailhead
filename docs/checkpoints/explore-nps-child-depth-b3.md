@@ -103,3 +103,88 @@ candidate plus byte-identical rebuild, and run the focused audit.
 - Do not deploy, promote, publish an OTA, or alter public feature stages.
 - Do not repeat production, Map, Search, Layers, campground, Trails,
   Originals, Android Auto, Memory, or screenshot work.
+
+## Build checkpoint — 2026-08-02 00:16 CDT
+
+- Frozen implementation commit: `c1a18bcc`
+- Candidate:
+  `data/explore/audit_candidates/internal/post-b08-nps-child-depth-b3-r5`
+- Independent rebuild:
+  `data/explore/audit_candidates/internal/post-b08-nps-child-depth-b3-r5-rebuild`
+- Candidate and rebuild are byte-identical:
+  - `audit.json`: `d811752e6975efd16a4327567340b9c8dcfff2c87130fb3729d982d77dad47a6`
+  - `manifest.json`: `565cd7db018ae5f0f7b550b50fd4fade8dd821ae823b91c1719056c63d2fdad4`
+  - `nps_child_depth_v1.json`: `db4f0b94bcde127a903f4db9c1ef91b43d98149c72e016c2b47b8a0ce051ced5`
+  - `review.json`: `7ae2871be90b5e628e4a719202c45e700eaeb842e8451cbe20cc4893c687d348`
+
+### Accepted output profile
+
+- Total: `131` children with stable, unique identities.
+- Destination counts: Big Bend `30`, Everglades `27`, Cuyahoga Valley
+  `21`, Hawaiʻi Volcanoes `25`, and Buffalo National River `28`.
+- Module counts: Stay `20`, Visitor Information `17`, Activities `13`,
+  Trails `52`, and See `29`.
+- Media: `131` candidate images, `111` exact-page rights-approved images,
+  and `20` conservatively stripped images.
+- Provider requests: `0`.
+- Live catalog modified: `false`.
+- Live serving index modified: `false`.
+- Promotion ready: `false`.
+
+### Named audit decisions closed
+
+- Semantically deduplicated the two Hawaiʻi `Devastation Trail` records and
+  retained the rights-backed official trailhead record.
+- Classified `Camp Lonesome` as Stay/campground, `Brecksville Station` and
+  `Boxley Grist Mill` as See/historic sites, and `Hōlei Sea Arch` as an
+  activity rather than a named trail.
+- Repaired the Bobcat Boardwalk distance, Buffalo Point Recreation.gov copy,
+  and Rush Mine distance wording.
+- Recorded exactly `9` parent-page URL fallbacks and exactly `5` reviewed
+  shared-coordinate clusters in immutable review diagnostics.
+- Preserved the exact-page HTTPS NPS media plus unambiguous NPS-credit rights
+  policy.
+
+### Compatibility and verification
+
+- Batch 2 rebuild remains byte-identical to its accepted r7 artifacts.
+- Batch 3 changes produce no additional Batch 1 drift when compared with the
+  current unmodified builder baseline.
+- Focused builder/candidate/Batch 2 suite: `18 passed`.
+- Broader Explore/NPS/source/search suite after isolated schema initialization:
+  `167 passed`, `17 subtests passed`, `15 warnings`.
+- Python compilation passed for the builder and both Batch 3 test files.
+- `git diff --check` and cached-diff checks passed.
+- The staged file set contained only the builder, tests, and final r5/rebuild
+  artifacts. Protected-file hashes remain exactly those recorded above.
+- Independent read-only audit accepted exact commit `c1a18bcc`:
+  - Candidate and rebuild hashes are identical for all four artifacts.
+  - All `131` children resolve to their pinned cached source objects.
+  - All retained media URLs, credits, and evidence hashes resolve under the
+    exact-page NPS-rights policy.
+  - The `9` actual missing child URLs exactly match the documented parent-page
+    fallbacks.
+  - The one semantic dedupe, five coordinate reviews, and every named
+    classification/copy fix were independently verified.
+  - Requests remain `0`; the artifacts are internal and non-promotable.
+  - P0: none. P1: none. P2: none.
+
+### Background processes
+
+No task-owned candidate build, test, auditor, Metro, Gradle, Maestro, EAS,
+Railway, or provider-fetch process remains running.
+
+### Exact next action
+
+Integrate the accepted immutable r5 artifacts into a separately checkpointed
+internal-preview packet. Bind Batch 3 after Batch 1 and Batch 2, retain the
+legacy Batch 1 binding, require authenticated administrator plus internal
+preview header, and do not alter the protected serving index.
+
+### Do not repeat after acceptance
+
+- Do not rebuild Batch 3 or spend NPS API quota.
+- Do not integrate draft r1–r4 artifacts.
+- Do not integrate, deploy, promote, or run device crawls from this branch.
+- Do not rerun the complete Explore/NPS suite unless the accepted artifacts or
+  builder change.

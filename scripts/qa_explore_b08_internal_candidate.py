@@ -59,6 +59,17 @@ EXPECTED_NPS_CHILD_BINDING_2 = {
     "review_path": "data/explore/audit_candidates/internal/post-b08-nps-child-depth-b2-r7/review.json",
     "review_sha256": "683c6bff03b3a7a98cfe0d1315f172a6803869e4790ae18c0d17cac6572c2fef",
 }
+EXPECTED_NPS_CHILD_BINDING_3 = {
+    "batch_id": "post-b08-nps-child-depth-b3",
+    "manifest_path": "data/explore/audit_candidates/internal/post-b08-nps-child-depth-b3-r5/manifest.json",
+    "manifest_sha256": "565cd7db018ae5f0f7b550b50fd4fade8dd821ae823b91c1719056c63d2fdad4",
+    "artifact_path": "data/explore/audit_candidates/internal/post-b08-nps-child-depth-b3-r5/nps_child_depth_v1.json",
+    "artifact_sha256": "db4f0b94bcde127a903f4db9c1ef91b43d98149c72e016c2b47b8a0ce051ced5",
+    "audit_path": "data/explore/audit_candidates/internal/post-b08-nps-child-depth-b3-r5/audit.json",
+    "audit_sha256": "d811752e6975efd16a4327567340b9c8dcfff2c87130fb3729d982d77dad47a6",
+    "review_path": "data/explore/audit_candidates/internal/post-b08-nps-child-depth-b3-r5/review.json",
+    "review_sha256": "7ae2871be90b5e628e4a719202c45e700eaeb842e8451cbe20cc4893c687d348",
+}
 
 
 EXPECTED_IDS = (
@@ -360,8 +371,46 @@ def audit(
         candidate = payload.get("candidate") or {}
         binding = candidate.get("nps_child_depth") or {}
         bindings = candidate.get("nps_child_depth_batches") or []
-        if payload.get("child_count") != len(children) or len(children) != 326:
-            failures.append("NPS child count differs from the accepted 326-record combined batches")
+        expected_bindings = [
+            EXPECTED_NPS_CHILD_BINDING,
+            EXPECTED_NPS_CHILD_BINDING_2,
+            EXPECTED_NPS_CHILD_BINDING_3,
+        ]
+        expected_child_ids: list[str] = []
+        missing_expected_inputs: list[str] = []
+        accepted_input_pairs = (
+            ("manifest_path", "manifest_sha256"),
+            ("artifact_path", "artifact_sha256"),
+            ("audit_path", "audit_sha256"),
+            ("review_path", "review_sha256"),
+        )
+        for expected_binding in expected_bindings:
+            for path_key, hash_key in accepted_input_pairs:
+                accepted_path = root / expected_binding[path_key]
+                if not accepted_path.is_file():
+                    missing_expected_inputs.append(expected_binding[path_key])
+                elif _sha256(accepted_path) != expected_binding[hash_key]:
+                    failures.append(
+                        f"accepted NPS child {expected_binding['batch_id']} {path_key} hash differs"
+                    )
+            artifact = root / expected_binding["artifact_path"]
+            if not artifact.is_file():
+                continue
+            source_payload = json.loads(artifact.read_text())
+            expected_child_ids.extend(
+                str(item.get("id") or "")
+                for item in source_payload.get("places") or []
+                if isinstance(item, dict)
+            )
+        if missing_expected_inputs:
+            failures.append("accepted NPS child inputs are missing")
+        expected_child_count = len(expected_child_ids)
+        if (
+            payload.get("child_count") != len(children)
+            or len(children) != expected_child_count
+            or expected_child_count != 457
+        ):
+            failures.append("NPS child count differs from the accepted 457-record combined batches")
         if any(not item_id for item_id in child_ids) or len(child_ids) != len(set(child_ids)):
             failures.append("NPS children lack unique stable IDs")
         if any(
@@ -374,7 +423,6 @@ def audit(
         for key, expected_hash in EXPECTED_NPS_CHILD_BINDING.items():
             if binding.get(key) != expected_hash:
                 failures.append(f"NPS child binding {key} differs from accepted r7")
-        expected_bindings = [EXPECTED_NPS_CHILD_BINDING, EXPECTED_NPS_CHILD_BINDING_2]
         if len(bindings) != len(expected_bindings):
             failures.append("NPS child batch bindings are incomplete")
         else:
@@ -382,18 +430,8 @@ def audit(
                 for key, expected_value in expected_binding.items():
                     if bindings[index].get(key) != expected_value:
                         failures.append(f"NPS child batch {index + 1} binding {key} differs from accepted r7")
-        expected_child_ids: list[str] = []
-        for expected_binding in expected_bindings:
-            artifact = root / expected_binding["artifact_path"]
-            if artifact.is_file():
-                source_payload = json.loads(artifact.read_text())
-                expected_child_ids.extend(
-                    str(item.get("id") or "")
-                    for item in source_payload.get("places") or []
-                    if isinstance(item, dict)
-                )
-        if len(expected_child_ids) == 326 and child_ids != expected_child_ids:
-            failures.append("NPS child IDs or deterministic batch order differ from accepted r7 inputs")
+        if expected_child_count == 457 and child_ids != expected_child_ids:
+            failures.append("NPS child IDs or deterministic batch order differ from accepted inputs")
         if any(
             item.get("promotion_ready") is not False
             or item.get("live_serving_index_modified") is not False

@@ -412,8 +412,17 @@ class ExplorePublicPromotionRuntimeTests(unittest.TestCase):
         with patch.object(server, "EXPLORE_CATALOG", legacy_path):
             served = server._prebuild_explore_public_served_catalog(self.catalog, index)
 
+        legacy_places = json.loads(legacy_path.read_text())["places"]
+        with patch.object(server, "_load_explore_promoted_index", return_value=index):
+            merged, payload = server._merge_promoted_explore_serving_index(legacy_places)
+
         self.assertEqual(
             {item["id"] for item in served["places"]},
+            {"place:usfs:new-camp", "place:nps:parent"},
+        )
+        self.assertIs(payload, index)
+        self.assertEqual(
+            {item["id"] for item in merged},
             {"place:usfs:new-camp", "place:nps:parent"},
         )
 

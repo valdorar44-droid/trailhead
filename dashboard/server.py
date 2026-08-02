@@ -4435,21 +4435,22 @@ def _merge_promoted_explore_serving_index(places: list[dict]) -> tuple[list[dict
             continue
         seen.add(item_id)
         promoted.append(profile)
-    for category in payload.get("missing_filters") or []:
-        if any(_explore_place_matches_indexed_category(place, category) for place in promoted):
-            continue
-        supplements = [
-            place for place in places
-            if str(place.get("id") or "") not in seen
-            and _explore_place_matches_indexed_category(place, category)
-        ]
-        supplements.sort(key=lambda place: _explore_query_sort_key(place, []))
-        for place in supplements:
-            place_id = str(place.get("id") or "")
-            if not place_id or place_id in seen:
+    if not _explore_public_release_active():
+        for category in payload.get("missing_filters") or []:
+            if any(_explore_place_matches_indexed_category(place, category) for place in promoted):
                 continue
-            seen.add(place_id)
-            promoted.append(_clean_explore_public_labels(sanitize_place_profile(place)))
+            supplements = [
+                place for place in places
+                if str(place.get("id") or "") not in seen
+                and _explore_place_matches_indexed_category(place, category)
+            ]
+            supplements.sort(key=lambda place: _explore_query_sort_key(place, []))
+            for place in supplements:
+                place_id = str(place.get("id") or "")
+                if not place_id or place_id in seen:
+                    continue
+                seen.add(place_id)
+                promoted.append(_clean_explore_public_labels(sanitize_place_profile(place)))
     return promoted or places, payload
 
 

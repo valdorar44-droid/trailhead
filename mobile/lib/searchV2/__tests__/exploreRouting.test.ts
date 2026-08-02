@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import {
   canonicalCampgroundSearchResultPinV2,
   isCanonicalCampgroundSearchResultV2,
@@ -75,4 +78,39 @@ test('canonical camp without coordinates stays unresolved until detail lookup', 
   const noCoordinates = result({ coordinates: null });
   assert.equal(isCanonicalCampgroundSearchResultV2(noCoordinates), true);
   assert.equal(canonicalCampgroundSearchResultPinV2(noCoordinates), null);
+});
+
+test('direct Explore campground search clears a stale hub without changing result identity', () => {
+  const selected = result({
+    result_id: 'nps-child:bibe:campgrounds:chisos-basin-campground',
+    canonical_place_id: 'nps-child:bibe:campgrounds:chisos-basin-campground',
+    detail_ref: 'nps-child:bibe:campgrounds:chisos-basin-campground',
+    title: 'Chisos Basin Campground',
+    subtitle: 'Big Bend National Park',
+    coordinates: { lat: 29.2746, lng: -103.3028 },
+    provenance: {
+      provider: 'trailhead',
+      source_label: 'National Park Service',
+      temporary_use_only: false,
+    },
+  });
+  const camp = canonicalCampgroundSearchResultPinV2(selected);
+  assert.equal(camp?.id, selected.canonical_place_id, 'the exact selected campground identity must reach Map');
+
+  const testDirectory = dirname(fileURLToPath(import.meta.url));
+  const guideSource = readFileSync(resolve(testDirectory, '../../../app/(tabs)/guide.tsx'), 'utf8');
+  const handoff = guideSource.match(
+    /function showExploreCampOnMap\(camp: CampsitePin,[\s\S]*?\n  \}\n\n  function showExploreTrailOnMap/,
+  )?.[0];
+  const selection = guideSource.match(
+    /if \(canonicalId && isCanonicalCampgroundSearchResultV2\(selected\)\) \{[\s\S]*?\n    \}/,
+  )?.[0];
+
+  assert.ok(handoff, 'the Explore campground Map handoff must remain explicit');
+  assert.match(handoff, /origin: 'hub' \| 'search' = 'hub'/);
+  assert.match(handoff, /if \(origin === 'search'\) closeSelectedExplore\(\);/);
+  assert.match(handoff, /else suspendSelectedExploreForMap\(\);/);
+  assert.ok(selection, 'the canonical campground Search V2 branch must remain present');
+  assert.match(selection, /showExploreCampOnMap\(camp, 'search'\);/);
+  assert.doesNotMatch(selection, /showExploreCampOnMap\(camp\);/);
 });

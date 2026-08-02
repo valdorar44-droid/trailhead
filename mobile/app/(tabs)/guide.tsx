@@ -4683,9 +4683,12 @@ function GuideScreenContent() {
     }
   }
 
-  function showExploreCampOnMap(camp: CampsitePin) {
+  function showExploreCampOnMap(camp: CampsitePin, origin: 'hub' | 'search' = 'hub') {
     setPendingMapSelection({ kind: 'camp', camp });
-    suspendSelectedExploreForMap();
+    // Hub children return to their mounted parent. Direct search owns its own
+    // return state, so an older destination hub must not be restored on Back.
+    if (origin === 'search') closeSelectedExplore();
+    else suspendSelectedExploreForMap();
     router.push('/(tabs)/map');
   }
 
@@ -5847,7 +5850,7 @@ function GuideScreenContent() {
       setExploreSearchDraft(camp.name || selected.title);
       setExploreOpeningResultId(null);
       exploreSearchV2.pause();
-      showExploreCampOnMap(camp);
+      showExploreCampOnMap(camp, 'search');
       return;
     }
 

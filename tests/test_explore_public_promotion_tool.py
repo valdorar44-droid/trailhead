@@ -423,6 +423,26 @@ class ExplorePublicPromotionToolTests(unittest.TestCase):
             with self.assertRaisesRegex(promoter.PromotionError, "unresolved rejected"):
                 promoter.promote(args, repo_root=self.root)
 
+    def test_child_depth_rejects_internal_audit_contract_before_promotion(self) -> None:
+        child_path = self.source_root / "data/explore/audit_candidates/children/contract.json"
+        write_json(child_path, {
+            "schema": "ExploreNpsChildContractV1",
+            "schema_version": 1,
+            "stage": "internal",
+            "promotion_ready": False,
+            "public_promotion_compatible": False,
+            "places": [],
+        })
+        args = self.args(
+            stage="child_depth",
+            release_id="explore-b08-r2",
+            child_input=["contract=data/explore/audit_candidates/children/contract.json"],
+            expected_catalog_count=1,
+            expected_serving_count=1,
+        )
+        with self.assertRaisesRegex(promoter.PromotionError, "internal audit contract"):
+            promoter.promote(args, repo_root=self.root)
+
     def test_input_path_traversal_outside_both_roots_is_rejected(self) -> None:
         outside = Path(self.temp.name) / "outside.json"
         write_json(outside, {"schema_version": 3, "count": 0, "places": []})

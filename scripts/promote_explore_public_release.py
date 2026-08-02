@@ -27,6 +27,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUTPUT_ROOT = ROOT / "dashboard" / "explore_releases"
 MANIFEST_SCHEMA = "explore_public_promotion_manifest_v1"
+INTERNAL_NPS_CHILD_CONTRACT_SCHEMA = "ExploreNpsChildContractV1"
 RELEASE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,95}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 DISPOSITIONS = frozenset({"published", "canonical_merge", "remapped", "rejected"})
@@ -211,6 +212,18 @@ def _validate_serving(payload: Any, label: str) -> tuple[dict[str, Any], list[di
     if not gate.get("passed"):
         raise PromotionError(f"{label} canonical serving gate did not pass")
     return serving, items
+
+
+def _validate_child_input_for_promotion(payload: dict[str, Any], label: str) -> None:
+    """Reject audit-only child contracts before any promotion logic sees them."""
+
+    if (
+        payload.get("schema") == INTERNAL_NPS_CHILD_CONTRACT_SCHEMA
+        or payload.get("public_promotion_compatible") is False
+    ):
+        raise PromotionError(
+            f"{label} is an internal audit contract and cannot be promoted"
+        )
 
 
 def _list_payload(payload: Any, key: str, label: str) -> list[dict[str, Any]]:
@@ -972,6 +985,7 @@ def promote(args: argparse.Namespace, *, repo_root: Path = ROOT) -> dict[str, An
         seen_input_ids.add(input_id)
         path, logical_path = _input_path(repo_root, source_root, raw_path.strip())
         payload = _require_object(_load_json(path), f"child input {input_id}")
+        _validate_child_input_for_promotion(payload, f"child input {input_id}")
         child_payloads.append((input_id, payload))
         child_input_refs.append((input_id, path, logical_path, payload))
 

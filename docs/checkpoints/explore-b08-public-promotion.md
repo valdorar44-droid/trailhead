@@ -35,4 +35,21 @@ Never stage or modify the main-worktree `.cursor/`, `dashboard/explore_serving_i
 
 ## Next exact action
 
-Implement and test the public promotion manifest, deterministic dual-artifact builder, runtime hash validation, alias resolution, and admin release diagnostics.
+Deploy the immutable `explore-b08-top-level-v1` artifacts with all three public-release environment paths, wait for Railway `SUCCESS`, then run only the bounded Release 1 API and device checks.
+
+## Release 1 prepared
+
+- Prepared: 2026-08-02 (America/Winnipeg)
+- Implementation HEAD before artifact commit: `ac258d20`
+- Release ID: `explore-b08-top-level-v1`
+- Rich catalog: 993 records, SHA-256 `6b931a389e870cbacaa1b5b3f2f33116192b507b2d9a1e230cbfb33d1fea22ac`
+- Public serving index: 5,435 records, SHA-256 `a004cee20e06a37cdcb0f6795112d239bbe19a1a4ea226f224d2f8992947ec25`
+- Promotion manifest SHA-256: `e4dba0c247eff3e8c37ae7de620f41353dbbe0a1cf719abbadd37126f376e66b`
+- Runtime prebuild: 5,435 served IDs, 5,435 unique IDs, five aliases, no unpinned legacy supplements.
+- Focused promotion/runtime suite: 33 passed.
+- Wider bounded Explore/source suite: 160 passed; five child-preview tests were not runnable in this clean worktree because their accepted gitignored b1 inputs live only in the preserved source checkout. Release 2 validates those exact files through hash-pinned `--source-root` inputs instead.
+- Open P0/P1: none before deployment.
+- Protected main-worktree hashes remain unchanged:
+  - Explore serving index: `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`
+  - App Store copy: `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`
+- Task-owned background processes: none.

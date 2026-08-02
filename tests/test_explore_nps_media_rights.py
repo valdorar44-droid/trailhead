@@ -154,6 +154,25 @@ class ExploreNpsMediaRightsTests(unittest.TestCase):
         self.assertNotIn("image_url", children[2])
         self.assertNotIn("image_credit", children[2])
 
+    def test_promoted_nps_child_place_uses_the_same_closed_media_gate(self):
+        child = {
+            "id": "place:nps-child:cave:places:example",
+            "name": "Example place",
+            "media": [{"url": self.child_image, "credit": "invented fallback", "license": "NPS data"}],
+            "source_pack": {
+                "nps_park_code": "cave",
+                "official_url": "https://www.nps.gov/places/example.htm",
+                "photos": [{"url": self.child_image, "credit": "invented fallback", "license": "NPS data"}],
+            },
+        }
+        normalized = self._normalize([child])[0]
+        self.assertEqual(normalized["media"][0]["credit"], "National Park Service")
+        self.assertEqual(normalized["media"][0]["distribution_status"], "approved")
+        self.assertEqual(
+            normalized["media"][0]["rights_evidence"]["json_pointer"],
+            "/related/cave/places/0/images/0",
+        )
+
     def test_reader_links_are_sanitized_and_only_generated_warnings_are_removed(self):
         place = self._normalize()[0]
         self.assertIn("https://www.nps.gov/cave/visit", place["description"])

@@ -484,16 +484,20 @@ def normalize_selected_nps_places(
     evidence_root: str | Path,
 ) -> list[dict[str, Any]]:
     """Return a cache-evidenced NPS media view without mutating source artifacts."""
+    def is_nps_place(place: dict[str, Any]) -> bool:
+        place_id = str(place.get("id") or "")
+        return place_id.startswith("place:nps:") or place_id.startswith("place:nps-child:")
+
     park_codes = sorted({
         str((place.get("source_pack") or {}).get("nps_park_code") or "").strip().casefold()
         for place in places
-        if isinstance(place, dict) and str(place.get("id") or "").startswith("place:nps:")
+        if isinstance(place, dict) and is_nps_place(place)
     } - {""})
     indexes = load_nps_media_traces(cache_dir, park_codes, evidence_root=evidence_root)
     normalized: list[dict[str, Any]] = []
     for original in places:
         place = copy.deepcopy(original)
-        if not str(place.get("id") or "").startswith("place:nps:"):
+        if not is_nps_place(place):
             normalized.append(place)
             continue
         code = str((place.get("source_pack") or {}).get("nps_park_code") or "").strip().casefold()

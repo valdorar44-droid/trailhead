@@ -181,3 +181,26 @@ Wait for corrected Release 1 deployment `eb9c7a9d-54c1-4f7a-a4df-8f9bce054bf6` t
 - Do not rerun Release 1, refetch b08 data, repeat broad NPS/Explore crawls, or re-audit passed Aspenglen/Kulana flows without new evidence.
 - Do not expose children in Featured or broad discovery.
 - Do not modify the protected serving index; future releases continue from these immutable artifacts and manifests.
+
+## Release 2 physical iOS spot check accepted
+
+- Accepted: 2026-08-02 14:50 America/Winnipeg.
+- Device: iPhone16,2 (`SEAN`), iOS 26.5.2; production package `com.trailhead.app`, app 1.0.11 build 62.
+- Exact Aniakchak search opened the correct `Parks & Land` destination hub with the source-backed Overview rather than campground semantics.
+- `What to See` exposed the three reviewed children in deterministic order: Aniakchak Caldera, Surprise Lake, and The Gates.
+- Aniakchak Caldera opened with exact NPS imagery, `Scenic View/Photo Spot`, a nonblank directions map, NPS photo attribution, and the shared Map place sheet.
+- Closing the Map sheet retained the Aniakchak camera and selected-area context. Returning to Explore restored the exact Aniakchak Caldera detail, and Back restored the same three-item `What to See` list.
+- A close gesture briefly opened iOS Control Center; it was cleared without resetting Trailhead. This was a test interaction artifact, not an app defect, and screenshot `07-map-after-close.png` is excluded from acceptance evidence.
+- Evidence root: `C:\Users\User\Documents\Codex\evidence\explore-b08-public\release2-ios`.
+- Acceptance evidence hashes:
+  - `03-aniakchak-opened.png` `d059a30a5c8eb35f17cb2dca925873a4ec74bb6b20c12cc14d4f8b619483d66d`
+  - `04-aniakchak-child.png` `e9bd36f834f6dfdd6848aa9bd74ce31fac590eab21d74f87fff68a6ef539aedc`
+  - `05-aniakchak-caldera-detail.png` `64e770f8a2dff83dc47ab6aa5b7685c56c083d53fbeccd210d3c04a3164627b6e`
+  - `06-aniakchak-caldera-map.png` `a2a89337b4be4878f7a4b1cf0aa541f79c706c06124d32519cb472fe3ef68573`
+  - `08-app-after-return.png` `e86e5d3e121c9e48ac9a93cac38b8dca81c1e7d755d71a3f45a39c11b76cd377`
+  - `09-explore-return.png` `bbdd0aef5201e39c8287131da65fcd30b4f87e65ba6df39be0004f720d8a0454`
+  - `10-child-list-restored.png` `24129e96f35395ced1c96c03866f2a9da38cf57fbf17949749282f6266cbe884`
+- Open P0/P1: none.
+- Task-owned Metro, Gradle, Maestro, pytest, Railway polling, and iOS tunnel processes: none.
+- Release 2 is accepted on both Android and iOS. No mobile OTA or native build is required for this backend-only promotion.
+- Next exact action: begin the next untouched Explore data-depth packet from `explore-b08-child-depth-v1`; do not repeat b08 promotion or accepted device checks without new evidence.

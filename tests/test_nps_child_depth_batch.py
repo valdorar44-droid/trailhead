@@ -9,9 +9,14 @@ from pathlib import Path
 
 from scripts.build_nps_child_depth_batch import (
     AUDIT_CANDIDATE_ROOT,
+    BATCH_2_DESTINATIONS,
+    BATCH_2_ID,
     BATCH_DESTINATIONS,
+    BATCH_ID,
     ROOT,
+    _apply_exact_child_copy_fixes,
     _audit_children,
+    _dedupe_rendered_rail_children,
     _normalize_child_classification,
     build,
 )
@@ -111,13 +116,58 @@ class NpsChildDepthBatchTests(unittest.TestCase):
             manifest = json.loads((first / "manifest.json").read_text())
             sidecar = json.loads((first / "nps_child_depth_v1.json").read_text())
             audit = json.loads((first / "audit.json").read_text())
+            self.assertEqual(manifest["batch_id"], BATCH_ID)
             self.assertEqual(manifest["requests_used"], 0)
             self.assertFalse(manifest["promotion_ready"])
             self.assertFalse(manifest["live_serving_index_modified"])
+            review = json.loads((first / "review.json").read_text())
+            self.assertTrue(all(
+                item["source_fetched_at"] == 1785550000
+                for item in review["destinations"]
+            ))
             self.assertEqual(sidecar["stage"], "internal")
             self.assertTrue(audit["passed"])
             self.assertTrue(all(item["canonical_role"] == "child" for item in sidecar["places"]))
         self.assertEqual(sha256(protected), protected_before)
+
+    def test_batch2_preset_is_cached_only_and_keeps_batch1_default_intact(self):
+        with tempfile.TemporaryDirectory(dir=AUDIT_CANDIDATE_ROOT) as temp:
+            root = Path(temp)
+            base = root / "base.json"
+            write_json(base, {
+                "schema_version": 3,
+                "generated_at": 1785553072,
+                "count": 1,
+                "places": [{"id": "place:existing", "name": "Existing Place"}],
+            })
+            cache = root / "cache"
+            for code, name in BATCH_2_DESTINATIONS:
+                make_fixture(cache, code, name)
+            out_dir = root / "candidate"
+            result = build(argparse.Namespace(
+                batch_id=BATCH_2_ID,
+                base_catalog=str(base),
+                source_cache=str(cache),
+                out_dir=str(out_dir),
+            ))
+
+            self.assertEqual(result["count"], 20)
+            self.assertEqual(
+                result["destination_counts"],
+                {code: 4 for code, _ in BATCH_2_DESTINATIONS},
+            )
+            manifest = json.loads((out_dir / "manifest.json").read_text())
+            sidecar = json.loads((out_dir / "nps_child_depth_v1.json").read_text())
+            self.assertEqual(manifest["batch_id"], BATCH_2_ID)
+            self.assertEqual(sidecar["batch_id"], BATCH_2_ID)
+            self.assertEqual(manifest["requests_used"], 0)
+            self.assertFalse(manifest["promotion_ready"])
+            self.assertFalse(manifest["live_serving_index_modified"])
+            review = json.loads((out_dir / "review.json").read_text())
+            self.assertTrue(all(
+                item["source_fetched_at"] == 1785550000
+                for item in review["destinations"]
+            ))
 
     def test_non_nps_official_url_blocks_the_candidate(self):
         with tempfile.TemporaryDirectory(dir=AUDIT_CANDIDATE_ROOT) as temp:
@@ -222,6 +272,120 @@ class NpsChildDepthBatchTests(unittest.TestCase):
             (visitor_trailhead["category"], visitor_trailhead["module_target"]),
             ("trailhead", "trails"),
         )
+
+        structured_trailhead = {
+            "id": "place:nps-child:olym:places:beach-access",
+            "name": "Beach Access Trail from Kalaloch Campground",
+            "category": "campground",
+            "module_target": "stay",
+            "tags": ["Olympic National Park", "campground"],
+            "search_aliases": ["Olympic National Park", "Campground"],
+            "subcategories": ["place"],
+            "source_pack": {"topics": ["Olympic National Park", "campground"]},
+            "card": {"quick_facts": ["Olympic National Park", "Place"]},
+        }
+        _normalize_child_classification(
+            structured_trailhead,
+            "places",
+            {"amenities": ["Trailhead"], "tags": ["campground"]},
+        )
+        self.assertEqual(
+            (structured_trailhead["category"], structured_trailhead["module_target"]),
+            ("trailhead", "trails"),
+        )
+        self.assertIn("Trailhead", structured_trailhead["card"]["quick_facts"])
+        self.assertNotIn("Campground", structured_trailhead["search_aliases"])
+        self.assertIn("Trailhead", structured_trailhead["search_aliases"])
+
+        scenic_drive = {
+            "id": "place:nps-child:deva:thingstodo:artists-drive",
+            "name": "Tour Artists Drive",
+            "category": "trail",
+            "module_target": "trails",
+        }
+        _normalize_child_classification(
+            scenic_drive,
+            "thingstodo",
+            {"activities": [{"name": "Scenic Driving"}], "tags": ["hiking"]},
+        )
+        self.assertEqual(
+            (scenic_drive["category"], scenic_drive["module_target"]),
+            ("activity", "do"),
+        )
+
+    def test_rendered_rail_dedupe_prefers_specific_nps_endpoint(self):
+        children = [{
+            "id": "place:nps-child:romo:places:beaver",
+            "name": "Beaver Meadows Visitor Center",
+            "parent_hub_id": "place:nps:romo",
+            "module_target": "visitor",
+            "lat": 40.363,
+            "lng": -105.588,
+        }, {
+            "id": "place:nps-child:romo:visitorcenters:beaver",
+            "name": "Beaver Meadows Visitor Center",
+            "parent_hub_id": "place:nps:romo",
+            "module_target": "visitor",
+            "lat": 40.363,
+            "lng": -105.588,
+        }]
+
+        deduped, diagnostics = _dedupe_rendered_rail_children(children)
+
+        self.assertEqual(
+            [item["id"] for item in deduped],
+            ["place:nps-child:romo:visitorcenters:beaver"],
+        )
+        self.assertEqual(diagnostics[0]["kept_endpoint"], "visitorcenters")
+        self.assertEqual(
+            diagnostics[0]["dropped"],
+            [{"id": "place:nps-child:romo:places:beaver", "endpoint": "places"}],
+        )
+
+        separate_location = dict(children[0])
+        separate_location["id"] = "place:nps-child:romo:places:beaver-west"
+        separate_location["lng"] = -105.6
+        kept, diagnostics = _dedupe_rendered_rail_children([
+            children[1],
+            separate_location,
+        ])
+        self.assertEqual(len(kept), 2)
+        self.assertEqual(diagnostics, [])
+
+    def test_reviewed_copy_fixes_are_identity_bound(self):
+        arch = {
+            "id": "place:nps-child:jotr:thingstodo:4b6d0fab-7f6b-4b19-b3fe-6c07566b8050",
+            "summary": "A .6-mile trail leads to a .2-mile loop.",
+            "description": "A .6-mile trail leads to a .2-mile loop.",
+            "card": {"summary": "A .6-mile trail leads to a .2-mile loop."},
+            "source_pack": {"extract": "A .6-mile trail leads to a .2-mile loop."},
+        }
+        _apply_exact_child_copy_fixes(arch)
+        self.assertEqual(arch["summary"], "A 0.6-mile trail leads to a 0.2-mile loop.")
+
+        fall_river = {
+            "id": "place:nps-child:romo:places:c3a54769-e360-4591-8650-cc7cf92fb7bc",
+            "summary": "What to Expect? . Traffic uses one lane.",
+            "card": {"highlight": "What to Expect? . Traffic uses one lane."},
+            "source_pack": {"extract": "What to Expect? . Traffic uses one lane."},
+        }
+        _apply_exact_child_copy_fixes(fall_river)
+        self.assertEqual(fall_river["summary"], "What to expect? Traffic uses one lane.")
+
+        kalaloch = {
+            "id": "place:nps-child:olym:campgrounds:f8dfab23-efe0-4f31-98d0-cd5a871596a9",
+            "name": "Kalaloch Campround",
+            "search_aliases": [],
+            "card": {
+                "title": "Kalaloch Campround",
+                "headline": "Kalaloch Campround",
+            },
+            "source_pack": {"sources": []},
+            "sources": [],
+        }
+        _apply_exact_child_copy_fixes(kalaloch)
+        self.assertEqual(kalaloch["name"], "Kalaloch Campground")
+        self.assertEqual(kalaloch["card"]["headline"], "Kalaloch Campground")
 
     def test_exact_source_media_mismatch_is_rejected(self):
         child = {

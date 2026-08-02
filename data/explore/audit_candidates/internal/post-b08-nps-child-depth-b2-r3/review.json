@@ -1,0 +1,133 @@
+{
+  "schema_version": 1,
+  "batch_id": "post-b08-nps-child-depth-b2",
+  "generated_at": 1785553072,
+  "requests_used": 0,
+  "live_catalog_modified": false,
+  "live_serving_index_modified": false,
+  "promotion_ready": false,
+  "destinations": [
+    {
+      "park_code": "gumo",
+      "name": "Guadalupe Mountains National Park",
+      "accepted": 36,
+      "module_counts": {
+        "stay": 14,
+        "visitor": 3,
+        "trails": 10,
+        "do": 3,
+        "see": 6
+      },
+      "cached_counts": {
+        "campgrounds": 13,
+        "visitorcenters": 3,
+        "thingstodo": 48,
+        "places": 41
+      },
+      "parent_hub_id": "place:nps:gumo",
+      "source_fetched_at": 1785538330
+    },
+    {
+      "park_code": "olym",
+      "name": "Olympic National Park",
+      "accepted": 35,
+      "module_counts": {
+        "stay": 13,
+        "visitor": 5,
+        "do": 2,
+        "trails": 11,
+        "see": 4
+      },
+      "cached_counts": {
+        "campgrounds": 12,
+        "visitorcenters": 5,
+        "thingstodo": 10,
+        "places": 100
+      },
+      "parent_hub_id": "place:nps:olym",
+      "source_fetched_at": 1785519724
+    },
+    {
+      "park_code": "deva",
+      "name": "Death Valley National Park",
+      "accepted": 34,
+      "module_counts": {
+        "stay": 12,
+        "visitor": 2,
+        "do": 5,
+        "trails": 2,
+        "see": 13
+      },
+      "cached_counts": {
+        "campgrounds": 12,
+        "visitorcenters": 2,
+        "thingstodo": 14,
+        "places": 38
+      },
+      "parent_hub_id": "place:nps:deva",
+      "source_fetched_at": 1785529800
+    },
+    {
+      "park_code": "jotr",
+      "name": "Joshua Tree National Park",
+      "accepted": 33,
+      "module_counts": {
+        "stay": 9,
+        "visitor": 4,
+        "trails": 14,
+        "do": 2,
+        "see": 4
+      },
+      "cached_counts": {
+        "campgrounds": 9,
+        "visitorcenters": 4,
+        "thingstodo": 48,
+        "places": 100
+      },
+      "parent_hub_id": "place:nps:jotr",
+      "source_fetched_at": 1785519771
+    },
+    {
+      "park_code": "romo",
+      "name": "Rocky Mountain National Park",
+      "accepted": 33,
+      "module_counts": {
+        "stay": 5,
+        "visitor": 9,
+        "do": 3,
+        "trails": 5,
+        "see": 11
+      },
+      "cached_counts": {
+        "campgrounds": 5,
+        "visitorcenters": 10,
+        "thingstodo": 12,
+        "places": 67
+      },
+      "parent_hub_id": "place:nps:romo",
+      "source_fetched_at": 1785519763
+    }
+  ],
+  "counts": {
+    "base_places": 993,
+    "sidecar_places": 171,
+    "destination_count": 5
+  },
+  "reader_link_actions": {
+    "kept_item_url": 167,
+    "used_parent_nps_url": 1,
+    "upgraded_nps_https": 3
+  },
+  "media_policy": {
+    "candidate_images": 168,
+    "approved_images": 151,
+    "stripped_images": 17,
+    "policy": "exact cached NPS media with NPS-prefixed credit only"
+  },
+  "internal_preview_contract": {
+    "stage": "internal",
+    "requires_authenticated_admin": true,
+    "required_header": "X-Trailhead-Explore-Preview: internal",
+    "header_is_not_a_credential": true
+  }
+}

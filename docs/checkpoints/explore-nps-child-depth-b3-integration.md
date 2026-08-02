@@ -60,3 +60,49 @@ focused Explore suite after normal database initialization.
   Auto, or screenshot work.
 - Do not deploy or promote this packet publicly.
 
+## Completion checkpoint
+
+Completed 2026-08-02 00:12 CDT (America/Winnipeg) from branch
+`feat/nps-child-depth-b3-integration`.
+
+- Baseline checkpoint commit: `c6cfebaee97298cf6334a4b9da83c73d0695fdaa`.
+- Accepted Batch 3 was appended after Batch 1 and Batch 2 without refetching or
+  rebuilding any accepted input.
+- The compatibility field `candidate.nps_child_depth` remains bound to Batch 1.
+- `candidate.nps_child_depth_batches` is exactly ordered Batch 1, Batch 2,
+  Batch 3 and contains each immutable accepted binding.
+- The combined child list contains 457 unique records in accepted source order.
+- Duplicate child identities fail the pure combine step.
+- Generated sidecar:
+  - Path: `dashboard/explore_internal_preview_v1.json`
+  - Bytes: `4742342`
+  - SHA-256:
+    `98d23649e54d4ab02cf5a0f2193f30e826dd17527271b5ef6429667a91b28b62`
+  - Proof hubs: 13
+  - NPS proof hubs: 6
+  - Reviewed replacements: 5
+  - Children: 457
+- An independent build at `/tmp/explore_internal_preview_b3_rebuild.json`
+  produced the same byte count and SHA-256 and passed `cmp` byte-for-byte.
+- Sidecar QA passed with exact accepted paths, hashes, order, and counts.
+- Authorization remains unchanged: internal data stage, authenticated admin,
+  and the internal-preview header are all required. The header alone is not a
+  credential. Search/detail/parent rails remain absent outside that context.
+- Focused integration tests: 14 passed.
+- Focused Explore/Search/source/promotion-gate suite: 199 passed plus 21
+  subtests.
+- Python compile and `git diff --check`: passed.
+- Read-only audit found no P0/P1. Its single P2 was closed before commit:
+  standalone QA now independently hashes every accepted manifest, artifact,
+  audit, and review file for all three batches; a drift fixture proves failure.
+- Open P0/P1/P2: none at checkpoint time.
+- Task-owned background processes: none.
+- Protected files were not opened for this packet; their hashes were
+  intentionally not recomputed. Git status contains no protected path.
+
+## Exact next action after merge
+
+Review and merge the isolated branch. A later, separately authorized packet may
+deploy the authenticated internal sidecar and run a bounded Android proof. This
+checkpoint does not authorize deployment, public promotion, serving-index
+mutation, native work, or mobile code changes.

@@ -65,6 +65,37 @@ class ExploreNpsChildInternalPreviewTests(unittest.TestCase):
         self.assertEqual(binding_2["artifact_sha256"], builder.ACCEPTED_NPS_CHILD_HASHES_2["nps_child_depth_v1.json"])
         self.assertFalse(set(item["id"] for item in children).intersection(item["id"] for item in children_2))
 
+        children_3, binding_3 = builder._validated_nps_child_depth(
+            builder.DEFAULT_NPS_CHILDREN_3,
+            builder.DEFAULT_NPS_CHILD_MANIFEST_3,
+            builder.DEFAULT_NPS_CHILD_AUDIT_3,
+            builder.DEFAULT_NPS_CHILD_REVIEW_3,
+            accepted_paths=(
+                builder.DEFAULT_NPS_CHILDREN_3, builder.DEFAULT_NPS_CHILD_MANIFEST_3,
+                builder.DEFAULT_NPS_CHILD_AUDIT_3, builder.DEFAULT_NPS_CHILD_REVIEW_3,
+            ),
+            accepted_hashes=builder.ACCEPTED_NPS_CHILD_HASHES_3,
+            accepted_batch_id="post-b08-nps-child-depth-b3",
+        )
+        self.assertEqual(len(children_3), 131)
+        self.assertEqual(binding_3["artifact_sha256"], builder.ACCEPTED_NPS_CHILD_HASHES_3["nps_child_depth_v1.json"])
+        self.assertFalse(
+            set(item["id"] for item in [*children, *children_2]).intersection(
+                item["id"] for item in children_3
+            )
+        )
+
+    def test_batch_combiner_preserves_order_and_rejects_cross_batch_duplicates(self):
+        first = [{"id": "batch-1"}]
+        second = [{"id": "batch-2"}]
+        third = [{"id": "batch-3"}]
+        self.assertEqual(
+            [item["id"] for item in builder._combine_nps_child_batches(first, second, third)],
+            ["batch-1", "batch-2", "batch-3"],
+        )
+        with self.assertRaises(SystemExit):
+            builder._combine_nps_child_batches(first, second, [{"id": "batch-1"}])
+
     def test_manifest_hash_mismatch_is_rejected(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
@@ -95,6 +126,30 @@ class ExploreNpsChildInternalPreviewTests(unittest.TestCase):
             path.write_text(json.dumps(payload))
             with self.assertRaises(SystemExit):
                 qa.audit(path)
+
+    def test_generated_sidecar_fails_qa_when_batch_3_binding_drifts(self):
+        payload = json.loads(builder.DEFAULT_OUTPUT.read_text())
+        payload["candidate"]["nps_child_depth_batches"][2]["artifact_sha256"] = "0" * 64
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "preview.json"
+            path.write_text(json.dumps(payload))
+            with self.assertRaises(SystemExit):
+                qa.audit(path)
+
+    def test_generated_sidecar_fails_qa_when_accepted_batch_3_file_drifts(self):
+        accepted_artifact = (
+            qa.ROOT / qa.EXPECTED_NPS_CHILD_BINDING_3["artifact_path"]
+        ).resolve()
+        real_sha256 = qa._sha256
+
+        def drift_batch_3(path: Path) -> str:
+            if path.resolve() == accepted_artifact:
+                return "0" * 64
+            return real_sha256(path)
+
+        with patch.object(qa, "_sha256", side_effect=drift_batch_3):
+            with self.assertRaises(SystemExit):
+                qa.audit(builder.DEFAULT_OUTPUT)
 
     def test_builder_rejects_self_consistent_alternate_child_artifacts(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -169,7 +224,7 @@ class ExploreNpsChildInternalPreviewTests(unittest.TestCase):
         }]}
         merged = server._merge_explore_internal_preview(base)
         self.assertEqual(merged["internal_preview"]["count"], 13)
-        self.assertEqual(merged["internal_preview"]["child_count"], 326)
+        self.assertEqual(merged["internal_preview"]["child_count"], 457)
         proof = next(item for item in merged["places"] if item["id"] == "place:usfs:9006")
         child = next(item for item in merged["places"] if item["id"].startswith("place:nps-child:blri:"))
         self.assertLess(proof["summary"]["rank"], 0)
@@ -232,7 +287,10 @@ class ExploreNpsChildInternalPreviewTests(unittest.TestCase):
         batch_1 = json.loads(builder.DEFAULT_NPS_CHILDREN.read_text())["places"]
         batch_2 = json.loads(builder.DEFAULT_NPS_CHILDREN_2.read_text())["places"]
         expected_ids = [item["id"] for item in [*batch_1, *batch_2]]
-        self.assertEqual([item["id"] for item in payload["children"]], expected_ids)
+        self.assertEqual(
+            [item["id"] for item in payload["children"][:len(expected_ids)]],
+            expected_ids,
+        )
         self.assertEqual(payload["children"][len(batch_1)]["id"], batch_2[0]["id"])
 
         os.environ["TRAILHEAD_EXPLORE_DATA_STAGE"] = "internal"
@@ -275,6 +333,68 @@ class ExploreNpsChildInternalPreviewTests(unittest.TestCase):
             server._explore_internal_preview_context.reset(marker)
         self.assertEqual([item.result_id for item in searched.results], [dog_canyon_id])
         self.assertEqual(searched.results[0].detail_ref, dog_canyon_id)
+        self.assertEqual(searched.results[0].kind, "campground")
+        self.assertEqual(later_page.results, [])
+
+    def test_batch_3_child_reaches_detail_search_and_parent_rails_only_in_internal_preview(self):
+        payload = json.loads(builder.DEFAULT_OUTPUT.read_text())
+        batch_1 = json.loads(builder.DEFAULT_NPS_CHILDREN.read_text())["places"]
+        batch_2 = json.loads(builder.DEFAULT_NPS_CHILDREN_2.read_text())["places"]
+        batch_3 = json.loads(builder.DEFAULT_NPS_CHILDREN_3.read_text())["places"]
+        expected_ids = [item["id"] for item in [*batch_1, *batch_2, *batch_3]]
+        self.assertEqual([item["id"] for item in payload["children"]], expected_ids)
+        self.assertEqual(payload["children"][len(batch_1) + len(batch_2)]["id"], batch_3[0]["id"])
+        self.assertEqual(payload["candidate"]["nps_child_depth"]["batch_id"], "post-b08-nps-child-depth-b1")
+        self.assertEqual(
+            [item["batch_id"] for item in payload["candidate"]["nps_child_depth_batches"]],
+            [
+                "post-b08-nps-child-depth-b1",
+                "post-b08-nps-child-depth-b2",
+                "post-b08-nps-child-depth-b3",
+            ],
+        )
+
+        os.environ["TRAILHEAD_EXPLORE_DATA_STAGE"] = "internal"
+        server.EXPLORE_INTERNAL_PREVIEW = builder.DEFAULT_OUTPUT
+        merged = server._merge_explore_internal_preview({"catalog_id": "public", "places": []})
+        campground_id = "place:nps-child:bibe:campgrounds:127199ac-a753-4b49-b3ff-1f8484b61cbe"
+        trail_id = "place:nps-child:bibe:thingstodo:02304e24-cabf-40d1-904f-e67e4c837fe7"
+        visitor_center_id = "place:nps-child:bibe:visitorcenters:c5f00e54-bf45-46e1-8acf-bbe615867b78"
+
+        with patch.object(server, "_load_explore_catalog", return_value=merged):
+            server._EXPLORE_CHILDREN_BY_PARENT_CACHE.update({"key": None, "by_parent": {}})
+            parent_children = server._explore_children_for_parent("place:nps:bibe")
+            parent_ids = [item["id"] for item in parent_children]
+            self.assertIn(campground_id, parent_ids)
+            self.assertIn(trail_id, parent_ids)
+            self.assertIn(visitor_center_id, parent_ids)
+            self.assertEqual(server._find_explore_place(campground_id)["id"], campground_id)
+
+            with patch.object(server, "_canonical_explore_place_id", return_value="place:nps:bibe"):
+                rails = server._canonical_explore_related_rails(server.MapCardResolveRequest(
+                    source="trailhead_explore", place_id="place:nps:bibe",
+                    lat=29.25, lng=-103.25,
+                ))
+            self.assertIn("Chisos Basin Campground", {item.get("name") for item in rails["campgrounds_nearby"]})
+            self.assertIn("Hike the Lost Mine Trail", {item.get("name") for item in rails["trails"]})
+            self.assertIn("Panther Junction Visitor Center", {item.get("name") for item in rails["visitor_centers"]})
+
+        request = server.SearchRequestV2(query="Chisos Basin Campground", categories=["campground"], limit=8)
+        page = server.SearchPageV2(query=request.query, results=[], revision="public", elapsed_ms=1)
+        self.assertEqual(server._search_v2_apply_internal_preview_page(page, request=request).results, [])
+        marker = server._explore_internal_preview_context.set(True)
+        try:
+            searched = server._search_v2_apply_internal_preview_page(page, request=request)
+            later_page = server._search_v2_apply_internal_preview_page(
+                page,
+                request=server.SearchRequestV2(
+                    query=request.query, categories=["campground"], cursor="opaque-page-2", limit=8,
+                ),
+            )
+        finally:
+            server._explore_internal_preview_context.reset(marker)
+        self.assertEqual([item.result_id for item in searched.results], [campground_id])
+        self.assertEqual(searched.results[0].detail_ref, campground_id)
         self.assertEqual(searched.results[0].kind, "campground")
         self.assertEqual(later_page.results, [])
 

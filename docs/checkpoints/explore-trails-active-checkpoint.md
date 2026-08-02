@@ -1575,3 +1575,35 @@ Verify `git diff --cached --name-only` before every commit.
 - Do not repeat Kirch/Mammoth Android, broad campground, Explore, Map, Search, NPS, Trails, Memory, Layers, Originals, Android Auto, or store crawls without new evidence.
 - Do not refetch b08/NPS data, mutate the serving index, fabricate media or facts, publish production, promote a public catalog/stage, or reopen the resolved alias path.
 - Do not stage `.cursor/`, `dashboard/explore_serving_index_v2.json`, `docs/app-store-copy.md`, Valhalla files, Android helper scripts, or unrelated dirty files.
+
+## Active continuation pointer — NPS Child Depth Batch 1 accepted — 2026-08-01 20:23 CDT
+
+- The newest completed Explore data-gap packet is implementation commit
+  `ed27248cd7ef670b8bee3619594facf2f82e73c4` and immutable cached candidate
+  `post-b08-nps-child-depth-b1-r7`.
+- It contains 156 official NPS child records across five destinations, uses
+  stable NPS item identity, retains both park-specific `Sunset Campground`
+  records, and has corrected activity/place/trail classification.
+- Exact-page media rights retain 104 images and conservatively strip 52.
+  Reader-facing copy and search data contain no source URLs.
+- Candidate and rebuild match across all four artifact hashes. Manifest:
+  `6956e4b8bdc238501feee49215470e6d0a8785be31188fbddcc2abe7c196266d`.
+- Final focused gate: `85 passed`; content QA, compilation, whitespace, and
+  independent read-only audit passed with no P0/P1/P2.
+- Protected Explore index and App Store copy hashes remain unchanged. No NPS
+  API request, public catalog promotion, backend deployment, or mobile OTA was
+  performed for this data-only candidate.
+
+### Exact next action
+
+Integrate r7 into the existing authenticated internal Explore preview sidecar,
+then run one bounded Android hub -> module -> child -> shared sheet -> map ->
+Back assertion. Preserve internal stage plus authenticated-admin-and-header
+authorization. Do not overwrite the serving index or expose the batch publicly.
+
+### Do not repeat
+
+- Do not rebuild r1-r6, refetch NPS, repeat b08/agency quality audits, or reopen
+  the closed identity/classification/media/URL work without new evidence.
+- Do not repeat broad Map, Search, Layers, campground, Trails, Originals,
+  Android Auto, Memory, or screenshot work.

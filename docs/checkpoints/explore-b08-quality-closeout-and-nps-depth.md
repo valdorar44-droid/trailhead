@@ -103,3 +103,85 @@ public catalog.
 - BLM reader-depth r2 or this r3 deterministic build without new evidence.
 - Public Explore/catalog promotion, Community-route exposure, Safe Water,
   CarPlay, advertising, or store-asset work.
+
+## NPS Child Depth Batch 1 accepted — 2026-08-01 20:23 CDT
+
+- Branch: `feat/trailhead-1.0.10-overhaul`
+- Pre-fix batch HEAD: `29ec461d`
+- Accepted implementation commit: `ed27248cd7ef670b8bee3619594facf2f82e73c4`
+- Protected Explore-index SHA-256 remains
+  `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
+- Protected App Store copy SHA-256 remains
+  `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+- `.cursor/` and both protected files remain unstaged and unmodified by this
+  packet.
+
+Accepted cached-only candidate:
+`data/explore/audit_candidates/internal/post-b08-nps-child-depth-b1-r7`
+
+Independent rebuild:
+`data/explore/audit_candidates/internal/post-b08-nps-child-depth-b1-r7-rebuild`
+
+- Official NPS child records: 156
+- Destination counts: Blue Ridge 36, Sequoia/Kings Canyon 36, Bryce Canyon
+  25, Shenandoah 28, Dinosaur 31
+- Module counts: Stay 36, Visitor Information 21, Activities 12, Trails 42,
+  See 45
+- Approved exact-page images: 104; conservatively stripped images: 52
+- Provider requests: 0
+- Promotion ready: false; live catalog and serving index modified: false
+- Candidate/rebuild differing file hashes: 0 of 4
+- Manifest SHA-256:
+  `6956e4b8bdc238501feee49215470e6d0a8785be31188fbddcc2abe7c196266d`
+- Sidecar SHA-256:
+  `66abda311a4734cc05bf3b4d9c99834cd5d3ec119e5a295e68b6cb7a3199ade9`
+- Audit SHA-256:
+  `b5fc24c29e376a20d694c339d23c636c3937092669e52d998795a0981d251923`
+- Review SHA-256:
+  `8ecfe03c074dd0da8a753693db801651d73b08610af82a009a7fcde1b376aee1`
+
+### Defects closed
+
+- NPS stable item IDs now own canonical child identity. Same-name records are
+  deduplicated only within the same park and endpoint, so the separate Sequoia
+  and Bryce `Sunset Campground` records both survive.
+- Trail classification now uses endpoint, structured activities/tags, explicit
+  trailheads, and strong place semantics. Ranger walks, gazebos, waysides,
+  trail stops, petroglyph exhibits, waterfalls, and overlooks no longer enter
+  the trail lane because of incidental title or hiking words.
+- Page-scoped imagery requires approved rights evidence from that exact NPS
+  page. Reused-image approval from a different page is rejected.
+- Rejected third-party URLs are absent from search data and all reader-facing
+  summary/description/card/source-pack copy. `Aspen Hollow Campground` now uses
+  its useful cached body facts without the malformed external-link sentence.
+- Candidate outputs are restricted below `data/explore/audit_candidates`, and
+  manifests use stable logical input references rather than checkout paths.
+
+### Verification
+
+- Final focused Explore/NPS/source/internal-preview suite: `85 passed`.
+- Identity/media/batch suite: `25 passed`.
+- Content-quality QA: `PASS`; nine reviewed coordinate clusters are distinct
+  official records sharing access points, not duplicate identities.
+- Python compilation and `git diff --check`: passed.
+- Independent read-only final audit: no P0/P1/P2 blockers.
+- Open P0/P1 for this candidate: none.
+- Task-owned provider fetch, Metro, Gradle, Maestro, EAS, Railway-tail, test,
+  or recording processes: none.
+
+### Exact next action
+
+Wire the accepted r7 sidecar into the existing authenticated internal Explore
+preview boundary, then run one bounded Android destination flow across a rich
+park and a sparse child. Preserve the requirement for internal stage,
+authenticated administrator, and `X-Trailhead-Explore-Preview: internal`.
+Do not mutate the protected serving index or public catalog.
+
+### Do not repeat
+
+- Do not rebuild r1-r6, refetch NPS data, spend provider quota, or repeat the
+  completed b08/agency quality audits without new evidence.
+- Do not repeat broad Map, Search, Layers, campground, Trails, Originals,
+  Android Auto, Memory, or screenshot work.
+- Do not publish or promote this candidate publicly until the authenticated
+  internal preview and device delta are separately accepted.

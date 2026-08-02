@@ -1635,3 +1635,30 @@ cached NPS module-coverage gap; do not refetch or promote publicly in this step.
 - Do not repeat the accepted NPS child batch, agency quality work, broad Trails,
   Search, Map, Layers, campground, Originals, Android Auto, Memory, or store
   crawls without new evidence.
+
+## Explore continuation — Batch 1 deployed and Android-accepted — 2026-08-01 21:22 CDT
+
+- Railway deployment `b2fbc963-fe48-40ac-855b-6cc72c1ea081` successfully
+  deployed exact implementation `11e7b84a9c7efc037e7fe7eb59ced90f9d43ad40`.
+  Health is `ok`; preview-header-only access remains denied with `401`.
+- Android admin diagnostics reported 13 profiles ready. Exact internal child
+  search, exact NPS imagery/detail, rich hub child navigation, and the shared
+  main-Map sheet passed without a fatal or JavaScript error.
+- Open P0/P1: none. Deferred P2s: a legacy `Things` child kicker and incomplete
+  direct-search/Map Back restoration. Do not reopen these during the data
+  builder packet.
+- Protected Explore index and App Store copy hashes remain unchanged; no OTA,
+  native build, provider request, catalog promotion, or stage change occurred.
+
+### Exact next action
+
+Build immutable cached-only NPS Child Depth Batch 2 for GUMO, OLYM, DEVA,
+JOTR, and ROMO. Expected bounded output: 171 children; See 38, Do 15, Stay 53,
+Trails 42, Visitor Information 23; 151 approved exact-page images. Reuse the
+accepted r7 gates, require deterministic rebuild/hash parity, and stop before
+internal-preview integration or deployment.
+
+### Do not repeat
+
+- Do not rebuild or redeploy Batch 1, repeat its Android proof, refetch NPS,
+  mutate the serving index, or run broad completed crawls.

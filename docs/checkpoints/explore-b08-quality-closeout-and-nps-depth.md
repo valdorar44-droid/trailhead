@@ -247,3 +247,73 @@ OTA or public catalog promotion is required for this backend/data-only packet.
 - Do not repeat broad Map, Search, Layers, campground, Trails, Originals,
   Android Auto, Memory, or screenshot work.
 - Do not stage the protected serving index, App Store copy, or `.cursor/`.
+
+## NPS child-depth internal deployment and Android acceptance — 2026-08-01 21:22 CDT
+
+- Branch: `feat/trailhead-1.0.10-overhaul`; deployed implementation commit
+  `11e7b84a9c7efc037e7fe7eb59ced90f9d43ad40`; checkpoint HEAD before this
+  append: `c03f5091082cad95ea180794057ed81e236418ca`.
+- Railway deployment `b2fbc963-fe48-40ac-855b-6cc72c1ea081` reached terminal
+  `SUCCESS` with image digest
+  `sha256:111fc629df7685c8c9bea8527b2f2a2fc9ea612f790145830c0000ee8f83a9e9`.
+  `https://api.gettrailhead.app/api/health` returned `status=ok`, and the
+  internal-preview header without a bearer token returned `401`.
+- The protected Explore-index SHA-256 remains
+  `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`;
+  the protected App Store copy SHA-256 remains
+  `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+  `.cursor/` and both protected files remain unstaged.
+- Samsung `SM_A326U1`, app `1.0.10` build `69`, loaded preview source
+  `2d5f9de6c461904e4667b3b9dba6aff538ac30c4`, runtime
+  `native-1.0.10-android.7`, update
+  `019fbf59-81ed-7890-babc-065de79576a8`. The admin QA screen reported the
+  internal request active, data ready, and all 13 reviewed profiles available.
+- Exact internal Search V2 resolved `Fossil Discovery Trail - Visitor Center
+  Trailhead` as a Trailhead child of Dinosaur National Monument. Selection
+  opened a nonblank detail with the exact NPS image and source-backed copy.
+- The existing rich-destination path also passed on device: Carlsbad Caverns
+  hub -> What to See -> Accessibility child -> main Map shared sheet. The map
+  retained the exact child identity and image, exposed the existing actions,
+  and produced no fatal/JavaScript error match.
+- Evidence directory:
+  `C:\Users\User\Documents\Codex\evidence\trailhead\explore-nps-child-11e7b84a`.
+  Key SHA-256 values: QA status
+  `b16f475c58dddc7c683f4ab91096cb3c80b0ce5850a7885a53e61846898b62d9`;
+  Fossil search
+  `01f4e11832692a924178e87b8f96a0d8901f1849da345f42f1845668bb90cbdc`;
+  Fossil detail
+  `7063be9cfd6302a8b52eeaa47eb5529d7c6a6c37274a0b90df311d74ab196ca2`;
+  Carlsbad module list
+  `7470a10273b952c5099c2f6ad1ebf4fe721fc78e64442daf4aece92c07c385cc`;
+  child detail
+  `3a76f10188e3183d6fc33846021f704be15914e7b7ed4b37c486de8b7e1abe39`;
+  shared Map sheet
+  `10397c0a44a735b9c0936a270304a0ac916fd8ce0f4e13b26e72ecc013318deb`;
+  filtered error summary
+  `19eafe0accf1abb6772cb163ce10d481264f1c2a85b4b633b736bb6d9c0cee36`.
+- Open P0/P1: none. Two bounded P2 presentation items are recorded rather
+  than reopened in this data packet: direct child detail can display the
+  legacy `Things` kicker instead of its source-backed trailhead category, and
+  direct-search/Map Back does not always restore the prior child-list/search
+  state. Neither changes identity, source data, or internal authorization.
+- No mobile OTA or native rebuild was required. No provider request, public
+  catalog promotion, serving-index mutation, or public-stage change occurred.
+
+### Next exact packet
+
+Build cached-only NPS Child Depth Batch 2 for Guadalupe Mountains, Olympic,
+Death Valley, Joshua Tree, and Rocky Mountain. The read-only coverage audit
+found 171 eligible source-backed children across all five rails: See 38,
+Activities 15, Stay 53, Trails 42, and Visitor Information 23, with 151
+exact-page media approvals. Keep the candidate immutable and internal, use the
+accepted r7 identity/media/link gates, rebuild deterministically, and do not
+refetch NPS or modify the serving index.
+
+### Do not repeat
+
+- Do not repeat the Batch 1 build, deployment, Android exact-child flow, broad
+  Explore/Map/Search crawls, campground work, Trails, Layers, Memory,
+  Originals, Android Auto, or production OTA work without new evidence.
+- Do not include C&O Canal until its media gap is reviewed, Glen Canyon until
+  child-specific URLs improve, or Great Smoky Mountains until its cached
+  Things-to-Do classification gap is resolved.

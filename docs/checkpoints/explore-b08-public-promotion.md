@@ -110,3 +110,74 @@ Wait for corrected Release 1 deployment `eb9c7a9d-54c1-4f7a-a4df-8f9bce054bf6` t
 - Physical iOS spot check: pending because no Apple device was connected; the shared API contract is unchanged.
 - Release 1 open P0/P1: none.
 - Next exact action: commit and tag this accepted Release 1 checkpoint, then build Release 2 only from immutable `explore-b08-top-level-v2` inputs.
+
+## Release 2 prepared
+
+- Artifact commit: `a71040a4`.
+- Release ID: `explore-b08-child-depth-v1`.
+- Rollback release: `explore-b08-top-level-v2`, Railway deployment `eb9c7a9d-54c1-4f7a-a4df-8f9bce054bf6`.
+- Rich catalog: 1,442 records, SHA-256 `23f15894e46e381ccbd6df28baa8df0e018844876c68112c5872509211095f06`.
+- Public serving index: 5,867 records, SHA-256 `1773805d38537f74c6656165305a86595bb39d53a3e694c328a82ce4f33061ba`.
+- Promotion manifest SHA-256: `79b3a7df32c02376a8e7322bd5c6f53ba417694fb01eb5ceb3afe1d5bb2c77c6`.
+- All 457 reviewed source children are dispositioned: 448 published, 3 source-ID remaps, 6 canonical merges, 0 rejected.
+- Alias table: 24 entries: all 19 Release 1 aliases plus five child-depth RIDB replacements.
+- Artifact validation: zero missing parents, zero public alias sources, zero missing alias targets, and every serving child is `hidden_from_featured`.
+- Reviewed corrections are exact:
+  - Aspenglen uses the approved reservation and summer-season copy from its official source.
+  - Kulanaokuaiki is named correctly and categorized as a campground.
+- Reviewed exception counts remain pinned: 24 shared-coordinate clusters, 12 parent-page fallbacks, 9 explicit b3 fallbacks, and 89 text-only image fallbacks.
+- Focused promotion/runtime/NPS/source suite: 55 passed.
+- Active Railway deployment: `36cf126b-34c9-4534-a56c-1cced3713579` (awaiting terminal status at checkpoint write).
+- Next exact action: require Railway `SUCCESS`, verify raw count, direct child/search access, parent hierarchy, Featured exclusion, 24 aliases, and bounded Android hub-child Back behavior.
+
+## Release 2 accepted
+
+- Accepted: 2026-08-02 04:48 America/Winnipeg.
+- Branch: `release/explore-b08-public`.
+- Artifact commit: `a71040a4b2ee6365a330975cb0e81e40276465fa`.
+- Final backend source: `73860e01c00f2244474e21be43f326609954f385`.
+- Release ID: `explore-b08-child-depth-v1`.
+- Initial Railway deployment: `36cf126b-34c9-4534-a56c-1cced3713579`, terminal `SUCCESS`.
+- Search-consistency Railway deployment: `89a3e1d2-962b-4174-adc3-2723eab3e6a0`, terminal `SUCCESS`.
+- Final image digest: `sha256:ab55a840bc6c31c1fbb09cdc3bcf4df9a80c7763d26e8236bb0a95ea67573527`.
+- Rollback target: Release 1 v2 deployment `eb9c7a9d-54c1-4f7a-a4df-8f9bce054bf6`, source `8accebef115e91cf4056918fd66ef06e8822c5ea`.
+- Raw public catalog: 5,867 records. Broad browse: 5,416 records. The 451-record difference is the reviewed child set hidden from broad discovery.
+- Rich catalog: 1,442 records. Manifest dispositions: 448 published, 3 remapped, 6 canonical merges, 0 rejected.
+- All 24 aliases resolve to their exact reviewed canonical targets; no alias source remains public and no target is missing.
+- Internal-preview isolation passed: the preview header without authenticated admin access returns the public 5,416-item browse view and no internal payload.
+- Aspenglen is directly addressable and searchable under `place:nps:romo`, module `stay`, with the approved reservation/summer copy.
+- Kulanaokuaiki is directly addressable under `place:nps:havo`, module `stay`, with the correct campground name and category.
+- Railway health is `ok`; the final post-deploy public counts remain 5,867 raw and 5,416 broad browse.
+
+### Android bounded delta
+
+- Device: Samsung SM-A326U1, production package `com.trailhead.app`, app 1.0.10 build 69.
+- Aspenglen exact search opened the correct campground Peek, nonblank Full sheet, and restored the Map on Back.
+- Kulanaokuaiki exact search opened the correct named campground sheet.
+- One deterministic P1 was found: the exact Aniakchak destination initially opened a Campground sheet because Search V2 preferred a stale persistent canonical index over the active promoted index.
+- One evidence-backed backend correction now makes Search V2 use the manifest-validated promoted serving index and fingerprints the promoted index plus manifest to invalidate stale documents.
+- Focused correction tests: 86 passed and 17 subtests passed. The wider focused run completed with 104 passed and 17 subtests; Python compile and whitespace checks passed.
+- After deployment `89a3e1d2-962b-4174-adc3-2723eab3e6a0`, the exact Aniakchak result opened the `Parks & Land` destination hub at `Overview`, with no Campground, Reservable, or View Sites state.
+- Evidence root: `C:\Users\User\Documents\Codex\evidence\explore-b08-public\release2-android`.
+- Key evidence hashes:
+  - `03-aspenglen-child-sheet.png` `f17cba9c014295cdda195f9a50125ec700b924275a72a13777ff63ccc754afc8`
+  - `04-aspenglen-full-details.png` `3a833795f7f1d05345620c5f57cfa5b7efe0ea4725d93d02438a21e08f5cf427`
+  - `07-kulanaokuaiki-sheet.png` `dfd37ce3f160857c0b6b75f61c25b009df6cf185f69b4b0fa6fd8c84851c0887`
+  - `09-aniakchak-hub-entry.png` `7f6274b0b73bd9641dfd14895adee9523eda1ebd91c84f66a1833dadb51827e1`
+  - `14-aniakchak-fix-opened.png` `da157b59ac1b65c609991ba64c1290224107fe2d2f8169b1a81cf7672b75e2ed`
+  - `14-aniakchak-fix-opened.xml` `8753b6f734b4ec6e75bcdce8a2e1bdbf6c4f3b64281237e0eb1e94b107184341`
+
+### Closeout state
+
+- Protected main-worktree Explore index remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
+- Protected App Store copy remains `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+- Physical iOS spot check is pending because no Apple device was connected. The backend contract and public data require no OTA or native build.
+- Open P0/P1: none after the bounded Aniakchak correction.
+- Task-owned Metro, Gradle, Maestro, pytest, and Railway polling processes: none.
+- Next exact action: perform only the shared iOS hub/child spot check when an iPhone is available; otherwise begin the next untouched Explore data packet from this accepted release.
+
+### Do not repeat
+
+- Do not rerun Release 1, refetch b08 data, repeat broad NPS/Explore crawls, or re-audit passed Aspenglen/Kulana flows without new evidence.
+- Do not expose children in Featured or broad discovery.
+- Do not modify the protected serving index; future releases continue from these immutable artifacts and manifests.

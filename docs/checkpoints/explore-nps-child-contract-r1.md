@@ -98,3 +98,86 @@ Explore source, copy, privacy, and matrix tests.
   Auto, Memory, screenshot, or broad NPS testing without new evidence.
 - Figma and Mobbin are not required because this packet changes data contracts,
   not an approved interaction or visual pattern.
+
+## Completion checkpoint
+
+- Recorded: `2026-08-02T18:03:13-05:00`.
+- Implementation commit: `e7f8eb0d9d6a99a90a4ae2812761b474605fe419`.
+- Branch: `feat/explore-nps-child-contract-r1`; implementation is pushed to
+  `origin/feat/explore-nps-child-contract-r1`.
+- Delivery remains data/audit-only: no Railway deployment, feature-stage
+  change, preview or production OTA, native build, or device crawl occurred.
+- Task-owned Gradle, Metro, Maestro, Expo, pytest, and candidate-builder
+  processes: none.
+
+### Completed contract
+
+- Added cached-only preset `post-b08-nps-child-contract-r1` with pinned b08,
+  accepted b09, and raw-cache hashes. It cannot write outside
+  `data/explore/audit_candidates/internal`, overwrite an immutable output, or
+  fetch source data.
+- Accounted for exactly 394 identities: 157 legacy normalization records plus
+  237 normalized candidates. Module counts are See 112, Do 45, Stay 49, and
+  Visitor 31. One reviewed Acadia duplicate merges into the richer visitor
+  center, leaving 236 materialized candidates.
+- Added the tracked clean-checkout identity lock
+  `tests/fixtures/explore_sources/nps_child_contract_r1_identity.json`, SHA-256
+  `d5aad97024b47c4d47fe353e9781391343c8e8fd83f7c9bdab35f7f9b0ed3508`.
+  It reproduces all identity hashes, module/destination counts, legacy serving
+  coverage, collision checks, and the reviewed duplicate without committing
+  the large ignored audit outputs.
+- Kept 49 missing source descriptions blank/text-only, kept six source records
+  without media text-only, and excluded 47 additional images that lacked the
+  strict cached distribution evidence. The resulting 183 images remain bound
+  to exact pinned source evidence.
+- Removed embedded booking URLs from the visible/search copy of exactly three
+  reviewed Glen Canyon campground records. Booking and official links remain
+  in their action/source fields; no facts were invented.
+- Added an explicit public-promoter rejection for
+  `ExploreNpsChildContractV1` and any child payload declaring
+  `public_promotion_compatible: false`. The integration test exercises the real
+  promotion entry point.
+
+### Evidence
+
+- Identity hashes:
+  - Legacy: `8a6dd528b262654e97a4b98625aeb3b1f4a6d77c96bc1fd27f9d6d8052ee33e4`
+  - New: `d94ee87a0ca79e476297e44d7cb2f4224599b28749ffcae9ab90c2ede631bc0c`
+  - Combined: `fc6ea5fc19cf4ec1b3f794902502e0a30dbc6380ff9fb7cfd5eba9dfa94b6524`
+- Current immutable local audit artifacts:
+  - `audit.json`: `01e7953e0ac50b51f047872661dd4cb97fe23c82be772c7dcb50ae070674f639`
+  - `child_dispositions.json`: `4dc8a35e56774df88fdd2ca0aa557b8f76f91be8b73311784251d9a302591518`
+  - `manifest.json`: `89ba6376343c593f978d05061eef47bcd9aac8bae23b0de428286bd562032e6d`
+  - `nps_child_contract_v1.json`: `a4a6db4becb705d43351e820c7a61f8bb335dde4244a19adfcce1c384ad0046a`
+  - `review.json`: `9166f08cd27aa7f141ea4f460795c891328bb978dd85dced47c8b1cdab3bcdc8`
+- Primary and deterministic-rebuild directories are byte-identical.
+- Final focused regression: 42 passed. Python compilation and whitespace
+  checks passed.
+- Broader Explore/source/content regression: 184 passed with only existing
+  framework deprecation warnings. The Explore catalog QA matrix passed with no
+  dead-end scenarios.
+- Independent reviews approved exact scope, source/media lineage, deterministic
+  output, visible-copy cleanup, and public-promotion isolation.
+- Protected hashes remain unchanged:
+  - Explore serving index:
+    `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`
+  - App Store copy:
+    `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`
+
+### Open defects and exact next action
+
+- Open P0/P1 defects: none in this internal contract packet.
+- The sidecar is deliberately not mounted or promotion-ready. The next packet
+  is a reviewed, admin-only internal-preview overlay that consumes these 236
+  materialized candidates and 157 identity aliases without modifying the public
+  catalog or serving index. Device review follows that mount; public promotion
+  remains a later explicit decision.
+
+### Updated do-not-repeat list
+
+- Do not refetch NPS data, rebuild b06/b08/b09, or re-audit the 394 identities.
+- Do not repeat broad Map, Search, Layers, Trails, Originals, Android Auto,
+  Memory, screenshot, or NPS research work.
+- Do not feed this contract directly to the public promoter; it is explicitly
+  rejected there.
+- Do not stage the ignored local artifact or deterministic-rebuild directories.

@@ -1,0 +1,29 @@
+{
+  "aliases": [
+    {
+      "from_id": "place:ridb:10182463",
+      "to_id": "place:usfs:usfs-sierra-sites-83a6b34b-07f9-40a0-a98b-68de9b7b81a8",
+      "reason": "The reviewed USFS record is the authoritative replacement for Kirch Flat Group Campground."
+    },
+    {
+      "from_id": "place:ridb:232817",
+      "to_id": "place:usfs:usfs-sierra-sites-5f618db8-3fe8-4011-a735-18a738acfb43",
+      "reason": "The reviewed USFS record is the authoritative replacement for Mammoth Pool Campground."
+    },
+    {
+      "from_id": "place:ridb:232878",
+      "to_id": "place:usfs:usfs-sierra-sites-b01b7bab-bef1-45a7-a0f5-8707be86d2ba",
+      "reason": "The reviewed USFS record is the authoritative replacement for Forks Campground."
+    },
+    {
+      "from_id": "place:ridb:232880",
+      "to_id": "place:usfs:usfs-sierra-sites-307b30f3-9f42-4aa4-8de0-fe6eb125d8e2",
+      "reason": "The reviewed USFS record is the authoritative replacement for Kelty Meadow Campground."
+    },
+    {
+      "from_id": "place:ridb:233839",
+      "to_id": "place:usfs:usfs-sierra-sites-1089761d-6a96-47fa-b575-6b69bd7c1772",
+      "reason": "The reviewed USFS record is the authoritative replacement for Dirt Flat Campground."
+    }
+  ]
+}

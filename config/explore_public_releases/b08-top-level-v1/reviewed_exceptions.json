@@ -1,0 +1,16 @@
+{
+  "approved_image_corrections": [
+    {
+      "id": "place:ridb:261716",
+      "image_url": "https://cdn.recreation.gov/public/2021/06/01/14/10/261716_b60960bd-92b5-4404-8f02-e8c82dc0ac65_700.webp",
+      "reason": "Replace a non-image YouTube URL with the reviewed Recreation.gov image."
+    },
+    {
+      "id": "place:ridb:269134",
+      "image_url": "https://cdn.recreation.gov/public/images/83803_1440.webp",
+      "reason": "Replace a non-image YouTube URL with the reviewed Recreation.gov image."
+    }
+  ],
+  "child_corrections": {},
+  "reviewed_displacements": 5
+}

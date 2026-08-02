@@ -506,8 +506,22 @@ BLOG_INDEX = Path(__file__).parent / "blog.html"
 BLOG_DIR = Path(__file__).parent / "blog"
 DEFAULT_EXPLORE_CATALOG = Path(__file__).parent / "explore_catalog_v1.json"
 DEFAULT_EXPLORE_CATALOG_V3 = Path(__file__).parent / "explore_catalog_v3.json"
+DEFAULT_EXPLORE_SERVING_INDEX = Path(__file__).parent / "explore_serving_index_v2.json"
+_EXPLORE_REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _explore_configured_repo_path(value: str) -> Path:
+    path = Path(str(value or "").strip())
+    return path if path.is_absolute() else _EXPLORE_REPO_ROOT / path
+
+
 EXPLORE_CATALOG = DEFAULT_EXPLORE_CATALOG
-EXPLORE_CATALOG_V3 = DEFAULT_EXPLORE_CATALOG_V3
+_EXPLORE_CATALOG_V3_ENV = str(os.getenv("TRAILHEAD_EXPLORE_CATALOG_V3") or "").strip()
+EXPLORE_CATALOG_V3 = (
+    _explore_configured_repo_path(_EXPLORE_CATALOG_V3_ENV)
+    if _EXPLORE_CATALOG_V3_ENV
+    else DEFAULT_EXPLORE_CATALOG_V3
+)
 EXPLORE_OFFICIAL_FEATURED = Path(__file__).parent / "explore_official_featured_v1.json"
 EXPLORE_GLOBAL_SEED = Path(__file__).resolve().parents[1] / "scripts" / "explore_global_seed_v1.json"
 EXPLORE_BOOKABLE_EXPERIENCES = Path(__file__).parent / "explore_bookable_experiences_v1.json"
@@ -515,8 +529,21 @@ EXPLORE_TOURS_VIATOR = Path(__file__).parent / "explore_tours_viator_v1.json"
 EXPLORE_GUIDED_DESTINATIONS = Path(__file__).parent / "explore_guided_destinations_v1.json"
 EXPLORE_SERVING_INDEX = Path(
     os.getenv("TRAILHEAD_EXPLORE_SERVING_INDEX")
-    or (Path(__file__).parent / "explore_serving_index_v2.json")
+    or DEFAULT_EXPLORE_SERVING_INDEX
 )
+_EXPLORE_PUBLIC_PROMOTION_MANIFEST_ENV = str(
+    os.getenv("TRAILHEAD_EXPLORE_PUBLIC_PROMOTION_MANIFEST") or ""
+).strip()
+EXPLORE_PUBLIC_PROMOTION_MANIFEST: Path | None = (
+    _explore_configured_repo_path(_EXPLORE_PUBLIC_PROMOTION_MANIFEST_ENV)
+    if _EXPLORE_PUBLIC_PROMOTION_MANIFEST_ENV
+    else None
+)
+_EXPLORE_PUBLIC_PROMOTION_EXPLICIT_PATHS = {
+    "catalog_v3": bool(_EXPLORE_CATALOG_V3_ENV),
+    "serving_index": bool(str(os.getenv("TRAILHEAD_EXPLORE_SERVING_INDEX") or "").strip()),
+    "manifest": bool(_EXPLORE_PUBLIC_PROMOTION_MANIFEST_ENV),
+}
 EXPLORE_INTERNAL_PREVIEW = Path(
     os.getenv("TRAILHEAD_EXPLORE_INTERNAL_PREVIEW")
     or (Path(__file__).parent / "explore_internal_preview_v1.json")
@@ -542,6 +569,376 @@ CANONICAL_TRAIL_INDEX_PATH = Path(CANONICAL_TRAIL_INDEX_ENV or (CANONICAL_SERVIN
 CANONICAL_TRAIL_INDEX_BUNDLED_PATH = Path(__file__).parent / "canonical_trail_index_v1.json"
 APP_ICON = Path(__file__).resolve().parents[1] / "mobile" / "assets" / "icon.png"
 
+
+_EXPLORE_PUBLIC_PROMOTION_CACHE: dict[str, object] = {"key": None, "state": None}
+_EXPLORE_PUBLIC_PROMOTION_SHA_RE = re.compile(r"^[0-9a-f]{64}$")
+
+
+def _explore_promoted_index_enabled() -> bool:
+    return str(os.getenv("TRAILHEAD_EXPLORE_PROMOTED_INDEX_ENABLED", "1")).strip().lower() not in {
+        "0", "false", "no", "off",
+    }
+
+
+def _explore_public_promotion_configured() -> bool:
+    return bool(
+        _EXPLORE_PUBLIC_PROMOTION_EXPLICIT_PATHS.get("catalog_v3")
+        or _EXPLORE_PUBLIC_PROMOTION_EXPLICIT_PATHS.get("manifest")
+    )
+
+
+def _explore_public_release_active() -> bool:
+    return _explore_public_promotion_configured() and _explore_promoted_index_enabled()
+
+
+def _explore_active_catalog_v3_path() -> Path:
+    return EXPLORE_CATALOG_V3 if _explore_promoted_index_enabled() else DEFAULT_EXPLORE_CATALOG_V3
+
+
+def _explore_active_serving_index_path() -> Path:
+    return EXPLORE_SERVING_INDEX if _explore_promoted_index_enabled() else DEFAULT_EXPLORE_SERVING_INDEX
+
+
+def _explore_file_stat_key(path: Path | None) -> tuple[str, int, int]:
+    if path is None:
+        return ("", 0, 0)
+    try:
+        stat = path.stat()
+        return (str(path.resolve()), stat.st_mtime_ns, stat.st_size)
+    except Exception:
+        return (str(path), 0, 0)
+
+
+def _explore_public_promotion_cache_key() -> tuple[object, ...]:
+    return (
+        ("promoted_index_enabled", int(_explore_promoted_index_enabled()), 0),
+        _explore_file_stat_key(EXPLORE_PUBLIC_PROMOTION_MANIFEST),
+        _explore_file_stat_key(_explore_active_catalog_v3_path()),
+        _explore_file_stat_key(_explore_active_serving_index_path()),
+    )
+
+
+def _explore_sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _explore_public_repo_artifact_path(raw_path: object, *, field: str) -> Path:
+    text = str(raw_path or "").strip()
+    if not text or Path(text).is_absolute():
+        raise RuntimeError(f"Explore public promotion {field} must be a repository-relative path")
+    root = _EXPLORE_REPO_ROOT.resolve()
+    resolved = (root / text).resolve()
+    try:
+        resolved.relative_to(root)
+    except ValueError:
+        raise RuntimeError(f"Explore public promotion {field} escapes the repository") from None
+    return resolved
+
+
+def _explore_public_sha(value: object, *, field: str) -> str:
+    digest = str(value or "").strip().lower()
+    if not _EXPLORE_PUBLIC_PROMOTION_SHA_RE.fullmatch(digest):
+        raise RuntimeError(f"Explore public promotion {field} must be a SHA-256 digest")
+    return digest
+
+
+def _explore_public_count(value: object, *, field: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise RuntimeError(f"Explore public promotion {field} must be a non-negative integer")
+    return value
+
+
+def _explore_public_valid_coordinates(record: dict) -> bool:
+    try:
+        lat = float(record.get("lat"))
+        lng = float(record.get("lng"))
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(lat) and math.isfinite(lng) and -90 <= lat <= 90 and -180 <= lng <= 180
+
+
+def _explore_public_json_object(path: Path, *, field: str) -> dict:
+    try:
+        payload = json.loads(path.read_text())
+    except Exception as exc:
+        raise RuntimeError(f"Explore public promotion {field} is not valid JSON") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"Explore public promotion {field} must be a JSON object")
+    return payload
+
+
+def _explore_public_validate_artifact(
+    manifest: dict,
+    *,
+    artifact_key: str,
+    configured_path: Path,
+    list_key: str,
+    schema_version: int,
+) -> tuple[dict, str, int]:
+    artifacts = manifest.get("artifacts")
+    artifact = artifacts.get(artifact_key) if isinstance(artifacts, dict) else None
+    if not isinstance(artifact, dict):
+        raise RuntimeError(f"Explore public promotion artifacts.{artifact_key} is required")
+    artifact_path = _explore_public_repo_artifact_path(
+        artifact.get("path"), field=f"artifacts.{artifact_key}.path",
+    )
+    try:
+        configured_resolved = configured_path.resolve(strict=True)
+        artifact_resolved = artifact_path.resolve(strict=True)
+    except Exception as exc:
+        raise RuntimeError(f"Explore public promotion {artifact_key} artifact is missing") from exc
+    if configured_resolved != artifact_resolved:
+        raise RuntimeError(f"Explore public promotion {artifact_key} path does not match its environment setting")
+    expected_sha = _explore_public_sha(
+        artifact.get("sha256"), field=f"artifacts.{artifact_key}.sha256",
+    )
+    actual_sha = _explore_sha256_file(artifact_resolved)
+    if actual_sha != expected_sha:
+        raise RuntimeError(f"Explore public promotion {artifact_key} hash mismatch")
+    expected_count = _explore_public_count(
+        artifact.get("count"), field=f"artifacts.{artifact_key}.count",
+    )
+    payload = _explore_public_json_object(artifact_resolved, field=artifact_key)
+    if payload.get("schema_version") != schema_version:
+        raise RuntimeError(f"Explore public promotion {artifact_key} schema version is invalid")
+    records = payload.get(list_key)
+    if not isinstance(records, list):
+        raise RuntimeError(f"Explore public promotion {artifact_key}.{list_key} must be an array")
+    if len(records) != expected_count:
+        raise RuntimeError(f"Explore public promotion {artifact_key} count mismatch")
+    payload_count = payload.get("count")
+    if payload_count is not None and payload_count != expected_count:
+        raise RuntimeError(f"Explore public promotion {artifact_key} payload count mismatch")
+    ids = [str(item.get("id") or "").strip() for item in records if isinstance(item, dict)]
+    if len(ids) != expected_count or any(not item_id for item_id in ids) or len(set(ids)) != len(ids):
+        raise RuntimeError(f"Explore public promotion {artifact_key} identities are incomplete or duplicated")
+    if any(not _explore_public_valid_coordinates(item) for item in records if isinstance(item, dict)):
+        raise RuntimeError(f"Explore public promotion {artifact_key} contains invalid coordinates")
+    return payload, actual_sha, expected_count
+
+
+def _validate_explore_public_promotion() -> dict:
+    """Validate one immutable public Explore release before it can be served."""
+    # TRAILHEAD_EXPLORE_SERVING_INDEX predates versioned public releases and
+    # may already be configured by itself. Only either new release setting
+    # opts a deployment into the manifest contract; once opted in, all three
+    # paths become mandatory.
+    configured = _explore_public_promotion_configured()
+    if not configured:
+        return {
+            "enabled": False,
+            "status": "not_configured",
+            "release_id": "",
+            "stage": "off",
+            "aliases": {},
+        }
+    if not _explore_promoted_index_enabled():
+        return {
+            "enabled": False,
+            "status": "disabled",
+            "release_id": "",
+            "stage": "off",
+            "aliases": {},
+        }
+    if not all(_EXPLORE_PUBLIC_PROMOTION_EXPLICIT_PATHS.values()):
+        raise RuntimeError(
+            "Explore public promotion requires catalog, serving-index, and manifest environment paths"
+        )
+    if EXPLORE_PUBLIC_PROMOTION_MANIFEST is None:
+        raise RuntimeError("Explore public promotion manifest is not configured")
+
+    cache_key = _explore_public_promotion_cache_key()
+    if _EXPLORE_PUBLIC_PROMOTION_CACHE.get("key") == cache_key:
+        cached = _EXPLORE_PUBLIC_PROMOTION_CACHE.get("state")
+        if isinstance(cached, dict):
+            return cached
+
+    manifest_path = EXPLORE_PUBLIC_PROMOTION_MANIFEST.resolve()
+    try:
+        manifest_path.relative_to(_EXPLORE_REPO_ROOT.resolve())
+    except ValueError:
+        raise RuntimeError("Explore public promotion manifest must remain inside the repository") from None
+    manifest = _explore_public_json_object(manifest_path, field="manifest")
+    if manifest.get("schema") != "explore_public_promotion_manifest_v1":
+        raise RuntimeError("Explore public promotion manifest schema is invalid")
+    release_id = str(manifest.get("release_id") or "").strip()
+    if not release_id or len(release_id) > 120:
+        raise RuntimeError("Explore public promotion release_id is invalid")
+    stage = str(manifest.get("stage") or "").strip()
+    if stage not in {"top_level", "child_depth"}:
+        raise RuntimeError("Explore public promotion stage is invalid")
+
+    expected_current = manifest.get("expected_current")
+    if not isinstance(expected_current, dict) or not str(expected_current.get("release_id") or "").strip():
+        raise RuntimeError("Explore public promotion expected_current is incomplete")
+    _explore_public_sha(
+        expected_current.get("catalog_v3_sha256"), field="expected_current.catalog_v3_sha256",
+    )
+    _explore_public_sha(
+        expected_current.get("serving_index_sha256"), field="expected_current.serving_index_sha256",
+    )
+
+    inputs = manifest.get("inputs")
+    if not isinstance(inputs, list) or not inputs:
+        raise RuntimeError("Explore public promotion inputs must be a non-empty array")
+    input_ids: set[str] = set()
+    for index, item in enumerate(inputs):
+        if not isinstance(item, dict):
+            raise RuntimeError(f"Explore public promotion inputs[{index}] is invalid")
+        input_id = str(item.get("id") or "").strip()
+        if not input_id or input_id in input_ids:
+            raise RuntimeError("Explore public promotion input identities are missing or duplicated")
+        input_ids.add(input_id)
+        _explore_public_repo_artifact_path(item.get("path"), field=f"inputs[{index}].path")
+        _explore_public_sha(item.get("sha256"), field=f"inputs[{index}].sha256")
+        _explore_public_count(item.get("count"), field=f"inputs[{index}].count")
+
+    catalog, catalog_sha, catalog_count = _explore_public_validate_artifact(
+        manifest,
+        artifact_key="catalog_v3",
+        configured_path=EXPLORE_CATALOG_V3,
+        list_key="places",
+        schema_version=3,
+    )
+    serving_index, index_sha, index_count = _explore_public_validate_artifact(
+        manifest,
+        artifact_key="serving_index",
+        configured_path=EXPLORE_SERVING_INDEX,
+        list_key="items",
+        schema_version=2,
+    )
+    serving_gate = serving_index.get("gate")
+    if not isinstance(serving_gate, dict) or serving_gate.get("passed") is not True:
+        raise RuntimeError("Explore public promotion serving_index gate did not pass")
+    if serving_index.get("reviewable_count") != index_count:
+        raise RuntimeError("Explore public promotion serving_index reviewable_count mismatch")
+    if any(item.get("reviewable") is False for item in serving_index.get("items") or []):
+        raise RuntimeError("Explore public promotion serving_index contains a non-reviewable item")
+
+    aliases_raw = manifest.get("aliases")
+    if not isinstance(aliases_raw, list):
+        raise RuntimeError("Explore public promotion aliases must be an array")
+    aliases: dict[str, str] = {}
+    public_ids = {
+        *[str(place.get("id") or "").strip() for place in catalog.get("places") or [] if isinstance(place, dict)],
+        *[str(item.get("id") or "").strip() for item in serving_index.get("items") or [] if isinstance(item, dict)],
+    }
+    for index, item in enumerate(aliases_raw):
+        if not isinstance(item, dict):
+            raise RuntimeError(f"Explore public promotion aliases[{index}] is invalid")
+        from_id = str(item.get("from_id") or "").strip()
+        to_id = str(item.get("to_id") or "").strip()
+        reason = str(item.get("reason") or "").strip()
+        if not from_id or not to_id or not reason or from_id == to_id or from_id in aliases:
+            raise RuntimeError("Explore public promotion aliases are incomplete or duplicated")
+        if to_id not in public_ids:
+            raise RuntimeError(f"Explore public promotion alias target is not public: {to_id}")
+        aliases[from_id] = to_id
+    alias_sources = set(aliases)
+    if alias_sources.intersection(public_ids):
+        raise RuntimeError("Explore public promotion alias source remains public")
+    if any(target in alias_sources for target in aliases.values()):
+        raise RuntimeError("Explore public promotion alias chains or cycles are not allowed")
+
+    child_dispositions = manifest.get("child_dispositions")
+    if not isinstance(child_dispositions, list):
+        raise RuntimeError("Explore public promotion child_dispositions must be an array")
+    child_sources: set[str] = set()
+    for index, item in enumerate(child_dispositions):
+        if not isinstance(item, dict):
+            raise RuntimeError(f"Explore public promotion child_dispositions[{index}] is invalid")
+        source_id = str(item.get("source_id") or "").strip()
+        public_id = str(item.get("public_id") or "").strip()
+        disposition = str(item.get("disposition") or "").strip()
+        reason = str(item.get("reason") or "").strip()
+        if not source_id or source_id in child_sources or not public_id or not disposition or not reason:
+            raise RuntimeError("Explore public promotion child dispositions are incomplete or duplicated")
+        if public_id not in public_ids:
+            raise RuntimeError(f"Explore public promotion child target is not public: {public_id}")
+        child_sources.add(source_id)
+    if stage == "top_level" and child_dispositions:
+        raise RuntimeError("Top-level Explore promotion must not publish child dispositions")
+    if stage == "child_depth" and not child_dispositions:
+        raise RuntimeError("Child-depth Explore promotion requires child dispositions")
+    for collection_name, records in (
+        ("catalog_v3", catalog.get("places") or []),
+        ("serving_index", serving_index.get("items") or []),
+    ):
+        for record in records:
+            if not isinstance(record, dict) or not str(record.get("parent_hub_id") or "").strip():
+                continue
+            parent_id = str(record.get("parent_hub_id") or "").strip()
+            if parent_id not in public_ids:
+                raise RuntimeError(f"Explore public promotion {collection_name} child parent is not public")
+            if (
+                str(record.get("canonical_role") or "").strip() != "child"
+                or not str(record.get("module_target") or "").strip()
+                or record.get("hidden_from_featured") is not True
+            ):
+                raise RuntimeError(f"Explore public promotion {collection_name} child structure is invalid")
+    if not isinstance(manifest.get("reviewed_exceptions"), dict):
+        raise RuntimeError("Explore public promotion reviewed_exceptions must be an object")
+    rollback = manifest.get("rollback")
+    if not isinstance(rollback, dict):
+        raise RuntimeError("Explore public promotion rollback must be an object")
+    for field in ("release_id", "git_commit", "railway_deployment_id", "manifest_path"):
+        if not str(rollback.get(field) or "").strip():
+            raise RuntimeError(f"Explore public promotion rollback.{field} is required")
+    _explore_public_repo_artifact_path(
+        rollback.get("manifest_path"), field="rollback.manifest_path",
+    )
+
+    served_catalog = _prebuild_explore_public_served_catalog(catalog, serving_index)
+    served_ids = tuple(str(item.get("id") or "") for item in served_catalog.get("places") or [])
+    state = {
+        "enabled": True,
+        "status": "ready",
+        "release_id": release_id,
+        "stage": stage,
+        "catalog_count": catalog_count,
+        "index_count": index_count,
+        "catalog_sha256": catalog_sha,
+        "serving_index_sha256": index_sha,
+        "alias_count": len(aliases),
+        "child_disposition_count": len(child_dispositions),
+        "served_count": len(served_ids),
+        "served_ids": served_ids,
+        "index_ids": tuple(str(item.get("id") or "") for item in serving_index.get("items") or []),
+        "aliases": aliases,
+    }
+    _verify_explore_public_served_catalog(served_catalog, state=state)
+    _EXPLORE_PUBLIC_PROMOTION_CACHE.update({"key": cache_key, "state": state})
+    return state
+
+
+def _resolve_explore_public_id(value: object) -> str:
+    decoded = unquote(str(value or "")).strip()
+    if not decoded:
+        return ""
+    state = _validate_explore_public_promotion()
+    aliases = state.get("aliases") if isinstance(state.get("aliases"), dict) else {}
+    return str(aliases.get(decoded) or decoded)
+
+
+def _explore_public_release_diagnostics() -> dict:
+    state = _validate_explore_public_promotion()
+    return {
+        "status": str(state.get("status") or "not_configured"),
+        "release_id": str(state.get("release_id") or ""),
+        "stage": str(state.get("stage") or "off"),
+        "catalog_count": int(state.get("catalog_count") or 0),
+        "index_count": int(state.get("index_count") or 0),
+        "alias_count": int(state.get("alias_count") or 0),
+        "child_disposition_count": int(state.get("child_disposition_count") or 0),
+        "served_count": int(state.get("served_count") or 0),
+        "catalog_hash": str(state.get("catalog_sha256") or "")[:12],
+        "serving_index_hash": str(state.get("serving_index_sha256") or "")[:12],
+    }
+
 _originals_preview_token_context: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "originals_preview_token", default=None,
 )
@@ -562,6 +959,14 @@ async def _validate_production_runtime_security() -> None:
     # recovery tasks. A production process must not begin serving or enqueueing
     # work with the public development JWT signing key.
     validate_production_secret_key(settings.secret_key)
+
+
+@app.on_event("startup")
+async def _validate_explore_public_promotion_startup() -> None:
+    # Public Explore artifacts are an immutable release set. Never let the
+    # process prewarm or serve a catalog whose configured files drifted from
+    # the reviewed promotion manifest.
+    _validate_explore_public_promotion()
 
 
 @app.middleware("http")
@@ -1380,11 +1785,16 @@ def _explore_v3_place_to_profile(place: dict, rank: int = 900000) -> dict:
 
 
 def _load_explore_catalog_v3_profiles() -> list[dict]:
-    if not EXPLORE_CATALOG_V3.exists():
+    catalog_path = _explore_active_catalog_v3_path()
+    if not catalog_path.exists():
+        if _explore_public_release_active():
+            raise RuntimeError("Configured Explore public catalog is missing")
         return []
     try:
-        catalog = json.loads(EXPLORE_CATALOG_V3.read_text())
-    except Exception:
+        catalog = json.loads(catalog_path.read_text())
+    except Exception as exc:
+        if _explore_public_release_active():
+            raise RuntimeError("Configured Explore public catalog could not be loaded") from exc
         return []
     raw_places = [place for place in catalog.get("places") or [] if isinstance(place, dict)]
     profiles = []
@@ -1664,7 +2074,7 @@ def _explore_runtime_cache_enabled() -> bool:
 
 def _explore_legacy_search_cache_key() -> tuple[object, ...]:
     parts: list[object] = []
-    for path in (EXPLORE_CATALOG, EXPLORE_CATALOG_V3):
+    for path in (EXPLORE_CATALOG, _explore_active_catalog_v3_path()):
         try:
             stat = path.stat()
             parts.append((str(path), stat.st_mtime_ns, stat.st_size))
@@ -1769,7 +2179,7 @@ def _explore_runtime_cache_can_write(catalog: dict) -> bool:
     try:
         if EXPLORE_CATALOG.resolve() != DEFAULT_EXPLORE_CATALOG.resolve():
             return False
-        if EXPLORE_CATALOG_V3.resolve() != DEFAULT_EXPLORE_CATALOG_V3.resolve():
+        if _explore_active_catalog_v3_path().resolve() != DEFAULT_EXPLORE_CATALOG_V3.resolve():
             return False
     except Exception:
         return False
@@ -1780,12 +2190,24 @@ def _explore_runtime_cache_can_write(catalog: dict) -> bool:
 
 def _explore_catalog_cache_key() -> tuple[object, ...]:
     parts: list[object] = []
-    for path in (EXPLORE_CATALOG, EXPLORE_CATALOG_V3, EXPLORE_OFFICIAL_FEATURED, EXPLORE_GLOBAL_SEED, CANONICAL_EXPLORE_INDEX_PATH, EXPLORE_SERVING_INDEX):
+    for path in (
+        EXPLORE_CATALOG,
+        _explore_active_catalog_v3_path(),
+        EXPLORE_OFFICIAL_FEATURED,
+        EXPLORE_GLOBAL_SEED,
+        CANONICAL_EXPLORE_INDEX_PATH,
+        _explore_active_serving_index_path(),
+        EXPLORE_PUBLIC_PROMOTION_MANIFEST,
+    ):
+        if path is None:
+            parts.append(("", 0, 0))
+            continue
         try:
             stat = path.stat()
             parts.append((str(path), stat.st_mtime_ns, stat.st_size))
         except Exception:
             parts.append((str(path), 0, 0))
+    parts.append(("promoted_index_enabled", int(_explore_promoted_index_enabled()), 0))
     return tuple(parts)
 
 
@@ -3736,23 +4158,37 @@ def _server_curated_explore_profiles() -> list[dict]:
     ]
 
 
-_EXPLORE_PROMOTED_INDEX_CACHE: dict[str, object] = {"mtime": 0, "payload": None}
+_EXPLORE_PROMOTED_INDEX_CACHE: dict[str, object] = {"key": None, "payload": None}
 
 
 def _load_explore_promoted_index() -> dict | None:
-    if str(os.getenv("TRAILHEAD_EXPLORE_PROMOTED_INDEX_ENABLED", "1")).strip().lower() in {"0", "false", "no", "off"}:
-        return None
+    serving_path = _explore_active_serving_index_path()
     try:
-        stat = EXPLORE_SERVING_INDEX.stat()
+        stat = serving_path.stat()
     except Exception:
+        if _explore_public_release_active():
+            raise RuntimeError("Configured Explore public serving index is missing")
         return None
-    if _EXPLORE_PROMOTED_INDEX_CACHE.get("mtime") == stat.st_mtime_ns:
+    cache_key = (
+        str(serving_path.resolve()),
+        stat.st_mtime_ns,
+        stat.st_size,
+        _explore_file_stat_key(EXPLORE_PUBLIC_PROMOTION_MANIFEST),
+        _explore_promoted_index_enabled(),
+    )
+    if _EXPLORE_PROMOTED_INDEX_CACHE.get("key") == cache_key:
         cached = _EXPLORE_PROMOTED_INDEX_CACHE.get("payload")
         return cached if isinstance(cached, dict) else None
     try:
-        payload = json.loads(EXPLORE_SERVING_INDEX.read_text())
-    except Exception:
+        payload = json.loads(serving_path.read_text())
+    except Exception as exc:
+        if _explore_public_release_active():
+            raise RuntimeError("Configured Explore public serving index could not be loaded") from exc
         return None
+    if _explore_public_release_active():
+        _validate_explore_public_promotion()
+        _EXPLORE_PROMOTED_INDEX_CACHE.update({"key": cache_key, "payload": payload})
+        return payload
     items = payload.get("items") if isinstance(payload, dict) else None
     if not isinstance(items, list) or not items:
         return None
@@ -3760,7 +4196,7 @@ def _load_explore_promoted_index() -> dict | None:
     if len(reviewable) < 4000:
         return None
     clean_payload = {**payload, "items": reviewable, "count": len(reviewable)}
-    _EXPLORE_PROMOTED_INDEX_CACHE.update({"mtime": stat.st_mtime_ns, "payload": clean_payload})
+    _EXPLORE_PROMOTED_INDEX_CACHE.update({"key": cache_key, "payload": clean_payload})
     return clean_payload
 
 
@@ -3943,6 +4379,13 @@ def _promoted_explore_item_to_profile(item: dict, index: int, existing: dict | N
     profile["reviewable"] = True
     profile["promoted_serving"] = True
     profile["promoted_category"] = str(item.get("category") or "")
+    for relationship_key in (
+        "canonical_role", "parent_hub_id", "parent_hub_title", "module_target",
+    ):
+        if relationship_key in item:
+            profile[relationship_key] = str(item.get(relationship_key) or "").strip()
+    if "hidden_from_featured" in item:
+        profile["hidden_from_featured"] = bool(item.get("hidden_from_featured"))
     primary_provenance = provenance.get("primary") if isinstance(provenance.get("primary"), dict) else {}
     if (
         str(primary_provenance.get("source") or "").lower() == "ridb"
@@ -3997,6 +4440,69 @@ def _merge_promoted_explore_serving_index(places: list[dict]) -> tuple[list[dict
     return promoted or places, payload
 
 
+def _merge_explore_v3_sidecar_profiles(places: list[dict], sidecar_profiles: list[dict]) -> list[dict]:
+    merged = list(places)
+    id_to_index = {str(place.get("id") or ""): idx for idx, place in enumerate(merged) if isinstance(place, dict)}
+    title_to_index = {
+        key: idx for idx, place in enumerate(merged)
+        if isinstance(place, dict)
+        and not str(place.get("parent_hub_id") or "").strip()
+        and (key := _explore_title_merge_key(place))
+    }
+    for place in sidecar_profiles:
+        place_id = str(place.get("id") or "")
+        title_key = _explore_title_merge_key(place)
+        parent_bound = bool(str(place.get("parent_hub_id") or "").strip())
+        if place_id in id_to_index:
+            merged[id_to_index[place_id]] = _merge_explore_sidecar_enrichment(merged[id_to_index[place_id]], place)
+            continue
+        if not parent_bound and title_key and title_key in title_to_index:
+            merged[title_to_index[title_key]] = _merge_explore_sidecar_enrichment(merged[title_to_index[title_key]], place)
+            continue
+        id_to_index[place_id] = len(merged)
+        merged.append(place)
+        if not parent_bound and title_key:
+            title_to_index[title_key] = len(merged) - 1
+    return merged
+
+
+def _prebuild_explore_public_served_catalog(catalog: dict, serving_index: dict) -> dict:
+    try:
+        legacy = json.loads(EXPLORE_CATALOG.read_text())
+        base_places = [item for item in legacy.get("places") or [] if isinstance(item, dict)]
+    except Exception as exc:
+        raise RuntimeError("Explore public promotion baseline catalog could not be prebuilt") from exc
+    raw_places = [item for item in catalog.get("places") or [] if isinstance(item, dict)]
+    sidecars = [_explore_v3_place_to_profile(item, rank=900000 + index) for index, item in enumerate(raw_places, 1)]
+    _attach_v3_nearby_source_items(sidecars, raw_places)
+    base_places = _merge_explore_v3_sidecar_profiles(base_places, sidecars)
+    base_by_id = {str(item.get("id") or ""): item for item in base_places}
+    served: list[dict] = []
+    seen: set[str] = set()
+    for index, item in enumerate(serving_index.get("items") or [], 1):
+        item_id = str(item.get("id") or "")
+        profile = _promoted_explore_item_to_profile(item, index, base_by_id.get(item_id))
+        if not profile or item_id in seen:
+            raise RuntimeError("Explore public promotion filtered a reviewed serving item")
+        seen.add(item_id)
+        served.append(profile)
+    return {"places": served}
+
+
+def _verify_explore_public_served_catalog(catalog: dict, *, state: dict | None = None) -> None:
+    if not _explore_public_release_active():
+        return
+    state = state or _validate_explore_public_promotion()
+    actual_ids = [str(item.get("id") or "") for item in catalog.get("places") or [] if isinstance(item, dict)]
+    if len(actual_ids) != int(state.get("served_count") or 0) or set(actual_ids) != set(state.get("served_ids") or ()):
+        raise RuntimeError("Configured Explore public release does not match the prebuilt served catalog")
+    counts: dict[str, int] = {}
+    for item_id in actual_ids:
+        counts[item_id] = counts.get(item_id, 0) + 1
+    if any(counts.get(item_id) != 1 for item_id in state.get("index_ids") or ()):
+        raise RuntimeError("Configured Explore public release did not serve every reviewed item exactly once")
+
+
 def _load_explore_catalog_base() -> dict:
     cache_key = _explore_catalog_cache_key()
     cached = _EXPLORE_CATALOG_CACHE.get("catalog")
@@ -4007,6 +4513,7 @@ def _load_explore_catalog_base() -> dict:
         return cached
 
     def store_cache(catalog: dict, *, persist: bool = False) -> dict:
+        _verify_explore_public_served_catalog(catalog)
         _EXPLORE_CATALOG_CACHE["key"] = cache_key
         _EXPLORE_CATALOG_CACHE["loaded_at"] = time.time()
         _EXPLORE_CATALOG_CACHE["catalog"] = catalog
@@ -4028,7 +4535,9 @@ def _load_explore_catalog_base() -> dict:
             title_to_index = {
                 key: idx
                 for idx, place in enumerate(places)
-                if isinstance(place, dict) and (key := _explore_title_merge_key(place))
+                if isinstance(place, dict)
+                and not str(place.get("parent_hub_id") or "").strip()
+                and (key := _explore_title_merge_key(place))
             }
             sidecar_profiles = list(_load_explore_catalog_v3_profiles())
             if _explore_catalog_should_merge_global_indexes() and not promoted_source:
@@ -4038,33 +4547,35 @@ def _load_explore_catalog_base() -> dict:
             for place in sidecar_profiles:
                 place_id = str(place.get("id") or "")
                 title_key = _explore_title_merge_key(place)
+                parent_bound = bool(str(place.get("parent_hub_id") or "").strip())
                 if place_id in id_to_index:
                     places[id_to_index[place_id]] = _merge_explore_sidecar_enrichment(places[id_to_index[place_id]], place)
                     seen.add(place_id)
                     continue
-                if title_key and title_key in title_to_index:
+                if not parent_bound and title_key and title_key in title_to_index:
                     places[title_to_index[title_key]] = _merge_explore_sidecar_enrichment(places[title_to_index[title_key]], place)
                     seen.add(place_id)
                     continue
                 if place_id not in seen:
                     places.append(place)
                     id_to_index[place_id] = len(places) - 1
-                    if title_key:
+                    if not parent_bound and title_key:
                         title_to_index[title_key] = len(places) - 1
                     seen.add(place_id)
             if _explore_catalog_should_merge_global_indexes() and not promoted_source:
                 for place in _server_curated_explore_profiles():
                     place_id = str(place.get("id") or "")
                     title_key = _explore_title_merge_key(place)
+                    parent_bound = bool(str(place.get("parent_hub_id") or "").strip())
                     if place_id in id_to_index:
                         places[id_to_index[place_id]] = _merge_explore_sidecar_enrichment(places[id_to_index[place_id]], place)
                         continue
-                    if title_key and title_key in title_to_index:
+                    if not parent_bound and title_key and title_key in title_to_index:
                         places[title_to_index[title_key]] = _merge_explore_sidecar_enrichment(places[title_to_index[title_key]], place)
                         continue
                     places.append(place)
                     id_to_index[place_id] = len(places) - 1
-                    if title_key:
+                    if not parent_bound and title_key:
                         title_to_index[title_key] = len(places) - 1
             if promoted_source:
                 legacy_search_places = _merge_explore_profile_lists(list(places), _server_curated_explore_profiles())
@@ -4096,7 +4607,10 @@ def _load_explore_catalog_base() -> dict:
                 final_catalog = _sanitize_explore_catalog(final_catalog)
             return store_cache(final_catalog, persist=True)
         except Exception:
-            pass
+            if _explore_public_release_active():
+                raise
+    if _explore_public_release_active():
+        raise RuntimeError("Configured Explore public release could not load its baseline catalog")
     return store_cache(_sanitize_explore_catalog(_apply_explore_story_overrides({
         "schema_version": 1,
         "catalog_id": "explore-us-top-v1",
@@ -5640,7 +6154,7 @@ def _explore_catalog_camp_detail(identifier: str) -> dict | None:
     another upstream provider. Live context can be loaded by its own modules;
     it must not gate or replace this identity-bound detail.
     """
-    requested = unquote(str(identifier or "")).strip()
+    requested = _resolve_explore_public_id(identifier)
     if not requested:
         return None
 
@@ -11014,6 +11528,7 @@ async def admin_qa_diagnostics(admin: dict = Depends(_require_admin)):
             "ui_system_v2": _product_feature_enabled("UI_SYSTEM_V2_ENABLED", admin),
             "originals": _originals_feature_enabled(admin),
         },
+        "explore_public_release": _explore_public_release_diagnostics(),
     }
 
 
@@ -21038,6 +21553,67 @@ def _search_v2_apply_internal_preview_resolve(
     })
 
 
+def _search_v2_apply_public_alias_result(result: SearchResultV2) -> SearchResultV2:
+    """Expose the reviewed target identity while retaining alias provenance.
+
+    Aliased IDs are migration inputs, not canonical response identities. The
+    old ID remains only in ``provenance.provider_result_id`` so existing saved
+    links can be diagnosed without asking new clients to persist it.
+    """
+    if result.persistence_policy != "canonical" or result.provenance.provider != "trailhead":
+        return result
+    state = _validate_explore_public_promotion()
+    aliases = state.get("aliases") if isinstance(state.get("aliases"), dict) else {}
+    if not aliases:
+        return result
+    alias_source = ""
+    target_id = ""
+    for value in (result.canonical_place_id, result.detail_ref, result.result_id):
+        candidate = unquote(str(value or "")).strip()
+        if candidate.startswith("explore:"):
+            candidate = candidate[len("explore:"):]
+        resolved = str(aliases.get(candidate) or "")
+        if resolved:
+            alias_source = candidate
+            target_id = resolved
+            break
+    if not target_id:
+        return result
+    provenance = result.provenance.model_copy(update={
+        "provider_result_id": alias_source,
+    })
+    return result.model_copy(update={
+        "result_id": target_id,
+        "canonical_place_id": target_id,
+        "detail_ref": target_id,
+        "provenance": provenance,
+    })
+
+
+def _search_v2_apply_public_alias_page(page: SearchPageV2) -> SearchPageV2:
+    results: list[SearchResultV2] = []
+    seen: set[str] = set()
+    for raw_result in page.results:
+        result = _search_v2_apply_public_alias_result(raw_result)
+        if result.result_id in seen:
+            continue
+        seen.add(result.result_id)
+        results.append(result)
+    return page.model_copy(update={"results": results})
+
+
+def _search_v2_apply_public_alias_resolve(
+    response: SearchResolveResponseV2,
+) -> SearchResolveResponseV2:
+    return response.model_copy(update={
+        "selected": _search_v2_apply_public_alias_result(response.selected) if response.selected else None,
+        "alternatives": [
+            _search_v2_apply_public_alias_result(result)
+            for result in response.alternatives
+        ],
+    })
+
+
 async def _search_v2_page(
     request: SearchRequestV2,
     *,
@@ -21048,7 +21624,8 @@ async def _search_v2_page(
         page = await _search_v2_service.page(
             request, mode=mode, external_subject=external_subject,
         )
-        return _search_v2_apply_internal_preview_page(page, request=request, limit=request.limit)
+        page = _search_v2_apply_internal_preview_page(page, request=request, limit=request.limit)
+        return _search_v2_apply_public_alias_page(page)
     except SearchCursorError as exc:
         raise HTTPException(400, {
             "code": "invalid_search_cursor", "message": str(exc),
@@ -21138,6 +21715,10 @@ async def api_search_v2_resolve(
     _require_product_feature("TRAILHEAD_SEARCH_V2_ENABLED", user)
     selected_result_id = body.selected_result_id
     selected_detail_ref = body.selected_detail_ref
+    if selected_result_id:
+        selected_result_id = _resolve_explore_public_id(selected_result_id)
+    if selected_detail_ref:
+        selected_detail_ref = _resolve_explore_public_id(selected_detail_ref)
     request = SearchRequestV2.model_validate(body.model_dump(
         exclude={"selected_result_id", "selected_detail_ref"},
     ))
@@ -21182,7 +21763,8 @@ async def api_search_v2_resolve(
             request,
             external_subject=_search_v2_external_subject(http_request, user),
         )
-        return _search_v2_apply_internal_preview_resolve(response)
+        response = _search_v2_apply_internal_preview_resolve(response)
+        return _search_v2_apply_public_alias_resolve(response)
     except SearchCursorError as exc:
         raise HTTPException(400, {
             "code": "invalid_search_cursor", "message": str(exc),
@@ -32454,15 +33036,18 @@ def _canonical_search_explore_card(body: MapCardResolveRequest) -> dict | None:
         if candidate and candidate not in candidates:
             candidates.append(candidate)
     for candidate in candidates:
-        place = _find_explore_place(candidate)
+        canonical_id = _resolve_explore_public_id(candidate)
+        place = _find_explore_place(canonical_id)
         if not place:
             continue
         card = _explore_place_to_nearby_place(place, float(body.lat), float(body.lng))
         if not card:
             continue
-        card["id"] = body.id or candidate
-        card["place_id"] = candidate
-        card["provider_place_id"] = body.provider_place_id or candidate
+        card["id"] = canonical_id
+        card["place_id"] = canonical_id
+        card["provider_place_id"] = canonical_id
+        if canonical_id != candidate:
+            card["legacy_place_id"] = candidate
         return card
     return None
 
@@ -32477,8 +33062,9 @@ def _canonical_explore_place_id(body: MapCardResolveRequest) -> str:
         candidate = str(value or "").strip()
         if candidate.startswith("explore:"):
             candidate = candidate[len("explore:"):]
-        if candidate and _find_explore_place(candidate):
-            return candidate
+        resolved = _resolve_explore_public_id(candidate)
+        if resolved and _find_explore_place(resolved):
+            return resolved
     return ""
 
 
@@ -35597,7 +36183,7 @@ async def explore_places(
 
 
 def _find_explore_place(place_id: str) -> dict | None:
-    decoded = unquote(str(place_id or ""))
+    decoded = _resolve_explore_public_id(place_id)
     camp_profile = _canonical_camp_explore_profile_by_id(decoded)
     if camp_profile:
         return camp_profile
@@ -35633,10 +36219,11 @@ def _explore_enrichment_catalog_candidates(q: str = "", category: str = "", plac
     catalog = _load_explore_catalog()
     places = list(catalog.get("places") or [])
     if place_id:
-        place = next((item for item in places if str(item.get("id") or "") == str(place_id)), None)
+        resolved_place_id = _resolve_explore_public_id(place_id)
+        place = next((item for item in places if str(item.get("id") or "") == resolved_place_id), None)
         if place:
             return [place]
-        official_place = _official_cache_profile_by_id(place_id)
+        official_place = _official_cache_profile_by_id(resolved_place_id)
         return [official_place] if official_place else []
     query_terms = _explore_query_terms_for_category(q, category)
     if query_terms:

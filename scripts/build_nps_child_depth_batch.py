@@ -65,6 +65,82 @@ BATCH_3_DESTINATIONS: tuple[tuple[str, str], ...] = (
     ("havo", "Hawaiʻi Volcanoes National Park"),
     ("buff", "Buffalo National River"),
 )
+BATCH_4_ID = "post-b09-nps-child-depth-b4"
+BATCH_4_DESTINATIONS: tuple[tuple[str, str], ...] = (
+    ("hosp", "Hot Springs National Park"),
+    ("hove", "Hovenweep National Monument"),
+    ("indu", "Indiana Dunes National Park"),
+    ("jeca", "Jewel Cave National Monument"),
+    ("joda", "John Day Fossil Beds National Monument"),
+)
+BATCH_4_EXPECTED_INPUT_HASHES = {
+    "base_catalog": "462ab1a8313e84073b2ce5347411b25771c19ebd17079b00227deb922e18a080",
+    "normalized_nps_catalog": "8bc319b8b230d4272778671318903c9e0e05844b7c5a5d11d8f81438a1584c80",
+}
+BATCH_4_EXPECTED_FIXTURE_HASHES = {
+    "hosp": "43110d2d6a2a4ed2f6624baf0810d1b5a0c6649cd74e68c101b13400ec1a0834",
+    "hove": "8431ba41d5ab0077d96bfa2093310403c85865a6e5068da85dc44779e187c02b",
+    "indu": "22cfaf65da51c037dc6d1583f00e57bcffb9b6d1fcb111d72ef359615a66b881",
+    "jeca": "550106bcb79cf9f45e08a12cb02cc613aa5652b665aef3110b0f65d2d92b149b",
+    "joda": "b80fc6eaff16fd4b18f4671bad7792855cd5c3822559884bc446ddafa68eec3b",
+}
+BATCH_4_EXPECTED_DESTINATION_COUNTS = {
+    "hosp": 24,
+    "hove": 17,
+    "indu": 26,
+    "jeca": 11,
+    "joda": 19,
+}
+BATCH_4_EXPECTED_MODULE_COUNTS = {
+    "stay": 5,
+    "visitor": 7,
+    "do": 6,
+    "trails": 33,
+    "see": 46,
+}
+BATCH_4_EXPECTED_CATEGORY_COUNTS = {
+    "campground": 5,
+    "visitor_center": 7,
+    "activity": 6,
+    "trail": 23,
+    "place": 16,
+    "waterfall": 1,
+    "hot_spring": 4,
+    "historic_site": 11,
+    "viewpoint": 14,
+    "trailhead": 10,
+}
+BATCH_4_EXPECTED_LINK_ACTIONS = {
+    "kept_item_url": 93,
+    "used_parent_nps_url": 2,
+    "upgraded_nps_https": 2,
+}
+BATCH_4_EXPECTED_PARENT_FALLBACKS = {
+    "place:nps-child:indu:campgrounds:665a07f7-cd99-401a-8674-4c65ac41954c": (
+        "https://www.nps.gov/indu/index.htm"
+    ),
+    "place:nps-child:indu:campgrounds:89cb27d1-22a1-437e-9528-3d99de6a22f0": (
+        "https://www.nps.gov/indu/index.htm"
+    ),
+}
+BATCH_4_EXPECTED_MEDIA_COUNTS = {
+    "candidate_images": 97,
+    "approved_images": 86,
+    "stripped_images": 11,
+}
+BATCH_4_EXPECTED_TEXT_ONLY_IDS = {
+    "place:nps-child:hosp:campgrounds:b09710b2-3d0b-47b0-b15e-abafc4243f75",
+    "place:nps-child:hosp:places:d219abd2-714d-4793-b148-9aac20000ec2",
+    "place:nps-child:indu:visitorcenters:af24dad9-0425-4259-a050-d3eacad69ef1",
+    "place:nps-child:indu:thingstodo:e8fab275-df01-437d-9671-d2626d049032",
+    "place:nps-child:indu:thingstodo:ff26d5dd-3eb0-46ca-a7af-4976acd84821",
+    "place:nps-child:indu:thingstodo:5d9e1a12-d7da-4438-8269-24c923dd111b",
+    "place:nps-child:indu:thingstodo:7566f877-6002-41e7-ae62-f39ffc140ba1",
+    "place:nps-child:indu:thingstodo:77d42ac3-015b-41dd-ac5c-23d12d609ab1",
+    "place:nps-child:indu:thingstodo:380f336e-8d28-40ff-8f29-1c75c4f960fa",
+    "place:nps-child:indu:thingstodo:0615ba48-e72b-4655-8592-e367e0d2e931",
+    "place:nps-child:indu:places:1557d73e-4ad4-487e-9eb1-4f9b29c48ab6",
+}
 CONTRACT_BATCH_ID = "post-b08-nps-child-contract-r1"
 CONTRACT_DESTINATIONS: tuple[tuple[str, str], ...] = (
     ("acad", "Acadia National Park"),
@@ -163,7 +239,9 @@ BATCH_DEFINITIONS: dict[str, tuple[tuple[str, str], ...]] = {
     BATCH_ID: BATCH_DESTINATIONS,
     BATCH_2_ID: BATCH_2_DESTINATIONS,
     BATCH_3_ID: BATCH_3_DESTINATIONS,
+    BATCH_4_ID: BATCH_4_DESTINATIONS,
 }
+REVIEWED_BATCH_IDS = {BATCH_3_ID, BATCH_4_ID}
 RENDERED_RAIL_ENDPOINT_PRIORITY = {
     "visitorcenters": 0,
     "campgrounds": 0,
@@ -193,8 +271,102 @@ EXACT_CLASSIFICATION_OVERRIDES: dict[str, tuple[str, str]] = {
         "historic_site",
         "see",
     ),
+    "place:nps-child:hosp:places:a6b52836-b617-442d-9989-b8d800fd1b6a": (
+        "historic_site",
+        "see",
+    ),
+    "place:nps-child:hosp:places:b265fcd3-ebc5-4591-aa37-83d87d53810d": (
+        "hot_spring",
+        "see",
+    ),
+    "place:nps-child:hosp:places:85ed0ad4-51e0-4abd-a779-03d1ee687432": (
+        "hot_spring",
+        "see",
+    ),
+    "place:nps-child:hosp:places:84810559-561e-48c1-9586-b8c6ddc3436f": (
+        "hot_spring",
+        "see",
+    ),
+    "place:nps-child:hosp:places:8dfd3a3b-3983-4431-813e-bbe26ead7850": (
+        "hot_spring",
+        "see",
+    ),
+    "place:nps-child:hosp:places:a0aba175-0403-4fbe-9d5c-3979fccecfa1": (
+        "viewpoint",
+        "see",
+    ),
+    "place:nps-child:hosp:places:4459aac0-dd80-4974-9ec9-9ff090c0c4d9": (
+        "place",
+        "see",
+    ),
+    "place:nps-child:hosp:places:1fc9879f-2f96-4faa-8ed0-e68691f502af": (
+        "historic_site",
+        "see",
+    ),
+    "place:nps-child:hosp:places:491647e9-c5f5-4f1a-b6f8-9388830a4139": (
+        "place",
+        "see",
+    ),
+    "place:nps-child:hove:places:c955bfee-8c04-4499-8433-fad3a665ed13": (
+        "viewpoint",
+        "see",
+    ),
+    "place:nps-child:indu:places:1557d73e-4ad4-487e-9eb1-4f9b29c48ab6": (
+        "historic_site",
+        "see",
+    ),
+    "place:nps-child:indu:places:3714878f-a334-4317-b529-cac78ab7ceea": (
+        "trail",
+        "trails",
+    ),
+    "place:nps-child:indu:places:d31f52b6-a23a-4308-a9d9-17e6f85910c9": (
+        "historic_site",
+        "see",
+    ),
+    "place:nps-child:indu:places:a438b359-fab9-4d1a-aa38-8e9958436a40": (
+        "trailhead",
+        "trails",
+    ),
+    "place:nps-child:indu:places:1e256355-708c-47c4-8988-6543e4c267b4": (
+        "trailhead",
+        "trails",
+    ),
+    "place:nps-child:joda:places:454636a0-765d-45fd-96bb-530c1fd56040": (
+        "historic_site",
+        "see",
+    ),
+    "place:nps-child:joda:places:601a772e-441c-4b77-a60b-9b9882bfc9ea": (
+        "historic_site",
+        "see",
+    ),
+    "place:nps-child:joda:places:ad26286d-5f16-4273-adeb-72c201ef13d0": (
+        "historic_site",
+        "see",
+    ),
 }
 EXACT_COPY_REPLACEMENTS: dict[str, tuple[tuple[str, str], ...]] = {
+    "place:nps-child:jeca:places:0f7d5a9f-4314-40d3-b90d-0717091ccb44": (
+        (".. . ", ". "),
+    ),
+    "place:nps-child:joda:places:454636a0-765d-45fd-96bb-530c1fd56040": (
+        (".. . ", ". "),
+    ),
+    "place:nps-child:joda:places:f7c3ca79-21e3-4fe3-85fe-0b9ab75609af": (
+        (".. . ", ". "),
+    ),
+    "place:nps-child:joda:places:3d1494a4-e076-4068-930f-a3fa1b6af1f2": (
+        (".. . ", ". "),
+    ),
+    "place:nps-child:joda:places:ebc06523-8699-4840-928a-6a84fb179391": (
+        (".. . ", ". "),
+    ),
+    "place:nps-child:joda:places:ad26286d-5f16-4273-adeb-72c201ef13d0": (
+        (".. . ", ". "),
+    ),
+    "place:nps-child:hove:places:d8a6cfaf-0aba-4041-b226-27d77f93f7ed": (
+        ("This tall, this tower", "This tall tower"),
+        ("expert craftmanship", "expert craftsmanship"),
+    ),
     "place:nps-child:jotr:thingstodo:4b6d0fab-7f6b-4b19-b3fe-6c07566b8050": (
         (
             "A .6-mile trail leads to a .2-mile loop.",
@@ -355,6 +527,41 @@ BATCH_3_SHARED_COORDINATE_REVIEWS: dict[tuple[str, ...], str] = {
         "place:nps-child:cuva:visitorcenters:18c3cbc0-556a-4e4f-8486-16723df55255",
         "place:nps-child:cuva:thingstodo:5acd5e72-ada8-4b57-9052-f454e23144d4",
     ))): "The Canal Exploration Center facility and visit activity are separate official endpoint records.",
+}
+BATCH_4_SHARED_COORDINATE_REVIEWS: dict[tuple[str, ...], str] = {
+    tuple(sorted((
+        "place:nps-child:hosp:places:a6b52836-b617-442d-9989-b8d800fd1b6a",
+        "place:nps-child:hosp:places:fc7437d4-be5f-449b-b04c-bfb7a63d1cfb",
+    ))): "Arlington Lawn and Hot Water Cascade are distinct official places sharing a visitor access point.",
+    tuple(sorted((
+        "place:nps-child:hove:visitorcenters:fe0c0aa2-f347-4cb2-902f-dbbd9d6e234f",
+        "place:nps-child:hove:thingstodo:ec74ef1f-636d-4b52-a1ec-cd4d57242402",
+    ))): "The visitor center and Square Tower Group overlook walk are distinct official records at the same access point.",
+    tuple(sorted((
+        "place:nps-child:indu:thingstodo:e8fab275-df01-437d-9671-d2626d049032",
+        "place:nps-child:indu:thingstodo:ff26d5dd-3eb0-46ca-a7af-4976acd84821",
+    ))): "Diana Dunes Dare and West Beach swimming are distinct official activities sharing the West Beach area point.",
+    tuple(sorted((
+        "place:nps-child:indu:thingstodo:7566f877-6002-41e7-ae62-f39ffc140ba1",
+        "place:nps-child:indu:thingstodo:77d42ac3-015b-41dd-ac5c-23d12d609ab1",
+        "place:nps-child:indu:thingstodo:380f336e-8d28-40ff-8f29-1c75c4f960fa",
+    ))): "The one-hour, half-day, and full-day itinerary records are separate official activity options sharing one park reference point.",
+    tuple(sorted((
+        "place:nps-child:indu:thingstodo:5d9e1a12-d7da-4438-8269-24c923dd111b",
+        "place:nps-child:indu:places:7e0308dc-3f4d-4b6f-b669-5b50775d7e8d",
+    ))): "The horseback-riding activity and Glenwood Dunes main trail record are distinct official records sharing a trail access point.",
+    tuple(sorted((
+        "place:nps-child:indu:places:659cec24-1909-47bf-b758-5551bd5c407b",
+        "place:nps-child:indu:places:e6e520b4-fff5-4c39-8cc7-698e8bbe05e6",
+    ))): "Calumet Dunes Trail and the Glenwood Dunes alternate route are distinct official routes sharing an access point.",
+    tuple(sorted((
+        "place:nps-child:jeca:places:95a4627a-fbd4-4c75-969a-dd7c8acab945",
+        "place:nps-child:jeca:places:5f6cad96-61bd-4c52-878b-b153266ca793",
+    ))): "The front porch and north side of Jewel Cave's historic ranger cabin are distinct official interpretive viewpoints at one structure.",
+}
+SHARED_COORDINATE_REVIEWS = {
+    BATCH_3_ID: BATCH_3_SHARED_COORDINATE_REVIEWS,
+    BATCH_4_ID: BATCH_4_SHARED_COORDINATE_REVIEWS,
 }
 MAX_PER_DESTINATION = 36
 MAX_TOTAL = 180
@@ -803,7 +1010,7 @@ def _normalize_child_reader_link(
 ) -> str:
     pack = place.get("source_pack") if isinstance(place.get("source_pack"), dict) else {}
     item_url = source_item.get("url") or source_item.get("relatedUrl")
-    if batch_id != BATCH_3_ID:
+    if batch_id not in REVIEWED_BATCH_IDS:
         item_url = item_url or pack.get("official_url")
     safe_url, action = _safe_nps_reader_url(
         item_url,
@@ -936,7 +1143,7 @@ def _normalize_child_classification(
 
     exact_override = (
         EXACT_CLASSIFICATION_OVERRIDES.get(str(place.get("id") or ""))
-        if batch_id == BATCH_3_ID
+        if batch_id in REVIEWED_BATCH_IDS
         else None
     )
     if exact_override:
@@ -954,7 +1161,7 @@ def _normalize_child_classification(
         "trailhead": "Trailhead",
         "visitor_center": "Visitor center",
     }
-    if batch_id == BATCH_3_ID:
+    if batch_id in REVIEWED_BATCH_IDS:
         category_labels.update({
             "climbing_area": "Climbing area",
             "historic_site": "Historic site",
@@ -1168,26 +1375,76 @@ def _review_shared_coordinates(audit: dict[str, Any], *, batch_id: str) -> list[
     for warning in audit.get("warnings") or []:
         if warning.get("code") == "shared_coordinate_clusters":
             clusters.extend(warning.get("samples") or [])
-    if batch_id != BATCH_3_ID:
+    expected_reviews = SHARED_COORDINATE_REVIEWS.get(batch_id)
+    if expected_reviews is None:
         return []
 
     reviewed: list[dict[str, Any]] = []
     for cluster in clusters:
         place_ids = tuple(sorted(str(value) for value in cluster.get("place_ids") or []))
-        reason = BATCH_3_SHARED_COORDINATE_REVIEWS.get(place_ids)
+        reason = expected_reviews.get(place_ids)
         if not reason:
-            raise ValueError(f"unreviewed Batch 3 shared-coordinate cluster: {place_ids!r}")
+            raise ValueError(f"unreviewed {batch_id} shared-coordinate cluster: {place_ids!r}")
         reviewed.append({
             "place_ids": list(place_ids),
             "decision": "keep_distinct",
             "reason": reason,
         })
-    if len(reviewed) != len(BATCH_3_SHARED_COORDINATE_REVIEWS):
+    if len(reviewed) != len(expected_reviews):
         raise ValueError(
-            "Batch 3 shared-coordinate review set changed: "
-            f"expected {len(BATCH_3_SHARED_COORDINATE_REVIEWS)}, got {len(reviewed)}"
+            f"{batch_id} shared-coordinate review set changed: "
+            f"expected {len(expected_reviews)}, got {len(reviewed)}"
         )
     return reviewed
+
+
+def _validate_batch4_contract(
+    *,
+    batch_id: str,
+    audit: dict[str, Any],
+    link_actions: Counter[str],
+    parent_page_fallbacks: list[dict[str, Any]],
+    media_before_policy: int,
+    media_after_policy: int,
+    children: list[dict[str, Any]],
+) -> None:
+    if batch_id != BATCH_4_ID:
+        return
+    expected_count = sum(BATCH_4_EXPECTED_DESTINATION_COUNTS.values())
+    if int(audit.get("count") or 0) != expected_count:
+        raise ValueError(
+            f"Batch 4 child count changed: expected {expected_count}, "
+            f"got {int(audit.get('count') or 0)}"
+        )
+    if audit.get("destination_counts") != BATCH_4_EXPECTED_DESTINATION_COUNTS:
+        raise ValueError("Batch 4 destination counts changed")
+    if audit.get("module_counts") != BATCH_4_EXPECTED_MODULE_COUNTS:
+        raise ValueError("Batch 4 module counts changed")
+    category_counts = dict(Counter(str(item.get("category") or "") for item in children))
+    if category_counts != BATCH_4_EXPECTED_CATEGORY_COUNTS:
+        raise ValueError("Batch 4 category counts changed")
+    if dict(link_actions) != BATCH_4_EXPECTED_LINK_ACTIONS:
+        raise ValueError("Batch 4 reader-link actions changed")
+    actual_fallbacks = {
+        str(item.get("place_id") or ""): str(item.get("official_url") or "")
+        for item in parent_page_fallbacks
+    }
+    if actual_fallbacks != BATCH_4_EXPECTED_PARENT_FALLBACKS:
+        raise ValueError("Batch 4 parent-page fallback set changed")
+    actual_media = {
+        "candidate_images": media_before_policy,
+        "approved_images": media_after_policy,
+        "stripped_images": media_before_policy - media_after_policy,
+    }
+    if actual_media != BATCH_4_EXPECTED_MEDIA_COUNTS:
+        raise ValueError("Batch 4 media-rights counts changed")
+    text_only_ids = {
+        str(item.get("id") or "")
+        for item in children
+        if not (item.get("media") or [])
+    }
+    if text_only_ids != BATCH_4_EXPECTED_TEXT_ONLY_IDS:
+        raise ValueError("Batch 4 text-only media identities changed")
 
 
 def _rebuild_search_blob(
@@ -2014,12 +2271,30 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         supported = ", ".join(sorted(BATCH_DEFINITIONS))
         raise ValueError(f"unsupported NPS child-depth batch {batch_id!r}; choose {supported}") from exc
     base_catalog = Path(args.base_catalog).resolve()
+    normalized_catalog: Path | None = None
     source_cache = Path(args.source_cache).resolve()
     out_dir = Path(args.out_dir).resolve()
     if not base_catalog.is_file():
         raise FileNotFoundError(base_catalog)
     if not source_cache.is_dir():
         raise FileNotFoundError(source_cache)
+    if batch_id == BATCH_4_ID:
+        normalized_raw = str(getattr(args, "normalized_nps_catalog", "") or "").strip()
+        if not normalized_raw:
+            raise ValueError("Batch 4 requires --normalized-nps-catalog")
+        normalized_catalog = Path(normalized_raw).resolve()
+        if not normalized_catalog.is_file():
+            raise FileNotFoundError(normalized_catalog)
+        _require_sha256(
+            base_catalog,
+            BATCH_4_EXPECTED_INPUT_HASHES["base_catalog"],
+            "Batch 4 base catalog",
+        )
+        _require_sha256(
+            normalized_catalog,
+            BATCH_4_EXPECTED_INPUT_HASHES["normalized_nps_catalog"],
+            "Batch 4 normalized NPS catalog",
+        )
     if out_dir == AUDIT_CANDIDATE_ROOT or AUDIT_CANDIDATE_ROOT not in out_dir.parents:
         raise ValueError("output must remain below data/explore/audit_candidates")
     if out_dir in PROTECTED_OUTPUTS or any(out_dir in path.parents for path in PROTECTED_OUTPUTS):
@@ -2031,6 +2306,22 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
     base_places = _places(base_payload, base_catalog)
     existing_ids, existing_titles = load_existing_keys({"places": base_places})
     generated_at = int(base_payload.get("generated_at") or 0)
+    if normalized_catalog is not None:
+        normalized_payload = _read_json(normalized_catalog)
+        normalized_parents = {
+            str(place.get("id") or ""): place
+            for place in _places(normalized_payload, normalized_catalog)
+            if str(place.get("id") or "").startswith("place:nps:")
+            and not str(place.get("id") or "").startswith("place:nps-child:")
+        }
+        for code, expected_name in batch_destinations:
+            parent = normalized_parents.get(f"place:nps:{code}")
+            if not parent or str(parent.get("name") or "").strip() != expected_name:
+                raise ValueError(
+                    f"Batch 4 normalized parent mismatch for {code}: "
+                    f"{str((parent or {}).get('name') or '').strip()!r}"
+                )
+        generated_at = int(normalized_payload.get("generated_at") or 0)
     if generated_at <= 0:
         raise ValueError("base catalog needs a fixed generated_at timestamp")
 
@@ -2042,6 +2333,12 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
     parent_page_fallbacks: list[dict[str, Any]] = []
     for code, expected_name in batch_destinations:
         fixture = _fixture_for_code(source_cache, code)
+        if batch_id == BATCH_4_ID:
+            _require_sha256(
+                fixture,
+                BATCH_4_EXPECTED_FIXTURE_HASHES[code],
+                f"Batch 4 NPS source cache {code}",
+            )
         park, related, source_fetched_at = _fixture_park(fixture, code, expected_name)
         source_indexes[code] = _source_child_index(related)
         additions = promote_from_fixture(
@@ -2127,7 +2424,7 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         evidence_root=evidence_root,
     )
     _stabilize_evidence_paths(children)
-    if batch_id == BATCH_3_ID:
+    if batch_id in REVIEWED_BATCH_IDS:
         for child in children:
             endpoint = _endpoint_from_place(child)
             code = str(child.get("parent_hub_id") or "").removeprefix("place:nps:")
@@ -2145,6 +2442,15 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         codes = sorted({str(item.get("code") or "unknown") for item in audit["errors"]})
         raise ValueError(f"NPS child-depth audit failed: {', '.join(codes)}")
     shared_coordinate_review = _review_shared_coordinates(audit, batch_id=batch_id)
+    _validate_batch4_contract(
+        batch_id=batch_id,
+        audit=audit,
+        link_actions=link_actions,
+        parent_page_fallbacks=parent_page_fallbacks,
+        media_before_policy=media_before_policy,
+        media_after_policy=media_after_policy,
+        children=children,
+    )
 
     sidecar = {
         "schema_version": 1,
@@ -2191,7 +2497,7 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
             "header_is_not_a_credential": True,
         },
     }
-    if batch_id == BATCH_3_ID:
+    if batch_id in REVIEWED_BATCH_IDS:
         review.update({
             "parent_page_source_fallbacks": sorted(
                 parent_page_fallbacks,
@@ -2223,6 +2529,12 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         "promotion_ready": False,
         "inputs": {
             "base_catalog": _source_ref(base_catalog, f"base_catalog/{base_catalog.name}"),
+            **({
+                "normalized_nps_catalog": _source_ref(
+                    normalized_catalog,
+                    f"normalized_nps_catalog/{normalized_catalog.name}",
+                ),
+            } if normalized_catalog is not None else {}),
             "fixtures": fixture_refs,
         },
         "artifacts": [

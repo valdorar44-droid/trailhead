@@ -174,180 +174,200 @@
       "source_child_id": "place:nps-child:care:campgrounds:b1b4ea86-dda9-416a-9e7b-d718df3c3233",
       "parent_hub_id": "place:nps:care",
       "module_target": "stay",
-      "official_url_preserved": true,
-      "reservation_preserved": true,
-      "media_preserved": false
+      "official_url": "https://www.nps.gov/care/planyourvisit/fruitacampground.htm",
+      "reservation_url": "https://www.recreation.gov/camping/campgrounds/272245",
+      "reservable": true,
+      "media_count": 0
     },
     {
       "canonical_id": "place:nps:campgrounds:6a989d7d-8aa1-432e-a915-337bb2b45e4c",
       "source_child_id": "place:nps-child:care:campgrounds:6a989d7d-8aa1-432e-a915-337bb2b45e4c",
       "parent_hub_id": "place:nps:care",
       "module_target": "stay",
-      "official_url_preserved": true,
-      "reservation_preserved": true,
-      "media_preserved": true
+      "official_url": "https://www.nps.gov/care/index.htm",
+      "reservation_url": "https://www.recreation.gov/camping/campgrounds/251709",
+      "reservable": true,
+      "media_count": 1
     },
     {
       "canonical_id": "place:nps:campgrounds:36c60550-b5be-4d8d-afa3-f87e545ca54a",
       "source_child_id": "place:nps-child:care:campgrounds:36c60550-b5be-4d8d-afa3-f87e545ca54a",
       "parent_hub_id": "place:nps:care",
       "module_target": "stay",
-      "official_url_preserved": true,
-      "reservation_preserved": false,
-      "media_preserved": true
+      "official_url": "https://www.nps.gov/care/planyourvisit/primitive-campgrounds.htm",
+      "reservation_url": "",
+      "reservable": false,
+      "media_count": 1
     },
     {
       "canonical_id": "place:nps:campgrounds:b59e5dfb-3738-4986-96ad-648fe6a34abe",
       "source_child_id": "place:nps-child:care:campgrounds:b59e5dfb-3738-4986-96ad-648fe6a34abe",
       "parent_hub_id": "place:nps:care",
       "module_target": "stay",
-      "official_url_preserved": true,
-      "reservation_preserved": false,
-      "media_preserved": true
+      "official_url": "https://www.nps.gov/care/planyourvisit/primitive-campgrounds.htm",
+      "reservation_url": "",
+      "reservable": false,
+      "media_count": 1
     },
     {
       "canonical_id": "place:nps:campgrounds:9fa0e6d0-85f3-4388-92b1-26f408774f28",
       "source_child_id": "place:nps-child:grsa:campgrounds:9fa0e6d0-85f3-4388-92b1-26f408774f28",
       "parent_hub_id": "place:nps:grsa",
       "module_target": "stay",
-      "official_url_preserved": true,
-      "reservation_preserved": true,
-      "media_preserved": false
+      "official_url": "https://www.nps.gov/grsa/planyourvisit/backpacking.htm",
+      "reservation_url": "https://www.recreation.gov/permits/4675316",
+      "reservable": true,
+      "media_count": 0
     },
     {
       "canonical_id": "place:nps:campgrounds:0e90e11a-c131-4aea-aadd-c14042c04b23",
       "source_child_id": "place:nps-child:grsa:campgrounds:0e90e11a-c131-4aea-aadd-c14042c04b23",
       "parent_hub_id": "place:nps:grsa",
       "module_target": "stay",
-      "official_url_preserved": true,
-      "reservation_preserved": false,
-      "media_preserved": true
+      "official_url": "https://www.nps.gov/grsa/planyourvisit/medano-pass-road.htm",
+      "reservation_url": "",
+      "reservable": false,
+      "media_count": 1
     },
     {
       "canonical_id": "place:nps:campgrounds:f3d4a32a-b2ca-4e38-b049-c90164e4540a",
       "source_child_id": "place:nps-child:grsa:campgrounds:f3d4a32a-b2ca-4e38-b049-c90164e4540a",
       "parent_hub_id": "place:nps:grsa",
       "module_target": "stay",
-      "official_url_preserved": true,
-      "reservation_preserved": true,
-      "media_preserved": true
+      "official_url": "https://www.nps.gov/grsa/planyourvisit/pinonflatscampground.htm",
+      "reservation_url": "https://www.recreation.gov/camping/campgrounds/234685",
+      "reservable": true,
+      "media_count": 1
     },
     {
       "canonical_id": "place:nps:campgrounds:71d71180-efb3-4888-8b2c-5474107cc139",
       "source_child_id": "place:nps-child:crla:campgrounds:71d71180-efb3-4888-8b2c-5474107cc139",
       "parent_hub_id": "place:nps:crla",
       "module_target": "stay",
-      "official_url_preserved": true,
-      "reservation_preserved": false,
-      "media_preserved": true
+      "official_url": "https://www.nps.gov/crla/planyourvisit/lost_creek.htm",
+      "reservation_url": "",
+      "reservable": false,
+      "media_count": 1
     },
     {
       "canonical_id": "place:nps:campgrounds:adcaae21-0b87-4379-a710-73e70566aa92",
       "source_child_id": "place:nps-child:crla:campgrounds:adcaae21-0b87-4379-a710-73e70566aa92",
       "parent_hub_id": "place:nps:crla",
       "module_target": "stay",
-      "official_url_preserved": true,
-      "reservation_preserved": true,
-      "media_preserved": true
+      "official_url": "https://www.nps.gov/crla/planyourvisit/mazama_campground.htm",
+      "reservation_url": "https://www.recreation.gov/camping/campgrounds/10337002",
+      "reservable": true,
+      "media_count": 1
     },
     {
       "canonical_id": "place:nps:campgrounds:700e6bd8-f6ca-4a1a-a361-cfeaf028902a",
       "source_child_id": "place:nps-child:asis:campgrounds:700e6bd8-f6ca-4a1a-a361-cfeaf028902a",
       "parent_hub_id": "place:nps:asis",
       "module_target": "stay",
-      "official_url_preserved": true,
-      "reservation_preserved": true,
-      "media_preserved": true
+      "official_url": "https://www.nps.gov/asis/planyourvisit/bayside-drive-in-campground-reservation.htm",
+      "reservation_url": "https://www.recreation.gov/camping/campgrounds/232507",
+      "reservable": true,
+      "media_count": 1
     },
     {
       "canonical_id": "place:nps:campgrounds:27ebfe30-be1a-4511-9244-cf83f67e3085",
       "source_child_id": "place:nps-child:asis:campgrounds:27ebfe30-be1a-4511-9244-cf83f67e3085",
       "parent_hub_id": "place:nps:asis",
       "module_target": "stay",
-      "official_url_preserved": true,
-      "reservation_preserved": true,
-      "media_preserved": true
+      "official_url": "https://www.nps.gov/asis/planyourvisit/horse-campground-reservation.htm",
+      "reservation_url": "https://www.recreation.gov/camping/campgrounds/232507",
+      "reservable": true,
+      "media_count": 1
     },
     {
       "canonical_id": "place:nps:campgrounds:eb7177ad-9252-4cad-b85d-08d9be25aa25",
       "source_child_id": "place:nps-child:asis:campgrounds:eb7177ad-9252-4cad-b85d-08d9be25aa25",
       "parent_hub_id": "place:nps:asis",
       "module_target": "stay",
-      "official_url_preserved": true,
-      "reservation_preserved": true,
-      "media_preserved": true
+      "official_url": "https://cms.nps.gov/asis/planyourvisit/oceanside-drive-in-campground-reservation.htm",
+      "reservation_url": "https://www.recreation.gov/camping/campgrounds/232507",
+      "reservable": true,
+      "media_count": 1
     },
     {
       "canonical_id": "place:nps:campgrounds:27416013-2f23-4d0a-86fa-42fc24d7a03e",
       "source_child_id": "place:nps-child:asis:campgrounds:27416013-2f23-4d0a-86fa-42fc24d7a03e",
       "parent_hub_id": "place:nps:asis",
       "module_target": "stay",
-      "official_url_preserved": true,
-      "reservation_preserved": true,
-      "media_preserved": true
+      "official_url": "https://www.nps.gov/asis/planyourvisit/oceanside-group-campground-reservation.htm",
+      "reservation_url": "https://www.recreation.gov/camping/campgrounds/232507",
+      "reservable": true,
+      "media_count": 1
     },
     {
       "canonical_id": "place:nps:campgrounds:b9b39c25-d4c1-47ae-b02a-ac0e6cb93dcb",
       "source_child_id": "place:nps-child:asis:campgrounds:b9b39c25-d4c1-47ae-b02a-ac0e6cb93dcb",
       "parent_hub_id": "place:nps:asis",
       "module_target": "stay",
-      "official_url_preserved": true,
-      "reservation_preserved": true,
-      "media_preserved": true
+      "official_url": "https://www.nps.gov/asis/planyourvisit/oceanside-walk-in-campground-reservation.htm",
+      "reservation_url": "https://www.recreation.gov/camping/campgrounds/232507",
+      "reservable": true,
+      "media_count": 1
     },
     {
       "canonical_id": "place:nps:campgrounds:ea81bc45-c361-437f-89b8-5c89fb0d0f86",
       "source_child_id": "place:nps-child:amis:campgrounds:ea81bc45-c361-437f-89b8-5c89fb0d0f86",
       "parent_hub_id": "place:nps:amis",
       "module_target": "stay",
-      "official_url_preserved": true,
-      "reservation_preserved": true,
-      "media_preserved": true
+      "official_url": "https://www.nps.gov/amis/planyourvisit/277-north-campground.htm",
+      "reservation_url": "https://www.recreation.gov/camping/campgrounds/10182621",
+      "reservable": true,
+      "media_count": 1
     },
     {
       "canonical_id": "place:nps:campgrounds:ffa388bf-3129-4fc4-80ed-d163e8199587",
       "source_child_id": "place:nps-child:amis:campgrounds:ffa388bf-3129-4fc4-80ed-d163e8199587",
       "parent_hub_id": "place:nps:amis",
       "module_target": "stay",
-      "official_url_preserved": true,
-      "reservation_preserved": false,
-      "media_preserved": true
+      "official_url": "https://www.nps.gov/amis/planyourvisit/governors-landing-campground.htm",
+      "reservation_url": "",
+      "reservable": false,
+      "media_count": 1
     },
     {
       "canonical_id": "place:nps:campgrounds:188b6f61-e7a3-4a44-af27-ee0f6e1ce2d7",
       "source_child_id": "place:nps-child:amis:campgrounds:188b6f61-e7a3-4a44-af27-ee0f6e1ce2d7",
       "parent_hub_id": "place:nps:amis",
       "module_target": "stay",
-      "official_url_preserved": true,
-      "reservation_preserved": true,
-      "media_preserved": true
+      "official_url": "https://www.nps.gov/amis/planyourvisit/rock-quarry-group-campsite.htm",
+      "reservation_url": "https://www.recreation.gov/camping/campgrounds/10182619?tab=seasons",
+      "reservable": true,
+      "media_count": 1
     },
     {
       "canonical_id": "place:nps:campgrounds:5d9fe77f-9c30-4b0c-a0f6-cd60e86b38fb",
       "source_child_id": "place:nps-child:amis:campgrounds:5d9fe77f-9c30-4b0c-a0f6-cd60e86b38fb",
       "parent_hub_id": "place:nps:amis",
       "module_target": "stay",
-      "official_url_preserved": true,
-      "reservation_preserved": false,
-      "media_preserved": true
+      "official_url": "https://www.nps.gov/amis/planyourvisit/rough-canyon-campground.htm",
+      "reservation_url": "",
+      "reservable": false,
+      "media_count": 1
     },
     {
       "canonical_id": "place:nps:campgrounds:225e6d27-6aa8-42ee-ae4e-e6c85de8a8c9",
       "source_child_id": "place:nps-child:amis:campgrounds:225e6d27-6aa8-42ee-ae4e-e6c85de8a8c9",
       "parent_hub_id": "place:nps:amis",
       "module_target": "stay",
-      "official_url_preserved": true,
-      "reservation_preserved": true,
-      "media_preserved": true
+      "official_url": "https://www.nps.gov/amis/planyourvisit/san-pedro-campground.htm",
+      "reservation_url": "https://www.recreation.gov/camping/campgrounds/10182617",
+      "reservable": true,
+      "media_count": 1
     },
     {
       "canonical_id": "place:nps:campgrounds:bb3e9361-0e41-4cf7-adcc-aa19234877fd",
       "source_child_id": "place:nps-child:amis:campgrounds:bb3e9361-0e41-4cf7-adcc-aa19234877fd",
       "parent_hub_id": "place:nps:amis",
       "module_target": "stay",
-      "official_url_preserved": true,
-      "reservation_preserved": false,
-      "media_preserved": true
+      "official_url": "https://www.nps.gov/amis/planyourvisit/spur-406-campground.htm",
+      "reservation_url": "",
+      "reservable": false,
+      "media_count": 1
     }
   ]
 }

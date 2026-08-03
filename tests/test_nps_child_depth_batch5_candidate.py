@@ -42,9 +42,9 @@ REBUILD = (
 )
 EXPECTED_ARTIFACT_HASHES = {
     "audit.json": "d86d58c6b0f236297d3f606a1a053e61f25fe82c2ac69f0e4a339f4a84b70296",
-    "manifest.json": "eee245af2fde5cb1724e057c18f43684ace86cc82986e256fcf581b7d8b837bd",
+    "manifest.json": "d9f7ed993c23051fb53e9bf47392c057fda8fed2833f4923e2a3aeea23054150",
     "nps_child_depth_v1.json": "e3c4d0763d3a2be8d84d462dc3f892a444cb98781eea0d4227dc1b1b3b2fa0da",
-    "review.json": "3fcddcd44552227f6459dd1543981b0c617b40e3e28f4d726077d79f9efd106d",
+    "review.json": "8029b3434db17daf361d353a5c1c5148977921b7faffce8cf400c90ddfb052be",
 }
 EXPECTED_CLASSIFICATIONS = {
     "place:nps-child:care:places:1e1eae1a-c9cc-47d3-b317-c05c7e4d2abd": (
@@ -224,6 +224,13 @@ def test_candidate_has_fixed_grain_modules_links_media_and_clean_copy():
         row["place_id"]: row["official_url"]
         for row in review["parent_page_source_fallbacks"]
     } == BATCH_5_EXPECTED_PARENT_FALLBACKS
+    assert all(
+        0 <= int(sidecar["generated_at"]) - int(row["source_fetched_at"]) <= 259_200
+        for row in review["destinations"]
+    )
+    assert review["rendered_rail_dedupe"]["dropped_count"] == 0
+    assert review["semantic_dedupe"]["dropped_count"] == 0
+    assert review["shared_coordinate_review"] == []
 
     for place in places:
         assert place["canonical_role"] == "child"
@@ -251,6 +258,7 @@ def test_candidate_has_fixed_grain_modules_links_media_and_clean_copy():
             assert image["credit"].casefold().startswith(
                 ("nps", "national park service")
             )
+            assert image["rights_evidence"]["source_cache_sha256"]
 
 
 def test_canonical_campground_shadows_preserve_identity_booking_and_media():
@@ -296,11 +304,12 @@ def test_canonical_campground_shadows_preserve_identity_booking_and_media():
         assert row["source_child_id"] == camp["canonical_reference"]["source_child_id"]
         assert row["parent_hub_id"] == camp["parent_hub_id"]
         assert row["module_target"] == "stay"
-        assert row["official_url_preserved"] is bool(
+        assert row["official_url"] == (
             camp.get("official_url") or camp["source_pack"].get("official_url")
         )
-        assert row["reservation_preserved"] is bool(camp.get("reservation_url"))
-        assert row["media_preserved"] is bool(camp.get("media"))
+        assert row["reservation_url"] == str(camp.get("reservation_url") or "")
+        assert row["reservable"] is (camp.get("reservable") is True)
+        assert row["media_count"] == len(camp.get("media") or [])
 
     permit_urls = [
         camp["reservation_url"]
@@ -336,6 +345,17 @@ def test_proof_activity_copy_and_exact_omission_are_reader_safe():
         row["place_id"]: row["reason"]
         for row in review["exact_omissions"]
     } == BATCH_5_EXACT_OMISSIONS
+
+    all_copy = " ".join(visible_copy(place) for place in places)
+    for rejected in (
+        "www.recreation.gov",
+        "Recreation.gov Mobile App",
+        "skilIs",
+        "Wizard Island. and",
+        "is offers three meals",
+        "_Transparent Border_",
+    ):
+        assert rejected not in all_copy
 
 
 def test_input_hash_guard_fails_closed():

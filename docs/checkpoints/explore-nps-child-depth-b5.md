@@ -42,11 +42,11 @@ packs:
 4. Assateague Island National Seashore (`asis`).
 5. Amistad National Recreation Area (`amis`).
 
-The current conservative promotion produces 71 records. The official
+The conservative source pass produces 71 records. The official
 `Driving the Burr Trail` activity duplicates an already represented route and
 must receive one explicit identity-bound omission, leaving 70 reviewed child
-records. Expected modules are Stay 20, Visitor Information 9, Trails 15,
-Activities 5, and See 21.
+records. Accepted modules are Stay 21, Visitor Information 10, Trails 14,
+Activities 6, and See 19.
 
 The first bounded Android proof after integration is:
 Great Sand Dunes -> Things to Do -> Sandboarding and Sand Sledding -> Show
@@ -100,3 +100,70 @@ rebuild. Integrate and deploy only after the cached candidate passes.
 
 No task-owned Metro, Gradle, Maestro, Expo/EAS, Railway-tail, provider-fetch,
 or candidate-builder process is running at checkpoint creation.
+
+## Candidate completion checkpoint
+
+Recorded `2026-08-03` after implementation commit
+`99f66036c2c37e842ab2e947878933b781d01c1b`.
+
+- Branch: `feat/explore-nps-child-depth-b5`.
+- Candidate: `post-b09-nps-child-depth-b5-r1`.
+- Independent rebuild: `post-b09-nps-child-depth-b5-r1-rebuild`.
+- Records: 70 total (`care` 20, `grsa` 14, `crla` 12, `asis` 14,
+  `amis` 10).
+- Modules: Stay 21, Visitor Information 10, Activities 6, See 19,
+  Trails 14.
+- Media: 69 candidates, 64 approved, five stripped, six honest text-only
+  records.
+- Campgrounds: 20 existing canonical campground identities reused as child
+  shadows; 13 booking links, 19 official links, and 18 exact approved images
+  preserved. No duplicate NPS-child campground identity is emitted.
+- Exact omission: the duplicate Capitol Reef `Driving the Burr Trail`
+  activity only.
+- Shared-coordinate clusters: zero.
+- Provider/network requests: zero.
+
+Artifact SHA-256 values:
+
+- `audit.json`:
+  `d86d58c6b0f236297d3f606a1a053e61f25fe82c2ac69f0e4a339f4a84b70296`.
+- `manifest.json`:
+  `d9f7ed993c23051fb53e9bf47392c057fda8fed2833f4923e2a3aeea23054150`.
+- `nps_child_depth_v1.json`:
+  `e3c4d0763d3a2be8d84d462dc3f892a444cb98781eea0d4227dc1b1b3b2fa0da`.
+- `review.json`:
+  `8029b3434db17daf361d353a5c1c5148977921b7faffce8cf400c90ddfb052be`.
+
+Verification:
+
+- 48 focused B1-B5, media-rights, reader-link, and Explore copy-quality
+  tests passed.
+- Python compilation and whitespace checks passed.
+- Candidate and independent rebuild are byte-identical.
+- A read-only auditor found one parent-fallback identity issue before commit;
+  the review now names the final canonical campground ID.
+- No P0/P1 remains in the immutable candidate.
+
+### Exact next action
+
+Create a clean B5 integration worktree from accepted B4 integration commit
+`d1d997123be92602fb9252427d1cdf42854b9a93`, add this fifth immutable batch to
+the internal sidecar, verify all 860 children and canonical campground detail
+merges, then deploy the backend internally. After terminal Railway success,
+run only Great Sand Dunes -> Things to Do -> Sandboarding and Sand Sledding ->
+shared detail -> Map -> Back on Android.
+
+### Do not repeat after candidate acceptance
+
+- Do not rebuild or reaudit B1-B4.
+- Do not refetch any NPS data.
+- Do not manually reclassify the accepted B5 records without new source
+  evidence.
+- Do not run a broad Explore crawl; the next device test is the single Great
+  Sand Dunes proof path.
+
+### Background processes at completion
+
+No candidate builder, pytest, Metro, Gradle, Maestro, Expo/EAS, or Railway-tail
+process is running. A separate authorized host-cleanup task may still be
+removing rebuildable caches; it does not touch this worktree or its artifacts.

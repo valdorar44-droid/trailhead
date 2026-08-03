@@ -303,3 +303,25 @@ Remaining stop-the-line sequence:
 Do not repeat the user-supplied policy video, broad app crawls, Memory Gate,
 Layers, NPS, Originals lifecycle, Trails, or completed Play form entry without
 new evidence.
+
+### Final-source pre-preview result
+
+- Android Auto/privacy implementation commit:
+  `45ddb910809abbb4cf589efd03251d1c8d6fccbc`.
+- Narrow release-contract correction commit:
+  `db2a50b9dde40f915f6344d6acb66857985a0b64`.
+- The single final-source `audit:prepreview` run completed every mobile/native
+  phase and the full backend suite. Result: `1006 passed`, `1 failed`, `18`
+  warnings, and `148` subtests. The only backend failure was a stale assertion
+  expecting Railway's former 90-second health window while the accepted and
+  deployed configuration intentionally uses 300 seconds.
+- Native drift's only failure was a false positive: it matched the literal
+  `io.branch.` inside the release manifest denylist that prevents Branch from
+  entering an AAB. It did not find Branch wiring.
+- The two evidence-backed contract corrections were applied without changing
+  app behavior. The exact assertions now pass:
+  - `node mobile/scripts/native-drift-check.mjs`.
+  - `tests/test_railway_config.py`: `1 passed`.
+- The complete gate is not repeated. All other phases already passed in that
+  run; only these two assertions were rerun, following the one-reproduction,
+  one-correction release rule.

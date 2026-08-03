@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "batch_id": "post-b09-nps-child-depth-b5",
+  "generated_at": 1785704580,
+  "requests_used": 0,
+  "live_catalog_modified": false,
+  "live_serving_index_modified": false,
+  "promotion_ready": false,
+  "inputs": {
+    "base_catalog": {
+      "path": "base_catalog/explore_catalog_v3_review.json",
+      "bytes": 28099396,
+      "sha256": "462ab1a8313e84073b2ce5347411b25771c19ebd17079b00227deb922e18a080"
+    },
+    "normalized_nps_catalog": {
+      "path": "normalized_nps_catalog/explore_catalog_v3.json",
+      "bytes": 25701451,
+      "sha256": "8bc319b8b230d4272778671318903c9e0e05844b7c5a5d11d8f81438a1584c80"
+    },
+    "canonical_camp_index": {
+      "path": "canonical_camp_index/canonical_camp_index_v1.json",
+      "bytes": 8526191,
+      "sha256": "ff992e658728a62316f29158434b64ebc4cc01f0e7045229344b61adeafeda51"
+    },
+    "fixtures": {
+      "care": {
+        "path": "nps/care/source-pack_codes-care_with-places-thingstodo-campgrounds-visitorcenters-alerts-articles-events-tours-parkin_max-500.json",
+        "bytes": 1008514,
+        "sha256": "424f8269f81003d7be35686b0cb99bbaf7f61bc5246b1919385c1c12509f8ec0"
+      },
+      "grsa": {
+        "path": "nps/grsa/source-pack_codes-grsa_with-places-thingstodo-campgrounds-visitorcenters-alerts-articles-events-tours-parkin_max-500.json",
+        "bytes": 556077,
+        "sha256": "ae955fb4da77e960084f7fb5682403e84ad8dd1c578a5f1e8b4aee78e8d9076f"
+      },
+      "crla": {
+        "path": "nps/crla/source-pack_codes-crla_with-places-thingstodo-campgrounds-visitorcenters-alerts-articles-events-tours-parkin_max-500.json",
+        "bytes": 726814,
+        "sha256": "b0dc60a0da58fb892b402f4ba1099b09be8e2bab98753b920333bc9ace716ac4"
+      },
+      "asis": {
+        "path": "nps/asis/source-pack_codes-asis_with-places-thingstodo-campgrounds-visitorcenters-alerts-articles-events-tours-parkin_max-500.json",
+        "bytes": 540576,
+        "sha256": "99f67f343909305e420a815e19b86c6fcb93b02ee539b5cf2bf63ac75edcd275"
+      },
+      "amis": {
+        "path": "nps/amis/source-pack_codes-amis_with-places-thingstodo-campgrounds-visitorcenters-alerts-articles-events-tours-parkin_max-500.json",
+        "bytes": 447751,
+        "sha256": "03d74c7bf80a99e169f9e29eb4023b6087f3e9afb832733130661fa8f2e46462"
+      }
+    }
+  },
+  "artifacts": [
+    {
+      "path": "audit.json",
+      "bytes": 508,
+      "sha256": "d86d58c6b0f236297d3f606a1a053e61f25fe82c2ac69f0e4a339f4a84b70296"
+    },
+    {
+      "path": "nps_child_depth_v1.json",
+      "bytes": 527790,
+      "sha256": "e3c4d0763d3a2be8d84d462dc3f892a444cb98781eea0d4227dc1b1b3b2fa0da"
+    },
+    {
+      "path": "review.json",
+      "bytes": 12282,
+      "sha256": "3fcddcd44552227f6459dd1543981b0c617b40e3e28f4d726077d79f9efd106d"
+    }
+  ]
+}

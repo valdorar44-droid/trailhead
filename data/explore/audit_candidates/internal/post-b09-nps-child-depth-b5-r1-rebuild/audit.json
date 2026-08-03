@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "batch_id": "post-b09-nps-child-depth-b5",
+  "intended_grain": "one approved cached NPS child record per stable place ID",
+  "count": 70,
+  "destination_counts": {
+    "care": 20,
+    "grsa": 14,
+    "crla": 12,
+    "asis": 14,
+    "amis": 10
+  },
+  "module_counts": {
+    "stay": 21,
+    "visitor": 10,
+    "do": 6,
+    "see": 19,
+    "trails": 14
+  },
+  "media_count": 64,
+  "unique_ids": true,
+  "unique_title_scopes": true,
+  "errors": [],
+  "warnings": [],
+  "passed": true
+}

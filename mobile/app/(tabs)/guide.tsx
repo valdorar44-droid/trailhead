@@ -128,6 +128,7 @@ import {
   serviceDestinationQueryFromExploreQuery,
 } from '@/lib/exploreNearbyContext';
 import { sourcePackItemCampPin } from '@/lib/exploreSourcePackHandoff';
+import { explorePlaceSemanticTypeV1 } from '@/lib/explorePlaceMapReturn';
 import {
   boundedExploreImageUrl,
   exploreImageSource,
@@ -4539,6 +4540,7 @@ function GuideScreenContent() {
     const canonicalId = String(item.source_id || '').trim()
       || `source-pack:${selectedExplore?.id || 'explore'}:${sourceKey}`;
     const image = mediaUrl(item.image_url);
+    const semanticType = explorePlaceSemanticTypeV1(item);
     setPendingMapSelection({
       kind: 'explorePlace',
       place: {
@@ -4546,9 +4548,11 @@ function GuideScreenContent() {
         name: item.title || 'Explore stop',
         lat,
         lng,
-        category: item.kind || item.category || 'place',
+        type: semanticType.type,
+        category: semanticType.type,
+        displayType: semanticType.displayType,
         summary: item.description || '',
-        note: item.description || item.kind || item.source_label || '',
+        note: item.description || semanticType.displayType || item.source_label || '',
         sourceLabel: item.source_label || item.source || selectedExplore?.source_pack?.primary,
         sourceUrl: item.url,
         officialUrl: item.url,

@@ -1222,7 +1222,7 @@ export function ExploreDetailSheet({
       return (
         <>
           {seeItems.length > 0 ? renderItemList(seeItems, EMPTY_DETAIL_MESSAGE) : null}
-          {!!place.profile?.why_it_matters && (
+          {seeItems.length === 0 && !!place.profile?.why_it_matters && (
             <View style={[styles.copyPanel, { borderColor: C.border, backgroundColor: C.s1 }]}>
               <Text style={[styles.copyTitle, { color: C.text }]}>Why Go</Text>
               <ExpandableText value={place.profile.why_it_matters} textStyle={[styles.copyBody, { color: C.text2 }]} previewChars={420} />

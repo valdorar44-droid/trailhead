@@ -100,6 +100,11 @@ import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
 import { trackPhase0Event, trackPhase0Once } from '@/lib/telemetry';
 import { captureMapCampSelectionErrorV1 } from '@/lib/telemetry/mapCampSelection';
 import {
+  captureExplorePlaceMapReturnV1,
+  explorePlaceMapReturnMatchesV1,
+  type ExplorePlaceMapReturnV1,
+} from '@/lib/explorePlaceMapReturn';
+import {
   clearMapCampSelectionPhaseV1,
   markMapCampSelectionPhaseV1,
 } from '@/lib/telemetry/mapCampSelectionCore';
@@ -6904,6 +6909,7 @@ function MapScreen() {
   const [selectedPlaceContext, setSelectedPlaceContext] = useState<SelectedPlaceContext | null>(null);
   const [selectedPlaceTripContext, setSelectedPlaceTripContext] = useState<TripPlaceContext | null>(null);
   const [relatedPlaceReturnStack, setRelatedPlaceReturnStack] = useState<RelatedPlaceReturnEntry[]>([]);
+  const explorePlaceReturnRef = useRef<ExplorePlaceMapReturnV1 | null>(null);
   const recentRenderedMapboxSelectionRef = useRef<{ at: number; lat: number; lng: number; key: string } | null>(null);
   const renderedMapboxEnrichmentSeqRef = useRef(0);
   const renderedMapboxEnrichmentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -10909,6 +10915,7 @@ function MapScreen() {
 
   useEffect(() => {
     if (!pendingMapSelection || !screenActivity.isActive || (useNativeMapSurface && !mapSurfaceReady)) return;
+    if (pendingMapSelection.kind !== 'explorePlace') explorePlaceReturnRef.current = null;
     setPendingMapSelection(null);
     setShowSearch(false);
     setSearchRouteCard(null);
@@ -10935,6 +10942,7 @@ function MapScreen() {
     }
     if (pendingMapSelection.kind === 'explorePlace') {
       const explore = pendingMapSelection.place;
+      explorePlaceReturnRef.current = captureExplorePlaceMapReturnV1(explore.id);
       const sourceLabel = cleanExploreSourceLabel(explore.sourceLabel, 'Explore Area');
       const photos: TrailheadGalleryPhoto[] = (explore.photos ?? [])
         .map((photo, idx) => ({
@@ -11079,6 +11087,14 @@ function MapScreen() {
     setPendingTrailDiscovery,
     useNativeMapSurface,
   ]);
+
+  useEffect(() => {
+    const snapshot = explorePlaceReturnRef.current;
+    if (!snapshot || !selectedPlace || relatedPlaceReturnStack.length > 0) return;
+    if (!explorePlaceMapReturnMatchesV1(snapshot, selectedPlace.id)) {
+      explorePlaceReturnRef.current = null;
+    }
+  }, [relatedPlaceReturnStack.length, selectedPlace?.id]);
 
   useEffect(() => {
     if (!pendingOpenOfflineModal) return;
@@ -22646,6 +22662,17 @@ function MapScreen() {
     postWebMessage(JSON.stringify({ type: 'fly_to', lat: parent.place.lat, lng: parent.place.lng, name: parent.place.name }));
   }
 
+  function returnSelectedExplorePlaceToHub() {
+    if (!explorePlaceMapReturnMatchesV1(explorePlaceReturnRef.current, selectedPlace?.id)) return;
+    explorePlaceReturnRef.current = null;
+    cancelRenderedMapboxEnrichment();
+    setRelatedPlaceReturnStack([]);
+    setSelectedPlace(null);
+    setSelectedPlaceContext(null);
+    setSelectedPlaceTripContext(null);
+    router.back();
+  }
+
   function restoreCampgroundParent() {
     const parent = campParentSnapshotRef.current;
     if (!parent) return;
@@ -29739,8 +29766,13 @@ function MapScreen() {
         returnContext={placeSheetCoordinator.returnContext}
         related={selectedPlaceContext ?? undefined}
         routeContextLabel={selectedPlaceTripContext?.label}
-        onBack={relatedPlaceReturnStack.length ? restoreRelatedPlaceParent : undefined}
+        onBack={relatedPlaceReturnStack.length
+          ? restoreRelatedPlaceParent
+          : explorePlaceMapReturnMatchesV1(explorePlaceReturnRef.current, selectedPlace?.id)
+            ? returnSelectedExplorePlaceToHub
+            : undefined}
         onClose={() => {
+          explorePlaceReturnRef.current = null;
           cancelRenderedMapboxEnrichment();
           setRelatedPlaceReturnStack([]);
           setSelectedPlace(null);
@@ -29750,6 +29782,7 @@ function MapScreen() {
           if (activeTrip) restoreTripOverview(false);
         }}
         onNavigate={place => {
+          explorePlaceReturnRef.current = null;
           cancelRenderedMapboxEnrichment();
           setRelatedPlaceReturnStack([]);
           setSelectedPlace(null);
@@ -29771,6 +29804,7 @@ function MapScreen() {
           setTimeout(() => setQuickToast(''), 2200);
         }}
         onReport={() => {
+          explorePlaceReturnRef.current = null;
           cancelRenderedMapboxEnrichment();
           setRelatedPlaceReturnStack([]);
           setSelectedPlace(null);
@@ -29779,6 +29813,7 @@ function MapScreen() {
           setQuickReport(true);
         }}
         onNearbyCamps={place => {
+          explorePlaceReturnRef.current = null;
           cancelRenderedMapboxEnrichment();
           setRelatedPlaceReturnStack([]);
           setSelectedPlace(null);

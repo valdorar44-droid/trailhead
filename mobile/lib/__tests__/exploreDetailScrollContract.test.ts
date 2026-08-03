@@ -38,3 +38,7 @@ test('Explore uses explicit source-driven empty and unavailable states without f
   assert.doesNotMatch(source, /Check closer to your trip/);
   assert.doesNotMatch(source, /Check back closer to your trip/);
 });
+
+test('Explore does not append parent Why Go copy below a populated sights list', () => {
+  assert.match(source, /seeItems\.length === 0 && !!place\.profile\?\.why_it_matters/);
+});

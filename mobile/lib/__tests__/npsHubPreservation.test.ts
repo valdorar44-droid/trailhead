@@ -43,6 +43,8 @@ test('production source-pack children retain canonical identity in the main-map 
   assert.match(handoff, /const canonicalId = String\(item\.source_id \|\| ''\)\.trim\(\)/);
   assert.match(handoff, /setPendingMapSelection\(\{\s*kind: 'explorePlace'/s);
   assert.match(handoff, /place: \{\s*id: canonicalId,/s);
+  assert.match(handoff, /const semanticType = explorePlaceSemanticTypeV1\(item\)/);
+  assert.match(handoff, /type: semanticType\.type,[\s\S]*?category: semanticType\.type,[\s\S]*?displayType: semanticType\.displayType/);
   assert.match(handoff, /sourceLabel: item\.source_label \|\| item\.source/);
   assert.match(handoff, /imageUrl: image,/);
   assert.match(handoff, /photos: image \? \[\{/);
@@ -58,10 +60,22 @@ test('production source-pack children retain canonical identity in the main-map 
     /displayType: place\.summary\.category \|\| place\.category \|\| mapCategory/,
     'Explore hands the user-facing canonical type to the main map',
   );
+  const mapSource = readFileSync(resolve(testDirectory, '../../app/(tabs)/map.tsx'), 'utf8');
   assert.match(
-    readFileSync(resolve(testDirectory, '../../app/(tabs)/map.tsx'), 'utf8'),
+    mapSource,
     /type: explore\.type \|\| 'place',[\s\S]*?display_type: explore\.displayType \|\| explore\.category \|\| undefined/,
     'the main map preserves the Explore semantic type instead of flattening every entity to place',
+  );
+  assert.match(mapSource, /explorePlaceReturnRef\.current = captureExplorePlaceMapReturnV1\(explore\.id\)/);
+  assert.match(
+    mapSource,
+    /explorePlaceMapReturnMatchesV1\(explorePlaceReturnRef\.current, selectedPlace\?\.id\)[\s\S]*?returnSelectedExplorePlaceToHub/,
+    'the exact source-pack child owns Android Back while its generic map sheet is open',
+  );
+  assert.match(
+    mapSource,
+    /function returnSelectedExplorePlaceToHub\(\) \{[\s\S]*?router\.back\(\);[\s\S]*?\n  \}/,
+    'returning from the child map sheet restores the suspended Explore route',
   );
   assert.match(
     guideSource,

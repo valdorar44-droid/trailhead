@@ -148,3 +148,72 @@ run only the bounded admin Explore child-to-sheet-to-map delta.
   Android Auto, Memory, or screenshot crawls.
 - Do not activate the 157 advisory aliases or expose children in Featured.
 - Do not promote this sidecar to a public catalog or production channel.
+
+## Internal deployment and paired preview checkpoint
+
+- Recorded: `2026-08-02T19:42:28-05:00`.
+- Exact source: `3ec05aebe23bc64bf1f321d6b08b274ff927c1ea`.
+- Railway deployment: `a6b68aa3-b929-4417-ab6e-dfb568ad5898`, terminal
+  `SUCCESS`, image digest
+  `sha256:e962674f7a4bfec1e9506478f1079b550899b34c846a0203626f86c470a6d42c`.
+- Public health: `https://api.gettrailhead.app/api/health` returned HTTP 200
+  with the expected Trailhead service response.
+- Internal stage remained `TRAILHEAD_EXPLORE_DATA_STAGE=internal`.
+- Header-only authorization remained fail-closed: the preview diagnostics
+  endpoint returned HTTP 401 without an authenticated administrator. A public
+  Featured request returned byte-identical data with and without the preview
+  header, SHA-256
+  `e3a4b7aeff7f06a570766c11ae35b6174fae35c5ad06dc98dcb98614a627308e`.
+
+### Paired preview identity
+
+- Preview channel ID: `019dbc97-3cde-795b-a35d-e6aa985060d3`.
+- Candidate branch:
+  `preview-candidate-3ec05aebe23bc64bf1f321d6b08b274ff927c1ea-mschl80l-e7b0051f2e5313d8c40e0d6f`.
+- Android update: `019fc509-66b6-7747-9583-28c8e550eb0f`, group
+  `cc48cab0-1bb2-436f-8534-254531c05fcb`, runtime
+  `native-1.0.10-android.7`.
+- iOS update: `019fc509-bce5-7c32-886c-4019d1b0611d`, group
+  `ded30488-001a-4188-b1e6-f78af95a9a25`, runtime
+  `native-1.0.10-ios.6`.
+- Android Sentry debug ID:
+  `437357d5-2e29-432b-8976-3f6be0ac3121`.
+- iOS Sentry debug ID: `287a76c0-6c94-4903-8d6a-84d749f8b26b`.
+- The guarded publisher validated both update records against the exact source
+  and runtime before moving the preview channel.
+
+### Device boundary
+
+- The reusable Android preview APK is accepted build `69`, EAS build
+  `3da6ed72-0eff-49f7-9cb5-e192d55a26ce`, SHA-256
+  `7e753c2a1233625e7633ed0ac92fe9938cb07e8a85eab66a25c58d1cd3ca63d5`.
+- It installed successfully over emulator build 68 without clearing app data.
+  The emulator's retained account state was signed out, so the admin-only
+  content assertion was not claimed and no access gate was weakened.
+- Release exports, the accepted APK, and temporary emulator evidence were moved
+  outside the worktree to
+  `C:\Users\User\Downloads\TrailheadReleaseArtifacts\3ec05aeb`.
+- Task-owned Metro, Gradle, Maestro, Expo/EAS publisher, pytest, and Railway-tail
+  processes are none. The temporary emulator was stopped after the signed-out
+  boundary was confirmed.
+
+### Exact next action
+
+1. On the signed-in administrator Samsung, apply Android update
+   `019fc509-66b6-7747-9583-28c8e550eb0f` and open Great Smoky Mountains.
+2. Run only Overview -> Stay -> one reviewed campground -> shared sheet -> Map
+   -> Back. Confirm the 13 reviewed Stay campgrounds, exact imagery, stable
+   return state, and diagnostics `active` / `ready` with 693 children.
+3. After that one visible proof passes, build the zero-network
+   `post-b09-nps-child-depth-b4` packet from the already accepted cached inputs:
+   Hot Springs 24, Hovenweep 17, Indiana Dunes 26, Jewel Cave 11, and John Day
+   Fossil Beds 19 (97 children total; expected preview total 790).
+
+### Do not repeat
+
+- Do not rerun the completed 693-child content audit, public-isolation suite,
+  clean-checkout rehearsal, broad NPS crawl, or paired publication.
+- Do not spend NPS quota for b10 before the cached B4 packet is reviewed.
+- Do not include Isle Royale or Katahdin until their flat 36-child cap is
+  replaced with an explicit completeness/pagination contract.
+- Do not expose Community routes or internal NPS children publicly.

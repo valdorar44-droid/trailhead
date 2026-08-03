@@ -194,3 +194,98 @@ Sand Dunes -> Things to Do -> Sandboarding and Sand Sledding -> detail -> Map ->
 Back. If that passes, publish the identical SHA to iOS and record the paired
 update IDs. Do not repeat broad Explore, NPS, Search, Layers, Memory, Trails,
 Originals, Android Auto, or screenshot crawls.
+
+## Completion checkpoint — reviewed child module ownership
+
+Recorded 2026-08-03 02:13 CDT (America/Winnipeg).
+
+- Starting HEAD: `912cb3f5c7501ba68b84cf7255a620fb9f9d8523`.
+- Accepted correction commit: `f89c411e` (`fix(explore): honor reviewed child
+  module ownership`).
+- Installed Android identity used for the bounded proof:
+  - App 1.0.10, build 69.
+  - Runtime `native-1.0.10-android.7`.
+  - Source `f968e40f8c910abbe12042e7dcf4b3da120c2249`.
+  - Update `019fc644-adf9-7dab-b4ed-43cb3518ba06`.
+  - Group `fe6d46a3-d2b4-43a4-8b89-3152283a7b55`.
+- Railway deployment `6212afae-f9c0-448d-8f45-4d35726e81ff` reached terminal
+  `SUCCESS`. `/api/health` returned 200 and a preview-header-only request
+  returned 401.
+
+### Evidence-backed cause and correction
+
+The remaining eight-row live result did not come from Redis or Map Card. The
+Explore detail endpoint projected the reviewed five Activities correctly, then
+retained three legacy NPS `thingstodo` rows whose exact UUIDs had been reviewed
+into the Trails module. The projector deduplicated only inside the current
+module.
+
+The correction now treats exact reviewed child identity as authoritative across
+all modules. A legacy row assigned to a different reviewed module is removed;
+unmatched official parent content remains. Cross-module title guessing is not
+used. The empty-current-module edge is also covered so a park with reviewed
+Trails and no reviewed Activities cannot retain the same legacy
+misclassification.
+
+Focused backend verification passed: 57 tests, 3 skipped, 44 subtests. Python
+compilation and whitespace checks passed. An independent bounded review passed
+privacy and over-filtering checks after the empty-module edge was added.
+
+### Android result
+
+Great Sand Dunes now renders:
+
+- `Things to Do · 5 options`.
+- `Explore the Dunes`.
+- `Sandboarding and Sand Sledding`.
+- `Experience the Night`.
+- `4WD Medano Pass Primitive Road`.
+- `Splash in Medano Creek`.
+
+The three reviewed Hike records no longer appear in Things to Do. The earlier
+bounded Sandboarding detail, exact NPS image/credit, Show Area, shared Map
+sheet, and Back restoration proof remains accepted and was not repeated.
+
+Evidence SHA-256 values:
+
+- `trailhead-b5-fixed-hub-mid.png`:
+  `9224169548774C2819A2A6DF40061062EEA0E1218AA3FF77FF17C9A213ABCE94`.
+- `trailhead-b5-fixed-hub-mid.xml`:
+  `107E0A09232AD3217652019AA90CD5DCBA5C9C367B35CE234491CC660C287EA1`.
+- `trailhead-b5-fixed-do.png`:
+  `31B5DF818BE3633FBF3C79301F7F16C7127CAC2E8182A4945F614699031FE7DC`.
+- `trailhead-b5-fixed-do.xml`:
+  `39F016C963F841B03646ABE6693F4EB6D8727DD9E013AC2473440B4C4663823B`.
+- Final bounded list scan:
+  `D7F9DF0910C9BAFFB63FBD8F5F3257EE4EFD754F8CA77B483AC1DDCD7D67C353`.
+
+Protected hashes remain unchanged:
+
+- Explore serving index:
+  `c0726d8166ab7d110f437ff4e6acde7aa09702354f053103e3f6630a0129b869`.
+- App Store copy:
+  `126af147b650c2f1077fb73036d26f34f940422c07a3193bade047c73b5c225a`.
+
+Open B5 P0/P1 defects: none. A separate cold-first-search Retry state was seen
+before this backend proof and is deferred to the Search packet; the bounded
+post-deployment search completed normally and it does not reopen this accepted
+data packet.
+
+### Exact next action
+
+Publish the unchanged accepted mobile source as one paired preview update so
+the existing Android client correction also reaches the iOS preview runtime.
+Verify both update identities, record the update IDs, and stop. The next Explore
+depth batch remains separate and must begin from this accepted checkpoint
+without refetching or rebuilding B1-B5.
+
+### Do not repeat
+
+- Do not repeat Great Sand Dunes detail, Show Area, Map, or Back.
+- Do not refetch or rebuild B1-B5.
+- Do not repeat broad Explore/NPS, Search, Layers, Memory, Trails, Originals,
+  Android Auto, or screenshot crawls.
+- Do not modify the public catalog or protected serving index.
+
+No task-owned Metro, Gradle, Maestro, provider-fetch, candidate-builder,
+pytest, Railway-tail, or cleanup process remains running.

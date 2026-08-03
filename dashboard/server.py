@@ -3569,6 +3569,37 @@ def _official_cache_source_pack_item(profile: dict, *, kind: str) -> dict | None
         or "",
         360,
     )
+    requested_image_url = str(
+        summary.get("image_url") or summary.get("thumbnail_url") or ""
+    ).strip()
+    reviewed_media = [
+        media
+        for collection in (
+            source_pack.get("photos"),
+            profile.get("media"),
+            profile.get("photos"),
+        )
+        for media in (collection if isinstance(collection, list) else [])
+        if isinstance(media, dict) and str(media.get("url") or "").strip()
+    ]
+    matching_media = [
+        media
+        for media in reviewed_media
+        if not requested_image_url
+        or str(media.get("url") or "").strip() == requested_image_url
+    ]
+    selected_media = max(
+        matching_media or reviewed_media,
+        key=lambda media: sum(
+            bool(media.get(key))
+            for key in (
+                "caption", "credit", "license", "rights_state",
+                "source_page_url", "rights_evidence",
+            )
+        ),
+        default={},
+    )
+    image_url = str(selected_media.get("url") or requested_image_url).strip()
     item = {
         "kind": kind,
         "source": "official",
@@ -3578,10 +3609,20 @@ def _official_cache_source_pack_item(profile: dict, *, kind: str) -> dict | None
         "url": source_pack.get("official_url") or summary.get("source_url") or "",
         "lat": lat,
         "lng": lng,
-        "image_url": summary.get("image_url") or summary.get("thumbnail_url") or "",
-        "image_caption": title,
-        "image_credit": source_label,
-        "image_license": "",
+        "image_url": image_url,
+        "image_caption": str(selected_media.get("caption") or summary.get("image_caption") or title),
+        "image_credit": str(selected_media.get("credit") or summary.get("image_credit") or source_label),
+        "image_license": str(selected_media.get("license") or summary.get("image_license") or ""),
+        "image_source_page_url": str(
+            selected_media.get("source_page_url")
+            or summary.get("image_source_page_url")
+            or ""
+        ),
+        "image_rights_state": str(
+            selected_media.get("rights_state")
+            or summary.get("image_rights_state")
+            or ""
+        ),
         "source_label": source_label,
         "category": str(summary.get("category") or kind).replace("_", " "),
         "tags": [str(tag) for tag in (summary.get("tags") or summary.get("badges") or []) if str(tag).strip()][:5],
@@ -3655,6 +3696,107 @@ def _attach_official_nearby_source_pack(place: dict) -> dict:
         pack["topics"] = sorted({str(topic).strip() for topic in topics if str(topic).strip()})
         enriched["source_pack"] = pack
     return _clean_explore_public_labels(enriched)
+
+
+def _attach_internal_preview_child_source_pack(place: dict) -> dict:
+    """Project reviewed preview children into one parent response, request-locally.
+
+    The internal preview catalog and caches are process-global. Never mutate a
+    parent from either one: an authorized response may include these module
+    rows, while the next public response must remain byte-for-byte public.
+    """
+    if not isinstance(place, dict) or not _explore_internal_preview_context.get():
+        return place
+    parent_id = str(place.get("id") or "").strip()
+    if not parent_id:
+        return place
+    children = _explore_children_for_parent(parent_id)
+    if not children:
+        return place
+
+    key_for_target = {
+        "see": ("things_to_see", "place"),
+        "do": ("things_to_do", "activity"),
+        "stay": ("campgrounds", "campground"),
+        "visitor": ("visitor_centers", "visitor_center"),
+    }
+    projected: dict[str, list[dict]] = {key: [] for key, _kind in key_for_target.values()}
+    for child in children:
+        target = str(child.get("module_target") or "").strip().lower()
+        destination = key_for_target.get(target)
+        if not destination:
+            continue
+        child_summary = child.get("summary") if isinstance(child.get("summary"), dict) else {}
+        child_title = str(child_summary.get("title") or (child.get("card") or {}).get("title") or "")
+        parent_title = str(child.get("parent_hub_title") or "")
+        if (
+            target == "see"
+            and _explore_title_merge_key({"name": child_title})
+            and _explore_title_merge_key({"name": child_title})
+            == _explore_title_merge_key({"name": parent_title})
+        ):
+            # Keep this canonical child directly addressable, but do not show
+            # a no-op copy of its destination hub inside What to See.
+            continue
+        key, kind = destination
+        item = _official_cache_source_pack_item(child, kind=kind)
+        if not item:
+            continue
+        child_id = str(child.get("id") or "").strip()
+        if not child_id:
+            continue
+        source_pack = child.get("source_pack") if isinstance(child.get("source_pack"), dict) else {}
+        item["source_id"] = child_id
+        item["canonical_place_id"] = child_id
+        raw_source_id = str(source_pack.get("raw_source_identity") or "").strip()
+        if raw_source_id:
+            item["source_record_id"] = raw_source_id
+        booking_url = str(
+            source_pack.get("booking_url")
+            or (child.get("reservations") or {}).get("url")
+            or ""
+        ).strip()
+        if booking_url:
+            item["reservation_url"] = booking_url
+        projected[key].append(item)
+
+    enriched = dict(place)
+    pack = dict(enriched.get("source_pack") if isinstance(enriched.get("source_pack"), dict) else {})
+    for key, rows in projected.items():
+        if not rows:
+            continue
+        existing = [item for item in (pack.get(key) or []) if isinstance(item, dict)]
+        canonical_titles = {
+            _explore_title_merge_key({"name": item.get("title")})
+            for item in rows
+            if str(item.get("title") or "").strip()
+        }
+        canonical_ids = {
+            str(value or "").strip().lower()
+            for item in rows
+            for value in (
+                item.get("source_id"),
+                item.get("canonical_place_id"),
+                item.get("source_record_id"),
+            )
+            if str(value or "").strip()
+        }
+        supplemental = []
+        for item in existing:
+            identity = str(
+                item.get("canonical_place_id")
+                or item.get("source_id")
+                or ""
+            ).strip().lower()
+            title_key = _explore_title_merge_key({"name": item.get("title")})
+            if identity in canonical_ids or (title_key and title_key in canonical_titles):
+                continue
+            supplemental.append(item)
+        # Canonical reviewed children lead, in their immutable source order.
+        # Supplemental parent content follows and is never silently discarded.
+        pack[key] = [*rows, *supplemental]
+    enriched["source_pack"] = pack
+    return enriched
 
 
 def _explore_profile_merge_key(place: dict) -> str:
@@ -4636,22 +4778,122 @@ def _load_explore_catalog_base() -> dict:
     })), persist=True)
 
 
-_EXPLORE_INTERNAL_PREVIEW_CACHE: dict[str, object] = {"key": None, "profiles": [], "children": []}
+_EXPLORE_INTERNAL_PREVIEW_CACHE: dict[str, object] = {
+    "key": None,
+    "profiles": [],
+    "children": [],
+    "status": "not_loaded",
+    "contract_id": "",
+}
+
+_EXPLORE_INTERNAL_PREVIEW_CONTRACT_V1 = {
+    "contract_id": "post-b08-nps-child-contract-r1",
+    "manifest_sha256": "89ba6376343c593f978d05061eef47bcd9aac8bae23b0de428286bd562032e6d",
+    "artifact_sha256": "a4a6db4becb705d43351e820c7a61f8bb335dde4244a19adfcce1c384ad0046a",
+    "audit_sha256": "01e7953e0ac50b51f047872661dd4cb97fe23c82be772c7dcb50ae070674f639",
+    "review_sha256": "9166f08cd27aa7f141ea4f460795c891328bb978dd85dced47c8b1cdab3bcdc8",
+    "dispositions_sha256": "4dc8a35e56774df88fdd2ca0aa557b8f76f91be8b73311784251d9a302591518",
+    "materialized_count": 236,
+    "advisory_alias_count": 157,
+    "active_alias_count": 0,
+    "public_promotion_compatible": False,
+}
+_EXPLORE_INTERNAL_PREVIEW_CONTENT_SHA256_V1 = (
+    "6f25c74687e694b3c39832cd77b58cb687491551924ce47d98133ca5b5b8c784"
+)
+
+
+def _clear_explore_internal_preview_cache(status: str, key: object = None) -> None:
+    _EXPLORE_INTERNAL_PREVIEW_CACHE.update({
+        "key": key,
+        "profiles": [],
+        "children": [],
+        "status": status,
+        "contract_id": "",
+    })
+
+
+def _explore_internal_preview_payload_valid(payload: object) -> bool:
+    if not isinstance(payload, dict):
+        return False
+    try:
+        canonical_payload = json.dumps(
+            payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError):
+        return False
+    if not hmac.compare_digest(
+        hashlib.sha256(canonical_payload).hexdigest(),
+        _EXPLORE_INTERNAL_PREVIEW_CONTENT_SHA256_V1,
+    ):
+        return False
+    raw_places = payload.get("places")
+    raw_children = payload.get("children")
+    candidate = payload.get("candidate") if isinstance(payload.get("candidate"), dict) else {}
+    contract = candidate.get("nps_child_contract") if isinstance(candidate.get("nps_child_contract"), dict) else {}
+    batches = candidate.get("nps_child_depth_batches")
+    if (
+        payload.get("schema_version") != 1
+        or payload.get("catalog_id") != "trailhead-explore-internal-preview-v1"
+        or payload.get("stage") != "internal"
+        or payload.get("public_promotion_compatible") is not False
+        or not isinstance(raw_places, list)
+        or not isinstance(raw_children, list)
+        or payload.get("count") != len(raw_places)
+        or payload.get("child_count") != len(raw_children)
+        or len(raw_places) != 13
+        or len(raw_children) != 693
+        or not isinstance(batches, list)
+        or len(batches) != 3
+    ):
+        return False
+    for key, expected in _EXPLORE_INTERNAL_PREVIEW_CONTRACT_V1.items():
+        if contract.get(key) != expected:
+            return False
+    child_ids: set[str] = set()
+    for child in raw_children:
+        if not isinstance(child, dict):
+            return False
+        child_id = str(child.get("id") or "").strip()
+        if (
+            not child_id
+            or child_id in child_ids
+            or child.get("hidden_from_featured") is not True
+            or str(child.get("canonical_role") or "").strip() != "child"
+            or not str(child.get("parent_hub_id") or "").strip()
+            or not str(child.get("module_target") or "").strip()
+        ):
+            return False
+        child_ids.add(child_id)
+    return True
 
 
 def _load_explore_internal_preview_profiles() -> list[dict]:
-    if not _explore_internal_preview_enabled() or not EXPLORE_INTERNAL_PREVIEW.exists():
+    if not _explore_internal_preview_enabled():
+        _clear_explore_internal_preview_cache("stage_off")
+        return []
+    if not EXPLORE_INTERNAL_PREVIEW.exists():
+        _clear_explore_internal_preview_cache("sidecar_missing")
         return []
     try:
         stat = EXPLORE_INTERNAL_PREVIEW.stat()
         cache_key = (str(EXPLORE_INTERNAL_PREVIEW), stat.st_mtime_ns, stat.st_size)
     except Exception:
+        _clear_explore_internal_preview_cache("sidecar_invalid")
         return []
     if _EXPLORE_INTERNAL_PREVIEW_CACHE.get("key") == cache_key:
         return list(_EXPLORE_INTERNAL_PREVIEW_CACHE.get("profiles") or [])
     try:
         payload = json.loads(EXPLORE_INTERNAL_PREVIEW.read_text())
     except Exception:
+        _clear_explore_internal_preview_cache("sidecar_invalid", cache_key)
+        return []
+    if not _explore_internal_preview_payload_valid(payload):
+        _clear_explore_internal_preview_cache("sidecar_invalid", cache_key)
         return []
     raw_places = [place for place in payload.get("places") or [] if isinstance(place, dict)]
     raw_children = [place for place in payload.get("children") or [] if isinstance(place, dict)]
@@ -4685,12 +4927,16 @@ def _load_explore_internal_preview_profiles() -> list[dict]:
         "key": cache_key,
         "profiles": profiles,
         "children": children,
+        "status": "ready",
+        "contract_id": str((payload.get("candidate") or {}).get("nps_child_contract", {}).get("contract_id") or ""),
     })
     return list(profiles)
 
 
 def _load_explore_internal_preview_children() -> list[dict]:
     _load_explore_internal_preview_profiles()
+    if _EXPLORE_INTERNAL_PREVIEW_CACHE.get("status") != "ready":
+        return []
     return list(_EXPLORE_INTERNAL_PREVIEW_CACHE.get("children") or [])
 
 
@@ -8092,7 +8338,10 @@ def _explore_internal_preview_authorized(authorization: str) -> bool:
 def _explore_internal_preview_request_code(path: str, preview_header: str, authorization: str) -> str:
     """Return a fixed QA code without retaining request or account data."""
     preview_path = str(path or "")
-    if not preview_path.startswith(("/api/explore/", "/api/campsites/", "/api/search/v2/")):
+    preview_scoped = preview_path.startswith(
+        ("/api/explore/", "/api/campsites/", "/api/search/v2/")
+    ) or preview_path == "/api/map-card/resolve"
+    if not preview_scoped:
         return "not_applicable"
     if str(preview_header or "").strip().lower() != "internal":
         return "header_missing"
@@ -11567,6 +11816,8 @@ async def explore_internal_preview_diagnostics(admin: dict = Depends(_require_ad
         data_code = "unchecked"
     elif not EXPLORE_INTERNAL_PREVIEW.exists():
         data_code = "sidecar_missing"
+    elif _EXPLORE_INTERNAL_PREVIEW_CACHE.get("status") == "sidecar_invalid":
+        data_code = "sidecar_invalid"
     elif not profiles:
         data_code = "sidecar_empty"
     else:
@@ -11576,6 +11827,15 @@ async def explore_internal_preview_diagnostics(admin: dict = Depends(_require_ad
         "request_code": request_code,
         "data_code": data_code,
         "profile_count": min(len(profiles), 10_000),
+        "child_count": min(
+            len(_EXPLORE_INTERNAL_PREVIEW_CACHE.get("children") or [])
+            if data_code == "ready" else 0,
+            10_000,
+        ),
+        "contract_id": (
+            str(_EXPLORE_INTERNAL_PREVIEW_CACHE.get("contract_id") or "")
+            if data_code == "ready" else ""
+        ),
     }
 
 class AccountDeletionAuthorizationRequest(BaseModel):
@@ -21475,15 +21735,24 @@ def _search_v2_internal_preview_child_results(request: SearchRequestV2) -> list[
         if not profile_id or not title:
             continue
         normalized_title = normalize_search_text(title)
+        normalized_parent_title = normalize_search_text(profile.get("parent_hub_title") or "")
+        collides_with_parent_title = bool(
+            normalized_parent_title and normalized_title == normalized_parent_title
+        )
         exact_values = {
             normalize_search_text(profile_id),
             *(
                 normalize_search_text(value)
                 for value in profile.get("search_aliases") or []
-                if str(value or "").strip() and alias_counts.get(normalize_search_text(value)) == 1
+                if str(value or "").strip()
+                and alias_counts.get(normalize_search_text(value)) == 1
+                and not (
+                    normalized_parent_title
+                    and normalize_search_text(value) == normalized_parent_title
+                )
             ),
         }
-        if title_counts.get(normalized_title) == 1:
+        if title_counts.get(normalized_title) == 1 and not collides_with_parent_title:
             exact_values.add(normalized_title)
         if normalized_query not in exact_values:
             continue
@@ -33950,7 +34219,10 @@ async def resolve_map_card(body: MapCardResolveRequest, user: dict | None = Depe
         base = {**base, **canonical_explore_card, **request_identity}
     errors: dict[str, str] = {}
     cache_key = _map_card_cache_key(body)
-    cached = get_cached("campsite_cache", cache_key, ttl_seconds=MAP_CARD_SAFE_TTL_SECONDS)
+    preview_active = _explore_internal_preview_context.get()
+    cached = None if preview_active else get_cached(
+        "campsite_cache", cache_key, ttl_seconds=MAP_CARD_SAFE_TTL_SECONDS,
+    )
     if cached is not None and not _contains_restricted_provider(cached):
         if isinstance(cached, dict) and isinstance(cached.get("card"), dict):
             cached["card"] = _clean_map_card_summary(_normalize_map_card_display(dict(cached["card"]), body), body)
@@ -34113,7 +34385,7 @@ async def resolve_map_card(body: MapCardResolveRequest, user: dict | None = Depe
         "camp_detail": camp_detail,
         "display_source_label": display_source_label,
         "enriched_by": enriched_by,
-        "cache_status": "miss",
+        "cache_status": "uncached" if preview_active else "miss",
         "photo_candidates": photo_candidates,
         "locked_sections": [],
         "partial": bool(errors),
@@ -34121,10 +34393,17 @@ async def resolve_map_card(body: MapCardResolveRequest, user: dict | None = Depe
         "context_status": context_status,
         "rail_status": context_status,
         "cached": False,
-        "cache_ttl_seconds": MAP_CARD_SAFE_TTL_SECONDS if _map_card_cacheable(body, {"card": card, "photos": card.get("photos") or [], "related": related}) else 0,
+        "cache_ttl_seconds": 0 if preview_active else (
+            MAP_CARD_SAFE_TTL_SECONDS
+            if _map_card_cacheable(
+                body,
+                {"card": card, "photos": card.get("photos") or [], "related": related},
+            )
+            else 0
+        ),
         "timings": {**timings, "total_ms": round((time.time() - started) * 1000)},
     }
-    if response["cache_ttl_seconds"]:
+    if response["cache_ttl_seconds"] and not preview_active:
         set_cached("campsite_cache", cache_key, response)
     return response
 
@@ -36410,7 +36689,9 @@ async def explore_place_detail(place_id: str):
     place = _find_explore_place(place_id)
     if not place:
         raise HTTPException(404, "Explore place not found")
-    return _attach_official_nearby_source_pack(place)
+    return _attach_official_nearby_source_pack(
+        _attach_internal_preview_child_source_pack(place)
+    )
 
 
 @app.post("/api/explore/places/bulk")
@@ -36447,7 +36728,9 @@ async def explore_places_bulk(body: ExplorePlacesBulkRequest):
             missing.append(place_id)
             continue
         try:
-            places.append(_attach_official_nearby_source_pack(place))
+            places.append(_attach_official_nearby_source_pack(
+                _attach_internal_preview_child_source_pack(place)
+            ))
         except Exception:
             try:
                 places.append(_clean_explore_public_response_profile(place))

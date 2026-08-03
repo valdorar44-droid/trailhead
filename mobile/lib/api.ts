@@ -296,7 +296,8 @@ async function reqWithToken<T>(path: string, opts: RequestInit = {}, tokenOverri
   };
   if (token) headers['Authorization'] = `Bearer ${token}`;
   const usesExplorePreviewCatalog = path.startsWith('/api/explore/')
-    || path.startsWith('/api/campsites/');
+    || path.startsWith('/api/campsites/')
+    || path === '/api/map-card/resolve';
   if (token && EXPLORE_INTERNAL_DATA_PREVIEW && usesExplorePreviewCatalog) {
     headers['X-Trailhead-Explore-Preview'] = 'internal';
   }
@@ -930,10 +931,17 @@ export const api = {
     ),
   resolveMapCard: (data: MapCardResolveRequest) => {
     const payload = normalizePlaceIdPayload(data);
+    const run = () => req<MapCardResolveResponse>(
+      '/api/map-card/resolve',
+      { method: 'POST', body: JSON.stringify(payload) },
+    );
+    // Internal preview responses are account-scoped and must never survive an
+    // admin logout/account switch in the process-global request cache.
+    if (EXPLORE_INTERNAL_DATA_PREVIEW) return run();
     return guardedRequest(
       `map-card:${payload.kind || 'place'}:${payload.source || ''}:${payload.id || payload.provider_place_id || payload.place_id || ''}:${normalizeRequestText(payload.name || '')}:${stableNumber(payload.lat, 4)}:${stableNumber(payload.lng, 4)}`,
       10 * 60_000,
-      () => req<MapCardResolveResponse>('/api/map-card/resolve', { method: 'POST', body: JSON.stringify(payload) }),
+      run,
     );
   },
   getCampsites: (lat: number, lng: number, radius = 25) =>
@@ -1063,15 +1071,18 @@ export const api = {
     }
     return req<ExploreCatalog>(`/api/explore/places?${qs.toString()}`);
   },
-  getExploreRouteRank: (data: ExploreRouteRankRequest) =>
-    guardedRequest(
+  getExploreRouteRank: (data: ExploreRouteRankRequest) => {
+    const run = () => req<ExploreRouteRankResponse>('/api/explore/route-rank', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+    if (EXPLORE_INTERNAL_DATA_PREVIEW) return run();
+    return guardedRequest(
       `explore-route-rank:${stableRouteKey(data.route as [number, number][])}:${(data.categories ?? []).join(',')}:${data.q ?? ''}:${data.limit ?? 48}:${data.max_distance_mi ?? 90}`,
       5 * 60_000,
-      () => req<ExploreRouteRankResponse>('/api/explore/route-rank', {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
-    ),
+      run,
+    );
+  },
   getExplorePlace: (placeId: string) =>
     req<ExplorePlaceProfile>(`/api/explore/places/${encodeURIComponent(placeId)}`),
   getExplorePlacesBulk: (placeIds: string[], forceRefresh = false) =>

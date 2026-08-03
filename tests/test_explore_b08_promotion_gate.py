@@ -138,6 +138,7 @@ class ExploreB08PromotionGateTests(unittest.TestCase):
         return {
             "schema_version": 1,
             "stage": "internal",
+            "public_promotion_compatible": False,
             "count": 1,
             "candidate": {
                 "agency_revision": self.agency_revision,

@@ -7,7 +7,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from types import SimpleNamespace
 
 import dashboard.server as server
@@ -21,7 +21,11 @@ class ExploreNpsChildInternalPreviewTests(unittest.TestCase):
         self.old_path = server.EXPLORE_INTERNAL_PREVIEW
         self.old_cache = copy.deepcopy(server._EXPLORE_INTERNAL_PREVIEW_CACHE)
         self.old_child_cache = copy.deepcopy(server._EXPLORE_CHILDREN_BY_PARENT_CACHE)
-        server._EXPLORE_INTERNAL_PREVIEW_CACHE.update({"key": None, "profiles": [], "children": []})
+        server._EXPLORE_INTERNAL_PREVIEW_CACHE.clear()
+        server._EXPLORE_INTERNAL_PREVIEW_CACHE.update({
+            "key": None, "profiles": [], "children": [], "status": "not_loaded",
+            "contract_id": "",
+        })
         server._EXPLORE_CHILDREN_BY_PARENT_CACHE.update({"key": None, "by_parent": {}})
 
     def tearDown(self):
@@ -35,7 +39,37 @@ class ExploreNpsChildInternalPreviewTests(unittest.TestCase):
         else:
             os.environ["TRAILHEAD_EXPLORE_DATA_STAGE"] = self.old_stage
 
+    @staticmethod
+    def _sidecar_batches():
+        children = json.loads(builder.DEFAULT_OUTPUT.read_text())["children"]
+        return children[:156], children[156:326], children[326:457], children[457:]
+
+    @staticmethod
+    def _require_local_builder_evidence():
+        paths = (
+            builder.DEFAULT_NPS_CHILDREN,
+            builder.DEFAULT_NPS_CHILD_MANIFEST,
+            builder.DEFAULT_NPS_CHILD_AUDIT,
+            builder.DEFAULT_NPS_CHILD_REVIEW,
+            builder.DEFAULT_NPS_CHILDREN_2,
+            builder.DEFAULT_NPS_CHILD_MANIFEST_2,
+            builder.DEFAULT_NPS_CHILD_AUDIT_2,
+            builder.DEFAULT_NPS_CHILD_REVIEW_2,
+            builder.DEFAULT_NPS_CHILDREN_3,
+            builder.DEFAULT_NPS_CHILD_MANIFEST_3,
+            builder.DEFAULT_NPS_CHILD_AUDIT_3,
+            builder.DEFAULT_NPS_CHILD_REVIEW_3,
+            builder.DEFAULT_NPS_CHILD_CONTRACT,
+            builder.DEFAULT_NPS_CHILD_CONTRACT_MANIFEST,
+            builder.DEFAULT_NPS_CHILD_CONTRACT_AUDIT,
+            builder.DEFAULT_NPS_CHILD_CONTRACT_REVIEW,
+            builder.DEFAULT_NPS_CHILD_CONTRACT_DISPOSITIONS,
+        )
+        if not all(path.is_file() for path in paths):
+            raise unittest.SkipTest("local ignored builder evidence is not present in this checkout")
+
     def test_accepted_r7_binding_is_exact_and_internal_only(self):
+        self._require_local_builder_evidence()
         children, binding = builder._validated_nps_child_depth(
             builder.DEFAULT_NPS_CHILDREN,
             builder.DEFAULT_NPS_CHILD_MANIFEST,
@@ -85,18 +119,65 @@ class ExploreNpsChildInternalPreviewTests(unittest.TestCase):
             )
         )
 
+        contract_children, contract_binding = builder._validated_nps_child_contract(
+            builder.DEFAULT_NPS_CHILD_CONTRACT,
+            builder.DEFAULT_NPS_CHILD_CONTRACT_MANIFEST,
+            builder.DEFAULT_NPS_CHILD_CONTRACT_AUDIT,
+            builder.DEFAULT_NPS_CHILD_CONTRACT_REVIEW,
+            builder.DEFAULT_NPS_CHILD_CONTRACT_DISPOSITIONS,
+        )
+        self.assertEqual(len(contract_children), 236)
+        self.assertEqual(contract_binding["disposition_count"], 394)
+        self.assertEqual(contract_binding["advisory_alias_count"], 157)
+        self.assertEqual(contract_binding["active_alias_count"], 0)
+        self.assertFalse(contract_binding["public_promotion_compatible"])
+        self.assertFalse(
+            set(item["id"] for item in [*children, *children_2, *children_3]).intersection(
+                item["id"] for item in contract_children
+            )
+        )
+
     def test_batch_combiner_preserves_order_and_rejects_cross_batch_duplicates(self):
         first = [{"id": "batch-1"}]
         second = [{"id": "batch-2"}]
         third = [{"id": "batch-3"}]
+        fourth = [{"id": "contract-1"}]
         self.assertEqual(
-            [item["id"] for item in builder._combine_nps_child_batches(first, second, third)],
-            ["batch-1", "batch-2", "batch-3"],
+            [item["id"] for item in builder._combine_nps_child_batches(first, second, third, fourth)],
+            ["batch-1", "batch-2", "batch-3", "contract-1"],
         )
         with self.assertRaises(SystemExit):
-            builder._combine_nps_child_batches(first, second, [{"id": "batch-1"}])
+            builder._combine_nps_child_batches(first, second, third, [{"id": "batch-1"}])
+
+    def test_mount_validator_rejects_source_collision_and_missing_parent(self):
+        children = [
+            {
+                "id": f"place:nps-child:test:places:{index}",
+                "source_ids": [f"source-{index}"],
+                "parent_hub_id": "place:nps:test",
+                "module_target": "see",
+            }
+            for index in range(693)
+        ]
+        contract = children[-236:]
+        builder._validate_nps_child_preview_mount(
+            children, contract, public_parent_ids={"place:nps:test"},
+        )
+        collision = copy.deepcopy(children)
+        collision[-1]["source_ids"] = ["source-0"]
+        with self.assertRaises(SystemExit):
+            builder._validate_nps_child_preview_mount(
+                collision, collision[-236:], public_parent_ids={"place:nps:test"},
+            )
+        missing_parent = copy.deepcopy(children)
+        missing_parent[-1]["parent_hub_id"] = "place:nps:missing"
+        with self.assertRaises(SystemExit):
+            builder._validate_nps_child_preview_mount(
+                missing_parent, missing_parent[-236:], public_parent_ids={"place:nps:test"},
+            )
 
     def test_manifest_hash_mismatch_is_rejected(self):
+        self._require_local_builder_evidence()
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             paths = {}
@@ -136,10 +217,34 @@ class ExploreNpsChildInternalPreviewTests(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 qa.audit(path)
 
+    def test_generated_sidecar_fails_qa_when_contract_binding_drifts(self):
+        payload = json.loads(builder.DEFAULT_OUTPUT.read_text())
+        payload["candidate"]["nps_child_contract"]["artifact_sha256"] = "0" * 64
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "preview.json"
+            path.write_text(json.dumps(payload))
+            with self.assertRaises(SystemExit):
+                qa.audit(path)
+
+    def test_generated_sidecar_passes_qa_in_clean_checkout_without_ignored_evidence(self):
+        real_is_file = Path.is_file
+
+        def tracked_checkout_is_file(path: Path) -> bool:
+            if "/data/explore/audit_candidates/" in path.as_posix():
+                return False
+            return real_is_file(path)
+
+        with patch.object(Path, "is_file", tracked_checkout_is_file):
+            result = qa.audit(builder.DEFAULT_OUTPUT)
+        self.assertTrue(result["passed"])
+        self.assertEqual(result["child_count"], 693)
+
     def test_generated_sidecar_fails_qa_when_accepted_batch_3_file_drifts(self):
         accepted_artifact = (
             qa.ROOT / qa.EXPECTED_NPS_CHILD_BINDING_3["artifact_path"]
         ).resolve()
+        if not accepted_artifact.is_file():
+            self.skipTest("local ignored builder evidence is not present in this checkout")
         real_sha256 = qa._sha256
 
         def drift_batch_3(path: Path) -> str:
@@ -152,6 +257,7 @@ class ExploreNpsChildInternalPreviewTests(unittest.TestCase):
                 qa.audit(builder.DEFAULT_OUTPUT)
 
     def test_builder_rejects_self_consistent_alternate_child_artifacts(self):
+        self._require_local_builder_evidence()
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             copies = {}
@@ -199,6 +305,123 @@ class ExploreNpsChildInternalPreviewTests(unittest.TestCase):
         self.assertEqual(public_enriched["places"][0]["id"], "public-enrich")
         self.assertEqual(public_bulk["places"][0]["id"], "public-bulk")
 
+    def test_runtime_corrupt_sidecar_clears_previously_cached_children(self):
+        os.environ["TRAILHEAD_EXPLORE_DATA_STAGE"] = "internal"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "preview.json"
+            path.write_bytes(builder.DEFAULT_OUTPUT.read_bytes())
+            server.EXPLORE_INTERNAL_PREVIEW = path
+            self.assertEqual(len(server._load_explore_internal_preview_children()), 693)
+
+            path.write_text("{broken json", encoding="utf-8")
+            self.assertEqual(server._load_explore_internal_preview_profiles(), [])
+            self.assertEqual(server._load_explore_internal_preview_children(), [])
+            self.assertEqual(server._EXPLORE_INTERNAL_PREVIEW_CACHE.get("profiles"), [])
+            self.assertEqual(server._EXPLORE_INTERNAL_PREVIEW_CACHE.get("children"), [])
+            self.assertEqual(server._EXPLORE_INTERNAL_PREVIEW_CACHE.get("status"), "sidecar_invalid")
+
+    def test_runtime_rejects_parseable_public_or_promotable_sidecar(self):
+        payload = json.loads(builder.DEFAULT_OUTPUT.read_text())
+        self.assertTrue(server._explore_internal_preview_payload_valid(payload))
+        public = copy.deepcopy(payload)
+        public["stage"] = "public"
+        self.assertFalse(server._explore_internal_preview_payload_valid(public))
+        promotable = copy.deepcopy(payload)
+        promotable["public_promotion_compatible"] = True
+        self.assertFalse(server._explore_internal_preview_payload_valid(promotable))
+
+    def test_runtime_rejects_parseable_content_drift(self):
+        payload = json.loads(builder.DEFAULT_OUTPUT.read_text())
+        mutations = {
+            "child copy": lambda value: value["children"][0].__setitem__("name", "Changed child"),
+            "child parent": lambda value: value["children"][0].__setitem__("parent_hub_id", "place:nps:grsm"),
+            "batch binding": lambda value: value["candidate"]["nps_child_depth_batches"].__setitem__(0, {}),
+            "parent payload": lambda value: value["places"].__setitem__(0, {}),
+        }
+        for label, mutate in mutations.items():
+            with self.subTest(label=label):
+                drifted = copy.deepcopy(payload)
+                mutate(drifted)
+                self.assertFalse(server._explore_internal_preview_payload_valid(drifted))
+
+    def test_runtime_parseable_content_drift_clears_cached_preview(self):
+        os.environ["TRAILHEAD_EXPLORE_DATA_STAGE"] = "internal"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "preview.json"
+            payload = json.loads(builder.DEFAULT_OUTPUT.read_text())
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            server.EXPLORE_INTERNAL_PREVIEW = path
+            self.assertEqual(len(server._load_explore_internal_preview_children()), 693)
+
+            payload["children"][0]["name"] = "Changed child"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertEqual(server._load_explore_internal_preview_profiles(), [])
+            self.assertEqual(server._load_explore_internal_preview_children(), [])
+            self.assertEqual(server._EXPLORE_INTERNAL_PREVIEW_CACHE.get("status"), "sidecar_invalid")
+
+    def test_internal_map_card_bypasses_public_cache_both_directions(self):
+        shared: dict[str, dict] = {}
+
+        def fake_get(_table, key, ttl_seconds=None):
+            return copy.deepcopy(shared.get(key))
+
+        def fake_set(_table, key, value):
+            shared[key] = copy.deepcopy(value)
+
+        body = server.MapCardResolveRequest(
+            kind="place", id="place:nps:grsm", place_id="place:nps:grsm",
+            source="trailhead_explore", name="Great Smoky Mountains National Park",
+            lat=35.60, lng=-83.50, type="park",
+        )
+        empty = {
+            "things_to_do": [], "things_to_see": [], "visitor_centers": [],
+            "campgrounds_nearby": [], "trails": [], "trip_services": [],
+        }
+
+        def canonical_rails(_body):
+            result = copy.deepcopy(empty)
+            if server._explore_internal_preview_context.get():
+                result["campgrounds_nearby"] = [{
+                    "id": "preview-child", "name": "Preview child",
+                    "lat": 35.61, "lng": -83.51, "type": "camp",
+                }]
+            return result
+
+        with patch.object(server, "get_cached", side_effect=fake_get) as get_cached, patch.object(
+            server, "set_cached", side_effect=fake_set,
+        ) as set_cached, patch.object(
+            server, "_canonical_search_explore_card", return_value={
+                "id": body.id, "name": body.name, "lat": body.lat, "lng": body.lng,
+                "type": "park", "source": "nps",
+            },
+        ), patch.object(
+            server, "_canonical_explore_related_rails", side_effect=canonical_rails,
+        ), patch.object(
+            server, "_discovery_context_smart_places", new=AsyncMock(return_value={"places": []}),
+        ), patch.object(
+            server, "trails_discover", new=AsyncMock(return_value={"trails": []}),
+        ), patch.object(server, "_is_broad_map_place", return_value=False):
+            public_first = asyncio.run(server.resolve_map_card(body, None))
+            marker = server._explore_internal_preview_context.set(True)
+            try:
+                internal = asyncio.run(server.resolve_map_card(body, None))
+            finally:
+                server._explore_internal_preview_context.reset(marker)
+            public_after = asyncio.run(server.resolve_map_card(body, None))
+
+        self.assertEqual(public_first["related"]["campgrounds_nearby"], [])
+        self.assertEqual(
+            [item["id"] for item in internal["related"]["campgrounds_nearby"]],
+            ["preview-child"],
+        )
+        self.assertEqual(internal["cache_status"], "uncached")
+        self.assertEqual(internal["cache_ttl_seconds"], 0)
+        self.assertFalse(internal["cached"])
+        self.assertEqual(public_after["cache_status"], "hit")
+        self.assertEqual(public_after["related"]["campgrounds_nearby"], [])
+        self.assertEqual(get_cached.call_count, 2)
+        self.assertEqual(set_cached.call_count, 1)
+
     def test_parent_rails_prefer_source_backed_child_classification(self):
         payload = json.loads(builder.DEFAULT_OUTPUT.read_text())
         by_name = {item["name"]: server._explore_v3_place_to_profile(item) for item in payload["children"]}
@@ -224,7 +447,7 @@ class ExploreNpsChildInternalPreviewTests(unittest.TestCase):
         }]}
         merged = server._merge_explore_internal_preview(base)
         self.assertEqual(merged["internal_preview"]["count"], 13)
-        self.assertEqual(merged["internal_preview"]["child_count"], 457)
+        self.assertEqual(merged["internal_preview"]["child_count"], 693)
         proof = next(item for item in merged["places"] if item["id"] == "place:usfs:9006")
         child = next(item for item in merged["places"] if item["id"].startswith("place:nps-child:blri:"))
         self.assertLess(proof["summary"]["rank"], 0)
@@ -284,8 +507,7 @@ class ExploreNpsChildInternalPreviewTests(unittest.TestCase):
 
     def test_batch_2_child_reaches_detail_search_and_parent_rails_only_in_internal_preview(self):
         payload = json.loads(builder.DEFAULT_OUTPUT.read_text())
-        batch_1 = json.loads(builder.DEFAULT_NPS_CHILDREN.read_text())["places"]
-        batch_2 = json.loads(builder.DEFAULT_NPS_CHILDREN_2.read_text())["places"]
+        batch_1, batch_2, _, _ = self._sidecar_batches()
         expected_ids = [item["id"] for item in [*batch_1, *batch_2]]
         self.assertEqual(
             [item["id"] for item in payload["children"][:len(expected_ids)]],
@@ -338,12 +560,14 @@ class ExploreNpsChildInternalPreviewTests(unittest.TestCase):
 
     def test_batch_3_child_reaches_detail_search_and_parent_rails_only_in_internal_preview(self):
         payload = json.loads(builder.DEFAULT_OUTPUT.read_text())
-        batch_1 = json.loads(builder.DEFAULT_NPS_CHILDREN.read_text())["places"]
-        batch_2 = json.loads(builder.DEFAULT_NPS_CHILDREN_2.read_text())["places"]
-        batch_3 = json.loads(builder.DEFAULT_NPS_CHILDREN_3.read_text())["places"]
-        expected_ids = [item["id"] for item in [*batch_1, *batch_2, *batch_3]]
+        batch_1, batch_2, batch_3, contract = self._sidecar_batches()
+        expected_ids = [item["id"] for item in [*batch_1, *batch_2, *batch_3, *contract]]
         self.assertEqual([item["id"] for item in payload["children"]], expected_ids)
         self.assertEqual(payload["children"][len(batch_1) + len(batch_2)]["id"], batch_3[0]["id"])
+        self.assertEqual(
+            payload["children"][len(batch_1) + len(batch_2) + len(batch_3)]["id"],
+            contract[0]["id"],
+        )
         self.assertEqual(payload["candidate"]["nps_child_depth"]["batch_id"], "post-b08-nps-child-depth-b1")
         self.assertEqual(
             [item["batch_id"] for item in payload["candidate"]["nps_child_depth_batches"]],
@@ -353,6 +577,11 @@ class ExploreNpsChildInternalPreviewTests(unittest.TestCase):
                 "post-b08-nps-child-depth-b3",
             ],
         )
+        self.assertEqual(
+            payload["candidate"]["nps_child_contract"]["contract_id"],
+            "post-b08-nps-child-contract-r1",
+        )
+        self.assertEqual(payload["candidate"]["nps_child_contract"]["active_alias_count"], 0)
 
         os.environ["TRAILHEAD_EXPLORE_DATA_STAGE"] = "internal"
         server.EXPLORE_INTERNAL_PREVIEW = builder.DEFAULT_OUTPUT
@@ -397,6 +626,167 @@ class ExploreNpsChildInternalPreviewTests(unittest.TestCase):
         self.assertEqual(searched.results[0].detail_ref, campground_id)
         self.assertEqual(searched.results[0].kind, "campground")
         self.assertEqual(later_page.results, [])
+
+    def test_contract_child_reaches_parent_detail_search_and_map_rail_only_in_preview(self):
+        os.environ["TRAILHEAD_EXPLORE_DATA_STAGE"] = "internal"
+        server.EXPLORE_INTERNAL_PREVIEW = builder.DEFAULT_OUTPUT
+        parent = {
+            "id": "place:nps:glca",
+            "summary": {"title": "Glen Canyon National Recreation Area", "lat": 37.1, "lng": -111.2},
+            "source_pack": {"primary": "National Park Service"},
+        }
+        merged = server._merge_explore_internal_preview({"catalog_id": "public", "places": [parent]})
+        bullfrog_id = "place:nps-child:glca:campgrounds:4285489c-2d25-4967-91e7-18597c645a0f"
+
+        with patch.object(server, "_load_explore_catalog", return_value=merged):
+            server._EXPLORE_CHILDREN_BY_PARENT_CACHE.update({"key": None, "by_parent": {}})
+            self.assertEqual(server._find_explore_place(bullfrog_id)["id"], bullfrog_id)
+            parent_children = server._explore_children_for_parent(parent["id"])
+            self.assertIn(bullfrog_id, {item["id"] for item in parent_children})
+            with patch.object(server, "_canonical_explore_place_id", return_value=parent["id"]):
+                rails = server._canonical_explore_related_rails(server.MapCardResolveRequest(
+                    source="trailhead_explore", place_id=parent["id"], lat=37.1, lng=-111.2,
+                ))
+            self.assertIn("Bullfrog RV & Campground", {
+                item.get("name") for item in rails["campgrounds_nearby"]
+            })
+
+        request = server.SearchRequestV2(
+            query="Bullfrog RV & Campground", categories=["campground"], limit=8,
+        )
+        page = server.SearchPageV2(query=request.query, results=[], revision="public", elapsed_ms=1)
+        self.assertEqual(server._search_v2_apply_internal_preview_page(page, request=request).results, [])
+        marker = server._explore_internal_preview_context.set(True)
+        try:
+            searched = server._search_v2_apply_internal_preview_page(page, request=request)
+        finally:
+            server._explore_internal_preview_context.reset(marker)
+        self.assertEqual([item.result_id for item in searched.results], [bullfrog_id])
+        bullfrog = next(item for item in merged["places"] if item.get("id") == bullfrog_id)
+        visible_copy = " ".join((
+            str((bullfrog.get("summary") or {}).get("short_description") or ""),
+            str((bullfrog.get("profile") or {}).get("summary") or ""),
+            str((bullfrog.get("profile") or {}).get("story") or ""),
+        ))
+        self.assertNotIn("http://", visible_copy)
+        self.assertNotIn("https://", visible_copy)
+
+    def test_parent_title_collision_does_not_outrank_acadia_hub(self):
+        os.environ["TRAILHEAD_EXPLORE_DATA_STAGE"] = "internal"
+        server.EXPLORE_INTERNAL_PREVIEW = builder.DEFAULT_OUTPUT
+        provenance = server.SearchProvenanceV2(
+            provider="trailhead", source_label="National Park Service",
+            provider_result_id="place:nps:acad", attribution="National Park Service",
+            temporary_use_only=False,
+        )
+        parent = server.SearchResultV2(
+            result_id="place:nps:acad", canonical_place_id="place:nps:acad",
+            title="Acadia National Park", kind="park", categories=["park"],
+            provenance=provenance, persistence_policy="canonical",
+            detail_ref="place:nps:acad", score=1000, match_reason="exact_title",
+        )
+        page = server.SearchPageV2(
+            query="Acadia National Park", results=[parent], revision="public", elapsed_ms=1,
+        )
+        marker = server._explore_internal_preview_context.set(True)
+        try:
+            result = server._search_v2_apply_internal_preview_page(
+                page, request=server.SearchRequestV2(query=page.query, limit=8),
+            )
+        finally:
+            server._explore_internal_preview_context.reset(marker)
+        self.assertEqual([item.result_id for item in result.results], ["place:nps:acad"])
+
+    def test_acadia_projection_omits_parent_copy_and_keeps_reviewed_gateway_once(self):
+        os.environ["TRAILHEAD_EXPLORE_DATA_STAGE"] = "internal"
+        server.EXPLORE_INTERNAL_PREVIEW = builder.DEFAULT_OUTPUT
+        parent = {
+            "id": "place:nps:acad",
+            "summary": {"title": "Acadia National Park", "lat": 44.35, "lng": -68.25},
+            "source_pack": {"primary": "National Park Service"},
+        }
+        merged = server._merge_explore_internal_preview({"catalog_id": "public", "places": [parent]})
+        marker = server._explore_internal_preview_context.set(True)
+        try:
+            with patch.object(server, "_load_explore_catalog", return_value=merged):
+                server._EXPLORE_CHILDREN_BY_PARENT_CACHE.update({"key": None, "by_parent": {}})
+                projected = server._attach_internal_preview_child_source_pack(parent)
+        finally:
+            server._explore_internal_preview_context.reset(marker)
+
+        self.assertNotIn(
+            "Acadia National Park",
+            [item.get("title") for item in projected["source_pack"].get("things_to_see", [])],
+        )
+        all_items = [
+            item
+            for key in ("things_to_see", "things_to_do", "campgrounds", "visitor_centers")
+            for item in projected["source_pack"].get(key, [])
+        ]
+        gateway_id = "place:nps-child:acad:visitorcenters:99b33fa9-2579-415c-b2c7-2a29879744f8"
+        self.assertEqual(
+            [item.get("source_id") for item in all_items].count(gateway_id),
+            1,
+        )
+        self.assertFalse(any("bea85a63" in str(item.get("source_id") or "") for item in all_items))
+
+    def test_internal_parent_projection_exposes_all_smokies_stays_without_public_mutation(self):
+        os.environ["TRAILHEAD_EXPLORE_DATA_STAGE"] = "internal"
+        server.EXPLORE_INTERNAL_PREVIEW = builder.DEFAULT_OUTPUT
+        parent = {
+            "id": "place:nps:grsm",
+            "summary": {"title": "Great Smoky Mountains National Park", "lat": 35.6, "lng": -83.5},
+            "source_pack": {
+                "primary": "National Park Service",
+                "campgrounds": [{"title": "Camping information", "source_id": "official-camping"}],
+            },
+        }
+        original = copy.deepcopy(parent)
+        merged = server._merge_explore_internal_preview({"catalog_id": "public", "places": [parent]})
+        marker = server._explore_internal_preview_context.set(True)
+        try:
+            with patch.object(server, "_load_explore_catalog", return_value=merged):
+                server._EXPLORE_CHILDREN_BY_PARENT_CACHE.update({"key": None, "by_parent": {}})
+                internal = server._attach_internal_preview_child_source_pack(parent)
+        finally:
+            server._explore_internal_preview_context.reset(marker)
+        canonical = [
+            item for item in internal["source_pack"]["campgrounds"]
+            if str(item.get("source_id") or "").startswith("place:nps-child:grsm:campgrounds:")
+        ]
+        self.assertEqual(len(canonical), 13)
+        self.assertEqual(canonical[-1]["title"], "Smokemont Group Campground")
+        self.assertEqual(parent, original)
+        self.assertIs(server._attach_internal_preview_child_source_pack(parent), parent)
+
+    def test_internal_parent_projection_preserves_reviewed_child_media_rights(self):
+        os.environ["TRAILHEAD_EXPLORE_DATA_STAGE"] = "internal"
+        server.EXPLORE_INTERNAL_PREVIEW = builder.DEFAULT_OUTPUT
+        parent = {
+            "id": "place:nps:blri",
+            "summary": {"title": "Blue Ridge Parkway", "lat": 36.5, "lng": -80.9},
+            "source_pack": {"primary": "National Park Service"},
+        }
+        merged = server._merge_explore_internal_preview({"catalog_id": "public", "places": [parent]})
+        marker = server._explore_internal_preview_context.set(True)
+        try:
+            with patch.object(server, "_load_explore_catalog", return_value=merged):
+                server._EXPLORE_CHILDREN_BY_PARENT_CACHE.update({"key": None, "by_parent": {}})
+                projected = server._attach_internal_preview_child_source_pack(parent)
+        finally:
+            server._explore_internal_preview_context.reset(marker)
+        doughton = next(
+            item
+            for item in projected["source_pack"]["campgrounds"]
+            if item.get("title") == "Doughton Park Campground"
+        )
+        self.assertEqual(
+            doughton["image_caption"],
+            "In summer, wildflowers bloom in the fields around Doughton Park",
+        )
+        self.assertEqual(doughton["image_credit"], "NPS Photo")
+        self.assertEqual(doughton["image_license"], "National Park Service public data")
+        self.assertEqual(doughton["image_rights_state"], "source_terms_reviewed")
 
 
     def test_internal_search_requires_unique_exact_alias_and_standard_filters(self):

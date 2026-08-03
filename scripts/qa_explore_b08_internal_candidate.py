@@ -70,6 +70,49 @@ EXPECTED_NPS_CHILD_BINDING_3 = {
     "review_path": "data/explore/audit_candidates/internal/post-b08-nps-child-depth-b3-r5/review.json",
     "review_sha256": "7ae2871be90b5e628e4a719202c45e700eaeb842e8451cbe20cc4893c687d348",
 }
+EXPECTED_NPS_CHILD_CONTRACT_BINDING = {
+    "contract_id": "post-b08-nps-child-contract-r1",
+    "manifest_path": "data/explore/audit_candidates/internal/post-b08-nps-child-contract-r1/manifest.json",
+    "manifest_sha256": "89ba6376343c593f978d05061eef47bcd9aac8bae23b0de428286bd562032e6d",
+    "artifact_path": "data/explore/audit_candidates/internal/post-b08-nps-child-contract-r1/nps_child_contract_v1.json",
+    "artifact_sha256": "a4a6db4becb705d43351e820c7a61f8bb335dde4244a19adfcce1c384ad0046a",
+    "audit_path": "data/explore/audit_candidates/internal/post-b08-nps-child-contract-r1/audit.json",
+    "audit_sha256": "01e7953e0ac50b51f047872661dd4cb97fe23c82be772c7dcb50ae070674f639",
+    "review_path": "data/explore/audit_candidates/internal/post-b08-nps-child-contract-r1/review.json",
+    "review_sha256": "9166f08cd27aa7f141ea4f460795c891328bb978dd85dced47c8b1cdab3bcdc8",
+    "dispositions_path": "data/explore/audit_candidates/internal/post-b08-nps-child-contract-r1/child_dispositions.json",
+    "dispositions_sha256": "4dc8a35e56774df88fdd2ca0aa557b8f76f91be8b73311784251d9a302591518",
+    "disposition_count": 394,
+    "materialized_count": 236,
+    "new_disposition_count": 237,
+    "merged_duplicate_count": 1,
+    "legacy_alias_count": 157,
+    "advisory_alias_count": 157,
+    "active_alias_count": 0,
+    "identity_hashes": {
+        "legacy": "8a6dd528b262654e97a4b98625aeb3b1f4a6d77c96bc1fd27f9d6d8052ee33e4",
+        "new": "d94ee87a0ca79e476297e44d7cb2f4224599b28749ffcae9ab90c2ede631bc0c",
+        "combined": "fc6ea5fc19cf4ec1b3f794902502e0a30dbc6380ff9fb7cfd5eba9dfa94b6524",
+    },
+    "promotion_ready": False,
+    "public_promotion_compatible": False,
+    "live_serving_index_modified": False,
+    "audit_passed": True,
+}
+NPS_CHILD_CONTRACT_IDENTITY_LOCK_PATH = (
+    "tests/fixtures/explore_sources/nps_child_contract_r1_identity.json"
+)
+NPS_CHILD_CONTRACT_IDENTITY_LOCK_SHA256 = (
+    "d5aad97024b47c4d47fe353e9781391343c8e8fd83f7c9bdab35f7f9b0ed3508"
+)
+NPS_CHILD_CONTRACT_MERGED_DUPLICATE_ID = (
+    "place:nps-child:acad:places:bea85a63-0ce1-42b6-b429-88c68fb55a30"
+)
+EXPECTED_NPS_CHILD_ID_HASHES = {
+    "accepted_batches": "28c456053a3d7d8be8ef07986d116eca688fbd0d8824707bc9069389d134772f",
+    "contract_materialized": "ea23a5e4f3925195febc232f76ad7bd49ecc065437c970d25b7c8735e876f76e",
+    "combined": "ac41f5591ba4f21c73890b18cebaddbd02f127a8e94e28d1cc323f6e0a81ab1f",
+}
 
 
 EXPECTED_IDS = (
@@ -128,6 +171,49 @@ UNSAFE_HOST_SUFFIXES = (".local", ".internal", ".localhost", ".cms.nps.doi.net")
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _ordered_ids_sha256(values: list[str]) -> str:
+    return hashlib.sha256(("\n".join(values) + "\n").encode()).hexdigest()
+
+
+def _contract_identity_ids(root: Path, failures: list[str]) -> list[str]:
+    """Load the tracked identity lock used when local review artifacts are absent."""
+    path = root / NPS_CHILD_CONTRACT_IDENTITY_LOCK_PATH
+    if not path.is_file():
+        failures.append("tracked NPS child contract identity lock is missing")
+        return []
+    if _sha256(path) != NPS_CHILD_CONTRACT_IDENTITY_LOCK_SHA256:
+        failures.append("tracked NPS child contract identity lock hash differs")
+        return []
+    try:
+        payload = json.loads(path.read_text())
+    except (OSError, json.JSONDecodeError):
+        failures.append("tracked NPS child contract identity lock is unreadable")
+        return []
+    candidates = payload.get("new_candidates") or []
+    candidate_ids = [
+        str(item[0] or "")
+        for item in candidates
+        if isinstance(item, list) and len(item) == 2
+    ]
+    if (
+        payload.get("schema") != "ExploreNpsChildIdentityLockV1"
+        or payload.get("schema_version") != 1
+        or payload.get("contract_id") != EXPECTED_NPS_CHILD_CONTRACT_BINDING["contract_id"]
+        or len(candidates) != 237
+        or len(candidate_ids) != 237
+        or any(not item_id for item_id in candidate_ids)
+        or len(candidate_ids) != len(set(candidate_ids))
+        or NPS_CHILD_CONTRACT_MERGED_DUPLICATE_ID not in candidate_ids
+    ):
+        failures.append("tracked NPS child contract identity lock is invalid")
+        return []
+    return [
+        item_id
+        for item_id in candidate_ids
+        if item_id != NPS_CHILD_CONTRACT_MERGED_DUPLICATE_ID
+    ]
 
 
 def _valid_coordinates(place: dict[str, Any]) -> bool:
@@ -244,6 +330,20 @@ def _validate_candidate_binding(
 ) -> None:
     candidate = payload.get("candidate") if isinstance(payload.get("candidate"), dict) else {}
     sources = payload.get("sources") if isinstance(payload.get("sources"), dict) else {}
+    evidence_keys = (
+        "agency_manifest_path",
+        "agency_catalog_path",
+        "combined_manifest_path",
+        "nps_catalog_path",
+        "serving_index_path",
+        "catalog_merge_review_path",
+        "promotion_review_path",
+    )
+    evidence_paths = [root / expected[key] for key in evidence_keys]
+    evidence_presence = [path.is_file() for path in evidence_paths]
+    verify_local_evidence = all(evidence_presence)
+    if any(evidence_presence) and not verify_local_evidence:
+        failures.append("accepted b08 local evidence set is incomplete")
     if candidate.get("agency_revision") != expected["agency_revision"]:
         failures.append("sidecar is not bound to the accepted agency revision")
     if candidate.get("nps_revision") != expected["nps_revision"]:
@@ -270,7 +370,7 @@ def _validate_candidate_binding(
         if source.get("revision") != expected_revision:
             failures.append(f"{source_key}: sidecar source revision differs from the accepted candidate")
         source_path = root / expected[path_key]
-        if not source_path.is_file() or _sha256(source_path) != expected[hash_key]:
+        if verify_local_evidence and _sha256(source_path) != expected[hash_key]:
             failures.append(f"{source_key}: accepted source artifact is missing or changed on disk")
 
     if (
@@ -299,6 +399,8 @@ def _validate_candidate_binding(
             },
         ),
     ):
+        if not verify_local_evidence:
+            continue
         manifest_path = root / expected[manifest_path_key]
         if not manifest_path.is_file() or _sha256(manifest_path) != expected[manifest_hash_key]:
             failures.append(f"{manifest_path_key}: accepted manifest is missing or changed on disk")
@@ -332,6 +434,8 @@ def _validate_candidate_binding(
         ("catalog_merge_review_path", "catalog_merge_review_sha256", "agency", expected_agency_catalog),
         ("promotion_review_path", "promotion_review_sha256", "agency_merged", expected_agency_serving),
     ):
+        if not verify_local_evidence:
+            continue
         review_path = root / expected[review_path_key]
         if not review_path.is_file() or _sha256(review_path) != expected[review_hash_key]:
             failures.append(f"{review_path_key}: combined review is missing or changed on disk")
@@ -358,7 +462,11 @@ def audit(
     failures: list[str] = []
     _validate_candidate_binding(payload, failures, root=root, expected=expected)
     ids = tuple(str(item.get("id") or "") for item in places)
-    if payload.get("schema_version") != 1 or payload.get("stage") != "internal":
+    if (
+        payload.get("schema_version") != 1
+        or payload.get("stage") != "internal"
+        or payload.get("public_promotion_compatible") is not False
+    ):
         failures.append("sidecar schema or stage is not internal v1")
     if payload.get("count") != len(places):
         failures.append("declared count does not match place count")
@@ -371,13 +479,13 @@ def audit(
         candidate = payload.get("candidate") or {}
         binding = candidate.get("nps_child_depth") or {}
         bindings = candidate.get("nps_child_depth_batches") or []
+        contract_binding = candidate.get("nps_child_contract") or {}
         expected_bindings = [
             EXPECTED_NPS_CHILD_BINDING,
             EXPECTED_NPS_CHILD_BINDING_2,
             EXPECTED_NPS_CHILD_BINDING_3,
         ]
         expected_child_ids: list[str] = []
-        missing_expected_inputs: list[str] = []
         accepted_input_pairs = (
             ("manifest_path", "manifest_sha256"),
             ("artifact_path", "artifact_sha256"),
@@ -385,32 +493,60 @@ def audit(
             ("review_path", "review_sha256"),
         )
         for expected_binding in expected_bindings:
-            for path_key, hash_key in accepted_input_pairs:
-                accepted_path = root / expected_binding[path_key]
-                if not accepted_path.is_file():
-                    missing_expected_inputs.append(expected_binding[path_key])
-                elif _sha256(accepted_path) != expected_binding[hash_key]:
+            accepted_paths = [root / expected_binding[path_key] for path_key, _ in accepted_input_pairs]
+            presence = [path.is_file() for path in accepted_paths]
+            if any(presence) and not all(presence):
+                failures.append(
+                    f"accepted NPS child {expected_binding['batch_id']} local evidence is incomplete"
+                )
+            if all(presence):
+                for (path_key, hash_key), accepted_path in zip(accepted_input_pairs, accepted_paths):
+                    if _sha256(accepted_path) == expected_binding[hash_key]:
+                        continue
                     failures.append(
                         f"accepted NPS child {expected_binding['batch_id']} {path_key} hash differs"
                     )
-            artifact = root / expected_binding["artifact_path"]
-            if not artifact.is_file():
-                continue
-            source_payload = json.loads(artifact.read_text())
-            expected_child_ids.extend(
+                artifact = root / expected_binding["artifact_path"]
+                source_payload = json.loads(artifact.read_text())
+                expected_child_ids.extend(
+                    str(item.get("id") or "")
+                    for item in source_payload.get("places") or []
+                    if isinstance(item, dict)
+                )
+        contract_input_pairs = (
+            ("manifest_path", "manifest_sha256"),
+            ("artifact_path", "artifact_sha256"),
+            ("audit_path", "audit_sha256"),
+            ("review_path", "review_sha256"),
+            ("dispositions_path", "dispositions_sha256"),
+        )
+        contract_paths = [
+            root / EXPECTED_NPS_CHILD_CONTRACT_BINDING[path_key]
+            for path_key, _ in contract_input_pairs
+        ]
+        contract_presence = [path.is_file() for path in contract_paths]
+        if any(contract_presence) and not all(contract_presence):
+            failures.append("accepted NPS child contract local evidence is incomplete")
+        if all(contract_presence):
+            for (path_key, hash_key), accepted_path in zip(contract_input_pairs, contract_paths):
+                if _sha256(accepted_path) != EXPECTED_NPS_CHILD_CONTRACT_BINDING[hash_key]:
+                    failures.append(f"accepted NPS child contract {path_key} hash differs")
+        contract_artifact = root / EXPECTED_NPS_CHILD_CONTRACT_BINDING["artifact_path"]
+        contract_identity_ids = _contract_identity_ids(root, failures)
+        if all(contract_presence):
+            source_payload = json.loads(contract_artifact.read_text())
+            artifact_contract_ids = [
                 str(item.get("id") or "")
                 for item in source_payload.get("places") or []
                 if isinstance(item, dict)
-            )
-        if missing_expected_inputs:
-            failures.append("accepted NPS child inputs are missing")
-        expected_child_count = len(expected_child_ids)
+            ]
+            if artifact_contract_ids != contract_identity_ids:
+                failures.append("accepted NPS child contract identities differ from the tracked lock")
         if (
             payload.get("child_count") != len(children)
-            or len(children) != expected_child_count
-            or expected_child_count != 457
+            or len(children) != 693
         ):
-            failures.append("NPS child count differs from the accepted 457-record combined batches")
+            failures.append("NPS child count differs from the accepted 693-record combined set")
         if any(not item_id for item_id in child_ids) or len(child_ids) != len(set(child_ids)):
             failures.append("NPS children lack unique stable IDs")
         if any(
@@ -430,15 +566,31 @@ def audit(
                 for key, expected_value in expected_binding.items():
                     if bindings[index].get(key) != expected_value:
                         failures.append(f"NPS child batch {index + 1} binding {key} differs from accepted r7")
-        if expected_child_count == 457 and child_ids != expected_child_ids:
-            failures.append("NPS child IDs or deterministic batch order differ from accepted inputs")
+        for key, expected_value in EXPECTED_NPS_CHILD_CONTRACT_BINDING.items():
+            if contract_binding.get(key) != expected_value:
+                failures.append(f"NPS child contract binding {key} differs from accepted R1")
+        accepted_batch_ids = child_ids[:457]
+        mounted_contract_ids = child_ids[457:]
+        if expected_child_ids and accepted_batch_ids != expected_child_ids:
+            failures.append("NPS child IDs or deterministic batch order differ from accepted local inputs")
+        if mounted_contract_ids != contract_identity_ids:
+            failures.append("materialized NPS child contract IDs differ from the tracked identity lock")
+        for scope, values in (
+            ("accepted_batches", accepted_batch_ids),
+            ("contract_materialized", mounted_contract_ids),
+            ("combined", child_ids),
+        ):
+            if _ordered_ids_sha256(values) != EXPECTED_NPS_CHILD_ID_HASHES[scope]:
+                failures.append(f"NPS child {scope} identity/order hash differs")
         if any(
             item.get("promotion_ready") is not False
             or item.get("live_serving_index_modified") is not False
             or item.get("audit_passed") is not True
-            for item in [binding, *bindings]
+            for item in [binding, *bindings, contract_binding]
         ):
             failures.append("NPS child binding is not an audited internal-only candidate")
+        if contract_binding.get("public_promotion_compatible") is not False:
+            failures.append("NPS child contract binding became public-promotion compatible")
 
     for place in [*places, *children]:
         place_id = str(place.get("id") or "")

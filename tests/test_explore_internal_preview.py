@@ -50,9 +50,21 @@ class ExploreInternalPreviewTests(unittest.TestCase):
             "schema_version": 1,
             "places": [preview_place("place:nps:test", "Preview Park", description)],
         }))
-        server._EXPLORE_INTERNAL_PREVIEW_CACHE.update({"key": None, "profiles": []})
+        server._EXPLORE_INTERNAL_PREVIEW_CACHE.clear()
+        server._EXPLORE_INTERNAL_PREVIEW_CACHE.update({
+            "key": None, "profiles": [], "children": [], "status": "not_loaded",
+            "contract_id": "",
+        })
+        # Most tests in this class characterize request-local merge behavior
+        # with a deliberately tiny fixture. Runtime contract validation has its
+        # own fail-closed coverage against the complete tracked sidecar.
+        self._payload_validator = patch.object(
+            server, "_explore_internal_preview_payload_valid", return_value=True,
+        )
+        self._payload_validator.start()
 
     def tearDown(self):
+        self._payload_validator.stop()
         server.EXPLORE_INTERNAL_PREVIEW = self._old_path
         if self._old_stage is None:
             os.environ.pop("TRAILHEAD_EXPLORE_DATA_STAGE", None)
@@ -219,6 +231,15 @@ class ExploreInternalPreviewTests(unittest.TestCase):
                 server._explore_internal_preview_request_code("/api/search/v2/results", "internal", "Bearer admin"),
                 "active",
             )
+            self.assertEqual(
+                server._explore_internal_preview_request_code("/api/map-card/resolve", "internal", "Bearer admin"),
+                "active",
+            )
+            for path in ("/api/map-card/resolve/", "/api/map-card", "/api/map-card/resolve/extra"):
+                self.assertEqual(
+                    server._explore_internal_preview_request_code(path, "internal", "Bearer admin"),
+                    "not_applicable",
+                )
 
     def test_reviewed_camp_detail_is_database_first_and_does_not_wait_for_ridb(self):
         reviewed_camp = server._explore_v3_place_to_profile({
@@ -689,6 +710,8 @@ class ExploreInternalPreviewTests(unittest.TestCase):
             "request_code": "active",
             "data_code": "ready",
             "profile_count": 1,
+            "child_count": 0,
+            "contract_id": "",
         })
 
     def test_cross_agency_preview_context_preserves_reviewed_copy_and_booking(self):

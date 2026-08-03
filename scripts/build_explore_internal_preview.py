@@ -70,6 +70,24 @@ ACCEPTED_NPS_CHILD_HASHES_3 = {
     "audit.json": "d811752e6975efd16a4327567340b9c8dcfff2c87130fb3729d982d77dad47a6",
     "review.json": "7ae2871be90b5e628e4a719202c45e700eaeb842e8451cbe20cc4893c687d348",
 }
+ACCEPTED_NPS_CHILD_CONTRACT = "post-b08-nps-child-contract-r1"
+DEFAULT_NPS_CHILD_CONTRACT_DIR = (
+    ROOT / f"data/explore/audit_candidates/internal/{ACCEPTED_NPS_CHILD_CONTRACT}"
+)
+DEFAULT_NPS_CHILD_CONTRACT = DEFAULT_NPS_CHILD_CONTRACT_DIR / "nps_child_contract_v1.json"
+DEFAULT_NPS_CHILD_CONTRACT_MANIFEST = DEFAULT_NPS_CHILD_CONTRACT_DIR / "manifest.json"
+DEFAULT_NPS_CHILD_CONTRACT_AUDIT = DEFAULT_NPS_CHILD_CONTRACT_DIR / "audit.json"
+DEFAULT_NPS_CHILD_CONTRACT_REVIEW = DEFAULT_NPS_CHILD_CONTRACT_DIR / "review.json"
+DEFAULT_NPS_CHILD_CONTRACT_DISPOSITIONS = (
+    DEFAULT_NPS_CHILD_CONTRACT_DIR / "child_dispositions.json"
+)
+ACCEPTED_NPS_CHILD_CONTRACT_HASHES = {
+    "manifest.json": "89ba6376343c593f978d05061eef47bcd9aac8bae23b0de428286bd562032e6d",
+    "nps_child_contract_v1.json": "a4a6db4becb705d43351e820c7a61f8bb335dde4244a19adfcce1c384ad0046a",
+    "audit.json": "01e7953e0ac50b51f047872661dd4cb97fe23c82be772c7dcb50ae070674f639",
+    "review.json": "9166f08cd27aa7f141ea4f460795c891328bb978dd85dced47c8b1cdab3bcdc8",
+    "child_dispositions.json": "4dc8a35e56774df88fdd2ca0aa557b8f76f91be8b73311784251d9a302591518",
+}
 DEFAULT_AGENCY_IDS = (
     "place:usfs:9006",
     "place:blm:moab-field-office",
@@ -335,6 +353,158 @@ def _validated_nps_child_depth(
     }
 
 
+def _validated_nps_child_contract(
+    contract_path: Path,
+    manifest_path: Path,
+    audit_path: Path,
+    review_path: Path,
+    dispositions_path: Path,
+) -> tuple[list[dict], dict]:
+    """Load the exact reviewed R1 contract without activating legacy aliases."""
+
+    paths = (
+        contract_path,
+        manifest_path,
+        audit_path,
+        review_path,
+        dispositions_path,
+    )
+    accepted_paths = {
+        DEFAULT_NPS_CHILD_CONTRACT.resolve(),
+        DEFAULT_NPS_CHILD_CONTRACT_MANIFEST.resolve(),
+        DEFAULT_NPS_CHILD_CONTRACT_AUDIT.resolve(),
+        DEFAULT_NPS_CHILD_CONTRACT_REVIEW.resolve(),
+        DEFAULT_NPS_CHILD_CONTRACT_DISPOSITIONS.resolve(),
+    }
+    if {path.resolve() for path in paths} != accepted_paths:
+        raise SystemExit("Internal preview accepts only the immutable R1 NPS child contract")
+    for path in paths:
+        if not path.is_file():
+            raise SystemExit(f"NPS child contract artifact is missing: {path}")
+        expected_hash = ACCEPTED_NPS_CHILD_CONTRACT_HASHES[path.name]
+        if _sha256(path) != expected_hash:
+            raise SystemExit(f"NPS child contract accepted hash mismatch: {path.name}")
+
+    contract = json.loads(contract_path.read_text())
+    manifest = json.loads(manifest_path.read_text())
+    audit = json.loads(audit_path.read_text())
+    review = json.loads(review_path.read_text())
+    dispositions = json.loads(dispositions_path.read_text())
+    if (
+        contract.get("schema") != "ExploreNpsChildContractV1"
+        or manifest.get("schema") != "ExploreNpsChildContractManifestV1"
+        or audit.get("schema") != "ExploreNpsChildContractAuditV1"
+        or review.get("schema") != "ExploreNpsChildContractReviewV1"
+        or dispositions.get("schema") != "ExploreNpsChildAuditDispositionsV1"
+    ):
+        raise SystemExit("NPS child contract schema differs from the reviewed R1 contract")
+    payloads = (contract, manifest, audit, review, dispositions)
+    if any(str(payload.get("contract_id") or "") != ACCEPTED_NPS_CHILD_CONTRACT for payload in payloads):
+        raise SystemExit("NPS child contract identity differs from the reviewed R1 contract")
+    if any(payload.get("stage") != "internal" for payload in payloads):
+        raise SystemExit("NPS child contract must remain internal")
+    if (
+        contract.get("promotion_ready") is not False
+        or manifest.get("promotion_ready") is not False
+        or review.get("promotion_ready") is not False
+        or manifest.get("public_promotion_compatible") is not False
+        or dispositions.get("public_promotion_compatible") is not False
+        or manifest.get("requests_used") != 0
+        or review.get("requests_used") != 0
+    ):
+        raise SystemExit("NPS child contract became promotable or used live requests")
+    if (
+        manifest.get("live_catalog_modified") is not False
+        or manifest.get("live_serving_index_modified") is not False
+        or audit.get("passed") is not True
+        or audit.get("errors") not in ([], None)
+    ):
+        raise SystemExit("NPS child contract failed its internal-only audit")
+
+    declared = {
+        str(item.get("path") or ""): item
+        for item in manifest.get("artifacts") or []
+        if isinstance(item, dict)
+    }
+    for path in (contract_path, audit_path, review_path, dispositions_path):
+        entry = declared.get(path.name)
+        if (
+            not entry
+            or str(entry.get("sha256") or "") != _sha256(path)
+            or int(entry.get("bytes") or -1) != path.stat().st_size
+        ):
+            raise SystemExit(f"NPS child contract manifest binding differs: {path.name}")
+
+    places = [item for item in contract.get("places") or [] if isinstance(item, dict)]
+    aliases = [item for item in contract.get("legacy_aliases") or [] if isinstance(item, dict)]
+    rows = [item for item in dispositions.get("rows") or [] if isinstance(item, dict)]
+    ids = [str(item.get("id") or "") for item in places]
+    review_counts = review.get("counts") if isinstance(review.get("counts"), dict) else {}
+    identity_hashes = audit.get("identity_hashes") if isinstance(audit.get("identity_hashes"), dict) else {}
+    if (
+        len(places) != 236
+        or int((contract.get("counts") or {}).get("materialized_places") or -1) != 236
+        or int((contract.get("counts") or {}).get("new_candidate_dispositions") or -1) != 237
+        or int((contract.get("counts") or {}).get("merged_duplicates") or -1) != 1
+        or len(aliases) != 157
+        or len(rows) != 394
+        or int(dispositions.get("count") or -1) != 394
+        or review_counts.get("module_counts") != {
+            "see": 112, "do": 45, "stay": 49, "visitor": 31,
+        }
+        or review_counts.get("destination_counts") != {
+            "acad": 32, "grsm": 39, "grte": 34, "grba": 31,
+            "badl": 18, "arch": 19, "cany": 25, "glca": 39,
+        }
+        or identity_hashes != {
+            "legacy": "8a6dd528b262654e97a4b98625aeb3b1f4a6d77c96bc1fd27f9d6d8052ee33e4",
+            "new": "d94ee87a0ca79e476297e44d7cb2f4224599b28749ffcae9ab90c2ede631bc0c",
+            "combined": "fc6ea5fc19cf4ec1b3f794902502e0a30dbc6380ff9fb7cfd5eba9dfa94b6524",
+        }
+        or any(not item_id for item_id in ids)
+        or len(ids) != len(set(ids))
+    ):
+        raise SystemExit("NPS child contract count or identity scope differs")
+
+    normalized: list[dict] = []
+    for place in places:
+        item = json.loads(json.dumps(place))
+        if (
+            item.get("canonical_role") != "child"
+            or not str(item.get("parent_hub_id") or "")
+            or not str(item.get("module_target") or "")
+        ):
+            raise SystemExit(f"NPS child contract record is not parent-bound: {item.get('id')}")
+        item["hidden_from_featured"] = True
+        normalized.append(item)
+
+    return normalized, {
+        "contract_id": ACCEPTED_NPS_CHILD_CONTRACT,
+        "manifest_path": str(manifest_path.relative_to(ROOT)),
+        "manifest_sha256": _sha256(manifest_path),
+        "artifact_path": str(contract_path.relative_to(ROOT)),
+        "artifact_sha256": _sha256(contract_path),
+        "audit_path": str(audit_path.relative_to(ROOT)),
+        "audit_sha256": _sha256(audit_path),
+        "review_path": str(review_path.relative_to(ROOT)),
+        "review_sha256": _sha256(review_path),
+        "dispositions_path": str(dispositions_path.relative_to(ROOT)),
+        "dispositions_sha256": _sha256(dispositions_path),
+        "disposition_count": len(rows),
+        "materialized_count": len(normalized),
+        "new_disposition_count": 237,
+        "merged_duplicate_count": 1,
+        "legacy_alias_count": len(aliases),
+        "advisory_alias_count": len(aliases),
+        "active_alias_count": 0,
+        "identity_hashes": identity_hashes,
+        "promotion_ready": False,
+        "public_promotion_compatible": False,
+        "live_serving_index_modified": False,
+        "audit_passed": True,
+    }
+
+
 def _write_payload_atomically(
     output: Path,
     payload: dict[str, Any],
@@ -373,6 +543,59 @@ def _combine_nps_child_batches(*batches: list[dict]) -> list[dict]:
     if any(not item_id for item_id in child_ids) or len(child_ids) != len(set(child_ids)):
         raise SystemExit("Accepted NPS child-depth batches contain duplicate stable IDs")
     return combined
+
+
+def _validate_nps_child_preview_mount(
+    children: list[dict],
+    contract_children: list[dict],
+    *,
+    public_parent_ids: set[str],
+) -> None:
+    """Fail closed on identity or parent/module drift before writing a sidecar."""
+    if len(children) != 693 or len(contract_children) != 236:
+        raise SystemExit("Internal NPS child mount must contain 457 depth and 236 contract records")
+    source_owners: dict[str, str] = {}
+    endpoint_targets = {
+        "thingstodo": "do",
+        "places": "see",
+        "visitorcenters": "visitor",
+        "campgrounds": "stay",
+    }
+    contract_ids = {str(item.get("id") or "") for item in contract_children}
+    if contract_ids.intersection(public_parent_ids):
+        raise SystemExit("Internal NPS child contract collides with a public identity")
+    for item in children:
+        item_id = str(item.get("id") or "").strip()
+        source_pack = item.get("source_pack") if isinstance(item.get("source_pack"), dict) else {}
+        source_values = [
+            *(item.get("source_ids") or []),
+            source_pack.get("raw_source_identity"),
+            *(
+                source.get("source_id")
+                for source in item.get("sources") or []
+                if isinstance(source, dict)
+            ),
+        ]
+        for value in source_values:
+            identity = str(value or "").strip().lower()
+            if not identity:
+                continue
+            owner = source_owners.get(identity)
+            if owner and owner != item_id:
+                raise SystemExit("Internal NPS child mount contains a source-identity collision")
+            source_owners[identity] = item_id
+        if item_id not in contract_ids:
+            continue
+        parent_id = str(item.get("parent_hub_id") or "").strip()
+        if parent_id not in public_parent_ids:
+            raise SystemExit(f"Internal NPS child parent is not public: {parent_id}")
+        match = re.search(
+            r":nps-child:[^:]+:(thingstodo|places|visitorcenters|campgrounds):",
+            item_id.lower(),
+        )
+        expected_target = endpoint_targets.get(match.group(1) if match else "")
+        if not expected_target or str(item.get("module_target") or "").strip().lower() != expected_target:
+            raise SystemExit(f"Internal NPS child endpoint/module mapping differs: {item_id}")
 
 
 def _select_records(
@@ -426,6 +649,25 @@ def build(
     child_manifest_path_3 = Path(getattr(args, "nps_child_manifest_3", DEFAULT_NPS_CHILD_MANIFEST_3)).resolve()
     child_audit_path_3 = Path(getattr(args, "nps_child_audit_3", DEFAULT_NPS_CHILD_AUDIT_3)).resolve()
     child_review_path_3 = Path(getattr(args, "nps_child_review_3", DEFAULT_NPS_CHILD_REVIEW_3)).resolve()
+    child_contract_path = Path(
+        getattr(args, "nps_child_contract", DEFAULT_NPS_CHILD_CONTRACT)
+    ).resolve()
+    child_contract_manifest_path = Path(
+        getattr(args, "nps_child_contract_manifest", DEFAULT_NPS_CHILD_CONTRACT_MANIFEST)
+    ).resolve()
+    child_contract_audit_path = Path(
+        getattr(args, "nps_child_contract_audit", DEFAULT_NPS_CHILD_CONTRACT_AUDIT)
+    ).resolve()
+    child_contract_review_path = Path(
+        getattr(args, "nps_child_contract_review", DEFAULT_NPS_CHILD_CONTRACT_REVIEW)
+    ).resolve()
+    child_contract_dispositions_path = Path(
+        getattr(
+            args,
+            "nps_child_contract_dispositions",
+            DEFAULT_NPS_CHILD_CONTRACT_DISPOSITIONS,
+        )
+    ).resolve()
     accepted_child_paths = (
         DEFAULT_NPS_CHILDREN.resolve(), DEFAULT_NPS_CHILD_MANIFEST.resolve(),
         DEFAULT_NPS_CHILD_AUDIT.resolve(), DEFAULT_NPS_CHILD_REVIEW.resolve(),
@@ -502,12 +744,30 @@ def build(
         accepted_hashes=ACCEPTED_NPS_CHILD_HASHES_3,
         accepted_batch_id="post-b08-nps-child-depth-b3",
     )
-    combined_children = _combine_nps_child_batches(children, children_2, children_3)
+    contract_children, child_contract_binding = _validated_nps_child_contract(
+        child_contract_path,
+        child_contract_manifest_path,
+        child_contract_audit_path,
+        child_contract_review_path,
+        child_contract_dispositions_path,
+    )
+    combined_children = _combine_nps_child_batches(
+        children,
+        children_2,
+        children_3,
+        contract_children,
+    )
+    _validate_nps_child_preview_mount(
+        combined_children,
+        contract_children,
+        public_parent_ids=set(serving_by_id),
+    )
     child_ids = [str(item.get("id") or "") for item in combined_children]
     payload = {
         "schema_version": 1,
         "catalog_id": "trailhead-explore-internal-preview-v1",
         "stage": "internal",
+        "public_promotion_compatible": False,
         "count": len(selected),
         "child_count": len(combined_children),
         "candidate": {
@@ -527,6 +787,7 @@ def build(
             },
             "nps_child_depth": child_binding,
             "nps_child_depth_batches": [child_binding, child_binding_2, child_binding_3],
+            "nps_child_contract": child_contract_binding,
         },
         "sources": {
             "agency_catalog": {
@@ -579,6 +840,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--nps-child-manifest-3", dest="nps_child_manifest_3", default=str(DEFAULT_NPS_CHILD_MANIFEST_3))
     parser.add_argument("--nps-child-audit-3", dest="nps_child_audit_3", default=str(DEFAULT_NPS_CHILD_AUDIT_3))
     parser.add_argument("--nps-child-review-3", dest="nps_child_review_3", default=str(DEFAULT_NPS_CHILD_REVIEW_3))
+    parser.add_argument("--nps-child-contract", default=str(DEFAULT_NPS_CHILD_CONTRACT))
+    parser.add_argument(
+        "--nps-child-contract-manifest",
+        default=str(DEFAULT_NPS_CHILD_CONTRACT_MANIFEST),
+    )
+    parser.add_argument(
+        "--nps-child-contract-audit",
+        default=str(DEFAULT_NPS_CHILD_CONTRACT_AUDIT),
+    )
+    parser.add_argument(
+        "--nps-child-contract-review",
+        default=str(DEFAULT_NPS_CHILD_CONTRACT_REVIEW),
+    )
+    parser.add_argument(
+        "--nps-child-contract-dispositions",
+        default=str(DEFAULT_NPS_CHILD_CONTRACT_DISPOSITIONS),
+    )
     parser.add_argument("--agency-id", action="append", default=list(DEFAULT_AGENCY_IDS))
     parser.add_argument("--nps-code", action="append", default=list(DEFAULT_NPS_CODES))
     return parser.parse_args()

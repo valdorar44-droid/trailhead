@@ -30,6 +30,19 @@ test('internal Explore data header is build-scoped and authenticated', () => {
   assert.match(apiSource, /token && EXPLORE_INTERNAL_DATA_PREVIEW/);
   assert.match(apiSource, /path\.startsWith\('\/api\/explore\/'\)/);
   assert.match(apiSource, /path\.startsWith\('\/api\/campsites\/'\)/);
+  assert.match(apiSource, /path === '\/api\/map-card\/resolve'/);
+  assert.match(
+    apiSource,
+    /resolveMapCard:[\s\S]+?req<MapCardResolveResponse>\(\s*'\/api\/map-card\/resolve'/,
+  );
+  assert.match(
+    apiSource,
+    /resolveMapCard:[\s\S]+?if \(EXPLORE_INTERNAL_DATA_PREVIEW\) return run\(\);[\s\S]+?return guardedRequest/,
+  );
+  assert.match(
+    apiSource,
+    /getExploreRouteRank:[\s\S]+?if \(EXPLORE_INTERNAL_DATA_PREVIEW\) return run\(\);[\s\S]+?return guardedRequest/,
+  );
   assert.match(apiSource, /X-Trailhead-Explore-Preview'\] = 'internal'/);
   assert.match(apiSource, /export async function explorePreviewAuthHeaders/);
   assert.match(searchAppClientSource, /getHeaders: explorePreviewAuthHeaders/);

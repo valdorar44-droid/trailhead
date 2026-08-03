@@ -26,6 +26,13 @@ import {
   type MapCameraOwnership,
 } from '@/lib/mapCameraOwnership';
 import {
+  beginMapRecentViewportRestoreV1,
+  canCommitMapRecentViewportRestoreV1,
+  claimExplicitMapCameraV1,
+  commitMapRecentViewportRestoreV1,
+  initialMapRecentViewportRestoreGateV1,
+} from '@/lib/mapRecentViewportRestore';
+import {
   shouldQueueFreeCameraCommand,
   shouldNotifyRegionGestureBreakaway,
   shouldNotifyTrackingModeBreakaway,
@@ -1296,6 +1303,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const navGestureBreakawayRef = useRef(false);
   const lastGestureNotifyRef = useRef(0);
   const recentViewportRestoredRef = useRef(false);
+  const recentViewportRestoreGateRef = useRef(initialMapRecentViewportRestoreGateV1());
   const lastViewportCacheWriteRef = useRef(0);
   const locateSettleTimersRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
   const deferredSourceRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1314,6 +1322,16 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       animationDuration: 0,
     };
   }, []);
+
+  const claimExplicitBrowseCamera = useCallback((source: string) => {
+    if (!camRef.current || cameraOwnershipRef.current.blocksRecentViewport) return false;
+    recentViewportRestoreGateRef.current = claimExplicitMapCameraV1(
+      recentViewportRestoreGateRef.current,
+    );
+    recentViewportRestoredRef.current = true;
+    emitDebugEvent('camera:cancel-recent-viewport-restore', { source });
+    return true;
+  }, [emitDebugEvent]);
 
   useEffect(() => {
     if (!navMode || navCameraFollow) navGestureBreakawayRef.current = false;
@@ -1354,10 +1372,27 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
 
   const restoreRecentViewportIfNeeded = useCallback(async () => {
     if (!visualWorkActiveRef.current || recentViewportRestoredRef.current) return;
+    const requestGeneration = beginMapRecentViewportRestoreV1(
+      recentViewportRestoreGateRef.current,
+    );
     const experienceOwnsCamera = cameraOwnershipRef.current.blocksRecentViewport;
     if (!experienceOwnsCamera && (navMode || waypoints.length > 0 || searchMarker)) return;
     const cached = parseCachedMapViewport(await accountStorage.get(RECENT_MAP_VIEWPORT_KEY).catch(() => null));
     if (!cached || Date.now() - cached.at > RECENT_MAP_VIEWPORT_TTL_MS) return;
+    if (
+      !visualWorkActiveRef.current
+      || !canCommitMapRecentViewportRestoreV1(
+        recentViewportRestoreGateRef.current,
+        requestGeneration,
+      )
+    ) {
+      emitDebugEvent('camera:skip-stale-recent-viewport', {
+        request_generation: requestGeneration,
+        current_generation: recentViewportRestoreGateRef.current.generation,
+        resolved_by: recentViewportRestoreGateRef.current.resolvedBy,
+      });
+      return;
+    }
     freeCameraDefaultRef.current = {
       centerCoordinate: cached.centerCoordinate,
       zoomLevel: cached.zoomLevel,
@@ -1371,6 +1406,12 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       });
       return;
     }
+    const commit = commitMapRecentViewportRestoreV1(
+      recentViewportRestoreGateRef.current,
+      requestGeneration,
+    );
+    if (!commit.apply) return;
+    recentViewportRestoreGateRef.current = commit.state;
     recentViewportRestoredRef.current = true;
     emitDebugEvent('camera:restore-recent-viewport', {
       age_ms: Date.now() - cached.at,
@@ -1398,6 +1439,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       || center.length !== 2
       || !center.every(value => Number.isFinite(Number(value)))
     ) return false;
+    if (!claimExplicitBrowseCamera(source)) return false;
     lastCamRef.current = Date.now();
     programmaticCameraUntilRef.current = Date.now() + 1100;
     recentViewportRestoredRef.current = true;
@@ -1415,7 +1457,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       animationMode: 'none',
     } as any);
     return true;
-  }, [emitDebugEvent]);
+  }, [claimExplicitBrowseCamera, emitDebugEvent]);
 
   useEffect(() => {
     const previous = previousCameraOwnershipRef.current;
@@ -1978,6 +2020,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   // ── Imperative API (replaces postMessage) ───────────────────────────────────
   useImperativeHandle(ref, () => ({
     flyTo(lat, lng, zoom = 14) {
+      if (!Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) return;
+      claimExplicitBrowseCamera('flyTo');
       lastFlyToRef.current = Date.now();
       lastCamRef.current = Date.now();
       programmaticCameraUntilRef.current = Date.now() + 1100;
@@ -1996,6 +2040,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       const lat = Number(options.lat);
       const lng = Number(options.lng);
       if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+      claimExplicitBrowseCamera('flyToCamera');
       lastFlyToRef.current = Date.now();
       lastCamRef.current = Date.now();
       programmaticCameraUntilRef.current = Date.now() + Math.max(900, (Number.isFinite(Number(options.duration)) ? Number(options.duration) : 520) + 450);
@@ -2031,6 +2076,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       const ne: [number, number] = [Math.max(...lngs), Math.max(...lats)];
       const sw: [number, number] = [Math.min(...lngs), Math.min(...lats)];
       const applyFit = () => {
+        claimExplicitBrowseCamera('fitCoordinates');
         lastCamRef.current = Date.now();
         programmaticCameraUntilRef.current = Date.now() + Math.max(900, duration + 450);
         emitDebugEvent('camera:set:fitCoordinates', { points: clean.length, ne, sw, padding, duration });
@@ -2048,6 +2094,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       applyFit();
     },
     async setZoom(zoom, focus) {
+      claimExplicitBrowseCamera('setZoom');
       const nextZoom = clampMapZoom(Number(zoom), 12);
       const lat = Number(focus?.lat);
       const lng = Number(focus?.lng);
@@ -2066,6 +2113,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       return nextZoom;
     },
     async zoomBy(delta, focus) {
+      claimExplicitBrowseCamera('zoomBy');
       if (!mapRef.current) return null;
       const current = await mapRef.current.getZoom().catch(() => null);
       const base = Number.isFinite(Number(current)) ? Number(current) : 12;
@@ -2087,6 +2135,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       return nextZoom;
     },
     async locate(lat, lng) {
+      claimExplicitBrowseCamera('locate');
       clearLocateSettleTimers();
       lastFlyToRef.current = Date.now();
       lastCamRef.current = Date.now();
@@ -2161,6 +2210,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       wasOffRouteRef.current = false;
     },
     async highlightTrail(lat, lng, name) {
+      claimExplicitBrowseCamera('highlightTrail');
       lastFlyToRef.current = Date.now();
       lastCamRef.current = Date.now();
       programmaticCameraUntilRef.current = Date.now() + 1100;
@@ -2481,7 +2531,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       });
     },
     setNavTarget(idx) { setNavTargetIdx(idx); },
-  }), [applyLocateCamera, applyRouteSnapshot, clearLocateSettleTimers, clearRouteSnapshot, emitDebugEvent, waypoints, routePairsForWaypoints, searchDest, mapboxToken, navMode, rememberFreeCamera, routeOpts, routeProviderMode, showTerrain]);
+  }), [applyLocateCamera, applyRouteSnapshot, claimExplicitBrowseCamera, clearLocateSettleTimers, clearRouteSnapshot, emitDebugEvent, waypoints, routePairsForWaypoints, searchDest, mapboxToken, navMode, rememberFreeCamera, routeOpts, routeProviderMode, showTerrain]);
 
   const emitTracePoint = useCallback(async (
     x: number,

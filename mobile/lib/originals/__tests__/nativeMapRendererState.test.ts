@@ -80,6 +80,12 @@ async function main() {
   assert.match(nativeMap, /cameraOwnershipRef\.current\.blocksRecentViewport/);
   assert.match(nativeMap, /camera:restore-browse-owner/);
   assert.match(nativeMap, /pendingBrowseCameraRestoreRef\.current/);
+  assert.match(nativeMap, /beginMapRecentViewportRestoreV1/);
+  assert.match(nativeMap, /canCommitMapRecentViewportRestoreV1/);
+  assert.match(nativeMap, /camera:skip-stale-recent-viewport/);
+  assert.match(nativeMap, /if \(!camRef\.current \|\| cameraOwnershipRef\.current\.blocksRecentViewport\) return false/);
+  assert.match(nativeMap, /flyTo\(lat, lng, zoom = 14\) \{\s*if \(!Number\.isFinite\(Number\(lat\)\) \|\| !Number\.isFinite\(Number\(lng\)\)\) return;\s*claimExplicitBrowseCamera\('flyTo'\)/);
+  assert.match(nativeMap, /flyToCamera\(options\) \{[\s\S]*claimExplicitBrowseCamera\('flyToCamera'\)/);
   assert.match(nativeMap, /onDidFinishLoadingStyle=\{\(\) => \{[\s\S]*onMapStyleLoaded\?\.\(\)/);
 
   const routeMap = readFileSync('components/originals/OriginalRouteMap.tsx', 'utf8');

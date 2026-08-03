@@ -81,6 +81,17 @@ EXPECTED_NPS_CHILD_BINDING_4 = {
     "review_path": "data/explore/audit_candidates/internal/post-b09-nps-child-depth-b4-r2/review.json",
     "review_sha256": "60ccad3f4bf56f0664a53e4e1c54b175fc664f9dcbc75f629994fedc7cf48e99",
 }
+EXPECTED_NPS_CHILD_BINDING_5 = {
+    "batch_id": "post-b09-nps-child-depth-b5",
+    "manifest_path": "data/explore/audit_candidates/internal/post-b09-nps-child-depth-b5-r1/manifest.json",
+    "manifest_sha256": "d9f7ed993c23051fb53e9bf47392c057fda8fed2833f4923e2a3aeea23054150",
+    "artifact_path": "data/explore/audit_candidates/internal/post-b09-nps-child-depth-b5-r1/nps_child_depth_v1.json",
+    "artifact_sha256": "e3c4d0763d3a2be8d84d462dc3f892a444cb98781eea0d4227dc1b1b3b2fa0da",
+    "audit_path": "data/explore/audit_candidates/internal/post-b09-nps-child-depth-b5-r1/audit.json",
+    "audit_sha256": "d86d58c6b0f236297d3f606a1a053e61f25fe82c2ac69f0e4a339f4a84b70296",
+    "review_path": "data/explore/audit_candidates/internal/post-b09-nps-child-depth-b5-r1/review.json",
+    "review_sha256": "8029b3434db17daf361d353a5c1c5148977921b7faffce8cf400c90ddfb052be",
+}
 EXPECTED_NPS_CHILD_CONTRACT_BINDING = {
     "contract_id": "post-b08-nps-child-contract-r1",
     "manifest_path": "data/explore/audit_candidates/internal/post-b08-nps-child-contract-r1/manifest.json",
@@ -120,9 +131,9 @@ NPS_CHILD_CONTRACT_MERGED_DUPLICATE_ID = (
     "place:nps-child:acad:places:bea85a63-0ce1-42b6-b429-88c68fb55a30"
 )
 EXPECTED_NPS_CHILD_ID_HASHES = {
-    "accepted_batches": "44eb88b7f4447a194b8164910b2369baf101cbc38ad0faef9c8fed672ceb63f5",
+    "accepted_batches": "b7f961ba1c07ce13c1742c4aeebeca641c294970d16aba1381b386b750c4ea9e",
     "contract_materialized": "ea23a5e4f3925195febc232f76ad7bd49ecc065437c970d25b7c8735e876f76e",
-    "combined": "0f78c91b55cd1392a30182582bf2e378b2530e66b422e0e100135715c0e156fe",
+    "combined": "a9e540ae649f3644dff5240d984a069b306d268ed44c1374a501a49b5c53aa75",
 }
 EXPECTED_NPS_CHILD_BATCH_4_PARENTS = frozenset({
     "place:nps:hosp",
@@ -130,6 +141,13 @@ EXPECTED_NPS_CHILD_BATCH_4_PARENTS = frozenset({
     "place:nps:indu",
     "place:nps:jeca",
     "place:nps:joda",
+})
+EXPECTED_NPS_CHILD_BATCH_5_PARENTS = frozenset({
+    "place:nps:care",
+    "place:nps:grsa",
+    "place:nps:crla",
+    "place:nps:asis",
+    "place:nps:amis",
 })
 
 
@@ -503,8 +521,9 @@ def audit(
             EXPECTED_NPS_CHILD_BINDING_2,
             EXPECTED_NPS_CHILD_BINDING_3,
             EXPECTED_NPS_CHILD_BINDING_4,
+            EXPECTED_NPS_CHILD_BINDING_5,
         ]
-        accepted_batch_counts = (156, 170, 131, 97)
+        accepted_batch_counts = (156, 170, 131, 97, 70)
         accepted_batch_offset = 0
         accepted_input_pairs = (
             ("manifest_path", "manifest_sha256"),
@@ -573,9 +592,9 @@ def audit(
                 failures.append("accepted NPS child contract identities differ from the tracked lock")
         if (
             payload.get("child_count") != len(children)
-            or len(children) != 790
+            or len(children) != 860
         ):
-            failures.append("NPS child count differs from the accepted 790-record combined set")
+            failures.append("NPS child count differs from the accepted 860-record combined set")
         if any(not item_id for item_id in child_ids) or len(child_ids) != len(set(child_ids)):
             failures.append("NPS children lack unique stable IDs")
         if any(
@@ -591,6 +610,35 @@ def audit(
         }
         if batch_4_parent_ids != EXPECTED_NPS_CHILD_BATCH_4_PARENTS:
             failures.append("NPS child Batch 4 parent scope differs from the reviewed five parks")
+        batch_5 = children[554:624]
+        batch_5_parent_ids = {
+            str(item.get("parent_hub_id") or "").strip()
+            for item in batch_5
+        }
+        if batch_5_parent_ids != EXPECTED_NPS_CHILD_BATCH_5_PARENTS:
+            failures.append("NPS child Batch 5 parent scope differs from the reviewed five parks")
+        canonical_camps = [
+            item for item in batch_5
+            if str(item.get("id") or "").startswith("place:nps:campgrounds:")
+        ]
+        if len(canonical_camps) != 20:
+            failures.append("NPS child Batch 5 canonical campground scope differs")
+        if sum(bool(item.get("reservation_url")) for item in canonical_camps) != 13:
+            failures.append("NPS child Batch 5 campground booking scope differs")
+        for camp in canonical_camps:
+            booking_url = str(camp.get("reservation_url") or "").strip()
+            reservations = camp.get("reservations") if isinstance(camp.get("reservations"), dict) else {}
+            if booking_url and (
+                not re.match(
+                    r"^https://(?:www\.)?recreation\.gov/"
+                    r"(?:camping/campgrounds|permits)/[A-Za-z0-9_-]+(?:[/?#]|$)",
+                    booking_url,
+                    re.I,
+                )
+                or reservations.get("url") != booking_url
+                or reservations.get("reservable") is not True
+            ):
+                failures.append(f"{camp.get('id')}: canonical campground booking handoff differs")
         serving_path = root / expected["serving_index_path"]
         if serving_path.is_file():
             serving_payload = json.loads(serving_path.read_text())
@@ -601,6 +649,8 @@ def audit(
             }
             if not EXPECTED_NPS_CHILD_BATCH_4_PARENTS.issubset(public_parent_ids):
                 failures.append("NPS child Batch 4 parent hub is missing from the public serving index")
+            if not EXPECTED_NPS_CHILD_BATCH_5_PARENTS.issubset(public_parent_ids):
+                failures.append("NPS child Batch 5 parent hub is missing from the public serving index")
         for key, expected_hash in EXPECTED_NPS_CHILD_BINDING.items():
             if binding.get(key) != expected_hash:
                 failures.append(f"NPS child binding {key} differs from accepted r7")
@@ -614,8 +664,8 @@ def audit(
         for key, expected_value in EXPECTED_NPS_CHILD_CONTRACT_BINDING.items():
             if contract_binding.get(key) != expected_value:
                 failures.append(f"NPS child contract binding {key} differs from accepted R1")
-        accepted_batch_ids = child_ids[:554]
-        mounted_contract_ids = child_ids[554:]
+        accepted_batch_ids = child_ids[:624]
+        mounted_contract_ids = child_ids[624:]
         if mounted_contract_ids != contract_identity_ids:
             failures.append("materialized NPS child contract IDs differ from the tracked identity lock")
         for scope, values in (

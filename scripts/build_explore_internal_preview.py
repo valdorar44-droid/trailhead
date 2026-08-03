@@ -82,6 +82,18 @@ ACCEPTED_NPS_CHILD_HASHES_4 = {
     "audit.json": "1e29aa4f1b9e149aaf2d1b0ad61793ce636c1242525f8f560c80b56a592d07e2",
     "review.json": "60ccad3f4bf56f0664a53e4e1c54b175fc664f9dcbc75f629994fedc7cf48e99",
 }
+ACCEPTED_NPS_CHILD_BATCH_5 = "post-b09-nps-child-depth-b5-r1"
+DEFAULT_NPS_CHILD_DIR_5 = ROOT / f"data/explore/audit_candidates/internal/{ACCEPTED_NPS_CHILD_BATCH_5}"
+DEFAULT_NPS_CHILDREN_5 = DEFAULT_NPS_CHILD_DIR_5 / "nps_child_depth_v1.json"
+DEFAULT_NPS_CHILD_MANIFEST_5 = DEFAULT_NPS_CHILD_DIR_5 / "manifest.json"
+DEFAULT_NPS_CHILD_AUDIT_5 = DEFAULT_NPS_CHILD_DIR_5 / "audit.json"
+DEFAULT_NPS_CHILD_REVIEW_5 = DEFAULT_NPS_CHILD_DIR_5 / "review.json"
+ACCEPTED_NPS_CHILD_HASHES_5 = {
+    "manifest.json": "d9f7ed993c23051fb53e9bf47392c057fda8fed2833f4923e2a3aeea23054150",
+    "nps_child_depth_v1.json": "e3c4d0763d3a2be8d84d462dc3f892a444cb98781eea0d4227dc1b1b3b2fa0da",
+    "audit.json": "d86d58c6b0f236297d3f606a1a053e61f25fe82c2ac69f0e4a339f4a84b70296",
+    "review.json": "8029b3434db17daf361d353a5c1c5148977921b7faffce8cf400c90ddfb052be",
+}
 ACCEPTED_NPS_CHILD_CONTRACT = "post-b08-nps-child-contract-r1"
 DEFAULT_NPS_CHILD_CONTRACT_DIR = (
     ROOT / f"data/explore/audit_candidates/internal/{ACCEPTED_NPS_CHILD_CONTRACT}"
@@ -111,7 +123,8 @@ DEFAULT_AGENCY_IDS = (
 )
 DEFAULT_NPS_CODES = ("cave", "cato", "chis", "goga", "grte", "gumo")
 RECREATION_BOOKING_RE = re.compile(
-    r"^https://(?:www\.)?recreation\.gov/camping/campgrounds/[A-Za-z0-9_-]+(?:[/?#]|$)",
+    r"^https://(?:www\.)?recreation\.gov/"
+    r"(?:camping/campgrounds|permits)/[A-Za-z0-9_-]+(?:[/?#]|$)",
     re.I,
 )
 APPROVED_MEDIA_RIGHTS_STATES = frozenset({
@@ -121,6 +134,18 @@ APPROVED_MEDIA_RIGHTS_STATES = frozenset({
     "public_domain",
     "source_terms_reviewed",
 })
+ACCEPTED_BATCH_4_PREVIEW_SHA256 = (
+    "ebcc92fac3a6fa7b80feb84d070fb30220ad0b783f656c2b5c38569382fc910b"
+)
+ACCEPTED_BATCH_4_PREVIEW_CONTENT_SHA256 = (
+    "55e1a26ba8c70514eff995575a047bbccd4a159a58c4dcfa346d4407c4aa9ad0"
+)
+ACCEPTED_BATCH_4_DEPTH_ID_SHA256 = (
+    "44eb88b7f4447a194b8164910b2369baf101cbc38ad0faef9c8fed672ceb63f5"
+)
+ACCEPTED_CONTRACT_ID_SHA256 = (
+    "ea23a5e4f3925195febc232f76ad7bd49ecc065437c970d25b7c8735e876f76e"
+)
 
 
 def _read_catalog(path: Path) -> list[dict]:
@@ -548,6 +573,115 @@ def _write_payload_atomically(
             temporary_path.unlink(missing_ok=True)
 
 
+def _ordered_ids_sha256(items: list[dict]) -> str:
+    payload = "\n".join(str(item.get("id") or "") for item in items) + "\n"
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _append_nps_child_batch_5_to_accepted_preview(
+    base_preview: Path,
+    output: Path,
+    *,
+    validate_output: Callable[[Path], Any] | None = None,
+) -> dict:
+    """Append B5 to the accepted B4 sidecar without rebuilding prior evidence."""
+    base_preview = base_preview.resolve()
+    output = output.resolve()
+    if not base_preview.is_file():
+        raise FileNotFoundError(base_preview)
+    if _sha256(base_preview) != ACCEPTED_BATCH_4_PREVIEW_SHA256:
+        raise SystemExit("Accepted Batch 4 preview base hash differs")
+    payload = json.loads(base_preview.read_text())
+    canonical_payload = json.dumps(
+        payload,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+    if hashlib.sha256(canonical_payload).hexdigest() != (
+        ACCEPTED_BATCH_4_PREVIEW_CONTENT_SHA256
+    ):
+        raise SystemExit("Accepted Batch 4 preview payload hash differs")
+    base_children = [
+        item for item in payload.get("children") or [] if isinstance(item, dict)
+    ]
+    candidate = payload.get("candidate") if isinstance(payload.get("candidate"), dict) else {}
+    bindings = candidate.get("nps_child_depth_batches")
+    if (
+        payload.get("stage") != "internal"
+        or payload.get("public_promotion_compatible") is not False
+        or len(base_children) != 790
+        or payload.get("child_count") != 790
+        or not isinstance(bindings, list)
+        or len(bindings) != 4
+    ):
+        raise SystemExit("Accepted Batch 4 preview structure differs")
+    accepted_depth = base_children[:554]
+    contract_children = base_children[554:]
+    if (
+        len(contract_children) != 236
+        or _ordered_ids_sha256(accepted_depth) != ACCEPTED_BATCH_4_DEPTH_ID_SHA256
+        or _ordered_ids_sha256(contract_children) != ACCEPTED_CONTRACT_ID_SHA256
+    ):
+        raise SystemExit("Accepted Batch 4 preview identity boundary differs")
+
+    child_paths_5 = (
+        DEFAULT_NPS_CHILDREN_5.resolve(),
+        DEFAULT_NPS_CHILD_MANIFEST_5.resolve(),
+        DEFAULT_NPS_CHILD_AUDIT_5.resolve(),
+        DEFAULT_NPS_CHILD_REVIEW_5.resolve(),
+    )
+    children_5, binding_5 = _validated_nps_child_depth(
+        *child_paths_5,
+        accepted_paths=child_paths_5,
+        accepted_hashes=ACCEPTED_NPS_CHILD_HASHES_5,
+        accepted_batch_id="post-b09-nps-child-depth-b5",
+    )
+    existing_ids = {str(item.get("id") or "") for item in base_children}
+    batch_5_ids = {str(item.get("id") or "") for item in children_5}
+    if len(children_5) != 70 or existing_ids.intersection(batch_5_ids):
+        raise SystemExit("Accepted Batch 5 identities overlap the mounted child set")
+    canonical_camps = [
+        item for item in children_5
+        if str(item.get("id") or "").startswith("place:nps:campgrounds:")
+    ]
+    if len(canonical_camps) != 20:
+        raise SystemExit("Accepted Batch 5 canonical campground scope differs")
+    for camp in canonical_camps:
+        reservation_url = str(camp.get("reservation_url") or "").strip()
+        reservations = camp.get("reservations") if isinstance(camp.get("reservations"), dict) else {}
+        if (
+            camp.get("hidden_from_featured") is not True
+            or camp.get("module_target") != "stay"
+            or (
+                reservation_url
+                and (
+                    not RECREATION_BOOKING_RE.match(reservation_url)
+                    or reservations.get("url") != reservation_url
+                    or reservations.get("reservable") is not True
+                )
+            )
+        ):
+            raise SystemExit("Accepted Batch 5 campground handoff differs")
+
+    combined_children = [*accepted_depth, *children_5, *contract_children]
+    next_payload = json.loads(json.dumps(payload))
+    next_payload["children"] = combined_children
+    next_payload["child_count"] = len(combined_children)
+    next_candidate = dict(candidate)
+    next_candidate["nps_child_depth_batches"] = [*bindings, binding_5]
+    next_payload["candidate"] = next_candidate
+    _write_payload_atomically(output, next_payload, validate_output=validate_output)
+    return {
+        "output": str(output),
+        "bytes": output.stat().st_size,
+        "sha256": _sha256(output),
+        "place_ids": [str(item.get("id") or "") for item in next_payload.get("places") or []],
+        "child_ids": [str(item.get("id") or "") for item in combined_children],
+    }
+
+
 def _combine_nps_child_batches(*batches: list[dict]) -> list[dict]:
     """Preserve accepted batch order and reject cross-batch identity overlap."""
     combined = [item for batch in batches for item in batch]
@@ -564,8 +698,8 @@ def _validate_nps_child_preview_mount(
     public_parent_ids: set[str],
 ) -> None:
     """Fail closed on identity or parent/module drift before writing a sidecar."""
-    if len(children) != 790 or len(contract_children) != 236:
-        raise SystemExit("Internal NPS child mount must contain 554 depth and 236 contract records")
+    if len(children) != 860 or len(contract_children) != 236:
+        raise SystemExit("Internal NPS child mount must contain 624 depth and 236 contract records")
     source_owners: dict[str, str] = {}
     endpoint_targets = {
         "thingstodo": "do",
@@ -576,6 +710,30 @@ def _validate_nps_child_preview_mount(
     contract_ids = {str(item.get("id") or "") for item in contract_children}
     if contract_ids.intersection(public_parent_ids):
         raise SystemExit("Internal NPS child contract collides with a public identity")
+    canonical_camps = [
+        item
+        for item in children
+        if str(item.get("id") or "").startswith("place:nps:campgrounds:")
+    ]
+    if len(canonical_camps) != 20:
+        raise SystemExit("Internal NPS child mount must contain 20 canonical campground shadows")
+    for camp in canonical_camps:
+        reference = camp.get("canonical_reference") if isinstance(camp.get("canonical_reference"), dict) else {}
+        reservations = camp.get("reservations") if isinstance(camp.get("reservations"), dict) else {}
+        if (
+            reference.get("canonical_id") != camp.get("id")
+            or not str(reference.get("source_child_id") or "").startswith("place:nps-child:")
+            or camp.get("module_target") != "stay"
+            or camp.get("hidden_from_featured") is not True
+        ):
+            raise SystemExit("Internal NPS canonical campground shadow lost its child context")
+        reservation_url = str(camp.get("reservation_url") or "").strip()
+        if reservation_url and (
+            not RECREATION_BOOKING_RE.match(reservation_url)
+            or reservations.get("url") != reservation_url
+            or reservations.get("reservable") is not True
+        ):
+            raise SystemExit("Internal NPS canonical campground shadow lost its booking handoff")
     for item in children:
         item_id = str(item.get("id") or "").strip()
         source_pack = item.get("source_pack") if isinstance(item.get("source_pack"), dict) else {}
@@ -641,6 +799,15 @@ def build(
     *,
     validate_output: Callable[[Path], Any] | None = None,
 ) -> dict:
+    accepted_preview_base = str(
+        getattr(args, "accepted_preview_base", "") or ""
+    ).strip()
+    if accepted_preview_base:
+        return _append_nps_child_batch_5_to_accepted_preview(
+            Path(accepted_preview_base),
+            Path(args.output),
+            validate_output=validate_output,
+        )
     agency_path = Path(args.agency_catalog).resolve()
     agency_manifest_path = Path(args.agency_manifest).resolve()
     nps_path = Path(args.nps_catalog).resolve()
@@ -665,6 +832,10 @@ def build(
     child_manifest_path_4 = Path(getattr(args, "nps_child_manifest_4", DEFAULT_NPS_CHILD_MANIFEST_4)).resolve()
     child_audit_path_4 = Path(getattr(args, "nps_child_audit_4", DEFAULT_NPS_CHILD_AUDIT_4)).resolve()
     child_review_path_4 = Path(getattr(args, "nps_child_review_4", DEFAULT_NPS_CHILD_REVIEW_4)).resolve()
+    child_path_5 = Path(getattr(args, "nps_children_5", DEFAULT_NPS_CHILDREN_5)).resolve()
+    child_manifest_path_5 = Path(getattr(args, "nps_child_manifest_5", DEFAULT_NPS_CHILD_MANIFEST_5)).resolve()
+    child_audit_path_5 = Path(getattr(args, "nps_child_audit_5", DEFAULT_NPS_CHILD_AUDIT_5)).resolve()
+    child_review_path_5 = Path(getattr(args, "nps_child_review_5", DEFAULT_NPS_CHILD_REVIEW_5)).resolve()
     child_contract_path = Path(
         getattr(args, "nps_child_contract", DEFAULT_NPS_CHILD_CONTRACT)
     ).resolve()
@@ -708,6 +879,12 @@ def build(
     )
     if (child_path_4, child_manifest_path_4, child_audit_path_4, child_review_path_4) != accepted_child_paths_4:
         raise SystemExit("Internal preview builds accept only the immutable Batch 4 r2 NPS child-depth artifacts")
+    accepted_child_paths_5 = (
+        DEFAULT_NPS_CHILDREN_5.resolve(), DEFAULT_NPS_CHILD_MANIFEST_5.resolve(),
+        DEFAULT_NPS_CHILD_AUDIT_5.resolve(), DEFAULT_NPS_CHILD_REVIEW_5.resolve(),
+    )
+    if (child_path_5, child_manifest_path_5, child_audit_path_5, child_review_path_5) != accepted_child_paths_5:
+        raise SystemExit("Internal preview builds accept only the immutable Batch 5 r1 NPS child-depth artifacts")
     agency_binding = _validated_manifest_artifact(agency_manifest_path, agency_path)
     nps_binding = _validated_manifest_artifact(
         combined_manifest_path,
@@ -775,6 +952,15 @@ def build(
         accepted_hashes=ACCEPTED_NPS_CHILD_HASHES_4,
         accepted_batch_id="post-b09-nps-child-depth-b4",
     )
+    children_5, child_binding_5 = _validated_nps_child_depth(
+        child_path_5,
+        child_manifest_path_5,
+        child_audit_path_5,
+        child_review_path_5,
+        accepted_paths=accepted_child_paths_5,
+        accepted_hashes=ACCEPTED_NPS_CHILD_HASHES_5,
+        accepted_batch_id="post-b09-nps-child-depth-b5",
+    )
     contract_children, child_contract_binding = _validated_nps_child_contract(
         child_contract_path,
         child_contract_manifest_path,
@@ -787,6 +973,7 @@ def build(
         children_2,
         children_3,
         children_4,
+        children_5,
         contract_children,
     )
     _validate_nps_child_preview_mount(
@@ -820,6 +1007,7 @@ def build(
             "nps_child_depth": child_binding,
             "nps_child_depth_batches": [
                 child_binding, child_binding_2, child_binding_3, child_binding_4,
+                child_binding_5,
             ],
             "nps_child_contract": child_contract_binding,
         },
@@ -861,6 +1049,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--serving-index", default=str(DEFAULT_SERVING))
     parser.add_argument("--combined-manifest", default=str(DEFAULT_COMBINED_MANIFEST))
     parser.add_argument("--output", default=str(DEFAULT_OUTPUT))
+    parser.add_argument(
+        "--accepted-preview-base",
+        help="Append accepted B5 to the exact accepted B4 internal preview sidecar.",
+    )
     parser.add_argument("--nps-cache-dir", default=str(DEFAULT_NPS_CACHE))
     parser.add_argument("--nps-children", default=str(DEFAULT_NPS_CHILDREN))
     parser.add_argument("--nps-child-manifest", default=str(DEFAULT_NPS_CHILD_MANIFEST))
@@ -878,6 +1070,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--nps-child-manifest-4", dest="nps_child_manifest_4", default=str(DEFAULT_NPS_CHILD_MANIFEST_4))
     parser.add_argument("--nps-child-audit-4", dest="nps_child_audit_4", default=str(DEFAULT_NPS_CHILD_AUDIT_4))
     parser.add_argument("--nps-child-review-4", dest="nps_child_review_4", default=str(DEFAULT_NPS_CHILD_REVIEW_4))
+    parser.add_argument("--nps-children-5", dest="nps_children_5", default=str(DEFAULT_NPS_CHILDREN_5))
+    parser.add_argument("--nps-child-manifest-5", dest="nps_child_manifest_5", default=str(DEFAULT_NPS_CHILD_MANIFEST_5))
+    parser.add_argument("--nps-child-audit-5", dest="nps_child_audit_5", default=str(DEFAULT_NPS_CHILD_AUDIT_5))
+    parser.add_argument("--nps-child-review-5", dest="nps_child_review_5", default=str(DEFAULT_NPS_CHILD_REVIEW_5))
     parser.add_argument("--nps-child-contract", default=str(DEFAULT_NPS_CHILD_CONTRACT))
     parser.add_argument(
         "--nps-child-contract-manifest",

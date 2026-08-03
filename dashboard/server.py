@@ -1716,6 +1716,7 @@ def _explore_v3_place_to_profile(place: dict, rank: int = 900000) -> dict:
         ) if isinstance(place.get("reservations"), dict) else "",
         "license": primary_source.get("license") or existing_source_pack.get("license") or "",
     }
+    is_source_child = str(place.get("canonical_role") or "").strip() == "child"
     profile = {
         "id": place_id,
         "category": category,
@@ -1737,6 +1738,9 @@ def _explore_v3_place_to_profile(place: dict, rank: int = 900000) -> dict:
         "safety": place.get("safety") or "",
         "amenities": place.get("amenities") or [],
         "reservations": place.get("reservations") or {},
+        "reservation_url": place.get("reservation_url") or "",
+        "reservable": place.get("reservable") is True,
+        "official_url": source_url or place.get("official_url") or "",
         "media": place.get("media") or [],
         "geometry": place.get("geometry"),
         "linked_trail_ids": place.get("linked_trail_ids") or [],
@@ -1776,10 +1780,22 @@ def _explore_v3_place_to_profile(place: dict, rank: int = 900000) -> dict:
             "summary": card_summary,
             "story": description,
             "why_it_matters": card_summary,
-            "what_to_know": str(place.get("safety") or "Check current access, closures, permits, weather, and local rules before you go."),
-            "best_time_to_stop": str(place.get("best_season") or "Check season and current conditions."),
-            "access_notes": str(place.get("access") or "Open the source link and map before committing to the stop."),
-            "nearby_context": "Use nearby camps, trails, services, weather, and map context from this stop.",
+            "what_to_know": str(
+                place.get("safety")
+                or ("" if is_source_child else "Check current access, closures, permits, weather, and local rules before you go.")
+            ),
+            "best_time_to_stop": str(
+                place.get("best_season")
+                or ("" if is_source_child else "Check season and current conditions.")
+            ),
+            "access_notes": str(
+                place.get("access")
+                or ("" if is_source_child else "Open the source link and map before committing to the stop.")
+            ),
+            "nearby_context": (
+                "" if is_source_child
+                else "Use nearby camps, trails, services, weather, and map context from this stop."
+            ),
         },
         "audio_script": description,
         "wiki_extract": description if any(str(source.get("source") or "").lower() == "wikidata" for source in place.get("sources") or [] if isinstance(source, dict)) else "",
@@ -4153,8 +4169,10 @@ def _merge_explore_sidecar_enrichment(
     enriched["summary"] = base_summary
 
     for key in ("canonical_role", "parent_hub_id", "parent_hub_title", "module_target"):
-        if sidecar.get(key) and not enriched.get(key):
+        if sidecar.get(key):
             enriched[key] = sidecar.get(key)
+    if sidecar.get("hidden_from_featured") is True:
+        enriched["hidden_from_featured"] = True
     for key in ("search_aliases", "subcategories", "source_ids"):
         merged_values = []
         seen_values = set()
@@ -4196,9 +4214,29 @@ def _merge_explore_sidecar_enrichment(
     side_pack = sidecar.get("source_pack") if isinstance(sidecar.get("source_pack"), dict) else {}
     if side_pack:
         merged_pack = _v3_merge_source_pack(base_pack, side_pack)
+        for key in ("booking_url", "official_url"):
+            if side_pack.get(key):
+                merged_pack[key] = side_pack.get(key)
         if side_pack.get("extract"):
             merged_pack["extract"] = _explore_richer_text(base_pack.get("extract"), side_pack.get("extract"))
         enriched["source_pack"] = merged_pack
+    base_reservations = (
+        enriched.get("reservations")
+        if isinstance(enriched.get("reservations"), dict)
+        else {}
+    )
+    side_reservations = (
+        sidecar.get("reservations")
+        if isinstance(sidecar.get("reservations"), dict)
+        else {}
+    )
+    if side_reservations:
+        enriched["reservations"] = {**base_reservations, **side_reservations}
+    for key in ("reservation_url", "official_url"):
+        if sidecar.get(key):
+            enriched[key] = sidecar.get(key)
+    if sidecar.get("reservable") is True:
+        enriched["reservable"] = True
     enriched["sources"] = _merge_unique_dicts(enriched.get("sources") or [], sidecar.get("sources") or [], ("url", "title", "publisher", "name"))
     enriched["media"] = _merge_unique_dicts(enriched.get("media") or [], sidecar.get("media") or [], ("url", "caption"))
     if sidecar.get("wiki_extract"):
@@ -4799,7 +4837,7 @@ _EXPLORE_INTERNAL_PREVIEW_CONTRACT_V1 = {
     "public_promotion_compatible": False,
 }
 _EXPLORE_INTERNAL_PREVIEW_CONTENT_SHA256_V1 = (
-    "55e1a26ba8c70514eff995575a047bbccd4a159a58c4dcfa346d4407c4aa9ad0"
+    "8ada0d9d2eeca36b4f6a2d2d470f37dea0c93e5ea25c751cecdedc621f6f3ac2"
 )
 
 
@@ -4846,9 +4884,9 @@ def _explore_internal_preview_payload_valid(payload: object) -> bool:
         or payload.get("count") != len(raw_places)
         or payload.get("child_count") != len(raw_children)
         or len(raw_places) != 13
-        or len(raw_children) != 790
+        or len(raw_children) != 860
         or not isinstance(batches, list)
-        or len(batches) != 4
+        or len(batches) != 5
     ):
         return False
     for key, expected in _EXPLORE_INTERNAL_PREVIEW_CONTRACT_V1.items():
@@ -6361,7 +6399,8 @@ def _source_pack_first_text(value: object) -> str:
 
 
 _RECREATION_CAMPGROUND_BOOKING_RE = re.compile(
-    r"^https://(?:www\.)?recreation\.gov/camping/campgrounds/[A-Za-z0-9_-]+(?:[/?#]|$)",
+    r"^https://(?:www\.)?recreation\.gov/"
+    r"(?:camping/campgrounds|permits)/[A-Za-z0-9_-]+(?:[/?#]|$)",
     re.I,
 )
 
@@ -36504,7 +36543,22 @@ def _find_explore_place(place_id: str) -> dict | None:
     decoded = _resolve_explore_public_id(place_id)
     camp_profile = _canonical_camp_explore_profile_by_id(decoded)
     if camp_profile:
-        return camp_profile
+        catalog_match = next(
+            (
+                item for item in _load_explore_catalog().get("places") or []
+                if str(item.get("id") or "") == decoded
+            ),
+            None,
+        )
+        return (
+            _merge_explore_sidecar_enrichment(
+                camp_profile,
+                catalog_match,
+                prefer_sidecar_text=True,
+            )
+            if catalog_match
+            else camp_profile
+        )
     generated = _canonical_serving_profile_by_id(decoded)
     if generated:
         catalog_match = next(

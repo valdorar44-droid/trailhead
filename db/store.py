@@ -331,6 +331,7 @@ def _backfill_embedded_trip_payloads(db: sqlite3.Connection) -> None:
 TRAILHEAD_V110_BACKEND_MIGRATION = "trailhead_1_0_10_backend_contracts_v1"
 EXPLORE_COMMUNITY_TRAILS_MIGRATION = "explore_community_trails_v1"
 EXPLORE_PRIVATE_TRAILS_E4_MIGRATION = "explore_private_trails_e4_v1"
+SUBSCRIPTION_RECEIPT_BINDING_MIGRATION = "subscription_receipt_binding_v1"
 
 
 def _table_columns(db: sqlite3.Connection, table: str) -> set[str]:
@@ -557,6 +558,60 @@ def _migrate_trailhead_v110_backend_contracts(db: sqlite3.Connection) -> None:
         db.execute(
             "INSERT OR REPLACE INTO schema_migrations (migration_id,applied_at) VALUES (?,?)",
             (TRAILHEAD_V110_BACKEND_MIGRATION, int(time.time())),
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
+
+def _migrate_subscription_receipt_binding(db: sqlite3.Connection) -> None:
+    """Add immutable store/platform/product ownership to purchase receipts."""
+    db.commit()
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        db.execute(
+            """CREATE TABLE IF NOT EXISTS schema_migrations (
+                migration_id TEXT PRIMARY KEY,
+                applied_at   INTEGER NOT NULL
+            )"""
+        )
+        columns = _table_columns(db, "stripe_purchases")
+        additions = {
+            "purchase_kind": "TEXT",
+            "platform": "TEXT",
+            "product_id": "TEXT",
+            "original_transaction_id": "TEXT",
+        }
+        for column, definition in additions.items():
+            if column not in columns:
+                db.execute(
+                    f"ALTER TABLE stripe_purchases ADD COLUMN {column} {definition}"
+                )
+        _require_table_columns(
+            db,
+            "stripe_purchases",
+            {
+                "session_id",
+                "user_id",
+                "credits",
+                "purchase_kind",
+                "platform",
+                "product_id",
+                "original_transaction_id",
+            },
+        )
+        db.execute(
+            "UPDATE stripe_purchases SET purchase_kind='iap' "
+            "WHERE purchase_kind IS NULL AND credits=0"
+        )
+        db.execute(
+            "UPDATE stripe_purchases SET purchase_kind='stripe' "
+            "WHERE purchase_kind IS NULL AND credits!=0"
+        )
+        db.execute(
+            "INSERT OR REPLACE INTO schema_migrations (migration_id,applied_at) VALUES (?,?)",
+            (SUBSCRIPTION_RECEIPT_BINDING_MIGRATION, int(time.time())),
         )
         db.commit()
     except Exception:
@@ -903,7 +958,11 @@ def init_db():
             session_id  TEXT PRIMARY KEY,
             user_id     INTEGER NOT NULL,
             credits     INTEGER NOT NULL,
-            created_at  INTEGER NOT NULL
+            created_at  INTEGER NOT NULL,
+            purchase_kind TEXT,
+            platform TEXT,
+            product_id TEXT,
+            original_transaction_id TEXT
         );
         CREATE TABLE IF NOT EXISTS app_store_subscriptions (
             original_transaction_id TEXT PRIMARY KEY,
@@ -1901,7 +1960,16 @@ def init_db():
         "ALTER TABLE trips ADD COLUMN source TEXT",
         "ALTER TABLE trips ADD COLUMN version INTEGER NOT NULL DEFAULT 1",
         "CREATE INDEX IF NOT EXISTS idx_trips_user_updated ON trips(user_id, updated_at)",
-        "CREATE TABLE IF NOT EXISTS stripe_purchases (session_id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, credits INTEGER NOT NULL, created_at INTEGER NOT NULL)",
+        """CREATE TABLE IF NOT EXISTS stripe_purchases (
+            session_id TEXT PRIMARY KEY,
+            user_id INTEGER NOT NULL,
+            credits INTEGER NOT NULL,
+            created_at INTEGER NOT NULL,
+            purchase_kind TEXT,
+            platform TEXT,
+            product_id TEXT,
+            original_transaction_id TEXT
+        )""",
         """CREATE TABLE IF NOT EXISTS camp_planning_brief_unlocks (
             user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             facility_id   TEXT NOT NULL,
@@ -2781,9 +2849,16 @@ def init_db():
     )
     _backfill_embedded_trip_payloads(db)
     _migrate_trailhead_v110_backend_contracts(db)
+    _migrate_subscription_receipt_binding(db)
     _migrate_explore_community_trails(db)
     _migrate_explore_private_trails_e4(db)
     _queue_legacy_community_trail_profiles(db)
+    # Delivery history needs recipient/account status, not a reusable push
+    # credential. Redact legacy tokens as part of every compatible startup.
+    db.execute(
+        "UPDATE push_campaign_deliveries SET push_token='[redacted]' "
+        "WHERE push_token!='[redacted]'"
+    )
     db.commit()
     db.close()
     try:
@@ -2795,15 +2870,29 @@ def init_db():
 
 def log_event(user_id: int | None, session_id: str | None, event_type: str, event_data: dict | None = None):
     """Fire-and-forget analytics event. Never raises — analytics must not break product."""
+    db = None
     try:
         db = _conn()
+        db.execute("BEGIN IMMEDIATE")
+        if user_id is not None and not db.execute(
+            "SELECT 1 FROM users WHERE id=?", (int(user_id),)
+        ).fetchone():
+            db.rollback()
+            return
         db.execute(
             "INSERT INTO analytics_events (user_id, session_id, event_type, event_data, created_at) VALUES (?,?,?,?,?)",
             (user_id, session_id, event_type, json.dumps(event_data) if event_data else None, int(time.time()))
         )
-        db.commit(); db.close()
+        db.commit()
     except Exception:
-        pass
+        if db is not None:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+    finally:
+        if db is not None:
+            db.close()
 
 def cleanup_stale_data():
     """Prune expired camp fullness records and old analytics. Safe to call on health check."""
@@ -2814,6 +2903,7 @@ def cleanup_stale_data():
         # Keep analytics for 90 days
         cutoff = now - 90 * 86400
         db.execute("DELETE FROM analytics_events WHERE created_at < ?", (cutoff,))
+        db.execute("DELETE FROM push_campaign_deliveries WHERE created_at < ?", (cutoff,))
         # Completed planner payloads can contain full route geometry. Trips are
         # already persisted separately, so old job envelopes need not live forever.
         plan_job_cutoff = now - 7 * 86400
@@ -3555,6 +3645,10 @@ class RevisionConflictError(ValueError):
 
 class IdempotencyConflictError(ValueError):
     pass
+
+
+class SubscriptionReceiptConflictError(ValueError):
+    """A verified store receipt is already bound to incompatible account data."""
 
 
 def _validate_canonical_id(value: str, label: str = "canonical id") -> str:
@@ -5690,12 +5784,355 @@ def get_user_by_id(user_id: int) -> dict | None:
     db.close()
     return dict(row) if row else None
 
+
+# Every NO ACTION reference to users must have an explicit deletion policy.
+# CASCADE and SET NULL references are mirrored explicitly so account deletion
+# remains deterministic and auditable while foreign-key enforcement stays on.
+_USER_FK_DELETE_POLICIES = frozenset({
+    ("account_deletion_authorizations", "user_id"),
+    ("app_store_subscriptions", "user_id"),
+    ("authored_original_feedback", "user_id"),
+    ("authored_trip_pack_acquisition_requests", "user_id"),
+    ("authored_trip_pack_entitlements", "user_id"),
+    ("availability_monitors", "user_id"),
+    ("camp_comments", "user_id"),
+    ("camp_field_reports", "user_id"),
+    ("camp_fullness", "reporter_id"),
+    ("camp_fullness_votes", "user_id"),
+    ("camp_planning_brief_jobs", "user_id"),
+    ("camp_planning_brief_unlocks", "user_id"),
+    ("communication_preferences", "user_id"),
+    ("community_publications", "user_id"),
+    ("community_rating_events", "user_id"),
+    ("community_ratings", "user_id"),
+    ("contest_entries", "user_id"),
+    ("contest_events", "user_id"),
+    ("contributor_badges", "user_id"),
+    ("credit_transactions", "user_id"),
+    ("dispersed_site_lead_photos", "user_id"),
+    ("extreme_copilot_actions", "user_id"),
+    ("extreme_demo_sessions", "user_id"),
+    ("extreme_ledger_events", "user_id"),
+    ("extreme_trip_metadata", "user_id"),
+    ("map_contributor_applications", "user_id"),
+    ("offline_downloads", "user_id"),
+    ("offline_bundle_preparations_v2", "user_id"),
+    ("owned_trail_routes_v1", "user_id"),
+    ("pin_interactions", "user_id"),
+    ("place_comments", "user_id"),
+    ("place_photos", "user_id"),
+    ("place_reservation_alerts", "user_id"),
+    ("push_campaign_deliveries", "user_id"),
+    ("referrals", "referrer_id"),
+    ("report_interactions", "user_id"),
+    ("reports", "user_id"),
+    ("route_exit_references_v1", "user_id"),
+    ("route_service_segments_v1", "user_id"),
+    ("saved_entities", "user_id"),
+    ("saved_entity_mutations", "user_id"),
+    ("support_attachments", "user_id"),
+    ("support_threads", "user_id"),
+    ("timeline_event_media_v1", "user_id"),
+    ("trail_contribution_credit_awards_v1", "user_id"),
+    ("trail_field_reports", "user_id"),
+    ("trail_route_mutations_v1", "user_id"),
+    ("trip_brief_and_backup_v1", "user_id"),
+    ("trip_document_mutations", "user_id"),
+    ("trip_documents_v2", "user_id"),
+    ("viator_bookings", "user_id"),
+})
+
+_USER_FK_CLEAR_POLICIES = frozenset({
+    ("authored_original_assets", "uploaded_by"),
+    ("authored_original_features", "selected_by"),
+    ("authored_original_feedback", "moderated_by"),
+    ("authored_original_validation_reports", "started_by"),
+    ("authored_trip_pack_features", "selected_by"),
+    ("authored_trip_pack_versions", "published_by"),
+    ("authored_trip_packs", "created_by"),
+    ("authored_trip_packs", "updated_by"),
+    ("community_publications", "moderated_by"),
+    ("contest_awards", "awarded_by"),
+    ("contributor_badges", "granted_by"),
+    ("extreme_admin_config", "updated_by"),
+    ("push_campaigns", "created_by"),
+    ("support_messages", "sender_admin_id"),
+    ("support_messages", "sender_user_id"),
+    ("support_threads", "created_by_admin"),
+    ("trail_submissions_v1", "user_id"),
+})
+
+_USER_LEGACY_DELETE_COLUMNS = (
+    ("ai_usage_log", "user_id"),
+    ("analytics_events", "user_id"),
+    ("bug_reports", "user_id"),
+    ("camp_edit_suggestions", "user_id"),
+    ("community_pins", "user_id"),
+    ("pin_update_suggestions", "user_id"),
+    ("place_edit_suggestions", "user_id"),
+    ("plan_jobs", "user_id"),
+    ("stripe_purchases", "user_id"),
+    ("trail_edit_suggestions", "user_id"),
+    ("trips", "user_id"),
+)
+
+_USER_LEGACY_CLEAR_COLUMNS = (
+    ("camp_profile_overrides", "updated_by"),
+    ("dispersed_site_leads", "published_by"),
+    ("dispersed_site_leads", "reviewed_by"),
+    ("explore_story_overrides", "updated_by"),
+    ("users", "referred_by"),
+)
+
+_USER_REFERENCE_COLUMN_NAMES = frozenset({
+    "awarded_by",
+    "created_by",
+    "created_by_admin",
+    "granted_by",
+    "moderated_by",
+    "published_by",
+    "referred_by",
+    "referrer_id",
+    "reporter_id",
+    "reviewed_by",
+    "selected_by",
+    "sender_admin_id",
+    "sender_user_id",
+    "started_by",
+    "updated_by",
+    "uploaded_by",
+    "user_id",
+    "winner_user_id",
+})
+
+
+def _sqlite_identifier(value: str) -> str:
+    return '"' + str(value).replace('"', '""') + '"'
+
+
+def _user_foreign_key_references(
+    db: sqlite3.Connection,
+) -> list[tuple[str, str, str]]:
+    references: list[tuple[str, str, str]] = []
+    tables = db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+    ).fetchall()
+    for table_row in tables:
+        table = str(table_row["name"])
+        quoted_table = _sqlite_identifier(table)
+        for fk in db.execute(f"PRAGMA foreign_key_list({quoted_table})").fetchall():
+            if str(fk["table"]) != "users" or str(fk["to"]) != "id":
+                continue
+            references.append((table, str(fk["from"]), str(fk["on_delete"]).upper()))
+    return sorted(references)
+
+
+def _user_non_fk_references(db: sqlite3.Connection) -> list[tuple[str, str]]:
+    references: list[tuple[str, str]] = []
+    tables = db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+    ).fetchall()
+    for table_row in tables:
+        table = str(table_row["name"])
+        quoted_table = _sqlite_identifier(table)
+        user_fk_columns = {
+            str(fk["from"])
+            for fk in db.execute(f"PRAGMA foreign_key_list({quoted_table})").fetchall()
+            if str(fk["table"]) == "users" and str(fk["to"]) == "id"
+        }
+        for column_row in db.execute(f"PRAGMA table_info({quoted_table})").fetchall():
+            column = str(column_row["name"])
+            if column in _USER_REFERENCE_COLUMN_NAMES and column not in user_fk_columns:
+                references.append((table, column))
+    return sorted(references)
+
+
+def _validate_user_deletion_schema(db: sqlite3.Connection) -> None:
+    for table, column, on_delete in _user_foreign_key_references(db):
+        key = (table, column)
+        if key == ("contest_awards", "winner_user_id"):
+            continue
+        if on_delete in {"CASCADE", "SET NULL"}:
+            continue
+        if key not in _USER_FK_DELETE_POLICIES and key not in _USER_FK_CLEAR_POLICIES:
+            raise RuntimeError(
+                f"Account deletion has no policy for {table}.{column} ({on_delete})"
+            )
+    declared_legacy = set(_USER_LEGACY_DELETE_COLUMNS) | set(_USER_LEGACY_CLEAR_COLUMNS)
+    for table, column in _user_non_fk_references(db):
+        if (table, column) not in declared_legacy:
+            raise RuntimeError(
+                f"Account deletion has no policy for non-FK identity {table}.{column}"
+            )
+
+
+def _prepare_user_deletion_dependencies(
+    db: sqlite3.Connection,
+    user_id: int,
+) -> None:
+    # A photo can point at a comment written by a different account. Clear the
+    # optional child link before the comment owner is removed, then the normal
+    # photo policy can delete only photos owned by the deleted account.
+    if {"id", "user_id"}.issubset(_table_columns(db, "place_comments")) and {
+        "comment_id"
+    }.issubset(_table_columns(db, "place_photos")):
+        db.execute(
+            """UPDATE place_photos SET comment_id=NULL
+               WHERE comment_id IN (
+                   SELECT id FROM place_comments WHERE user_id=?
+               )""",
+            (user_id,),
+        )
+
+
+def _apply_user_foreign_key_deletion_policies(
+    db: sqlite3.Connection,
+    user_id: int,
+) -> None:
+    for table, column, on_delete in _user_foreign_key_references(db):
+        key = (table, column)
+        quoted_table = _sqlite_identifier(table)
+        quoted_column = _sqlite_identifier(column)
+        if key == ("contest_awards", "winner_user_id"):
+            db.execute(
+                """UPDATE contest_awards
+                   SET winner_user_id=NULL,winner_username='Deleted user'
+                   WHERE winner_user_id=?""",
+                (user_id,),
+            )
+        elif on_delete == "CASCADE" or key in _USER_FK_DELETE_POLICIES:
+            db.execute(
+                f"DELETE FROM {quoted_table} WHERE {quoted_column}=?", (user_id,)
+            )
+        elif on_delete == "SET NULL" or key in _USER_FK_CLEAR_POLICIES:
+            db.execute(
+                f"UPDATE {quoted_table} SET {quoted_column}=NULL WHERE {quoted_column}=?",
+                (user_id,),
+            )
+        else:
+            raise RuntimeError(
+                f"Account deletion has no policy for {table}.{column} ({on_delete})"
+            )
+
+
+def _apply_user_legacy_deletion_policies(
+    db: sqlite3.Connection,
+    user_id: int,
+) -> None:
+    user_row = db.execute("SELECT email FROM users WHERE id=?", (user_id,)).fetchone()
+    deleted_email = str(user_row["email"] or "").strip() if user_row else ""
+    if deleted_email and "referred_email" in _table_columns(db, "referrals"):
+        db.execute(
+            "DELETE FROM referrals WHERE lower(referred_email)=lower(?)",
+            (deleted_email,),
+        )
+
+    # Remove interactions on a pin/report owned by the deleted account before
+    # removing the parent rows; these legacy relationships are not foreign keys.
+    if {"id", "user_id"}.issubset(_table_columns(db, "community_pins")):
+        if {"pin_id"}.issubset(_table_columns(db, "pin_interactions")):
+            db.execute(
+                """DELETE FROM pin_interactions
+                   WHERE pin_id IN (SELECT id FROM community_pins WHERE user_id=?)""",
+                (user_id,),
+            )
+        if {"pin_id"}.issubset(_table_columns(db, "pin_update_suggestions")):
+            db.execute(
+                """DELETE FROM pin_update_suggestions
+                   WHERE pin_id IN (SELECT id FROM community_pins WHERE user_id=?)""",
+                (user_id,),
+            )
+    if {"id", "user_id"}.issubset(_table_columns(db, "reports")) and {
+        "report_id"
+    }.issubset(_table_columns(db, "report_interactions")):
+        db.execute(
+            """DELETE FROM report_interactions
+               WHERE report_id IN (SELECT id FROM reports WHERE user_id=?)""",
+            (user_id,),
+        )
+
+    for table, column in _USER_LEGACY_DELETE_COLUMNS:
+        if column in _table_columns(db, table):
+            db.execute(
+                f"DELETE FROM {_sqlite_identifier(table)} "
+                f"WHERE {_sqlite_identifier(column)}=?",
+                (user_id,),
+            )
+    for table, column in _USER_LEGACY_CLEAR_COLUMNS:
+        if column in _table_columns(db, table):
+            db.execute(
+                f"UPDATE {_sqlite_identifier(table)} "
+                f"SET {_sqlite_identifier(column)}=NULL "
+                f"WHERE {_sqlite_identifier(column)}=?",
+                (user_id,),
+            )
+
+
+def _assert_user_references_removed(db: sqlite3.Connection, user_id: int) -> None:
+    remaining: list[str] = []
+    for table, column, _on_delete in _user_foreign_key_references(db):
+        count = db.execute(
+            f"SELECT COUNT(*) FROM {_sqlite_identifier(table)} "
+            f"WHERE {_sqlite_identifier(column)}=?",
+            (user_id,),
+        ).fetchone()[0]
+        if int(count):
+            remaining.append(f"{table}.{column}")
+    for table, column in _user_non_fk_references(db):
+        count = db.execute(
+            f"SELECT COUNT(*) FROM {_sqlite_identifier(table)} "
+            f"WHERE {_sqlite_identifier(column)}=?",
+            (user_id,),
+        ).fetchone()[0]
+        if int(count):
+            remaining.append(f"{table}.{column}")
+    if remaining:
+        raise RuntimeError(
+            "Account deletion retained account references: " + ", ".join(sorted(set(remaining)))
+        )
+
+
+def _delete_user_account_data(db: sqlite3.Connection, user_id: int) -> None:
+    _validate_user_deletion_schema(db)
+    _prepare_user_deletion_dependencies(db, user_id)
+    _delete_user_support_data(db, user_id)
+    _delete_user_trail_route_data(db, user_id)
+    _apply_user_foreign_key_deletion_policies(db, user_id)
+    _apply_user_legacy_deletion_policies(db, user_id)
+    _assert_user_references_removed(db, user_id)
+    db.execute("DELETE FROM users WHERE id=?", (user_id,))
+
+
+def _foreign_key_violation_keys(
+    db: sqlite3.Connection,
+) -> frozenset[tuple[str, int | None, str, int | None]]:
+    """Return stable identities for the database's current FK violations."""
+    return frozenset(
+        (
+            str(row[0]),
+            int(row[1]) if row[1] is not None else None,
+            str(row[2]),
+            int(row[3]) if row[3] is not None else None,
+        )
+        for row in db.execute("PRAGMA foreign_key_check").fetchall()
+    )
+
+
+def _assert_no_new_foreign_key_violations(
+    db: sqlite3.Connection,
+    baseline: frozenset[tuple[str, int | None, str, int | None]],
+) -> None:
+    violations = _foreign_key_violation_keys(db) - baseline
+    if violations:
+        tables = sorted({row[0] for row in violations})
+        raise RuntimeError(
+            "Account deletion foreign-key check failed: " + ", ".join(tables)
+        )
+
+
 def delete_user(user_id: int) -> None:
-    """Permanently delete a user and all associated data.
-    Uses FK-compliant full delete when possible; falls back to FK-off user-row
-    delete if DB is locked (e.g. Railway multi-instance deploy window)."""
+    """Permanently delete an account in one foreign-key-checked transaction."""
     import time as _time
-    # Attempt 1-3: full FK-compliant delete
     for attempt in range(3):
         try:
             _delete_user_full(user_id)
@@ -5705,43 +6142,17 @@ def delete_user(user_id: int) -> None:
                 raise
             if attempt < 2:
                 _time.sleep(2)
-            else:
-                break
 
-    # Fallback: disable FK constraints, delete user row directly.
-    # Delete account-owned library/trip records explicitly because foreign keys are
-    # disabled on this recovery path.
-    db = sqlite3.connect(settings.db_path, timeout=60.0, check_same_thread=False)
+    # Make one final serialized attempt with foreign keys still enabled. This is
+    # deliberately not a force-delete path: a persistent lock or any integrity
+    # failure rolls back and leaves the account intact for a later retry.
+    db = _conn()
     try:
-        db.row_factory = sqlite3.Row
-        db.execute("PRAGMA foreign_keys=OFF")
-        _delete_user_support_data(db, user_id)
-        _delete_user_trail_route_data(db, user_id)
-        db.execute("DELETE FROM authored_trip_pack_acquisition_requests WHERE user_id=?", (user_id,))
-        db.execute("DELETE FROM authored_trip_pack_entitlements WHERE user_id=?", (user_id,))
-        db.execute("UPDATE authored_trip_packs SET created_by=NULL WHERE created_by=?", (user_id,))
-        db.execute("UPDATE authored_trip_packs SET updated_by=NULL WHERE updated_by=?", (user_id,))
-        db.execute("UPDATE authored_trip_pack_versions SET published_by=NULL WHERE published_by=?", (user_id,))
-        db.execute("UPDATE authored_trip_pack_features SET selected_by=NULL WHERE selected_by=?", (user_id,))
-        db.execute("UPDATE authored_original_features SET selected_by=NULL WHERE selected_by=?", (user_id,))
-        db.execute("UPDATE authored_original_assets SET uploaded_by=NULL WHERE uploaded_by=?", (user_id,))
-        db.execute("DELETE FROM availability_monitors WHERE user_id=?", (user_id,))
-        db.execute("DELETE FROM community_publications WHERE user_id=?", (user_id,))
-        db.execute("UPDATE community_publications SET moderated_by=NULL WHERE moderated_by=?", (user_id,))
-        db.execute("DELETE FROM communication_preferences WHERE user_id=?", (user_id,))
-        db.execute("DELETE FROM trip_document_mutations WHERE user_id=?", (user_id,))
-        db.execute("DELETE FROM trip_documents_v2 WHERE user_id=?", (user_id,))
-        db.execute("DELETE FROM saved_entity_mutations WHERE user_id=?", (user_id,))
-        db.execute("DELETE FROM saved_entities WHERE user_id=?", (user_id,))
-        db.execute("DELETE FROM community_ratings WHERE user_id=?", (user_id,))
-        db.execute("DELETE FROM community_rating_events WHERE user_id=?", (user_id,))
-        db.execute("DELETE FROM offline_bundle_preparations_v2 WHERE user_id=?", (user_id,))
-        db.execute("DELETE FROM route_service_segments_v1 WHERE user_id=?", (user_id,))
-        db.execute("DELETE FROM route_exit_references_v1 WHERE user_id=?", (user_id,))
-        db.execute("DELETE FROM timeline_event_media_v1 WHERE user_id=?", (user_id,))
-        db.execute("DELETE FROM trip_brief_and_backup_v1 WHERE user_id=?", (user_id,))
-        db.execute("DELETE FROM account_deletion_authorizations WHERE user_id=?", (user_id,))
-        db.execute("DELETE FROM users WHERE id=?", (user_id,))
+        db.execute("PRAGMA busy_timeout=60000")
+        db.execute("BEGIN IMMEDIATE")
+        foreign_key_baseline = _foreign_key_violation_keys(db)
+        _delete_user_account_data(db, user_id)
+        _assert_no_new_foreign_key_violations(db, foreign_key_baseline)
         db.commit()
     except Exception:
         db.rollback()
@@ -5754,8 +6165,7 @@ def _delete_user_support_data(db: sqlite3.Connection, user_id: int) -> None:
     """Remove private support data while preserving unrelated transcripts.
 
     ``support_threads.user_id`` predates cascading deletion in deployed databases,
-    and the locked-database recovery path intentionally disables foreign keys. The
-    child rows therefore have to be removed explicitly in both paths.
+    so child rows are removed explicitly before the account transaction commits.
     """
     db.execute("DELETE FROM support_attachments WHERE user_id=?", (user_id,))
     db.execute(
@@ -5925,8 +6335,8 @@ def _anonymize_trail_moderator_history(value: object) -> list[dict]:
 def _delete_user_trail_route_data(db: sqlite3.Connection, user_id: int) -> None:
     """Delete private trail work and anonymize already-public contributions.
 
-    This is deliberately explicit because the locked-database account deletion
-    recovery path disables foreign keys.  A published Community route keeps its
+    This is deliberately explicit so the serialized account-deletion transaction
+    remains auditable with foreign keys enabled. A published Community route keeps its
     immutable geometry and moderation record, but no account identifier or
     chosen handle survives account deletion.
     """
@@ -6086,52 +6496,17 @@ def _delete_user_trail_route_data(db: sqlite3.Connection, user_id: int) -> None:
 
 def _delete_user_full(user_id: int) -> None:
     db = _conn()
-    _delete_user_support_data(db, user_id)
-    _delete_user_trail_route_data(db, user_id)
-    # Tables with REFERENCES users(id) — strict foreign key constraints, delete first
-    db.execute("DELETE FROM contributor_badges WHERE user_id=? OR granted_by=?", (user_id, user_id))
-    db.execute("DELETE FROM contest_events      WHERE user_id=?",    (user_id,))
-    db.execute("DELETE FROM contest_entries     WHERE user_id=?",    (user_id,))
-    db.execute("UPDATE contest_awards SET winner_user_id=NULL,winner_username='Deleted user' WHERE winner_user_id=?", (user_id,))
-    db.execute("DELETE FROM report_interactions WHERE user_id=?",    (user_id,))
-    db.execute("DELETE FROM camp_field_reports  WHERE user_id=?",    (user_id,))
-    db.execute("DELETE FROM camp_comments       WHERE user_id=?",    (user_id,))
-    db.execute("DELETE FROM place_reservation_alerts WHERE user_id=?", (user_id,))
-    db.execute("DELETE FROM availability_monitors WHERE user_id=?", (user_id,))
-    db.execute("DELETE FROM authored_trip_pack_entitlements WHERE user_id=?", (user_id,))
-    db.execute("DELETE FROM community_publications WHERE user_id=?", (user_id,))
-    db.execute("UPDATE community_publications SET moderated_by=NULL WHERE moderated_by=?", (user_id,))
-    db.execute("DELETE FROM communication_preferences WHERE user_id=?", (user_id,))
-    db.execute("DELETE FROM place_photos        WHERE user_id=?",    (user_id,))
-    db.execute("DELETE FROM place_comments      WHERE user_id=?",    (user_id,))
-    db.execute("DELETE FROM trail_field_reports WHERE user_id=?",    (user_id,))
-    db.execute("DELETE FROM camp_fullness_votes WHERE user_id=?",    (user_id,))
-    db.execute("DELETE FROM camp_fullness       WHERE reporter_id=?", (user_id,))
-    db.execute("DELETE FROM credit_transactions WHERE user_id=?",    (user_id,))
-    db.execute("DELETE FROM referrals           WHERE referrer_id=?", (user_id,))
-    # Tables with nullable user_id (no FK constraint but clean up anyway)
-    db.execute("DELETE FROM analytics_events    WHERE user_id=?",    (user_id,))
-    db.execute("DELETE FROM bug_reports         WHERE user_id=?",    (user_id,))
-    db.execute("DELETE FROM plan_jobs           WHERE user_id=?",    (user_id,))
-    db.execute("DELETE FROM reports             WHERE user_id=?",    (user_id,))
-    db.execute("DELETE FROM community_pins      WHERE user_id=?",    (user_id,))
-    db.execute("DELETE FROM trips               WHERE user_id=?",    (user_id,))
-    db.execute("DELETE FROM trip_document_mutations WHERE user_id=?", (user_id,))
-    db.execute("DELETE FROM trip_documents_v2   WHERE user_id=?",    (user_id,))
-    db.execute("DELETE FROM saved_entity_mutations WHERE user_id=?", (user_id,))
-    db.execute("DELETE FROM saved_entities       WHERE user_id=?",    (user_id,))
-    # stripe_purchases uses session_id PK — delete by user_id if col exists (added via migration)
     try:
-        db.execute("DELETE FROM stripe_purchases WHERE user_id=?",   (user_id,))
-    except sqlite3.OperationalError as exc:
-        # Older deployments can legitimately lack this table/column. Do not mask
-        # locking, integrity, or other database failures during account deletion.
-        message = str(exc).lower()
-        if "no such table" not in message and "no such column" not in message:
-            raise
-    # Finally delete the user row itself (push_token is a column on users, not a table)
-    db.execute("DELETE FROM users               WHERE id=?",         (user_id,))
-    db.commit(); db.close()
+        db.execute("BEGIN IMMEDIATE")
+        foreign_key_baseline = _foreign_key_violation_keys(db)
+        _delete_user_account_data(db, user_id)
+        _assert_no_new_foreign_key_violations(db, foreign_key_baseline)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 def get_user_by_referral_code(code: str) -> dict | None:
     normalized = str(code or "").strip()
@@ -6202,14 +6577,25 @@ def add_contest_points(user_id: int, points: int, reason: str,
     _record_contest_event_db(db, user_id, points, reason, source_type, source_id, created_at)
     db.commit(); db.close()
 
-def add_credits(user_id: int, amount: int, reason: str):
+def add_credits(user_id: int, amount: int, reason: str) -> bool:
     now = int(time.time())
     db = _conn()
-    db.execute("UPDATE users SET credits=MAX(0,credits+?) WHERE id=?", (amount, user_id))
-    db.execute("INSERT INTO credit_transactions (user_id,amount,reason,created_at) VALUES (?,?,?,?)",
-               (user_id, amount, reason, now))
-    _record_contest_event_db(db, user_id, amount, reason, created_at=now)
-    db.commit(); db.close()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        if not db.execute("SELECT 1 FROM users WHERE id=?", (int(user_id),)).fetchone():
+            db.rollback()
+            return False
+        db.execute("UPDATE users SET credits=MAX(0,credits+?) WHERE id=?", (amount, user_id))
+        db.execute("INSERT INTO credit_transactions (user_id,amount,reason,created_at) VALUES (?,?,?,?)",
+                   (user_id, amount, reason, now))
+        _record_contest_event_db(db, user_id, amount, reason, created_at=now)
+        db.commit()
+        return True
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 def grant_signup_rewards(user_id: int, signup_bonus: int, referral_bonus: int) -> dict:
     """Grant welcome/referral credits exactly once, independent of current balance.
@@ -6486,14 +6872,81 @@ def is_stripe_session_fulfilled(session_id: str) -> bool:
     return row is not None
 
 
-def fulfill_stripe_purchase(session_id: str, user_id: int, credits: int):
+def get_purchase_fulfillment(session_id: str) -> dict | None:
+    """Return the immutable owner/value claim for a fulfilled purchase token."""
     db = _conn()
-    db.execute(
-        "INSERT OR IGNORE INTO stripe_purchases (session_id,user_id,credits,created_at) VALUES (?,?,?,?)",
-        (session_id, user_id, credits, int(time.time()))
-    )
-    db.commit()
+    row = db.execute(
+        """SELECT session_id,user_id,credits,created_at,purchase_kind,platform,
+                  product_id,original_transaction_id
+           FROM stripe_purchases WHERE session_id=?""",
+        (str(session_id or "").strip(),),
+    ).fetchone()
     db.close()
+    return dict(row) if row else None
+
+
+def fulfill_stripe_purchase(
+    session_id: str,
+    user_id: int,
+    credits: int,
+    reason: str | None = None,
+) -> bool:
+    """Record and credit one paid session atomically.
+
+    A retry is successful only for the same account and credit amount.  A
+    payment identifier is an ownership claim, so a replay may never silently
+    succeed for another account.
+    """
+    db = _conn()
+    now = int(time.time())
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        if not db.execute("SELECT 1 FROM users WHERE id=?", (int(user_id),)).fetchone():
+            db.rollback()
+            return False
+        existing = db.execute(
+            "SELECT user_id,credits,purchase_kind FROM stripe_purchases WHERE session_id=?",
+            (session_id,),
+        ).fetchone()
+        if existing:
+            same_purchase = (
+                int(existing["user_id"]) == int(user_id)
+                and int(existing["credits"]) == int(credits)
+                and str(existing["purchase_kind"] or "stripe") == "stripe"
+            )
+            if same_purchase and not existing["purchase_kind"]:
+                db.execute(
+                    "UPDATE stripe_purchases SET purchase_kind='stripe' WHERE session_id=?",
+                    (session_id,),
+                )
+            db.commit()
+            return same_purchase
+        inserted = db.execute(
+            """INSERT INTO stripe_purchases
+               (session_id,user_id,credits,created_at,purchase_kind)
+               VALUES (?,?,?,?,'stripe')""",
+            (session_id, user_id, credits, now),
+        ).rowcount
+        if inserted and int(credits) > 0:
+            credit_reason = str(reason or f"Purchased credit pack — {int(credits)} credits")
+            db.execute(
+                "UPDATE users SET credits=MAX(0,credits+?) WHERE id=?",
+                (int(credits), int(user_id)),
+            )
+            db.execute(
+                "INSERT INTO credit_transactions (user_id,amount,reason,created_at) VALUES (?,?,?,?)",
+                (int(user_id), int(credits), credit_reason, now),
+            )
+            _record_contest_event_db(
+                db, int(user_id), int(credits), credit_reason, created_at=now
+            )
+        db.commit()
+        return True
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 
 def is_reporter_restricted(user_id: int) -> tuple[bool, int]:
@@ -7839,46 +8292,368 @@ def set_user_admin(user_id: int, is_admin: bool):
 def set_user_plan(user_id: int, plan_type: str, expires_at: int | None = None) -> dict | None:
     db = _conn()
     now = int(time.time())
-    if plan_type == "free":
-        db.execute("UPDATE users SET plan_type='free', plan_expires_at=NULL WHERE id=?", (user_id,))
-    else:
-        if expires_at is None:
-            expires_at = now + 366 * 86400
-        db.execute("UPDATE users SET plan_type=?, plan_expires_at=? WHERE id=?", (plan_type, expires_at, user_id))
-        if int(expires_at or 0) > now:
-            month, year = _contest_period(now)
-            db.execute(
-                """INSERT INTO contest_entries
-                   (user_id,period_month,period_year,entry_type,created_at)
-                   VALUES (?,?,?,?,?)
-                   ON CONFLICT(user_id,period_month) DO UPDATE SET
-                     entry_type='subscriber', period_year=excluded.period_year""",
-                (user_id, month, year, "subscriber", now),
-            )
-    db.commit()
-    row = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
-    db.close()
-    return _decode_pin_details(row) if row else None
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        if not db.execute("SELECT 1 FROM users WHERE id=?", (int(user_id),)).fetchone():
+            db.rollback()
+            return None
+        if plan_type == "free":
+            db.execute("UPDATE users SET plan_type='free', plan_expires_at=NULL WHERE id=?", (user_id,))
+        else:
+            if expires_at is None:
+                expires_at = now + 366 * 86400
+            db.execute("UPDATE users SET plan_type=?, plan_expires_at=? WHERE id=?", (plan_type, expires_at, user_id))
+            if int(expires_at or 0) > now:
+                month, year = _contest_period(now)
+                db.execute(
+                    """INSERT INTO contest_entries
+                       (user_id,period_month,period_year,entry_type,created_at)
+                       VALUES (?,?,?,?,?)
+                       ON CONFLICT(user_id,period_month) DO UPDATE SET
+                         entry_type='subscriber', period_year=excluded.period_year""",
+                    (user_id, month, year, "subscriber", now),
+                )
+        row = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+        db.commit()
+        return _decode_pin_details(row) if row else None
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+def _subscription_platform_from_environment(environment: str | None) -> str | None:
+    normalized = str(environment or "").strip().lower()
+    if not normalized:
+        return None
+    return "android" if "google" in normalized else "ios"
+
+
+def _assert_subscription_record_consistency(
+    row: sqlite3.Row,
+    *,
+    user_id: int,
+    product_id: str,
+    platform: str | None,
+    transition_product_ids: frozenset[str] = frozenset(),
+) -> None:
+    if int(row["user_id"]) != int(user_id):
+        raise SubscriptionReceiptConflictError(
+            "Store subscription is already linked to another account"
+        )
+    existing_product = str(row["product_id"] or "")
+    requested_product = str(product_id or "")
+    product_transition_allowed = bool(
+        existing_product != requested_product
+        and existing_product in transition_product_ids
+        and requested_product in transition_product_ids
+    )
+    if existing_product != requested_product and not product_transition_allowed:
+        raise SubscriptionReceiptConflictError(
+            "Store subscription is already linked to another product"
+        )
+    existing_platform = _subscription_platform_from_environment(row["environment"])
+    if platform and existing_platform and platform != existing_platform:
+        raise SubscriptionReceiptConflictError(
+            "Store subscription is already linked to another platform"
+        )
+
 
 def save_app_store_subscription(original_transaction_id: str, transaction_id: str | None,
                                 user_id: int, product_id: str, environment: str | None,
-                                expires_at: int | None, status: str = "active") -> None:
+                                expires_at: int | None, status: str = "active",
+                                platform: str | None = None, *,
+                                transition_product_ids: frozenset[str] = frozenset()) -> bool:
+    """Persist a verified subscription without ever transferring its owner.
+
+    ``original_transaction_id`` is the durable ownership key.  A latest
+    transaction can change during a valid renewal, but the account, product,
+    and platform must remain consistent with the verified original purchase.
+    """
+    original_transaction_id = str(original_transaction_id or "").strip()
+    transaction_id = str(transaction_id or "").strip() or None
+    product_id = str(product_id or "").strip()
+    platform = str(platform or "").strip().lower() or _subscription_platform_from_environment(environment)
+    if not original_transaction_id or not product_id:
+        raise ValueError("Subscription identity is incomplete")
+    if platform not in {None, "ios", "android"}:
+        raise ValueError("Subscription platform is invalid")
     db = _conn()
-    db.execute(
-        """INSERT INTO app_store_subscriptions
-           (original_transaction_id,transaction_id,user_id,product_id,environment,expires_at,status,updated_at)
-           VALUES (?,?,?,?,?,?,?,?)
-           ON CONFLICT(original_transaction_id) DO UPDATE SET
-             transaction_id=excluded.transaction_id,
-             user_id=excluded.user_id,
-             product_id=excluded.product_id,
-             environment=excluded.environment,
-             expires_at=excluded.expires_at,
-             status=excluded.status,
-             updated_at=excluded.updated_at""",
-        (original_transaction_id, transaction_id, user_id, product_id, environment, expires_at, status, int(time.time()))
-    )
-    db.commit(); db.close()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        if not db.execute("SELECT 1 FROM users WHERE id=?", (int(user_id),)).fetchone():
+            db.rollback()
+            return False
+        existing = db.execute(
+            "SELECT * FROM app_store_subscriptions WHERE original_transaction_id=?",
+            (original_transaction_id,),
+        ).fetchone()
+        if existing:
+            _assert_subscription_record_consistency(
+                existing,
+                user_id=user_id,
+                product_id=product_id,
+                platform=platform,
+                transition_product_ids=transition_product_ids,
+            )
+        if transaction_id:
+            transaction_rows = db.execute(
+                "SELECT * FROM app_store_subscriptions WHERE transaction_id=?",
+                (transaction_id,),
+            ).fetchall()
+            for row in transaction_rows:
+                if str(row["original_transaction_id"]) != original_transaction_id:
+                    raise SubscriptionReceiptConflictError(
+                        "Store transaction is already linked to another subscription"
+                    )
+                _assert_subscription_record_consistency(
+                    row,
+                    user_id=user_id,
+                    product_id=product_id,
+                    platform=platform,
+                )
+        db.execute(
+            """INSERT INTO app_store_subscriptions
+               (original_transaction_id,transaction_id,user_id,product_id,environment,expires_at,status,updated_at)
+               VALUES (?,?,?,?,?,?,?,?)
+               ON CONFLICT(original_transaction_id) DO UPDATE SET
+                 transaction_id=excluded.transaction_id,
+                 product_id=excluded.product_id,
+                 environment=excluded.environment,
+                 expires_at=excluded.expires_at,
+                 status=excluded.status,
+                 updated_at=excluded.updated_at""",
+            (original_transaction_id, transaction_id, user_id, product_id, environment, expires_at, status, int(time.time()))
+        )
+        db.commit()
+        return True
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def bind_verified_store_subscription(
+    receipt_id: str,
+    original_transaction_id: str,
+    transaction_id: str | None,
+    user_id: int,
+    product_id: str,
+    platform: str,
+    environment: str | None,
+    expires_at: int,
+    status: str = "active",
+    *,
+    related_receipt_ids: list[str] | tuple[str, ...] | None = None,
+    transition_product_ids: frozenset[str] = frozenset(),
+) -> dict | None:
+    """Atomically claim a verified receipt and update its subscription.
+
+    The receipt claim reuses the existing fulfilled-purchase ledger so legacy
+    activations remain protected.  Same-account retries and renewals are
+    idempotent; cross-account, cross-product, or cross-platform replays fail.
+    """
+    receipt_id = str(receipt_id or "").strip()
+    original_transaction_id = str(original_transaction_id or "").strip()
+    transaction_id = str(transaction_id or "").strip() or None
+    product_id = str(product_id or "").strip()
+    platform = str(platform or "").strip().lower()
+    if not receipt_id or not original_transaction_id or not product_id:
+        raise ValueError("Verified subscription identity is incomplete")
+    if platform not in {"ios", "android"}:
+        raise ValueError("Verified subscription platform is invalid")
+    receipt_chain = list(dict.fromkeys(
+        value for value in (
+            str(item or "").strip()
+            for item in ([receipt_id] + list(related_receipt_ids or []))
+        ) if value
+    ))
+    subscription_keys = list(dict.fromkeys([original_transaction_id, *receipt_chain]))
+
+    db = _conn()
+    now = int(time.time())
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        if not db.execute("SELECT 1 FROM users WHERE id=?", (int(user_id),)).fetchone():
+            db.rollback()
+            return None
+
+        placeholders = ",".join("?" for _ in receipt_chain)
+        receipt_rows = db.execute(
+            f"""SELECT session_id,user_id,credits,purchase_kind,platform,product_id,
+                       original_transaction_id
+                FROM stripe_purchases WHERE session_id IN ({placeholders})""",
+            receipt_chain,
+        ).fetchall()
+        receipt = next((row for row in receipt_rows if row["session_id"] == receipt_id), None)
+        for chain_receipt in receipt_rows:
+            if int(chain_receipt["user_id"]) != int(user_id):
+                raise SubscriptionReceiptConflictError(
+                    "Store replacement chain is already linked to another account"
+                )
+            if int(chain_receipt["credits"]) != 0 or str(
+                chain_receipt["purchase_kind"] or "iap"
+            ) != "iap":
+                raise SubscriptionReceiptConflictError(
+                    "Purchase identifier is already used for another product type"
+                )
+            if chain_receipt["platform"] and str(chain_receipt["platform"]) != platform:
+                raise SubscriptionReceiptConflictError(
+                    "Store replacement chain is already linked to another platform"
+                )
+            historical_original = str(chain_receipt["original_transaction_id"] or "")
+            if historical_original and historical_original not in subscription_keys:
+                raise SubscriptionReceiptConflictError(
+                    "Store replacement chain is linked to another subscription"
+                )
+            historical_product = str(chain_receipt["product_id"] or "")
+            if (
+                chain_receipt["session_id"] != receipt_id
+                and historical_product
+                and historical_product != product_id
+                and not (
+                    historical_product in transition_product_ids
+                    and product_id in transition_product_ids
+                )
+            ):
+                raise SubscriptionReceiptConflictError(
+                    "Store replacement chain contains an incompatible product"
+                )
+        if receipt:
+            if int(receipt["user_id"]) != int(user_id):
+                raise SubscriptionReceiptConflictError(
+                    "Store receipt is already linked to another account"
+                )
+            if int(receipt["credits"]) != 0:
+                raise SubscriptionReceiptConflictError(
+                    "Purchase identifier is already used for another product type"
+                )
+            if str(receipt["purchase_kind"] or "iap") != "iap":
+                raise SubscriptionReceiptConflictError(
+                    "Purchase identifier is already used for another product type"
+                )
+            if receipt["platform"] and str(receipt["platform"]) != platform:
+                raise SubscriptionReceiptConflictError(
+                    "Store receipt is already linked to another platform"
+                )
+            if receipt["product_id"] and str(receipt["product_id"]) != product_id:
+                raise SubscriptionReceiptConflictError(
+                    "Store receipt is already linked to another product"
+                )
+            if (
+                receipt["original_transaction_id"]
+                and str(receipt["original_transaction_id"]) not in subscription_keys
+            ):
+                raise SubscriptionReceiptConflictError(
+                    "Store receipt is already linked to another subscription"
+                )
+
+        subscription_placeholders = ",".join("?" for _ in subscription_keys)
+        chain_subscriptions = db.execute(
+            f"""SELECT * FROM app_store_subscriptions
+                WHERE original_transaction_id IN ({subscription_placeholders})""",
+            subscription_keys,
+        ).fetchall()
+        for existing in chain_subscriptions:
+            _assert_subscription_record_consistency(
+                existing,
+                user_id=user_id,
+                product_id=product_id,
+                platform=platform,
+                transition_product_ids=transition_product_ids,
+            )
+
+        if transaction_id:
+            for row in db.execute(
+                "SELECT * FROM app_store_subscriptions WHERE transaction_id=?",
+                (transaction_id,),
+            ).fetchall():
+                # Older Google activations used the immediately linked token
+                # as the subscription key. A newly verified full replacement
+                # chain may therefore find the same transaction on a
+                # same-owner alias. Accept only aliases Google just proved are
+                # in this chain; unrelated subscription keys remain a replay.
+                if str(row["original_transaction_id"]) not in subscription_keys:
+                    raise SubscriptionReceiptConflictError(
+                        "Store transaction is already linked to another subscription"
+                    )
+                _assert_subscription_record_consistency(
+                    row,
+                    user_id=user_id,
+                    product_id=product_id,
+                    platform=platform,
+                    transition_product_ids=transition_product_ids,
+                )
+
+        created = receipt is None
+        if created:
+            db.execute(
+                """INSERT INTO stripe_purchases
+                   (session_id,user_id,credits,created_at,purchase_kind,platform,
+                    product_id,original_transaction_id)
+                   VALUES (?,?,0,?,'iap',?,?,?)""",
+                (
+                    receipt_id,
+                    int(user_id),
+                    now,
+                    platform,
+                    product_id,
+                    original_transaction_id,
+                ),
+            )
+        else:
+            db.execute(
+                """UPDATE stripe_purchases
+                   SET purchase_kind='iap',platform=?,product_id=?,original_transaction_id=?
+                   WHERE session_id=?""",
+                (platform, product_id, original_transaction_id, receipt_id),
+            )
+        alias_keys = [
+            key for key in subscription_keys if key != original_transaction_id
+        ]
+        if alias_keys:
+            alias_placeholders = ",".join("?" for _ in alias_keys)
+            db.execute(
+                f"DELETE FROM app_store_subscriptions WHERE original_transaction_id IN ({alias_placeholders})",
+                alias_keys,
+            )
+        db.execute(
+            """INSERT INTO app_store_subscriptions
+               (original_transaction_id,transaction_id,user_id,product_id,environment,expires_at,status,updated_at)
+               VALUES (?,?,?,?,?,?,?,?)
+               ON CONFLICT(original_transaction_id) DO UPDATE SET
+                 transaction_id=excluded.transaction_id,
+                 product_id=excluded.product_id,
+                 environment=excluded.environment,
+                 expires_at=excluded.expires_at,
+                 status=excluded.status,
+                 updated_at=excluded.updated_at""",
+            (
+                original_transaction_id,
+                transaction_id,
+                int(user_id),
+                product_id,
+                environment,
+                int(expires_at),
+                status,
+                now,
+            ),
+        )
+        row = db.execute(
+            "SELECT * FROM app_store_subscriptions WHERE original_transaction_id=?",
+            (original_transaction_id,),
+        ).fetchone()
+        db.commit()
+        result = dict(row) if row else {}
+        result["receipt_created"] = created
+        result["platform"] = platform
+        return result
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 def get_app_store_subscription(original_transaction_id: str) -> dict | None:
     db = _conn()
@@ -8620,28 +9395,38 @@ def authorize_offline_download(user: dict, asset_type: str, region_id: str, cost
         db.close()
     return {"authorized": True, "charged": cost, "free_used": False, "credits": _user_balance(user_id)}
 
-def activate_plan(user_id: int, plan_type: str, duration_days: int):
+def activate_plan(user_id: int, plan_type: str, duration_days: int) -> int | None:
     """Set plan_type and expiry. Extends existing plan if still active."""
     db = _conn()
-    now = int(time.time())
-    row = db.execute("SELECT plan_expires_at FROM users WHERE id=?", (user_id,)).fetchone()
-    current_expiry = row["plan_expires_at"] if row and row["plan_expires_at"] else now
-    new_expiry = max(current_expiry, now) + duration_days * 86400
-    db.execute(
-        "UPDATE users SET plan_type=?, plan_expires_at=? WHERE id=?",
-        (plan_type, new_expiry, user_id)
-    )
-    month, year = _contest_period(now)
-    db.execute(
-        """INSERT INTO contest_entries
-           (user_id,period_month,period_year,entry_type,created_at)
-           VALUES (?,?,?,?,?)
-           ON CONFLICT(user_id,period_month) DO UPDATE SET
-             entry_type='subscriber', period_year=excluded.period_year""",
-        (user_id, month, year, "subscriber", now),
-    )
-    db.commit(); db.close()
-    return new_expiry
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        now = int(time.time())
+        row = db.execute("SELECT plan_expires_at FROM users WHERE id=?", (user_id,)).fetchone()
+        if not row:
+            db.rollback()
+            return None
+        current_expiry = row["plan_expires_at"] if row["plan_expires_at"] else now
+        new_expiry = max(current_expiry, now) + duration_days * 86400
+        db.execute(
+            "UPDATE users SET plan_type=?, plan_expires_at=? WHERE id=?",
+            (plan_type, new_expiry, user_id)
+        )
+        month, year = _contest_period(now)
+        db.execute(
+            """INSERT INTO contest_entries
+               (user_id,period_month,period_year,entry_type,created_at)
+               VALUES (?,?,?,?,?)
+               ON CONFLICT(user_id,period_month) DO UPDATE SET
+                 entry_type='subscriber', period_year=excluded.period_year""",
+            (user_id, month, year, "subscriber", now),
+        )
+        db.commit()
+        return new_expiry
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 def use_free_camp_search(user_id: int) -> bool:
     """Consume one free camp search. Returns True if the slot was available, False if limit reached."""
@@ -8699,34 +9484,16 @@ def get_push_token(user_id: int) -> str | None:
 
 def _push_audience_where(audience: dict | None, now: int) -> tuple[str, list]:
     audience = audience or {}
-    segment = str(audience.get("segment") or "active_recent").strip().lower()
-    active_days = int(audience.get("active_within_days") or 30)
-    credits_lte = audience.get("credits_lte")
+    segment = str(audience.get("segment") or "admins").strip().lower()
     where = [
         "COALESCE(u.push_token,'') != ''",
     ]
     params: list = []
-    if segment == "active_plan":
-        where.append("u.plan_type != 'free'")
-        where.append("COALESCE(u.plan_expires_at, 0) > ?")
-        params.append(now)
-    elif segment == "free_users":
-        where.append("(u.plan_type = 'free' OR COALESCE(u.plan_expires_at, 0) <= ?)")
-        params.append(now)
-    elif segment == "admins":
-        where.append("u.is_admin = 1")
-    elif segment == "low_credits":
-        where.append("u.is_admin = 0")
-        where.append("COALESCE(u.credits, 0) <= ?")
-        params.append(int(credits_lte if credits_lte is not None else 200))
-    elif segment == "all_users":
-        pass
-    else:
-        cutoff = now - max(1, active_days) * 86400
-        where.append(
-            "EXISTS (SELECT 1 FROM analytics_events ae WHERE ae.user_id = u.id AND ae.created_at >= ?)"
-        )
-        params.append(cutoff)
+    # Generic bulk campaigns are deliberately admin-only. User notifications
+    # are sent through their dedicated transactional or explicit-preference
+    # paths; product activity, plans, balances and email opt-ins are not treated
+    # as consent for promotional push.
+    where.append("u.is_admin = 1" if segment == "admins" else "1 = 0")
     return " AND ".join(where), params
 
 def get_push_campaign_recipients(audience: dict | None, limit: int | None = None) -> list[dict]:
@@ -8797,7 +9564,7 @@ def record_push_campaign_delivery(campaign_id: int, user_id: int | None, push_to
         (
             campaign_id,
             user_id,
-            push_token,
+            "[redacted]",
             delivery_status,
             json.dumps(response or {}) if response is not None else None,
             error_text,
@@ -14718,28 +15485,38 @@ def save_viator_booking_intent(user_id: int, product_code: str, product_title: s
     now = int(time.time())
     booking_id = "vtr_" + secrets.token_urlsafe(18).replace("-", "").replace("_", "")[:24]
     db = _conn()
-    db.execute(
-        """INSERT INTO viator_bookings
-           (id,user_id,product_code,product_title,travel_date,currency,amount,status,booking_url,provider_payload,created_at,updated_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (
-            booking_id,
-            int(user_id),
-            str(product_code or "").strip()[:120],
-            str(product_title or "").strip()[:300],
-            str(travel_date or "").strip()[:40],
-            str(currency or "USD").strip().upper()[:8],
-            amount,
-            str(status or "intent").strip()[:40],
-            str(booking_url or "").strip()[:1200],
-            json.dumps(provider_payload or {}, separators=(",", ":")),
-            now,
-            now,
-        ),
-    )
-    row = db.execute("SELECT * FROM viator_bookings WHERE id=? AND user_id=?", (booking_id, int(user_id))).fetchone()
-    db.commit(); db.close()
-    return _decode_viator_booking(row) if row else {}
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        if not db.execute("SELECT 1 FROM users WHERE id=?", (int(user_id),)).fetchone():
+            db.rollback()
+            return {}
+        db.execute(
+            """INSERT INTO viator_bookings
+               (id,user_id,product_code,product_title,travel_date,currency,amount,status,booking_url,provider_payload,created_at,updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                booking_id,
+                int(user_id),
+                str(product_code or "").strip()[:120],
+                str(product_title or "").strip()[:300],
+                str(travel_date or "").strip()[:40],
+                str(currency or "USD").strip().upper()[:8],
+                amount,
+                str(status or "intent").strip()[:40],
+                str(booking_url or "").strip()[:1200],
+                json.dumps(provider_payload or {}, separators=(",", ":")),
+                now,
+                now,
+            ),
+        )
+        row = db.execute("SELECT * FROM viator_bookings WHERE id=? AND user_id=?", (booking_id, int(user_id))).fetchone()
+        db.commit()
+        return _decode_viator_booking(row) if row else {}
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 def update_viator_booking(booking_id: str, user_id: int, **updates) -> dict | None:
     allowed = {

@@ -3131,7 +3131,6 @@ function GuideScreenContent() {
     if ((!Array.isArray(camps) || camps.length > 0) && !error) return;
     trackPhase0Once(`phase0:guide-empty:${placeId}:${error ? 'error' : 'none'}`, 'phase0_empty_state_seen', {
       surface: 'guide_explore_camp_rail',
-      place_id: placeId,
       group: groupForExplorePlace(place),
       reason: error ? 'provider_error' : 'no_results',
     });

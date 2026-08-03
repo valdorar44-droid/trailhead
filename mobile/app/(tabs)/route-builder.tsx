@@ -2663,7 +2663,6 @@ function RouteBuilderScreenContent() {
       surface: 'route_builder_inline',
       day: inlineSearch.day,
       tab: inlineSearch.tab,
-      active_key: activeDiscoveryKey,
     };
     if (inlineSearch.tab === 'camps' && camps.length === 0) {
       trackPhase0Once(`phase0:route-builder-empty:camps:${activeDiscoveryKey || 'none'}:${inlineSearch.day}`, 'phase0_empty_state_seen', payload);
@@ -2849,7 +2848,6 @@ function RouteBuilderScreenContent() {
       `route-activity-offer:${pendingRouteActivityOffer.tripId}:${pendingRouteActivityOffer.createdAt}`,
       'phase0_route_activity_offer_viewed',
       {
-        trip_id: pendingRouteActivityOffer.tripId,
         result_count: pendingRouteActivityOffer.experiences.length,
       },
     );
@@ -2929,16 +2927,6 @@ function RouteBuilderScreenContent() {
         if (cancelled || !accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
         const offers = res.status === 'ok' ? res.offers : [];
         setRentalOffers(offers);
-        if (offers.length) {
-          api.trackOutdoorOfferEvent('impression', {
-            offer_id: offers[0].id,
-            provider: offers[0].provider || 'outdoorsy',
-            placement: 'route_builder',
-            route_type: rentalSuggestion.context.route_type,
-            session_id: sessionId,
-            context: rentalSuggestion.context,
-          }).catch(() => {});
-        }
       })
       .catch(() => {
         if (!cancelled && accountRequestIsCurrent(requestEpoch, requestAccountId)) setRentalOffers([]);
@@ -6578,27 +6566,14 @@ function RouteBuilderScreenContent() {
     );
   }
 
-  function rentalEventPayload(offer: OutdoorOffer) {
-    return {
-      offer_id: offer.id,
-      provider: offer.provider || 'outdoorsy',
-      placement: 'route_builder',
-      route_type: rentalSuggestion.context.route_type,
-      session_id: sessionId,
-      context: rentalSuggestion.context,
-    };
-  }
-
   function viewRentalOffers(offer?: OutdoorOffer) {
     const selected = offer ?? rentalOffers[0];
     if (!selected) return;
     const url = selected.affiliate_url || selected.booking_url || '';
-    api.trackOutdoorOfferEvent('click', rentalEventPayload(selected)).catch(() => {});
     if (!url) {
       Alert.alert('Rental options are still loading here.', 'Try nearby camps, routes, and official places.');
       return;
     }
-    api.trackOutdoorOfferEvent('redirect', rentalEventPayload(selected)).catch(() => {});
     Linking.openURL(url).catch(() => {
       Alert.alert('Unable to open rentals', 'Try again in a moment.');
     });
@@ -6608,7 +6583,6 @@ function RouteBuilderScreenContent() {
     const selected = rentalOffers[0];
     if (!selected) return;
     setRentalIdeaSaved(true);
-    api.trackOutdoorOfferEvent('save', rentalEventPayload(selected)).catch(() => {});
   }
 
   function dismissRentalSuggestion() {
@@ -6617,7 +6591,6 @@ function RouteBuilderScreenContent() {
     setRentalDismissedAt(ts);
     setRentalOffers([]);
     storage.set(ROUTE_BUILDER_RENTAL_DISMISSED_KEY, String(ts)).catch(() => {});
-    if (selected) api.trackOutdoorOfferEvent('dismiss', rentalEventPayload(selected)).catch(() => {});
   }
 
   function renderRouteExitConfirmation() {
@@ -7822,8 +7795,6 @@ function RouteBuilderScreenContent() {
         onDismiss={() => setPendingRouteActivityOffer(null)}
         onOpen={experience => {
           trackPhase0Event('phase0_route_activity_offer_opened', {
-            trip_id: routeActivityOfferTripId,
-            experience_id: experience.source_id || experience.id,
             source: experience.source || 'viator',
           });
         }}
@@ -7838,8 +7809,6 @@ function RouteBuilderScreenContent() {
             : Math.max(1, Math.min(Math.max(...days, 1), requestedDay));
           await addBookedTourToRoute(experience);
           trackPhase0Event('phase0_route_activity_booking_confirmed', {
-            trip_id: routeActivityOfferTripId,
-            experience_id: experience.source_id || experience.id,
             day,
             source: experience.source || 'viator',
           });

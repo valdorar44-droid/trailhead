@@ -68,7 +68,7 @@ import {
   normalizeReferralCode,
   referralAttributionIsAvailable,
   setReferralAttributionEnabled,
-} from '@/lib/referrals/branchAttribution';
+} from '@/lib/referrals/referralAttribution';
 import {
   displayConsumptionToMpg,
   displayToMiles,
@@ -1489,7 +1489,6 @@ export default function ProfileScreen() {
       if (cached) {
         setActiveTrip({ ...cached, updated_at: Date.now() }, true);
         trackPhase0Event('phase0_saved_trip_opened', {
-          trip_id: t.trip_id,
           source: 'offline',
           has_active_user: !!user,
         });
@@ -1504,7 +1503,6 @@ export default function ProfileScreen() {
       ) return;
       setActiveTrip({ ...trip, updated_at: Date.now() });
       trackPhase0Event('phase0_saved_trip_opened', {
-        trip_id: t.trip_id,
         source: 'server',
         has_active_user: !!user,
       });

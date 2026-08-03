@@ -131,6 +131,56 @@ class TrailheadOriginalsAnalyticsTests(unittest.TestCase):
             "labels": ["one", "two"],
         })
 
+    def test_phase0_endpoint_keeps_only_aggregate_allowlisted_dimensions(self):
+        events: list[tuple[object, object, object, dict]] = []
+
+        def fake_log_event(user_id, session_id, event_type, event_data):
+            events.append((user_id, session_id, event_type, event_data))
+
+        body = server.AnalyticsEventRequest(
+            event_type="phase0_search_no_results",
+            session_id="stable-install-or-session-id",
+            event_data={
+                "surface": "map_copilot_camp_search",
+                "category": "camp",
+                "query": "camp near my home",
+                "searched_near": "123 Private Street",
+                "lat_bucket": "38.57",
+                "lng_bucket": "-109.55",
+                "trip_id": "private-trip-id",
+                "user_id": 42,
+            },
+        )
+        with patch.object(server, "log_event", fake_log_event):
+            result = asyncio.run(server.analytics_event(body, {"id": 42}))
+
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(events, [(
+            None,
+            None,
+            "phase0_search_no_results",
+            {"surface": "map_copilot_camp_search", "category": "camp"},
+        )])
+
+    def test_phase0_labels_and_event_types_fail_closed(self):
+        clean = server._clean_nonidentifying_analytics_event_data(
+            "phase0_route_alert_row_tapped",
+            {
+                "alert_type": "road_closure",
+                "provider": "Official provider with spaces and user text",
+                "severity": "warning",
+                "alert_id": "private-alert-id",
+            },
+        )
+        self.assertEqual(clean, {"alert_type": "road_closure", "severity": "warning"})
+
+        with self.assertRaises(HTTPException) as unknown:
+            asyncio.run(server.analytics_event(server.AnalyticsEventRequest(
+                event_type="phase0_arbitrary_future_payload",
+                event_data={"query": "private search"},
+            ), None))
+        self.assertEqual(unknown.exception.status_code, 400)
+
 
 if __name__ == "__main__":
     unittest.main()

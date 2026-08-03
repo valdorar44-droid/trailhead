@@ -54,7 +54,7 @@ class OutdoorOffersApiTests(unittest.TestCase):
         result = server.OfferSearchResult("outdoorsy", "empty", offers=[])
         self.assertEqual(server._offer_cache_ttl_seconds(result, now=100), 30)
 
-    def test_record_offer_event_logs_only_safe_payload(self):
+    def test_record_offer_event_is_a_noncollecting_compatibility_noop(self):
         body = server.OfferEventRequest(
             offer_id="outdoorsy:denver-campervan-1",
             provider="outdoorsy",
@@ -69,24 +69,9 @@ class OutdoorOffersApiTests(unittest.TestCase):
                 "vehicle_type": "campervan",
             },
         )
-        events: list[tuple[object, object, object, dict]] = []
-
-        def fake_log_event(user_id, session_id, event_type, event_data):
-            events.append((user_id, session_id, event_type, event_data))
-
-        with patch.object(server, "log_event", fake_log_event):
+        with patch.object(server, "log_event") as log_event:
             self.assertEqual(server._record_offer_event("commerce_offer_click", body, None), {"ok": True})
-
-        self.assertEqual(len(events), 1)
-        _, session_id, event_type, event_data = events[0]
-        self.assertEqual(session_id, "session-1")
-        self.assertEqual(event_type, "commerce_offer_click")
-        payload = json.dumps(event_data).lower()
-        self.assertIn("outdoorsy:denver-campervan-1", payload)
-        self.assertIn("campervan", payload)
-        self.assertNotIn("route_geometry", payload)
-        self.assertNotIn("39.7392", payload)
-        self.assertNotIn("-104.9903", payload)
+        log_event.assert_not_called()
 
 
 if __name__ == "__main__":

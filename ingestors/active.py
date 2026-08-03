@@ -23,9 +23,9 @@ from db.store import get_cached, set_cached
 from ingestors.provider_guard import provider_budget_available, record_provider_call, runtime_cached_call
 
 
-CAMPGROUND_BASE = "http://api.amp.active.com/camping/campgrounds"
+CAMPGROUND_BASE = "https://api.amp.active.com/camping/campgrounds"
 ACTIVITY_BASE = "https://api.amp.active.com/v2/search"
-RESERVE_AMERICA_BASE = "http://www.reserveamerica.com"
+RESERVE_AMERICA_BASE = "https://www.reserveamerica.com"
 
 CAMPGROUND_SITE_TYPES = {
     "rv": "2001",
@@ -125,7 +125,9 @@ def _active_photo_url(value: object) -> str:
         return ""
     if photo.startswith("//"):
         return f"https:{photo}"
-    if photo.startswith("http://") or photo.startswith("https://"):
+    if photo.startswith("http://"):
+        return "https://" + photo.removeprefix("http://")
+    if photo.startswith("https://"):
         return photo
     if photo.startswith("/"):
         return f"{RESERVE_AMERICA_BASE}{photo}"
@@ -138,7 +140,9 @@ def _active_url(value: object) -> str:
         return ""
     if url.startswith("//"):
         return f"https:{url}"
-    if not url.startswith(("http://", "https://")):
+    if url.startswith("http://"):
+        return "https://" + url.removeprefix("http://")
+    if not url.startswith("https://"):
         return f"https://{url}"
     return url
 

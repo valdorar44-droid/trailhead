@@ -730,7 +730,7 @@ td.name{color:var(--text);font-weight:600;}
       <!-- Push Campaigns -->
       <div class="page" id="page-push-campaigns">
         <div class="page-title">Push Campaigns</div>
-        <div class="page-sub">Send admin announcements, credit promos, contest reminders, and community event alerts.</div>
+        <div class="page-sub">Send test announcements to administrator devices. User notifications use their dedicated consented flows.</div>
         <div class="push-grid">
           <div class="push-stack">
             <div class="card">
@@ -748,25 +748,11 @@ td.name{color:var(--text);font-weight:600;}
                 <div>
                   <div class="modal-label">AUDIENCE</div>
                   <select id="push-audience" class="filter-input">
-                    <option value="active_recent">Recently active users</option>
-                    <option value="active_plan">Active plan users</option>
-                    <option value="free_users">Free users</option>
-                    <option value="low_credits">Low-credit users</option>
-                    <option value="all_users">All users with push</option>
                     <option value="admins">Admins only</option>
                   </select>
                 </div>
               </div>
-              <div class="push-form-grid" style="margin-bottom:10px;">
-                <div>
-                  <div class="modal-label">ACTIVE WITHIN DAYS</div>
-                  <input id="push-active-days" class="filter-input" type="number" value="30">
-                </div>
-                <div>
-                  <div class="modal-label">CREDITS LTE</div>
-                  <input id="push-credits-lte" class="filter-input" type="number" value="200">
-                </div>
-              </div>
+              <div class="hint" style="margin-bottom:10px;">Bulk user marketing is disabled until Trailhead adds a separate promotional-push opt-in.</div>
               <div style="margin-bottom:10px;">
                 <div class="modal-label">TITLE</div>
                 <input id="push-title" class="modal-input" maxlength="120" value="Drop by today and plan a route for a chance to win credits.">
@@ -1916,18 +1902,12 @@ async function updateContestAward(id) {
 
 function buildPushCampaignBody() {
   const segment = document.getElementById('push-audience').value;
-  const activeWithinDays = parseInt(document.getElementById('push-active-days').value || '30', 10);
-  const creditsLteRaw = document.getElementById('push-credits-lte').value.trim();
   const promoCreditsRaw = document.getElementById('push-credits').value.trim();
   return {
     title: document.getElementById('push-title').value.trim(),
     body: document.getElementById('push-body').value.trim(),
     campaign_type: document.getElementById('push-type').value,
-    audience: {
-      segment,
-      active_within_days: Number.isFinite(activeWithinDays) ? activeWithinDays : 30,
-      credits_lte: creditsLteRaw ? parseInt(creditsLteRaw, 10) : null,
-    },
+    audience: { segment },
     deeplink: document.getElementById('push-deeplink').value.trim(),
     campaign_tag: document.getElementById('push-tag').value.trim(),
     credits: promoCreditsRaw ? parseInt(promoCreditsRaw, 10) : null,

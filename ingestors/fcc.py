@@ -17,7 +17,7 @@ from db.store import get_cached, set_cached
 from ingestors.provider_guard import provider_budget_available, record_provider_call, runtime_cached_call
 
 
-VIZMO_BASE = "http://vizmo.fcc.gov/api"
+VIZMO_BASE = "https://vizmo.fcc.gov/api"
 
 TECHNOLOGY_LABELS = {
     "300": "3G",

@@ -680,7 +680,7 @@ function StartTourModal({
                 style={[styles.disclosureBody, { color: C.text2 }]}
                 testID="original.start.disclosure"
               >
-                Trailhead uses location in the background so navigation and Original stories can continue after you lock your phone or switch apps. Location stops when you end navigation or the tour.
+                Trailhead collects precise location data to keep navigation, Trailhead Original stories, and trail recording working in the background, including when the app is closed or not in use. Location access begins only after you start one of these features and stops when you end it. Trailhead does not use location for advertising.
               </Text>
               <View style={styles.permissionList}>
                 <PermissionRow icon="location-outline" title="Background location" body="Triggers stories along the route. Your traveled route is not uploaded." />

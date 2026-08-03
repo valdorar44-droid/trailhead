@@ -56,7 +56,6 @@ function assertClean() {
 const fullSha = execute('git', ['-C', '..', 'rev-parse', 'HEAD'], { capture: true });
 const shortSha = fullSha.slice(0, 8);
 process.env.EXPO_PUBLIC_RELEASE_COMMIT_SHA = fullSha;
-process.env.EXPO_PUBLIC_BRANCH_CONFIGURED ||= 'true';
 
 const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 const require = createRequire(import.meta.url);

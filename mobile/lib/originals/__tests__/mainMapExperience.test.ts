@@ -164,7 +164,7 @@ assert.doesNotMatch(
   'an unrelated runtime download cannot replace this detail download state',
 );
 assert.equal(
-  detailScreenSource.match(/Trailhead uses location in the background/g)?.length,
+  detailScreenSource.match(/Trailhead collects precise location data/g)?.length,
   1,
   'the policy disclosure appears only in the Start/recovery flow',
 );

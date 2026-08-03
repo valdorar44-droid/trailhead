@@ -179,7 +179,7 @@ from db.store import (
     set_email_verification, verify_email_token, set_password_reset, reset_password_with_token,
     add_credits, deduct_credits, get_credit_history, grant_signup_rewards,
     get_user_report_count_today, get_report_credits_today,
-    is_stripe_session_fulfilled, fulfill_stripe_purchase,
+    fulfill_stripe_purchase,
     create_report_idempotent, get_report_by_client_id, get_reports_near, get_reports_along_route,
     upvote_report, downvote_report, confirm_report,
     get_leaderboard, is_reporter_restricted, check_and_update_streak,
@@ -283,6 +283,7 @@ from db.store import (
     get_explore_story_override, get_explore_story_overrides, set_explore_story_override,
     get_user_pin_count_today, vote_community_pin, add_pin_update_suggestion,
     get_pin_update_suggestions, update_pin_update_suggestion_status, set_user_plan,
+    SubscriptionReceiptConflictError, bind_verified_store_subscription,
     save_app_store_subscription, get_app_store_subscription,
     add_contest_points, ensure_contest_entry, get_contest_user_status, get_contest_leaderboard,
     get_contest_admin_overview, snapshot_contest_award, run_contest_drawing,
@@ -8372,9 +8373,7 @@ class AdminExtremeConfigBody(BaseModel):
     copilot_voice: Optional[str] = None
 
 class AdminPushAudience(BaseModel):
-    segment: str = "active_recent"
-    active_within_days: Optional[int] = 30
-    credits_lte: Optional[int] = None
+    segment: Literal["admins"] = "admins"
 
 class AdminPushCampaignBody(BaseModel):
     title: str
@@ -9873,255 +9872,10 @@ async def originals_landing_page(slug: str):
     return FileResponse(path, media_type="text/html")
 
 
-_BRANCH_REFERRAL_API_URL = "https://api2.branch.io/v1/url"
-_BRANCH_REFERRAL_DOMAIN = "go.gettrailhead.app"
-_BRANCH_REFERRAL_CACHE_MAX = 2048
-_BRANCH_REFERRAL_CACHE_SUCCESS_SECONDS = 6 * 3600
-_BRANCH_REFERRAL_CACHE_FAILURE_SECONDS = 60
-_BRANCH_REFERRAL_CACHE: dict[str, tuple[float, str | None]] = {}
-_BRANCH_REFERRAL_CACHE_LOCK = threading.Lock()
-_BRANCH_REFERRAL_DEV_SECRET = "trailhead-dev-secret-change-in-prod"
 _TRAILHEAD_IOS_STORE_URL = "https://apps.apple.com/app/id6763677349"
 _TRAILHEAD_ANDROID_STORE_URL = (
     "https://play.google.com/store/apps/details?id=com.trailhead.app&gl=us&hl=en_US"
 )
-
-
-def _branch_referral_config() -> tuple[str, str, str] | None:
-    if not bool(getattr(settings, "branch_referral_handoff_enabled", False)):
-        return None
-    branch_key = str(getattr(settings, "branch_live_key", "") or "").strip()
-    domain = str(getattr(settings, "branch_link_domain", "") or "").strip().lower().rstrip(".")
-    if not re.fullmatch(r"key_(?:live|test)_[A-Za-z0-9]{8,200}", branch_key):
-        return None
-    # The approved handoff must remain on Trailhead's configured branded host.
-    # Never silently substitute a Branch default domain.
-    if domain != _BRANCH_REFERRAL_DOMAIN:
-        return None
-    alias_secret = str(
-        getattr(settings, "branch_referral_alias_secret", "") or ""
-    ).strip()
-    if not alias_secret:
-        fallback = str(getattr(settings, "secret_key", "") or "").strip()
-        if fallback and fallback != _BRANCH_REFERRAL_DEV_SECRET:
-            alias_secret = fallback
-    if len(alias_secret) < 32 or alias_secret == _BRANCH_REFERRAL_DEV_SECRET:
-        return None
-    return branch_key, domain, alias_secret
-
-
-def _branch_referral_alias(code: str, alias_secret: str) -> str:
-    digest = hmac.new(
-        alias_secret.encode("utf-8"),
-        f"trailhead-branch-referral-v1\0{code}".encode("utf-8"),
-        hashlib.sha256,
-    ).digest()
-    opaque = base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")[:32]
-    return f"r/{opaque}"
-
-
-def _branch_referral_request_payload(
-    code: str,
-    branch_key: str,
-    domain: str,
-    alias_secret: str,
-) -> dict:
-    canonical_url = f"https://gettrailhead.app/r/{quote(code)}"
-    return {
-        "branch_key": branch_key,
-        "domain": domain,
-        "feature": "referral",
-        "channel": "trailhead_referral",
-        "alias": _branch_referral_alias(code, alias_secret),
-        "type": 0,
-        "data": {
-            # Referral code is the only account-derived value sent to Branch.
-            "referral_code": code,
-            "$deeplink_path": f"referral?code={quote(code)}",
-            "$canonical_url": canonical_url,
-            "$desktop_url": canonical_url,
-            "$fallback_url": canonical_url,
-            "$ios_url": _TRAILHEAD_IOS_STORE_URL,
-            "$android_url": _TRAILHEAD_ANDROID_STORE_URL,
-        },
-    }
-
-
-def _validated_branch_referral_url(
-    candidate: str,
-    expected_domain: str,
-    expected_alias: str,
-) -> str:
-    parsed = urlsplit(str(candidate or "").strip())
-    try:
-        port = parsed.port
-    except ValueError:
-        raise RuntimeError("Branch link creation returned an unexpected URL") from None
-    expected_path = "/" + expected_alias.strip("/")
-    if (
-        parsed.scheme != "https"
-        or str(parsed.hostname or "").lower().rstrip(".") != expected_domain
-        or parsed.username is not None
-        or parsed.password is not None
-        or port not in (None, 443)
-        or parsed.query
-        or parsed.fragment
-        or parsed.path.rstrip("/") != expected_path
-    ):
-        raise RuntimeError("Branch link creation returned an unexpected URL")
-    return parsed.geturl()
-
-
-def _branch_referral_record_matches(response_payload: object, request_payload: dict) -> bool:
-    if not isinstance(response_payload, dict):
-        return False
-    expected_data = request_payload.get("data")
-    actual_data = response_payload.get("data")
-    if not isinstance(expected_data, dict) or not isinstance(actual_data, dict):
-        return False
-    if response_payload.get("feature") != request_payload.get("feature"):
-        return False
-    if response_payload.get("channel") != request_payload.get("channel"):
-        return False
-    actual_alias = response_payload.get("alias")
-    if actual_alias not in (None, "", request_payload.get("alias")):
-        return False
-    for key in (
-        "referral_code", "$deeplink_path", "$canonical_url", "$desktop_url",
-        "$fallback_url", "$ios_url", "$android_url",
-    ):
-        if actual_data.get(key) != expected_data.get(key):
-            return False
-    return True
-
-
-async def _verify_existing_branch_referral_url(
-    client: httpx.AsyncClient,
-    candidate: str,
-    payload: dict,
-    expected_domain: str,
-) -> str:
-    verified_candidate = _validated_branch_referral_url(
-        candidate, expected_domain, str(payload.get("alias") or ""),
-    )
-    response = await client.get(
-        _BRANCH_REFERRAL_API_URL,
-        headers={"Accept": "application/json"},
-        params={
-            "url": verified_candidate,
-            "branch_key": str(payload.get("branch_key") or ""),
-        },
-    )
-    if response.status_code != 200:
-        raise RuntimeError("Branch alias could not be verified")
-    try:
-        response_payload = response.json()
-    except (ValueError, TypeError):
-        raise RuntimeError("Branch alias verification returned an invalid response") from None
-    if not _branch_referral_record_matches(response_payload, payload):
-        raise RuntimeError("Branch alias is bound to a different referral")
-    return verified_candidate
-
-
-async def _request_branch_referral_url(payload: dict, expected_domain: str) -> str:
-    timeout = httpx.Timeout(4.0, connect=2.0)
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
-        response = await client.post(
-            _BRANCH_REFERRAL_API_URL,
-            headers={"Accept": "application/json", "Content-Type": "application/json"},
-            json=payload,
-        )
-        if response.status_code == 200:
-            try:
-                candidate = str(response.json().get("url") or "").strip()
-            except (ValueError, TypeError, AttributeError):
-                raise RuntimeError("Branch link creation returned an invalid response") from None
-            return _validated_branch_referral_url(
-                candidate, expected_domain, str(payload.get("alias") or ""),
-            )
-        if response.status_code not in {400, 409}:
-            raise RuntimeError(f"Branch link creation returned HTTP {response.status_code}")
-        # A deterministic alias may already exist after a process restart or
-        # cache expiry. Constructing its address is for lookup only; it is never
-        # returned unless Branch proves the stored referral/canonical target is
-        # exactly the one requested here.
-        candidate = (
-            f"https://{expected_domain}/"
-            f"{quote(str(payload.get('alias') or ''), safe='/')}"
-        )
-        return await _verify_existing_branch_referral_url(
-            client, candidate, payload, expected_domain,
-        )
-
-
-def _branch_referral_cache_key(
-    code: str,
-    branch_key: str,
-    domain: str,
-    alias_secret: str,
-) -> str:
-    secret_fingerprint = hashlib.sha256(alias_secret.encode("utf-8")).hexdigest()
-    return hashlib.sha256(
-        f"{branch_key}\0{domain}\0{code}\0{secret_fingerprint}".encode("utf-8")
-    ).hexdigest()
-
-
-def _branch_referral_cache_get(key: str) -> tuple[bool, str | None]:
-    now = time.monotonic()
-    with _BRANCH_REFERRAL_CACHE_LOCK:
-        cached = _BRANCH_REFERRAL_CACHE.get(key)
-        if cached is None:
-            return False, None
-        expires_at, value = cached
-        if expires_at <= now:
-            _BRANCH_REFERRAL_CACHE.pop(key, None)
-            return False, None
-        return True, value
-
-
-def _branch_referral_cache_set(key: str, value: str | None) -> None:
-    now = time.monotonic()
-    ttl = (
-        _BRANCH_REFERRAL_CACHE_SUCCESS_SECONDS
-        if value is not None else _BRANCH_REFERRAL_CACHE_FAILURE_SECONDS
-    )
-    with _BRANCH_REFERRAL_CACHE_LOCK:
-        expired = [
-            cache_key for cache_key, (expires_at, _value) in _BRANCH_REFERRAL_CACHE.items()
-            if expires_at <= now
-        ]
-        for cache_key in expired:
-            _BRANCH_REFERRAL_CACHE.pop(cache_key, None)
-        if len(_BRANCH_REFERRAL_CACHE) >= _BRANCH_REFERRAL_CACHE_MAX:
-            oldest = min(
-                _BRANCH_REFERRAL_CACHE,
-                key=lambda cache_key: _BRANCH_REFERRAL_CACHE[cache_key][0],
-            )
-            _BRANCH_REFERRAL_CACHE.pop(oldest, None)
-        _BRANCH_REFERRAL_CACHE[key] = (now + ttl, value)
-
-
-async def _branch_referral_url(code: str) -> str | None:
-    config = _branch_referral_config()
-    if config is None:
-        return None
-    branch_key, domain, alias_secret = config
-    cache_key = _branch_referral_cache_key(code, branch_key, domain, alias_secret)
-    found, cached = _branch_referral_cache_get(cache_key)
-    if found:
-        return cached
-    payload = _branch_referral_request_payload(
-        code, branch_key, domain, alias_secret,
-    )
-    try:
-        value = await _request_branch_referral_url(payload, domain)
-    except Exception:
-        # Referral entry must remain usable during provider/network failures.
-        # Do not log the code, request payload, provider response, or key.
-        logger.warning("Branded referral handoff is temporarily unavailable")
-        value = None
-    _branch_referral_cache_set(cache_key, value)
-    return value
 
 
 @app.get("/r/{referral_code}", response_class=HTMLResponse)
@@ -10133,15 +9887,6 @@ async def referral_landing_page(referral_code: str):
         raise HTTPException(404, "Referral link was not found")
     safe_code = html.escape(code, quote=True)
     app_link = f"trailhead://referral?code={quote(code)}"
-    branch_link = await _branch_referral_url(code)
-    handoff_link = branch_link or app_link
-    ios_link = branch_link or _TRAILHEAD_IOS_STORE_URL
-    android_link = branch_link or _TRAILHEAD_ANDROID_STORE_URL
-    handoff_note = (
-        "If the referral does not apply automatically, enter the code shown above."
-        if branch_link
-        else "Open or download Trailhead, then enter the code shown above."
-    )
     return HTMLResponse(f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -10154,10 +9899,10 @@ main{{width:min(100%,480px);background:#fff;border:1px solid #dedfda;border-radi
 </style></head><body><main>
 <div class="kicker">Trailhead referral</div><h1>Plan the road ahead.</h1>
 <p>Open Trailhead and use referral code <span class="code">{safe_code}</span> when you create your account.</p>
-<a class="button primary" href="{html.escape(handoff_link, quote=True)}">Continue to Trailhead</a>
-<a class="button secondary" href="{html.escape(ios_link, quote=True)}">Download for iPhone</a>
-<a class="button secondary" href="{html.escape(android_link, quote=True)}">Download for Android</a>
-<small>{html.escape(handoff_note)}</small>
+<a class="button primary" href="{html.escape(app_link, quote=True)}">Continue to Trailhead</a>
+<a class="button secondary" href="{html.escape(_TRAILHEAD_IOS_STORE_URL, quote=True)}">Download for iPhone</a>
+<a class="button secondary" href="{html.escape(_TRAILHEAD_ANDROID_STORE_URL, quote=True)}">Download for Android</a>
+<small>Open or download Trailhead, then enter the code shown above.</small>
 </main></body></html>""", headers={"Cache-Control": "private, no-store"})
 
 
@@ -10431,26 +10176,15 @@ def _offer_event_context(context: object) -> dict[str, object]:
 
 
 def _record_offer_event(event_type: str, body: OfferEventRequest, user: dict | None) -> dict[str, bool]:
+    """Compatibility endpoint for older clients; do not retain affiliate activity.
+
+    Trailhead 1.0.12 no longer sends these events. Older distributed clients
+    may still call the endpoint, so keep a successful response while discarding
+    the account, session, offer and context instead of building a marketing
+    activity history.
+    """
     if event_type not in OFFER_EVENT_TYPES:
         raise HTTPException(400, "Unsupported offer event")
-    provider_id = _offer_provider_id(body.provider)
-    offer_id = _clean_offer_slug(body.offer_id, 160)
-    if not offer_id:
-        raise HTTPException(400, "Offer unavailable")
-    placement = _clean_offer_slug(body.placement, 80)
-    route_type = _clean_offer_label(body.route_type, 80)
-    session_id = _clean_offer_slug(body.session_id, 120) or None
-    event_data: dict[str, object] = {
-        "offer_id": offer_id,
-        "provider": provider_id,
-        "placement": placement,
-        "route_type": route_type,
-        "timestamp": int(time.time()),
-    }
-    context = _offer_event_context(body.context)
-    if context:
-        event_data["context"] = context
-    log_event(user["id"] if user else None, session_id, event_type, event_data)
     return {"ok": True}
 
 
@@ -11748,12 +11482,14 @@ async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, c
 
         actual_days = plan_data.get("duration_days", 7)
         try:
+            # Aggregate product measurement only. The saved trip remains tied
+            # to its owner, but analytics does not retain an account, stable
+            # session, trip identifier, route or destination list.
             log_event(
-                user["id"] if user else None, body.session_id, "plan_generated",
-                {"trip_id": trip_id, "days": actual_days,
-                 "states": plan_data.get("states", []),
-                 "difficulty": plan_data.get("difficulty", ""),
-                 "waypoint_count": len(plan_data.get("waypoints", [])),
+                None, None, "plan_generated",
+                {"days": max(0, min(int(actual_days or 0), 365)),
+                 "difficulty": _clean_offer_label(plan_data.get("difficulty", ""), 40).lower(),
+                 "waypoint_count": max(0, min(len(plan_data.get("waypoints", [])), 1_000)),
                  "platform": "mobile"},
             )
         except Exception as exc:
@@ -15933,7 +15669,7 @@ def _r2_audio_client():
         )
     except Exception as exc:
         try:
-            log_event(None, None, "audio_cache_r2_unavailable", {"details": f"{type(exc).__name__}: {exc}"})
+            log_event(None, None, "audio_cache_r2_unavailable", {"error_code": "client_unavailable"})
         except Exception:
             pass
         return None
@@ -15976,7 +15712,7 @@ async def _write_audio_cache(digest: str, mode: str, audio: bytes) -> None:
             return
         except Exception as exc:
             try:
-                log_event(None, None, "audio_cache_r2_write_failed", {"details": f"{type(exc).__name__}: {exc}"})
+                log_event(None, None, "audio_cache_r2_write_failed", {"error_code": "object_write_failed"})
             except Exception:
                 pass
     try:
@@ -15985,7 +15721,7 @@ async def _write_audio_cache(digest: str, mode: str, audio: bytes) -> None:
         await asyncio.to_thread(path.write_bytes, audio)
     except Exception as exc:
         try:
-            log_event(None, None, "audio_cache_local_write_failed", {"details": f"{type(exc).__name__}: {exc}"})
+            log_event(None, None, "audio_cache_local_write_failed", {"error_code": "local_write_failed"})
         except Exception:
             pass
 
@@ -15999,7 +15735,7 @@ async def _delete_audio_cache(digest: str, mode: str) -> None:
             await asyncio.to_thread(r2.delete_object, Bucket=settings.r2_bucket, Key=key)
         except Exception as exc:
             try:
-                log_event(None, None, "audio_cache_r2_delete_failed", {"details": f"{type(exc).__name__}: {exc}"})
+                log_event(None, None, "audio_cache_r2_delete_failed", {"error_code": "object_delete_failed"})
             except Exception:
                 pass
     try:
@@ -16008,7 +15744,7 @@ async def _delete_audio_cache(digest: str, mode: str) -> None:
             await asyncio.to_thread(path.unlink)
     except Exception as exc:
         try:
-            log_event(None, None, "audio_cache_local_delete_failed", {"details": f"{type(exc).__name__}: {exc}"})
+            log_event(None, None, "audio_cache_local_delete_failed", {"error_code": "local_delete_failed"})
         except Exception:
             pass
 
@@ -16760,6 +16496,80 @@ def _scrub_analytics_event_data(value: object, *, depth: int = 0) -> object | No
     return None
 
 
+_NONIDENTIFYING_ANALYTICS_EVENT_SPECS: dict[str, dict[str, object]] = {
+    "welcome_contest_seen": {"source": "label"},
+    "welcome_contest_cta": {"source": "label"},
+    "welcome_contest_cta_attributed": {"source": "label"},
+    "welcome_gate_seen": {"source": "label"},
+    "welcome_gate_cta": {"source": "label"},
+    "welcome_gate_cta_attributed": {"source": "label"},
+    "welcome_walkthrough_seen": {"source": "label"},
+    "welcome_walkthrough_cta": {"source": "label"},
+    "phase0_empty_state_seen": {
+        "surface": "label", "group": "label", "reason": "label",
+        "day": "count", "tab": "label",
+    },
+    "phase0_profile_opened": {
+        "signed_in": "bool", "has_plan": "bool", "saved_trips": "count",
+        "favorite_camps": "count", "saved_places": "count",
+    },
+    "phase0_saved_trip_opened": {"source": "label", "has_active_user": "bool"},
+    "phase0_camp_card_opened": {
+        "surface": "label", "source": "label", "land_type": "label",
+        "reservable": "bool", "active_trip": "bool",
+    },
+    "phase0_search_no_results": {"surface": "label", "category": "label"},
+    "phase0_route_activity_offer_viewed": {"result_count": "count"},
+    "phase0_route_activity_offer_opened": {"source": "label"},
+    "phase0_route_activity_booking_confirmed": {
+        "day": "count", "source": "label", "route_stop_added": "bool",
+    },
+    "phase0_route_alerts_opened": {"alert_count": "count", "alert_types": "labels"},
+    "phase0_route_alerts_dismissed": {"reason": "label", "alert_count": "count"},
+    "phase0_route_alert_row_tapped": {
+        "alert_type": "label", "provider": "label", "severity": "label",
+    },
+    "phase0_route_brief_opened": {"planning_status": "label", "evidence_revision": "label"},
+    "phase0_route_brief_dismissed": {
+        "reason": "label", "planning_status": "label", "evidence_revision": "label",
+    },
+    "phase0_route_brief_generated": {
+        "source": "label", "planning_status": "label", "evidence_revision": "label",
+        "service_segment_count": "count", "exit_count": "count",
+    },
+}
+
+
+def _clean_nonidentifying_analytics_event_data(event_type: str, value: object) -> dict[str, object]:
+    """Keep only fixed, aggregate dimensions for non-Originals analytics."""
+    spec = _NONIDENTIFYING_ANALYTICS_EVENT_SPECS.get(event_type)
+    if spec is None:
+        raise HTTPException(400, "Unsupported analytics event")
+    source = value if isinstance(value, dict) else {}
+    clean: dict[str, object] = {}
+    for key, rule in spec.items():
+        raw = source.get(key)
+        if rule == "bool":
+            if isinstance(raw, bool):
+                clean[key] = raw
+        elif rule == "count":
+            if isinstance(raw, int) and not isinstance(raw, bool):
+                clean[key] = max(0, min(raw, 1_000_000))
+        elif rule == "label":
+            label = str(raw or "").strip().lower()
+            if re.fullmatch(r"[a-z0-9][a-z0-9_.:-]{0,79}", label):
+                clean[key] = label
+        elif rule == "labels" and isinstance(raw, (list, tuple)):
+            labels: list[str] = []
+            for item in raw[:20]:
+                label = str(item or "").strip().lower()
+                if re.fullmatch(r"[a-z0-9][a-z0-9_.:-]{0,79}", label) and label not in labels:
+                    labels.append(label)
+            if labels:
+                clean[key] = labels
+    return clean
+
+
 def _clean_originals_analytics_identifier(value: object, *, limit: int = 120) -> str:
     clean = str(value or "").strip()
     if len(clean) > limit or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,119}", clean):
@@ -16839,18 +16649,8 @@ def _clean_originals_analytics_event_data(
 @app.post("/api/analytics/event")
 async def analytics_event(body: AnalyticsEventRequest, user: dict | None = Depends(_optional_user)):
     event_type = re.sub(r"[^a-z0-9_.:-]+", "_", (body.event_type or "").strip().lower())[:80]
-    allowed_events = {
-        "welcome_contest_seen",
-        "welcome_contest_cta",
-        "welcome_contest_cta_attributed",
-        "welcome_gate_seen",
-        "welcome_gate_cta",
-        "welcome_gate_cta_attributed",
-        "welcome_walkthrough_seen",
-        "welcome_walkthrough_cta",
-    }
     is_originals_event = event_type in ORIGINALS_ANALYTICS_EVENT_SPECS
-    if event_type not in allowed_events and not event_type.startswith("phase0_") and not is_originals_event:
+    if event_type not in _NONIDENTIFYING_ANALYTICS_EVENT_SPECS and not is_originals_event:
         raise HTTPException(400, "Unsupported analytics event")
     if is_originals_event:
         clean_session = None
@@ -16858,11 +16658,12 @@ async def analytics_event(body: AnalyticsEventRequest, user: dict | None = Depen
             event_type, body.event_data, user_id=user["id"] if user else None,
         )
     else:
-        clean_session = re.sub(r"[^a-zA-Z0-9_.:-]+", "", (body.session_id or "").strip())[:120] or None
-        event_data = _scrub_analytics_event_data(body.event_data or {})
-        if not isinstance(event_data, dict):
-            event_data = {}
-    log_event(None if is_originals_event else (user["id"] if user else None), clean_session, event_type, event_data)
+        clean_session = None
+        event_data = _clean_nonidentifying_analytics_event_data(event_type, body.event_data)
+    # Product analytics is aggregate-only. Authentication may authorize the
+    # request, but neither the account nor a stable client/session identifier is
+    # persisted with the event.
+    log_event(None, clean_session, event_type, event_data)
     return {"ok": True}
 
 
@@ -25698,9 +25499,13 @@ async def stripe_webhook(request: _Request):
                 pkg_id = meta.get("package_id", "")
             except (ValueError, TypeError):
                 return {"received": True}
-            if uid and credits and not is_stripe_session_fulfilled(session_id):
-                add_credits(uid, credits, f"Purchased {pkg_id} pack — {credits} credits")
-                fulfill_stripe_purchase(session_id, uid, credits)
+            if uid and credits:
+                fulfill_stripe_purchase(
+                    session_id,
+                    uid,
+                    credits,
+                    f"Purchased {pkg_id} pack — {credits} credits",
+                )
 
     return {"received": True}
 
@@ -25798,38 +25603,93 @@ def _parse_google_expiry(value: str | None) -> int:
     except Exception:
         return 0
 
+
+_GOOGLE_PLAY_ENTITLEMENT_STATES = frozenset({
+    "SUBSCRIPTION_STATE_ACTIVE",
+    "SUBSCRIPTION_STATE_IN_GRACE_PERIOD",
+    # A canceled subscription remains paid through expiry. Google sends
+    # EXPIRED when access must end.
+    "SUBSCRIPTION_STATE_CANCELED",
+})
+
+
+def _require_google_play_entitlement(
+    state: str,
+    expires_at: int,
+    *,
+    now: int | None = None,
+) -> None:
+    if int(expires_at or 0) <= int(now if now is not None else time.time()):
+        raise HTTPException(402, "Google Play subscription is expired")
+    if state not in _GOOGLE_PLAY_ENTITLEMENT_STATES:
+        raise HTTPException(402, f"Google Play subscription is not active ({state})")
+
 async def _verify_google_play_subscription(product_id: str, purchase_token: str) -> dict:
     token = await _google_play_access_token()
     if not token:
         raise HTTPException(502, "Google Play auth did not return an access token")
-    url = (
-        "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/"
-        f"{quote(settings.google_play_package_name)}/purchases/subscriptionsv2/tokens/{quote(purchase_token)}"
-    )
     async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.get(url, headers={"Authorization": f"Bearer {token}"})
-    if r.status_code >= 400:
-        detail = r.text[:240] if r.text else r.reason_phrase
-        raise HTTPException(402, f"Google Play could not verify this subscription ({r.status_code}: {detail})")
-    data = r.json()
+        async def fetch_subscription(candidate_token: str) -> dict:
+            url = (
+                "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/"
+                f"{quote(settings.google_play_package_name)}/purchases/subscriptionsv2/tokens/{quote(candidate_token)}"
+            )
+            response = await client.get(url, headers={"Authorization": f"Bearer {token}"})
+            if response.status_code >= 400:
+                detail = response.text[:240] if response.text else response.reason_phrase
+                raise HTTPException(
+                    402,
+                    f"Google Play could not verify this subscription ({response.status_code}: {detail})",
+                )
+            return response.json()
+
+        data, receipt_chain = await _resolve_google_play_replacement_chain(
+            purchase_token, fetch_subscription,
+        )
     line_items = data.get("lineItems") or []
     matching = next((item for item in line_items if item.get("productId") == product_id), None)
     if not matching:
         raise HTTPException(400, "Google Play subscription does not match the requested product")
     expires_at = _parse_google_expiry(matching.get("expiryTime"))
-    if expires_at <= int(time.time()):
-        raise HTTPException(402, "Google Play subscription is expired")
     state = data.get("subscriptionState", "")
-    if state in {"SUBSCRIPTION_STATE_EXPIRED", "SUBSCRIPTION_STATE_CANCELED", "SUBSCRIPTION_STATE_PENDING"}:
-        raise HTTPException(402, f"Google Play subscription is not active ({state})")
+    _require_google_play_entitlement(state, expires_at)
     return {
+        "platform": "android",
         "product_id": product_id,
         "transaction_id": data.get("latestOrderId") or purchase_token,
-        "original_transaction_id": data.get("linkedPurchaseToken") or purchase_token,
+        "original_transaction_id": receipt_chain[-1],
+        "receipt_chain": receipt_chain,
         "expires_at": expires_at,
         "environment": "GooglePlay",
         "state": state,
     }
+
+
+async def _resolve_google_play_replacement_chain(
+    purchase_token: str,
+    fetch_subscription,
+) -> tuple[dict, list[str]]:
+    """Resolve the complete Play replacement chain from current token to root."""
+    current_token = str(purchase_token or "").strip()
+    if not current_token:
+        raise HTTPException(400, "Google Play purchase token is missing")
+    chain: list[str] = []
+    seen: set[str] = set()
+    current_data: dict | None = None
+    first_data: dict | None = None
+    for _depth in range(32):
+        if current_token in seen:
+            raise HTTPException(502, "Google Play returned a cyclic replacement chain")
+        seen.add(current_token)
+        chain.append(current_token)
+        current_data = await fetch_subscription(current_token)
+        if first_data is None:
+            first_data = current_data
+        linked = str(current_data.get("linkedPurchaseToken") or "").strip()
+        if not linked:
+            return first_data, chain
+        current_token = linked
+    raise HTTPException(502, "Google Play replacement chain is too deep")
 
 def _apple_server_jwt() -> str:
     now = int(time.time())
@@ -25877,159 +25737,208 @@ async def _fetch_apple_transaction(transaction_id: str) -> tuple[dict, str]:
             break
     raise HTTPException(402, f"Apple could not verify this subscription transaction ({last_status}: {last_detail})")
 
-async def _verify_apple_subscription(product_id: str, transaction_id: str) -> dict:
-    tx, queried_env = await _fetch_apple_transaction(transaction_id)
+def _validate_apple_subscription_transaction(
+    product_id: str,
+    transaction_id: str,
+    tx: dict,
+    queried_env: str,
+    *,
+    require_active: bool,
+) -> dict:
     apple_product_id = tx.get("productId")
     if apple_product_id != product_id:
         raise HTTPException(400, "Apple transaction does not match the requested product")
     if apple_product_id not in IAP_PRODUCTS:
         raise HTTPException(400, "Apple transaction is not a Trailhead Explorer product")
     bundle_id = tx.get("bundleId")
-    if settings.apple_bundle_id and bundle_id and bundle_id != settings.apple_bundle_id:
+    if settings.apple_bundle_id and bundle_id != settings.apple_bundle_id:
         raise HTTPException(400, "Apple transaction bundle does not match Trailhead")
-    expires_ms = int(tx.get("expiresDate") or 0)
+    try:
+        expires_ms = int(tx.get("expiresDate") or 0)
+    except (TypeError, ValueError):
+        expires_ms = 0
     if expires_ms <= 0:
         raise HTTPException(402, "Apple transaction is not an active subscription")
     expires_at = expires_ms // 1000
-    if expires_at <= int(time.time()):
-        raise HTTPException(402, "Apple subscription is expired")
+    raw_revocation_date = tx.get("revocationDate")
+    try:
+        revoked = int(raw_revocation_date or 0) > 0
+    except (TypeError, ValueError):
+        revoked = bool(raw_revocation_date)
+    revoked = revoked or tx.get("revocationReason") is not None
+    if require_active:
+        if revoked:
+            raise HTTPException(402, "Apple subscription was refunded or revoked")
+        if expires_at <= int(time.time()):
+            raise HTTPException(402, "Apple subscription is expired")
     return {
+        "platform": "ios",
         "product_id": apple_product_id,
         "transaction_id": tx.get("transactionId") or transaction_id,
         "original_transaction_id": tx.get("originalTransactionId"),
         "expires_at": expires_at,
         "environment": tx.get("environment") or queried_env,
         "bundle_id": bundle_id,
+        "revoked": revoked,
     }
+
+
+async def _verify_apple_subscription(product_id: str, transaction_id: str) -> dict:
+    tx, queried_env = await _fetch_apple_transaction(transaction_id)
+    return _validate_apple_subscription_transaction(
+        product_id,
+        transaction_id,
+        tx,
+        queried_env,
+        require_active=True,
+    )
 
 @app.post("/api/subscription/activate")
 async def activate_subscription(body: IAPActivateRequest, user: dict = Depends(_current_user)):
-    """Called by mobile after a successful native store purchase. Activates the plan on the user account."""
+    """Verify and bind one native-store subscription to the signed-in account."""
     product = IAP_PRODUCTS.get(body.product_id)
     if not product:
         raise HTTPException(400, f"Unknown product: {body.product_id}")
-    if not body.transaction_id.strip():
+    receipt_id = body.transaction_id.strip()
+    if not receipt_id:
         raise HTTPException(400, "Missing transaction_id")
+
+    account_id = int(user["id"])
+    if get_user_by_id(account_id) is None:
+        return {"status": "ignored", "reason": "account_unavailable"}
 
     platform = (body.platform or "ios").strip().lower()
     if platform not in {"ios", "android"}:
-        platform = "ios"
-    verification = None
-    if platform == "ios" and _apple_server_api_ready():
-        verification = await _verify_apple_subscription(body.product_id, body.transaction_id.strip())
-    if platform == "android" and _google_play_server_api_ready():
-        verification = await _verify_google_play_subscription(body.product_id, body.transaction_id.strip())
+        raise HTTPException(400, "Unsupported subscription platform")
 
-    # Idempotency: store transaction_id to prevent double-activation
-    from db.store import _conn as _db_conn
-    db = _db_conn()
-    existing = db.execute(
-        "SELECT 1 FROM stripe_purchases WHERE session_id=?", (body.transaction_id,)
-    ).fetchone()
-    if existing:
-        db.close()
-        user_row = get_user_by_id(user["id"])
-        if verification:
-            updated = set_user_plan(user["id"], verification["product_id"], verification["expires_at"])
-            if verification.get("original_transaction_id"):
-                save_app_store_subscription(
-                    verification["original_transaction_id"],
-                    verification.get("transaction_id"),
-                    user["id"],
-                    verification["product_id"],
-                    verification.get("environment"),
-                    verification["expires_at"],
-                    "active",
-                )
-            log_event(user["id"], None, "iap_verified_existing", verification)
-            return {
-                "status": "verified",
-                "plan_type": updated.get("plan_type"),
-                "plan_expires_at": updated.get("plan_expires_at"),
-            }
-        if has_active_plan(user_row):
-            return {"status": "already_active", "plan_type": user_row.get("plan_type"), "plan_expires_at": user_row.get("plan_expires_at")}
-        expires_at = activate_plan(user["id"], body.product_id, product["days"])
-        log_event(user["id"], None, "iap_reactivate", {"product_id": body.product_id, "platform": platform, "days": product["days"]})
-        return {"status": "reactivated", "plan_type": body.product_id, "plan_expires_at": expires_at}
+    if platform == "ios":
+        if not _apple_server_api_ready():
+            raise HTTPException(503, "App Store subscription verification is unavailable")
+        verification = await _verify_apple_subscription(body.product_id, receipt_id)
+    else:
+        if not _google_play_server_api_ready():
+            raise HTTPException(503, "Google Play subscription verification is unavailable")
+        verification = await _verify_google_play_subscription(body.product_id, receipt_id)
 
-    db.execute(
-        "INSERT INTO stripe_purchases (session_id, user_id, credits, created_at) VALUES (?,?,0,?)",
-        (body.transaction_id, user["id"], int(__import__("time").time()))
-    )
-    db.commit(); db.close()
+    verified_platform = str(verification.get("platform") or "").strip().lower()
+    verified_product = str(verification.get("product_id") or "").strip()
+    original_transaction_id = str(
+        verification.get("original_transaction_id") or ""
+    ).strip()
+    verified_transaction_id = str(
+        verification.get("transaction_id") or ""
+    ).strip()
+    expires_at = int(verification.get("expires_at") or 0)
+    if verified_platform != platform:
+        raise HTTPException(400, "Store verification returned a different platform")
+    if verified_product != body.product_id:
+        raise HTTPException(400, "Store verification returned a different product")
+    if not original_transaction_id or not verified_transaction_id or expires_at <= int(time.time()):
+        raise HTTPException(402, "Store verification returned an incomplete subscription")
 
-    if verification:
-        updated = set_user_plan(user["id"], verification["product_id"], verification["expires_at"])
-        if verification.get("original_transaction_id"):
-            save_app_store_subscription(
-                verification["original_transaction_id"],
-                verification.get("transaction_id"),
-                user["id"],
-                verification["product_id"],
-                verification.get("environment"),
-                verification["expires_at"],
-                "active",
-            )
-        log_event(user["id"], None, "iap_verified_activate", verification)
-        return {
-            "status": "verified",
-            "plan_type": updated.get("plan_type"),
-            "plan_expires_at": updated.get("plan_expires_at"),
-        }
+    try:
+        bound = bind_verified_store_subscription(
+            receipt_id,
+            original_transaction_id,
+            verified_transaction_id,
+            account_id,
+            verified_product,
+            platform,
+            verification.get("environment"),
+            expires_at,
+            "active",
+            related_receipt_ids=verification.get("receipt_chain"),
+            transition_product_ids=frozenset(IAP_PRODUCTS),
+        )
+    except SubscriptionReceiptConflictError:
+        raise HTTPException(409, "This store purchase is already linked to another account or product")
+    if bound is None:
+        return {"status": "ignored", "reason": "account_unavailable"}
 
-    expires_at = activate_plan(user["id"], body.product_id, product["days"])
-    log_event(user["id"], None, "iap_activate_unverified", {
-        "product_id": body.product_id,
+    updated = set_user_plan(account_id, verified_product, expires_at)
+    if updated is None:
+        return {"status": "ignored", "reason": "account_unavailable"}
+    log_event(account_id, None, "iap_verified_activate", {
         "platform": platform,
-        "google_validation_configured": _google_play_server_api_ready(),
-        "days": product["days"],
+        "product_id": verified_product,
+        "environment": verification.get("environment"),
+        "expires_at": expires_at,
+        "idempotent": not bool(bound.get("receipt_created")),
     })
-    return {"status": "activated", "plan_type": body.product_id, "plan_expires_at": expires_at}
+    return {
+        "status": "verified",
+        "plan_type": updated.get("plan_type"),
+        "plan_expires_at": updated.get("plan_expires_at"),
+    }
 
 @app.post("/api/apple/notifications")
 async def apple_server_notification(body: AppleNotificationBody):
     """App Store Server Notifications v2 endpoint for renewal/cancellation sync."""
+    # The incoming JWS is decoded only to locate a transaction. Entitlement
+    # mutation relies exclusively on a fresh authenticated App Store Server API
+    # lookup below; an unverified notification payload is never authoritative.
     payload = _decode_apple_jws_payload(body.signedPayload)
     data = payload.get("data") or {}
     signed_tx = data.get("signedTransactionInfo")
     if not signed_tx:
         log_event(None, None, "apple_notification_no_transaction", {"notificationType": payload.get("notificationType")})
         return {"ok": True, "handled": False}
-    tx = _decode_apple_jws_payload(signed_tx)
-    original_id = tx.get("originalTransactionId")
-    product_id = tx.get("productId")
-    if not original_id or product_id not in IAP_PRODUCTS:
+    claimed_tx = _decode_apple_jws_payload(signed_tx)
+    transaction_id = str(claimed_tx.get("transactionId") or "").strip()
+    if not transaction_id:
+        raise HTTPException(400, "Apple notification did not include a transaction identifier")
+    if not _apple_server_api_ready():
+        raise HTTPException(503, "App Store subscription verification is unavailable")
+
+    verified_tx, queried_env = await _fetch_apple_transaction(transaction_id)
+    product_id = str(verified_tx.get("productId") or "").strip()
+    if product_id not in IAP_PRODUCTS:
         log_event(None, None, "apple_notification_unmapped_product", {
             "product_id": product_id,
             "notificationType": payload.get("notificationType"),
         })
         return {"ok": True, "handled": False}
+    verification = _validate_apple_subscription_transaction(
+        product_id,
+        transaction_id,
+        verified_tx,
+        queried_env,
+        require_active=False,
+    )
+    original_id = verification.get("original_transaction_id")
+    if not original_id:
+        raise HTTPException(502, "Apple transaction did not include its original identifier")
     mapped = get_app_store_subscription(original_id)
     if not mapped:
         log_event(None, None, "apple_notification_no_user_mapping", {
-            "original_transaction_id": original_id,
-            "product_id": product_id,
             "notificationType": payload.get("notificationType"),
         })
         return {"ok": True, "handled": False}
-    expires_ms = int(tx.get("expiresDate") or 0)
-    expires_at = expires_ms // 1000 if expires_ms else None
-    active = bool(expires_at and expires_at > int(time.time()))
-    status = "active" if active else "expired"
-    if active:
-        set_user_plan(mapped["user_id"], product_id, expires_at)
-    else:
-        set_user_plan(mapped["user_id"], "free", None)
-    save_app_store_subscription(
-        original_id,
-        tx.get("transactionId"),
-        mapped["user_id"],
-        product_id,
-        tx.get("environment") or data.get("environment"),
-        expires_at,
-        status,
+    expires_at = int(verification.get("expires_at") or 0) or None
+    revoked = bool(verification.get("revoked"))
+    active = bool(not revoked and expires_at and expires_at > int(time.time()))
+    status = "active" if active else ("revoked" if revoked else "expired")
+    try:
+        persisted = save_app_store_subscription(
+            original_id,
+            verification.get("transaction_id"),
+            mapped["user_id"],
+            product_id,
+            verification.get("environment"),
+            expires_at,
+            status,
+            "ios",
+            transition_product_ids=frozenset(IAP_PRODUCTS),
+        )
+    except SubscriptionReceiptConflictError:
+        raise HTTPException(409, "Apple subscription mapping is inconsistent")
+    if not persisted:
+        return {"ok": True, "handled": False}
+    updated = set_user_plan(
+        mapped["user_id"], product_id if active else "free", expires_at if active else None
     )
+    if updated is None:
+        return {"ok": True, "handled": False}
     log_event(mapped["user_id"], None, "apple_notification_subscription_sync", {
         "notificationType": payload.get("notificationType"),
         "subtype": payload.get("subtype"),
@@ -26771,8 +26680,8 @@ a{color:#984f2f;}
 </style></head>
 <body>
 <h1>Trailhead Privacy Policy</h1>
-<p class="updated">Last updated: July 26, 2026</p>
-<p class="notice">Trailhead does not sell personal information. We use contracted processors only to provide requested features, operate Trailhead, and measure reliability.</p>
+<p class="updated">Last updated: August 3, 2026</p>
+<p class="notice">Trailhead does not sell personal information or use it for third-party advertising. We disclose information only to service providers that operate Trailhead or to an external service when you choose its feature.</p>
 
 <h2>1. Information We Collect</h2>
 <h3>Account information</h3>
@@ -26780,23 +26689,24 @@ a{color:#984f2f;}
 <h3>Location and map requests</h3>
 <p>With device permission, Trailhead processes approximate or precise location, map viewport, route endpoints, and selected places to show maps, nearby results, weather and land layers, build routes, navigate, and trigger downloaded Original stories. Trailhead does not put raw coordinates or traveled routes into product analytics.</p>
 <h3>Content, purchases and communications</h3>
-<p>Saved trips, routes, stops, notes, packing lists, saved places, ratings, comments, reports, edits, optional photos, support messages and screenshots, subscription and credit history, purchase receipts, push tokens, and communication preferences. Trailhead does not receive or store full payment-card or bank credentials.</p>
+<p>Saved trips, routes, stops, notes, packing lists, saved places, ratings, comments, reports, edits, optional photos, support messages and screenshots, planner or Co-Pilot chat history, subscription and credit history, preferred prize-payout method label and status, purchase receipts, push tokens, and communication preferences. An explicitly reviewed trail recording may also include its selected activity, elapsed time, distance and route geometry. Trailhead does not receive or store full payment-card, bank, PayPal, or Cash App credentials.</p>
 <h3>Optional voice features</h3>
-<p>If you start Co-Pilot voice assistant, microphone audio and conversation context are sent to OpenAI so the assistant can respond. Microphone access is optional and can be stopped at any time.</p>
+<p>If you start Co-Pilot voice assistant, microphone audio and the context needed for your request are sent to OpenAI so the assistant can respond. Trailhead does not keep the raw audio in your account, but OpenAI may temporarily retain API inputs for abuse monitoring under its API data-retention terms. The resulting transcript and requested map or trip action may remain in your account history until you remove it or delete your account. Microphone access is optional and stops when you close or cancel Co-Pilot.</p>
 <h3>Diagnostics and app activity</h3>
-<p>Privacy-minimized app events, fixed error codes, stack frames, platform, app/build/runtime/update version, and static performance measurements. Sentry Session Replay is disabled. Search text, support content, payout information, raw coordinates, and traveled routes are excluded from Trailhead analytics and Sentry events.</p>
+<p>Trailhead processes a small set of aggregate app events plus fixed error codes, stack frames, platform, app/build/runtime/update version, and static performance measurements. Aggregate product events do not contain an account identifier or stable session identifier. Separate first-party operational audit records may associate an account with a fixed event type and the minimum identifiers needed to complete or investigate a purchase, support request, community report, security event, or administrator action. They are not used to build advertising audiences. Sentry Session Replay is disabled. Personal search text, support-message content, payout information, raw coordinates, traveled routes, and user-provided photos or files are excluded from Trailhead analytics and Sentry events.</p>
 
 <h2>2. How We Use Your Information</h2>
 <p>We use this information to operate accounts; provide maps, Search, navigation, planning, offline downloads and Originals; personalize requested planning features; process purchases and credits; deliver notifications and support; protect the service; fix crashes; and measure reliability. We do not sell personal information or use private support messages, payout information, personal search text, raw coordinates, or traveled routes for advertising.</p>
 
 <h2>3. Location and Background Use</h2>
-<p>Foreground location supports the map, nearby places, route building and navigation. Trailhead uses location in the background only after you explicitly start navigation or a Trailhead Original so guidance or stories can continue after the phone is locked or another app is open. Location use stops when you end navigation or the tour. You can change permission in device Settings.</p>
+<p>Foreground location supports the map, nearby places, route building and navigation. Trailhead continues location processing in the background only after you explicitly start navigation, a Trailhead Original, or trail recording so the active feature can continue after the phone is locked or another app is open. Location use stops when you end that feature. Trail recording remains private on your device unless you explicitly save, export, or submit it. You can change permission in device Settings.</p>
 
 <h2>4. Payment Data</h2>
 <p>Apple, Google Play, Stripe, PayPal, Cash App, or a bank handles credentials in the applicable approved purchase or prize flow. Trailhead stores only purchase, entitlement, credit-ledger, payout-method label, and workflow status needed to provide the service or complete an award. Never send payout credentials in support chat.</p>
 
 <h2>5. Data Retention</h2>
 <p>Account and saved content remain while your account is active or until you delete the item. Operational community reports use the expiry shown by that feature; comments, ratings, edits, trips and support records are not covered by a short report-expiry window. Purchase, credit-ledger, fraud-prevention, security, and legal records may be retained only as required for those purposes.</p>
+<p>Aggregate product measurements and first-party operational audit events are normally removed after 90 days. Push campaign delivery history is also limited to 90 days and does not retain a reusable push token.</p>
 <p>You can permanently delete your account in Trailhead under Profile after fresh password, Google, or Apple reauthentication. See the <a href="/delete-account">account deletion page</a>.</p>
 
 <h2>6. Service Providers and User-Requested Transfers</h2>
@@ -26806,12 +26716,13 @@ a{color:#984f2f;}
 <li><strong>OpenAI and Anthropic</strong> process relevant request and trip or campground context for Co-Pilot, planning and briefs. OpenAI also processes optional Co-Pilot audio.</li>
 <li><strong>Expo, Firebase Cloud Messaging and Apple Push Notification service</strong> process push tokens, notification payloads, platform metadata and update-delivery information.</li>
 <li><strong>Apple, Google and Stripe</strong> process sign-in or purchase information for the flow you choose.</li>
-<li><strong>Map, route, weather, land and content providers</strong>, including OpenTopoData, RainViewer, Avalanche.org, USFS, USGS, OpenStreetMap, NPS, RIDB/Recreation.gov, BLM and Wikimedia, process requested coordinates, tiles, routes or content identifiers.</li>
-<li><strong>ElevenLabs and Cartesia</strong> process Trailhead-authored narration scripts when Trailhead prepares Original audio.</li>
+<li><strong>Transactional email providers</strong> process email address, username and time-limited verification or recovery links for account messages.</li>
+<li><strong>Map, route, weather, land and content providers</strong>, including Project OSRM, OpenTopoData, RainViewer, Avalanche.org, USFS, USGS, OpenStreetMap, NPS, RIDB/Recreation.gov, BLM and Wikimedia, process requested coordinates, tiles, routes or content identifiers for the feature you invoke.</li>
+<li><strong>ElevenLabs and Cartesia</strong> process text for requested guide, direction, or Original narration. Generated audio may be cached so the same requested content can play reliably or offline where the app labels it available.</li>
 <li><strong>Viator</strong> provides separately labelled guided-tour inventory and handles the external booking flow you choose.</li>
 <li><strong>Railway, content-delivery and object-storage providers</strong> host and deliver Trailhead accounts, APIs, downloads, content and attachments.</li>
 </ul>
-<p>These providers are restricted to processing for Trailhead or for the external action you request. Third-party deferred referral attribution is disabled; manual referral codes remain available.</p>
+<p>Trailhead does not send these providers personal data for third-party advertising. Trailhead 1.0.12 and later use first-party <code>gettrailhead.app</code> referral links and manual referral codes rather than a native third-party attribution SDK. An older installed build may still contain Branch for referral-link attribution; that build can send install, app-open, referrer, and device-level data to Branch, but Trailhead does not send Branch account identity, location, personal search text, support content, or purchase events. Updating to 1.0.12 or later removes that SDK.</p>
 
 <h2>7. Your Choices and Security</h2>
 <p>You can change location, microphone, photo and notification permissions in device Settings; leave support diagnostic consent off; use manual referral codes; remove saved content; and delete your account. Production external traffic uses HTTPS encryption. Passwords are stored as one-way hashes. No system can guarantee absolute security.</p>
@@ -32134,46 +32045,6 @@ async def _nominatim_town_profile(name: str, lat: float, lng: float, client: htt
     return None
 
 
-async def _geonames_town_profile(name: str, lat: float, lng: float, client: httpx.AsyncClient) -> dict | None:
-    username = getattr(settings, "geonames_username", "") or ""
-    if not username:
-        return None
-    try:
-        resp = await client.get(
-            "http://api.geonames.org/findNearbyWikipediaJSON",
-            params={"lat": lat, "lng": lng, "radius": 20, "maxRows": 8, "username": username},
-        )
-        resp.raise_for_status()
-        records = (resp.json() or {}).get("geonames") or []
-        first_name = (_town_name_candidates(name) or [name])[0].lower()
-        best = None
-        for record in records:
-            title = str(record.get("title") or "").lower()
-            if first_name in title or title in first_name:
-                best = record
-                break
-        best = best or (records[0] if records else None)
-        if not best:
-            return None
-        thumb = best.get("thumbnailImg") or ""
-        return {
-            "name": best.get("title") or name,
-            "summary": _planner_clean_text(best.get("summary") or "", 700),
-            "lat": float(best.get("lat") or lat),
-            "lng": float(best.get("lng") or lng),
-            "photo_url": thumb,
-            "photos": [{"url": thumb, "caption": best.get("title") or name, "credit": "GeoNames / Wikipedia", "source": "GeoNames"}] if thumb else [],
-            "official_url": best.get("wikipediaUrl") if str(best.get("wikipediaUrl") or "").startswith("http") else (f"https://{best.get('wikipediaUrl')}" if best.get("wikipediaUrl") else ""),
-            "source": "geonames",
-            "source_label": "GeoNames",
-            "source_badge": "GeoNames / Wikipedia",
-            "source_freshness": "Verify current local conditions before you go.",
-            "last_checked": int(time.time()),
-        }
-    except Exception:
-        return None
-
-
 def _merge_town_profiles(*profiles: dict | None) -> dict | None:
     merged: dict = {}
     sources: list[str] = []
@@ -32233,8 +32104,7 @@ async def _open_town_profile(card: dict, body: MapCardResolveRequest) -> dict | 
             wikidata_profile = await _wikidata_profile((osm_profile or {}).get("wikidata_id") or "", client) if osm_profile else None
             wiki_name = (osm_profile or {}).get("wikipedia_title") or (wikidata_profile or {}).get("wikipedia_title") or name
             wiki_profile = await _open_place_wiki_profile(str(wiki_name), lat, lng, client)
-            geonames_profile = await _geonames_town_profile(name, lat, lng, client)
-            profile = _merge_town_profiles(osm_profile, wikidata_profile, wiki_profile, geonames_profile)
+            profile = _merge_town_profiles(osm_profile, wikidata_profile, wiki_profile)
             if profile:
                 profile["id"] = f"town_profile:{hashlib.sha1(f'{name}:{lat:.3f}:{lng:.3f}'.encode()).hexdigest()[:16]}"
                 profile["source_freshness"] = profile.get("source_freshness") or "Verify current local conditions before you go."
@@ -36162,7 +36032,6 @@ class ViatorBookingIntentRequest(BaseModel):
     currency: str = "USD"
     amount: Optional[float] = None
     booking_url: Optional[str] = None
-    provider_payload: dict = Field(default_factory=dict)
 
 class ViatorBookingProviderRequest(BaseModel):
     booking_id: Optional[str] = None
@@ -36372,8 +36241,9 @@ def _viator_provider_status(payload: dict | None) -> dict:
 
 
 def _viator_booking_enabled(client: ViatorClient | None = None) -> bool:
-    provider = client or ViatorClient(viator_config_from_env())
-    return bool(getattr(provider, "booking_ready", provider.ready)())
+    # Trailhead deliberately uses Viator's externally fulfilled checkout. An
+    # embedded checkout would require a separate PCI and Data Safety review.
+    return False
 
 
 def _viator_booking_config(client: ViatorClient | None = None) -> dict:
@@ -36382,12 +36252,12 @@ def _viator_booking_config(client: ViatorClient | None = None) -> dict:
     return {
         "source": "viator",
         "merchant_of_record": "Viator",
-        "payment_solution": "iframe",
+        "payment_solution": "external_handoff",
         "booking_enabled": enabled,
         "live_enabled": provider.ready(),
-        "requires_certification": True,
-        "requires_pci": True,
-        "status": "enabled" if enabled else "pending_access",
+        "requires_certification": False,
+        "requires_pci": False,
+        "status": "external_only",
     }
 
 
@@ -36415,13 +36285,21 @@ def _deep_first(payload: object, keys: set[str]) -> str:
 def _viator_booking_update_from_provider(payload: dict, fallback_status: str) -> dict:
     status = str(payload.get("status") or "").lower()
     provider_ok = status in {"ok", "confirmed", "booked", "success"} or bool(_deep_first(payload, {"bookingReference", "booking_reference"}))
+    provider_metadata = {
+        "status": status[:40],
+        "endpoint": str(payload.get("endpoint") or "")[:200],
+        "http_status": payload.get("http_status") if isinstance(payload.get("http_status"), int) else None,
+        "provider_code": str(payload.get("provider_code") or "")[:120],
+        "tracking_id": str(payload.get("tracking_id") or "")[:200],
+        "fetched_at": payload.get("fetched_at") if isinstance(payload.get("fetched_at"), int) else None,
+    }
     return {
         "status": fallback_status if provider_ok else (status or "provider_pending"),
         "booking_reference": _deep_first(payload, {"bookingReference", "booking_reference", "reference"}),
         "cart_id": _deep_first(payload, {"cartId", "cart_id", "cartReference", "cart_reference"}),
         "hold_expires_at": _deep_first(payload, {"holdExpiresAt", "hold_expires_at", "pricingHoldExpiry", "availabilityHoldExpiry"}),
         "voucher_url": _deep_first(payload, {"voucherUrl", "voucher_url"}),
-        "provider_payload": payload,
+        "provider_payload": {key: value for key, value in provider_metadata.items() if value not in {None, ""}},
     }
 
 
@@ -37489,17 +37367,15 @@ async def viator_product_booking_data(product_code: str, currency: str = "USD"):
     client = ViatorClient(viator_config_from_env())
     product = client.get_product(code)
     schedule = client.get_availability_schedule(code, currency=currency)
-    questions = client.get_booking_questions(product_code=code)
     return {
         **_viator_booking_config(client),
         "product_code": code,
         "product": product,
         "availability_schedule": schedule,
-        "booking_questions": questions,
+        "booking_questions": {"status": "external_only"},
         "provider_status": [
             {"name": "product", **_viator_provider_status(product)},
             {"name": "availability_schedule", **_viator_provider_status(schedule)},
-            {"name": "booking_questions", **_viator_provider_status(questions)},
         ],
     }
 
@@ -37525,7 +37401,7 @@ async def viator_booking_intent(body: ViatorBookingIntentRequest, user: dict = D
         currency=body.currency,
         amount=body.amount,
         booking_url=body.booking_url,
-        provider_payload=body.provider_payload,
+        provider_payload={},
     )
     return {**_viator_booking_config(), "booking": booking}
 
@@ -37537,58 +37413,6 @@ def _update_booking_from_provider_if_present(booking_id: str | None, user_id: in
         booking = get_viator_booking(booking_id, user_id)
         return booking
     return update_viator_booking(booking_id, user_id, **_viator_booking_update_from_provider(payload, status))
-
-
-@app.post("/api/viator/availability/check")
-async def viator_availability_check(body: ViatorBookingProviderRequest, user: dict = Depends(_current_user)):
-    client = ViatorClient(viator_config_from_env())
-    payload = client.check_availability(body.payload or {})
-    booking = _update_booking_from_provider_if_present(body.booking_id, user["id"], payload, "availability_checked")
-    return {
-        **_viator_booking_config(client),
-        "result": payload,
-        "booking": booking,
-        "provider_status": _viator_provider_status(payload),
-    }
-
-
-@app.post("/api/viator/bookings/cart/hold")
-async def viator_cart_hold(body: ViatorBookingProviderRequest, user: dict = Depends(_current_user)):
-    client = ViatorClient(viator_config_from_env())
-    payload = client.cart_hold(body.payload or {})
-    booking = _update_booking_from_provider_if_present(body.booking_id, user["id"], payload, "held")
-    return {
-        **_viator_booking_config(client),
-        "result": payload,
-        "booking": booking,
-        "provider_status": _viator_provider_status(payload),
-    }
-
-
-@app.post("/api/viator/bookings/cart/book")
-async def viator_cart_book(body: ViatorBookingProviderRequest, user: dict = Depends(_current_user)):
-    client = ViatorClient(viator_config_from_env())
-    payload = client.cart_book(body.payload or {})
-    booking = _update_booking_from_provider_if_present(body.booking_id, user["id"], payload, "booked")
-    return {
-        **_viator_booking_config(client),
-        "result": payload,
-        "booking": booking,
-        "provider_status": _viator_provider_status(payload),
-    }
-
-
-@app.post("/api/viator/checkoutsessions/{session_token}/paymentaccounts")
-async def viator_checkout_payment_accounts(session_token: str, body: ViatorBookingProviderRequest, user: dict = Depends(_current_user)):
-    client = ViatorClient(viator_config_from_env())
-    payload = client.checkout_payment_accounts(session_token, body.payload or {})
-    booking = _update_booking_from_provider_if_present(body.booking_id, user["id"], payload, "payment_ready")
-    return {
-        **_viator_booking_config(client),
-        "result": payload,
-        "booking": booking,
-        "provider_status": _viator_provider_status(payload),
-    }
 
 
 @app.post("/api/viator/bookings/status")

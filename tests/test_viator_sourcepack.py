@@ -356,19 +356,55 @@ class ViatorSourcePackTests(unittest.TestCase):
         self.assertEqual(urllib.parse.urlparse(opener.requests[0].full_url).path, "/partner/bookings/cart/hold")
         self.assertEqual(opener.bodies[0]["lineItems"][0]["productCode"], "MOAB-JEEP-001")
 
-    def test_booking_cancel_quote_and_iframe_payment_paths(self):
+    def test_consumer_booking_config_is_external_only(self):
+        client = ViatorClient(ViatorConfig(api_key="test", enable_live=True, enable_booking=True))
+        config = server._viator_booking_config(client)
+        self.assertFalse(config["booking_enabled"])
+        self.assertEqual(config["payment_solution"], "external_handoff")
+        self.assertEqual(config["status"], "external_only")
+        self.assertFalse(config["requires_pci"])
+
+        registered_paths = {route.path for route in server.app.routes}
+        self.assertNotIn("/api/viator/availability/check", registered_paths)
+        self.assertNotIn("/api/viator/bookings/cart/hold", registered_paths)
+        self.assertNotIn("/api/viator/bookings/cart/book", registered_paths)
+        self.assertNotIn("/api/viator/checkoutsessions/{session_token}/paymentaccounts", registered_paths)
+
+    def test_provider_booking_metadata_drops_personal_and_payment_fields(self):
+        update = server._viator_booking_update_from_provider(
+            {
+                "status": "CONFIRMED",
+                "bookingReference": "BOOK-123",
+                "cartId": "CART-123",
+                "provider_code": "OK",
+                "tracking_id": "TRACE-123",
+                "email": "private@example.com",
+                "cardNumber": "4111111111111111",
+                "traveler": {"name": "Private Traveler"},
+            },
+            "confirmed",
+        )
+        self.assertEqual(update["booking_reference"], "BOOK-123")
+        self.assertEqual(update["cart_id"], "CART-123")
+        self.assertEqual(update["provider_payload"]["status"], "confirmed")
+        self.assertNotIn("email", update["provider_payload"])
+        self.assertNotIn("cardNumber", update["provider_payload"])
+        self.assertNotIn("traveler", update["provider_payload"])
+
+        intent = server.ViatorBookingIntentRequest.model_validate({
+            "product_code": "MOAB-001",
+            "provider_payload": {"cardNumber": "4111111111111111"},
+        })
+        self.assertNotIn("provider_payload", intent.model_dump())
+
+    def test_booking_cancel_quote_path(self):
         opener = CapturingOpener({"status": "ok"})
         client = ViatorClient(ViatorConfig(api_key="test", enable_live=True, enable_booking=True), opener=opener)
         client.cancel_quote("BR 123", {"reasonCode": "CUSTOMER_REQUEST"})
-        client.checkout_payment_accounts("session 123", {"account": {"type": "iframe"}})
         first = urllib.parse.urlparse(opener.requests[0].full_url)
-        second = urllib.parse.urlparse(opener.requests[1].full_url)
         self.assertEqual(opener.requests[0].get_method(), "GET")
         self.assertEqual(first.path, "/partner/bookings/BR%20123/cancel-quote")
         self.assertEqual(urllib.parse.parse_qs(first.query)["reasonCode"], ["CUSTOMER_REQUEST"])
-        self.assertEqual(opener.requests[1].get_method(), "POST")
-        self.assertEqual(second.path, "/partner/v1/checkoutsessions/session%20123/paymentaccounts")
-        self.assertEqual(opener.bodies[0]["account"]["type"], "iframe")
 
     def test_product_detail_and_schedule_paths_are_encoded(self):
         opener = CapturingOpener({"status": "ok"})

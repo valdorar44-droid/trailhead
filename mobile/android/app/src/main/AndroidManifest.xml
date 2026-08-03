@@ -8,7 +8,6 @@
   <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
   <uses-permission android:name="android.permission.RECORD_AUDIO"/>
   <uses-permission android:name="android.permission.VIBRATE"/>
-  <uses-permission android:name="com.android.vending.INSTALL_REFERRER"/>
   <uses-permission android:name="androidx.car.app.NAVIGATION_TEMPLATES"/>
   <uses-permission android:name="androidx.car.app.ACCESS_SURFACE"/>
   <uses-permission android:name="com.android.vending.BILLING"/>
@@ -17,6 +16,8 @@
   <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:node="remove"/>
   <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" tools:node="remove"/>
   <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" tools:node="remove"/>
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" tools:node="remove"/>
+  <uses-permission android:name="com.android.vending.INSTALL_REFERRER" tools:node="remove"/>
   <queries>
     <intent>
       <action android:name="android.intent.action.VIEW"/>
@@ -26,7 +27,6 @@
   </queries>
   <application android:name=".MainApplication" android:label="@string/app_name" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:allowBackup="false" android:theme="@style/AppTheme" android:supportsRtl="true">
     <meta-data android:name="com.google.android.geo.API_KEY" android:value="${googleMapsApiKey}"/>
-    <meta-data android:name="io.branch.sdk.BranchKey" android:value="${branchKey}"/>
     <meta-data android:name="com.google.firebase.messaging.default_notification_color" android:resource="@color/notification_icon_color"/>
     <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@drawable/notification_icon"/>
     <meta-data android:name="expo.modules.notifications.default_notification_color" android:resource="@color/notification_icon_color"/>
@@ -46,6 +46,7 @@
     </service>
     <service android:name=".car.TrailheadCarLocationService" android:exported="false" android:foregroundServiceType="location"/>
     <service android:name="com.oney.WebRTCModule.MediaProjectionService" tools:node="remove"/>
+    <service android:name="expo.modules.audio.service.AudioRecordingService" tools:node="remove"/>
     <activity android:name=".MainActivity" android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode" android:launchMode="singleTask" android:windowSoftInputMode="adjustResize" android:theme="@style/Theme.App.SplashScreen" android:exported="true">
       <intent-filter>
         <action android:name="android.intent.action.MAIN"/>
@@ -75,14 +76,6 @@
         <category android:name="android.intent.category.DEFAULT"/>
         <category android:name="android.intent.category.BROWSABLE"/>
         <data android:scheme="https" android:host="api.gettrailhead.app" android:pathPrefix="/originals"/>
-      </intent-filter>
-      <intent-filter android:autoVerify="true">
-        <action android:name="android.intent.action.VIEW"/>
-        <category android:name="android.intent.category.DEFAULT"/>
-        <category android:name="android.intent.category.BROWSABLE"/>
-        <data android:scheme="https" android:host="${branchDomain}"/>
-        <data android:scheme="https" android:host="zswub.app.link"/>
-        <data android:scheme="https" android:host="zswub-alternate.app.link"/>
       </intent-filter>
       <intent-filter>
         <action android:name="androidx.car.app.action.NAVIGATE"/>

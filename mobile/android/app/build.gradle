@@ -4,8 +4,6 @@ apply plugin: "com.facebook.react"
 
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 def googleMapsApiKey = findProperty('GOOGLE_MAPS_API_KEY') ?: System.getenv('GOOGLE_MAPS_API_KEY') ?: ''
-def branchApiKey = findProperty('BRANCH_API_KEY') ?: System.getenv('BRANCH_API_KEY') ?: ''
-def branchDomain = findProperty('BRANCH_DOMAIN') ?: System.getenv('EXPO_PUBLIC_BRANCH_DOMAIN') ?: 'go.gettrailhead.app'
 
 /**
  * This is the configuration block to customize your React Native Android app.
@@ -98,11 +96,9 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 38
-        versionName "1.0.11"
+        versionName "1.0.12"
         manifestPlaceholders = [
             googleMapsApiKey: googleMapsApiKey,
-            branchKey: branchApiKey,
-            branchDomain: branchDomain,
         ]
     }
     signingConfigs {

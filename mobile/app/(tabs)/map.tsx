@@ -381,6 +381,15 @@ import { playTrailheadCue, playTrailheadVoice, preloadTrailheadVoice, stopTrailh
 import { loadWelcomeSetupPreferences, type WelcomeSetupPreferences } from '@/lib/welcomeGate';
 import { buildTrailheadUserContext } from '@/lib/trailheadUserContext';
 import { startRealtimeCopilotSession, type RealtimeCopilotHandle } from '@/lib/realtimeCopilot';
+import {
+  realtimeCopilotStartIsCurrent,
+  realtimeNarratorStartIsCurrent,
+  releaseRealtimeCopilotHandle,
+} from '@/lib/copilotVoiceLifecycle';
+import {
+  BACKGROUND_LOCATION_PROMINENT_DISCLOSURE,
+  navigationBackgroundStartStep,
+} from '@/lib/navigationLocationDisclosure';
 import { waitForRouteRenderReady, waitForRealtimeConnected } from '@/lib/cinematicDirector';
 import type { CopilotPresenceState } from '@/components/copilot/CopilotPresenceOrb';
 import { TrailheadWayfinder, type TrailheadWayfinderState } from '@/components/copilot/TrailheadWayfinder';
@@ -2807,17 +2816,39 @@ function calcBearing(lat1: number, lng1: number, lat2: number, lng2: number) {
   return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
 }
 
-async function startNavigationBackgroundLocation() {
-  if (Platform.OS === 'web' || Platform.OS === 'android') return;
+type NavigationBackgroundLocationResult =
+  | 'unsupported'
+  | 'started'
+  | 'already_active'
+  | 'foreground_denied'
+  | 'background_denied'
+  | 'failed';
+
+async function startNavigationBackgroundLocation(): Promise<NavigationBackgroundLocationResult> {
+  if (Platform.OS === 'web' || Platform.OS === 'android') return 'unsupported';
   try {
     const fg = await Location.getForegroundPermissionsAsync();
-    if (fg.status !== 'granted') return;
-    const bg = await Location.getBackgroundPermissionsAsync().catch(() => null);
-    if (bg?.status !== 'granted') {
-      await Location.requestBackgroundPermissionsAsync().catch(() => null);
-    }
     const active = await Location.hasStartedLocationUpdatesAsync(AUDIO_LOCATION_TASK).catch(() => false);
-    if (active) return;
+    let bg = await Location.getBackgroundPermissionsAsync().catch(() => null);
+    let step = navigationBackgroundStartStep({
+      platform: Platform.OS,
+      foregroundGranted: fg.status === 'granted',
+      backgroundGranted: bg?.status === 'granted',
+      alreadyActive: active,
+    });
+    if (step === 'foreground_denied') return 'foreground_denied';
+    if (step === 'already_active') return 'already_active';
+    if (step === 'unsupported') return 'unsupported';
+    if (step === 'request_background') {
+      bg = await Location.requestBackgroundPermissionsAsync().catch(() => null);
+      step = navigationBackgroundStartStep({
+        platform: Platform.OS,
+        foregroundGranted: true,
+        backgroundGranted: bg?.status === 'granted',
+        alreadyActive: false,
+      });
+      if (step !== 'start_background') return 'background_denied';
+    }
     await Location.startLocationUpdatesAsync(AUDIO_LOCATION_TASK, {
       accuracy: Location.Accuracy.BestForNavigation,
       timeInterval: 1000,
@@ -2831,8 +2862,10 @@ async function startNavigationBackgroundLocation() {
         notificationColor: '#f97316',
       },
     });
+    return 'started';
   } catch (e) {
     console.warn('Background navigation location failed', e);
+    return 'failed';
   }
 }
 
@@ -6430,7 +6463,6 @@ function MapScreen() {
       `route-activity-offer:${pendingRouteActivityOffer.tripId}:${pendingRouteActivityOffer.createdAt}`,
       'phase0_route_activity_offer_viewed',
       {
-        trip_id: pendingRouteActivityOffer.tripId,
         result_count: pendingRouteActivityOffer.experiences.length,
       },
     );
@@ -6607,7 +6639,7 @@ function MapScreen() {
     || !extremeConfig.beta_active
     || (!!extremeConfig.explorer_entitled && !extremeCopilotAvailable)
   );
-  const [showExtremeCopilot, setShowExtremeCopilot] = useState(false);
+  const [showExtremeCopilot, setShowExtremeCopilotState] = useState(false);
   const [extremeCopilotInput, setExtremeCopilotInput] = useState('');
   const [extremeCopilotSessionId, setExtremeCopilotSessionId] = useState<string | null>(null);
   const [extremeCopilotBusy, setExtremeCopilotBusy] = useState(false);
@@ -6669,6 +6701,9 @@ function MapScreen() {
   const mapMissionTerrainEnabledRef = useRef(false);
   const mapMissionStyleSnapshotRef = useRef<{ mapLayer: MapLayer; premiumMapStyle: PremiumMapStyle } | null>(null);
   const realtimeCopilotRef = useRef<RealtimeCopilotHandle | null>(null);
+  const missionNarratorHandleRef = useRef<RealtimeCopilotHandle | null>(null);
+  const copilotVoiceOperationRef = useRef(0);
+  const copilotModalVisibleRef = useRef(false);
   const missionDirectorActiveRef = useRef(false);
   const missionVoicePathRef = useRef<MissionVoicePath>('realtime');
   // Which storyboard authored the playing cinematic (QA breadcrumb).
@@ -6715,9 +6750,35 @@ function MapScreen() {
     extremeCopilotVoiceStatus,
   ]);
   const copilotAccentText = themeMode === 'light' ? '#ffffff' : '#050505';
+  const stopCopilotVoiceSession = useCallback((nextStatus = '') => {
+    copilotVoiceOperationRef.current += 1;
+    missionDirectorActiveRef.current = false;
+    missionNarratorHandleRef.current = null;
+    releaseRealtimeCopilotHandle(realtimeCopilotRef);
+    setExtremeCopilotVoiceActive(false);
+    setExtremeCopilotVoiceBusy(false);
+    setExtremeCopilotVoiceMode(null);
+    setExtremeCopilotVoiceStatus(nextStatus);
+  }, []);
+  const setShowExtremeCopilot = useCallback((visible: boolean) => {
+    copilotModalVisibleRef.current = visible;
+    setShowExtremeCopilotState(visible);
+    if (!visible) stopCopilotVoiceSession();
+  }, [stopCopilotVoiceSession]);
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', state => {
+      if (state !== 'active') setShowExtremeCopilot(false);
+    });
+    return () => subscription.remove();
+  }, [setShowExtremeCopilot]);
+  useEffect(() => {
+    if (!screenActivity.isFocused) setShowExtremeCopilot(false);
+  }, [screenActivity.isFocused, setShowExtremeCopilot]);
   useEffect(() => () => {
-    realtimeCopilotRef.current?.stop();
-    realtimeCopilotRef.current = null;
+    copilotVoiceOperationRef.current += 1;
+    copilotModalVisibleRef.current = false;
+    missionNarratorHandleRef.current = null;
+    releaseRealtimeCopilotHandle(realtimeCopilotRef);
   }, []);
   const [showLands,   setShowLands]    = useState(false);
   const [showUsgs,    setShowUsgs]     = useState(false);
@@ -6977,7 +7038,6 @@ function MapScreen() {
     if (!selectedCamp?.id) return;
     trackPhase0Once(`phase0:camp-card:${selectedCamp.id}`, 'phase0_camp_card_opened', {
       surface: 'map',
-      camp_id: selectedCamp.id,
       source: selectedCamp.verified_source || selectedCamp.source || 'unknown',
       land_type: selectedCamp.land_type || '',
       reservable: !!selectedCamp.reservable,
@@ -6991,7 +7051,6 @@ function MapScreen() {
       `phase0:route-alerts:${activeTrip?.trip_id || 'none'}:${routeAlerts.map(alert => String(alert.id)).join(',')}`,
       'phase0_route_alerts_opened',
       {
-        trip_id: activeTrip?.trip_id ?? null,
         alert_count: routeAlerts.length,
         alert_types: Array.from(new Set(routeAlerts.map(alert => alert.type).filter(Boolean))).slice(0, 8),
       },
@@ -7314,7 +7373,6 @@ function MapScreen() {
   function closeRouteBrief(reason: 'close_button' | 'system_dismiss' = 'close_button') {
     if (showBriefAndBackup && briefAndBackup) {
       trackPhase0Event('phase0_route_brief_dismissed', {
-        trip_id: activeTrip?.trip_id ?? null,
         reason,
         planning_status: briefAndBackup.status,
         evidence_revision: briefAndBackup.evidence_revision,
@@ -7326,7 +7384,6 @@ function MapScreen() {
   function closeRouteAlerts(reason: 'close_button' | 'toggle_button' = 'close_button') {
     if (showAlerts && routeAlerts.length > 0) {
       trackPhase0Event('phase0_route_alerts_dismissed', {
-        trip_id: activeTrip?.trip_id ?? null,
         reason,
         alert_count: routeAlerts.length,
       });
@@ -7337,7 +7394,6 @@ function MapScreen() {
   useEffect(() => {
     if (!showBriefAndBackup || !briefAndBackup) return;
     trackPhase0Event('phase0_route_brief_opened', {
-      trip_id: activeTrip?.trip_id ?? null,
       planning_status: briefAndBackup.status,
       evidence_revision: briefAndBackup.evidence_revision,
     });
@@ -7915,6 +7971,9 @@ function MapScreen() {
     [mapRendererPresentationMounted, showOfflineModal],
   );
   const [showLocDisclosure, setShowLocDisclosure] = useState(false);
+  const [navigationLocationDisclosureMode, setNavigationLocationDisclosureMode] = useState<'start' | 'recovery' | null>(null);
+  const navigationBackgroundSettingsPendingRef = useRef(false);
+  const navigationBackgroundStartGenerationRef = useRef(0);
   const [routeBuildReveal, setRouteBuildReveal] = useState(0);
   const routeBuildGeometryKeyRef = useRef('');
   const routeBuildSeenStopsRef = useRef(new Set<string>());
@@ -8885,13 +8944,49 @@ function MapScreen() {
     trailFollowSession?.plan.id,
   ]);
 
+  const attemptNavigationBackgroundStart = useCallback(async () => {
+    const generation = navigationBackgroundStartGenerationRef.current + 1;
+    navigationBackgroundStartGenerationRef.current = generation;
+    setNavigationLocationDisclosureMode(null);
+    const result = await startNavigationBackgroundLocation();
+    if (generation !== navigationBackgroundStartGenerationRef.current || !navRef.current.active) return;
+    if (result === 'foreground_denied' || result === 'background_denied' || result === 'failed') {
+      setNavigationLocationDisclosureMode('recovery');
+    }
+  }, []);
+
+  const acceptNavigationLocationDisclosure = useCallback(() => {
+    if (navigationLocationDisclosureMode === 'recovery' && Platform.OS === 'ios') {
+      setNavigationLocationDisclosureMode(null);
+      navigationBackgroundSettingsPendingRef.current = true;
+      Linking.openSettings().catch(() => {
+        navigationBackgroundSettingsPendingRef.current = false;
+        if (navRef.current.active) setNavigationLocationDisclosureMode('recovery');
+      });
+      return;
+    }
+    void attemptNavigationBackgroundStart();
+  }, [attemptNavigationBackgroundStart, navigationLocationDisclosureMode]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', state => {
+      if (state !== 'active' || !navigationBackgroundSettingsPendingRef.current) return;
+      navigationBackgroundSettingsPendingRef.current = false;
+      if (navRef.current.active) void attemptNavigationBackgroundStart();
+    });
+    return () => subscription.remove();
+  }, [attemptNavigationBackgroundStart]);
+
   useEffect(() => {
     navRef.current.active = navMode;
     // Keep screen alive during navigation — phone would otherwise sleep in 15s
     if (navMode) {
       activateKeepAwakeAsync('navigation').catch(() => {});
-      startNavigationBackgroundLocation().catch(() => {});
+      setNavigationLocationDisclosureMode(current => current ?? 'start');
     } else {
+      navigationBackgroundStartGenerationRef.current += 1;
+      navigationBackgroundSettingsPendingRef.current = false;
+      setNavigationLocationDisclosureMode(null);
       try { Promise.resolve(deactivateKeepAwake('navigation')).catch(() => {}); } catch {}
       stopNavigationBackgroundLocation().catch(() => {});
     }
@@ -16594,15 +16689,37 @@ function MapScreen() {
     clearNarrationWaitTimer();
     pendingNarrationRef.current = null;
     missionDirectorActiveRef.current = false;
+    copilotVoiceOperationRef.current += 1;
+    const narratorHandle = missionNarratorHandleRef.current;
+    missionNarratorHandleRef.current = null;
+    if (narratorHandle) {
+      if (realtimeCopilotRef.current === narratorHandle) realtimeCopilotRef.current = null;
+      narratorHandle.stop();
+      setExtremeCopilotVoiceActive(false);
+      setExtremeCopilotVoiceBusy(false);
+      setExtremeCopilotVoiceMode(null);
+      setExtremeCopilotVoiceStatus('');
+      return;
+    }
     realtimeCopilotRef.current?.exitDirectorMode();
   }
 
   async function ensureMissionDirectorVoice(force = true): Promise<RealtimeCopilotHandle | null> {
     if (!useStore.getState().token || !ENABLE_REALTIME_NARRATOR || !extremeConfig?.copilot?.voice_enabled) return null;
+    if (AppState.currentState !== 'active' || !screenActivity.isFocused || !missionRunningRef.current) return null;
     if (!force && missionDirectorActiveRef.current && realtimeCopilotRef.current?.isConnected()) {
       realtimeCopilotRef.current.enterDirectorMode(() => finishMissionNarrationBeat('realtime'));
       return realtimeCopilotRef.current;
     }
+    const operation = copilotVoiceOperationRef.current + 1;
+    copilotVoiceOperationRef.current = operation;
+    const narratorOwnershipIsCurrent = () => realtimeNarratorStartIsCurrent({
+      operation,
+      currentOperation: copilotVoiceOperationRef.current,
+      experienceActive: missionRunningRef.current,
+      appActive: AppState.currentState === 'active',
+      screenFocused: screenActivity.isFocused,
+    });
     let handle = realtimeCopilotRef.current;
     if (handle && !handle.isConnected()) {
       handle.stop();
@@ -16612,6 +16729,7 @@ function MapScreen() {
     if (!handle) {
       try {
         const sessionId = await ensureCopilotSession();
+        if (!narratorOwnershipIsCurrent()) return null;
         const tokenResponse = await api.createRealtimeCopilotSession({
           session_id: sessionId,
           voice: String(extremeConfig?.copilot?.voice || ''),
@@ -16619,17 +16737,29 @@ function MapScreen() {
           wake_phrase: false,
           context: buildCopilotContext(),
         });
+        if (!narratorOwnershipIsCurrent()) return null;
         handle = await startRealtimeCopilotSession({
           tokenResponse,
           narrationOnly: true,
           onToolCall: () => ({ applied: true }),
         });
+        if (!narratorOwnershipIsCurrent()) {
+          handle.stop();
+          return null;
+        }
         realtimeCopilotRef.current = handle;
+        missionNarratorHandleRef.current = handle;
         setExtremeCopilotVoiceActive(true);
         setExtremeCopilotVoiceMode('push_to_talk');
       } catch {
         return null;
       }
+    }
+    if (!narratorOwnershipIsCurrent()) {
+      if (missionNarratorHandleRef.current === handle) missionNarratorHandleRef.current = null;
+      if (realtimeCopilotRef.current === handle) realtimeCopilotRef.current = null;
+      handle.stop();
+      return null;
     }
     missionDirectorActiveRef.current = true;
     handle.enterDirectorMode(() => finishMissionNarrationBeat('realtime'));
@@ -16638,6 +16768,12 @@ function MapScreen() {
       logCopilotMapTelemetry('mission_director_voice_connect_timeout', {
         had_existing_handle: !!realtimeCopilotRef.current,
       });
+    }
+    if (!narratorOwnershipIsCurrent()) {
+      if (missionNarratorHandleRef.current === handle) missionNarratorHandleRef.current = null;
+      if (realtimeCopilotRef.current === handle) realtimeCopilotRef.current = null;
+      handle.stop();
+      return null;
     }
     return handle;
   }
@@ -17855,8 +17991,6 @@ function MapScreen() {
           trackPhase0Event('phase0_search_no_results', {
             surface: 'map_copilot_camp_search',
             category: 'camp',
-            query: query || null,
-            searched_near: searchedNear,
           });
         }
         setQuickToast(camps.length ? spokenSummary : `Try a wider camp search near ${searchedNear}.`);
@@ -18593,28 +18727,25 @@ function MapScreen() {
 
   async function startCopilotVoice(mode: 'push_to_talk' | 'wake_phrase') {
     if (extremeCopilotVoiceActive && extremeCopilotVoiceMode === mode) {
-      realtimeCopilotRef.current?.stop();
-      realtimeCopilotRef.current = null;
-      setExtremeCopilotVoiceActive(false);
-      setExtremeCopilotVoiceMode(null);
-      setExtremeCopilotVoiceStatus('Voice stopped.');
+      stopCopilotVoiceSession('Voice stopped.');
       return;
     }
     if (extremeCopilotVoiceActive) {
-      realtimeCopilotRef.current?.stop();
-      realtimeCopilotRef.current = null;
-      setExtremeCopilotVoiceActive(false);
-      setExtremeCopilotVoiceMode(null);
+      stopCopilotVoiceSession();
     }
     if (!extremeConfig?.copilot?.voice_enabled || extremeCopilotVoiceBusy) return;
     if (mode === 'wake_phrase' && !extremeConfig?.copilot?.wake_phrase) {
       setExtremeCopilotVoiceStatus('Wake phrase is not enabled.');
       return;
     }
+    if (!copilotModalVisibleRef.current) setShowExtremeCopilot(true);
+    const operation = copilotVoiceOperationRef.current + 1;
+    copilotVoiceOperationRef.current = operation;
     setExtremeCopilotVoiceBusy(true);
     setExtremeCopilotVoiceStatus(mode === 'wake_phrase' ? 'Arming wake phrase...' : 'Starting voice...');
     try {
       const sessionId = await ensureCopilotSession();
+      if (operation !== copilotVoiceOperationRef.current) return;
       const tokenResponse = await api.createRealtimeCopilotSession({
         session_id: sessionId,
         voice: String(extremeConfig?.copilot?.voice || ''),
@@ -18626,6 +18757,7 @@ function MapScreen() {
       const handle = await startRealtimeCopilotSession({
         tokenResponse,
         onStatus: status => {
+          if (operation !== copilotVoiceOperationRef.current) return;
           if (status === 'connected' && !listeningCuePlayed) {
             listeningCuePlayed = true;
             playTrailheadCue('copilotListening');
@@ -18638,10 +18770,12 @@ function MapScreen() {
           );
         },
         onMessage: text => {
+          if (operation !== copilotVoiceOperationRef.current) return;
           if (!text.trim()) return;
           appendCopilotMessage({ id: `copilot-voice-${Date.now()}`, role: 'assistant', text: text.trim() });
         },
         onUserTranscript: text => {
+          if (operation !== copilotVoiceOperationRef.current) return;
           const clean = text.trim();
           if (!clean) return;
           const last = lastRealtimeUserTranscriptRef.current;
@@ -18656,12 +18790,25 @@ function MapScreen() {
             });
           });
         },
-        onToolCall: action => handleRealtimeCopilotAction(action),
+        onToolCall: action => operation === copilotVoiceOperationRef.current
+          ? handleRealtimeCopilotAction(action)
+          : { applied: false, status: 'cancelled' },
       });
+      if (!realtimeCopilotStartIsCurrent({
+        operation,
+        currentOperation: copilotVoiceOperationRef.current,
+        modalVisible: copilotModalVisibleRef.current,
+        appActive: AppState.currentState === 'active',
+        screenFocused: screenActivity.isFocused,
+      })) {
+        handle.stop();
+        return;
+      }
       realtimeCopilotRef.current = handle;
       setExtremeCopilotVoiceActive(true);
       setExtremeCopilotVoiceMode(mode);
     } catch (e: any) {
+      if (operation !== copilotVoiceOperationRef.current) return;
       realtimeCopilotRef.current = null;
       setExtremeCopilotVoiceActive(false);
       setExtremeCopilotVoiceMode(null);
@@ -18674,7 +18821,7 @@ function MapScreen() {
         text: voiceError ? `Voice unavailable: ${voiceError}` : 'Voice unavailable. Text Copilot still works.',
       });
     } finally {
-      setExtremeCopilotVoiceBusy(false);
+      if (operation === copilotVoiceOperationRef.current) setExtremeCopilotVoiceBusy(false);
     }
   }
 
@@ -18717,6 +18864,7 @@ function MapScreen() {
       return;
     }
     if (extremeConfig?.copilot?.voice_enabled && !extremeCopilotVoiceBusy) {
+      openTrailGuideSheet();
       toggleCopilotVoice();
       return;
     }
@@ -19009,7 +19157,6 @@ function MapScreen() {
       );
       if (!requestIsCurrent()) return;
       trackPhase0Event('phase0_route_brief_generated', {
-        trip_id: requestTrip.trip_id,
         source: 'server_evidence',
         planning_status: brief.status,
         evidence_revision: brief.evidence_revision,
@@ -25441,7 +25588,7 @@ function MapScreen() {
     if (!follow) return;
     Alert.alert(
       'Record this trail?',
-      'Trailhead uses location in the background to record this trail after you lock your phone or switch apps. Recording stops when you pause or end it. Your track stays on this device unless you export it.',
+      'Trailhead collects precise location data to keep navigation, Trailhead Original stories, and trail recording working in the background, including when the app is closed or not in use. Location access begins only after you start one of these features and stops when you end it. Trailhead does not use location for advertising. Your recorded track stays on this device unless you save, export, or submit it.',
       [
         { text: 'Not now', style: 'cancel' },
         {
@@ -28976,8 +29123,6 @@ function MapScreen() {
           const r = routeAlerts.find(alert => String(alert.id) === alertId);
           if (!r) return;
           trackPhase0Event('phase0_route_alert_row_tapped', {
-            trip_id: activeTrip?.trip_id ?? null,
-            alert_id: String(r.id),
             alert_type: r.type,
             provider: r.provider || null,
             severity: r.severity,
@@ -29188,8 +29333,6 @@ function MapScreen() {
         }}
         onOpen={experience => {
           trackPhase0Event('phase0_route_activity_offer_opened', {
-            trip_id: activeTrip?.trip_id ?? null,
-            experience_id: experience.source_id || experience.id,
             source: experience.source || 'viator',
           });
         }}
@@ -29274,8 +29417,6 @@ function MapScreen() {
               title: 'Tour saved',
             });
             trackPhase0Event('phase0_route_activity_booking_confirmed', {
-              trip_id: committedTrip.trip_id,
-              experience_id: experience.source_id || experience.id,
               day,
               source: experience.source || 'viator',
               route_stop_added: false,
@@ -29411,8 +29552,6 @@ function MapScreen() {
             title: alreadyOnRoute ? 'Tour saved' : undefined,
           });
           trackPhase0Event('phase0_route_activity_booking_confirmed', {
-            trip_id: committedTrip.trip_id,
-            experience_id: experience.source_id || experience.id,
             day,
             source: experience.source || 'viator',
           });
@@ -31728,17 +31867,56 @@ function MapScreen() {
         </View>
       )}
 
+      {/* ── Navigation background-location prominent disclosure ── */}
+      {navigationLocationDisclosureMode && navMode && (
+        <View style={s.locDisclosureOverlay} testID="map.navigation-location-disclosure">
+          <View style={s.locDisclosureCard}>
+            <View style={s.locDisclosureIcon}>
+              <Ionicons name="navigate-circle" size={40} color={C.orange} />
+            </View>
+            <Text style={s.locDisclosureTitle}>
+              {navigationLocationDisclosureMode === 'recovery' ? 'BACKGROUND LOCATION IS OFF' : 'KEEP NAVIGATION ACTIVE'}
+            </Text>
+            <Text style={s.locDisclosureBody}>{BACKGROUND_LOCATION_PROMINENT_DISCLOSURE}</Text>
+            {navigationLocationDisclosureMode === 'recovery' && (
+              <Text style={s.locDisclosureNote}>
+                Navigation can continue while Trailhead is open. Allow background location to keep it active after you lock your phone or switch apps.
+              </Text>
+            )}
+            <TouchableOpacity
+              testID="map.navigation-location-disclosure.continue"
+              style={s.locDisclosureAllow}
+              onPress={acceptNavigationLocationDisclosure}
+              accessibilityRole="button"
+            >
+              <Ionicons name="checkmark-circle" size={16} color="#fff" />
+              <Text style={s.locDisclosureAllowText}>Agree &amp; continue</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              testID="map.navigation-location-disclosure.not-now"
+              style={s.locDisclosureDeny}
+              onPress={() => {
+                navigationBackgroundStartGenerationRef.current += 1;
+                navigationBackgroundSettingsPendingRef.current = false;
+                setNavigationLocationDisclosureMode(null);
+              }}
+              accessibilityRole="button"
+            >
+              <Text style={s.locDisclosureDenyText}>Not now</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
       {/* ── Location permission prominent disclosure ── */}
-      {showLocDisclosure && !guidedTourActive && (
+      {showLocDisclosure && !guidedTourActive && !navigationLocationDisclosureMode && (
         <View style={s.locDisclosureOverlay} testID="map.location-disclosure">
           <View style={s.locDisclosureCard}>
             <View style={s.locDisclosureIcon}>
               <Ionicons name="navigate-circle" size={40} color={C.orange} />
             </View>
             <Text style={s.locDisclosureTitle}>LOCATION ACCESS</Text>
-            <Text style={s.locDisclosureBody}>
-              Trailhead uses your location <Text style={{ fontWeight: '700', color: OVR.text }}>while you use the app</Text> to:
-            </Text>
+            <Text style={s.locDisclosureBody}>{BACKGROUND_LOCATION_PROMINENT_DISCLOSURE}</Text>
             <View style={s.locDisclosureList}>
               <View style={s.locDisclosureRow}>
                 <Ionicons name="location" size={13} color={C.orange} />
@@ -31757,9 +31935,6 @@ function MapScreen() {
                 <Text style={s.locDisclosureItem}>Show available route reports</Text>
               </View>
             </View>
-            <Text style={s.locDisclosureNote}>
-              Location is only used while the app is open and is never shared without your consent.
-            </Text>
             <TouchableOpacity
               testID="map.location-disclosure.continue"
               style={s.locDisclosureAllow}
@@ -31777,7 +31952,7 @@ function MapScreen() {
               }}
             >
               <Ionicons name="checkmark-circle" size={16} color="#fff" />
-              <Text style={s.locDisclosureAllowText}>Continue</Text>
+              <Text style={s.locDisclosureAllowText}>Agree &amp; continue</Text>
             </TouchableOpacity>
             <TouchableOpacity
               testID="map.location-disclosure.not-now"

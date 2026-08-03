@@ -108,10 +108,11 @@ class Settings:
     canada_open_data_enabled: bool = os.environ.get("CANADA_OPEN_DATA_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
     pakistan_mixed_source_enabled: bool = os.environ.get("PAKISTAN_MIXED_SOURCE_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
     gdacs_alerts_enabled: bool = os.environ.get("GDACS_ALERTS_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
-    fcc_vizmo_enabled: bool = os.environ.get("FCC_VIZMO_ENABLED", "true").lower() in {"1", "true", "yes", "on"}
+    # The legacy FCC VIZMO host is currently unavailable. Keep its optional
+    # adapter off unless a reviewed HTTPS service becomes available.
+    fcc_vizmo_enabled: bool = os.environ.get("FCC_VIZMO_ENABLED", "false").lower() in {"1", "true", "yes", "on"}
     fcc_bdc_mobile_data_date: str = os.environ.get("FCC_BDC_MOBILE_DATA_DATE", "")
     fcc_bdc_mobile_source_url: str = os.environ.get("FCC_BDC_MOBILE_SOURCE_URL", "https://broadbandmap.fcc.gov/data-download/nationwide-data")
-    geonames_username: str = os.environ.get("GEONAMES_USERNAME", "")
     secret_key: str = os.environ.get("SECRET_KEY", DEVELOPMENT_SECRET_KEY)
     db_path: str = os.environ.get("TRAILHEAD_DB_PATH", "/data/trailhead.db" if os.path.isdir("/data") else "./trailhead.db")
     stripe_secret_key: str = os.environ.get("STRIPE_SECRET_KEY", "")
@@ -154,23 +155,4 @@ class Settings:
     google_play_package_name: str = os.environ.get("GOOGLE_PLAY_PACKAGE_NAME", "com.trailhead.app")
     google_play_service_account_json: str = os.environ.get("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON", "")
     google_play_service_account_path: str = os.environ.get("GOOGLE_PLAY_SERVICE_ACCOUNT_PATH", "")
-    # Server-created referral links use only the Branch live/test key. Link
-    # creation fails closed unless the handoff is explicitly enabled and the
-    # branded domain is configured in Branch.
-    branch_live_key: str = os.environ.get(
-        "BRANCH_LIVE_KEY", os.environ.get("BRANCH_API_KEY", "")
-    )
-    branch_link_domain: str = os.environ.get(
-        "BRANCH_LINK_DOMAIN",
-        os.environ.get("EXPO_PUBLIC_BRANCH_DOMAIN", "go.gettrailhead.app"),
-    )
-    # Server-only HMAC key for opaque, deterministic Branch aliases. This is
-    # never sent to Branch or exposed to the mobile client.
-    branch_referral_alias_secret: str = os.environ.get(
-        "BRANCH_REFERRAL_ALIAS_SECRET", ""
-    )
-    branch_referral_handoff_enabled: bool = os.environ.get(
-        "BRANCH_REFERRAL_HANDOFF_ENABLED", "false"
-    ).lower() in {"1", "true", "yes", "on"}
-
 settings = Settings()

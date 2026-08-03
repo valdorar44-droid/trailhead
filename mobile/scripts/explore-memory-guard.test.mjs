@@ -34,7 +34,7 @@ assertRemoteImagesResize(sources.staticPreview, 'StaticMapboxPreview');
 assertRemoteImagesResize(sources.guide, 'Explore guide direct media');
 
 const startupLoad = sources.guide.match(
-  /useEffect\(\(\) => \{\s*let cancelled = false;\s*const homePageSpec[\s\S]*?\}, \[exploreCatalogReloadId, updateExploreCatalogPage\]\);/,
+  /useEffect\(\(\) => \{\s*if \(!authHydrated\) return;\s*let cancelled = false;\s*const homePageSpec[\s\S]*?\}, \[authHydrated, authToken, exploreCatalogReloadId, updateExploreCatalogPage\]\);/,
 )?.[0];
 assert.ok(startupLoad, 'Explore startup catalog effect must remain identifiable');
 assert.match(startupLoad, /api\.getExploreHome\(/, 'Explore startup must request the compact home page');
@@ -44,7 +44,7 @@ assert.doesNotMatch(
   'Explore startup must not hydrate catalog pages in the background',
 );
 
-const homeLimit = Number(startupLoad.match(/api\.getExploreHome\(\{[\s\S]*?limit:\s*(\d+)/)?.[1]);
+const homeLimit = Number(startupLoad.match(/api\.getExploreHome\(\s*\{[\s\S]*?limit:\s*(\d+)/)?.[1]);
 assert.ok(
   Number.isInteger(homeLimit) && homeLimit > 0 && homeLimit <= 48,
   `Explore startup page must stay bounded at 48 records or fewer; received ${homeLimit || 'unknown'}`,

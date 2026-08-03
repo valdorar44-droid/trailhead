@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -28,6 +28,8 @@ function contains(path, value, message) {
 
 const pkg = JSON.parse(source('package.json'));
 const lockRoot = JSON.parse(source('package-lock.json')).packages?.[''];
+const packageLockSource = source('package-lock.json');
+const appConfigSource = source('app.config.js');
 const config = require(join(mobileRoot, 'app.config.js')).expo;
 const androidManifest = source('android/app/src/main/AndroidManifest.xml');
 const androidGradle = source('android/app/build.gradle');
@@ -43,13 +45,12 @@ const iosInfo = source('ios/Trailhead/Info.plist');
 const iosProject = source('ios/Trailhead.xcodeproj/project.pbxproj');
 const iosEntitlements = source('ios/Trailhead/Trailhead.entitlements');
 const iosAppDelegate = source('ios/Trailhead/AppDelegate.swift');
-const branchAndroidApplicationAdapter = source('node_modules/@config-plugins/react-native-branch/android/src/main/java/expo/modules/adapters/branch/BranchApplicationLifecycleListener.kt');
-const branchAndroidActivityAdapter = source('node_modules/@config-plugins/react-native-branch/android/src/main/java/expo/modules/adapters/branch/BranchReactActivityLifecycleListener.kt');
-const branchIosAppDelegateAdapter = source('node_modules/@config-plugins/react-native-branch/ios/ExpoAdapterBranch/BranchAppDelegate.swift');
 const otaPublisher = source('scripts/publish-eas-update.mjs');
+const stagedPreviewPublisher = source('scripts/publish-staged-preview.mjs');
 const prePreviewCheck = source('scripts/pre-preview-check.mjs');
 const otaWorkflow = repoSource('.github/workflows/mobile-ota.yml');
 const ciWorkflow = repoSource('.github/workflows/ci.yml');
+const easConfigSource = source('eas.json');
 const easConfig = JSON.parse(source('eas.json'));
 
 function workflowJobSource(workflow, jobName) {
@@ -67,25 +68,25 @@ const ciTriggerSource = ciWorkflow.slice(0, ciWorkflow.indexOf('\npermissions:')
 const mobileCiJob = workflowJobSource(ciWorkflow, 'mobile');
 const androidNativeCiJob = workflowJobSource(ciWorkflow, 'android-native');
 
-expect(pkg.version === '1.0.11', 'package.json must use marketing version 1.0.11.');
-expect(lockRoot?.version === '1.0.11', 'package-lock.json root version must use 1.0.11.');
-expect(config.version === '1.0.11', 'app.config.js must use marketing version 1.0.11.');
-expect(config.ios.runtimeVersion === 'native-1.0.11-ios.1', 'iOS runtime is not native-1.0.11-ios.1.');
-expect(config.android.runtimeVersion === 'native-1.0.11-android.1', 'Android runtime is not native-1.0.11-android.1.');
+expect(pkg.version === '1.0.12', 'package.json must use marketing version 1.0.12.');
+expect(lockRoot?.version === '1.0.12', 'package-lock.json root version must use 1.0.12.');
+expect(config.version === '1.0.12', 'app.config.js must use marketing version 1.0.12.');
+expect(config.ios.runtimeVersion === 'native-1.0.12-ios.1', 'iOS runtime is not native-1.0.12-ios.1.');
+expect(config.android.runtimeVersion === 'native-1.0.12-android.1', 'Android runtime is not native-1.0.12-android.1.');
 expect(
-  easConfig.build.preview.env.EXPO_PUBLIC_BRANCH_ATTRIBUTION_ENABLED === 'false'
-    && easConfig.build.production.env.EXPO_PUBLIC_BRANCH_ATTRIBUTION_ENABLED === 'false',
-  'EAS profiles must not override Branch attribution back on.',
+  !/(?:BRANCH_API_KEY|EXPO_PUBLIC_BRANCH_|react-native-branch)/.test(`${appConfigSource}\n${easConfigSource}`),
+  'Branch configuration must not be restored to app.config.js or EAS profiles.',
 );
 expect(pkg.dependencies.expo === '~54.0.36', 'Expo must remain pinned to ~54.0.36.');
 expect(pkg.dependencies['expo-updates'] === '~29.0.19', 'Expo Updates must remain pinned to ~29.0.19.');
 expect(pkg.dependencies['expo-sqlite'] === '~16.0.10', 'Expo SQLite must remain pinned to ~16.0.10.');
 expect(pkg.dependencies['@sentry/react-native'] === '~7.2.0', 'Sentry must remain pinned to ~7.2.0.');
-expect(pkg.dependencies['@config-plugins/react-native-branch'] === '11.0.0', 'Branch Expo adapter must remain pinned to 11.0.0.');
-expect(pkg.dependencies['react-native-branch'] === '6.10.0', 'Branch must remain pinned to 6.10.0.');
+expect(!pkg.dependencies['@config-plugins/react-native-branch'], 'Branch Expo adapter must not be installed.');
+expect(!pkg.dependencies['react-native-branch'], 'Branch native SDK must not be installed.');
 expect(
-  !pkg.expo?.autolinking?.exclude?.includes('@config-plugins/react-native-branch'),
-  'ExpoAdapterBranch must remain in the native autolinking graph.',
+  !packageLockSource.includes('@config-plugins/react-native-branch')
+    && !packageLockSource.includes('react-native-branch'),
+  'Branch dependencies remain in package-lock.json.',
 );
 expect(!pkg.dependencies['expo-modules-core'], 'Do not restore direct expo-modules-core dependency.');
 expect(!lockRoot?.dependencies?.['expo-modules-core'], 'package-lock.json restored direct expo-modules-core dependency.');
@@ -105,6 +106,14 @@ expect(
 expect(!/LocationTaskService[^>]*tools:node="remove"/.test(androidManifest), 'Android removes Expo LocationTaskService.');
 expect(/ACCESS_BACKGROUND_LOCATION" tools:node="remove"/.test(androidManifest), 'Android must continue blocking ACCESS_BACKGROUND_LOCATION.');
 expect(androidManifest.includes('android.permission.RECORD_AUDIO'), 'Android Auto Co-Pilot requires RECORD_AUDIO.');
+expect(
+  /android\.permission\.FOREGROUND_SERVICE_MICROPHONE" tools:node="remove"/.test(androidManifest),
+  'Unused microphone foreground-service permission must remain removed from the merged Android manifest.',
+);
+expect(
+  /expo\.modules\.audio\.service\.AudioRecordingService" tools:node="remove"/.test(androidManifest),
+  'Unused Expo AudioRecordingService must remain removed from the merged Android manifest.',
+);
 expect(androidManifest.includes('.car.TrailheadCarAppService'), 'Android Auto CarAppService is missing.');
 expect(androidManifest.includes('androidx.car.app.category.NAVIGATION'), 'Android Auto navigation category is missing.');
 expect(
@@ -144,7 +153,12 @@ for (const copilotSource of [androidAutoCopilotAudio, androidAutoCopilotClient, 
   expect(!copilotSource.includes('api.openai.com'), 'Android Auto Co-Pilot must never call OpenAI directly.');
   expect(!/wake\s*word|hotword|continuous(?:ly)?\s+listen/i.test(copilotSource), 'Android Auto Co-Pilot must not use wake-word or continuous listening.');
 }
-expect(androidManifest.includes('com.android.vending.INSTALL_REFERRER'), 'Play Install Referrer permission is missing.');
+expect(
+  /com\.android\.vending\.INSTALL_REFERRER" tools:node="remove"/.test(androidManifest)
+    && config.android.blockedPermissions?.includes('com.android.vending.INSTALL_REFERRER')
+    && !config.android.permissions?.includes('com.android.vending.INSTALL_REFERRER'),
+  'Play Install Referrer must remain explicitly blocked.',
+);
 expect(!androidManifest.includes('com.google.android.gms.permission.AD_ID'), 'Advertising ID permission must not be present.');
 expect(androidManifest.includes('${googleMapsApiKey}'), 'Google Maps key must use an environment-backed manifest placeholder.');
 expect(!/AIza[0-9A-Za-z_-]{20,}/.test(androidManifest), 'A Google API key is committed in AndroidManifest.xml.');
@@ -152,49 +166,36 @@ for (const pathPrefix of ['/originals', '/app', '/r', '/support', '/trips', '/pr
   expect(androidManifest.includes(`android:pathPrefix="${pathPrefix}"`), `Android app-link path is missing: ${pathPrefix}`);
 }
 expect(!androidManifest.includes('android:pathPrefix="/reset-password"'), 'Password-reset web forms must not be captured by Android.');
-expect(androidGradle.includes('versionName "1.0.11"'), 'Android versionName is not 1.0.11.');
+expect(androidGradle.includes('versionName "1.0.12"'), 'Android versionName is not 1.0.12.');
 expect(androidGradle.includes('androidx.car.app:app-projected:1.7.0'), 'Android Auto projected dependency changed or is missing.');
 expect(androidGradle.includes('@sentry/react-native/package.json'), 'Android Sentry source-map wiring is missing.');
 expect(
-  branchAndroidApplicationAdapter.includes('RNBranchModule.getAutoInstance(this.context)'),
-  'Android Branch Expo adapter application initialization is missing.',
+  !/(?:RNBranchModule|io\.branch|branchKey|branchTestKey)/.test(
+    `${androidManifest}\n${androidGradle}\n${androidMainApplication}\n${androidMainActivity}`,
+  ),
+  'Branch native wiring remains in the Android project.',
 );
-expect(
-  branchAndroidActivityAdapter.includes('RNBranchModule.initSession(activity.getIntent().getData(), activity)')
-    && branchAndroidActivityAdapter.includes('RNBranchModule.onNewIntent(intent)'),
-  'Android Branch Expo adapter activity forwarding is incomplete.',
-);
-expect(
-  !androidMainApplication.includes('RNBranchModule') && !androidMainActivity.includes('RNBranchModule'),
-  'Do not duplicate Branch Expo adapter callbacks in Android app classes.',
-);
-contains('android/app/src/main/res/values/strings.xml', 'native-1.0.11-android.1', 'Android native runtime resource is stale.');
+contains('android/app/src/main/res/values/strings.xml', 'native-1.0.12-android.1', 'Android native runtime resource is stale.');
 
-expect(iosInfo.includes('<string>1.0.11</string>'), 'iOS Info.plist marketing version is stale.');
+expect(iosInfo.includes('<string>1.0.12</string>'), 'iOS Info.plist marketing version is stale.');
 expect(iosInfo.includes('<string>Automatic</string>'), 'iOS appearance must follow the app theme.');
 expect(iosInfo.includes('BarlowCondensed-SemiBold.ttf') && iosInfo.includes('BarlowCondensed-Bold.ttf'), 'iOS font registration is incomplete.');
-expect(iosInfo.includes('branch_key_not_configured'), 'Tracked iOS Branch key must remain an explicit non-secret placeholder.');
-expect(iosProject.match(/MARKETING_VERSION = 1\.0\.11;/g)?.length === 2, 'Xcode marketing versions are not both 1.0.11.');
-expect(iosProject.includes('Branch.json in Resources'), 'Branch NativeLink configuration is not bundled.');
+expect(iosProject.match(/MARKETING_VERSION = 1\.0\.12;/g)?.length === 2, 'Xcode marketing versions are not both 1.0.12.');
 expect(
-  branchIosAppDelegateAdapter.includes('RNBranch.initSession(launchOptions: launchOptions, isReferrable: true)')
-    && branchIosAppDelegateAdapter.includes('RNBranch.application(application, open:url, options:options)')
-    && branchIosAppDelegateAdapter.includes('RNBranch.continue(userActivity)'),
-  'iOS Expo AppDelegateSubscriber Branch forwarding is incomplete.',
+  !/(?:RNBranch|branch_key|branch_universal_link_domains|Branch\.json|zswub(?:-alternate)?\.app\.link|go\.gettrailhead\.app)/.test(
+    `${iosInfo}\n${iosProject}\n${iosEntitlements}\n${iosAppDelegate}`,
+  ),
+  'Branch native wiring remains in the iOS project.',
 );
-expect(!iosAppDelegate.includes('import RNBranch'), 'Do not duplicate Expo AppDelegateSubscriber Branch callbacks.');
+expect(!existsSync(join(mobileRoot, 'ios/Trailhead/Branch.json')), 'Branch.json must not be bundled.');
 expect(iosEntitlements.includes('applinks:gettrailhead.app'), 'iOS gettrailhead.app associated domain is missing.');
-expect(iosEntitlements.includes('applinks:go.gettrailhead.app'), 'iOS Branch associated domain is missing.');
+expect(iosEntitlements.includes('applinks:api.gettrailhead.app'), 'iOS API associated domain is missing.');
 for (const domain of ['zswub.app.link', 'zswub-alternate.app.link']) {
-  expect(
-    iosEntitlements.includes(`applinks:${domain}`),
-    `iOS Branch-provided associated domain is missing: ${domain}`,
-  );
-  expect(
-    androidManifest.includes(`android:host="${domain}"`),
-    `Android Branch-provided App Link domain is missing: ${domain}`,
-  );
+  expect(!iosEntitlements.includes(`applinks:${domain}`), `Removed Branch domain returned to iOS: ${domain}`);
+  expect(!androidManifest.includes(`android:host="${domain}"`), `Removed Branch domain returned to Android: ${domain}`);
 }
+expect(!iosEntitlements.includes('applinks:go.gettrailhead.app'), 'Removed Branch domain returned to iOS.');
+expect(!androidManifest.includes('android:host="go.gettrailhead.app"'), 'Removed Branch domain returned to Android.');
 expect(!iosEntitlements.includes('com.apple.developer.carplay'), 'Do not claim CarPlay without an approved entitlement.');
 const appleAssociation = JSON.parse(repoSource('dashboard/site/public/.well-known/apple-app-site-association'));
 const applePaths = appleAssociation?.applinks?.details?.[0]?.paths ?? [];
@@ -204,8 +205,7 @@ for (const pathPattern of ['/originals/*', '/app/*', '/r/*', '/support/*', '/tri
   expect(siteProxyWorker.includes(`'${pathPattern}'`), `Cloudflare association path is missing: ${pathPattern}`);
 }
 expect(!applePaths.some(path => String(path).startsWith('/reset-password')), 'Password-reset web forms must not be captured by iOS.');
-contains('ios/Trailhead/Supporting/Expo.plist', 'native-1.0.11-ios.1', 'iOS native runtime resource is stale.');
-contains('ios/Trailhead/Branch.json', '"checkPasteboardOnInstall": true', 'Branch NativeLink pasteboard setting is missing.');
+contains('ios/Trailhead/Supporting/Expo.plist', 'native-1.0.12-ios.1', 'iOS native runtime resource is stale.');
 contains('.gitignore', '*.mobileprovision', 'Mobile provisioning profiles must stay ignored.');
 expect(!source('.gitignore').split(/\r?\n/).includes('/ios/'), 'The authoritative iOS project is still ignored.');
 
@@ -236,11 +236,13 @@ expect(
     && otaWorkflow.includes('EXPO_PUBLIC_TELEMETRY_QA_ENABLED: "false"'),
   'Telemetry QA must be enabled only in preview updates.',
 );
-const branchAttribution = source('lib/referrals/branchAttribution.ts');
-expect(!branchAttribution.includes('.setIdentity('), 'Branch must not receive Trailhead account identity.');
-expect(!branchAttribution.includes('.logEvent('), 'Branch purchase or behavioral events must not be emitted.');
-expect(!branchAttribution.includes('.userCompletedAction('), 'Branch custom behavioral events must not be emitted.');
-contains('app.config.js', "EXPO_PUBLIC_BRANCH_ATTRIBUTION_ENABLED || 'false'", 'Branch attribution must be disabled by default.');
+const referralAttribution = source('lib/referrals/referralAttribution.ts');
+expect(
+  !/(?:react-native-branch|disableTracking|subscribe\(|setIdentity\(|logEvent\(|userCompletedAction\()/.test(referralAttribution)
+    && /referralAttributionIsAvailable\(\): boolean \{\s*return false;/.test(referralAttribution),
+  'Referral attribution must remain first-party only with native attribution unavailable.',
+);
+expect(!existsSync(join(mobileRoot, 'lib/referrals/branchAttribution.ts')), 'Legacy Branch attribution adapter must remain removed.');
 contains('lib/privacy/mapboxTelemetry.native.ts', 'setTelemetryEnabled(false)', 'Nonessential Mapbox telemetry must remain disabled.');
 expect(!source('lib/privacy/mapboxTelemetry.native.ts').includes('setTelemetryEnabled(true)'), 'Mapbox telemetry must not be enabled.');
 expect(
@@ -254,14 +256,12 @@ expect(!source('app/_layout.tsx').includes('disableNonessentialMapboxTelemetry('
 contains('lib/referrals/referralLinks.ts', 'TRAILHEAD_HTTPS_HOSTS', 'Referral URL parsing must enforce trusted Trailhead hosts.');
 contains('lib/referrals/referralLinks.ts', 'APPROVED_CUSTOM_ROUTES', 'Referral URL parsing must enforce approved custom routes.');
 expect(
-  repoSource('config/settings.py').includes('"BRANCH_REFERRAL_HANDOFF_ENABLED", "false"'),
-  'Branch server handoff must remain disabled by default.',
+  !/(?:api2\.branch\.io|BRANCH_(?:LIVE_KEY|API_KEY|LINK_DOMAIN|REFERRAL_ALIAS_SECRET|REFERRAL_HANDOFF_ENABLED)|branch_referral_handoff)/i.test(
+    `${repoSource('dashboard/server.py')}\n${repoSource('config/settings.py')}\n${repoSource('.env.example')}`,
+  ),
+  'Backend configuration or referral landing can still hand data to Branch.',
 );
-expect(
-  repoSource('.env.example').includes('BRANCH_REFERRAL_HANDOFF_ENABLED=false'),
-  'Example configuration must keep Branch handoff disabled.',
-);
-contains('scripts/prepare-eas-native-env.mjs', 'BRANCH_API_KEY', 'EAS native environment validation is missing.');
+expect(!source('scripts/prepare-eas-native-env.mjs').includes('BRANCH_API_KEY'), 'EAS native environment validation still requires Branch.');
 for (const path of ['app/(tabs)/plan.tsx', 'lib/connectivitySync.ts']) {
   const weatherWriter = source(path);
   expect(
@@ -293,14 +293,14 @@ contains('scripts/release-identity.test.mjs', 'must outrank', 'Release identity 
   );
 expect(
   otaPublisher.includes("'--skip-bundler'")
-    && otaPublisher.includes("'--input-dir', 'dist'")
+    && otaPublisher.includes("'--input-dir', inputDir")
     && otaPublisher.includes("'--source-maps'")
-    && otaPublisher.includes("'--max-workers', '2'"),
+    && otaPublisher.includes("'--max-workers', '1'"),
   'OTA publisher must publish the exact source-mapped export.',
 );
 expect(
-  otaPublisher.lastIndexOf("['scripts/upload-sentry-update-sourcemaps.mjs']")
-    < otaPublisher.lastIndexOf("run('npx', updateArgs, { capture: true })"),
+  otaPublisher.lastIndexOf("'scripts/upload-sentry-update-sourcemaps.mjs'")
+    < otaPublisher.lastIndexOf("run('npx', updateArgsFor(stage), { capture: true })"),
   'Sentry source maps must upload successfully before OTA publication.',
 );
   expect(
@@ -348,8 +348,10 @@ expect(
   'OTA jobs must execute with their matching EAS environment.',
 );
 expect(
-  (otaWorkflow.match(/EXPO_PUBLIC_BRANCH_CONFIGURED: "true"/g) || []).length === 2,
-  'Both OTA jobs must preserve the native Branch capability bit.',
+  !otaWorkflow.includes('EXPO_PUBLIC_BRANCH_CONFIGURED')
+    && !otaPublisher.includes('EXPO_PUBLIC_BRANCH_CONFIGURED')
+    && !stagedPreviewPublisher.includes('EXPO_PUBLIC_BRANCH_CONFIGURED'),
+  'OTA publication paths must not restore the removed Branch capability flag.',
 );
 expect(
   (otaWorkflow.match(/RNMAPBOX_MAPS_DOWNLOAD_TOKEN:/g) || []).length === 4
@@ -419,16 +421,12 @@ expect(
   'Trusted native CI must fail clearly when its read-only Mapbox Maven credential is missing.',
 );
 expect(
-  source('app.config.js').includes('EXPO_PUBLIC_BRANCH_CONFIGURED'),
-  'OTA configuration must use a non-secret Branch capability flag.',
-);
-expect(
-  pkg.scripts['test:referrals'].includes('branch-native-lifecycle.test.mjs'),
-  'Referral tests must cover native Branch lifecycle wiring.',
+  pkg.scripts['test:referrals'].includes('referralLinks.test.ts')
+    && !pkg.scripts['test:referrals'].includes('branch-native-lifecycle.test.mjs'),
+  'Referral tests must cover first-party links without the removed Branch lifecycle test.',
 );
 
 const external = [
-  'BRANCH_API_KEY',
   'EXPO_PUBLIC_SENTRY_DSN',
   'SENTRY_AUTH_TOKEN',
   'SENTRY_ORG',

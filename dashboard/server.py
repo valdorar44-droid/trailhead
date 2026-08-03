@@ -33518,18 +33518,65 @@ def _merge_related_rail_sets(primary: dict, canonical: dict) -> dict:
         "trails": 10,
         "trip_services": 4,
     }
+
+    def semantic_keys(item: dict) -> set[str]:
+        keys: set[str] = set()
+        identity = str(item.get("id") or item.get("source_id") or "").strip().lower()
+        source_match = re.search(
+            r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$",
+            identity,
+        )
+        if source_match:
+            keys.add(f"source:{source_match.group(1)}")
+        name = _place_cluster_name(item.get("name"))
+        lat = _first_number(item.get("lat"))
+        lng = _first_number(item.get("lng"))
+        if name and lat is not None and lng is not None:
+            keys.add(f"geo:{name}:{round(lat, 4)}:{round(lng, 4)}")
+        return keys
+
+    # Reviewed canonical children own their module classification. Legacy
+    # provider rails can carry the same NPS item under a bare source UUID, so
+    # lane-local ID deduplication alone can relabel a reviewed trail as a
+    # generic activity. Track canonical semantic identities across every lane
+    # before merging provider fallbacks.
+    canonical_lanes_by_semantic_key: dict[str, set[str]] = {}
+    for lane, items in (canonical or {}).items():
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            for semantic_key in semantic_keys(item):
+                canonical_lanes_by_semantic_key.setdefault(semantic_key, set()).add(lane)
+
     for key, limit in limits.items():
         rows: list[dict] = []
         seen: set[str] = set()
-        for item in [*((canonical or {}).get(key) or []), *((primary or {}).get(key) or [])]:
+        seen_semantic: set[str] = set()
+        canonical_items = [item for item in ((canonical or {}).get(key) or []) if isinstance(item, dict)]
+        primary_items = [item for item in ((primary or {}).get(key) or []) if isinstance(item, dict)]
+        for item, from_canonical in [
+            *((item, True) for item in canonical_items),
+            *((item, False) for item in primary_items),
+        ]:
             if not isinstance(item, dict):
                 continue
+            item_semantic_keys = semantic_keys(item)
+            if not from_canonical and item_semantic_keys:
+                canonical_lanes = set().union(*(
+                    canonical_lanes_by_semantic_key.get(semantic_key, set())
+                    for semantic_key in item_semantic_keys
+                ))
+                if canonical_lanes and key not in canonical_lanes:
+                    continue
+                if item_semantic_keys & seen_semantic:
+                    continue
             identity = str(item.get("id") or "").strip().lower()
             if not identity:
                 identity = f"{_smart_pack_type(item.get('type'))}:{_place_cluster_name(item.get('name'))}:{round(float(item.get('lat') or 0), 4)}:{round(float(item.get('lng') or 0), 4)}"
             if identity in seen:
                 continue
             seen.add(identity)
+            seen_semantic.update(item_semantic_keys)
             rows.append(item)
             if len(rows) >= limit:
                 break

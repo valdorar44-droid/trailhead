@@ -500,6 +500,52 @@ class OfficialPlaceEndpointTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(counts, [1, 1])
 
+    def test_reviewed_canonical_lane_suppresses_legacy_cross_lane_duplicate(self):
+        source_id = "f6c1e8b5-75b4-45f8-ae9d-ccf783c87d9b"
+        primary = {
+            "things_to_do": [
+                {
+                    "id": source_id,
+                    "name": "Hike Montville Nature Trail or Mosca Pass Trail",
+                    "lat": 37.7441,
+                    "lng": -105.5123,
+                    "type": "attraction",
+                },
+                {
+                    "id": "activity-1",
+                    "name": "Sandboarding and Sand Sledding",
+                    "lat": 37.7492,
+                    "lng": -105.5323,
+                    "type": "attraction",
+                },
+            ],
+            "trails": [],
+        }
+        canonical = {
+            "things_to_do": [],
+            "trails": [
+                {
+                    "id": f"place:nps-child:grsa:thingstodo:{source_id}",
+                    "name": "Hike Montville Nature Trail or Mosca Pass Trail",
+                    "lat": 37.7441,
+                    "lng": -105.5123,
+                    "type": "trail",
+                    "display_type": "Trail",
+                },
+            ],
+        }
+
+        merged = server._merge_related_rail_sets(primary, canonical)
+
+        self.assertEqual(
+            [item["name"] for item in merged["things_to_do"]],
+            ["Sandboarding and Sand Sledding"],
+        )
+        self.assertEqual(
+            [item["name"] for item in merged["trails"]],
+            ["Hike Montville Nature Trail or Mosca Pass Trail"],
+        )
+
     def test_legacy_provider_card_fields_are_scrubbed(self):
         stale = {
             "source": "google",

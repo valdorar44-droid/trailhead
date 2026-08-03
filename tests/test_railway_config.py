@@ -10,7 +10,10 @@ class RailwayConfigTests(unittest.TestCase):
         deploy = config.get("deploy", {})
 
         self.assertEqual(deploy.get("healthcheckPath"), "/api/health")
-        self.assertEqual(deploy.get("healthcheckTimeout"), 90)
+        # Railway occasionally needs longer than its old 90-second window to
+        # hydrate the production catalog. The deployed 300-second window is a
+        # startup allowance, not a relaxation of the /api/health contract.
+        self.assertEqual(deploy.get("healthcheckTimeout"), 300)
         self.assertNotIn("healthcheck", deploy)
 
 

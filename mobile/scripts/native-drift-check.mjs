@@ -169,9 +169,10 @@ expect(!androidManifest.includes('android:pathPrefix="/reset-password"'), 'Passw
 expect(androidGradle.includes('versionName "1.0.12"'), 'Android versionName is not 1.0.12.');
 expect(androidGradle.includes('androidx.car.app:app-projected:1.7.0'), 'Android Auto projected dependency changed or is missing.');
 expect(androidGradle.includes('@sentry/react-native/package.json'), 'Android Sentry source-map wiring is missing.');
+expect(androidGradle.includes('"io.branch."'), 'Release manifest verification must continue blocking Branch entries.');
 expect(
   !/(?:RNBranchModule|io\.branch|branchKey|branchTestKey)/.test(
-    `${androidManifest}\n${androidGradle}\n${androidMainApplication}\n${androidMainActivity}`,
+    `${androidManifest}\n${androidMainApplication}\n${androidMainActivity}`,
   ),
   'Branch native wiring remains in the Android project.',
 );

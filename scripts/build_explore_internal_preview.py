@@ -70,6 +70,18 @@ ACCEPTED_NPS_CHILD_HASHES_3 = {
     "audit.json": "d811752e6975efd16a4327567340b9c8dcfff2c87130fb3729d982d77dad47a6",
     "review.json": "7ae2871be90b5e628e4a719202c45e700eaeb842e8451cbe20cc4893c687d348",
 }
+ACCEPTED_NPS_CHILD_BATCH_4 = "post-b09-nps-child-depth-b4-r2"
+DEFAULT_NPS_CHILD_DIR_4 = ROOT / f"data/explore/audit_candidates/internal/{ACCEPTED_NPS_CHILD_BATCH_4}"
+DEFAULT_NPS_CHILDREN_4 = DEFAULT_NPS_CHILD_DIR_4 / "nps_child_depth_v1.json"
+DEFAULT_NPS_CHILD_MANIFEST_4 = DEFAULT_NPS_CHILD_DIR_4 / "manifest.json"
+DEFAULT_NPS_CHILD_AUDIT_4 = DEFAULT_NPS_CHILD_DIR_4 / "audit.json"
+DEFAULT_NPS_CHILD_REVIEW_4 = DEFAULT_NPS_CHILD_DIR_4 / "review.json"
+ACCEPTED_NPS_CHILD_HASHES_4 = {
+    "manifest.json": "a2c8c0b91f36f88ccf80c08f76ca5b7357fa0f445622a9939c4da55d71a52f4f",
+    "nps_child_depth_v1.json": "bff4dbe3fae5a984083c366aa7711e2766bad2c220c71f49367f2d4a1aea247f",
+    "audit.json": "1e29aa4f1b9e149aaf2d1b0ad61793ce636c1242525f8f560c80b56a592d07e2",
+    "review.json": "60ccad3f4bf56f0664a53e4e1c54b175fc664f9dcbc75f629994fedc7cf48e99",
+}
 ACCEPTED_NPS_CHILD_CONTRACT = "post-b08-nps-child-contract-r1"
 DEFAULT_NPS_CHILD_CONTRACT_DIR = (
     ROOT / f"data/explore/audit_candidates/internal/{ACCEPTED_NPS_CHILD_CONTRACT}"
@@ -297,7 +309,7 @@ def _validated_nps_child_depth(
     audit = json.loads(audit_path.read_text())
     review = json.loads(review_path.read_text())
     if any(str(item.get("batch_id") or "") != accepted_batch_id for item in (manifest, audit, review)):
-        raise SystemExit("NPS child-depth batch identity differs from accepted r7")
+        raise SystemExit("NPS child-depth batch identity differs from the accepted reviewed batch")
     if manifest.get("promotion_ready") is not False or review.get("promotion_ready") is not False:
         raise SystemExit("NPS child-depth batch must remain an internal, non-promotable candidate")
     for payload in (manifest, review):
@@ -552,8 +564,8 @@ def _validate_nps_child_preview_mount(
     public_parent_ids: set[str],
 ) -> None:
     """Fail closed on identity or parent/module drift before writing a sidecar."""
-    if len(children) != 693 or len(contract_children) != 236:
-        raise SystemExit("Internal NPS child mount must contain 457 depth and 236 contract records")
+    if len(children) != 790 or len(contract_children) != 236:
+        raise SystemExit("Internal NPS child mount must contain 554 depth and 236 contract records")
     source_owners: dict[str, str] = {}
     endpoint_targets = {
         "thingstodo": "do",
@@ -584,11 +596,11 @@ def _validate_nps_child_preview_mount(
             if owner and owner != item_id:
                 raise SystemExit("Internal NPS child mount contains a source-identity collision")
             source_owners[identity] = item_id
-        if item_id not in contract_ids:
-            continue
         parent_id = str(item.get("parent_hub_id") or "").strip()
         if parent_id not in public_parent_ids:
             raise SystemExit(f"Internal NPS child parent is not public: {parent_id}")
+        if item_id not in contract_ids:
+            continue
         match = re.search(
             r":nps-child:[^:]+:(thingstodo|places|visitorcenters|campgrounds):",
             item_id.lower(),
@@ -649,6 +661,10 @@ def build(
     child_manifest_path_3 = Path(getattr(args, "nps_child_manifest_3", DEFAULT_NPS_CHILD_MANIFEST_3)).resolve()
     child_audit_path_3 = Path(getattr(args, "nps_child_audit_3", DEFAULT_NPS_CHILD_AUDIT_3)).resolve()
     child_review_path_3 = Path(getattr(args, "nps_child_review_3", DEFAULT_NPS_CHILD_REVIEW_3)).resolve()
+    child_path_4 = Path(getattr(args, "nps_children_4", DEFAULT_NPS_CHILDREN_4)).resolve()
+    child_manifest_path_4 = Path(getattr(args, "nps_child_manifest_4", DEFAULT_NPS_CHILD_MANIFEST_4)).resolve()
+    child_audit_path_4 = Path(getattr(args, "nps_child_audit_4", DEFAULT_NPS_CHILD_AUDIT_4)).resolve()
+    child_review_path_4 = Path(getattr(args, "nps_child_review_4", DEFAULT_NPS_CHILD_REVIEW_4)).resolve()
     child_contract_path = Path(
         getattr(args, "nps_child_contract", DEFAULT_NPS_CHILD_CONTRACT)
     ).resolve()
@@ -686,6 +702,12 @@ def build(
     )
     if (child_path_3, child_manifest_path_3, child_audit_path_3, child_review_path_3) != accepted_child_paths_3:
         raise SystemExit("Internal preview builds accept only the immutable Batch 3 r5 NPS child-depth artifacts")
+    accepted_child_paths_4 = (
+        DEFAULT_NPS_CHILDREN_4.resolve(), DEFAULT_NPS_CHILD_MANIFEST_4.resolve(),
+        DEFAULT_NPS_CHILD_AUDIT_4.resolve(), DEFAULT_NPS_CHILD_REVIEW_4.resolve(),
+    )
+    if (child_path_4, child_manifest_path_4, child_audit_path_4, child_review_path_4) != accepted_child_paths_4:
+        raise SystemExit("Internal preview builds accept only the immutable Batch 4 r2 NPS child-depth artifacts")
     agency_binding = _validated_manifest_artifact(agency_manifest_path, agency_path)
     nps_binding = _validated_manifest_artifact(
         combined_manifest_path,
@@ -744,6 +766,15 @@ def build(
         accepted_hashes=ACCEPTED_NPS_CHILD_HASHES_3,
         accepted_batch_id="post-b08-nps-child-depth-b3",
     )
+    children_4, child_binding_4 = _validated_nps_child_depth(
+        child_path_4,
+        child_manifest_path_4,
+        child_audit_path_4,
+        child_review_path_4,
+        accepted_paths=accepted_child_paths_4,
+        accepted_hashes=ACCEPTED_NPS_CHILD_HASHES_4,
+        accepted_batch_id="post-b09-nps-child-depth-b4",
+    )
     contract_children, child_contract_binding = _validated_nps_child_contract(
         child_contract_path,
         child_contract_manifest_path,
@@ -755,6 +786,7 @@ def build(
         children,
         children_2,
         children_3,
+        children_4,
         contract_children,
     )
     _validate_nps_child_preview_mount(
@@ -786,7 +818,9 @@ def build(
                 },
             },
             "nps_child_depth": child_binding,
-            "nps_child_depth_batches": [child_binding, child_binding_2, child_binding_3],
+            "nps_child_depth_batches": [
+                child_binding, child_binding_2, child_binding_3, child_binding_4,
+            ],
             "nps_child_contract": child_contract_binding,
         },
         "sources": {
@@ -840,6 +874,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--nps-child-manifest-3", dest="nps_child_manifest_3", default=str(DEFAULT_NPS_CHILD_MANIFEST_3))
     parser.add_argument("--nps-child-audit-3", dest="nps_child_audit_3", default=str(DEFAULT_NPS_CHILD_AUDIT_3))
     parser.add_argument("--nps-child-review-3", dest="nps_child_review_3", default=str(DEFAULT_NPS_CHILD_REVIEW_3))
+    parser.add_argument("--nps-children-4", dest="nps_children_4", default=str(DEFAULT_NPS_CHILDREN_4))
+    parser.add_argument("--nps-child-manifest-4", dest="nps_child_manifest_4", default=str(DEFAULT_NPS_CHILD_MANIFEST_4))
+    parser.add_argument("--nps-child-audit-4", dest="nps_child_audit_4", default=str(DEFAULT_NPS_CHILD_AUDIT_4))
+    parser.add_argument("--nps-child-review-4", dest="nps_child_review_4", default=str(DEFAULT_NPS_CHILD_REVIEW_4))
     parser.add_argument("--nps-child-contract", default=str(DEFAULT_NPS_CHILD_CONTRACT))
     parser.add_argument(
         "--nps-child-contract-manifest",

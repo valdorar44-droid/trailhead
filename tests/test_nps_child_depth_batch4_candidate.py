@@ -249,16 +249,21 @@ def test_reviewed_parent_fallback_https_and_coordinate_decisions_are_fixed():
     }
 
 
-def test_candidate_does_not_overlap_current_preview_or_public_dispositions():
-    candidate_ids = {
+def test_candidate_is_mounted_once_and_does_not_overlap_public_dispositions():
+    candidate_ids_in_order = [
         place["id"]
         for place in read_json(CANDIDATE / "nps_child_depth_v1.json")["places"]
-    }
+    ]
+    candidate_ids = set(candidate_ids_in_order)
     preview = read_json(ROOT / "dashboard/explore_internal_preview_v1.json")
-    preview_ids = {
+    preview_ids_in_order = [
         str(place.get("id") or "")
         for place in (preview.get("children") or preview.get("places") or [])
-    }
+    ]
+    batch_ids = [
+        str(binding.get("batch_id") or "")
+        for binding in preview["candidate"]["nps_child_depth_batches"]
+    ]
     dispositions = read_json(
         ROOT
         / "config/explore_public_releases/b08-child-depth-v1/child_dispositions.json"
@@ -268,7 +273,15 @@ def test_candidate_does_not_overlap_current_preview_or_public_dispositions():
         str(row.get("public_id") or row.get("id") or "")
         for row in rows
     }
-    assert candidate_ids.isdisjoint(preview_ids)
+
+    assert batch_ids == [
+        "post-b08-nps-child-depth-b1",
+        "post-b08-nps-child-depth-b2",
+        "post-b08-nps-child-depth-b3",
+        BATCH_4_ID,
+    ]
+    assert preview_ids_in_order[457:554] == candidate_ids_in_order
+    assert all(preview_ids_in_order.count(place_id) == 1 for place_id in candidate_ids)
     assert candidate_ids.isdisjoint(disposition_ids)
 
 

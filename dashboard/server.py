@@ -4799,7 +4799,7 @@ _EXPLORE_INTERNAL_PREVIEW_CONTRACT_V1 = {
     "public_promotion_compatible": False,
 }
 _EXPLORE_INTERNAL_PREVIEW_CONTENT_SHA256_V1 = (
-    "6f25c74687e694b3c39832cd77b58cb687491551924ce47d98133ca5b5b8c784"
+    "55e1a26ba8c70514eff995575a047bbccd4a159a58c4dcfa346d4407c4aa9ad0"
 )
 
 
@@ -4846,9 +4846,9 @@ def _explore_internal_preview_payload_valid(payload: object) -> bool:
         or payload.get("count") != len(raw_places)
         or payload.get("child_count") != len(raw_children)
         or len(raw_places) != 13
-        or len(raw_children) != 693
+        or len(raw_children) != 790
         or not isinstance(batches, list)
-        or len(batches) != 3
+        or len(batches) != 4
     ):
         return False
     for key, expected in _EXPLORE_INTERNAL_PREVIEW_CONTRACT_V1.items():

@@ -42,7 +42,13 @@ class ExploreNpsChildInternalPreviewTests(unittest.TestCase):
     @staticmethod
     def _sidecar_batches():
         children = json.loads(builder.DEFAULT_OUTPUT.read_text())["children"]
-        return children[:156], children[156:326], children[326:457], children[457:]
+        return (
+            children[:156],
+            children[156:326],
+            children[326:457],
+            children[457:554],
+            children[554:],
+        )
 
     @staticmethod
     def _require_local_builder_evidence():
@@ -59,6 +65,10 @@ class ExploreNpsChildInternalPreviewTests(unittest.TestCase):
             builder.DEFAULT_NPS_CHILD_MANIFEST_3,
             builder.DEFAULT_NPS_CHILD_AUDIT_3,
             builder.DEFAULT_NPS_CHILD_REVIEW_3,
+            builder.DEFAULT_NPS_CHILDREN_4,
+            builder.DEFAULT_NPS_CHILD_MANIFEST_4,
+            builder.DEFAULT_NPS_CHILD_AUDIT_4,
+            builder.DEFAULT_NPS_CHILD_REVIEW_4,
             builder.DEFAULT_NPS_CHILD_CONTRACT,
             builder.DEFAULT_NPS_CHILD_CONTRACT_MANIFEST,
             builder.DEFAULT_NPS_CHILD_CONTRACT_AUDIT,
@@ -119,6 +129,26 @@ class ExploreNpsChildInternalPreviewTests(unittest.TestCase):
             )
         )
 
+        children_4, binding_4 = builder._validated_nps_child_depth(
+            builder.DEFAULT_NPS_CHILDREN_4,
+            builder.DEFAULT_NPS_CHILD_MANIFEST_4,
+            builder.DEFAULT_NPS_CHILD_AUDIT_4,
+            builder.DEFAULT_NPS_CHILD_REVIEW_4,
+            accepted_paths=(
+                builder.DEFAULT_NPS_CHILDREN_4, builder.DEFAULT_NPS_CHILD_MANIFEST_4,
+                builder.DEFAULT_NPS_CHILD_AUDIT_4, builder.DEFAULT_NPS_CHILD_REVIEW_4,
+            ),
+            accepted_hashes=builder.ACCEPTED_NPS_CHILD_HASHES_4,
+            accepted_batch_id="post-b09-nps-child-depth-b4",
+        )
+        self.assertEqual(len(children_4), 97)
+        self.assertEqual(binding_4["artifact_sha256"], builder.ACCEPTED_NPS_CHILD_HASHES_4["nps_child_depth_v1.json"])
+        self.assertFalse(
+            set(item["id"] for item in [*children, *children_2, *children_3]).intersection(
+                item["id"] for item in children_4
+            )
+        )
+
         contract_children, contract_binding = builder._validated_nps_child_contract(
             builder.DEFAULT_NPS_CHILD_CONTRACT,
             builder.DEFAULT_NPS_CHILD_CONTRACT_MANIFEST,
@@ -132,7 +162,7 @@ class ExploreNpsChildInternalPreviewTests(unittest.TestCase):
         self.assertEqual(contract_binding["active_alias_count"], 0)
         self.assertFalse(contract_binding["public_promotion_compatible"])
         self.assertFalse(
-            set(item["id"] for item in [*children, *children_2, *children_3]).intersection(
+            set(item["id"] for item in [*children, *children_2, *children_3, *children_4]).intersection(
                 item["id"] for item in contract_children
             )
         )
@@ -141,13 +171,14 @@ class ExploreNpsChildInternalPreviewTests(unittest.TestCase):
         first = [{"id": "batch-1"}]
         second = [{"id": "batch-2"}]
         third = [{"id": "batch-3"}]
-        fourth = [{"id": "contract-1"}]
+        fourth = [{"id": "batch-4"}]
+        contract = [{"id": "contract-1"}]
         self.assertEqual(
-            [item["id"] for item in builder._combine_nps_child_batches(first, second, third, fourth)],
-            ["batch-1", "batch-2", "batch-3", "contract-1"],
+            [item["id"] for item in builder._combine_nps_child_batches(first, second, third, fourth, contract)],
+            ["batch-1", "batch-2", "batch-3", "batch-4", "contract-1"],
         )
         with self.assertRaises(SystemExit):
-            builder._combine_nps_child_batches(first, second, third, [{"id": "batch-1"}])
+            builder._combine_nps_child_batches(first, second, third, fourth, [{"id": "batch-1"}])
 
     def test_mount_validator_rejects_source_collision_and_missing_parent(self):
         children = [
@@ -157,7 +188,7 @@ class ExploreNpsChildInternalPreviewTests(unittest.TestCase):
                 "parent_hub_id": "place:nps:test",
                 "module_target": "see",
             }
-            for index in range(693)
+            for index in range(790)
         ]
         contract = children[-236:]
         builder._validate_nps_child_preview_mount(
@@ -241,7 +272,7 @@ class ExploreNpsChildInternalPreviewTests(unittest.TestCase):
         with patch.object(Path, "is_file", tracked_checkout_is_file):
             result = qa.audit(builder.DEFAULT_OUTPUT)
         self.assertTrue(result["passed"])
-        self.assertEqual(result["child_count"], 693)
+        self.assertEqual(result["child_count"], 790)
 
     def test_generated_sidecar_fails_qa_when_accepted_batch_3_file_drifts(self):
         accepted_artifact = (
@@ -315,7 +346,7 @@ class ExploreNpsChildInternalPreviewTests(unittest.TestCase):
             path = Path(temp_dir) / "preview.json"
             path.write_bytes(builder.DEFAULT_OUTPUT.read_bytes())
             server.EXPLORE_INTERNAL_PREVIEW = path
-            self.assertEqual(len(server._load_explore_internal_preview_children()), 693)
+            self.assertEqual(len(server._load_explore_internal_preview_children()), 790)
 
             path.write_text("{broken json", encoding="utf-8")
             self.assertEqual(server._load_explore_internal_preview_profiles(), [])
@@ -355,7 +386,7 @@ class ExploreNpsChildInternalPreviewTests(unittest.TestCase):
             payload = json.loads(builder.DEFAULT_OUTPUT.read_text())
             path.write_text(json.dumps(payload), encoding="utf-8")
             server.EXPLORE_INTERNAL_PREVIEW = path
-            self.assertEqual(len(server._load_explore_internal_preview_children()), 693)
+            self.assertEqual(len(server._load_explore_internal_preview_children()), 790)
 
             payload["children"][0]["name"] = "Changed child"
             path.write_text(json.dumps(payload), encoding="utf-8")
@@ -451,7 +482,7 @@ class ExploreNpsChildInternalPreviewTests(unittest.TestCase):
         }]}
         merged = server._merge_explore_internal_preview(base)
         self.assertEqual(merged["internal_preview"]["count"], 13)
-        self.assertEqual(merged["internal_preview"]["child_count"], 693)
+        self.assertEqual(merged["internal_preview"]["child_count"], 790)
         proof = next(item for item in merged["places"] if item["id"] == "place:usfs:9006")
         child = next(item for item in merged["places"] if item["id"].startswith("place:nps-child:blri:"))
         self.assertLess(proof["summary"]["rank"], 0)
@@ -511,7 +542,7 @@ class ExploreNpsChildInternalPreviewTests(unittest.TestCase):
 
     def test_batch_2_child_reaches_detail_search_and_parent_rails_only_in_internal_preview(self):
         payload = json.loads(builder.DEFAULT_OUTPUT.read_text())
-        batch_1, batch_2, _, _ = self._sidecar_batches()
+        batch_1, batch_2, _, _, _ = self._sidecar_batches()
         expected_ids = [item["id"] for item in [*batch_1, *batch_2]]
         self.assertEqual(
             [item["id"] for item in payload["children"][:len(expected_ids)]],
@@ -564,12 +595,12 @@ class ExploreNpsChildInternalPreviewTests(unittest.TestCase):
 
     def test_batch_3_child_reaches_detail_search_and_parent_rails_only_in_internal_preview(self):
         payload = json.loads(builder.DEFAULT_OUTPUT.read_text())
-        batch_1, batch_2, batch_3, contract = self._sidecar_batches()
-        expected_ids = [item["id"] for item in [*batch_1, *batch_2, *batch_3, *contract]]
+        batch_1, batch_2, batch_3, batch_4, contract = self._sidecar_batches()
+        expected_ids = [item["id"] for item in [*batch_1, *batch_2, *batch_3, *batch_4, *contract]]
         self.assertEqual([item["id"] for item in payload["children"]], expected_ids)
         self.assertEqual(payload["children"][len(batch_1) + len(batch_2)]["id"], batch_3[0]["id"])
         self.assertEqual(
-            payload["children"][len(batch_1) + len(batch_2) + len(batch_3)]["id"],
+            payload["children"][len(batch_1) + len(batch_2) + len(batch_3) + len(batch_4)]["id"],
             contract[0]["id"],
         )
         self.assertEqual(payload["candidate"]["nps_child_depth"]["batch_id"], "post-b08-nps-child-depth-b1")
@@ -579,6 +610,7 @@ class ExploreNpsChildInternalPreviewTests(unittest.TestCase):
                 "post-b08-nps-child-depth-b1",
                 "post-b08-nps-child-depth-b2",
                 "post-b08-nps-child-depth-b3",
+                "post-b09-nps-child-depth-b4",
             ],
         )
         self.assertEqual(
@@ -630,6 +662,60 @@ class ExploreNpsChildInternalPreviewTests(unittest.TestCase):
         self.assertEqual(searched.results[0].detail_ref, campground_id)
         self.assertEqual(searched.results[0].kind, "campground")
         self.assertEqual(later_page.results, [])
+
+    def test_batch_4_is_before_contract_and_reaches_indiana_dunes_only_in_internal_preview(self):
+        payload = json.loads(builder.DEFAULT_OUTPUT.read_text())
+        _, _, batch_3, batch_4, contract = self._sidecar_batches()
+        self.assertEqual(len(batch_4), 97)
+        self.assertEqual(payload["children"][457]["id"], batch_4[0]["id"])
+        self.assertEqual(payload["children"][554]["id"], contract[0]["id"])
+        self.assertEqual(
+            {item["parent_hub_id"] for item in batch_4},
+            {"place:nps:hosp", "place:nps:hove", "place:nps:indu", "place:nps:jeca", "place:nps:joda"},
+        )
+        self.assertTrue(all(item["hidden_from_featured"] for item in batch_4))
+        self.assertFalse(set(item["id"] for item in batch_3).intersection(item["id"] for item in batch_4))
+
+        public_index = json.loads(builder.DEFAULT_SERVING.read_text())
+        public_ids = {
+            str(item.get("id") or "")
+            for item in public_index.get("items") or []
+            if isinstance(item, dict)
+        }
+        self.assertTrue({item["parent_hub_id"] for item in batch_4}.issubset(public_ids))
+
+        os.environ["TRAILHEAD_EXPLORE_DATA_STAGE"] = "internal"
+        server.EXPLORE_INTERNAL_PREVIEW = builder.DEFAULT_OUTPUT
+        merged = server._merge_explore_internal_preview({"catalog_id": "public", "places": []})
+        dunewood_id = "place:nps-child:indu:campgrounds:b526c74a-2287-48d2-a480-f4fd2f832ce5"
+
+        with patch.object(server, "_load_explore_catalog", return_value=merged):
+            server._EXPLORE_CHILDREN_BY_PARENT_CACHE.update({"key": None, "by_parent": {}})
+            parent_children = server._explore_children_for_parent("place:nps:indu")
+            self.assertIn(dunewood_id, {item["id"] for item in parent_children})
+            self.assertEqual(server._find_explore_place(dunewood_id)["id"], dunewood_id)
+            with patch.object(server, "_canonical_explore_place_id", return_value="place:nps:indu"):
+                rails = server._canonical_explore_related_rails(server.MapCardResolveRequest(
+                    source="trailhead_explore", place_id="place:nps:indu",
+                    lat=41.65, lng=-87.05,
+                ))
+            self.assertIn("Dunewood Campground", {
+                item.get("name") for item in rails["campgrounds_nearby"]
+            })
+
+        request = server.SearchRequestV2(
+            query="Dunewood Campground", categories=["campground"], limit=8,
+        )
+        page = server.SearchPageV2(query=request.query, results=[], revision="public", elapsed_ms=1)
+        self.assertEqual(server._search_v2_apply_internal_preview_page(page, request=request).results, [])
+        marker = server._explore_internal_preview_context.set(True)
+        try:
+            searched = server._search_v2_apply_internal_preview_page(page, request=request)
+        finally:
+            server._explore_internal_preview_context.reset(marker)
+        self.assertEqual([item.result_id for item in searched.results], [dunewood_id])
+        self.assertEqual(searched.results[0].detail_ref, dunewood_id)
+        self.assertEqual(searched.results[0].kind, "campground")
 
     def test_contract_child_reaches_parent_detail_search_and_map_rail_only_in_preview(self):
         os.environ["TRAILHEAD_EXPLORE_DATA_STAGE"] = "internal"

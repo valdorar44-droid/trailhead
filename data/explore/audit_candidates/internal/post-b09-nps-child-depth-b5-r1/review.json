@@ -1,0 +1,353 @@
+{
+  "schema_version": 1,
+  "batch_id": "post-b09-nps-child-depth-b5",
+  "generated_at": 1785704580,
+  "requests_used": 0,
+  "live_catalog_modified": false,
+  "live_serving_index_modified": false,
+  "promotion_ready": false,
+  "destinations": [
+    {
+      "park_code": "care",
+      "name": "Capitol Reef National Park",
+      "accepted": 20,
+      "module_counts": {
+        "stay": 4,
+        "visitor": 1,
+        "do": 1,
+        "see": 12,
+        "trails": 2
+      },
+      "cached_counts": {
+        "campgrounds": 5,
+        "visitorcenters": 1,
+        "thingstodo": 11,
+        "places": 39
+      },
+      "parent_hub_id": "place:nps:care",
+      "source_fetched_at": 1785523822,
+      "accepted_before_dedupe": 20
+    },
+    {
+      "park_code": "grsa",
+      "name": "Great Sand Dunes National Park & Preserve",
+      "accepted": 14,
+      "module_counts": {
+        "stay": 3,
+        "visitor": 2,
+        "do": 4,
+        "trails": 3,
+        "see": 2
+      },
+      "cached_counts": {
+        "campgrounds": 3,
+        "visitorcenters": 2,
+        "thingstodo": 8,
+        "places": 8
+      },
+      "parent_hub_id": "place:nps:grsa",
+      "source_fetched_at": 1785538313,
+      "accepted_before_dedupe": 14
+    },
+    {
+      "park_code": "crla",
+      "name": "Crater Lake National Park",
+      "accepted": 12,
+      "module_counts": {
+        "stay": 3,
+        "visitor": 3,
+        "trails": 2,
+        "see": 4
+      },
+      "cached_counts": {
+        "campgrounds": 2,
+        "visitorcenters": 2,
+        "thingstodo": 3,
+        "places": 15
+      },
+      "parent_hub_id": "place:nps:crla",
+      "source_fetched_at": 1785529746,
+      "accepted_before_dedupe": 12
+    },
+    {
+      "park_code": "asis",
+      "name": "Assateague Island National Seashore",
+      "accepted": 14,
+      "module_counts": {
+        "stay": 5,
+        "visitor": 3,
+        "trails": 6
+      },
+      "cached_counts": {
+        "campgrounds": 11,
+        "visitorcenters": 3,
+        "thingstodo": 6,
+        "places": 7
+      },
+      "parent_hub_id": "place:nps:asis",
+      "source_fetched_at": 1785520029,
+      "accepted_before_dedupe": 14
+    },
+    {
+      "park_code": "amis",
+      "name": "Amistad National Recreation Area",
+      "accepted": 10,
+      "module_counts": {
+        "stay": 6,
+        "visitor": 1,
+        "do": 1,
+        "see": 1,
+        "trails": 1
+      },
+      "cached_counts": {
+        "campgrounds": 6,
+        "visitorcenters": 1,
+        "thingstodo": 4,
+        "places": 11
+      },
+      "parent_hub_id": "place:nps:amis",
+      "source_fetched_at": 1785519968,
+      "accepted_before_dedupe": 10
+    }
+  ],
+  "counts": {
+    "base_places": 993,
+    "sidecar_places": 70,
+    "destination_count": 5
+  },
+  "reader_link_actions": {
+    "kept_item_url": 63,
+    "used_parent_nps_url": 2,
+    "upgraded_nps_https": 5
+  },
+  "exact_omissions": [
+    {
+      "place_id": "place:nps-child:care:thingstodo:d7cf6bf9-7c85-4b07-8124-bcbc66af4ab1",
+      "name": "Driving the Burr Trail",
+      "reason": "Driving the Burr Trail duplicates the already represented source-backed Burr Trail route and must not create a second reader destination."
+    }
+  ],
+  "media_policy": {
+    "candidate_images": 69,
+    "approved_images": 64,
+    "stripped_images": 5,
+    "policy": "exact cached NPS media with NPS-prefixed credit only"
+  },
+  "rendered_rail_dedupe": {
+    "rule": "one stable child per parent, rendered module, normalized title, and 5-decimal point; endpoint priority then stable ID",
+    "dropped_count": 0,
+    "records": []
+  },
+  "internal_preview_contract": {
+    "stage": "internal",
+    "requires_authenticated_admin": true,
+    "required_header": "X-Trailhead-Explore-Preview: internal",
+    "header_is_not_a_credential": true
+  },
+  "parent_page_source_fallbacks": [
+    {
+      "place_id": "place:nps-child:asis:visitorcenters:b6d37fdd-83ad-4690-8d3f-7f3cd54529fe",
+      "name": "Maryland District Ranger Contact Station & Campground Office",
+      "endpoint": "visitorcenters",
+      "parent_hub_id": "place:nps:asis",
+      "official_url": "https://www.nps.gov/asis/index.htm",
+      "reason": "The cached official child record has no reader URL; use the official parent park page."
+    },
+    {
+      "place_id": "place:nps:campgrounds:6a989d7d-8aa1-432e-a915-337bb2b45e4c",
+      "name": "Group Campsite",
+      "endpoint": "campgrounds",
+      "parent_hub_id": "place:nps:care",
+      "official_url": "https://www.nps.gov/care/index.htm",
+      "reason": "The cached official child record has no reader URL; use the official parent park page."
+    }
+  ],
+  "semantic_dedupe": {
+    "rule": "reviewed exact parent and normalized-title decisions only",
+    "dropped_count": 0,
+    "records": []
+  },
+  "shared_coordinate_review": [],
+  "canonical_campground_shadows": [
+    {
+      "canonical_id": "place:nps:campgrounds:b1b4ea86-dda9-416a-9e7b-d718df3c3233",
+      "source_child_id": "place:nps-child:care:campgrounds:b1b4ea86-dda9-416a-9e7b-d718df3c3233",
+      "parent_hub_id": "place:nps:care",
+      "module_target": "stay",
+      "official_url_preserved": true,
+      "reservation_preserved": true,
+      "media_preserved": false
+    },
+    {
+      "canonical_id": "place:nps:campgrounds:6a989d7d-8aa1-432e-a915-337bb2b45e4c",
+      "source_child_id": "place:nps-child:care:campgrounds:6a989d7d-8aa1-432e-a915-337bb2b45e4c",
+      "parent_hub_id": "place:nps:care",
+      "module_target": "stay",
+      "official_url_preserved": true,
+      "reservation_preserved": true,
+      "media_preserved": true
+    },
+    {
+      "canonical_id": "place:nps:campgrounds:36c60550-b5be-4d8d-afa3-f87e545ca54a",
+      "source_child_id": "place:nps-child:care:campgrounds:36c60550-b5be-4d8d-afa3-f87e545ca54a",
+      "parent_hub_id": "place:nps:care",
+      "module_target": "stay",
+      "official_url_preserved": true,
+      "reservation_preserved": false,
+      "media_preserved": true
+    },
+    {
+      "canonical_id": "place:nps:campgrounds:b59e5dfb-3738-4986-96ad-648fe6a34abe",
+      "source_child_id": "place:nps-child:care:campgrounds:b59e5dfb-3738-4986-96ad-648fe6a34abe",
+      "parent_hub_id": "place:nps:care",
+      "module_target": "stay",
+      "official_url_preserved": true,
+      "reservation_preserved": false,
+      "media_preserved": true
+    },
+    {
+      "canonical_id": "place:nps:campgrounds:9fa0e6d0-85f3-4388-92b1-26f408774f28",
+      "source_child_id": "place:nps-child:grsa:campgrounds:9fa0e6d0-85f3-4388-92b1-26f408774f28",
+      "parent_hub_id": "place:nps:grsa",
+      "module_target": "stay",
+      "official_url_preserved": true,
+      "reservation_preserved": true,
+      "media_preserved": false
+    },
+    {
+      "canonical_id": "place:nps:campgrounds:0e90e11a-c131-4aea-aadd-c14042c04b23",
+      "source_child_id": "place:nps-child:grsa:campgrounds:0e90e11a-c131-4aea-aadd-c14042c04b23",
+      "parent_hub_id": "place:nps:grsa",
+      "module_target": "stay",
+      "official_url_preserved": true,
+      "reservation_preserved": false,
+      "media_preserved": true
+    },
+    {
+      "canonical_id": "place:nps:campgrounds:f3d4a32a-b2ca-4e38-b049-c90164e4540a",
+      "source_child_id": "place:nps-child:grsa:campgrounds:f3d4a32a-b2ca-4e38-b049-c90164e4540a",
+      "parent_hub_id": "place:nps:grsa",
+      "module_target": "stay",
+      "official_url_preserved": true,
+      "reservation_preserved": true,
+      "media_preserved": true
+    },
+    {
+      "canonical_id": "place:nps:campgrounds:71d71180-efb3-4888-8b2c-5474107cc139",
+      "source_child_id": "place:nps-child:crla:campgrounds:71d71180-efb3-4888-8b2c-5474107cc139",
+      "parent_hub_id": "place:nps:crla",
+      "module_target": "stay",
+      "official_url_preserved": true,
+      "reservation_preserved": false,
+      "media_preserved": true
+    },
+    {
+      "canonical_id": "place:nps:campgrounds:adcaae21-0b87-4379-a710-73e70566aa92",
+      "source_child_id": "place:nps-child:crla:campgrounds:adcaae21-0b87-4379-a710-73e70566aa92",
+      "parent_hub_id": "place:nps:crla",
+      "module_target": "stay",
+      "official_url_preserved": true,
+      "reservation_preserved": true,
+      "media_preserved": true
+    },
+    {
+      "canonical_id": "place:nps:campgrounds:700e6bd8-f6ca-4a1a-a361-cfeaf028902a",
+      "source_child_id": "place:nps-child:asis:campgrounds:700e6bd8-f6ca-4a1a-a361-cfeaf028902a",
+      "parent_hub_id": "place:nps:asis",
+      "module_target": "stay",
+      "official_url_preserved": true,
+      "reservation_preserved": true,
+      "media_preserved": true
+    },
+    {
+      "canonical_id": "place:nps:campgrounds:27ebfe30-be1a-4511-9244-cf83f67e3085",
+      "source_child_id": "place:nps-child:asis:campgrounds:27ebfe30-be1a-4511-9244-cf83f67e3085",
+      "parent_hub_id": "place:nps:asis",
+      "module_target": "stay",
+      "official_url_preserved": true,
+      "reservation_preserved": true,
+      "media_preserved": true
+    },
+    {
+      "canonical_id": "place:nps:campgrounds:eb7177ad-9252-4cad-b85d-08d9be25aa25",
+      "source_child_id": "place:nps-child:asis:campgrounds:eb7177ad-9252-4cad-b85d-08d9be25aa25",
+      "parent_hub_id": "place:nps:asis",
+      "module_target": "stay",
+      "official_url_preserved": true,
+      "reservation_preserved": true,
+      "media_preserved": true
+    },
+    {
+      "canonical_id": "place:nps:campgrounds:27416013-2f23-4d0a-86fa-42fc24d7a03e",
+      "source_child_id": "place:nps-child:asis:campgrounds:27416013-2f23-4d0a-86fa-42fc24d7a03e",
+      "parent_hub_id": "place:nps:asis",
+      "module_target": "stay",
+      "official_url_preserved": true,
+      "reservation_preserved": true,
+      "media_preserved": true
+    },
+    {
+      "canonical_id": "place:nps:campgrounds:b9b39c25-d4c1-47ae-b02a-ac0e6cb93dcb",
+      "source_child_id": "place:nps-child:asis:campgrounds:b9b39c25-d4c1-47ae-b02a-ac0e6cb93dcb",
+      "parent_hub_id": "place:nps:asis",
+      "module_target": "stay",
+      "official_url_preserved": true,
+      "reservation_preserved": true,
+      "media_preserved": true
+    },
+    {
+      "canonical_id": "place:nps:campgrounds:ea81bc45-c361-437f-89b8-5c89fb0d0f86",
+      "source_child_id": "place:nps-child:amis:campgrounds:ea81bc45-c361-437f-89b8-5c89fb0d0f86",
+      "parent_hub_id": "place:nps:amis",
+      "module_target": "stay",
+      "official_url_preserved": true,
+      "reservation_preserved": true,
+      "media_preserved": true
+    },
+    {
+      "canonical_id": "place:nps:campgrounds:ffa388bf-3129-4fc4-80ed-d163e8199587",
+      "source_child_id": "place:nps-child:amis:campgrounds:ffa388bf-3129-4fc4-80ed-d163e8199587",
+      "parent_hub_id": "place:nps:amis",
+      "module_target": "stay",
+      "official_url_preserved": true,
+      "reservation_preserved": false,
+      "media_preserved": true
+    },
+    {
+      "canonical_id": "place:nps:campgrounds:188b6f61-e7a3-4a44-af27-ee0f6e1ce2d7",
+      "source_child_id": "place:nps-child:amis:campgrounds:188b6f61-e7a3-4a44-af27-ee0f6e1ce2d7",
+      "parent_hub_id": "place:nps:amis",
+      "module_target": "stay",
+      "official_url_preserved": true,
+      "reservation_preserved": true,
+      "media_preserved": true
+    },
+    {
+      "canonical_id": "place:nps:campgrounds:5d9fe77f-9c30-4b0c-a0f6-cd60e86b38fb",
+      "source_child_id": "place:nps-child:amis:campgrounds:5d9fe77f-9c30-4b0c-a0f6-cd60e86b38fb",
+      "parent_hub_id": "place:nps:amis",
+      "module_target": "stay",
+      "official_url_preserved": true,
+      "reservation_preserved": false,
+      "media_preserved": true
+    },
+    {
+      "canonical_id": "place:nps:campgrounds:225e6d27-6aa8-42ee-ae4e-e6c85de8a8c9",
+      "source_child_id": "place:nps-child:amis:campgrounds:225e6d27-6aa8-42ee-ae4e-e6c85de8a8c9",
+      "parent_hub_id": "place:nps:amis",
+      "module_target": "stay",
+      "official_url_preserved": true,
+      "reservation_preserved": true,
+      "media_preserved": true
+    },
+    {
+      "canonical_id": "place:nps:campgrounds:bb3e9361-0e41-4cf7-adcc-aa19234877fd",
+      "source_child_id": "place:nps-child:amis:campgrounds:bb3e9361-0e41-4cf7-adcc-aa19234877fd",
+      "parent_hub_id": "place:nps:amis",
+      "module_target": "stay",
+      "official_url_preserved": true,
+      "reservation_preserved": false,
+      "media_preserved": true
+    }
+  ]
+}

@@ -73,6 +73,94 @@ BATCH_4_DESTINATIONS: tuple[tuple[str, str], ...] = (
     ("jeca", "Jewel Cave National Monument"),
     ("joda", "John Day Fossil Beds National Monument"),
 )
+BATCH_5_ID = "post-b09-nps-child-depth-b5"
+BATCH_5_DESTINATIONS: tuple[tuple[str, str], ...] = (
+    ("care", "Capitol Reef National Park"),
+    ("grsa", "Great Sand Dunes National Park & Preserve"),
+    ("crla", "Crater Lake National Park"),
+    ("asis", "Assateague Island National Seashore"),
+    ("amis", "Amistad National Recreation Area"),
+)
+BATCH_5_EXPECTED_INPUT_HASHES = {
+    "base_catalog": "462ab1a8313e84073b2ce5347411b25771c19ebd17079b00227deb922e18a080",
+    "normalized_nps_catalog": "8bc319b8b230d4272778671318903c9e0e05844b7c5a5d11d8f81438a1584c80",
+}
+BATCH_5_EXPECTED_FIXTURE_HASHES = {
+    "care": "424f8269f81003d7be35686b0cb99bbaf7f61bc5246b1919385c1c12509f8ec0",
+    "grsa": "ae955fb4da77e960084f7fb5682403e84ad8dd1c578a5f1e8b4aee78e8d9076f",
+    "crla": "b0dc60a0da58fb892b402f4ba1099b09be8e2bab98753b920333bc9ace716ac4",
+    "asis": "99f67f343909305e420a815e19b86c6fcb93b02ee539b5cf2bf63ac75edcd275",
+    "amis": "03d74c7bf80a99e169f9e29eb4023b6087f3e9afb832733130661fa8f2e46462",
+}
+BATCH_5_EXPECTED_CANONICAL_CAMP_INDEX_HASH = (
+    "ff992e658728a62316f29158434b64ebc4cc01f0e7045229344b61adeafeda51"
+)
+BATCH_5_EXACT_OMISSIONS = {
+    "place:nps-child:care:thingstodo:d7cf6bf9-7c85-4b07-8124-bcbc66af4ab1": (
+        "Driving the Burr Trail duplicates the already represented source-backed "
+        "Burr Trail route and must not create a second reader destination."
+    ),
+}
+BATCH_5_EXPECTED_DESTINATION_COUNTS = {
+    "care": 20,
+    "grsa": 14,
+    "crla": 12,
+    "asis": 14,
+    "amis": 10,
+}
+BATCH_5_EXPECTED_MODULE_COUNTS = {
+    "stay": 21,
+    "visitor": 10,
+    "do": 6,
+    "see": 19,
+    "trails": 14,
+}
+BATCH_5_EXPECTED_CATEGORY_COUNTS = {
+    "campground": 20,
+    "visitor_center": 9,
+    "activity": 6,
+    "viewpoint": 5,
+    "historic_site": 4,
+    "place": 9,
+    "trailhead": 9,
+    "waterfall": 1,
+    "trail": 5,
+    "lake": 1,
+    "lodging": 1,
+}
+BATCH_5_EXPECTED_LINK_ACTIONS = {
+    "kept_item_url": 63,
+    "used_parent_nps_url": 2,
+    "upgraded_nps_https": 5,
+}
+BATCH_5_EXPECTED_PARENT_FALLBACKS = {
+    "place:nps:campgrounds:6a989d7d-8aa1-432e-a915-337bb2b45e4c": (
+        "https://www.nps.gov/care/index.htm"
+    ),
+    "place:nps-child:asis:visitorcenters:b6d37fdd-83ad-4690-8d3f-7f3cd54529fe": (
+        "https://www.nps.gov/asis/index.htm"
+    ),
+}
+BATCH_5_EXPECTED_MEDIA_COUNTS = {
+    "candidate_images": 69,
+    "approved_images": 64,
+    "stripped_images": 5,
+}
+BATCH_5_EXPECTED_TEXT_ONLY_IDS = {
+    "place:nps:campgrounds:b1b4ea86-dda9-416a-9e7b-d718df3c3233",
+    "place:nps-child:care:thingstodo:edf1ba15-d30f-40a1-921b-b83147b1084e",
+    "place:nps-child:care:places:5d91cfa8-9b7c-4533-86dd-787b4505b613",
+    "place:nps:campgrounds:9fa0e6d0-85f3-4388-92b1-26f408774f28",
+    "place:nps-child:asis:visitorcenters:0c8663b4-98ff-4841-ad40-8d8e76bc4542",
+    "place:nps-child:asis:places:f2cadee1-146c-4c56-8bd1-93b7528b2927",
+}
+BATCH_5_EXPECTED_ORDERED_ID_HASH = (
+    "88bda430a02369c51a533225c037bdfe17247ae4c14cbc096f92dba370aad6ac"
+)
+BATCH_5_EXPECTED_CANONICAL_CAMPGROUND_COUNT = 20
+BATCH_5_EXPECTED_BOOKING_COUNT = 13
+BATCH_5_EXPECTED_OFFICIAL_URL_COUNT = 19
+BATCH_5_EXPECTED_CAMPGROUND_MEDIA_COUNT = 18
 BATCH_4_EXPECTED_INPUT_HASHES = {
     "base_catalog": "462ab1a8313e84073b2ce5347411b25771c19ebd17079b00227deb922e18a080",
     "normalized_nps_catalog": "8bc319b8b230d4272778671318903c9e0e05844b7c5a5d11d8f81438a1584c80",
@@ -240,8 +328,9 @@ BATCH_DEFINITIONS: dict[str, tuple[tuple[str, str], ...]] = {
     BATCH_2_ID: BATCH_2_DESTINATIONS,
     BATCH_3_ID: BATCH_3_DESTINATIONS,
     BATCH_4_ID: BATCH_4_DESTINATIONS,
+    BATCH_5_ID: BATCH_5_DESTINATIONS,
 }
-REVIEWED_BATCH_IDS = {BATCH_3_ID, BATCH_4_ID}
+REVIEWED_BATCH_IDS = {BATCH_3_ID, BATCH_4_ID, BATCH_5_ID}
 RENDERED_RAIL_ENDPOINT_PRIORITY = {
     "visitorcenters": 0,
     "campgrounds": 0,
@@ -343,6 +432,19 @@ EXACT_CLASSIFICATION_OVERRIDES: dict[str, tuple[str, str]] = {
         "historic_site",
         "see",
     ),
+    "place:nps-child:care:places:1e1eae1a-c9cc-47d3-b317-c05c7e4d2abd": ("historic_site", "see"),
+    "place:nps-child:care:places:c052fb2d-afe5-443d-a936-ed78254e09b8": ("place", "see"),
+    "place:nps-child:care:places:51a87cd1-7811-439d-bc9d-0a3f9eea1516": ("place", "see"),
+    "place:nps-child:care:places:366f19d7-8798-46a1-be26-1b2854f9342a": ("historic_site", "see"),
+    "place:nps-child:grsa:thingstodo:03f03bbe-0241-4fee-8d61-d37def7f1e7e": ("activity", "do"),
+    "place:nps-child:grsa:places:27f7b028-5769-4e8b-a99d-8104e2aa7714": ("place", "see"),
+    "place:nps-child:crla:places:1c9c5103-fef8-42c3-ad68-e9304c1a7957": ("trail", "trails"),
+    "place:nps-child:crla:places:564e673f-25d4-4792-8456-3c41e12a44e5": ("lodging", "stay"),
+    "place:nps-child:crla:places:f96cecc2-b803-4d23-bffa-3e471a2e3afd": ("place", "visitor"),
+    "place:nps-child:crla:places:3bb07ae5-93fe-4f5d-b34b-63526f51122e": ("place", "see"),
+    "place:nps-child:crla:places:ac7f2003-372d-401f-9006-d587f4653b98": ("viewpoint", "see"),
+    "place:nps-child:crla:places:96b29dbf-05c0-4933-9a23-908a5a1e6200": ("trail", "trails"),
+    "place:nps-child:amis:places:93cb38f8-0d17-4326-901b-362dddbf6609": ("place", "see"),
 }
 EXACT_COPY_REPLACEMENTS: dict[str, tuple[tuple[str, str], ...]] = {
     "place:nps-child:jeca:places:0f7d5a9f-4314-40d3-b90d-0717091ccb44": (
@@ -488,6 +590,59 @@ EXACT_COPY_REPLACEMENTS: dict[str, tuple[tuple[str, str], ...]] = {
         "recreation.gov",
         "Recreation.gov",
     ),),
+    "place:nps-child:care:campgrounds:b1b4ea86-dda9-416a-9e7b-d718df3c3233": (
+        ("; visit www.recreation.gov to make a reservation", ""),
+        (
+            " The busy season is mid March through October when the campground is typically fully booked. In the winter, there is less demand and it is easy to secure a campsite",
+            "",
+        ),
+    ),
+    "place:nps-child:care:campgrounds:6a989d7d-8aa1-432e-a915-337bb2b45e4c": ((
+        "It may be reserved through www.recreation.gov up to one year in advance.",
+        "It may be reserved up to one year in advance.",
+    ),),
+    "place:nps-child:grsa:thingstodo:df98997d-01fc-4016-a90c-53dbc7faae4d": ((
+        "Read the information on this page to have a positive, fun, and safe experience",
+        "Purpose-built sandboards or sand sleds work best on dry sand",
+    ),),
+    "place:nps-child:crla:places:564e673f-25d4-4792-8456-3c41e12a44e5": ((
+        "The dining room is offers three meals a day.",
+        "The dining room offers three meals a day.",
+    ),),
+    "place:nps-child:crla:places:3bb07ae5-93fe-4f5d-b34b-63526f51122e": ((
+        "skilIs",
+        "skills",
+    ),),
+    "place:nps-child:crla:places:96b29dbf-05c0-4933-9a23-908a5a1e6200": ((
+        "Wizard Island. and",
+        "Wizard Island and",
+    ),),
+    "place:nps-child:amis:campgrounds:ea81bc45-c361-437f-89b8-5c89fb0d0f86": ((
+        " and rarely fills up",
+        "",
+    ),),
+    "place:nps-child:amis:campgrounds:ffa388bf-3129-4fc4-80ed-d163e8199587": ((
+        " and rarely fills up, except possibly on holiday weekends",
+        "",
+    ),),
+    "place:nps-child:amis:campgrounds:225e6d27-6aa8-42ee-ae4e-e6c85de8a8c9": ((
+        " and rarely fills to capacity",
+        "",
+    ),),
+    "place:nps-child:amis:campgrounds:bb3e9361-0e41-4cf7-adcc-aa19234877fd": ((
+        " and rarely fills up, except possibly on holiday weekends",
+        "",
+    ),),
+    "place:nps-child:amis:visitorcenters:350fe7d6-821d-4f78-aac9-fd303da8344c": ((
+        "_Transparent Border_",
+        "Transparent Border",
+    ),),
+}
+EXACT_READER_URL_OVERRIDES = {
+    "place:nps-child:asis:campgrounds:eb7177ad-9252-4cad-b85d-08d9be25aa25": (
+        "https://www.nps.gov/asis/planyourvisit/"
+        "oceanside-drive-in-campground-reservation.htm"
+    ),
 }
 SEMANTIC_DUPLICATE_PREFERENCES = {
     ("place:nps:havo", "devastation trail"): {
@@ -562,6 +717,7 @@ BATCH_4_SHARED_COORDINATE_REVIEWS: dict[tuple[str, ...], str] = {
 SHARED_COORDINATE_REVIEWS = {
     BATCH_3_ID: BATCH_3_SHARED_COORDINATE_REVIEWS,
     BATCH_4_ID: BATCH_4_SHARED_COORDINATE_REVIEWS,
+    BATCH_5_ID: {},
 }
 MAX_PER_DESTINATION = 36
 MAX_TOTAL = 180
@@ -1209,6 +1365,14 @@ def _normalize_child_classification(
 def _apply_exact_child_copy_fixes(place: dict[str, Any]) -> None:
     """Apply reviewed, identity-bound source-copy corrections only."""
     place_id = str(place.get("id") or "")
+    canonical_reference = (
+        place.get("canonical_reference")
+        if isinstance(place.get("canonical_reference"), dict)
+        else {}
+    )
+    source_child_id = str(canonical_reference.get("source_child_id") or "")
+    if source_child_id in DISPLAY_NAME_OVERRIDES or source_child_id in EXACT_COPY_REPLACEMENTS:
+        place_id = source_child_id
     name_override = DISPLAY_NAME_OVERRIDES.get(place_id)
     if name_override:
         old_name, new_name = name_override
@@ -1253,6 +1417,33 @@ def _apply_exact_child_copy_fixes(place: dict[str, Any]) -> None:
     pack = place.get("source_pack") if isinstance(place.get("source_pack"), dict) else {}
     if "extract" in pack:
         pack["extract"] = cleaned(pack.get("extract"))
+
+
+def _apply_exact_reader_url_override(place: dict[str, Any]) -> None:
+    canonical_reference = (
+        place.get("canonical_reference")
+        if isinstance(place.get("canonical_reference"), dict)
+        else {}
+    )
+    source_child_id = str(canonical_reference.get("source_child_id") or "")
+    lookup_id = source_child_id or str(place.get("id") or "")
+    override = EXACT_READER_URL_OVERRIDES.get(lookup_id)
+    if not override:
+        return
+    pack = place.get("source_pack") if isinstance(place.get("source_pack"), dict) else {}
+    pack["official_url"] = override
+    for source in pack.get("sources") or []:
+        if isinstance(source, dict):
+            source["url"] = override
+    for source in place.get("sources") or []:
+        if isinstance(source, dict):
+            source["url"] = override
+    for image in [*(place.get("media") or []), *(pack.get("photos") or [])]:
+        if isinstance(image, dict) and str(image.get("source_page_url") or "").startswith(
+            "https://cms.nps.gov/"
+        ):
+            image["source_page_url"] = override
+    place["source_pack"] = pack
 
 
 def _rendered_rail_identity(
@@ -1447,6 +1638,85 @@ def _validate_batch4_contract(
         raise ValueError("Batch 4 text-only media identities changed")
 
 
+def _validate_batch5_contract(
+    *,
+    batch_id: str,
+    audit: dict[str, Any],
+    link_actions: Counter[str],
+    parent_page_fallbacks: list[dict[str, Any]],
+    media_before_policy: int,
+    media_after_policy: int,
+    children: list[dict[str, Any]],
+    exact_omissions: list[dict[str, Any]],
+) -> None:
+    if batch_id != BATCH_5_ID:
+        return
+    expected_count = sum(BATCH_5_EXPECTED_DESTINATION_COUNTS.values())
+    if int(audit.get("count") or 0) != expected_count:
+        raise ValueError(
+            f"Batch 5 child count changed: expected {expected_count}, "
+            f"got {int(audit.get('count') or 0)}"
+        )
+    if audit.get("destination_counts") != BATCH_5_EXPECTED_DESTINATION_COUNTS:
+        raise ValueError("Batch 5 destination counts changed")
+    if audit.get("module_counts") != BATCH_5_EXPECTED_MODULE_COUNTS:
+        raise ValueError("Batch 5 module counts changed")
+    category_counts = dict(Counter(str(item.get("category") or "") for item in children))
+    if category_counts != BATCH_5_EXPECTED_CATEGORY_COUNTS:
+        raise ValueError("Batch 5 category counts changed")
+    if dict(link_actions) != BATCH_5_EXPECTED_LINK_ACTIONS:
+        raise ValueError("Batch 5 reader-link actions changed")
+    actual_fallbacks = {
+        str(item.get("place_id") or ""): str(item.get("official_url") or "")
+        for item in parent_page_fallbacks
+    }
+    if actual_fallbacks != BATCH_5_EXPECTED_PARENT_FALLBACKS:
+        raise ValueError("Batch 5 parent-page fallback set changed")
+    actual_media = {
+        "candidate_images": media_before_policy,
+        "approved_images": media_after_policy,
+        "stripped_images": media_before_policy - media_after_policy,
+    }
+    if actual_media != BATCH_5_EXPECTED_MEDIA_COUNTS:
+        raise ValueError("Batch 5 media-rights counts changed")
+    text_only_ids = {
+        str(item.get("id") or "")
+        for item in children
+        if not (item.get("media") or [])
+    }
+    if text_only_ids != BATCH_5_EXPECTED_TEXT_ONLY_IDS:
+        raise ValueError("Batch 5 text-only media identities changed")
+    canonical_camps = [
+        item
+        for item in children
+        if str(item.get("id") or "").startswith("place:nps:campgrounds:")
+    ]
+    if len(canonical_camps) != BATCH_5_EXPECTED_CANONICAL_CAMPGROUND_COUNT:
+        raise ValueError("Batch 5 canonical campground binding count changed")
+    booking_count = sum(bool(item.get("reservation_url")) for item in canonical_camps)
+    if booking_count != BATCH_5_EXPECTED_BOOKING_COUNT:
+        raise ValueError("Batch 5 campground booking count changed")
+    if sum(item.get("reservable") is True for item in canonical_camps) != booking_count:
+        raise ValueError("Batch 5 campground reservability state changed")
+    if sum(bool(item.get("official_url")) for item in canonical_camps) != (
+        BATCH_5_EXPECTED_OFFICIAL_URL_COUNT
+    ):
+        raise ValueError("Batch 5 campground official-link count changed")
+    if sum(bool(item.get("media")) for item in canonical_camps) != (
+        BATCH_5_EXPECTED_CAMPGROUND_MEDIA_COUNT
+    ):
+        raise ValueError("Batch 5 campground media count changed")
+    ordered_ids = "\n".join(str(item.get("id") or "") for item in children) + "\n"
+    if hashlib.sha256(ordered_ids.encode()).hexdigest() != BATCH_5_EXPECTED_ORDERED_ID_HASH:
+        raise ValueError("Batch 5 ordered identity hash changed")
+    actual_omissions = {
+        str(item.get("place_id") or ""): str(item.get("reason") or "")
+        for item in exact_omissions
+    }
+    if actual_omissions != BATCH_5_EXACT_OMISSIONS:
+        raise ValueError("Batch 5 exact omission set changed")
+
+
 def _rebuild_search_blob(
     place: dict[str, Any],
     endpoint: str,
@@ -1480,6 +1750,81 @@ def _endpoint_from_place(place: dict[str, Any]) -> str:
         return explicit
     parts = str(place.get("id") or "").split(":", 4)
     return parts[3] if len(parts) == 5 else ""
+
+
+def _bind_batch5_canonical_campground(
+    place: dict[str, Any],
+    canonical_by_source_id: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    """Use the existing campground identity while retaining NPS hub context."""
+    source_id = _source_id_from_place(place).strip().casefold()
+    canonical = canonical_by_source_id.get(source_id)
+    if canonical is None:
+        raise ValueError(
+            f"Batch 5 campground has no canonical identity: {place.get('id')}"
+        )
+    expected_id = f"place:nps:campgrounds:{source_id}"
+    canonical_id = str(canonical.get("id") or "").strip()
+    if canonical_id != expected_id:
+        raise ValueError(
+            f"Batch 5 campground canonical ID mismatch: {canonical_id!r}"
+        )
+    if title_key(canonical.get("name")) != title_key(place.get("name")):
+        raise ValueError(
+            f"Batch 5 campground title mismatch for {canonical_id}: "
+            f"{canonical.get('name')!r} != {place.get('name')!r}"
+        )
+    if (
+        abs(float(canonical.get("lat")) - float(place.get("lat"))) > 0.0002
+        or abs(float(canonical.get("lng")) - float(place.get("lng"))) > 0.0002
+    ):
+        raise ValueError(
+            f"Batch 5 campground coordinate mismatch for {canonical_id}"
+        )
+
+    original_id = str(place.get("id") or "")
+    place["id"] = canonical_id
+    place["canonical_reference"] = {
+        "canonical_id": canonical_id,
+        "source_child_id": original_id,
+        "source": str(canonical.get("source") or "NPS"),
+    }
+    for key in (
+        "kind",
+        "label",
+        "land_type",
+        "source",
+        "source_label",
+        "official_url",
+        "reservation_url",
+        "reservable",
+        "verified",
+    ):
+        if canonical.get(key) not in (None, ""):
+            place[key] = canonical.get(key)
+    canonical_summary = str(canonical.get("summary") or "").strip()
+    if canonical_summary:
+        place["summary"] = canonical_summary
+        card = dict(place.get("card") or {})
+        card["summary"] = canonical_summary
+        card["highlight"] = canonical_summary
+        place["card"] = card
+    reservation_url = str(canonical.get("reservation_url") or "").strip()
+    reservable = canonical.get("reservable") is True
+    if reservation_url:
+        place["reservations"] = {
+            "reservable": reservable,
+            "url": reservation_url,
+            "reservation_url": reservation_url,
+        }
+        pack = (
+            place.get("source_pack")
+            if isinstance(place.get("source_pack"), dict)
+            else {}
+        )
+        pack["booking_url"] = reservation_url
+        place["source_pack"] = pack
+    return place
 
 
 def _stabilize_evidence_paths(value: Any) -> None:
@@ -1556,7 +1901,21 @@ def _audit_children(
         module_target = str(place.get("module_target") or "")
         module_counts[module_target] += 1
         destination_counts[code] += 1
-        if not place_id.startswith(f"place:nps-child:{code}:") or place.get("canonical_role") != "child":
+        endpoint = _endpoint_from_place(place)
+        canonical_camp_reference = bool(
+            batch_id == BATCH_5_ID
+            and endpoint == "campgrounds"
+            and place_id.startswith("place:nps:campgrounds:")
+            and isinstance(place.get("canonical_reference"), dict)
+            and place.get("canonical_reference", {}).get("canonical_id") == place_id
+        )
+        if (
+            not (
+                place_id.startswith(f"place:nps-child:{code}:")
+                or canonical_camp_reference
+            )
+            or place.get("canonical_role") != "child"
+        ):
             fail("identity_contract", place, "child ID, parent ID, and canonical role must agree")
         if module_target not in ALLOWED_MODULE_TARGETS:
             fail("invalid_module_target", place, module_target)
@@ -1572,8 +1931,8 @@ def _audit_children(
         if re.search(r"https?://", str(place.get("search_blob") or ""), re.IGNORECASE):
             fail("unsafe_search_blob_url", place, "search data may not retain reader URLs")
         compatible_categories = {
-            "stay": {"campground"},
-            "visitor": {"visitor_center"},
+            "stay": {"campground", "lodging"},
+            "visitor": {"visitor_center", "place"},
             "trails": {"trail", "trailhead"},
             "do": {"activity"},
         }
@@ -1587,8 +1946,6 @@ def _audit_children(
         if not _nps_https_url(official_url):
             fail("unsafe_official_url", place, str(official_url or "missing"))
 
-        parts = place_id.split(":", 4)
-        endpoint = parts[3] if len(parts) == 5 else ""
         source_item = _resolve_source_item(
             place,
             endpoint,
@@ -2272,28 +2629,36 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         raise ValueError(f"unsupported NPS child-depth batch {batch_id!r}; choose {supported}") from exc
     base_catalog = Path(args.base_catalog).resolve()
     normalized_catalog: Path | None = None
+    canonical_camp_index: Path | None = None
+    canonical_camps_by_source_id: dict[str, dict[str, Any]] = {}
     source_cache = Path(args.source_cache).resolve()
     out_dir = Path(args.out_dir).resolve()
     if not base_catalog.is_file():
         raise FileNotFoundError(base_catalog)
     if not source_cache.is_dir():
         raise FileNotFoundError(source_cache)
-    if batch_id == BATCH_4_ID:
+    if batch_id in {BATCH_4_ID, BATCH_5_ID}:
+        expected_input_hashes = (
+            BATCH_4_EXPECTED_INPUT_HASHES
+            if batch_id == BATCH_4_ID
+            else BATCH_5_EXPECTED_INPUT_HASHES
+        )
+        batch_label = "Batch 4" if batch_id == BATCH_4_ID else "Batch 5"
         normalized_raw = str(getattr(args, "normalized_nps_catalog", "") or "").strip()
         if not normalized_raw:
-            raise ValueError("Batch 4 requires --normalized-nps-catalog")
+            raise ValueError(f"{batch_label} requires --normalized-nps-catalog")
         normalized_catalog = Path(normalized_raw).resolve()
         if not normalized_catalog.is_file():
             raise FileNotFoundError(normalized_catalog)
         _require_sha256(
             base_catalog,
-            BATCH_4_EXPECTED_INPUT_HASHES["base_catalog"],
-            "Batch 4 base catalog",
+            expected_input_hashes["base_catalog"],
+            f"{batch_label} base catalog",
         )
         _require_sha256(
             normalized_catalog,
-            BATCH_4_EXPECTED_INPUT_HASHES["normalized_nps_catalog"],
-            "Batch 4 normalized NPS catalog",
+            expected_input_hashes["normalized_nps_catalog"],
+            f"{batch_label} normalized NPS catalog",
         )
     if out_dir == AUDIT_CANDIDATE_ROOT or AUDIT_CANDIDATE_ROOT not in out_dir.parents:
         raise ValueError("output must remain below data/explore/audit_candidates")
@@ -2318,10 +2683,35 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
             parent = normalized_parents.get(f"place:nps:{code}")
             if not parent or str(parent.get("name") or "").strip() != expected_name:
                 raise ValueError(
-                    f"Batch 4 normalized parent mismatch for {code}: "
+                    f"{batch_label} normalized parent mismatch for {code}: "
                     f"{str((parent or {}).get('name') or '').strip()!r}"
                 )
         generated_at = int(normalized_payload.get("generated_at") or 0)
+        if batch_id == BATCH_5_ID:
+            canonical_raw = str(
+                getattr(args, "canonical_camp_index", "") or ""
+            ).strip()
+            if not canonical_raw:
+                raise ValueError("Batch 5 requires --canonical-camp-index")
+            canonical_camp_index = Path(canonical_raw).resolve()
+            if not canonical_camp_index.is_file():
+                raise FileNotFoundError(canonical_camp_index)
+            _require_sha256(
+                canonical_camp_index,
+                BATCH_5_EXPECTED_CANONICAL_CAMP_INDEX_HASH,
+                "Batch 5 canonical campground index",
+            )
+            canonical_payload = _read_json(canonical_camp_index)
+            canonical_items = canonical_payload.get("items")
+            if not isinstance(canonical_items, list):
+                raise ValueError("Batch 5 canonical campground index needs items")
+            for item in canonical_items:
+                if not isinstance(item, dict):
+                    continue
+                item_id = str(item.get("id") or "").strip().casefold()
+                prefix = "place:nps:campgrounds:"
+                if item_id.startswith(prefix):
+                    canonical_camps_by_source_id[item_id.removeprefix(prefix)] = item
     if generated_at <= 0:
         raise ValueError("base catalog needs a fixed generated_at timestamp")
 
@@ -2331,13 +2721,20 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
     destination_review: list[dict[str, Any]] = []
     link_actions: Counter[str] = Counter()
     parent_page_fallbacks: list[dict[str, Any]] = []
+    exact_omissions: list[dict[str, Any]] = []
     for code, expected_name in batch_destinations:
         fixture = _fixture_for_code(source_cache, code)
-        if batch_id == BATCH_4_ID:
+        if batch_id in {BATCH_4_ID, BATCH_5_ID}:
+            expected_fixture_hashes = (
+                BATCH_4_EXPECTED_FIXTURE_HASHES
+                if batch_id == BATCH_4_ID
+                else BATCH_5_EXPECTED_FIXTURE_HASHES
+            )
+            batch_label = "Batch 4" if batch_id == BATCH_4_ID else "Batch 5"
             _require_sha256(
                 fixture,
-                BATCH_4_EXPECTED_FIXTURE_HASHES[code],
-                f"Batch 4 NPS source cache {code}",
+                expected_fixture_hashes[code],
+                f"{batch_label} NPS source cache {code}",
             )
         park, related, source_fetched_at = _fixture_park(fixture, code, expected_name)
         source_indexes[code] = _source_child_index(related)
@@ -2348,6 +2745,20 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
             generated_at,
             max_per_park=MAX_PER_DESTINATION,
         )
+        if batch_id == BATCH_5_ID:
+            kept_additions: list[dict[str, Any]] = []
+            for child in additions:
+                child_id = str(child.get("id") or "")
+                reason = BATCH_5_EXACT_OMISSIONS.get(child_id)
+                if reason:
+                    exact_omissions.append({
+                        "place_id": child_id,
+                        "name": str(child.get("name") or ""),
+                        "reason": reason,
+                    })
+                    continue
+                kept_additions.append(child)
+            additions = kept_additions
         for child in additions:
             parts = str(child.get("id") or "").split(":", 4)
             endpoint = parts[3] if len(parts) == 5 else ""
@@ -2382,6 +2793,20 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
                     "reason": "The cached official child record has no reader URL; use the official parent park page.",
                 })
             _rebuild_search_blob(child, endpoint, source_item)
+            if batch_id == BATCH_5_ID and endpoint == "campgrounds":
+                source_child_id = str(child.get("id") or "")
+                _bind_batch5_canonical_campground(
+                    child,
+                    canonical_camps_by_source_id,
+                )
+                if link_action == "used_parent_nps_url":
+                    fallback = parent_page_fallbacks[-1]
+                    if fallback.get("place_id") != source_child_id:
+                        raise ValueError(
+                            "Batch 5 campground fallback identity changed before "
+                            "canonical binding"
+                        )
+                    fallback["place_id"] = str(child.get("id") or "")
         children.extend(additions)
         module_counts = Counter(str(item.get("module_target") or "") for item in additions)
         destination_review.append(
@@ -2434,6 +2859,7 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
                 source_indexes.get(code, {}),
             )
             _apply_exact_child_copy_fixes(child)
+            _apply_exact_reader_url_override(child)
             if source_item is not None:
                 _rebuild_search_blob(child, endpoint, source_item)
     media_after_policy = sum(len(item.get("media") or []) for item in children)
@@ -2450,6 +2876,16 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
         media_before_policy=media_before_policy,
         media_after_policy=media_after_policy,
         children=children,
+    )
+    _validate_batch5_contract(
+        batch_id=batch_id,
+        audit=audit,
+        link_actions=link_actions,
+        parent_page_fallbacks=parent_page_fallbacks,
+        media_before_policy=media_before_policy,
+        media_after_policy=media_after_policy,
+        children=children,
+        exact_omissions=exact_omissions,
     )
 
     sidecar = {
@@ -2476,6 +2912,10 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
             "destination_count": len(destination_review),
         },
         "reader_link_actions": dict(link_actions),
+        "exact_omissions": sorted(
+            exact_omissions,
+            key=lambda item: str(item.get("place_id") or ""),
+        ),
         "media_policy": {
             "candidate_images": media_before_policy,
             "approved_images": media_after_policy,
@@ -2510,6 +2950,26 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
             },
             "shared_coordinate_review": shared_coordinate_review,
         })
+    if batch_id == BATCH_5_ID:
+        review["canonical_campground_shadows"] = [
+            {
+                "canonical_id": str(child.get("id") or ""),
+                "source_child_id": str(
+                    (child.get("canonical_reference") or {}).get("source_child_id")
+                    or ""
+                ),
+                "parent_hub_id": str(child.get("parent_hub_id") or ""),
+                "module_target": str(child.get("module_target") or ""),
+                "official_url_preserved": bool(
+                    child.get("official_url")
+                    or (child.get("source_pack") or {}).get("official_url")
+                ),
+                "reservation_preserved": bool(child.get("reservation_url")),
+                "media_preserved": bool(child.get("media")),
+            }
+            for child in children
+            if str(child.get("id") or "").startswith("place:nps:campgrounds:")
+        ]
 
     out_dir.mkdir(parents=True, exist_ok=True)
     artifacts = {
@@ -2535,6 +2995,12 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
                     f"normalized_nps_catalog/{normalized_catalog.name}",
                 ),
             } if normalized_catalog is not None else {}),
+            **({
+                "canonical_camp_index": _source_ref(
+                    canonical_camp_index,
+                    f"canonical_camp_index/{canonical_camp_index.name}",
+                ),
+            } if canonical_camp_index is not None else {}),
             "fixtures": fixture_refs,
         },
         "artifacts": [
@@ -2562,6 +3028,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-catalog", default=str(DEFAULT_BASE_CATALOG))
     parser.add_argument("--base-index")
     parser.add_argument("--normalized-nps-catalog")
+    parser.add_argument("--canonical-camp-index")
     parser.add_argument("--source-cache", default=str(DEFAULT_SOURCE_CACHE))
     parser.add_argument("--out-dir")
     args = parser.parse_args()

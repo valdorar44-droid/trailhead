@@ -24,10 +24,28 @@ class PublicPrivacyPagesTests(unittest.TestCase):
             "normally removed after 90 days",
             "Mapbox",
             "OpenAI",
+            "Outdoorsy and TUNE",
+            "may earn a commission",
             "Firebase Cloud Messaging",
             "Trailhead 1.0.12 and later use first-party",
             "OpenAI may temporarily retain API inputs",
             "Production external traffic uses HTTPS encryption",
+            'href="/delete-account"',
+            'href="/delete-data"',
+        ):
+            self.assertIn(expected, body)
+
+    def test_partial_data_deletion_page_supports_item_and_request_flows(self):
+        response = self.client.get("/delete-data")
+        self.assertEqual(response.status_code, 200)
+        body = response.text
+        for expected in (
+            "Delete Trailhead data",
+            "Delete content in the app",
+            "saved trips",
+            "trip notes",
+            "Request data deletion",
+            "hello@gettrailhead.app",
             'href="/delete-account"',
         ):
             self.assertIn(expected, body)

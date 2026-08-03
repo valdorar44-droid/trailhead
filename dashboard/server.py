@@ -26681,7 +26681,7 @@ a{color:#984f2f;}
 <body>
 <h1>Trailhead Privacy Policy</h1>
 <p class="updated">Last updated: August 3, 2026</p>
-<p class="notice">Trailhead does not sell personal information or use it for third-party advertising. We disclose information only to service providers that operate Trailhead or to an external service when you choose its feature.</p>
+<p class="notice">Trailhead does not sell personal information or share it for cross-context behavioral advertising. Trailhead may use limited trip or start-area context to show clearly labelled partner booking offers. We disclose information only to service providers that operate Trailhead or to an external service when you choose its feature.</p>
 
 <h2>1. Information We Collect</h2>
 <h3>Account information</h3>
@@ -26696,7 +26696,7 @@ a{color:#984f2f;}
 <p>Trailhead processes a small set of aggregate app events plus fixed error codes, stack frames, platform, app/build/runtime/update version, and static performance measurements. Aggregate product events do not contain an account identifier or stable session identifier. Separate first-party operational audit records may associate an account with a fixed event type and the minimum identifiers needed to complete or investigate a purchase, support request, community report, security event, or administrator action. They are not used to build advertising audiences. Sentry Session Replay is disabled. Personal search text, support-message content, payout information, raw coordinates, traveled routes, and user-provided photos or files are excluded from Trailhead analytics and Sentry events.</p>
 
 <h2>2. How We Use Your Information</h2>
-<p>We use this information to operate accounts; provide maps, Search, navigation, planning, offline downloads and Originals; personalize requested planning features; process purchases and credits; deliver notifications and support; protect the service; fix crashes; and measure reliability. We do not sell personal information or use private support messages, payout information, personal search text, raw coordinates, or traveled routes for advertising.</p>
+<p>We use this information to operate accounts; provide maps, Search, navigation, planning, offline downloads and Originals; personalize requested planning features; process purchases and credits; deliver notifications and support; protect the service; fix crashes; measure reliability; and show clearly labelled partner booking offers that fit the current trip or start area. We do not sell personal information or use private support messages, payout information, personal search text, account identity, or raw traveled routes for advertising.</p>
 
 <h2>3. Location and Background Use</h2>
 <p>Foreground location supports the map, nearby places, route building and navigation. Trailhead continues location processing in the background only after you explicitly start navigation, a Trailhead Original, or trail recording so the active feature can continue after the phone is locked or another app is open. Location use stops when you end that feature. Trail recording remains private on your device unless you explicitly save, export, or submit it. You can change permission in device Settings.</p>
@@ -26707,7 +26707,7 @@ a{color:#984f2f;}
 <h2>5. Data Retention</h2>
 <p>Account and saved content remain while your account is active or until you delete the item. Operational community reports use the expiry shown by that feature; comments, ratings, edits, trips and support records are not covered by a short report-expiry window. Purchase, credit-ledger, fraud-prevention, security, and legal records may be retained only as required for those purposes.</p>
 <p>Aggregate product measurements and first-party operational audit events are normally removed after 90 days. Push campaign delivery history is also limited to 90 days and does not retain a reusable push token.</p>
-<p>You can permanently delete your account in Trailhead under Profile after fresh password, Google, or Apple reauthentication. See the <a href="/delete-account">account deletion page</a>.</p>
+<p>You can remove supported saved content without deleting your account, or permanently delete the account after fresh password, Google, or Apple reauthentication. See the <a href="/delete-data">data deletion page</a> and <a href="/delete-account">account deletion page</a>.</p>
 
 <h2>6. Service Providers and User-Requested Transfers</h2>
 <ul>
@@ -26720,9 +26720,10 @@ a{color:#984f2f;}
 <li><strong>Map, route, weather, land and content providers</strong>, including Project OSRM, OpenTopoData, RainViewer, Avalanche.org, USFS, USGS, OpenStreetMap, NPS, RIDB/Recreation.gov, BLM and Wikimedia, process requested coordinates, tiles, routes or content identifiers for the feature you invoke.</li>
 <li><strong>ElevenLabs and Cartesia</strong> process text for requested guide, direction, or Original narration. Generated audio may be cached so the same requested content can play reliably or offline where the app labels it available.</li>
 <li><strong>Viator</strong> provides separately labelled guided-tour inventory and handles the external booking flow you choose.</li>
+<li><strong>Outdoorsy and TUNE</strong> provide clearly labelled partner rental offers. Trailhead may use the current trip start area, dates, party needs, or vehicle needs to decide when to show an offer. Opening an offer is user initiated and sends standard link and referral request data to the provider; Trailhead may earn a commission. Trailhead does not send account identity, private messages, personal search history, or raw traveled routes for this purpose.</li>
 <li><strong>Railway, content-delivery and object-storage providers</strong> host and deliver Trailhead accounts, APIs, downloads, content and attachments.</li>
 </ul>
-<p>Trailhead does not send these providers personal data for third-party advertising. Trailhead 1.0.12 and later use first-party <code>gettrailhead.app</code> referral links and manual referral codes rather than a native third-party attribution SDK. An older installed build may still contain Branch for referral-link attribution; that build can send install, app-open, referrer, and device-level data to Branch, but Trailhead does not send Branch account identity, location, personal search text, support content, or purchase events. Updating to 1.0.12 or later removes that SDK.</p>
+<p>Trailhead does not sell personal data or provide it to these providers to build third-party advertising profiles. The limited contextual partner offers are described above. Trailhead 1.0.12 and later use first-party <code>gettrailhead.app</code> referral links and manual referral codes rather than a native third-party attribution SDK. An older installed build may still contain Branch for referral-link attribution; that build can send install, app-open, referrer, and device-level data to Branch, but Trailhead does not send Branch account identity, location, personal search text, support content, or purchase events. Updating to 1.0.12 or later removes that SDK.</p>
 
 <h2>7. Your Choices and Security</h2>
 <p>You can change location, microphone, photo and notification permissions in device Settings; leave support diagnostic consent off; use manual referral codes; remove saved content; and delete your account. Production external traffic uses HTTPS encryption. Passwords are stored as one-way hashes. No system can guarantee absolute security.</p>
@@ -26766,6 +26767,34 @@ h1{font-size:32px;margin:0 0 4px;}h2{font-size:20px;margin-top:30px;}p,li{color:
 <p>The account, profile, authentication identifiers, saved trips and routes, preferences, saved places, owned support content, push tokens, referral relationship, comments, ratings, reports, edits, and other account-owned records are deleted or de-identified as required by the deletion workflow.</p>
 <h2>Limited retention</h2>
 <p>Purchase, credit-ledger, anti-fraud, security, and legal records may be retained only where required for those purposes. Provider-side copies follow applicable provider retention and deletion obligations.</p>
+<p>Questions: <a href="mailto:hello@gettrailhead.app">hello@gettrailhead.app</a> · <a href="/privacy">Privacy Policy</a></p>
+</body></html>""")
+
+
+@app.get("/delete-data", response_class=HTMLResponse)
+async def delete_data_page():
+    return HTMLResponse("""<!DOCTYPE html><html lang="en"><head><title>Delete Trailhead data</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+body{font-family:system-ui,-apple-system,sans-serif;background:#f7f8f6;color:#111412;max-width:680px;margin:0 auto;padding:32px 20px 64px;line-height:1.65;}
+h1{font-size:32px;margin:0 0 4px;}h2{font-size:20px;margin-top:30px;}p,li{color:#3f4742;font-size:15px;}a{color:#984f2f;}
+.updated{color:#6b736e;font-size:13px;margin-bottom:28px;}.card{background:#fff;border:1px solid #d9ddd8;border-radius:16px;padding:18px;margin:18px 0;}
+.button{display:inline-block;background:#ad5a33;color:#fff;text-decoration:none;font-weight:700;border-radius:12px;padding:12px 16px;}
+</style></head><body>
+<h1>Delete Trailhead data</h1>
+<p class="updated">Trailhead by Trailhead - last updated August 3, 2026</p>
+<p>You can remove supported saved content while keeping your Trailhead account, or request deletion of other account data.</p>
+<div class="card"><h2>Delete content in the app</h2><ul>
+<li>Delete saved trips, routes, trip notes, saved places, ratings, comments, reports, or other supported content from the screen where it is managed.</li>
+<li>Destructive actions ask for confirmation before the content is removed.</li>
+<li>Deleting an item does not delete the Trailhead account.</li>
+</ul></div>
+<div class="card"><h2>Request deletion</h2>
+<p>If the content cannot be removed in the app, send the request from the email address on the Trailhead account and identify the data you want deleted. We verify account ownership before completing the request.</p>
+<p><a class="button" href="mailto:hello@gettrailhead.app?subject=Delete%20some%20of%20my%20Trailhead%20data">Request data deletion</a></p></div>
+<h2>Limited retention</h2>
+<p>Purchase, credit-ledger, anti-fraud, security, and legal records may be retained only where required for those purposes. Provider-side copies follow applicable provider retention and deletion obligations.</p>
+<p>To remove the entire account and its owned content, use the <a href="/delete-account">account deletion page</a>.</p>
 <p>Questions: <a href="mailto:hello@gettrailhead.app">hello@gettrailhead.app</a> · <a href="/privacy">Privacy Policy</a></p>
 </body></html>""")
 

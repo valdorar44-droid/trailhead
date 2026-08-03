@@ -1,0 +1,157 @@
+# Explore NPS Child Depth Batch 5 — Internal Preview Integration
+
+Recorded 2026-08-03 00:30 CDT (America/Winnipeg).
+
+## Resume first
+
+- Branch: `feat/explore-nps-child-depth-b5-integration`.
+- Isolated worktree:
+  `/home/sean/.openclaw/worktrees/trailhead-explore-nps-child-b5-integration`.
+- Pre-integration HEAD: `d5d90e8f4a33916c4f7de763867a260af3ed4fc3`.
+- Accepted implementation commit:
+  `3137d9bcff9cab71dc10f09e941325f03ca91bde`.
+- Accepted B4 integration base:
+  `d1d997123be92602fb9252427d1cdf42854b9a93`.
+- Scope: append the immutable 70-record B5 candidate after the 554 accepted
+  B1-B4 depth records and before the 236 accepted contract records.
+- This checkpoint has not deployed Railway, published a mobile OTA, changed a
+  public catalog, changed a feature stage, or refetched NPS data.
+
+## Protected scope
+
+The following remain unstaged, unmodified by this packet, and must not be
+discarded or overwritten:
+
+- `.cursor/`
+- `dashboard/explore_serving_index_v2.json`
+- `docs/app-store-copy.md`
+
+Current protected SHA-256 values in this integration checkout:
+
+- Explore serving index:
+  `c0726d8166ab7d110f437ff4e6acde7aa09702354f053103e3f6630a0129b869`.
+- App Store copy:
+  `126af147b650c2f1077fb73036d26f34f940422c07a3193bade047c73b5c225a`.
+
+## Accepted input and forward-only rebuild
+
+- Candidate: `post-b09-nps-child-depth-b5-r1`.
+- Records: 70 across Capitol Reef, Great Sand Dunes, Crater Lake,
+  Assateague Island, and Amistad.
+- Modules: Stay 21, Visitor Information 10, Activities 6, See 19, Trails 14.
+- Media: 64 approved exact assets and six reviewed text-only records.
+- Canonical campground shadows: 20 unique identities; 13 reviewed
+  Recreation.gov handoffs, including the Great Sand Dunes backpacking permit.
+- Provider/network requests: 0.
+
+The safe host cleanup removed old clean worktree checkouts that had exposed
+ignored historical evidence. No accepted data was rebuilt or refetched. The
+integration builder instead starts from the exact tracked B4 sidecar and fails
+closed on its file hash, canonical content hash, record boundary, batch count,
+and ordered identity hashes before appending the exact tracked B5 candidate.
+
+Accepted B5 artifact SHA-256 values:
+
+- `audit.json`:
+  `d86d58c6b0f236297d3f606a1a053e61f25fe82c2ac69f0e4a339f4a84b70296`.
+- `manifest.json`:
+  `d9f7ed993c23051fb53e9bf47392c057fda8fed2833f4923e2a3aeea23054150`.
+- `nps_child_depth_v1.json`:
+  `e3c4d0763d3a2be8d84d462dc3f892a444cb98781eea0d4227dc1b1b3b2fa0da`.
+- `review.json`:
+  `8029b3434db17daf361d353a5c1c5148977921b7faffce8cf400c90ddfb052be`.
+
+## Mounted sidecar
+
+- Path: `dashboard/explore_internal_preview_v1.json`.
+- Profiles: 13.
+- Children: 860 = 624 reviewed depth children + 236 contract children.
+- Immutable depth bindings: 5, exactly B1 through B5.
+- File SHA-256:
+  `278cd7fd74c17e432e44f80342d01e603944194cf6afc37396bfb0c4d0c87df3`.
+- Canonical compact-payload SHA-256 pinned by the server:
+  `8ada0d9d2eeca36b4f6a2d2d470f37dea0c93e5ea25c751cecdedc621f6f3ac2`.
+- B5 ordered identity SHA-256:
+  `88bda430a02369c51a533225c037bdfe17247ae4c14cbc096f92dba370aad6ac`.
+- Accepted depth identity SHA-256 for B1 through B5:
+  `b7f961ba1c07ce13c1742c4aeebeca641c294970d16aba1381b386b750c4ea9e`.
+- Contract identity SHA-256:
+  `ea23a5e4f3925195febc232f76ad7bd49ecc065437c970d25b7c8735e876f76e`.
+- Combined ordered identity SHA-256:
+  `a9e540ae649f3644dff5240d984a069b306d268ed44c1374a501a49b5c53aa75`.
+- Two independent append builds were byte-identical.
+
+## Runtime behavior
+
+- The server fails closed unless the exact canonical payload hash, 13 parent
+  profiles, 860 children, and five immutable depth bindings match.
+- Public and header-only requests remain unchanged. Internal children still
+  require the internal stage, an authenticated administrator, and
+  `X-Trailhead-Explore-Preview: internal`.
+- Canonical campground records retain their stored full sheets while the
+  sidecar supplies exact parent/module, media, official link, and reservation
+  context.
+- Reviewed Recreation.gov campground and permit handoffs are accepted through
+  a strict host/path allowlist. Other hosts and paths are rejected.
+- Source-pack official URLs take precedence over stale top-level CMS links.
+- Source-backed child records no longer receive generic access, season, nearby,
+  or safety filler when the source did not supply those facts.
+- B5 children remain hidden from Featured.
+
+The bounded Android proof item is:
+
+- `place:nps-child:grsa:thingstodo:df98997d-01fc-4016-a90c-53dbc7faae4d`
+- `Sandboarding and Sand Sledding`
+- Great Sand Dunes -> Activities
+- Exact official source:
+  `https://www.nps.gov/thingstodo/sandboarding-and-sand-sledding.htm`
+
+## Verification
+
+- Direct sidecar QA passed: 13 profiles, 860 children, five replacement
+  records, six NPS proof parents.
+- Data-quality audit passed uniqueness, parent integrity, module validity,
+  booking allowlists, source links, media rights, copy, and deterministic
+  ordering.
+- Candidate and rebuild artifacts remain byte-identical.
+- Focused integration suite: 68 passed, 3 skipped, 44 subtests passed.
+- Additional campground operational-depth, official-enrichment, and internal
+  preview regressions: 44 passed.
+- Python compilation passed.
+- Whitespace check passed.
+- Open P0/P1 before deployment: none.
+
+## Intentional files
+
+- `dashboard/explore_internal_preview_v1.json`
+- `dashboard/server.py`
+- `scripts/build_explore_internal_preview.py`
+- `scripts/qa_explore_b08_internal_candidate.py`
+- `tests/test_explore_nps_child_internal_preview.py`
+- `docs/checkpoints/explore-nps-child-depth-b5-integration.md`
+
+## Exact next action
+
+Commit and push only the intentional files. Deploy that exact clean commit to
+the existing Railway production service while retaining the internal Explore
+gate. Wait for terminal `SUCCESS`, verify `/api/health`, confirm header-only
+access is rejected, and confirm authenticated diagnostics report 13 profiles,
+860 children, and five bindings. Then run only this connected-Android proof:
+
+Great Sand Dunes -> Things to Do -> Sandboarding and Sand Sledding -> shared
+detail -> Show Area/Map -> Back.
+
+## Do not repeat
+
+- Do not refetch or rebuild B1-B5 or contract evidence.
+- Do not repeat broad Explore/NPS, Search, Layers, Memory, Trails, Originals,
+  Android Auto, or screenshot crawls.
+- Do not modify the public catalog or protected serving index.
+- Do not publish a mobile OTA for this backend/data-only packet.
+- Do not begin another cached depth batch until B5 internal proof is accepted.
+
+## Background processes
+
+No task-owned Metro, Gradle, Maestro, Expo/EAS, Railway-tail, provider-fetch,
+candidate-builder, pytest, or cleanup process remains running at checkpoint
+creation.

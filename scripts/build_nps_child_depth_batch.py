@@ -2960,12 +2960,14 @@ def build(args: argparse.Namespace) -> dict[str, Any]:
                 ),
                 "parent_hub_id": str(child.get("parent_hub_id") or ""),
                 "module_target": str(child.get("module_target") or ""),
-                "official_url_preserved": bool(
+                "official_url": str(
                     child.get("official_url")
                     or (child.get("source_pack") or {}).get("official_url")
+                    or ""
                 ),
-                "reservation_preserved": bool(child.get("reservation_url")),
-                "media_preserved": bool(child.get("media")),
+                "reservation_url": str(child.get("reservation_url") or ""),
+                "reservable": child.get("reservable") is True,
+                "media_count": len(child.get("media") or []),
             }
             for child in children
             if str(child.get("id") or "").startswith("place:nps:campgrounds:")

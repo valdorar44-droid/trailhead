@@ -8,8 +8,10 @@ field, account-deletion path, or active Play track changes.
 
 Google defines **collected** as data transmitted off the device, even when it
 is used only briefly by a processor. **Not sold** and **not shared** are separate
-claims. Trailhead does not sell personal data or use it for third-party
-advertising. The `Shared: No` answers below rely on recipients processing data
+claims. Trailhead does not sell personal data or use it for cross-context
+behavioral advertising. Trailhead does show clearly labelled, contextual
+partner booking offers and may earn a commission. The `Shared: No` answers
+below rely on recipients processing data
 as Trailhead service providers, or on another documented Google exception such
 as a user-requested external transaction.
 
@@ -92,12 +94,13 @@ The corrected 1.0.12 manifest must additionally prove:
 | Is all user data encrypted in transit? | **Yes** | Production external traffic uses HTTPS/TLS. Loopback HTTP for an on-device router/tile service does not leave the device. |
 | Can users request account deletion? | **Yes** | In-app Profile flow plus the public web URL below. |
 | Is account deletion automatic within 90 days? | **No** | Data remains until deletion or item removal, subject to limited security, transaction, fraud-prevention, and legal retention. |
-| Does the app contain ads? | **No** | No ads SDK and no `AD_ID` permission. |
+| Does the app contain ads? | **Yes** | Trailhead includes clearly labelled contextual partner booking offers and may earn a commission. It has no ads SDK or `AD_ID` permission and does not use cross-context behavioral advertising. |
 
 Use these public URLs in App Content:
 
 - Privacy policy: `https://api.gettrailhead.app/privacy`
 - Account deletion: `https://api.gettrailhead.app/delete-account`
+- Partial data deletion: `https://api.gettrailhead.app/delete-data`
 
 ## Exact Data Safety type matrix
 
@@ -113,9 +116,9 @@ as app activity or user-generated content.
 | Name | Yes | No | Optional | No | App functionality; Account management; Personalization | Profile/display name and OAuth display name |
 | Email address | Yes | No | Optional | No | App functionality; Account management; Developer communications; Fraud prevention, security and compliance | Registration, verification, sign-in and recovery |
 | User IDs | Yes | No | Optional | No | App functionality; Account management; Fraud prevention, security and compliance | Trailhead account ID, OAuth provider subject and the stable pseudonymous OpenAI safety identifier used for abuse prevention |
-| Other personal info | Yes | No | Optional | No | App functionality; Personalization; Account management | Username/handle, vehicle or rig preferences and referral/prize status |
-| Approximate location | Yes | No | Optional | No | App functionality; Personalization | Nearby Search, map viewport, weather/layer requests and destination context |
-| Precise location | Yes | No | Optional | No | App functionality; Personalization | Navigation, active Trailhead Original triggers, route building, nearby results, reports and explicitly saved/submitted routes |
+| Other personal info | Yes | No | Optional | No | App functionality; Personalization; Account management; Advertising or marketing | Username/handle, vehicle or rig preferences and referral/prize status; trip/rig context may select a clearly labelled partner booking offer |
+| Approximate location | Yes | No | Optional | No | App functionality; Personalization; Advertising or marketing | Nearby Search, map viewport, weather/layer requests, destination context and contextual partner booking inventory |
+| Precise location | Yes | No | Optional | No | App functionality; Personalization; Advertising or marketing | Navigation, active Trailhead Original triggers, route building, nearby results, reports, explicitly saved/submitted routes and contextual partner booking inventory |
 | Purchase history | Yes | No | Optional | No | App functionality; Account management; Fraud prevention, security and compliance | Subscription, credit and entitlement receipts verified with Apple/Google |
 | Other financial info | Yes | No | Optional | No | App functionality; Account management | Preferred prize-payout method label and workflow status; no payout credentials |
 | Fitness info | Yes | No | Optional | No | App functionality | A trail recording's selected activity, elapsed time and distance when the user explicitly reviews and saves, shares or submits it |
@@ -125,7 +128,7 @@ as app activity or user-generated content.
 | App interactions | Yes | No | Required | No | App functionality; Analytics; Fraud prevention, security and compliance | Privacy-minimized aggregate events plus first-party operational event types needed for purchases, support, reports, security and administrator audit; normally retained for no more than 90 days and never used to build advertising audiences |
 | In-app search history | Yes | No | Optional | No | App functionality; Personalization | Query text sent for Trailhead Search/Mapbox lookup; excluded from Trailhead analytics |
 | Other user-generated content | Yes | No | Optional | No | App functionality; Personalization | Trips, routes, notes, packing lists, GPX-derived saved geometry, ratings, comments, reports and edits |
-| Other actions | Yes | No | Optional | No | App functionality; Personalization | Tour/download progress, saves, route state, referral and prize workflow actions |
+| Other actions | Yes | No | Optional | No | App functionality; Personalization; Advertising or marketing | Tour/download progress, saves, route and trip-planning state, referral/prize workflow actions and contextual partner-offer selection |
 | Crash logs | Yes | No | Required | No | Analytics | Sentry allowlisted exception type and symbolicated stack frames |
 | Diagnostics | Yes | No | Required for automatic diagnostics; optional for support diagnostics | No | App functionality; Analytics | Fixed error codes, app/build/runtime/update, platform and consented support diagnostics |
 | Other app performance data | Yes | No | Required while performance monitoring is enabled | No | Analytics | Static Sentry performance transaction/span measurements |
@@ -169,7 +172,8 @@ service-provider or user-action exception supports `Shared: No`.
 | Stripe and an approved prize-payout provider | Checkout/transaction identifiers, or payout method after the user enters the separately controlled flow | User-requested purchase or award completion. Credentials are entered with the provider, not ordinary Trailhead support chat. |
 | Transactional email provider | Email address, username and time-limited verification/recovery link | Account verification, recovery and requested account communications. |
 | Project OSRM, OpenTopoData and other routing, elevation, weather, avalanche, land, trail and public-content sources | Requested place, route, viewport/tile/layer context and normal network metadata | User-requested online routing, elevation and product data. Direct transfers occur only as part of the feature the user invokes; proxy them where practical and retain source attribution. |
-| Viator | Destination/tour lookup and user-requested handoff to the separately labelled external booking flow | External fulfillment. The audited consumer app does not enable an undisclosed Trailhead-side booking mutation. |
+| Viator | Canonical Viator destination ID, dates and nonidentifying tour filters; a user-requested tap opens the separately labelled external booking flow | External fulfillment. Raw search text, route/place names, coordinates, account/device identifiers and route geometry are not sent to Viator. The audited consumer app does not enable an undisclosed Trailhead-side booking mutation. |
+| Outdoorsy/TUNE | Fixed offer, source and URL identifiers; a user-requested tap opens the clearly labelled external booking flow | Contextual affiliate inventory and external fulfillment. Trailhead may earn a commission. Route/start-area and rig context are processed by Trailhead only; no account identity, device ID, coordinates, private messages, raw search history or traveled-route history is sent to TUNE or Outdoorsy. |
 
 ### Branch removal
 
@@ -195,6 +199,9 @@ changing the app or console form.
 - [ ] Deletion URL is exactly
       `https://api.gettrailhead.app/delete-account` and works without first
       launching the app.
+- [ ] Partial-data deletion URL is exactly
+      `https://api.gettrailhead.app/delete-data` and works without first
+      launching the app.
 - [ ] The in-app Profile deletion flow supports fresh password, Google or Apple
       reauthentication as applicable.
 - [ ] Account creation methods select username/password, Google OAuth and Apple
@@ -208,7 +215,8 @@ changing the app or console form.
 
 ### Ads, audience, app access and user content
 
-- [ ] Ads declaration: **No**.
+- [ ] Ads declaration: **Yes** because contextual partner booking cards are
+      native affiliate content. No ads SDK or advertising identifier is used.
 - [ ] Confirm `AD_ID` is absent from the final merged manifest.
 - [ ] Health apps declaration: select **Activity and Fitness** because users
       can explicitly save or submit a trail recording with activity, elapsed
@@ -243,7 +251,7 @@ the 1.0.11 service list.
 Use this prominent disclosure immediately before the operating-system location
 request and at permission recovery—not on every detail/player screen:
 
-> Trailhead collects precise location data to keep navigation, Trailhead Original stories, and active trail recording working in the background, including when the app is closed or not in use. Location access begins only after you start one of these features and stops when you end it. Trailhead does not use location for advertising.
+> Trailhead collects precise location data to keep navigation, Trailhead Original stories, and active trail recording working in the background, including when the app is closed or not in use. Location access begins only after you start one of these features and stops when you end it. Trailhead does not sell location or use it for cross-app advertising.
 
 Actions: `Agree & continue` and `Not now`.
 

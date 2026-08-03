@@ -105,12 +105,13 @@ data class TrailheadCarSnapshot(
 
 object TrailheadCarRepository {
   internal const val CAR_SNAPSHOT_FILE = "car_navigation_snapshot.json"
+  internal const val CAR_GENERATED_SNAPSHOT_FILE = "car_generated_navigation_snapshot.json"
 
   fun load(context: Context): TrailheadCarSnapshot {
+    val generatedRead = readJson(context, CAR_GENERATED_SNAPSHOT_FILE)
+    val generated = generatedRead.value?.let(::fromCarJson)
     val carRead = readJson(context, CAR_SNAPSHOT_FILE)
-    if (carRead.value != null) {
-      fromCarJson(carRead.value)?.let { return it }
-    }
+    val phone = carRead.value?.let(::fromCarJson)
 
     val tripRead = readJson(context, "active_trip.json")
     val rigRead = readJson(context, "rig_profile.json")
@@ -119,7 +120,13 @@ object TrailheadCarRepository {
       tripRead.value == null -> TrailheadCarSnapshotState.UNAVAILABLE
       else -> TrailheadCarSnapshotState.READY
     }
-    return fromJson(tripRead.value, rigRead.value, state)
+    val current = phone ?: fromJson(tripRead.value, rigRead.value, state)
+    return generated?.copy(
+      account = current.account,
+      offline = current.offline,
+      mapboxAccessToken = current.mapboxAccessToken.ifBlank { generated.mapboxAccessToken },
+      updatedAt = maxOf(generated.updatedAt, current.updatedAt),
+    ) ?: current
   }
 
   fun saveGeneratedRoute(context: Context, snapshot: TrailheadCarSnapshot) {
@@ -183,13 +190,18 @@ object TrailheadCarRepository {
               .put("roundaboutExit", step.roundaboutExit))
           }
         }))
-    val target = File(context.filesDir, CAR_SNAPSHOT_FILE)
-    val temporary = File(context.filesDir, "$CAR_SNAPSHOT_FILE.tmp")
+    val target = File(context.filesDir, CAR_GENERATED_SNAPSHOT_FILE)
+    val temporary = File(context.filesDir, "$CAR_GENERATED_SNAPSHOT_FILE.tmp")
     temporary.writeText(root.toString())
     if (!temporary.renameTo(target)) {
       target.writeText(root.toString())
       temporary.delete()
     }
+  }
+
+  fun clearGeneratedRoute(context: Context) {
+    File(context.filesDir, CAR_GENERATED_SNAPSHOT_FILE).delete()
+    File(context.filesDir, "$CAR_GENERATED_SNAPSHOT_FILE.tmp").delete()
   }
 
   internal fun fromCarJson(root: JSONObject): TrailheadCarSnapshot? {

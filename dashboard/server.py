@@ -26719,7 +26719,7 @@ a{color:#984f2f;}
 <li><strong>Transactional email providers</strong> process email address, username and time-limited verification or recovery links for account messages.</li>
 <li><strong>Map, route, weather, land and content providers</strong>, including Project OSRM, OpenTopoData, RainViewer, Avalanche.org, USFS, USGS, OpenStreetMap, NPS, RIDB/Recreation.gov, BLM and Wikimedia, process requested coordinates, tiles, routes or content identifiers for the feature you invoke.</li>
 <li><strong>ElevenLabs and Cartesia</strong> process text for requested guide, direction, or Original narration. Generated audio may be cached so the same requested content can play reliably or offline where the app labels it available.</li>
-<li><strong>Viator</strong> provides separately labelled guided-tour inventory and handles the external booking flow you choose.</li>
+<li><strong>Viator</strong> receives a canonical destination ID, dates and nonidentifying filters for separately labelled guided-tour inventory, then handles the external booking flow you choose. Trailhead does not send Viator raw consumer search text, place or route names, coordinates, account or device identifiers, or route geometry.</li>
 <li><strong>Outdoorsy and TUNE</strong> provide clearly labelled partner rental offers. Trailhead may use the current trip start area, dates, party needs, or vehicle needs to decide when to show an offer. Opening an offer is user initiated and sends standard link and referral request data to the provider; Trailhead may earn a commission. Trailhead does not send account identity, private messages, personal search history, or raw traveled routes for this purpose.</li>
 <li><strong>Railway, content-delivery and object-storage providers</strong> host and deliver Trailhead accounts, APIs, downloads, content and attachments.</li>
 </ul>
@@ -36726,19 +36726,9 @@ def _live_viator_route_suggestions(
                 break
         if len(ranked_by_key) >= target_limit or len(searched_destinations) >= 4:
             break
-    if not ranked_by_key and q.strip():
-        payload = client.search_freetext(
-            search_term=q.strip(),
-            count=max(1, min(target_limit, page_count)),
-            start=1,
-            campaign_value=campaign_value,
-            timeout=min(float(getattr(config, "request_timeout_seconds", 120.0) or 120.0), 20.0),
-        )
-        statuses.append({"query": q.strip(), **_viator_provider_status(payload)})
-        anchor = points[0] if points else {"lat": 0, "lng": 0, "name": "Route"}
-        for item in _normalize_live_viator_experiences(payload, anchor, None, config.cache_ttl_hours):
-            key = str(item.get("id") or item.get("source_id") or item.get("title"))
-            ranked_by_key[key] = item
+    # Raw user-entered text and route/place names remain first-party data. Live
+    # Viator discovery is limited to provider destination IDs resolved from the
+    # current map context plus nonidentifying filters.
     category = str(filter_values.get("category") or "")
     filtered = _filter_experiences_for_destination_page(
         list(ranked_by_key.values()),
@@ -37041,17 +37031,15 @@ def _fetch_viator_guided_destination_live(
         )
         resolution = "provider_destination"
     else:
-        provider_calls += 1
-        search_term = re.sub(r"\s+", " ", str(q or destination.get("search_query") or destination.get("name") or "").strip())
-        search_payload = client.search_freetext(
-            search_term=search_term,
-            count=limit,
-            start=1,
-            currency=currency or "USD",
-            campaign_value="explore-guided",
-            timeout=timeout,
-        )
-        resolution = "freetext"
+        # Keep consumer text and Trailhead place names first party. If the
+        # provider cannot resolve the canonical destination, return the
+        # existing organic fallback instead of forwarding free text.
+        search_payload = {
+            "status": "unresolved_destination",
+            "reason": "No matching guided-tour destination is available.",
+            "products": [],
+        }
+        resolution = "unresolved_destination"
     return {
         "provider_calls": provider_calls,
         "destinations_payload": destinations_payload,
@@ -37340,7 +37328,12 @@ async def explore_experience_refresh(source: str = "viator", destination_id: str
 
 
 @app.get("/api/admin/viator/diagnostics")
-async def viator_diagnostics(destination_id: str = "5600", q: str = "Moab", limit: int = 3):
+async def viator_diagnostics(
+    destination_id: str = "5600",
+    q: str = "Moab",
+    limit: int = 3,
+    admin: dict = Depends(_require_admin),
+):
     config = viator_config_from_env()
     client = ViatorClient(config)
     diagnostics = {

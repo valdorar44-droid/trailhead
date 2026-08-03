@@ -15,6 +15,18 @@ internal data class TrailheadCarRouteResolution(
   val destinationLabel: String,
 )
 
+internal data class TrailheadCarDestinationChoice(
+  val label: String,
+  val detail: String,
+  val lat: Double,
+  val lng: Double,
+)
+
+internal sealed interface TrailheadCarDestinationSearchResponse {
+  data class Ready(val destinations: List<TrailheadCarDestinationChoice>) : TrailheadCarDestinationSearchResponse
+  data class Failed(val message: String) : TrailheadCarDestinationSearchResponse
+}
+
 internal sealed interface TrailheadCarNavigationStartResult {
   data object Started : TrailheadCarNavigationStartResult
   data class Failed(val message: String) : TrailheadCarNavigationStartResult
@@ -23,6 +35,9 @@ internal sealed interface TrailheadCarNavigationStartResult {
 internal fun interface TrailheadCarHttpClient {
   fun get(url: String): String
 }
+
+internal class TrailheadCarHttpException(val statusCode: Int) :
+  IllegalStateException("Trailhead service unavailable")
 
 internal class TrailheadCarUrlConnectionClient : TrailheadCarHttpClient {
   override fun get(url: String): String {
@@ -33,7 +48,7 @@ internal class TrailheadCarUrlConnectionClient : TrailheadCarHttpClient {
       connection.requestMethod = "GET"
       connection.setRequestProperty("Accept", "application/json")
       val status = connection.responseCode
-      if (status !in 200..299) throw IllegalStateException("Route service unavailable")
+      if (status !in 200..299) throw TrailheadCarHttpException(status)
       connection.inputStream.bufferedReader().use { it.readText() }
     } finally {
       connection.disconnect()
@@ -45,6 +60,52 @@ internal class TrailheadCarDestinationRouter(
   private val accessToken: String,
   private val httpClient: TrailheadCarHttpClient = TrailheadCarUrlConnectionClient(),
 ) {
+  fun search(
+    query: String,
+    origin: TrailheadCarPoint? = null,
+    limit: Int = 6,
+  ): List<TrailheadCarDestinationChoice> {
+    require(accessToken.isNotBlank()) { "Online search is unavailable" }
+    val cleanQuery = query.trim().take(160)
+    require(cleanQuery.length >= 2) { "Enter at least two characters" }
+    val root = JSONObject(httpClient.get(searchUrl(origin, cleanQuery, limit.coerceIn(1, 8))))
+    val features = root.optJSONArray("features") ?: return emptyList()
+    return buildList<TrailheadCarDestinationChoice> {
+      for (index in 0 until features.length()) {
+        val feature = features.optJSONObject(index) ?: continue
+        val properties = feature.optJSONObject("properties") ?: JSONObject()
+        val coordinates = feature.optJSONObject("geometry")?.optJSONArray("coordinates")
+          ?: properties.optJSONObject("coordinates")?.let { value ->
+            org.json.JSONArray()
+              .put(value.optDouble("longitude", Double.NaN))
+              .put(value.optDouble("latitude", Double.NaN))
+          }
+          ?: continue
+        val lng = coordinates.optDouble(0, Double.NaN)
+        val lat = coordinates.optDouble(1, Double.NaN)
+        if (!validCoordinate(lat, lng)) continue
+        val label = properties.optString("name").trim()
+          .ifEmpty { feature.optString("text").trim() }
+          .ifEmpty { cleanQuery }
+          .take(120)
+        val detail = properties.optString("full_address").trim()
+          .ifEmpty { properties.optString("place_formatted").trim() }
+          .ifEmpty { properties.optString("address").trim() }
+          .take(160)
+        val choice = TrailheadCarDestinationChoice(label, detail, lat, lng)
+        if (none { existing ->
+            normalizedSearchLabel(existing.label) == normalizedSearchLabel(choice.label) &&
+              TrailheadCarNavigationMath.distance(
+                TrailheadCarPoint(existing.lat, existing.lng),
+                TrailheadCarPoint(choice.lat, choice.lng),
+              ) < 50.0
+          }) {
+          add(choice)
+        }
+      }
+    }.take(limit)
+  }
+
   fun resolve(
     origin: TrailheadCarPoint,
     request: TrailheadCarNavigationRequest,
@@ -77,28 +138,22 @@ internal class TrailheadCarDestinationRouter(
     origin: TrailheadCarPoint,
     label: String,
   ): TrailheadCarPoint {
-    val root = JSONObject(httpClient.get(searchUrl(origin, label)))
-    val feature = root.optJSONArray("features")?.optJSONObject(0)
+    val choice = search(label, origin, limit = 1).firstOrNull()
       ?: throw IllegalStateException("Destination not found")
-    val coordinates = feature.optJSONObject("geometry")?.optJSONArray("coordinates")
-      ?: throw IllegalStateException("Destination not found")
-    val lng = coordinates.optDouble(0, Double.NaN)
-    val lat = coordinates.optDouble(1, Double.NaN)
-    if (!validCoordinate(lat, lng)) throw IllegalStateException("Destination not found")
-    return TrailheadCarPoint(lat, lng)
+    return TrailheadCarPoint(choice.lat, choice.lng)
   }
 
   internal fun searchUrl(origin: TrailheadCarPoint, label: String): String {
+    return searchUrl(origin as TrailheadCarPoint?, label, 1)
+  }
+
+  internal fun searchUrl(origin: TrailheadCarPoint?, label: String, limit: Int): String {
     val encodedQuery = URLEncoder.encode(label.trim(), StandardCharsets.UTF_8.name())
-    val session = UUID.nameUUIDFromBytes(
-      "${origin.lat},${origin.lng}:${label.trim().lowercase(Locale.US)}".toByteArray(),
-    )
     return "https://api.mapbox.com/search/searchbox/v1/forward" +
       "?q=$encodedQuery" +
-      "&limit=1" +
+      "&limit=${limit.coerceIn(1, 8)}" +
       "&types=poi,address,place,locality,neighborhood" +
-      "&proximity=${origin.lng},${origin.lat}" +
-      "&session_token=$session" +
+      (origin?.let { "&proximity=${it.lng},${it.lat}" } ?: "") +
       "&access_token=${encodedToken()}"
   }
 
@@ -203,4 +258,9 @@ internal class TrailheadCarDestinationRouter(
   private fun validCoordinate(lat: Double, lng: Double): Boolean {
     return lat.isFinite() && lng.isFinite() && lat in -90.0..90.0 && lng in -180.0..180.0
   }
+
+  private fun normalizedSearchLabel(value: String): String = value
+    .lowercase(Locale.US)
+    .replace(Regex("[^a-z0-9]+"), " ")
+    .trim()
 }

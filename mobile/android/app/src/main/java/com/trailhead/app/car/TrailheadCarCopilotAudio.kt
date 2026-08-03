@@ -52,7 +52,7 @@ internal class TrailheadCarCopilotAudio(
     }
     val next = runCatching { CarAudioRecord.create(carContext) }.getOrElse {
       abandonAudioFocus()
-      onFailure("Allow microphone access on your phone when parked.")
+      onFailure("When safe, use your phone to allow microphone access.")
       return false
     }
     recording = next

@@ -2,9 +2,9 @@
 
 Timestamp: 2026-08-03 14:18:00 -05:00
 
-Status: **privacy/backend correction deployed; Android artifacts and Play
-Console reconciliation remain in progress. Do not submit the final Data Safety
-form yet**.
+Status: **Play declarations are saved and the final Android Auto/privacy source
+is independently accepted. The exact preview, DHU session, production AAB,
+active-track replacement, and final submission remain in progress.**
 
 ## Repository and release identity
 
@@ -73,7 +73,10 @@ The exact console matrix and ready-to-paste declarations are in
 Fixed decisions:
 
 - Trailhead does not sell personal data.
-- Ads declaration is `No`; `AD_ID` and ads SDKs must remain absent.
+- Ads declaration is `Yes` because Trailhead shows clearly labelled contextual
+  affiliate booking cards and may earn a commission. This does not authorize
+  advertising-ID collection, behavioral targeting, or an ads SDK; `AD_ID` and
+  ads SDKs must remain absent.
 - Corrected 1.0.12 removes Branch's native SDK, keys/domains, config plugin,
   Install Referrer, iOS resource, native initialization, backend link creation,
   and server configuration.
@@ -87,6 +90,7 @@ Fixed decisions:
   the complete active-track union are verified.
 - Privacy URL: `https://api.gettrailhead.app/privacy`.
 - Deletion URL: `https://api.gettrailhead.app/delete-account`.
+- Partial data deletion URL: `https://api.gettrailhead.app/delete-data`.
 - Encryption in transit: `Yes`; no end-to-end or unverified encrypted-at-rest
   claim.
 - Background behavior is described as GPS-triggered playback during an
@@ -220,3 +224,82 @@ documentation task: none.
   `native-1.0.12-android.1`.
 - Exact AAB decoding, active Play-track reconciliation, Play App Content draft,
   and the <=30-second exact-candidate policy video remain pending.
+
+## August 3 Android Auto and Play-declaration closeout
+
+Current implementation base before the final freeze:
+`4f4a935e4e7c46c0be13b6228b96269c4aa5816c` on
+`fix/google-play-data-safety-closeout`. The next preview and production version
+codes are `73` and `74`; both use `native-1.0.12-android.1` because the canceled
+71/72 candidates were never distributed and no update targets that runtime.
+
+Saved Play Console declarations now reflect the audited app:
+
+- Data Safety includes account identifiers, purchase/financial workflow data,
+  approximate and precise location, messages/UGC, photos, voice/sound, fitness,
+  crash/diagnostic/performance data, interactions/search/actions, and device
+  identifiers where the audited feature or service-provider flow actually
+  collects them.
+- Data is not sold. `Shared: No` relies only on the documented service-provider
+  and clearly labelled, user-initiated external-handoff exceptions.
+- Encryption in transit is `Yes`; no end-to-end encryption claim is made.
+- Account creation includes username/password and OAuth. Account deletion and
+  partial deletion point to the two public URLs above.
+- Ads is `Yes` for contextual affiliate booking cards. Advertising ID remains
+  `No`, and the corrected manifest contains no `AD_ID` permission or ads SDK.
+- Health declares activity/fitness only. Target audience is 16–17 and 18+.
+- Foreground service types are Location and Media Playback. Background location
+  evidence uses the already-recorded consumer video
+  `https://youtube.com/shorts/KMBtFtKHcNw?feature=share`; navigation evidence is
+  `https://youtube.com/shorts/JOqSdXJXz18?feature=share`.
+- The privacy URL, listing name `Trailhead`, subtitle, and cleaned description
+  are saved. The console reports that changes are ready for Publishing overview;
+  final review was intentionally deferred until the exact artifact passes.
+
+The final Android Auto implementation supports a fresh-install head-unit flow:
+Search → destination → Start → NavigationTemplate. It uses a public-token
+bootstrap without persisting Mapbox temporary results, parked-only permission
+recovery, request-generation cancellation, and separate phone-authored versus
+head-unit-generated route snapshots. Active geometry always overlays the
+current phone account, entitlements, offline state, and public token. Starting
+and ending guidance return truthful service results, and report-only location
+cannot masquerade as active navigation.
+
+The Android release manifest verifier is now part of the real `bundleRelease`
+and `packageReleaseBundle` task graph. It blocks `AD_ID`, background-location,
+both Install Referrer permissions, microphone foreground service, Expo audio
+recording service, and Branch manifest entries.
+
+Affiliate/privacy hardening removes consumer raw-text Viator fallback lookup.
+Consumer Viator calls use canonical destination IDs, dates, and nonidentifying
+filters only. Outdoorsy/TUNE URLs are restricted to fixed affiliate metadata;
+they cannot include account/device/session identifiers, coordinates, route
+identity, route/place names, or search terms. The Viator diagnostics endpoint
+now requires an administrator.
+
+Focused acceptance at this source state:
+
+- Backend/privacy/affiliate: `57 passed`; the independent affiliate reviewer
+  reran `34 passed` and found no P0/P1.
+- Android Auto: `54` tests across six suites, zero failures/errors. The release
+  privacy manifest verifier and actual bundle task chain passed. An independent
+  final reviewer found no remaining deterministic P0/P1.
+- `audit:native-drift`, privacy controls, telemetry, and app-link checks pass.
+- Protected hashes remain:
+  - Explore index:
+    `c0726d8166ab7d110f437ff4e6acde7aa09702354f053103e3f6630a0129b869`.
+  - App Store copy:
+    `126af147b650c2f1077fb73036d26f34f940422c07a3193bade047c73b5c225a`.
+
+Remaining stop-the-line sequence:
+
+1. Freeze and commit the named source files.
+2. Run one final-source `audit:prepreview` gate.
+3. Build/install version code 73 and pass the exact DHU flow.
+4. Build/decode version code 74 from the identical SHA.
+5. Deploy the final backend hardening, replace stale Production, Closed Alpha,
+   and Internal artifacts, re-open every declaration, then submit.
+
+Do not repeat the user-supplied policy video, broad app crawls, Memory Gate,
+Layers, NPS, Originals lifecycle, Trails, or completed Play form entry without
+new evidence.

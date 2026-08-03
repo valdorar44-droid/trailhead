@@ -4,6 +4,8 @@ apply plugin: "com.facebook.react"
 
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 def googleMapsApiKey = findProperty('GOOGLE_MAPS_API_KEY') ?: System.getenv('GOOGLE_MAPS_API_KEY') ?: ''
+def trailheadApiBaseUrl = System.getenv('EXPO_PUBLIC_API_URL') ?: 'https://api.gettrailhead.app'
+def escapedTrailheadApiBaseUrl = trailheadApiBaseUrl.replace('\\', '\\\\').replace('"', '\\"')
 
 /**
  * This is the configuration block to customize your React Native Android app.
@@ -100,6 +102,10 @@ android {
         manifestPlaceholders = [
             googleMapsApiKey: googleMapsApiKey,
         ]
+        // Android Auto can be launched before React Native has written its
+        // navigation snapshot. The car app uses this public first-party URL to
+        // obtain the public Mapbox token; no routing credential is embedded.
+        buildConfigField 'String', 'TRAILHEAD_API_BASE_URL', "\"${escapedTrailheadApiBaseUrl}\""
     }
     signingConfigs {
         debug {
@@ -191,4 +197,47 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+}
+
+tasks.register("verifyReleasePrivacyManifest") {
+    group = "verification"
+    description = "Fails when the merged release manifest contains disallowed install-referrer permissions."
+    dependsOn("processReleaseMainManifest")
+
+    doLast {
+        def manifestFiles = fileTree("$buildDir/intermediates") {
+            include "merged_manifest/release/**/AndroidManifest.xml"
+            include "merged_manifests/release/**/AndroidManifest.xml"
+        }.files
+        if (manifestFiles.isEmpty()) {
+            throw new GradleException("Merged release AndroidManifest.xml was not produced")
+        }
+
+        def forbiddenManifestEntries = [
+            "com.android.vending.INSTALL_REFERRER",
+            "com.google.android.finsky.permission.BIND_GET_INSTALL_REFERRER_SERVICE",
+            "com.google.android.gms.permission.AD_ID",
+            "android.permission.ACCESS_BACKGROUND_LOCATION",
+            "android.permission.FOREGROUND_SERVICE_MICROPHONE",
+            "expo.modules.audio.service.AudioRecordingService",
+            "io.branch.",
+        ]
+        manifestFiles.each { manifestFile ->
+            def mergedManifest = manifestFile.getText("UTF-8")
+            forbiddenManifestEntries.each { entry ->
+                if (mergedManifest.contains(entry)) {
+                    throw new GradleException("Merged release manifest contains disallowed entry: ${entry}")
+                }
+            }
+        }
+    }
+}
+
+tasks.matching { task ->
+    task.name == "check" ||
+        task.name == "packageRelease" ||
+        task.name == "packageReleaseBundle" ||
+        task.name == "bundleRelease"
+}.configureEach {
+    dependsOn("verifyReleasePrivacyManifest")
 }

@@ -41,8 +41,8 @@ Add one explicit `post-b09-nps-child-depth-b4` cached-only builder preset for:
 4. Jewel Cave National Monument (`jeca`) — expected 11.
 5. John Day Fossil Beds National Monument (`joda`) — expected 19.
 
-Expected total: 97 unique children. Expected module distribution: See 47,
-Trails 32, Visitor Information 7, Activities 6, and Stay 5. If accepted and
+Expected total: 97 unique children. Final reviewed module distribution: See 46,
+Trails 33, Visitor Information 7, Activities 6, and Stay 5. If accepted and
 later integrated, the internal preview would move from 693 to 790 children.
 
 ## Pinned inputs
@@ -109,3 +109,94 @@ generate one immutable candidate plus one independent rebuild.
 
 No task-owned Metro, Gradle, Maestro, Expo/EAS, Railway-tail, provider-fetch,
 candidate-builder, or test process is running at checkpoint creation.
+
+## Cached candidate completion checkpoint
+
+- Recorded: `2026-08-02T20:12:57-05:00` (America/Winnipeg).
+- Branch: `feat/explore-nps-child-depth-b4`.
+- Baseline checkpoint commit: `96bdcc42aaa81cac192671e22f04c37175ea8be3`.
+- Delivery remains cached-only and internal. No provider request, Railway
+  deployment, OTA, native build, public catalog/index change, or feature-stage
+  change occurred.
+
+### Reviewed result
+
+- Built 97 exact official NPS children: Hot Springs 24, Hovenweep 17,
+  Indiana Dunes 26, Jewel Cave 11, and John Day Fossil Beds 19.
+- Modules: See 46, Trails 33, Visitor Information 7, Activities 6, Stay 5.
+- Reader categories: campground 5, visitor center 7, activity 6, trail 23,
+  place 16, waterfall 1, hot spring 4, historic site 11, viewpoint 14, and
+  trailhead 10.
+- Retained 86 exact rights-approved NPS images. The exact reviewed set of 11
+  records remains text-only; no generic media was substituted.
+- Preserved 93 exact child links, two reviewed Indiana parent-page fallbacks,
+  and two safe HTTP-to-HTTPS NPS upgrades.
+- Kept seven identity-reviewed shared-coordinate clusters distinct.
+- Confirmed zero identity overlap with the deployed 693-child internal preview
+  and the reviewed public child-disposition table.
+- Replaced unsafe keyword classifications with identity-bound, source-backed
+  decisions for Hot Springs springs/shelters, Hovenweep, Indiana Dunes, and
+  John Day interpretive places. Fixed six source paragraph seams and the two
+  reviewed Square Tower copy errors.
+
+### Immutable evidence
+
+Candidate:
+`data/explore/audit_candidates/internal/post-b09-nps-child-depth-b4-r2`.
+Independent rebuild:
+`data/explore/audit_candidates/internal/post-b09-nps-child-depth-b4-r2-rebuild`.
+Their four artifacts are byte-identical.
+
+- `audit.json`:
+  `1e29aa4f1b9e149aaf2d1b0ad61793ce636c1242525f8f560c80b56a592d07e2`
+- `manifest.json`:
+  `a2c8c0b91f36f88ccf80c08f76ca5b7357fa0f445622a9939c4da55d71a52f4f`
+- `nps_child_depth_v1.json`:
+  `bff4dbe3fae5a984083c366aa7711e2766bad2c220c71f49367f2d4a1aea247f`
+- `review.json`:
+  `60ccad3f4bf56f0664a53e4e1c54b175fc664f9dcbc75f629994fedc7cf48e99`
+
+### Verification
+
+- B1-B4 builder and candidate coverage: 22 passed.
+- NPS media-rights, link safety, contract, internal-preview, and content-quality
+  regression: 46 passed, 7 skipped, and 4 parameterized checks passed. Skips
+  are the suite's expected optional-evidence boundaries.
+- Direct content-quality audit: PASS; its seven shared-coordinate warnings are
+  the same seven explicitly reviewed identity clusters.
+- Candidate and rebuild are byte-identical.
+- Python compilation and `git diff --check`: passed.
+- Exact input and fixture hashes, category/module distributions, reader-link
+  decisions, exact text-only identities, and copy repairs fail closed.
+- Candidate tests no longer require absolute main-workspace inputs for their
+  drift guard and remain portable once the immutable artifacts are tracked.
+
+### Protected state
+
+- Main-workspace Explore index remains
+  `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
+- Main-workspace App Store copy remains
+  `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+- `.cursor/`, the protected Explore index, and App Store copy were not staged
+  or changed.
+- Task-owned Metro, Gradle, Maestro, Expo/EAS, pytest, Railway-tail, provider,
+  and candidate-builder processes: none.
+
+### Exact next action
+
+Finish the independent read-only audit, commit and push only the builder,
+candidate/rebuild, focused test, and this checkpoint. Do not integrate B4 yet.
+First complete the single signed-in administrator device proof for the already
+deployed Great Smoky Mountains pack. Once it passes, integrate this reviewed
+97-child pack into a separately checkpointed 693-to-790 internal-preview
+update and show one B4 destination before selecting another cached batch.
+
+### Do not repeat after this checkpoint
+
+- Do not rebuild this candidate, refetch NPS data, or rerun broad Explore/NPS
+  crawls without new evidence.
+- Do not weaken the image, link, classification, coordinate, or input-hash
+  locks.
+- Do not deploy B4, publish another OTA, activate aliases, or promote children
+  publicly before the bounded Great Smoky proof and a separate integration
+  checkpoint.

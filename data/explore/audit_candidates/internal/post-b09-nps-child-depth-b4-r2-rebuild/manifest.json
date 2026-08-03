@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "batch_id": "post-b09-nps-child-depth-b4",
+  "generated_at": 1785704580,
+  "requests_used": 0,
+  "live_catalog_modified": false,
+  "live_serving_index_modified": false,
+  "promotion_ready": false,
+  "inputs": {
+    "base_catalog": {
+      "path": "base_catalog/explore_catalog_v3_review.json",
+      "bytes": 28099396,
+      "sha256": "462ab1a8313e84073b2ce5347411b25771c19ebd17079b00227deb922e18a080"
+    },
+    "normalized_nps_catalog": {
+      "path": "normalized_nps_catalog/explore_catalog_v3.json",
+      "bytes": 25701451,
+      "sha256": "8bc319b8b230d4272778671318903c9e0e05844b7c5a5d11d8f81438a1584c80"
+    },
+    "fixtures": {
+      "hosp": {
+        "path": "nps/hosp/source-pack_codes-hosp_with-places-thingstodo-campgrounds-visitorcenters-alerts-articles-events-tours-parkin_max-500.json",
+        "bytes": 713830,
+        "sha256": "43110d2d6a2a4ed2f6624baf0810d1b5a0c6649cd74e68c101b13400ec1a0834"
+      },
+      "hove": {
+        "path": "nps/hove/source-pack_codes-hove_with-places-thingstodo-campgrounds-visitorcenters-alerts-articles-events-tours-parkin_max-500.json",
+        "bytes": 471061,
+        "sha256": "8431ba41d5ab0077d96bfa2093310403c85865a6e5068da85dc44779e187c02b"
+      },
+      "indu": {
+        "path": "nps/indu/source-pack_codes-indu_with-places-thingstodo-campgrounds-visitorcenters-alerts-articles-events-tours-parkin_max-500.json",
+        "bytes": 1012817,
+        "sha256": "22cfaf65da51c037dc6d1583f00e57bcffb9b6d1fcb111d72ef359615a66b881"
+      },
+      "jeca": {
+        "path": "nps/jeca/source-pack_codes-jeca_with-places-thingstodo-campgrounds-visitorcenters-alerts-articles-events-tours-parkin_max-500.json",
+        "bytes": 422857,
+        "sha256": "550106bcb79cf9f45e08a12cb02cc613aa5652b665aef3110b0f65d2d92b149b"
+      },
+      "joda": {
+        "path": "nps/joda/source-pack_codes-joda_with-places-thingstodo-campgrounds-visitorcenters-alerts-articles-events-tours-parkin_max-500.json",
+        "bytes": 543913,
+        "sha256": "b80fc6eaff16fd4b18f4671bad7792855cd5c3822559884bc446ddafa68eec3b"
+      }
+    }
+  },
+  "artifacts": [
+    {
+      "path": "audit.json",
+      "bytes": 2738,
+      "sha256": "1e29aa4f1b9e149aaf2d1b0ad61793ce636c1242525f8f560c80b56a592d07e2"
+    },
+    {
+      "path": "nps_child_depth_v1.json",
+      "bytes": 717900,
+      "sha256": "bff4dbe3fae5a984083c366aa7711e2766bad2c220c71f49367f2d4a1aea247f"
+    },
+    {
+      "path": "review.json",
+      "bytes": 7041,
+      "sha256": "60ccad3f4bf56f0664a53e4e1c54b175fc664f9dcbc75f629994fedc7cf48e99"
+    }
+  ]
+}

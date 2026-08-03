@@ -1,0 +1,219 @@
+{
+  "schema_version": 1,
+  "batch_id": "post-b09-nps-child-depth-b4",
+  "generated_at": 1785704580,
+  "requests_used": 0,
+  "live_catalog_modified": false,
+  "live_serving_index_modified": false,
+  "promotion_ready": false,
+  "destinations": [
+    {
+      "park_code": "hosp",
+      "name": "Hot Springs National Park",
+      "accepted": 24,
+      "module_counts": {
+        "stay": 1,
+        "visitor": 1,
+        "do": 1,
+        "trails": 8,
+        "see": 13
+      },
+      "cached_counts": {
+        "campgrounds": 1,
+        "visitorcenters": 1,
+        "thingstodo": 36,
+        "places": 39
+      },
+      "parent_hub_id": "place:nps:hosp",
+      "source_fetched_at": 1785704454,
+      "accepted_before_dedupe": 24
+    },
+    {
+      "park_code": "hove",
+      "name": "Hovenweep National Monument",
+      "accepted": 17,
+      "module_counts": {
+        "stay": 1,
+        "visitor": 1,
+        "trails": 3,
+        "see": 12
+      },
+      "cached_counts": {
+        "campgrounds": 1,
+        "visitorcenters": 1,
+        "thingstodo": 4,
+        "places": 18
+      },
+      "parent_hub_id": "place:nps:hove",
+      "source_fetched_at": 1785704460,
+      "accepted_before_dedupe": 17
+    },
+    {
+      "park_code": "indu",
+      "name": "Indiana Dunes National Park",
+      "accepted": 26,
+      "module_counts": {
+        "stay": 3,
+        "visitor": 2,
+        "trails": 13,
+        "do": 5,
+        "see": 3
+      },
+      "cached_counts": {
+        "campgrounds": 3,
+        "visitorcenters": 2,
+        "thingstodo": 12,
+        "places": 36
+      },
+      "parent_hub_id": "place:nps:indu",
+      "source_fetched_at": 1785704491,
+      "accepted_before_dedupe": 26
+    },
+    {
+      "park_code": "jeca",
+      "name": "Jewel Cave National Monument",
+      "accepted": 11,
+      "module_counts": {
+        "visitor": 1,
+        "see": 10
+      },
+      "cached_counts": {
+        "campgrounds": 0,
+        "visitorcenters": 1,
+        "thingstodo": 6,
+        "places": 16
+      },
+      "parent_hub_id": "place:nps:jeca",
+      "source_fetched_at": 1785704523,
+      "accepted_before_dedupe": 11
+    },
+    {
+      "park_code": "joda",
+      "name": "John Day Fossil Beds National Monument",
+      "accepted": 19,
+      "module_counts": {
+        "visitor": 2,
+        "trails": 9,
+        "see": 8
+      },
+      "cached_counts": {
+        "campgrounds": 0,
+        "visitorcenters": 2,
+        "thingstodo": 19,
+        "places": 17
+      },
+      "parent_hub_id": "place:nps:joda",
+      "source_fetched_at": 1785704535,
+      "accepted_before_dedupe": 19
+    }
+  ],
+  "counts": {
+    "base_places": 993,
+    "sidecar_places": 97,
+    "destination_count": 5
+  },
+  "reader_link_actions": {
+    "kept_item_url": 93,
+    "used_parent_nps_url": 2,
+    "upgraded_nps_https": 2
+  },
+  "media_policy": {
+    "candidate_images": 97,
+    "approved_images": 86,
+    "stripped_images": 11,
+    "policy": "exact cached NPS media with NPS-prefixed credit only"
+  },
+  "rendered_rail_dedupe": {
+    "rule": "one stable child per parent, rendered module, normalized title, and 5-decimal point; endpoint priority then stable ID",
+    "dropped_count": 0,
+    "records": []
+  },
+  "internal_preview_contract": {
+    "stage": "internal",
+    "requires_authenticated_admin": true,
+    "required_header": "X-Trailhead-Explore-Preview: internal",
+    "header_is_not_a_credential": true
+  },
+  "parent_page_source_fallbacks": [
+    {
+      "place_id": "place:nps-child:indu:campgrounds:665a07f7-cd99-401a-8674-4c65ac41954c",
+      "name": "Dunbar Group Site",
+      "endpoint": "campgrounds",
+      "parent_hub_id": "place:nps:indu",
+      "official_url": "https://www.nps.gov/indu/index.htm",
+      "reason": "The cached official child record has no reader URL; use the official parent park page."
+    },
+    {
+      "place_id": "place:nps-child:indu:campgrounds:89cb27d1-22a1-437e-9528-3d99de6a22f0",
+      "name": "Central Avenue Walk-in Sites",
+      "endpoint": "campgrounds",
+      "parent_hub_id": "place:nps:indu",
+      "official_url": "https://www.nps.gov/indu/index.htm",
+      "reason": "The cached official child record has no reader URL; use the official parent park page."
+    }
+  ],
+  "semantic_dedupe": {
+    "rule": "reviewed exact parent and normalized-title decisions only",
+    "dropped_count": 0,
+    "records": []
+  },
+  "shared_coordinate_review": [
+    {
+      "place_ids": [
+        "place:nps-child:hosp:places:a6b52836-b617-442d-9989-b8d800fd1b6a",
+        "place:nps-child:hosp:places:fc7437d4-be5f-449b-b04c-bfb7a63d1cfb"
+      ],
+      "decision": "keep_distinct",
+      "reason": "Arlington Lawn and Hot Water Cascade are distinct official places sharing a visitor access point."
+    },
+    {
+      "place_ids": [
+        "place:nps-child:hove:thingstodo:ec74ef1f-636d-4b52-a1ec-cd4d57242402",
+        "place:nps-child:hove:visitorcenters:fe0c0aa2-f347-4cb2-902f-dbbd9d6e234f"
+      ],
+      "decision": "keep_distinct",
+      "reason": "The visitor center and Square Tower Group overlook walk are distinct official records at the same access point."
+    },
+    {
+      "place_ids": [
+        "place:nps-child:indu:thingstodo:e8fab275-df01-437d-9671-d2626d049032",
+        "place:nps-child:indu:thingstodo:ff26d5dd-3eb0-46ca-a7af-4976acd84821"
+      ],
+      "decision": "keep_distinct",
+      "reason": "Diana Dunes Dare and West Beach swimming are distinct official activities sharing the West Beach area point."
+    },
+    {
+      "place_ids": [
+        "place:nps-child:indu:thingstodo:380f336e-8d28-40ff-8f29-1c75c4f960fa",
+        "place:nps-child:indu:thingstodo:7566f877-6002-41e7-ae62-f39ffc140ba1",
+        "place:nps-child:indu:thingstodo:77d42ac3-015b-41dd-ac5c-23d12d609ab1"
+      ],
+      "decision": "keep_distinct",
+      "reason": "The one-hour, half-day, and full-day itinerary records are separate official activity options sharing one park reference point."
+    },
+    {
+      "place_ids": [
+        "place:nps-child:indu:places:7e0308dc-3f4d-4b6f-b669-5b50775d7e8d",
+        "place:nps-child:indu:thingstodo:5d9e1a12-d7da-4438-8269-24c923dd111b"
+      ],
+      "decision": "keep_distinct",
+      "reason": "The horseback-riding activity and Glenwood Dunes main trail record are distinct official records sharing a trail access point."
+    },
+    {
+      "place_ids": [
+        "place:nps-child:indu:places:659cec24-1909-47bf-b758-5551bd5c407b",
+        "place:nps-child:indu:places:e6e520b4-fff5-4c39-8cc7-698e8bbe05e6"
+      ],
+      "decision": "keep_distinct",
+      "reason": "Calumet Dunes Trail and the Glenwood Dunes alternate route are distinct official routes sharing an access point."
+    },
+    {
+      "place_ids": [
+        "place:nps-child:jeca:places:5f6cad96-61bd-4c52-878b-b153266ca793",
+        "place:nps-child:jeca:places:95a4627a-fbd4-4c75-969a-dd7c8acab945"
+      ],
+      "decision": "keep_distinct",
+      "reason": "The front porch and north side of Jewel Cave's historic ranger cabin are distinct official interpretive viewpoints at one structure."
+    }
+  ]
+}

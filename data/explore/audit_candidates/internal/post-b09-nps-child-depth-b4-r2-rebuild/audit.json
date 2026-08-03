@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "batch_id": "post-b09-nps-child-depth-b4",
+  "intended_grain": "one approved cached NPS child record per stable place ID",
+  "count": 97,
+  "destination_counts": {
+    "hosp": 24,
+    "hove": 17,
+    "indu": 26,
+    "jeca": 11,
+    "joda": 19
+  },
+  "module_counts": {
+    "stay": 5,
+    "visitor": 7,
+    "do": 6,
+    "trails": 33,
+    "see": 46
+  },
+  "media_count": 86,
+  "unique_ids": true,
+  "unique_title_scopes": true,
+  "errors": [],
+  "warnings": [
+    {
+      "code": "shared_coordinate_clusters",
+      "count": 7,
+      "samples": [
+        {
+          "lat": 34.5161,
+          "lng": -93.0528,
+          "place_ids": [
+            "place:nps-child:hosp:places:a6b52836-b617-442d-9989-b8d800fd1b6a",
+            "place:nps-child:hosp:places:fc7437d4-be5f-449b-b04c-bfb7a63d1cfb"
+          ]
+        },
+        {
+          "lat": 37.3858,
+          "lng": -109.0754,
+          "place_ids": [
+            "place:nps-child:hove:visitorcenters:fe0c0aa2-f347-4cb2-902f-dbbd9d6e234f",
+            "place:nps-child:hove:thingstodo:ec74ef1f-636d-4b52-a1ec-cd4d57242402"
+          ]
+        },
+        {
+          "lat": 41.6229,
+          "lng": -87.2077,
+          "place_ids": [
+            "place:nps-child:indu:thingstodo:e8fab275-df01-437d-9671-d2626d049032",
+            "place:nps-child:indu:thingstodo:ff26d5dd-3eb0-46ca-a7af-4976acd84821"
+          ]
+        },
+        {
+          "lat": 41.6333,
+          "lng": -87.0538,
+          "place_ids": [
+            "place:nps-child:indu:thingstodo:7566f877-6002-41e7-ae62-f39ffc140ba1",
+            "place:nps-child:indu:thingstodo:77d42ac3-015b-41dd-ac5c-23d12d609ab1",
+            "place:nps-child:indu:thingstodo:380f336e-8d28-40ff-8f29-1c75c4f960fa"
+          ]
+        },
+        {
+          "lat": 41.6482,
+          "lng": -87.0154,
+          "place_ids": [
+            "place:nps-child:indu:thingstodo:5d9e1a12-d7da-4438-8269-24c923dd111b",
+            "place:nps-child:indu:places:7e0308dc-3f4d-4b6f-b669-5b50775d7e8d"
+          ]
+        },
+        {
+          "lat": 41.6618,
+          "lng": -87.01,
+          "place_ids": [
+            "place:nps-child:indu:places:659cec24-1909-47bf-b758-5551bd5c407b",
+            "place:nps-child:indu:places:e6e520b4-fff5-4c39-8cc7-698e8bbe05e6"
+          ]
+        },
+        {
+          "lat": 43.7335,
+          "lng": -103.8423,
+          "place_ids": [
+            "place:nps-child:jeca:places:95a4627a-fbd4-4c75-969a-dd7c8acab945",
+            "place:nps-child:jeca:places:5f6cad96-61bd-4c52-878b-b153266ca793"
+          ]
+        }
+      ],
+      "detail": "Distinct official child records can share an access point; review but do not merge by coordinate alone."
+    }
+  ],
+  "passed": true
+}

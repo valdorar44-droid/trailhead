@@ -485,14 +485,19 @@ def audit(
             EXPECTED_NPS_CHILD_BINDING_2,
             EXPECTED_NPS_CHILD_BINDING_3,
         ]
-        expected_child_ids: list[str] = []
+        accepted_batch_counts = (156, 170, 131)
+        accepted_batch_offset = 0
         accepted_input_pairs = (
             ("manifest_path", "manifest_sha256"),
             ("artifact_path", "artifact_sha256"),
             ("audit_path", "audit_sha256"),
             ("review_path", "review_sha256"),
         )
-        for expected_binding in expected_bindings:
+        for batch_index, expected_binding in enumerate(expected_bindings):
+            accepted_batch_count = accepted_batch_counts[batch_index]
+            mounted_batch_ids = child_ids[
+                accepted_batch_offset:accepted_batch_offset + accepted_batch_count
+            ]
             accepted_paths = [root / expected_binding[path_key] for path_key, _ in accepted_input_pairs]
             presence = [path.is_file() for path in accepted_paths]
             if any(presence) and not all(presence):
@@ -508,11 +513,16 @@ def audit(
                     )
                 artifact = root / expected_binding["artifact_path"]
                 source_payload = json.loads(artifact.read_text())
-                expected_child_ids.extend(
+                source_child_ids = [
                     str(item.get("id") or "")
                     for item in source_payload.get("places") or []
                     if isinstance(item, dict)
-                )
+                ]
+                if source_child_ids != mounted_batch_ids:
+                    failures.append(
+                        f"accepted NPS child {expected_binding['batch_id']} identities/order differ"
+                    )
+            accepted_batch_offset += accepted_batch_count
         contract_input_pairs = (
             ("manifest_path", "manifest_sha256"),
             ("artifact_path", "artifact_sha256"),
@@ -571,8 +581,6 @@ def audit(
                 failures.append(f"NPS child contract binding {key} differs from accepted R1")
         accepted_batch_ids = child_ids[:457]
         mounted_contract_ids = child_ids[457:]
-        if expected_child_ids and accepted_batch_ids != expected_child_ids:
-            failures.append("NPS child IDs or deterministic batch order differ from accepted local inputs")
         if mounted_contract_ids != contract_identity_ids:
             failures.append("materialized NPS child contract IDs differ from the tracked identity lock")
         for scope, values in (

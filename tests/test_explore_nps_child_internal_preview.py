@@ -230,7 +230,11 @@ class ExploreNpsChildInternalPreviewTests(unittest.TestCase):
         real_is_file = Path.is_file
 
         def tracked_checkout_is_file(path: Path) -> bool:
-            if "/data/explore/audit_candidates/" in path.as_posix():
+            value = path.as_posix()
+            if (
+                "/post-b08-nps-child-depth-b1-r7/" in value
+                or "/post-b08-nps-child-contract-r1/" in value
+            ):
                 return False
             return real_is_file(path)
 

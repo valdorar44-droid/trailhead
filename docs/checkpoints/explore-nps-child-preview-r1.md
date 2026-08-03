@@ -102,6 +102,10 @@ has both authenticated admin authorization and
   `6f25c74687e694b3c39832cd77b58cb687491551924ce47d98133ca5b5b8c784`.
 - Sidecar QA: 13 proof destinations, 693 children, five reviewed replacements,
   six NPS proof hubs, passed.
+- The first clean detached-checkout rehearsal exposed mixed tracked/local
+  evidence aggregation (batches 2/3 are tracked while batch 1 is local-only).
+  QA now validates each available batch against its fixed 156/170/131 slice;
+  the exact clean-checkout assertion passes without changing the sidecar.
 - Internal-preview and child integration: 44 passed plus four parameterized
   mutation checks.
 - Promotion/Search regression: 110 passed plus 21 parameterized checks. Two

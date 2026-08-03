@@ -1,9 +1,10 @@
 # Trailhead Google Play Android acceptance checkpoint
 
-Timestamp: 2026-08-03 13:45:21 -05:00
+Timestamp: 2026-08-03 14:18:00 -05:00
 
-Status: **in progress; do not submit the current Android artifact or final Data
-Safety form yet**.
+Status: **privacy/backend correction deployed; Android artifacts and Play
+Console reconciliation remain in progress. Do not submit the final Data Safety
+form yet**.
 
 ## Repository and release identity
 
@@ -196,3 +197,26 @@ decoded 1.0.12 manifest and Play Console export must be added after the build.
 
 Task-owned Metro, Gradle, Maestro and test processes still running from this
 documentation task: none.
+
+## August 3 release update
+
+- Frozen privacy/mobile implementation: `c2909039c95b582e3fcea622aec662bef79edd74`.
+- Railway health-window correction: `723a41ae` (`90` to `300` seconds only).
+- Railway deployment: `74235157-a3e5-4397-826e-b831e4438960`, terminal
+  `SUCCESS`, image digest
+  `sha256:4159983245c0ff9c4004eef6cb3b15817d18aec67b4ec3cf5cafc474b5d4559c`.
+- Verified public endpoints:
+  - `/api/health`: HTTP 200.
+  - `/privacy`: HTTP 200, SHA-256
+    `1979FDE1AF2B08E89A0E124CA9AC778C0F9AD6CA785A0D09D35AD882BF1AAB70`.
+  - `/delete-account`: HTTP 200, SHA-256
+    `C1FF7994B11866F848EC44A303AA19A1C82279CC84F5437FC94C5CF22FBD42C5`.
+- Production AAB queued: EAS build
+  `4e683e3e-a27c-43db-903c-d0d1da3c3730`, Android build 71.
+- Installable evidence APK queued: EAS build
+  `5286c96d-84c7-4661-9d7b-fd0e04fd9d92`, Android build 72.
+- Both Android builds are bound to `c2909039`, fingerprint
+  `97528db76bd11df2420d67c229e9b454b9f94d73`, and runtime
+  `native-1.0.12-android.1`.
+- Exact AAB decoding, active Play-track reconciliation, Play App Content draft,
+  and the <=30-second exact-candidate policy video remain pending.

@@ -103,8 +103,10 @@ or candidate-builder process is running at checkpoint creation.
 
 ## Candidate completion checkpoint
 
-Recorded `2026-08-03` after implementation commit
-`99f66036c2c37e842ab2e947878933b781d01c1b`.
+Recorded `2026-08-03` at candidate-completion HEAD
+`a7977d0326a331dba11098bf03fb8ddc27cb9c7b`. The immutable candidate was
+introduced by `99f66036c2c37e842ab2e947878933b781d01c1b` and its exact disposition
+evidence was locked by `a7977d0326a331dba11098bf03fb8ddc27cb9c7b`.
 
 - Branch: `feat/explore-nps-child-depth-b5`.
 - Candidate: `post-b09-nps-child-depth-b5-r1`.

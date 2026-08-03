@@ -831,6 +831,51 @@ class ExploreNpsChildInternalPreviewTests(unittest.TestCase):
         self.assertEqual([item.result_id for item in searched.results], [proof_id])
         self.assertEqual(searched.results[0].detail_ref, proof_id)
 
+    def test_great_sand_dunes_activity_projection_is_complete_unique_and_request_local(self):
+        os.environ["TRAILHEAD_EXPLORE_DATA_STAGE"] = "internal"
+        server.EXPLORE_INTERNAL_PREVIEW = builder.DEFAULT_OUTPUT
+        parent = {
+            "id": "place:nps:grsa",
+            "summary": {
+                "title": "Great Sand Dunes National Park & Preserve",
+                "lat": 37.73,
+                "lng": -105.51,
+            },
+            "source_pack": {
+                "primary": "National Park Service",
+                "things_to_do": [{
+                    "kind": "activity",
+                    "source_id": "official-splash",
+                    "title": "Splash in Medano Creek",
+                }],
+            },
+        }
+        original = copy.deepcopy(parent)
+        merged = server._merge_explore_internal_preview({
+            "catalog_id": "public",
+            "places": [parent],
+        })
+        marker = server._explore_internal_preview_context.set(True)
+        try:
+            with patch.object(server, "_load_explore_catalog", return_value=merged):
+                server._EXPLORE_CHILDREN_BY_PARENT_CACHE.update({"key": None, "by_parent": {}})
+                projected = server._attach_internal_preview_child_source_pack(parent)
+        finally:
+            server._explore_internal_preview_context.reset(marker)
+
+        titles = [item.get("title") for item in projected["source_pack"]["things_to_do"]]
+        self.assertEqual(titles, [
+            "Explore the Dunes",
+            "Sandboarding and Sand Sledding",
+            "Experience the Night",
+            "4WD Medano Pass Primitive Road",
+            "Splash in Medano Creek",
+        ])
+        self.assertEqual(len(titles), len(set(titles)))
+        self.assertEqual(titles.count("Sandboarding and Sand Sledding"), 1)
+        self.assertEqual(parent, original)
+        self.assertIs(server._attach_internal_preview_child_source_pack(parent), parent)
+
     def test_batch_5_canonical_camp_shadows_keep_full_detail_and_booking_context(self):
         payload = json.loads(builder.DEFAULT_OUTPUT.read_text())
         batch_5 = payload["children"][554:624]

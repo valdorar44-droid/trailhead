@@ -16,6 +16,7 @@ import {
   classifyRelatedPlaceSheetKind,
   relatedThingToDoCanShow,
   relatedThingToSeeCanShow,
+  sourcePackThingToDoCanShow,
 } from '../exploreContextFilters';
 
 test('NPS hub evidence covers direct, one-group, and two-group hierarchies', () => {
@@ -86,6 +87,13 @@ test('production source-pack children retain canonical identity in the main-map 
 });
 
 test('official canonical rail labels survive client filtering without keyword guessing', () => {
+  assert.equal(sourcePackThingToDoCanShow({
+    source_id: 'place:nps-child:grsa:thingstodo:df98997d-01fc-4016-a90c-53dbc7faae4d',
+    title: 'Sandboarding and Sand Sledding',
+    kind: 'activity',
+    source: 'nps',
+    source_label: 'National Park Service',
+  }), true);
   assert.equal(relatedThingToDoCanShow({
     id: 'explore:place:nps-child:yose:thingstodo:junior-ranger',
     name: 'Junior Ranger Day',

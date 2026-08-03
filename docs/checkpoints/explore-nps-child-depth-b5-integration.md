@@ -155,3 +155,42 @@ detail -> Show Area/Map -> Back.
 No task-owned Metro, Gradle, Maestro, Expo/EAS, Railway-tail, provider-fetch,
 candidate-builder, pytest, or cleanup process remains running at checkpoint
 creation.
+
+## Forward checkpoint — Android module projection correction
+
+Recorded 2026-08-03 01:03 CDT (America/Winnipeg).
+
+- Starting HEAD: `0325639bcf85eebe59d86d9991982e9c24d92b21`.
+- Railway deployment `30ca5144-8916-4d50-a588-c80e307c41fd` reached terminal
+  `SUCCESS`; `/api/health` returned 200, a header-only preview request returned
+  401, and the signed-in Android admin diagnostics reported `ready`, 13
+  profiles, 860 children, and five bindings.
+- Android evidence identity: app 1.0.10, build 69, preview runtime
+  `native-1.0.10-android.7`, source `50f0f2b07302c2f7f4d32af8e762017f1be70883`,
+  update `019fc5c1-4ffb-7712-9094-47ee93872fdb`.
+- One bounded P1 was reproduced: Great Sand Dunes -> Things to Do showed cached
+  trail rows while the valid semantic `activity` rows were filtered through
+  keyword guessing. The accepted Sandboarding record and its backend parent
+  projection were both present.
+- The correction accepts canonical activity kinds without keyword guessing and
+  keeps cached trail rows in the dedicated Trails module instead of relabelling
+  them as Things to Do. No candidate data, public catalog, serving index, API,
+  native input, permission, or runtime changed.
+- Focused backend projection tests: 2 passed.
+- NPS hub and internal-preview client tests: 24 passed.
+- TypeScript: passed.
+- User-facing copy audit: passed for 175 files.
+- Whitespace check: passed.
+- Protected hashes remain unchanged:
+  - Explore serving index: `c0726d8166ab7d110f437ff4e6acde7aa09702354f053103e3f6630a0129b869`.
+  - App Store copy: `126af147b650c2f1077fb73036d26f34f940422c07a3193bade047c73b5c225a`.
+- No task-owned background process remains running.
+
+### Exact next action
+
+Commit and push only the six correction/test files plus this checkpoint. Publish
+one Android preview OTA, verify its source/update identity, and run only Great
+Sand Dunes -> Things to Do -> Sandboarding and Sand Sledding -> detail -> Map ->
+Back. If that passes, publish the identical SHA to iOS and record the paired
+update IDs. Do not repeat broad Explore, NPS, Search, Layers, Memory, Trails,
+Originals, Android Auto, or screenshot crawls.

@@ -193,6 +193,10 @@ export function uniqueSourcePackItems<T extends SourcePackLike>(items: T[]) {
 }
 
 export function sourcePackItemLooksLikeActivity(item?: SourcePackLike | null) {
+  const semanticKind = itemKind(item).replace(/[^a-z0-9]+/g, '_');
+  if (semanticKind === 'activity' || semanticKind === 'thing_to_do' || semanticKind === 'things_to_do') {
+    return true;
+  }
   const text = [
     itemTitle(item),
     itemBody(item),

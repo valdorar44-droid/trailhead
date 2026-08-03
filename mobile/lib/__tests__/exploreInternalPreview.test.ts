@@ -159,3 +159,13 @@ test('cached trail enrichment cannot replace reviewed card or sheet identity', (
     /if \(exploreTrailAreasById\[detail\.id\]\) return exploreTrailAreasById\[detail\.id\]/,
   );
 });
+
+test('destination trail hydration keeps Trails out of Things to Do', () => {
+  const mergeFunction = guideSource.match(
+    /function mergeDynamicTrailArea[\s\S]*?\n}\n\nfunction exploreIndexItemToProfile/,
+  )?.[0];
+
+  assert.ok(mergeFunction, 'mergeDynamicTrailArea must remain present');
+  assert.match(mergeFunction, /Trail rows belong to the dedicated Trails module/);
+  assert.doesNotMatch(mergeFunction, /things_to_do:[\s\S]*?trails\.slice/);
+});

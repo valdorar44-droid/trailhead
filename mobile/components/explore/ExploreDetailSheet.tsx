@@ -22,6 +22,7 @@ import {
   mergeExploreDetailModuleRegistry,
   type ExploreDetailModuleRegistrySnapshot,
 } from '@/lib/exploreDetailModuleRegistry';
+import { sourcePackItemLooksLikeActivity } from '@/lib/exploreContextFilters';
 import { ExploreTrailArea } from './ExploreTrailArea';
 import { ExploreDestinationTrailList, type ExploreDestinationTrailState } from './ExploreDestinationTrailList';
 import { StaticMapboxPreview, type StaticMapboxPin } from './StaticMapboxPreview';
@@ -197,17 +198,6 @@ function uniqueSourcePackItems(items: ExploreSourcePackItem[]) {
     unique.push(item);
   }
   return unique;
-}
-
-function sourcePackItemLooksLikeActivity(item?: ExploreSourcePackItem | null) {
-  const text = [
-    item?.title,
-    item?.description,
-    item?.kind,
-    item?.category,
-    item?.url,
-  ].map(value => String(value || '').toLowerCase()).join(' ');
-  return /\b(hikes?|hiking|trail|walk|walking|drive|driving|road|tour|program|ranger|visit|visitor|birding|wildlife watching|watching safety|scenic|overlook|viewpoint|camp|camping|fish|fishing|boat|boating|paddle|paddling|kayak|climb|climbing|bike|biking|cycle|cycling|horse|ride|ski|snowshoe|lodge|historic)\b/.test(text);
 }
 
 function sourcePackItemLooksLikeSpeciesProfile(item?: ExploreSourcePackItem | null) {

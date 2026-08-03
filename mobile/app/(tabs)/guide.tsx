@@ -1620,18 +1620,12 @@ function mergeDynamicTrailArea(place: ExplorePlaceProfile, area: ExplorePlacePro
         ...((place.source_pack?.photos ?? []) as any[]),
         ...((area.source_pack?.photos ?? []) as any[]),
       ].slice(0, 12),
-      things_to_do: [
-        ...((place.source_pack?.things_to_do ?? []) as any[]),
-        ...trails.slice(0, 8).map((trail: ExploreTrailCard) => ({
-          title: trail.title,
-          description: [fmtMi(trail.distance_mi), trail.route_type, trail.difficulty].filter(Boolean).join(' · '),
-          url: trail.source_url,
-          lat: trail.lat,
-          lng: trail.lng,
-          image_url: trail.image_url || trail.photos?.find(photo => !!photo.url)?.url,
-          image_credit: trail.image_credit || trail.photos?.find(photo => !!photo.url)?.credit,
-        })),
-      ],
+      // Trail rows belong to the dedicated Trails module. Keep source-backed
+      // activities in Things to Do so opening a destination never relabels
+      // hikes as general activities while detail hydration settles.
+      things_to_do: ((place.source_pack?.things_to_do?.length ?? 0) > 0
+        ? place.source_pack?.things_to_do
+        : area.source_pack?.things_to_do) ?? [],
     },
     facts: {
       ...area.facts,

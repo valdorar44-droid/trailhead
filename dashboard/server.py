@@ -3737,13 +3737,37 @@ def _attach_internal_preview_child_source_pack(place: dict) -> dict:
         "visitor": ("visitor_centers", "visitor_center"),
     }
     projected: dict[str, list[dict]] = {key: [] for key, _kind in key_for_target.values()}
+    reviewed_ids_by_target: dict[str, set[str]] = {}
     for child in children:
         target = str(child.get("module_target") or "").strip().lower()
+        child_summary = child.get("summary") if isinstance(child.get("summary"), dict) else {}
+        child_card = child.get("card") if isinstance(child.get("card"), dict) else {}
+        child_title = str(
+            child_summary.get("title")
+            or child_card.get("title")
+            or child.get("name")
+            or ""
+        ).strip()
+        child_source_pack = child.get("source_pack") if isinstance(child.get("source_pack"), dict) else {}
+        reviewed_ids = reviewed_ids_by_target.setdefault(target, set())
+        for value in (
+            child.get("id"),
+            child_source_pack.get("raw_source_identity"),
+            child_source_pack.get("nps_item_id"),
+        ):
+            normalized = str(value or "").strip().lower()
+            if not normalized:
+                continue
+            reviewed_ids.add(normalized)
+            uuid_match = re.search(
+                r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                normalized,
+            )
+            if uuid_match:
+                reviewed_ids.add(uuid_match.group(0))
         destination = key_for_target.get(target)
         if not destination:
             continue
-        child_summary = child.get("summary") if isinstance(child.get("summary"), dict) else {}
-        child_title = str(child_summary.get("title") or (child.get("card") or {}).get("title") or "")
         parent_title = str(child.get("parent_hub_title") or "")
         if (
             target == "see"
@@ -3778,10 +3802,18 @@ def _attach_internal_preview_child_source_pack(place: dict) -> dict:
 
     enriched = dict(place)
     pack = dict(enriched.get("source_pack") if isinstance(enriched.get("source_pack"), dict) else {})
+    target_for_key = {key: target for target, (key, _kind) in key_for_target.items()}
     for key, rows in projected.items():
-        if not rows:
-            continue
         existing = [item for item in (pack.get(key) or []) if isinstance(item, dict)]
+        if not rows and not existing:
+            continue
+        current_target = target_for_key[key]
+        other_target_ids = {
+            identity
+            for target, identities in reviewed_ids_by_target.items()
+            if target != current_target
+            for identity in identities
+        }
         canonical_titles = {
             _explore_title_merge_key({"name": item.get("title")})
             for item in rows
@@ -3799,17 +3831,32 @@ def _attach_internal_preview_child_source_pack(place: dict) -> dict:
         }
         supplemental = []
         for item in existing:
-            identity = str(
-                item.get("canonical_place_id")
-                or item.get("source_id")
-                or ""
-            ).strip().lower()
+            item_ids = {
+                str(value or "").strip().lower()
+                for value in (
+                    item.get("id"),
+                    item.get("canonical_place_id"),
+                    item.get("source_id"),
+                    item.get("source_record_id"),
+                )
+                if str(value or "").strip()
+            }
+            for identity in tuple(item_ids):
+                uuid_match = re.search(
+                    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                    identity,
+                )
+                if uuid_match:
+                    item_ids.add(uuid_match.group(0))
             title_key = _explore_title_merge_key({"name": item.get("title")})
-            if identity in canonical_ids or (title_key and title_key in canonical_titles):
+            if item_ids.intersection(canonical_ids) or (title_key and title_key in canonical_titles):
+                continue
+            if item_ids.intersection(other_target_ids):
                 continue
             supplemental.append(item)
         # Canonical reviewed children lead, in their immutable source order.
-        # Supplemental parent content follows and is never silently discarded.
+        # Unclassified supplemental parent content follows. A reviewed child
+        # assigned to another module no longer survives in this legacy lane.
         pack[key] = [*rows, *supplemental]
     enriched["source_pack"] = pack
     return enriched

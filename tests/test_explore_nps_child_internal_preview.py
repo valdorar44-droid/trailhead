@@ -922,6 +922,76 @@ class ExploreNpsChildInternalPreviewTests(unittest.TestCase):
         ])
         self.assertEqual(len({item["name"] for item in rails["things_to_do"]}), 5)
 
+    def test_great_sand_dunes_detail_projection_removes_reviewed_trails_from_activities(self):
+        nps_catalog = json.loads(builder.DEFAULT_NPS.read_text())
+        nps_parent = next(
+            item for item in nps_catalog["places"]
+            if item.get("id") == "place:nps:grsa"
+        )
+        self.assertEqual(len((nps_parent.get("source_pack") or {}).get("things_to_do") or []), 8)
+
+        os.environ["TRAILHEAD_EXPLORE_DATA_STAGE"] = "internal"
+        server.EXPLORE_INTERNAL_PREVIEW = builder.DEFAULT_OUTPUT
+        merged_catalog = server._merge_explore_internal_preview({
+            "catalog_id": "public",
+            "places": [nps_parent],
+        })
+        marker = server._explore_internal_preview_context.set(True)
+        try:
+            with patch.object(server, "_load_explore_catalog", return_value=merged_catalog):
+                server._EXPLORE_CHILDREN_BY_PARENT_CACHE.update({"key": None, "by_parent": {}})
+                projected = server._attach_internal_preview_child_source_pack(nps_parent)
+        finally:
+            server._explore_internal_preview_context.reset(marker)
+
+        self.assertEqual([
+            item["title"] for item in projected["source_pack"]["things_to_do"]
+        ], [
+            "Explore the Dunes",
+            "Sandboarding and Sand Sledding",
+            "Experience the Night",
+            "4WD Medano Pass Primitive Road",
+            "Splash in Medano Creek",
+        ])
+        self.assertNotIn(
+            "Hike Montville Nature Trail or Mosca Pass Trail",
+            {item["title"] for item in projected["source_pack"]["things_to_do"]},
+        )
+
+    def test_detail_projection_reconciles_legacy_activity_lane_without_reviewed_activities(self):
+        parent = {
+            "id": "place:nps:test",
+            "source_pack": {
+                "things_to_do": [
+                    {
+                        "source_id": "11111111-1111-4111-8111-111111111111",
+                        "title": "Reviewed trail",
+                    },
+                    {
+                        "source_id": "22222222-2222-4222-8222-222222222222",
+                        "title": "Unreviewed activity",
+                    },
+                ],
+            },
+        }
+        children = [{
+            "id": "place:nps-child:test:thingstodo:11111111-1111-4111-8111-111111111111",
+            "module_target": "trails",
+            "card": {"title": "Reviewed trail"},
+            "source_pack": {"nps_item_id": "11111111-1111-4111-8111-111111111111"},
+        }]
+        marker = server._explore_internal_preview_context.set(True)
+        try:
+            with patch.object(server, "_explore_children_for_parent", return_value=children):
+                projected = server._attach_internal_preview_child_source_pack(parent)
+        finally:
+            server._explore_internal_preview_context.reset(marker)
+
+        self.assertEqual(projected["source_pack"]["things_to_do"], [{
+            "source_id": "22222222-2222-4222-8222-222222222222",
+            "title": "Unreviewed activity",
+        }])
+
     def test_batch_5_canonical_camp_shadows_keep_full_detail_and_booking_context(self):
         payload = json.loads(builder.DEFAULT_OUTPUT.read_text())
         batch_5 = payload["children"][554:624]

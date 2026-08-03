@@ -33521,13 +33521,19 @@ def _merge_related_rail_sets(primary: dict, canonical: dict) -> dict:
 
     def semantic_keys(item: dict) -> set[str]:
         keys: set[str] = set()
-        identity = str(item.get("id") or item.get("source_id") or "").strip().lower()
-        source_match = re.search(
-            r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$",
-            identity,
-        )
-        if source_match:
-            keys.add(f"source:{source_match.group(1)}")
+        for field in (
+            "id", "source_id", "source_record_id", "canonical_place_id", "provider_place_id",
+        ):
+            identity = str(item.get(field) or "").strip().lower()
+            if not identity:
+                continue
+            keys.add(f"stable:{identity}")
+            source_match = re.search(
+                r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$",
+                identity,
+            )
+            if source_match:
+                keys.add(f"source:{source_match.group(1)}")
         name = _place_cluster_name(item.get("name"))
         lat = _first_number(item.get("lat"))
         lng = _first_number(item.get("lng"))

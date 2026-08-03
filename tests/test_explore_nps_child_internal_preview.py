@@ -876,6 +876,52 @@ class ExploreNpsChildInternalPreviewTests(unittest.TestCase):
         self.assertEqual(parent, original)
         self.assertIs(server._attach_internal_preview_child_source_pack(parent), parent)
 
+    def test_great_sand_dunes_reviewed_rails_override_legacy_nps_taxonomy(self):
+        nps_catalog = json.loads(builder.DEFAULT_NPS.read_text())
+        nps_parent = next(
+            item for item in nps_catalog["places"]
+            if item.get("id") == "place:nps:grsa"
+        )
+        primary_things = [
+            {
+                **item,
+                "id": str(item.get("source_id") or "").lower(),
+                "name": item.get("title"),
+            }
+            for item in (nps_parent.get("source_pack") or {}).get("things_to_do") or []
+        ]
+        self.assertEqual(len(primary_things), 8)
+
+        os.environ["TRAILHEAD_EXPLORE_DATA_STAGE"] = "internal"
+        server.EXPLORE_INTERNAL_PREVIEW = builder.DEFAULT_OUTPUT
+        merged_catalog = server._merge_explore_internal_preview({
+            "catalog_id": "public",
+            "places": [nps_parent],
+        })
+        with patch.object(server, "_load_explore_catalog", return_value=merged_catalog), patch.object(
+            server, "_canonical_explore_place_id", return_value="place:nps:grsa",
+        ):
+            server._EXPLORE_CHILDREN_BY_PARENT_CACHE.update({"key": None, "by_parent": {}})
+            canonical = server._canonical_explore_related_rails(server.MapCardResolveRequest(
+                source="trailhead_explore", place_id="place:nps:grsa",
+                lat=37.73, lng=-105.51,
+            ))
+
+        rails = server._merge_related_rail_sets({"things_to_do": primary_things}, canonical)
+        self.assertEqual([item["name"] for item in rails["things_to_do"]], [
+            "Explore the Dunes",
+            "Sandboarding and Sand Sledding",
+            "Experience the Night",
+            "4WD Medano Pass Primitive Road",
+            "Splash in Medano Creek",
+        ])
+        self.assertEqual([item["name"] for item in rails["trails"]], [
+            "Hike Montville Nature Trail or Mosca Pass Trail",
+            "Hike Medano Lake and Mount Herard",
+            "Hike Sand Creek Lakes",
+        ])
+        self.assertEqual(len({item["name"] for item in rails["things_to_do"]}), 5)
+
     def test_batch_5_canonical_camp_shadows_keep_full_detail_and_booking_context(self):
         payload = json.loads(builder.DEFAULT_OUTPUT.read_text())
         batch_5 = payload["children"][554:624]

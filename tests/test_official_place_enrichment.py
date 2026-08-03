@@ -546,6 +546,53 @@ class OfficialPlaceEndpointTests(unittest.IsolatedAsyncioTestCase):
             ["Hike Montville Nature Trail or Mosca Pass Trail"],
         )
 
+    def test_related_rail_semantic_dedup_preserves_unrelated_primary_rows(self):
+        source_id = "f6c1e8b5-75b4-45f8-ae9d-ccf783c87d9b"
+        primary = {
+            "things_to_do": [
+                {
+                    "id": "legacy-card",
+                    "source_id": source_id,
+                    "name": "Legacy trail copy",
+                    "type": "attraction",
+                },
+                {
+                    "id": "far-activity",
+                    "name": "Sunset Walk",
+                    "lat": 38.5,
+                    "lng": -106.5,
+                    "type": "attraction",
+                },
+                {
+                    "id": "same-point-activity",
+                    "name": "Ranger Program",
+                    "lat": 37.7441,
+                    "lng": -105.5123,
+                    "type": "attraction",
+                },
+            ],
+        }
+        canonical = {
+            "trails": [{
+                "id": f"place:nps-child:grsa:thingstodo:{source_id}",
+                "name": "Sunset Walk",
+                "lat": 37.7441,
+                "lng": -105.5123,
+                "type": "trail",
+            }],
+        }
+
+        merged = server._merge_related_rail_sets(primary, canonical)
+
+        self.assertEqual(
+            [item["name"] for item in merged["things_to_do"]],
+            ["Sunset Walk", "Ranger Program"],
+        )
+        self.assertEqual(
+            server._merge_related_rail_sets(primary, {})["things_to_do"],
+            primary["things_to_do"],
+        )
+
     def test_legacy_provider_card_fields_are_scrubbed(self):
         stale = {
             "source": "google",

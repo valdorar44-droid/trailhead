@@ -289,3 +289,55 @@ without refetching or rebuilding B1-B5.
 
 No task-owned Metro, Gradle, Maestro, provider-fetch, candidate-builder,
 pytest, Railway-tail, or cleanup process remains running.
+
+## Paired preview completion checkpoint
+
+Recorded 2026-08-03 02:31 CDT (America/Winnipeg).
+
+- Publication source and current HEAD:
+  `b4d1d96c311789a288620c60ca108d86495b8740`.
+- Guarded preview publication completed successfully after sequential Android
+  and iOS exports, Sentry source-map uploads, paired runtime validation, and
+  server-owned update evidence checks.
+- Preview channel `019dbc97-3cde-795b-a35d-e6aa985060d3` now points to branch:
+  `preview-candidate-b4d1d96c311789a288620c60ca108d86495b8740-mscwjfnp-6ff8d80356055ca71de4820b`.
+- Branch ID: `019fc687-8f49-7874-b062-c00c2ab7e897`.
+- Android preview update:
+  - Runtime `native-1.0.10-android.7`.
+  - Update `019fc687-ab97-7567-80d0-f62f03d00a85`.
+  - Group `3b255b9f-c5c4-4c6f-85b0-42e47f42d9ec`.
+- iOS preview update:
+  - Runtime `native-1.0.10-ios.6`.
+  - Update `019fc688-032d-7809-ba53-138ef4d13ef0`.
+  - Group `6478d4ec-5063-4934-888e-04d9555e63ed`.
+- Both update records report Git commit
+  `b4d1d96c311789a288620c60ca108d86495b8740`.
+- Android and iOS Sentry artifact bundles uploaded successfully. The Android
+  bundle was already present; the iOS bundle was uploaded in this run.
+- Protected hashes remain unchanged:
+  - Explore serving index:
+    `c0726d8166ab7d110f437ff4e6acde7aa09702354f053103e3f6630a0129b869`.
+  - App Store copy:
+    `126af147b650c2f1077fb73036d26f34f940422c07a3193bade047c73b5c225a`.
+- Open B5 P0/P1 defects: none.
+- The cold-first-search Retry state remains deferred to its separate Search
+  packet; it does not reopen this accepted data-depth packet.
+- Generated export directories were removed after publication. No task-owned
+  Metro, Gradle, Maestro, Expo/EAS, Railway-tail, provider-fetch,
+  candidate-builder, pytest, or cleanup process remains running.
+
+### Exact next action
+
+Stop at this accepted B5 boundary. Begin the next Explore depth batch from
+`b4d1d96c` in a separate checkpoint; do not refetch, rebuild, or re-audit B1-B5.
+The next packet should add only a newly reviewed bounded batch and retain the
+same internal-preview isolation until its data and device proof pass.
+
+### Do not repeat
+
+- Do not repeat the Great Sand Dunes module, detail, Show Area, Map, or Back
+  proof.
+- Do not repeat broad Explore/NPS, Search, Layers, Memory, Trails, Originals,
+  Android Auto, or screenshot crawls.
+- Do not modify the public catalog or protected serving index as part of this
+  completed checkpoint.

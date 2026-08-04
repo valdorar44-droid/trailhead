@@ -10,6 +10,8 @@ import {
   getOriginalPreviewToken,
   originalRestoreScopeIsCurrent,
   originalSessionStore,
+  compileOriginalManifestV2Selections,
+  resolveOriginalManifestForPlayback,
   originalSummaryForLocalAccess,
   trackOriginalsAnalyticsEvent,
   originalsApi,
@@ -19,7 +21,10 @@ import {
   type OriginalAccessMode,
   type OriginalDetail,
   type OriginalManifestPreviewV1,
+  type OriginalManifestPreviewV2,
+  type OriginalManifest,
   type OriginalManifestV1,
+  type OriginalManifestV2,
   type OriginalLocalAccessV1,
   type OriginalOwnerScope,
   type OriginalSessionV1,
@@ -29,6 +34,7 @@ import {
 import type {
   OriginalUiAcquireResult,
   OriginalUiBundleState,
+  OriginalUiChapterSelection,
   OriginalUiDetail,
   OriginalUiSession,
   OriginalUiSource,
@@ -87,12 +93,14 @@ function originalHeroImageUrl(
 }
 
 function downloadedHeroArtwork(
-  manifest: OriginalManifestV1,
+  manifest: OriginalManifest,
   bundle: OriginalBundleRecord | null,
 ) {
   if (!bundle?.assets?.length) return undefined;
   const authoredArtworkIds = new Set(
-    manifest.stops.map(stop => stop.artwork_asset_id).filter(Boolean),
+    (manifest.schema_version === 1 ? manifest.stops : manifest.stories)
+      .map(story => story.artwork_asset_id)
+      .filter(Boolean),
   );
   return bundle.assets.find(asset => authoredArtworkIds.has(asset.id))?.local_uri
     || bundle.assets.find(asset => asset.kind === 'image')?.local_uri;
@@ -130,12 +138,34 @@ function formatCoverageRegion(value: string, fallback = 'Scenic drive') {
     .replace(/\b\w/g, character => character.toUpperCase());
 }
 
-function seasonLabel(months?: number[]) {
-  if (!months?.length) return 'Year-round';
+export function originalSeasonLabel(months?: number[]) {
   const names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const valid = months.filter(month => month >= 1 && month <= 12);
-  if (!valid.length || valid.length >= 10) return 'Year-round';
-  return `${names[valid[0] - 1]}–${names[valid[valid.length - 1] - 1]}`;
+  const valid = [...new Set((months ?? []).filter(month => Number.isInteger(month) && month >= 1 && month <= 12))]
+    .sort((left, right) => left - right);
+  if (!valid.length) return 'Seasonal';
+  if (valid.length === 12) return 'Year-round';
+  const ranges: Array<[number, number]> = [];
+  valid.forEach(month => {
+    const current = ranges[ranges.length - 1];
+    if (current && month === current[1] + 1) current[1] = month;
+    else ranges.push([month, month]);
+  });
+  return ranges.map(([start, end]) => (
+    start === end ? names[start - 1] : `${names[start - 1]}–${names[end - 1]}`
+  )).join(' · ');
+}
+
+export function originalPermanentUnlockOffer(detail: OriginalUiDetail | null | undefined) {
+  const creditCost = Number(detail?.permanentPriceCredits);
+  if (
+    detail?.accessKind !== 'explorer_subscription'
+    || !Number.isFinite(creditCost)
+    || creditCost <= 0
+  ) return null;
+  return {
+    creditCost,
+    label: `Keep permanently · ${creditCost} credits`,
+  };
 }
 
 function ownerScope(): OriginalOwnerScope {
@@ -162,6 +192,24 @@ function hasExactAccess(
 ) {
   return originalLocalAccessIsCurrent(records.get(identityKey(packId, version)))
     || originalLocalAccessIsCurrent(records.get(identityKey(slug, version)));
+}
+
+function exactAccessRecord(
+  records: Map<string, OriginalLocalAccessV1>,
+  packId: string,
+  slug: string,
+  version: number,
+  allowAdminPreview = false,
+) {
+  const candidates = [
+    records.get(identityKey(packId, version)),
+    records.get(identityKey(slug, version)),
+  ];
+  return candidates.find(candidate => originalLocalAccessIsCurrent(
+    candidate,
+    undefined,
+    { allowAdminPreview },
+  )) ?? null;
 }
 
 async function accessRecords(
@@ -213,8 +261,14 @@ async function bundleMap(scope: OriginalOwnerScope = ownerScope()) {
 }
 
 async function sessionMap(scope: OriginalOwnerScope = ownerScope()) {
-  const sessions = await originalSessionStore.list(scope).catch(() => []);
-  return new Map(sessions.map(item => [identityKey(item.pack_id, item.version), item]));
+  const sessions = (await originalSessionStore.list(scope).catch(() => []))
+    .sort((a, b) => b.updated_at_ms - a.updated_at_ms);
+  const byPack = new Map<string, OriginalSessionV1>();
+  sessions.forEach(item => {
+    const key = identityKey(item.pack_id, item.version);
+    if (!byPack.has(key)) byPack.set(key, item);
+  });
+  return byPack;
 }
 
 function summaryToUi(
@@ -258,7 +312,7 @@ function summaryToUi(
     durationLabel: textValue(meta, ['duration_label'], formatDuration(durationS)),
     distanceLabel: textValue(meta, ['distance_label'], formatDistance(distanceM)),
     surfaceLabel: textValue(meta, ['surface_label', 'surface'], 'Paved'),
-    seasonLabel: textValue(meta, ['season_label', 'season'], 'Year-round'),
+    seasonLabel: textValue(meta, ['season_label', 'season'], 'Seasonal'),
     storyCount: Math.max(1, storyCount || 1),
     offlineSizeLabel: textValue(meta, ['offline_size_label'], formatBytes(totalBytes)),
     priceCredits: item.price_credits,
@@ -324,10 +378,196 @@ function sourceList(meta: Record<string, unknown>): OriginalUiSource[] {
   });
 }
 
-function detailToUi(item: OriginalDetail, owned: boolean, bundle: OriginalBundleRecord | null, session: OriginalSessionV1 | null): OriginalUiDetail {
-  const base = summaryToUi(item, { owned, bundle, session });
+function compiledManifestSources(
+  manifest: OriginalManifestV1,
+  operational: OriginalUiSource[] = [],
+) {
+  const sources = new Map<string, OriginalUiSource>();
+  manifest.stops.forEach(stop => stop.citations.forEach(citation => {
+    const value: OriginalUiSource = {
+      label: citation.title,
+      url: citation.url,
+      role: citation.role === 'operational' ? 'operational' : 'story',
+      authority: citation.authority || undefined,
+      scope: Array.isArray(citation.scope) ? citation.scope : [],
+    };
+    sources.set(`${value.role}:${value.url || value.label}`, value);
+  }));
+  operational.forEach(source => sources.set(`${source.role}:${source.url || source.label}`, source));
+  return [...sources.values()];
+}
+
+function previewChapterSelections(
+  preview: OriginalManifestPreviewV2,
+): OriginalUiChapterSelection[] {
+  return [...preview.chapters]
+    .sort((a, b) => a.sequence - b.sequence || a.id.localeCompare(b.id))
+    .flatMap(chapter => [...chapter.variants]
+      .sort((a, b) => a.sequence - b.sequence || a.id.localeCompare(b.id))
+      .map(variant => ({
+        chapterId: chapter.id,
+        chapterSequence: chapter.sequence,
+        chapterTitle: chapter.title,
+        chapterSummary: chapter.summary,
+        variantId: variant.id,
+        variantSequence: variant.sequence,
+        variantTitle: variant.title,
+        isDefault: variant.id === chapter.default_variant_id,
+        direction: variant.direction,
+        durationLabel: formatDuration(variant.duration_s),
+        distanceLabel: formatDistance(variant.distance_m),
+        storyCount: variant.story_count,
+        cueCount: variant.cue_count,
+      })));
+}
+
+function manifestChapterSelections(
+  manifest: OriginalManifestV2,
+  sessions: OriginalSessionV1[] = [],
+): OriginalUiChapterSelection[] {
+  const chapters = new Map(manifest.chapters.map(chapter => [chapter.id, chapter]));
+  return compileOriginalManifestV2Selections(manifest).map(({ selection, compiled }) => {
+    const chapter = chapters.get(selection.chapter_id)!;
+    const routeManifest = compiled.manifest;
+    const matchingSession = sessions.find(session => (
+      session.chapter_selection?.chapter_id === selection.chapter_id
+      && session.chapter_selection.variant_id === selection.variant_id
+    )) ?? null;
+    const operational = chapter.operational_sources.map(source => ({
+      label: source.title,
+      url: source.url,
+      role: 'operational' as const,
+      authority: source.authority,
+      scope: [...source.scope],
+    }));
+    return {
+      chapterId: selection.chapter_id,
+      chapterSequence: selection.chapter_sequence,
+      chapterTitle: selection.chapter_title,
+      chapterSummary: selection.chapter_summary,
+      variantId: selection.variant_id,
+      variantSequence: selection.variant_sequence,
+      variantTitle: selection.variant_title,
+      isDefault: selection.is_default,
+      direction: selection.direction,
+      durationLabel: formatDuration(selection.duration_s),
+      distanceLabel: formatDistance(selection.distance_m),
+      storyCount: selection.story_count,
+      cueCount: selection.cue_count,
+      route: routeManifest.route,
+      stories: manifestStories(routeManifest, matchingSession),
+      surfaceLabel: routeManifest.access.surface,
+      seasonLabel: originalSeasonLabel(routeManifest.season.recommended_months),
+      safetyNotes: [
+        routeManifest.safety.summary,
+        routeManifest.safety.emergency_note,
+        ...routeManifest.safety.disclaimers,
+      ].filter(Boolean),
+      accessNotes: [
+        routeManifest.access.vehicle,
+        routeManifest.access.fees,
+        routeManifest.access.accessibility_notes,
+        routeManifest.season.closures_note,
+      ].filter(Boolean),
+      sources: compiledManifestSources(routeManifest, operational),
+    };
+  });
+}
+
+function defaultChapterSelection(
+  selections: OriginalUiChapterSelection[],
+  session?: OriginalSessionV1 | null,
+) {
+  if (session?.chapter_selection) {
+    const resumed = selections.find(selection => (
+      selection.chapterId === session.chapter_selection?.chapter_id
+      && selection.variantId === session.chapter_selection.variant_id
+    ));
+    if (resumed) return resumed;
+  }
+  return selections.find(selection => selection.isDefault) ?? selections[0];
+}
+
+export function selectOriginalUiChapter(
+  detail: OriginalUiDetail,
+  chapterId: string,
+  variantId: string,
+): OriginalUiDetail {
+  if (detail.manifestSchemaVersion !== 2) return detail;
+  const selection = detail.chapterSelections?.find(item => (
+    item.chapterId === chapterId && item.variantId === variantId
+  ));
+  if (!selection) return detail;
+  const stories = selection.stories ?? [];
+  return {
+    ...detail,
+    durationLabel: selection.durationLabel,
+    distanceLabel: selection.distanceLabel,
+    surfaceLabel: selection.surfaceLabel || detail.surfaceLabel,
+    seasonLabel: selection.seasonLabel || detail.seasonLabel,
+    storyCount: selection.storyCount,
+    cueCount: selection.cueCount,
+    overview: selection.chapterSummary,
+    routeLabel: `${selection.chapterTitle} · ${selection.variantTitle}`,
+    route: selection.route,
+    previewStory: stories.find(story => Boolean(story.transcript)),
+    stories,
+    safetyNotes: selection.safetyNotes ?? detail.safetyNotes,
+    accessNotes: selection.accessNotes ?? detail.accessNotes,
+    sources: selection.sources ?? detail.sources,
+    defaultChapterId: selection.chapterId,
+    defaultVariantId: selection.variantId,
+  };
+}
+
+function detailToUi(
+  item: OriginalDetail,
+  owned: boolean,
+  bundle: OriginalBundleRecord | null,
+  session: OriginalSessionV1 | null,
+  downloadedManifest?: OriginalManifest | null,
+  accessKind?: OriginalLocalAccessV1['access_type'],
+  selectionSessions: OriginalSessionV1[] = session ? [session] : [],
+): OriginalUiDetail {
+  const base = { ...summaryToUi(item, { owned, bundle, session }), accessKind };
   const meta = record(item.public_metadata);
   const preview = item.manifest_preview;
+  if (preview.schema_version === 2) {
+    const selections = downloadedManifest?.schema_version === 2
+      ? manifestChapterSelections(downloadedManifest, selectionSessions)
+      : previewChapterSelections(preview);
+    const selected = defaultChapterSelection(selections, session);
+    if (!selected) throw new Error('This Original does not contain a selectable route chapter.');
+    const totalOfflineBytes = numberValue(
+      meta,
+      ['offline_bytes', 'offline_size_bytes', 'bundle_bytes'],
+      Number(preview.offline_map?.estimated_bytes) || 0,
+    );
+    const initial: OriginalUiDetail = {
+      ...base,
+      manifestSchemaVersion: 2,
+      durationLabel: selected.durationLabel,
+      distanceLabel: selected.distanceLabel,
+      surfaceLabel: selected.surfaceLabel || base.surfaceLabel,
+      seasonLabel: selected.seasonLabel || base.seasonLabel,
+      storyCount: selected.storyCount,
+      cueCount: selected.cueCount,
+      offlineSizeLabel: textValue(meta, ['offline_size_label'], formatBytes(totalOfflineBytes)),
+      overview: selected.chapterSummary,
+      routeLabel: `${selected.chapterTitle} · ${selected.variantTitle}`,
+      route: selected.route,
+      previewStory: selected.stories?.find(story => Boolean(story.transcript)),
+      stories: selected.stories ?? [],
+      chapterSelections: selections,
+      defaultChapterId: selected.chapterId,
+      defaultVariantId: selected.variantId,
+      highlights: stringList(meta, ['highlights', 'route_highlights']).slice(0, 5),
+      safetyNotes: selected.safetyNotes ?? [],
+      accessNotes: selected.accessNotes ?? [],
+      sources: selected.sources ?? sourceList(meta),
+    };
+    return selectOriginalUiChapter(initial, selected.chapterId, selected.variantId);
+  }
   const stories = previewStories(preview, meta);
   const previewMeta = record(meta.preview_story);
   const previewStory = Object.keys(previewMeta).length ? {
@@ -340,10 +580,11 @@ function detailToUi(item: OriginalDetail, owned: boolean, bundle: OriginalBundle
   const totalOfflineBytes = numberValue(meta, ['offline_bytes', 'offline_size_bytes', 'bundle_bytes'], preview.offline_map?.estimated_bytes || 0);
   return {
     ...base,
+    manifestSchemaVersion: 1,
     durationLabel: textValue(meta, ['duration_label'], formatDuration(preview.route.duration_s)),
     distanceLabel: textValue(meta, ['distance_label'], formatDistance(preview.route.distance_m)),
     surfaceLabel: preview.access.surface || base.surfaceLabel,
-    seasonLabel: textValue(meta, ['season_label'], seasonLabel(preview.season.recommended_months)),
+    seasonLabel: textValue(meta, ['season_label'], originalSeasonLabel(preview.season.recommended_months)),
     storyCount: preview.stops.length,
     offlineSizeLabel: textValue(meta, ['offline_size_label'], formatBytes(totalOfflineBytes)),
     overview: textValue(meta, ['overview'], item.summary),
@@ -359,12 +600,79 @@ function detailToUi(item: OriginalDetail, owned: boolean, bundle: OriginalBundle
 }
 
 function cachedManifestToUi(
-  manifest: OriginalManifestV1,
+  manifest: OriginalManifest,
   access: OriginalLocalAccessV1,
   bundle: OriginalBundleRecord | null,
   session: OriginalSessionV1 | null,
+  selectionSessions: OriginalSessionV1[] = session ? [session] : [],
 ): OriginalUiDetail {
   const cachedMetadata = record(access.pack_summary?.public_metadata);
+  if (manifest.schema_version === 2) {
+    const selections = manifestChapterSelections(manifest, selectionSessions);
+    const selected = defaultChapterSelection(selections, session);
+    if (!selected) throw new Error('This downloaded Original has no selectable route chapter.');
+    const stories = selected.stories ?? [];
+    const terminalCount = session
+      ? new Set([
+        ...session.completed_stop_ids,
+        ...session.skipped_stop_ids,
+        ...session.missed_stop_ids,
+      ]).size
+      : 0;
+    const region = textValue(cachedMetadata, ['region', 'location_label'])
+      || formatCoverageRegion(access.pack_summary?.coverage_region || '');
+    const initial: OriginalUiDetail = {
+      id: manifest.pack_id,
+      slug: access.slug,
+      version: manifest.version,
+      title: manifest.title || access.title,
+      region,
+      summary: access.pack_summary?.summary || selected.chapterSummary,
+      durationLabel: selected.durationLabel,
+      distanceLabel: selected.distanceLabel,
+      surfaceLabel: selected.surfaceLabel || 'Scenic drive',
+      seasonLabel: selected.seasonLabel || 'Check current conditions',
+      storyCount: selected.storyCount,
+      cueCount: selected.cueCount,
+      offlineSizeLabel: formatBytes(bundle?.total_bytes ?? (
+        manifest.assets.reduce((sum, asset) => sum + asset.bytes, 0)
+        + manifest.offline_map.estimated_bytes
+      )),
+      priceCredits: access.pack_summary?.price_credits ?? 0,
+      explorerPriceCredits: access.pack_summary?.explorer_price_credits ?? 0,
+      explorerIncluded: access.pack_summary?.access_policy?.explorer_included,
+      permanentPriceCredits: access.pack_summary?.access_policy?.permanent_credit_price,
+      access: 'owned',
+      accessKind: access.access_type,
+      adminPreview: access.access_type === 'admin_preview',
+      featured: access.pack_summary?.featured ?? false,
+      heroImageUrl: originalHeroImageUrl(
+        { id: manifest.pack_id, slug: access.slug },
+        cachedMetadata,
+        downloadedHeroArtwork(manifest, bundle),
+      ),
+      progress: stories.length ? terminalCount / stories.length : 0,
+      downloadState: bundle ? 'ready' : 'not_downloaded',
+      manifestSchemaVersion: 2,
+      overview: selected.chapterSummary,
+      routeLabel: `${selected.chapterTitle} · ${selected.variantTitle}`,
+      route: selected.route,
+      previewStory: stories.find(story => Boolean(story.transcript)),
+      stories,
+      chapterSelections: selections,
+      defaultChapterId: selected.chapterId,
+      defaultVariantId: selected.variantId,
+      highlights: [
+        `${selected.storyCount} full stories · ${selected.cueCount} shorter cues`,
+        `${selected.distanceLabel} route`,
+        'Saved for offline playback',
+      ],
+      safetyNotes: selected.safetyNotes ?? [],
+      accessNotes: selected.accessNotes ?? [],
+      sources: selected.sources ?? [],
+    };
+    return selectOriginalUiChapter(initial, selected.chapterId, selected.variantId);
+  }
   const citations = new Map<string, OriginalUiSource>();
   manifest.stops.forEach(stop => stop.citations.forEach(citation => {
     citations.set(citation.url || citation.title, {
@@ -393,7 +701,7 @@ function cachedManifestToUi(
     durationLabel: formatDuration(manifest.route.duration_s),
     distanceLabel: formatDistance(manifest.route.distance_m),
     surfaceLabel: manifest.access.surface || 'Fixed route',
-    seasonLabel: seasonLabel(manifest.season.recommended_months),
+    seasonLabel: originalSeasonLabel(manifest.season.recommended_months),
     storyCount: manifest.stops.length,
     offlineSizeLabel: formatBytes(bundle?.total_bytes ?? (
       manifest.assets.reduce((sum, asset) => sum + asset.bytes, 0)
@@ -402,6 +710,7 @@ function cachedManifestToUi(
     priceCredits: 0,
     explorerPriceCredits: 0,
     access: 'owned',
+    accessKind: access.access_type,
     adminPreview: access.access_type === 'admin_preview',
     featured: false,
     heroImageUrl: originalHeroImageUrl(
@@ -411,6 +720,7 @@ function cachedManifestToUi(
     ),
     progress: manifest.stops.length ? terminalCount / manifest.stops.length : 0,
     downloadState: bundle ? 'ready' : 'not_downloaded',
+    manifestSchemaVersion: 1,
     overview: manifest.safety.summary,
     routeLabel: manifest.route.direction || 'Saved offline route',
     route: manifest.route,
@@ -449,10 +759,13 @@ async function cachedAccessDetail(access: OriginalLocalAccessV1, scope: Original
     false,
   );
   if (!manifest) return null;
-  const session = await originalSessionStore.load(scope, access.pack_id, access.version).catch(() => null);
+  const selectionSessions = (await originalSessionStore.list(scope).catch(() => []))
+    .filter(item => item.pack_id === access.pack_id && item.version === access.version)
+    .sort((left, right) => right.updated_at_ms - left.updated_at_ms);
+  const session = selectionSessions[0] ?? null;
   const verified = await originalBundleStore.verify(scope, access.pack_id, access.version);
   return {
-    ...cachedManifestToUi(manifest, access, bundle, session),
+    ...cachedManifestToUi(manifest, access, bundle, session, selectionSessions),
     downloadState: verified ? 'ready' as const : 'error' as const,
   };
 }
@@ -483,16 +796,39 @@ async function detailContext(
   requestToken: string | null,
   requestIsAdmin: boolean,
 ) {
-  const [access, bundles, sessions] = await Promise.all([
+  const [access, bundles, allSessions] = await Promise.all([
     accessRecords(scope, accountId, requestEpoch, requestToken, requestIsAdmin),
     bundleMap(scope),
-    sessionMap(scope),
+    originalSessionStore.list(scope).catch(() => []),
   ]);
   const packKey = identityKey(String(item.id), item.version);
   const slugKey = identityKey(item.slug, item.version);
   const bundle = bundles.get(packKey) || bundles.get(slugKey) || null;
-  const session = sessions.get(packKey) || sessions.get(slugKey) || null;
-  return { owned: hasExactAccess(access, String(item.id), item.slug, item.version), bundle, session };
+  const selectionSessions = allSessions
+    .filter(session => (
+      (session.pack_id === String(item.id) || session.pack_id === item.slug)
+      && session.version === item.version
+    ))
+    .sort((left, right) => right.updated_at_ms - left.updated_at_ms);
+  const session = selectionSessions[0] ?? null;
+  const exactAccess = exactAccessRecord(
+    access,
+    String(item.id),
+    item.slug,
+    item.version,
+    requestIsAdmin,
+  );
+  const manifest = bundle && exactAccess
+    ? await originalBundleStore.loadManifest(scope, bundle.pack_id, bundle.version, false).catch(() => null)
+    : null;
+  return {
+    owned: Boolean(exactAccess),
+    accessKind: exactAccess?.access_type,
+    bundle,
+    session,
+    selectionSessions,
+    manifest,
+  };
 }
 
 export async function listOriginals(_options: ListUiOptions = {}): Promise<OriginalUiSummary[]> {
@@ -706,20 +1042,40 @@ export async function getOriginalDetail(id: string, requestedVersion?: number): 
           requestIsAdmin,
         );
         if (!scopeIsCurrent()) throw new Error(ACCOUNT_CHANGED_ERROR);
-        return detailToUi(item, context.owned, context.bundle, context.session);
+      return detailToUi(
+        item,
+        context.owned,
+        context.bundle,
+       context.session,
+       context.manifest,
+       context.accessKind,
+       context.selectionSessions,
+     );
       }
       const access = (await originalAccessStore.list(scope)).find(value => (
         (value.pack_id === id || value.slug === id) && value.version === requestedVersion
       ));
       if (!scopeIsCurrent()) throw new Error(ACCOUNT_CHANGED_ERROR);
-      if (access) {
-        const [ownedManifest, ownedBundle, ownedSession] = await Promise.all([
+      if (access && originalLocalAccessIsCurrent(access, undefined, {
+        allowAdminPreview: requestIsAdmin,
+      })) {
+        const [ownedManifest, ownedBundle, ownedSessions] = await Promise.all([
           originalsApi.manifest(access.pack_id, requestedVersion, undefined, requestToken),
           originalBundleStore.get(scope, access.pack_id, requestedVersion),
-          originalSessionStore.load(scope, access.pack_id, requestedVersion),
+          originalSessionStore.list(scope).then(sessions => sessions
+            .filter(session => (
+              session.pack_id === access.pack_id && session.version === requestedVersion
+            ))
+            .sort((left, right) => right.updated_at_ms - left.updated_at_ms)),
         ]);
         if (!scopeIsCurrent()) throw new Error(ACCOUNT_CHANGED_ERROR);
-        return cachedManifestToUi(ownedManifest, access, ownedBundle, ownedSession);
+        return cachedManifestToUi(
+          ownedManifest,
+          access,
+          ownedBundle,
+          ownedSessions[0] ?? null,
+          ownedSessions,
+        );
       }
     } catch (requestError) {
       if (!scopeIsCurrent()) throw new Error(ACCOUNT_CHANGED_ERROR);

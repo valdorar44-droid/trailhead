@@ -4,7 +4,7 @@ import path from 'node:path';
 import { build, type Plugin } from 'esbuild';
 import React from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
-import { originalManifest } from './fixtures';
+import { originalManifest, originalManifestV2 } from './fixtures';
 
 type Runtime = import('../runtime').OriginalsRuntimeValue;
 type AdminRuntime = import('../runtime').OriginalsAdminRuntimeValue;
@@ -580,6 +580,29 @@ async function main() {
     await new Promise(resolve => setTimeout(resolve, 0));
   });
   assert.equal(runtime!.session, null, 'a cleared active pointer cannot resurrect historical active state after a save failure');
+  const unionManifest = originalManifestV2();
+  globals.__originalsRuntimeAuthState = { user: { id: 'driver' }, token: 'driver-token' };
+  accessOverride = async () => ({ owner_scope: 'account:driver', access_type: 'entitled' });
+  bundleOverride = async () => ({
+    ...bundle,
+    owner_scope: 'account:driver',
+    pack_id: unionManifest.pack_id,
+    version: unionManifest.version,
+    manifest_id: unionManifest.manifest_id,
+    manifest_schema_version: 2,
+  });
+  verifyOverride = async () => true;
+  await act(async () => {
+    await runtime!.startTour(unionManifest, {
+      chapter_id: 'mountain-crossing',
+      variant_id: 'westbound',
+    });
+  });
+  const startedV2Session = (runtime as unknown as Runtime).session;
+  assert.equal(startedV2Session?.chapter_selection?.chapter_id, 'mountain-crossing');
+  assert.equal(startedV2Session?.chapter_selection?.variant_id, 'westbound');
+  assert.equal(runtime!.manifest?.route.direction, 'reverse', 'foreground start compiles the selected V2 route');
+  await act(async () => { await runtime!.stopTour(); });
   accessOverride = null;
   bundleOverride = null;
   verifyOverride = null;
@@ -633,6 +656,37 @@ async function main() {
   await assert.rejects(staleFeaturedClaim, /account changed/i);
   assert.equal(featuredToken, 'token-a', 'a featured claim uses the token captured at start');
   assert.equal(entitlementWriteCount, 0, 'a stale same-account epoch cannot persist featured ownership');
+
+  let permanentAcquireOptions: Record<string, unknown> | undefined;
+  globals.__originalsRuntimeAuthState = { user: { id: 'account-a' }, token: 'token-a' };
+  globals.__originalsRuntimeEpoch = 3;
+  globals.__originalsRuntimeAcquire = async (_id, options) => {
+    permanentAcquireOptions = options as Record<string, unknown>;
+    return {
+      entitlement: {
+        pack_id: 'smokies-original',
+        version: 1,
+        access_type: 'permanent',
+        permanent: true,
+      },
+      pack: { id: 'smokies-original', version: 1 },
+      trip: {},
+      already_owned: false,
+      replayed: false,
+      credit_balance: 25,
+      upgraded_to_permanent: true,
+    };
+  };
+  const permanentAcquire = await ownershipRuntime.acquireOriginal(
+    'smokies-original',
+    1,
+    'original:smokies-original:1:permanent',
+    'permanent',
+  );
+  assert.equal(permanentAcquireOptions?.accessMode, 'permanent');
+  assert.equal(permanentAcquireOptions?.idempotencyKey, 'original:smokies-original:1:permanent');
+  assert.equal('guest_access' in permanentAcquire, false);
+  assert.equal(entitlementWriteCount, 1, 'a confirmed permanent conversion persists exactly once');
 
   const verifyEntered = deferred<void>();
   const verifyGate = deferred<boolean>();

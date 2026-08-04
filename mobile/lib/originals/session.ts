@@ -12,13 +12,18 @@ export function createOriginalSession(
   manifest: OriginalManifestV1,
   ownerScope: OriginalOwnerScope = 'guest',
   now = Date.now(),
+  chapterSelection?: NonNullable<OriginalSessionV1['chapter_selection']>,
 ): OriginalSessionV1 {
+  const selectionKey = chapterSelection
+    ? `:${chapterSelection.chapter_id}:${chapterSelection.variant_id}`
+    : '';
   return {
     schema_version: 1,
-    session_id: `${manifest.pack_id}:${manifest.version}:${now}`,
+    session_id: `${manifest.pack_id}:${manifest.version}${selectionKey}:${now}`,
     pack_id: manifest.pack_id,
     version: manifest.version,
     manifest_id: manifest.manifest_id,
+    ...(chapterSelection ? { chapter_selection: { ...chapterSelection } } : {}),
     owner_scope: ownerScope,
     status: 'ready',
     tracking_state: 'initializing',
@@ -57,8 +62,21 @@ export function normalizeOriginalSession(input: OriginalSessionV1): OriginalSess
   if (!input || input.schema_version !== 1 || !input.pack_id || !Number.isFinite(input.version)) {
     throw new Error('Invalid Trailhead Original session.');
   }
+  const chapterSelection = input.chapter_selection;
+  if (chapterSelection && (
+    chapterSelection.schema_version !== 1
+    || typeof chapterSelection.validation_selection_id !== 'string'
+    || !chapterSelection.validation_selection_id.trim()
+    || typeof chapterSelection.chapter_id !== 'string'
+    || !chapterSelection.chapter_id.trim()
+    || typeof chapterSelection.variant_id !== 'string'
+    || !chapterSelection.variant_id.trim()
+  )) {
+    throw new Error('Invalid Trailhead Original chapter selection.');
+  }
   return {
     ...input,
+    ...(chapterSelection ? { chapter_selection: { ...chapterSelection } } : {}),
     triggered_stop_ids: unique(input.triggered_stop_ids ?? []),
     completed_stop_ids: unique(input.completed_stop_ids ?? []),
     skipped_stop_ids: unique(input.skipped_stop_ids ?? []),

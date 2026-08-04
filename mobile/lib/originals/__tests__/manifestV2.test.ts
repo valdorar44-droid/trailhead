@@ -2,7 +2,12 @@ import assert from 'node:assert/strict';
 import { validateOriginalManifest } from '../manifest';
 import {
   compileOriginalManifestV2,
+  compileOriginalManifestV2Selections,
   listOriginalChapterSelections,
+  resolveOriginalManifestForPlayback,
+  resolveOriginalManifestForSession,
+  validateOriginalConsumerManifest,
+  validateOriginalManifestPreview,
   validateOriginalManifestV2,
 } from '../manifestV2';
 import type {
@@ -178,6 +183,78 @@ assert.equal(validateOriginalManifest(legacy), legacy, 'the existing V1 validato
 
 const manifest = manifestV2();
 assert.equal(validateOriginalManifestV2(manifest), manifest);
+assert.equal(validateOriginalConsumerManifest(legacy), legacy, 'the consumer discriminator preserves V1');
+assert.equal(validateOriginalConsumerManifest(manifest), manifest, 'the consumer discriminator accepts V2');
+
+const publicPreview = {
+  schema_version: 2 as const,
+  manifest_id: manifest.manifest_id,
+  pack_id: manifest.pack_id,
+  version: manifest.version,
+  locale: manifest.locale,
+  title: manifest.title,
+  chapters: listOriginalChapterSelections(manifest).reduce<Array<{
+    id: string;
+    sequence: number;
+    title: string;
+    summary: string;
+    default_variant_id: string;
+    variants: Array<{
+      id: string;
+      sequence: number;
+      title: string;
+      direction: string;
+      distance_m: number;
+      duration_s: number;
+      story_count: number;
+      cue_count: number;
+    }>;
+  }>>((chapters, selection) => {
+    let chapter = chapters.find(item => item.id === selection.chapter_id);
+    if (!chapter) {
+      const source = manifest.chapters.find(item => item.id === selection.chapter_id)!;
+      chapter = {
+        id: source.id,
+        sequence: source.sequence,
+        title: source.title,
+        summary: source.summary,
+        default_variant_id: source.default_variant_id,
+        variants: [],
+      };
+      chapters.push(chapter);
+    }
+    chapter.variants.push({
+      id: selection.variant_id,
+      sequence: selection.variant_sequence,
+      title: selection.variant_title,
+      direction: selection.direction,
+      distance_m: selection.distance_m,
+      duration_s: selection.duration_s,
+      story_count: selection.story_count,
+      cue_count: selection.cue_count,
+    });
+    return chapters;
+  }, []),
+};
+assert.equal(validateOriginalManifestPreview(publicPreview), publicPreview);
+assert.throws(
+  () => validateOriginalManifestPreview({ ...publicPreview, stories: manifest.stories }),
+  /unsupported fields: stories/,
+  'public detail previews cannot expose narration transcripts',
+);
+assert.throws(
+  () => validateOriginalManifestPreview({
+    ...publicPreview,
+    chapters: [{ ...publicPreview.chapters[0], route: manifest.chapters[1].variants[0].route }],
+  }),
+  /unsupported fields: route/,
+  'public V2 previews reject nested route geometry instead of silently retaining it',
+);
+assert.throws(
+  () => validateOriginalManifestPreview({ ...publicPreview, narration_profile: { provider: 'cartesia' } }),
+  /unsupported fields: narration_profile/,
+  'public previews reject internal provider metadata',
+);
 
 assert.deepEqual(listOriginalChapterSelections(manifest).map(selection => ({
   chapter: selection.chapter_id,
@@ -214,6 +291,16 @@ assert.deepEqual(compiledDefault.assets.map(asset => asset.id), [
 ]);
 assert.equal(validateOriginalManifest(compiledDefault), compiledDefault);
 assert.deepEqual(
+  compiledDefault.stops[0].citations[0].scope,
+  undefined,
+  'editorial claim identifiers never become reader-facing citation scope',
+);
+assert.equal(
+  compileOriginalManifestV2Selections(manifest).length,
+  3,
+  'detail hydration validates once and compiles every selectable route',
+);
+assert.deepEqual(
   compileOriginalManifestV2(manifest, { chapter_id: 'mountain-crossing' }),
   compiledDefaultResult,
   'default compilation is deterministic',
@@ -229,6 +316,45 @@ assert.notDeepEqual(compiledReverseResult.selection, compiledDefaultResult.selec
 assert.deepEqual(compiledReverse.stops.map(stop => stop.id), ['gap-cue', 'ridge-story']);
 assert.equal(compiledReverse.route.direction, 'reverse');
 
+assert.throws(
+  () => resolveOriginalManifestForPlayback(manifest),
+  /Choose a chapter and direction/,
+  'V2 playback never guesses a route variant',
+);
+const resolvedPlayback = resolveOriginalManifestForPlayback(manifest, {
+  chapter_id: 'mountain-crossing',
+  variant_id: 'westbound',
+});
+assert.equal(resolvedPlayback.source_schema_version, 2);
+assert.equal(resolvedPlayback.manifest.route.direction, 'reverse');
+assert.deepEqual(resolvedPlayback.selection, {
+  schema_version: 1,
+  validation_selection_id: 'smokies-mountain-crossing-v1',
+  chapter_id: 'mountain-crossing',
+  variant_id: 'westbound',
+});
+assert.equal(
+  resolveOriginalManifestForSession(manifest, { chapter_selection: resolvedPlayback.selection }).route.direction,
+  'reverse',
+  'restore recompiles the exact persisted route selection',
+);
+assert.throws(
+  () => resolveOriginalManifestForSession(manifest, {
+    chapter_selection: {
+      ...resolvedPlayback.selection!,
+      validation_selection_id: 'stale-selection',
+    },
+  }),
+  /validation identity no longer matches/,
+);
+assert.throws(
+  () => resolveOriginalManifestForPlayback(legacy, {
+    chapter_id: 'mountain-crossing',
+    variant_id: 'eastbound',
+  }),
+  /cannot be used with a V1 Original/,
+);
+
 function assertInvalid(mutate: (candidate: OriginalManifestV2) => void, expected: RegExp) {
   const candidate = clonedManifest();
   mutate(candidate);
@@ -238,6 +364,14 @@ function assertInvalid(mutate: (candidate: OriginalManifestV2) => void, expected
 assertInvalid(candidate => {
   candidate.stories[1].id = candidate.stories[0].id;
 }, /Story IDs must be unique/);
+
+assertInvalid(candidate => {
+  (candidate as unknown as Record<string, unknown>).narration_profile = { provider: 'cartesia' };
+}, /unsupported fields: narration_profile/);
+
+assertInvalid(candidate => {
+  (candidate.chapters[0] as unknown as Record<string, unknown>).internal_note = 'server only';
+}, /unsupported fields: internal_note/);
 
 assertInvalid(candidate => {
   candidate.chapters[1].variants[0].cue_refs[1].sequence = 3;

@@ -246,6 +246,9 @@ export type OriginalManifestV2 = {
   review: OriginalManifestV1['review'];
 };
 
+/** Consumer manifests remain one immutable V1 or V2 pack/version payload. */
+export type OriginalManifest = OriginalManifestV1 | OriginalManifestV2;
+
 export type OriginalChapterSelectionV2 = {
   chapter_id: string;
   /** Omit to compile the chapter's declared default variant. */
@@ -303,6 +306,43 @@ export type OriginalManifestPreviewV1 = {
   season: OriginalManifestV1['season'];
 };
 
+export type OriginalManifestPreviewVariantV2 = {
+  id: string;
+  sequence: number;
+  title: string;
+  direction: string;
+  distance_m: number;
+  duration_s: number;
+  story_count: number;
+  cue_count: number;
+};
+
+export type OriginalManifestPreviewChapterV2 = {
+  id: string;
+  sequence: number;
+  title: string;
+  summary: string;
+  default_variant_id: string;
+  variants: OriginalManifestPreviewVariantV2[];
+};
+
+/**
+ * Public V2 detail preview. Narration text, routes, assets, provider metadata,
+ * and editorial provenance intentionally remain absent until acquisition.
+ */
+export type OriginalManifestPreviewV2 = {
+  schema_version: 2;
+  manifest_id: string;
+  pack_id: string;
+  version: number;
+  locale: string;
+  title: string;
+  chapters: OriginalManifestPreviewChapterV2[];
+  offline_map?: Partial<OriginalOfflineMapV1>;
+};
+
+export type OriginalManifestPreview = OriginalManifestPreviewV1 | OriginalManifestPreviewV2;
+
 export type OriginalSummary = {
   id: string;
   slug: string;
@@ -332,7 +372,7 @@ export type OriginalAccessPolicyV1 = {
 export type OriginalEntitlementAccessType = 'explorer_subscription' | 'permanent';
 
 export type OriginalDetail = OriginalSummary & {
-  manifest_preview: OriginalManifestPreviewV1;
+  manifest_preview: OriginalManifestPreview;
 };
 
 export type OriginalCatalogResponse = {
@@ -433,6 +473,16 @@ export type OriginalSessionV1 = {
   pack_id: string;
   version: number;
   manifest_id: string;
+  /**
+   * Present only when a canonical V2 bundle is compiled into one selected
+   * chapter/variant for the V1 trigger engine. It is part of session identity.
+   */
+  chapter_selection?: {
+    schema_version: 1;
+    validation_selection_id: string;
+    chapter_id: string;
+    variant_id: string;
+  };
   owner_scope: OriginalOwnerScope;
   status: OriginalSessionStatus;
   tracking_state: OriginalTrackingState;

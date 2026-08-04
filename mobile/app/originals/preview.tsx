@@ -16,8 +16,14 @@ import { useStore } from '@/lib/store';
 export default function OriginalDraftPreviewScreen() {
   const C = useTheme();
   const router = useRouter();
-  const params = useLocalSearchParams<{ id?: string | string[] }>();
+  const params = useLocalSearchParams<{
+    id?: string | string[];
+    chapter?: string | string[];
+    variant?: string | string[];
+  }>();
   const id = Array.isArray(params.id) ? params.id[0] : params.id || '';
+  const chapter = Array.isArray(params.chapter) ? params.chapter[0] : params.chapter || '';
+  const variant = Array.isArray(params.variant) ? params.variant[0] : params.variant || '';
   const user = useStore(state => state.user);
   const runtime = useOriginalsRuntime();
   const adminRuntime = useOriginalsAdminRuntime();
@@ -42,7 +48,13 @@ export default function OriginalDraftPreviewScreen() {
       if (!user?.id || !user.is_admin) throw new Error('An admin account is required for unpublished draft testing.');
       setError('');
       setPhase('Checking the latest saved revision');
-      const manifest = await originalsApi.adminPreviewManifest(id);
+      const selection: { chapter_id: string; variant_id: string } | undefined = chapter && variant
+        ? { chapter_id: chapter, variant_id: variant }
+        : undefined;
+      const manifest = await originalsApi.adminPreviewManifest(id, selection);
+      if (manifest.schema_version === 2 && !selection) {
+        throw new Error('Choose a chapter and direction before opening this draft test.');
+      }
       if (!active) return;
       const scope = `account:${String(user.id)}` as const;
       const previousPreviews = (await originalAccessStore.list(scope)).filter(item => (
@@ -62,7 +74,7 @@ export default function OriginalDraftPreviewScreen() {
         await originalAccessStore.remove(scope, item.pack_id, item.version).catch(() => {});
       }));
       setPhase('Opening the trigger test');
-      await adminRuntimeRef.current.startSimulation(manifest);
+      await adminRuntimeRef.current.startSimulation(manifest, selection);
       simulationStarted = true;
       if (!active) {
         await runtimeRef.current.stopTour().catch(() => {});
@@ -71,7 +83,13 @@ export default function OriginalDraftPreviewScreen() {
       handedToPlayer = true;
       router.replace({
         pathname: '/originals/player',
-        params: { id: manifest.pack_id, version: String(manifest.version), simulate: '1' },
+        params: {
+          id: manifest.pack_id,
+          version: String(manifest.version),
+          simulate: '1',
+          chapter: selection?.chapter_id,
+          variant: selection?.variant_id,
+        },
       } as any);
     })().catch((caught: any) => {
       if (!active) return;
@@ -82,7 +100,7 @@ export default function OriginalDraftPreviewScreen() {
       abortController.abort();
       if (simulationStarted && !handedToPlayer) void runtimeRef.current.stopTour().catch(() => {});
     };
-  }, [attempt, id, router, user?.id, user?.is_admin]);
+  }, [attempt, chapter, id, router, user?.id, user?.is_admin, variant]);
 
   const progress = runtime.downloadProgress;
   const progressLabel = progress

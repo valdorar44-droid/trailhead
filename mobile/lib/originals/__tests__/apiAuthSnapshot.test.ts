@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { build, type Plugin } from 'esbuild';
+import { originalManifestV2 } from './fixtures';
 
 type OriginalsApiModule = typeof import('../api');
 
@@ -15,7 +16,10 @@ const stubs: Record<string, string> = {
       },
     };
   `,
-  './manifest': `export function validateOriginalManifest(value) { return value; }`,
+  './manifest': `
+    export class OriginalManifestError extends Error {}
+    export function validateOriginalManifest(value) { return value; }
+  `,
   './previewAccess': `export async function getOriginalPreviewToken() { return globalThis.__originalsPreviewToken || null; }`,
 };
 
@@ -64,6 +68,7 @@ async function main() {
   globals.__originalsStorageReads = 0;
   globals.__originalsStoredToken = 'later-account-token';
   globals.__originalsPreviewToken = 'short-lived-preview';
+  let responseBody: unknown = { guest_access: true, access_type: 'guest_free' };
   const previousFetch = globalThis.fetch;
   globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
     requests.push({ url: String(_url), headers: init?.headers as Record<string, string>, body: init?.body });
@@ -71,7 +76,7 @@ async function main() {
       ok: true,
       status: 200,
       statusText: 'OK',
-      json: async () => ({ guest_access: true, access_type: 'guest_free' }),
+      json: async () => responseBody,
     } as Response;
   }) as typeof fetch;
 
@@ -127,6 +132,57 @@ async function main() {
     assert.equal(requests[6]?.headers.Authorization, 'Bearer captured-account-token');
     assert.equal(requests[6]?.headers['X-Trailhead-Originals-Preview'], 'short-lived-preview');
     assert.equal(globals.__originalsStorageReads, 1, 'a pinned account probe never rereads auth storage');
+
+    const manifest = originalManifestV2();
+    const publicPreview = {
+      schema_version: 2,
+      manifest_id: manifest.manifest_id,
+      pack_id: manifest.pack_id,
+      version: manifest.version,
+      locale: manifest.locale,
+      title: manifest.title,
+      chapters: manifest.chapters.map(chapter => ({
+        id: chapter.id,
+        sequence: chapter.sequence,
+        title: chapter.title,
+        summary: chapter.summary,
+        default_variant_id: chapter.default_variant_id,
+        variants: chapter.variants.map(variant => ({
+          id: variant.id,
+          sequence: variant.sequence,
+          title: variant.title,
+          direction: variant.route.direction,
+          distance_m: variant.route.distance_m,
+          duration_s: variant.route.duration_s,
+          story_count: variant.cue_refs.length,
+          cue_count: 0,
+        })),
+      })),
+    };
+    const publicDetailResponse = {
+      id: manifest.pack_id,
+      slug: 'great-smoky-mountains-ridges-rivers-living-memory',
+      version: manifest.version,
+      manifest_preview: publicPreview,
+    };
+    responseBody = publicDetailResponse;
+    const detail = await apiModule.originalsApi.detail(manifest.pack_id, undefined, null);
+    assert.equal(detail.manifest_preview.schema_version, 2, 'the public detail parser accepts a redacted V2 preview');
+    assert.equal(requests[7]?.headers.Authorization, undefined);
+
+    responseBody = {
+      ...publicDetailResponse,
+      manifest_preview: { ...publicPreview, stories: manifest.stories },
+    };
+    await assert.rejects(
+      () => apiModule.originalsApi.detail(manifest.pack_id, undefined, null),
+      /unsupported fields: stories/,
+      'public details reject narration-bearing V2 previews',
+    );
+
+    responseBody = manifest;
+    const full = await apiModule.originalsApi.manifest(manifest.pack_id, manifest.version, undefined, null);
+    assert.equal(full.schema_version, 2, 'the acquired manifest parser accepts the complete union bundle');
   } finally {
     globalThis.fetch = previousFetch;
   }

@@ -48,12 +48,15 @@ export type OriginalUiSummary = {
   surfaceLabel: string;
   seasonLabel: string;
   storyCount: number;
+  /** Short route prompts, kept separate from full narrated stories in V2. */
+  cueCount?: number;
   offlineSizeLabel: string;
   priceCredits: number;
   explorerPriceCredits: number;
   explorerIncluded?: boolean;
   permanentPriceCredits?: number;
   access: OriginalAccessState;
+  accessKind?: 'guest_free' | 'entitled' | 'explorer_subscription' | 'permanent' | 'admin_preview';
   adminPreview?: boolean;
   featured: boolean;
   heroImageUrl?: string;
@@ -61,10 +64,37 @@ export type OriginalUiSummary = {
   downloadState?: OriginalDownloadState;
 };
 
+export type OriginalUiChapterSelection = {
+  chapterId: string;
+  chapterSequence: number;
+  chapterTitle: string;
+  chapterSummary: string;
+  variantId: string;
+  variantSequence: number;
+  variantTitle: string;
+  isDefault: boolean;
+  direction: string;
+  durationLabel: string;
+  distanceLabel: string;
+  storyCount: number;
+  cueCount: number;
+  route?: OriginalRouteV1;
+  stories?: OriginalUiStory[];
+  surfaceLabel?: string;
+  seasonLabel?: string;
+  safetyNotes?: string[];
+  accessNotes?: string[];
+  sources?: OriginalUiSource[];
+};
+
 export type OriginalUiDetail = OriginalUiSummary & {
+  manifestSchemaVersion: 1 | 2;
   overview: string;
   routeLabel: string;
-  route: OriginalRouteV1;
+  route?: OriginalRouteV1;
+  chapterSelections?: OriginalUiChapterSelection[];
+  defaultChapterId?: string;
+  defaultVariantId?: string;
   previewStory?: OriginalUiStory;
   stories: OriginalUiStory[];
   highlights: string[];

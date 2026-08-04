@@ -17,8 +17,44 @@ export type OriginalSessionStore = ReturnType<typeof createOriginalSessionStore>
 
 const emptyIndex = (): SessionIndexV1 => ({ schema_version: 1, sessions: {}, active: null });
 
-function sessionKey(packId: string, version: number) {
-  return `${encodeURIComponent(packId)}@${version}`;
+function hash32(value: string, seed: number) {
+  let hash = seed >>> 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = Math.imul(hash ^ value.charCodeAt(index), 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
+}
+
+function selectionDigest(
+  packId: string,
+  version: number,
+  selection: NonNullable<OriginalSessionV1['chapter_selection']>,
+) {
+  const identity = [
+    packId,
+    String(version),
+    selection.validation_selection_id,
+    selection.chapter_id,
+    selection.variant_id,
+  ].join('\u0000');
+  return [0x811c9dc5, 0x9e3779b9, 0x85ebca6b, 0xc2b2ae35]
+    .map(seed => hash32(identity, seed))
+    .join('');
+}
+
+function sessionKey(
+  packId: string,
+  version: number,
+  chapterSelection?: OriginalSessionV1['chapter_selection'],
+) {
+  const base = `${encodeURIComponent(packId)}@${version}`;
+  return chapterSelection
+    ? `v2~${selectionDigest(packId, version, chapterSelection)}`
+    : base;
+}
+
+function keyForSession(session: OriginalSessionV1) {
+  return sessionKey(session.pack_id, session.version, session.chapter_selection);
 }
 
 function scopeKey(scope: OriginalOwnerScope) {
@@ -30,6 +66,11 @@ function mergedGuestSession(
   account: OriginalSessionV1 | null,
   ownerScope: OriginalOwnerScope,
 ) {
+  const guestSelection = JSON.stringify(guest.chapter_selection ?? null);
+  const accountSelection = JSON.stringify(account?.chapter_selection ?? null);
+  if (account && guestSelection !== accountSelection) {
+    throw new Error('Original chapter progress cannot be merged across selections.');
+  }
   if (!account) return { ...guest, owner_scope: ownerScope, updated_at_ms: Date.now() };
   const newer = guest.updated_at_ms > account.updated_at_ms ? guest : account;
   const union = (a: string[], b: string[]) => [...new Set([...a, ...b])];
@@ -95,7 +136,22 @@ export function createOriginalSessionStore(
 
   const saveInternal = async (session: OriginalSessionV1) => {
     const clean = normalizeOriginalSession(session);
-    const key = sessionKey(clean.pack_id, clean.version);
+    const key = keyForSession(clean);
+    const colliding = await loadInternal(clean.owner_scope, key);
+    if (
+      colliding
+      && JSON.stringify({
+        pack_id: colliding.pack_id,
+        version: colliding.version,
+        selection: colliding.chapter_selection ?? null,
+      }) !== JSON.stringify({
+        pack_id: clean.pack_id,
+        version: clean.version,
+        selection: clean.chapter_selection ?? null,
+      })
+    ) {
+      throw new Error('Original chapter session identity collision.');
+    }
     await writeOriginalTextAtomically(files, pathFor(clean.owner_scope, key), JSON.stringify(clean));
     const index = await readIndex();
     const existing = index.sessions[clean.owner_scope] ?? [];
@@ -111,8 +167,13 @@ export function createOriginalSessionStore(
       return serialized(() => saveInternal(session));
     },
 
-    load(ownerScope: OriginalOwnerScope, packId: string, version: number) {
-      return serialized(() => loadInternal(ownerScope, sessionKey(packId, version)));
+    load(
+      ownerScope: OriginalOwnerScope,
+      packId: string,
+      version: number,
+      chapterSelection?: OriginalSessionV1['chapter_selection'],
+    ) {
+      return serialized(() => loadInternal(ownerScope, sessionKey(packId, version, chapterSelection)));
     },
 
     list(ownerScope: OriginalOwnerScope) {
@@ -137,7 +198,7 @@ export function createOriginalSessionStore(
         const index = await readIndex();
         index.active = {
           owner_scope: saved.owner_scope,
-          key: sessionKey(saved.pack_id, saved.version),
+          key: keyForSession(saved),
         };
         await writeIndex(index);
         return saved;
@@ -148,7 +209,7 @@ export function createOriginalSessionStore(
       return serialized(async () => {
         const clean = normalizeOriginalSession(session);
         if (!expectedSessionId || clean.session_id !== expectedSessionId) return null;
-        const key = sessionKey(clean.pack_id, clean.version);
+        const key = keyForSession(clean);
         const index = await readIndex();
         if (
           !index.active
@@ -180,9 +241,14 @@ export function createOriginalSessionStore(
       });
     },
 
-    remove(ownerScope: OriginalOwnerScope, packId: string, version: number) {
+    remove(
+      ownerScope: OriginalOwnerScope,
+      packId: string,
+      version: number,
+      chapterSelection?: OriginalSessionV1['chapter_selection'],
+    ) {
       return serialized(async () => {
-        const key = sessionKey(packId, version);
+        const key = sessionKey(packId, version, chapterSelection);
         await files.remove(pathFor(ownerScope, key)).catch(() => {});
         const index = await readIndex();
         index.sessions[ownerScope] = (index.sessions[ownerScope] ?? []).filter(value => value !== key);
@@ -215,7 +281,17 @@ export function createOriginalSessionStore(
         const allowedKeys = allowed
           ? new Set(allowed.map(value => sessionKey(value.pack_id, value.version)))
           : null;
-        const guestKeys = [...(index.sessions.guest ?? [])].filter(key => !allowedKeys || allowedKeys.has(key));
+        const guestKeys: string[] = [];
+        for (const candidateKey of index.sessions.guest ?? []) {
+          if (!allowedKeys) {
+            guestKeys.push(candidateKey);
+            continue;
+          }
+          const candidate = await loadInternal('guest', candidateKey);
+          if (candidate && allowedKeys.has(sessionKey(candidate.pack_id, candidate.version))) {
+            guestKeys.push(candidateKey);
+          }
+        }
         const migrated: OriginalSessionV1[] = [];
         for (const key of guestKeys) {
           const guest = await loadInternal('guest', key);

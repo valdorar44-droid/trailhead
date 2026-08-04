@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { OriginalManifestV1, OriginalStopV1 } from '../types';
+import type { OriginalManifestV1, OriginalManifestV2, OriginalStopV1 } from '../types';
 
 export const AUDIO_ONE = Buffer.from('story one audio');
 export const AUDIO_TWO = Buffer.from('story two audio');
@@ -72,5 +72,97 @@ export function originalManifest(version = 1): OriginalManifestV1 {
     access: { surface: 'paved', vehicle: 'passenger vehicle', fees: 'Park fees apply.', accessibility_notes: 'Check each stop.' },
     season: { recommended_months: [3, 4, 5, 9, 10], closures_note: 'Check official alerts.' },
     review: { editorial_status: 'approved', field_drive_completed_at: '2026-07-01', source_review_completed_at: '2026-07-02' },
+  };
+}
+
+export function originalManifestV2(version = 1): OriginalManifestV2 {
+  const legacy = originalManifest(version);
+  const stories = legacy.stops.map(stop => ({
+    id: stop.id,
+    kind: 'story' as const,
+    title: stop.title,
+    transcript: stop.transcript,
+    audio_asset_id: stop.audio_asset_id,
+    audio_duration_s: stop.audio_duration_s,
+    citations: [{
+      title: 'Official source',
+      url: 'https://example.gov/source',
+      publisher: 'National Park Service',
+      role: 'story' as const,
+      authority: 'official' as const,
+      reviewed_at: '2026-08-01',
+      rights_status: 'reference_only' as const,
+      affected_claims: [`${stop.id}-claim`],
+    }],
+  }));
+  const cueRefs = (reverse: boolean) => (reverse ? [...legacy.stops].reverse() : legacy.stops).map((stop, index) => ({
+    story_id: stop.id,
+    sequence: index + 1,
+    coordinates: { ...stop.coordinates },
+    trigger: { ...stop.trigger },
+  }));
+  const chapterBase = {
+    sequence: 1,
+    title: 'Mountain Crossing',
+    summary: 'A reviewed chapter for deterministic mobile tests.',
+    default_variant_id: 'eastbound',
+    safety: { ...legacy.safety, disclaimers: [...legacy.safety.disclaimers] },
+    access: { ...legacy.access },
+    season: { ...legacy.season, recommended_months: [...legacy.season.recommended_months] },
+    operational_sources: [{
+      title: 'Current conditions',
+      url: 'https://example.gov/conditions',
+      publisher: 'National Park Service',
+      reviewed_at: '2026-08-01',
+      role: 'operational' as const,
+      authority: 'official' as const,
+      scope: ['mountain-crossing-access'],
+    }],
+    operational_readiness: {
+      policy: 'required_before_start' as const,
+      source_scopes: ['mountain-crossing-access'],
+      alternate_chapter_ids: [] as string[],
+    },
+    validation_selection: {
+      selection_id: 'smokies-mountain-crossing-v1',
+      required_variant_ids: ['eastbound', 'westbound'],
+    },
+  };
+  return {
+    schema_version: 2,
+    manifest_id: `smokies-original:${version}`,
+    pack_id: 'smokies-original',
+    version,
+    locale: 'en-US',
+    title: 'Great Smoky Mountains: Ridges, Rivers & Living Memory',
+    stories,
+    chapters: [{
+      id: 'mountain-crossing',
+      ...chapterBase,
+      variants: [
+        {
+          id: 'eastbound',
+          sequence: 1,
+          title: 'Eastbound',
+          route: { ...legacy.route, geometry: { ...legacy.route.geometry, coordinates: [...legacy.route.geometry.coordinates] }, bounds: { ...legacy.route.bounds } },
+          cue_refs: cueRefs(false),
+        },
+        {
+          id: 'westbound',
+          sequence: 2,
+          title: 'Westbound',
+          route: {
+            ...legacy.route,
+            direction: 'reverse',
+            geometry: { ...legacy.route.geometry, coordinates: [...legacy.route.geometry.coordinates].reverse() },
+            bounds: { ...legacy.route.bounds },
+          },
+          cue_refs: cueRefs(true),
+        },
+      ],
+    }],
+    assets: legacy.assets.map(asset => ({ ...asset, kind: 'narration' })),
+    offline_map: { ...legacy.offline_map, bounds: { ...legacy.offline_map.bounds }, region_id: `smokies-union:${version}` },
+    review: { editorial_status: 'approved', source_review_completed_at: '2026-08-01' },
   };
 }

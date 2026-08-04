@@ -50,6 +50,10 @@ import {
   type OriginalLocationAdapter,
 } from './locationAdapter';
 import { validateOriginalManifest } from './manifest';
+import {
+  resolveOriginalManifestForPlayback,
+  resolveOriginalManifestForSession,
+} from './manifestV2';
 import { stopHeadlessOriginalRuntime } from './headlessRuntime';
 import { originalOwnerScopeForAccount, originalRestoreScopeIsCurrent } from './ownership';
 import { getOriginalPreviewToken } from './previewAccess';
@@ -76,6 +80,8 @@ import type {
   OriginalAcquisition,
   OriginalAccessMode,
   OriginalAuthenticatedAcquisition,
+  OriginalChapterSelectionV2,
+  OriginalManifest,
   OriginalManifestV1,
   OriginalOwnerScope,
   OriginalSessionV1,
@@ -125,11 +131,17 @@ export type OriginalsRuntimeValue = {
   audioPlaybackState: OriginalAudioPlaybackState | null;
   audioCapabilities: OriginalAudioAdapter['capabilities'];
   downloadOriginal: (
-    manifest: OriginalManifestV1,
+    manifest: OriginalManifest,
     options?: Omit<OriginalBundleDownloadOptions, 'onProgress' | 'ownerScope'>,
   ) => Promise<OriginalBundleRecord>;
-  startTour: (manifest: OriginalManifestV1) => Promise<OriginalSessionV1>;
-  restartTour: (manifest: OriginalManifestV1) => Promise<OriginalSessionV1>;
+  startTour: (
+    manifest: OriginalManifest,
+    selection?: OriginalChapterSelectionV2,
+  ) => Promise<OriginalSessionV1>;
+  restartTour: (
+    manifest: OriginalManifest,
+    selection?: OriginalChapterSelectionV2,
+  ) => Promise<OriginalSessionV1>;
   pauseTour: () => Promise<void>;
   resumeTour: () => Promise<void>;
   stopTour: () => Promise<void>;
@@ -150,7 +162,10 @@ export type OriginalsRuntimeValue = {
 
 /** Privileged synthetic controls intentionally excluded from the public runtime API. */
 export type OriginalsAdminRuntimeValue = {
-  startSimulation: (manifest: OriginalManifestV1) => Promise<OriginalSessionV1>;
+  startSimulation: (
+    manifest: OriginalManifest,
+    selection?: OriginalChapterSelectionV2,
+  ) => Promise<OriginalSessionV1>;
   skipSimulationCue: () => Promise<void>;
   clearSimulationDiagnostic: () => void;
   submitLocationSample: (sample: OriginalLocationSample) => Promise<void>;
@@ -630,9 +645,10 @@ export function OriginalsRuntimeProvider({
   handleExternalUserPlayRef.current = handleExternalUserPlay;
 
   const activateTour = useCallback(async (
-    manifestInput: OriginalManifestV1,
+    manifestInput: OriginalManifest,
     restart: boolean,
     simulate = false,
+    chapterSelection?: OriginalChapterSelectionV2,
   ) => {
     let activatedSessionId: string | null = null;
     const requestEpoch = accountStorage.epoch();
@@ -665,7 +681,8 @@ export function OriginalsRuntimeProvider({
       ) {
         throw new Error('Pause or end the active drive before opening the trigger test.');
       }
-      const cleanManifest = validateOriginalManifest(manifestInput);
+      const resolved = resolveOriginalManifestForPlayback(manifestInput, chapterSelection);
+      const cleanManifest = validateOriginalManifest(resolved.manifest);
       const ownerScope = await requireCurrentAccess(
         cleanManifest.pack_id,
         cleanManifest.version,
@@ -684,11 +701,16 @@ export function OriginalsRuntimeProvider({
       }
       const existing = restart || simulate
         ? null
-        : await dependencies.sessions.load(ownerScope, cleanManifest.pack_id, cleanManifest.version);
+        : await dependencies.sessions.load(
+          ownerScope,
+          cleanManifest.pack_id,
+          cleanManifest.version,
+          resolved.selection,
+        );
       requireActiveActivation();
       const now = Date.now();
       const active = {
-        ...(existing ?? createOriginalSession(cleanManifest, ownerScope, now)),
+        ...(existing ?? createOriginalSession(cleanManifest, ownerScope, now, resolved.selection)),
         status: 'active' as const,
         user_paused: false,
         download_state: 'ready' as const,
@@ -761,7 +783,7 @@ export function OriginalsRuntimeProvider({
   }, [dependencies.audio, dependencies.bundles, dependencies.sessions, playStop, publishSession, releaseAudio, requireCurrentAccess, startLocation, stopLocation]);
 
   const downloadOriginal = useCallback(async (
-    manifestInput: OriginalManifestV1,
+    manifestInput: OriginalManifest,
     options: Omit<OriginalBundleDownloadOptions, 'onProgress' | 'ownerScope'> = {},
   ) => {
     let reportDownloadAnalytics = true;
@@ -1408,12 +1430,18 @@ export function OriginalsRuntimeProvider({
     const accessAllowed = access?.owner_scope === ownerScope
       && originalLocalAccessIsCurrent(access);
     if (!accessAllowed || !scopeIsStillCurrent()) return null;
-    const [restoredManifest, restoredBundle, verified] = await Promise.all([
+    const [storedManifest, restoredBundle, verified] = await Promise.all([
       dependencies.bundles.loadManifest(ownerScope, active.pack_id, active.version, false),
       dependencies.bundles.get(ownerScope, active.pack_id, active.version),
       dependencies.bundles.verify(ownerScope, active.pack_id, active.version),
     ]);
-    if (!restoredManifest || !restoredBundle || !mountedRef.current || !scopeIsStillCurrent()) return null;
+    if (!storedManifest || !restoredBundle || !mountedRef.current || !scopeIsStillCurrent()) return null;
+    let restoredManifest: OriginalManifestV1;
+    try {
+      restoredManifest = resolveOriginalManifestForSession(storedManifest, active);
+    } catch {
+      return null;
+    }
     if (!verified) {
       const corrupt = {
         ...active,
@@ -1576,8 +1604,8 @@ export function OriginalsRuntimeProvider({
     audioPlaybackState,
     audioCapabilities: dependencies.audio.capabilities,
     downloadOriginal,
-    startTour: value => activateTour(value, false),
-    restartTour: value => activateTour(value, true),
+    startTour: (value, selection) => activateTour(value, false, false, selection),
+    restartTour: (value, selection) => activateTour(value, true, false, selection),
     pauseTour,
     resumeTour,
     stopTour,
@@ -1617,11 +1645,11 @@ export function OriginalsRuntimeProvider({
   ]);
 
   const adminValue = useMemo<OriginalsAdminRuntimeValue>(() => ({
-    startSimulation: value => {
+    startSimulation: (value, selection) => {
       if (!useStore.getState().user?.is_admin) {
         return Promise.reject(new Error('The Virtual Drive Lab is available only to Trailhead admins.'));
       }
-      return activateTour(value, true, true);
+      return activateTour(value, true, true, selection);
     },
     skipSimulationCue: () => {
       if (!useStore.getState().user?.is_admin || !simulationRef.current) {

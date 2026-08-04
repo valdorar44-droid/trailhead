@@ -12,11 +12,17 @@ import {
   useOriginalsAdminRuntime,
   useOriginalsRuntime,
   type OriginalRouteValidationReportV1,
+  type OriginalSessionV1,
   type OriginalStopV1,
   type OriginalTriggerDecisionDiagnostic,
 } from '@/lib/originals';
 import { useStore } from '@/lib/store';
-import { getOriginalDetail, manifestStories, originalSessionToUi } from '@/components/originals/originalsUiService';
+import {
+  getOriginalDetail,
+  manifestStories,
+  originalSessionToUi,
+  selectOriginalUiChapter,
+} from '@/components/originals/originalsUiService';
 import OriginalRouteMap from '@/components/originals/OriginalRouteMap';
 import OriginalFeedbackSheet from '@/components/originals/OriginalFeedbackSheet';
 import type { OriginalUiDetail, OriginalUiSession } from '@/components/originals/types';
@@ -66,16 +72,39 @@ const SIMULATION_CUE_FAILURE_CODES = new Set([
   'wrong_bearing',
 ]);
 
+function routeParam(value: string | string[] | undefined) {
+  const resolved = Array.isArray(value) ? value[0] : value;
+  return resolved?.trim() || '';
+}
+
+function sessionSelectionMatchesRequest(
+  selection: OriginalSessionV1['chapter_selection'] | undefined,
+  requestedChapterId: string,
+  requestedVariantId: string,
+) {
+  if (!requestedChapterId && !requestedVariantId) return selection == null;
+  if (!requestedChapterId || !requestedVariantId || !selection) return false;
+  return selection.chapter_id === requestedChapterId && selection.variant_id === requestedVariantId;
+}
+
 export default function OriginalPlayerScreen() {
   const C = useTheme();
   const router = useRouter();
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ id?: string | string[]; version?: string | string[]; simulate?: string | string[] }>();
-  const id = Array.isArray(params.id) ? params.id[0] : params.id || '';
-  const versionValue = Array.isArray(params.version) ? params.version[0] : params.version;
+  const params = useLocalSearchParams<{
+    id?: string | string[];
+    version?: string | string[];
+    simulate?: string | string[];
+    chapter?: string | string[];
+    variant?: string | string[];
+  }>();
+  const id = routeParam(params.id);
+  const versionValue = routeParam(params.version) || undefined;
   const requestedVersion = Number.isFinite(Number(versionValue)) ? Number(versionValue) : undefined;
-  const simulateValue = Array.isArray(params.simulate) ? params.simulate[0] : params.simulate;
+  const simulateValue = routeParam(params.simulate) || undefined;
+  const requestedChapterId = routeParam(params.chapter);
+  const requestedVariantId = routeParam(params.variant);
   const redirectConsumerToMainMap = consumerOriginalPlayerShouldRedirect(simulateValue);
   const originalsRuntime = useOriginalsRuntime();
   const originalsAdminRuntime = useOriginalsAdminRuntime();
@@ -102,42 +131,50 @@ export default function OriginalPlayerScreen() {
   const driveLabManifestKeyRef = useRef('');
   const driveLabTickBusyRef = useRef(false);
   const isAdmin = useStore(state => Boolean(state.user?.is_admin));
+  const runtimeManifest = originalsRuntime.manifest;
+  const runtimeSession = originalsRuntime.session;
+  const runtimeMatchesRequest = Boolean(
+    runtimeManifest
+    && runtimeSession
+    && runtimeSession.owner_scope === ownerScope
+    && runtimeSession.pack_id === runtimeManifest.pack_id
+    && runtimeSession.version === runtimeManifest.version
+    && runtimeSession.manifest_id === runtimeManifest.manifest_id
+    && runtimeSession.download_state === 'ready'
+    && runtimeSession.status !== 'stopped'
+    && (!id || runtimeManifest.pack_id === id)
+    && (requestedVersion == null || runtimeManifest.version === requestedVersion)
+    && sessionSelectionMatchesRequest(
+      runtimeSession.chapter_selection,
+      requestedChapterId,
+      requestedVariantId,
+    )
+  );
+  const detailRequestParams = useMemo(() => ({
+    id,
+    ...(requestedVersion == null ? {} : { version: String(requestedVersion) }),
+    ...(requestedChapterId ? { chapter: requestedChapterId } : {}),
+    ...(requestedVariantId ? { variant: requestedVariantId } : {}),
+  }), [id, requestedChapterId, requestedVariantId, requestedVersion]);
 
   useEffect(() => {
     if (!redirectConsumerToMainMap) return;
-    const runtimeManifest = originalsRuntime.manifest;
-    const runtimeSession = originalsRuntime.session;
-    const runtimeMatchesRequest = Boolean(
-      runtimeManifest
-      && runtimeSession
-      && runtimeSession.owner_scope === ownerScope
-      && runtimeSession.pack_id === runtimeManifest.pack_id
-      && runtimeSession.version === runtimeManifest.version
-      && runtimeSession.manifest_id === runtimeManifest.manifest_id
-      && runtimeSession.download_state === 'ready'
-      && runtimeSession.status !== 'stopped'
-      && (!id || runtimeManifest.pack_id === id)
-      && (requestedVersion == null || runtimeManifest.version === requestedVersion)
-    );
     if (runtimeMatchesRequest && runtimeManifest) {
       router.replace(originalStartDestination(runtimeManifest.pack_id, runtimeManifest.version) as any);
       return;
     }
     router.replace(
       id
-        ? { pathname: '/originals/[id]', params: { id, ...(requestedVersion == null ? {} : { version: String(requestedVersion) }) } } as any
+        ? { pathname: '/originals/[id]', params: detailRequestParams } as any
         : '/originals' as any,
     );
   }, [
+    detailRequestParams,
     id,
-    originalsRuntime.session,
-    originalsRuntime.manifest?.pack_id,
-    originalsRuntime.manifest?.manifest_id,
-    originalsRuntime.manifest?.version,
-    ownerScope,
     redirectConsumerToMainMap,
-    requestedVersion,
     router,
+    runtimeManifest,
+    runtimeMatchesRequest,
   ]);
 
   useEffect(() => () => {
@@ -153,15 +190,18 @@ export default function OriginalPlayerScreen() {
 
   useEffect(() => {
     const manifest = originalsRuntime.manifest;
-    if (!originalsRuntime.simulation || !isAdmin || !manifest) {
+    const activeSession = originalsRuntime.session;
+    if (!originalsRuntime.simulation || !isAdmin || !manifest || !activeSession || !runtimeMatchesRequest) {
       driveLabManifestKeyRef.current = '';
       commitDriveLabState(null);
       return;
     }
-    const manifestKey = `${manifest.manifest_id}:${manifest.version}`;
+    const selection = activeSession.chapter_selection;
+    const manifestKey = selection
+      ? `${manifest.manifest_id}:${manifest.version}:${encodeURIComponent(selection.chapter_id)}:${encodeURIComponent(selection.variant_id)}`
+      : `${manifest.manifest_id}:${manifest.version}`;
     if (driveLabManifestKeyRef.current === manifestKey && driveLabStateRef.current) return;
     driveLabManifestKeyRef.current = manifestKey;
-    const activeSession = originalsRuntime.session;
     commitDriveLabState(createOriginalVirtualDriveLabState(manifest, {
       progress_m: activeSession?.last_projected_route_progress_m ?? 0,
       speed_mps: simulationSpeedMps,
@@ -170,6 +210,8 @@ export default function OriginalPlayerScreen() {
         Number(activeSession?.last_location_timestamp_ms ?? activeSession?.updated_at_ms ?? 0) + 1_000,
       ),
     }));
+    setSimulationResults([]);
+    setValidationReport(null);
     setDriveLabError('');
   }, [
     commitDriveLabState,
@@ -177,6 +219,7 @@ export default function OriginalPlayerScreen() {
     originalsRuntime.manifest,
     originalsRuntime.session,
     originalsRuntime.simulation,
+    runtimeMatchesRequest,
     simulationSpeedMps,
   ]);
 
@@ -264,28 +307,29 @@ export default function OriginalPlayerScreen() {
     let cancelled = false;
     void getOriginalDetail(id, requestedVersion).then(nextDetail => {
       if (cancelled) return;
-      setDetail(nextDetail);
+      setDetail(
+        requestedChapterId && requestedVariantId
+          ? selectOriginalUiChapter(nextDetail, requestedChapterId, requestedVariantId)
+          : nextDetail,
+      );
     }).catch(() => {}).finally(() => !cancelled && setLoading(false));
     return () => { cancelled = true; };
-  }, [id, requestedVersion]);
+  }, [id, requestedChapterId, requestedVariantId, requestedVersion]);
 
   const session = useMemo(() => {
-    if (!originalsRuntime.session || !originalsRuntime.manifest) return null;
-    if (originalsRuntime.session.owner_scope !== ownerScope) return null;
-    if (originalsRuntime.session.pack_id !== id && originalsRuntime.manifest.pack_id !== id) return null;
+    if (!originalsRuntime.session || !originalsRuntime.manifest || !runtimeMatchesRequest) return null;
     return originalSessionToUi(originalsRuntime.session, originalsRuntime.manifest, originalsRuntime.muted);
-  }, [id, originalsRuntime.manifest, originalsRuntime.muted, originalsRuntime.session, ownerScope]);
+  }, [originalsRuntime.manifest, originalsRuntime.muted, originalsRuntime.session, runtimeMatchesRequest]);
 
   const playerDetail = useMemo(() => {
     if (
       !detail
       || !originalsRuntime.manifest
-      || originalsRuntime.session?.owner_scope !== ownerScope
-      || originalsRuntime.manifest.pack_id !== id
+      || !runtimeMatchesRequest
     ) return detail;
     const stories = manifestStories(originalsRuntime.manifest, originalsRuntime.session);
     return { ...detail, stories, storyCount: stories.length };
-  }, [detail, id, originalsRuntime.manifest, originalsRuntime.session, ownerScope]);
+  }, [detail, originalsRuntime.manifest, originalsRuntime.session, runtimeMatchesRequest]);
 
   const togglePause = useCallback(async () => {
     if (!session) return;
@@ -500,8 +544,17 @@ export default function OriginalPlayerScreen() {
   const isPaused = Boolean(session?.userPaused || session?.status === 'paused');
   const status = session?.status || 'ready';
   const needsRedownload = Boolean(
-    originalsRuntime.session?.owner_scope === ownerScope
-    && originalsRuntime.session?.pack_id === id
+    originalsRuntime.session
+    && originalsRuntime.manifest
+    && originalsRuntime.session.owner_scope === ownerScope
+    && originalsRuntime.session.pack_id === originalsRuntime.manifest.pack_id
+    && originalsRuntime.session.pack_id === id
+    && (requestedVersion == null || originalsRuntime.session.version === requestedVersion)
+    && sessionSelectionMatchesRequest(
+      originalsRuntime.session.chapter_selection,
+      requestedChapterId,
+      requestedVariantId,
+    )
     && originalsRuntime.session.download_state !== 'ready'
   );
 
@@ -529,17 +582,14 @@ export default function OriginalPlayerScreen() {
   if (loading || !playerDetail || !session || needsRedownload) {
     const canResume = Boolean(
       originalsRuntime.state !== 'error'
-      && originalsRuntime.manifest
-      && originalsRuntime.session?.download_state === 'ready'
-      && originalsRuntime.manifest.pack_id === id
-      && (requestedVersion == null || originalsRuntime.manifest.version === requestedVersion)
+      && runtimeMatchesRequest
     );
     return (
       <SafeAreaView style={[styles.center, { backgroundColor: C.bg }] }>
         {loading ? <ActivityIndicator color={C.orange} /> : <Ionicons name="pause-circle-outline" size={32} color={C.text3} />}
         <Text style={[styles.centerText, { color: C.text2 }]}>{loading ? 'Restoring your Original' : needsRedownload ? 'This offline package needs to be downloaded again' : canResume ? 'Your drive is ready to resume' : 'No active Original for this account on this device'}</Text>
         {!loading ? (
-          <TouchableOpacity accessibilityRole="button" onPress={() => canResume ? void originalsRuntime.resumeTour() : router.replace({ pathname: '/originals/[id]', params: { id, ...(requestedVersion == null ? {} : { version: String(requestedVersion) }) } } as any)} style={[styles.recoveryButton, { borderColor: C.border }] }>
+          <TouchableOpacity accessibilityRole="button" onPress={() => canResume ? void originalsRuntime.resumeTour() : router.replace({ pathname: '/originals/[id]', params: detailRequestParams } as any)} style={[styles.recoveryButton, { borderColor: C.border }] }>
             <Text style={[styles.recoveryText, { color: C.orange }]}>{canResume ? 'Resume tour' : 'Return to Original'}</Text>
           </TouchableOpacity>
         ) : null}
@@ -732,7 +782,10 @@ export default function OriginalPlayerScreen() {
                     text: 'End tour',
                     style: 'destructive',
                     onPress: () => void originalsRuntime.stopTour()
-                      .then(() => router.replace({ pathname: '/originals/[id]', params: { id, version: String(session.version) } } as any))
+                      .then(() => router.replace({ pathname: '/originals/[id]', params: {
+                        ...detailRequestParams,
+                        version: String(session.version),
+                      } } as any))
                       .catch(error => Alert.alert('Couldn’t end tour', error instanceof Error ? error.message : 'Try again.')),
                   },
                 ])}

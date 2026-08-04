@@ -27,6 +27,7 @@ const stubs: Record<string, string> = {
   '@/lib/originals': `
     export const ORIGINALS_ANALYTICS_EVENTS = { downloadResult: 'originals_download_result' };
     export const ORIGINAL_EXPLORER_ACCESS_REQUIRED = 'An active Explorer membership is required to play this Original.';
+    export function compileOriginalManifestV2Selections(...args) { return globalThis.__ownedOriginalsCompileSelections(...args); }
     export function originalLocalAccessIsCurrent(access, nowSeconds = Math.floor(Date.now() / 1000), options = {}) {
       if (!access) return false;
       if (access.access_type === 'guest_free' || access.access_type === 'entitled' || access.access_type === 'permanent') return true;
@@ -53,7 +54,7 @@ const stubs: Record<string, string> = {
       remove: async () => { globalThis.__ownedOriginalsRemovals += 1; },
     };
     export const originalSessionStore = {
-      list: async () => [],
+      list: (...args) => globalThis.__ownedOriginalsSessionList(...args),
       load: (...args) => globalThis.__ownedOriginalsSessionLoad(...args),
     };
     export const originalOwnerScopeForAccount = id => id == null ? 'guest' : 'account:' + String(id);
@@ -175,6 +176,8 @@ async function main() {
     __ownedOriginalsManifestLoad?: (...args: unknown[]) => Promise<unknown>;
     __ownedOriginalsBundleVerify?: (...args: unknown[]) => Promise<unknown>;
     __ownedOriginalsBundleDownload?: (...args: unknown[]) => Promise<unknown>;
+    __ownedOriginalsSessionList?: (...args: unknown[]) => Promise<unknown[]>;
+    __ownedOriginalsCompileSelections?: (...args: unknown[]) => unknown[];
     __ownedOriginalsSessionLoad?: (...args: unknown[]) => Promise<unknown>;
     __ownedOriginalsDetail?: (...args: unknown[]) => Promise<unknown>;
     __ownedOriginalsManifest?: (...args: unknown[]) => Promise<unknown>;
@@ -193,6 +196,8 @@ async function main() {
   globals.__ownedOriginalsManifestLoad = async () => null;
   globals.__ownedOriginalsBundleVerify = async () => false;
   globals.__ownedOriginalsBundleDownload = async () => { throw new Error('unused'); };
+  globals.__ownedOriginalsSessionList = async () => [];
+  globals.__ownedOriginalsCompileSelections = () => [];
   globals.__ownedOriginalsSessionLoad = async () => null;
   globals.__ownedOriginalsDetail = async () => { throw new Error('unused'); };
   globals.__ownedOriginalsManifest = async () => { throw new Error('unused'); };
@@ -238,16 +243,33 @@ async function main() {
     assets: [{ id: 'mesa-arch', kind: 'image', local_uri: DOWNLOADED_ARTWORK_URI }],
   };
   const manifest = {
+    schema_version: 1,
+    manifest_id: 'moab-original:1',
     pack_id: 'moab-original',
     version: 1,
+    locale: 'en-US',
     title: summary.title,
-    route: { direction: 'Moab loop', duration_s: 3600, distance_m: 10000 },
+    route: {
+      profile: 'driving',
+      direction: 'Moab loop',
+      duration_s: 3600,
+      distance_m: 10000,
+      geometry: { type: 'LineString', coordinates: [[-109.6, 38.5], [-109.5, 38.6]] },
+      bounds: { north: 38.6, south: 38.5, east: -109.5, west: -109.6 },
+    },
     stops: [],
     assets: [],
-    offline_map: { estimated_bytes: 0 },
+    offline_map: {
+      region_id: 'moab-original:1',
+      bounds: { north: 38.6, south: 38.5, east: -109.5, west: -109.6 },
+      min_zoom: 8,
+      max_zoom: 16,
+      estimated_bytes: 0,
+    },
     safety: { summary: 'Drive safely.', emergency_note: '', disclaimers: [] },
     access: { surface: 'Paved', vehicle: '', fees: '', accessibility_notes: '' },
     season: { recommended_months: [], closures_note: '' },
+    review: { editorial_status: 'approved' },
   };
   globals.__ownedOriginalsState = { user: null, token: null };
   globals.__ownedOriginalsEpoch = 2;
@@ -419,6 +441,200 @@ async function main() {
 
   globals.__ownedOriginalsAvailability = async () => { throw new Error('offline'); };
   await assert.rejects(service.listOriginals(), /availability could not be verified/i);
+
+  assert.equal(service.originalSeasonLabel([]), 'Seasonal', 'missing months never claim year-round access');
+  assert.equal(service.originalSeasonLabel([1, 2, 11, 12]), 'Jan–Feb · Nov–Dec');
+  assert.equal(
+    service.originalSeasonLabel([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]),
+    'Year-round',
+  );
+
+  const explorerOffer = service.originalPermanentUnlockOffer({
+    accessKind: 'explorer_subscription',
+    permanentPriceCredits: 900,
+  } as any);
+  assert.deepEqual(explorerOffer, {
+    creditCost: 900,
+    label: 'Keep permanently · 900 credits',
+  });
+  assert.equal(
+    service.originalPermanentUnlockOffer({ accessKind: 'permanent', permanentPriceCredits: 900 } as any),
+    null,
+    'permanent owners are never offered the same mutation again',
+  );
+
+  const expiredAccess = {
+    ...accountAccess,
+    access_type: 'explorer_subscription',
+    permanent: false,
+    access_active: true,
+    access_expires_at: Math.floor(Date.now() / 1_000) - 60,
+  };
+  let expiredManifestReads = 0;
+  globals.__ownedOriginalsState = { user: { id: 'A' }, token: 'token-a' };
+  globals.__ownedOriginalsEpoch = 10;
+  globals.__ownedOriginalsAccess = { 'account:A': [expiredAccess] };
+  globals.__ownedOriginalsAvailability = async () => ({ originals: true });
+  globals.__ownedOriginalsOwned = async () => ({ items: [] });
+  globals.__ownedOriginalsBundleList = async () => [{ ...bundle, owner_scope: 'account:A' }];
+  globals.__ownedOriginalsSessionList = async () => [];
+  globals.__ownedOriginalsManifestLoad = async () => {
+    expiredManifestReads += 1;
+    return { schema_version: 2, stories: [{ transcript: 'private narration' }] };
+  };
+  globals.__ownedOriginalsDetail = async () => ({
+    ...summary,
+    id: 'moab-original',
+    access_policy: {
+      schema_version: 1,
+      explorer_included: true,
+      permanent_credit_price: 900,
+    },
+    manifest_preview: {
+      schema_version: 2,
+      manifest_id: 'moab-original:1',
+      pack_id: 'moab-original',
+      version: 1,
+      locale: 'en-US',
+      title: summary.title,
+      chapters: [{
+        id: 'mountain-crossing',
+        sequence: 1,
+        title: 'Mountain Crossing',
+        summary: 'Public chapter summary.',
+        default_variant_id: 'eastbound',
+        variants: [{
+          id: 'eastbound',
+          sequence: 1,
+          title: 'Eastbound',
+          direction: 'forward',
+          distance_m: 12_000,
+          duration_s: 3_600,
+          story_count: 11,
+          cue_count: 0,
+        }],
+      }],
+    },
+  });
+  const expiredDetail = await service.getOriginalDetail('moab-original', 1);
+  assert.notEqual(expiredDetail.access, 'owned', 'expired Explorer access is no longer treated as owned');
+  assert.equal(expiredDetail.route, undefined, 'public detail cannot inherit downloaded route geometry');
+  assert.equal(expiredDetail.stories.length, 0, 'public detail cannot inherit downloaded transcripts');
+  assert.equal(expiredManifestReads, 0, 'expired access never reads the installed private V2 manifest');
+
+  const compiledFor = (variant: string, stopId: string) => ({
+    ...manifest,
+    stops: [{
+      id: stopId,
+      sequence: 1,
+      title: `${variant} story`,
+      coordinates: { lat: 38.55, lng: -109.55 },
+      transcript: `${variant} private transcript`,
+      audio_asset_id: 'audio-1',
+      audio_duration_s: 60,
+      trigger: {
+        enter_radius_m: 100,
+        exit_radius_m: 150,
+        lead_time_s: 0,
+        route_progress_start_m: 0,
+        route_progress_end_m: 500,
+      },
+      citations: [],
+    }],
+  });
+  const selectionItem = (variant: string) => ({
+    chapter_id: 'mountain-crossing',
+    chapter_sequence: 1,
+    chapter_title: 'Mountain Crossing',
+    chapter_summary: 'A reviewed chapter.',
+    variant_id: variant,
+    variant_sequence: variant === 'eastbound' ? 1 : 2,
+    variant_title: variant === 'eastbound' ? 'Eastbound' : 'Westbound',
+    is_default: variant === 'eastbound',
+    direction: variant,
+    distance_m: 10_000,
+    duration_s: 3_600,
+    story_count: 1,
+    cue_count: 0,
+    validation_selection_id: 'mountain-crossing-v1',
+  });
+  globals.__ownedOriginalsCompileSelections = () => [
+    { selection: selectionItem('eastbound'), compiled: { manifest: compiledFor('eastbound', 'east-story') } },
+    { selection: selectionItem('westbound'), compiled: { manifest: compiledFor('westbound', 'west-story') } },
+  ];
+  globals.__ownedOriginalsAccess = { 'account:A': [{ ...accountAccess, access_type: 'permanent' }] };
+  globals.__ownedOriginalsSessionList = async () => [{
+    pack_id: 'moab-original',
+    version: 1,
+    chapter_selection: {
+      chapter_id: 'mountain-crossing',
+      variant_id: 'eastbound',
+      validation_selection_id: 'mountain-crossing-v1',
+    },
+    completed_stop_ids: ['east-story'],
+    skipped_stop_ids: [],
+    missed_stop_ids: [],
+    updated_at_ms: 10,
+  }, {
+    pack_id: 'moab-original',
+    version: 1,
+    chapter_selection: {
+      chapter_id: 'mountain-crossing',
+      variant_id: 'westbound',
+      validation_selection_id: 'mountain-crossing-v1',
+    },
+    completed_stop_ids: [],
+    skipped_stop_ids: ['west-story'],
+    missed_stop_ids: [],
+    updated_at_ms: 20,
+  }];
+  globals.__ownedOriginalsManifestLoad = async () => ({
+    schema_version: 2,
+    manifest_id: 'moab-original:1',
+    pack_id: 'moab-original',
+    version: 1,
+    title: summary.title,
+    stories: [],
+    assets: [],
+    offline_map: { estimated_bytes: 0 },
+    chapters: [{
+      id: 'mountain-crossing',
+      operational_sources: [],
+    }],
+  });
+  const hydratedSelections = await service.getOriginalDetail('moab-original', 1);
+  const eastSelection = hydratedSelections.chapterSelections?.find(item => item.variantId === 'eastbound');
+  const westSelection = hydratedSelections.chapterSelections?.find(item => item.variantId === 'westbound');
+  assert.equal(eastSelection?.stories?.[0]?.completed, true, 'eastbound progress remains on eastbound');
+  assert.equal(westSelection?.stories?.[0]?.skipped, true, 'westbound progress remains on westbound');
+  assert.equal(westSelection?.stories?.[0]?.completed, false, 'one selection never borrows another selection progress');
+
+  const selectedV2 = service.selectOriginalUiChapter({
+    manifestSchemaVersion: 2,
+    storyCount: 77,
+    cueCount: 0,
+    chapterSelections: [{
+      chapterId: 'mountain-crossing',
+      chapterSequence: 1,
+      chapterTitle: 'Mountain Crossing',
+      chapterSummary: 'A complete crossing of the Smokies.',
+      variantId: 'eastbound',
+      variantSequence: 1,
+      variantTitle: 'Eastbound',
+      isDefault: true,
+      direction: 'forward',
+      durationLabel: '2 hr 30 min',
+      distanceLabel: '35 mi',
+      storyCount: 45,
+      cueCount: 32,
+    }],
+    stories: [],
+    safetyNotes: [],
+    accessNotes: [],
+    sources: [],
+  } as any, 'mountain-crossing', 'eastbound');
+  assert.equal(selectedV2.storyCount, 45, 'the STORIES metric counts full stories only');
+  assert.equal(selectedV2.cueCount, 32, 'shorter cues remain separately labelled');
 
   console.log('Owned Originals UI service tests passed.');
 }

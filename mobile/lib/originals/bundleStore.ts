@@ -5,9 +5,9 @@ import {
   writeOriginalTextAtomically,
   type OriginalFileAdapter,
 } from './fileAdapter';
-import { validateOriginalManifest } from './manifest';
+import { validateOriginalConsumerManifest } from './manifestV2';
 import type { OriginalOfflineMapAdapter } from './mapAdapter';
-import type { OriginalAssetV1, OriginalManifestV1, OriginalOwnerScope } from './types';
+import type { OriginalAssetV1, OriginalManifest, OriginalOwnerScope } from './types';
 
 export type OriginalBundleAssetRecord = OriginalAssetV1 & {
   local_uri: string;
@@ -19,6 +19,8 @@ export type OriginalBundleRecord = {
   pack_id: string;
   version: number;
   manifest_id: string;
+  /** Absent on existing V1 bundle records. */
+  manifest_schema_version?: 1 | 2;
   manifest_sha256: string;
   directory_uri: string;
   manifest_uri: string;
@@ -73,6 +75,17 @@ function safePart(value: string) {
   return encodeURIComponent(value).replace(/%/g, '_');
 }
 
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, entry]) => entry !== undefined)
+      .sort(([left], [right]) => left.localeCompare(right));
+    return `{${entries.map(([key, entry]) => `${JSON.stringify(key)}:${canonicalJson(entry)}`).join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
 function fileExtension(asset: OriginalAssetV1) {
   const cleanPath = asset.path.split(/[?#]/)[0];
   const pathMatch = cleanPath.match(/(\.[a-z0-9]{1,8})$/i);
@@ -91,11 +104,37 @@ function fileExtension(asset: OriginalAssetV1) {
   return byMime[asset.mime_type.toLowerCase()] ?? '.bin';
 }
 
-function resolveAssetUrl(path: string) {
-  if (/^https?:\/\//i.test(path)) return path;
-  if (path.startsWith('//')) return `https:${path}`;
+function assetRequest(path: string, headers: Record<string, string>) {
   const base = (process.env.EXPO_PUBLIC_API_URL?.trim() || 'https://api.gettrailhead.app').replace(/\/+$/, '');
-  return `${base}/${path.replace(/^\/+/, '')}`;
+  const api = new URL(`${base}/`);
+  const absolute = /^https?:\/\//i.test(path)
+    ? new URL(path)
+    : path.startsWith('//')
+      ? new URL(`https:${path}`)
+      : new URL(path.replace(/^\/+/, ''), api);
+  const configured = (process.env.EXPO_PUBLIC_ORIGINAL_ASSET_HOSTS ?? '')
+    .split(',')
+    .map(value => value.trim())
+    .filter(Boolean)
+    .map(value => new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`).origin);
+  const allowedOrigins = new Set([
+    api.origin,
+    'https://cdn.gettrailhead.app',
+    'https://assets.gettrailhead.app',
+    ...configured,
+  ]);
+  if (!allowedOrigins.has(absolute.origin)) {
+    throw new Error('Original asset host is not approved.');
+  }
+  if (absolute.origin !== api.origin && absolute.protocol !== 'https:') {
+    throw new Error('Original asset hosts outside the Trailhead API require HTTPS.');
+  }
+  return {
+    url: absolute.toString(),
+    // Account and preview credentials are valid only for the Trailhead API.
+    // Approved CDN URLs must be public or independently signed.
+    headers: absolute.origin === api.origin ? headers : {},
+  };
 }
 
 function progress(
@@ -169,11 +208,13 @@ export function createOriginalBundleStore(
       if (!/^[a-f0-9]{64}$/i.test(record.manifest_sha256 || '')) return false;
       const manifestDigest = await files.sha256(record.manifest_uri);
       if (manifestDigest.toLowerCase() !== record.manifest_sha256.toLowerCase()) return false;
-      const manifest = validateOriginalManifest(JSON.parse(await files.readText(record.manifest_uri)));
+      const manifest = validateOriginalConsumerManifest(JSON.parse(await files.readText(record.manifest_uri)));
       if (
         manifest.pack_id !== record.pack_id
         || manifest.version !== record.version
         || manifest.manifest_id !== record.manifest_id
+        || (record.manifest_schema_version != null
+          && manifest.schema_version !== record.manifest_schema_version)
       ) return false;
       if (manifest.assets.length !== record.assets.length) return false;
       for (let index = 0; index < manifest.assets.length; index += 1) {
@@ -204,9 +245,9 @@ export function createOriginalBundleStore(
   return {
     root,
 
-    download(manifestInput: OriginalManifestV1, options: OriginalBundleDownloadOptions) {
+    download(manifestInput: OriginalManifest, options: OriginalBundleDownloadOptions) {
       return serialized(async () => {
-        const manifest = validateOriginalManifest(manifestInput);
+        const manifest = validateOriginalConsumerManifest(manifestInput);
         const ownerScope = options.ownerScope;
         if (!ownerScope) throw new Error('An owner scope is required for an offline Original.');
         const totalBytes = manifest.assets.reduce((sum, asset) => sum + asset.bytes, 0)
@@ -223,13 +264,23 @@ export function createOriginalBundleStore(
         const currentScope = bundleScope(currentIndex, ownerScope);
         const existing = currentScope.records[manifest.pack_id]?.[String(manifest.version)];
         if (existing && await verifyRecordInternal(existing)) {
-          if (options.pinVersion !== false) {
-            currentScope.pinned_versions[manifest.pack_id] = manifest.version;
-          } else if (currentScope.pinned_versions[manifest.pack_id] === manifest.version) {
-            delete currentScope.pinned_versions[manifest.pack_id];
+          const installedManifest = validateOriginalConsumerManifest(
+            JSON.parse(await files.readText(existing.manifest_uri)),
+          );
+          const sameImmutableManifest = (
+            existing.manifest_id === manifest.manifest_id
+            && (existing.manifest_schema_version ?? installedManifest.schema_version) === manifest.schema_version
+            && canonicalJson(installedManifest) === canonicalJson(manifest)
+          );
+          if (sameImmutableManifest) {
+            if (options.pinVersion !== false) {
+              currentScope.pinned_versions[manifest.pack_id] = manifest.version;
+            } else if (currentScope.pinned_versions[manifest.pack_id] === manifest.version) {
+              delete currentScope.pinned_versions[manifest.pack_id];
+            }
+            await writeIndex(currentIndex);
+            return existing;
           }
-          await writeIndex(currentIndex);
-          return existing;
         }
 
         const finalDirectory = versionRoot(ownerScope, manifest.pack_id, manifest.version);
@@ -246,8 +297,9 @@ export function createOriginalBundleStore(
             const fileName = `${safePart(asset.id)}${fileExtension(asset)}`;
             const stagedUri = joinOriginalPath(stagingDirectory, 'assets', fileName);
             const finalUri = joinOriginalPath(finalDirectory, 'assets', fileName);
-            await files.download(resolveAssetUrl(asset.path), stagedUri, {
-              headers,
+            const request = assetRequest(asset.path, headers);
+            await files.download(request.url, stagedUri, {
+              headers: request.headers,
               signal: options.signal,
               onProgress: received => progress(
                 options.onProgress,
@@ -298,6 +350,7 @@ export function createOriginalBundleStore(
             pack_id: manifest.pack_id,
             version: manifest.version,
             manifest_id: manifest.manifest_id,
+            manifest_schema_version: manifest.schema_version,
             manifest_sha256: manifestSha256,
             directory_uri: finalDirectory,
             manifest_uri: joinOriginalPath(finalDirectory, 'manifest.json'),
@@ -374,7 +427,7 @@ export function createOriginalBundleStore(
         await recoverOriginalPath(files, record.directory_uri);
         if (requireVerified && !await verifyRecordInternal(record)) return null;
         try {
-          return validateOriginalManifest(JSON.parse(await files.readText(record.manifest_uri)));
+          return validateOriginalConsumerManifest(JSON.parse(await files.readText(record.manifest_uri)));
         } catch {
           return null;
         }

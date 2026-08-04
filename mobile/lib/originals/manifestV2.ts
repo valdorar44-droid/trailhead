@@ -6,10 +6,15 @@ import type {
   OriginalChapterV2,
   OriginalBoundsV1,
   OriginalManifestV1,
+  OriginalManifest,
+  OriginalManifestPreview,
+  OriginalManifestPreviewV1,
+  OriginalManifestPreviewV2,
   OriginalManifestV2,
   OriginalRouteV1,
   OriginalRouteVariantV2,
   OriginalStoryV2,
+  OriginalSessionV1,
 } from './types';
 
 function assertText(value: unknown, label: string): asserts value is string {
@@ -42,6 +47,18 @@ function assertRecord(value: unknown, label: string): asserts value is Record<st
   }
 }
 
+function assertAllowedKeys(
+  value: Record<string, unknown>,
+  label: string,
+  allowed: readonly string[],
+) {
+  const allowedKeys = new Set(allowed);
+  const unknown = Object.keys(value).filter(key => !allowedKeys.has(key));
+  if (unknown.length) {
+    throw new OriginalManifestError(`${label} contains unsupported fields: ${unknown.join(', ')}.`);
+  }
+}
+
 function assertStableId(value: unknown, label: string): asserts value is string {
   assertText(value, label);
   if (!/^[a-z0-9][a-z0-9._-]*$/i.test(value)) {
@@ -69,6 +86,7 @@ function assertUnique(values: string[], label: string) {
 
 function validateBounds(bounds: OriginalBoundsV1, label: string) {
   assertRecord(bounds, label);
+  assertAllowedKeys(bounds, label, ['north', 'south', 'east', 'west']);
   assertFinite(bounds.north, `${label}.north`, -90);
   assertFinite(bounds.south, `${label}.south`, -90);
   assertFinite(bounds.east, `${label}.east`, -180);
@@ -139,6 +157,10 @@ function assertContiguousSequence(
 function validateStory(story: OriginalStoryV2, index: number) {
   const label = `stories[${index}]`;
   assertRecord(story, label);
+  assertAllowedKeys(story, label, [
+    'id', 'kind', 'title', 'transcript', 'audio_asset_id', 'audio_duration_s',
+    'artwork_asset_id', 'citations',
+  ]);
   assertStableId(story.id, `${label}.id`);
   if (story.kind !== 'story' && story.kind !== 'cue') {
     throw new OriginalManifestError(`${label}.kind must be story or cue.`);
@@ -154,6 +176,10 @@ function validateStory(story: OriginalStoryV2, index: number) {
   story.citations.forEach((citation, citationIndex) => {
     assertRecord(citation, `${label}.citations[${citationIndex}]`);
     const citationLabel = `${label}.citations[${citationIndex}]`;
+    assertAllowedKeys(citation, citationLabel, [
+      'title', 'url', 'publisher', 'role', 'authority', 'reviewed_at',
+      'rights_status', 'affected_claims',
+    ]);
     assertText(citation.title, `${citationLabel}.title`);
     assertText(citation.url, `${citationLabel}.url`);
     assertText(citation.publisher, `${citationLabel}.publisher`);
@@ -187,6 +213,7 @@ function validateVariant(
 ) {
   const label = `chapters.${chapter.id}.variants[${index}]`;
   assertRecord(variant, label);
+  assertAllowedKeys(variant, label, ['id', 'sequence', 'title', 'route', 'cue_refs']);
   assertStableId(variant.id, `${label}.id`);
   assertPositiveInteger(variant.sequence, `${label}.sequence`);
   assertText(variant.title, `${label}.title`);
@@ -194,6 +221,16 @@ function validateVariant(
   assertContiguousSequence(variant.cue_refs, `${label}.cue_refs`);
   const refIds = variant.cue_refs.map((reference, referenceIndex) => {
     assertRecord(reference, `${label}.cue_refs[${referenceIndex}]`);
+    assertAllowedKeys(reference, `${label}.cue_refs[${referenceIndex}]`, [
+      'story_id', 'sequence', 'coordinates', 'explore_place_id', 'trigger',
+    ]);
+    assertRecord(reference.coordinates, `${label}.cue_refs[${referenceIndex}].coordinates`);
+    assertAllowedKeys(reference.coordinates, `${label}.cue_refs[${referenceIndex}].coordinates`, ['lat', 'lng']);
+    assertRecord(reference.trigger, `${label}.cue_refs[${referenceIndex}].trigger`);
+    assertAllowedKeys(reference.trigger, `${label}.cue_refs[${referenceIndex}].trigger`, [
+      'enter_radius_m', 'exit_radius_m', 'lead_time_s', 'route_progress_start_m',
+      'route_progress_end_m', 'approach_bearing_deg', 'bearing_tolerance_deg',
+    ]);
     assertStableId(reference.story_id, `${label}.cue_refs[${referenceIndex}].story_id`);
     if (!storyIds.has(reference.story_id)) {
       throw new OriginalManifestError(
@@ -209,6 +246,35 @@ function validateVariant(
     return reference.story_id;
   });
   assertUnique(refIds, `${label}.cue_refs story references`);
+}
+
+function validateRoute(route: OriginalRouteV1, label: string) {
+  assertRecord(route, label);
+  assertAllowedKeys(route, label, [
+    'profile', 'direction', 'geometry', 'bounds', 'distance_m', 'duration_s',
+  ]);
+  assertText(route.profile, `${label}.profile`);
+  assertText(route.direction, `${label}.direction`);
+  assertRecord(route.geometry, `${label}.geometry`);
+  assertAllowedKeys(route.geometry, `${label}.geometry`, ['type', 'coordinates']);
+  if (route.geometry.type !== 'LineString') {
+    throw new OriginalManifestError(`${label}.geometry must be a LineString.`);
+  }
+  assertArray(route.geometry.coordinates, `${label}.geometry.coordinates`);
+  route.geometry.coordinates.forEach((coordinate, coordinateIndex) => {
+    if (!Array.isArray(coordinate) || coordinate.length !== 2) {
+      throw new OriginalManifestError(`${label}.geometry.coordinates[${coordinateIndex}] is invalid.`);
+    }
+    assertFinite(coordinate[0], `${label}.geometry.coordinates[${coordinateIndex}][0]`, -180);
+    assertFinite(coordinate[1], `${label}.geometry.coordinates[${coordinateIndex}][1]`, -90);
+    if (Math.abs(coordinate[0]) > 180 || Math.abs(coordinate[1]) > 90) {
+      throw new OriginalManifestError(`${label}.geometry.coordinates[${coordinateIndex}] is invalid.`);
+    }
+  });
+  assertRecord(route.bounds, `${label}.bounds`);
+  validateBounds(route.bounds, `${label}.bounds`);
+  assertFinite(route.distance_m, `${label}.distance_m`, 1);
+  assertFinite(route.duration_s, `${label}.duration_s`, 1);
 }
 
 function cloneRoute(route: OriginalRouteV1): OriginalRouteV1 {
@@ -263,7 +329,6 @@ function buildCompiledManifest(
             reviewed_at: citation.reviewed_at,
             role: citation.role,
             authority: citation.authority,
-            scope: [...citation.affected_claims],
           })),
         };
       }),
@@ -311,6 +376,10 @@ export function validateOriginalManifestV2(input: unknown): OriginalManifestV2 {
   if (manifest.schema_version !== 2) {
     throw new OriginalManifestError('Unsupported Originals V2 manifest schema.');
   }
+  assertAllowedKeys(manifest, 'manifest', [
+    'schema_version', 'manifest_id', 'pack_id', 'version', 'locale', 'title',
+    'stories', 'chapters', 'assets', 'offline_map', 'review',
+  ]);
   assertText(manifest.manifest_id, 'manifest_id');
   assertStableId(manifest.pack_id, 'pack_id');
   assertPositiveInteger(manifest.version, 'version');
@@ -318,13 +387,38 @@ export function validateOriginalManifestV2(input: unknown): OriginalManifestV2 {
   assertText(manifest.title, 'title');
   assertArray(manifest.assets, 'assets');
   manifest.assets.forEach((asset, assetIndex) => {
-    assertRecord(asset, `assets[${assetIndex}]`);
-    assertText(asset.id, `assets[${assetIndex}].id`);
+    const label = `assets[${assetIndex}]`;
+    assertRecord(asset, label);
+    assertAllowedKeys(asset, label, ['id', 'kind', 'path', 'mime_type', 'bytes', 'sha256']);
+    assertStableId(asset.id, `${label}.id`);
+    assertText(asset.kind, `${label}.kind`);
+    assertText(asset.path, `${label}.path`);
+    assertText(asset.mime_type, `${label}.mime_type`);
+    assertFinite(asset.bytes, `${label}.bytes`, 1);
+    assertText(asset.sha256, `${label}.sha256`);
+    if (!/^[a-f0-9]{64}$/i.test(asset.sha256)) {
+      throw new OriginalManifestError(`${label}.sha256 must be a SHA-256 digest.`);
+    }
   });
+  assertUnique(manifest.assets.map(asset => asset.id), 'Asset IDs');
   assertRecord(manifest.offline_map, 'offline_map');
+  assertAllowedKeys(manifest.offline_map, 'offline_map', [
+    'region_id', 'bounds', 'min_zoom', 'max_zoom', 'estimated_bytes',
+  ]);
+  assertText(manifest.offline_map.region_id, 'offline_map.region_id');
   assertRecord(manifest.offline_map.bounds, 'offline_map.bounds');
   validateBounds(manifest.offline_map.bounds, 'offline_map.bounds');
+  assertFinite(manifest.offline_map.min_zoom, 'offline_map.min_zoom', 0);
+  assertFinite(manifest.offline_map.max_zoom, 'offline_map.max_zoom', 0);
+  assertFinite(manifest.offline_map.estimated_bytes, 'offline_map.estimated_bytes', 0);
+  if (manifest.offline_map.max_zoom < manifest.offline_map.min_zoom) {
+    throw new OriginalManifestError('offline_map.max_zoom must be at least min_zoom.');
+  }
   assertRecord(manifest.review, 'review');
+  assertAllowedKeys(manifest.review, 'review', [
+    'editorial_status', 'field_drive_completed_at', 'source_review_completed_at',
+  ]);
+  assertText(manifest.review.editorial_status, 'review.editorial_status');
   assertArray(manifest.stories, 'stories');
   manifest.stories.forEach(validateStory);
   const storyIds = manifest.stories.map(story => story.id);
@@ -355,11 +449,19 @@ export function validateOriginalManifestV2(input: unknown): OriginalManifestV2 {
   manifest.chapters.forEach((chapter, chapterIndex) => {
     const label = `chapters[${chapterIndex}]`;
     assertRecord(chapter, label);
+    assertAllowedKeys(chapter, label, [
+      'id', 'sequence', 'title', 'summary', 'default_variant_id', 'safety',
+      'access', 'season', 'operational_sources', 'operational_readiness',
+      'validation_selection', 'variants',
+    ]);
     assertPositiveInteger(chapter.sequence, `${label}.sequence`);
     assertText(chapter.title, `${label}.title`);
     assertText(chapter.summary, `${label}.summary`);
     assertStableId(chapter.default_variant_id, `${label}.default_variant_id`);
     assertRecord(chapter.safety, `${label}.safety`);
+    assertAllowedKeys(chapter.safety, `${label}.safety`, [
+      'summary', 'emergency_note', 'disclaimers',
+    ]);
     assertText(chapter.safety.summary, `${label}.safety.summary`);
     assertText(chapter.safety.emergency_note, `${label}.safety.emergency_note`);
     if (!Array.isArray(chapter.safety.disclaimers)) {
@@ -369,11 +471,15 @@ export function validateOriginalManifestV2(input: unknown): OriginalManifestV2 {
       assertText(disclaimer, `${label}.safety.disclaimers[${disclaimerIndex}]`);
     });
     assertRecord(chapter.access, `${label}.access`);
+    assertAllowedKeys(chapter.access, `${label}.access`, [
+      'surface', 'vehicle', 'fees', 'accessibility_notes',
+    ]);
     assertText(chapter.access.surface, `${label}.access.surface`);
     assertText(chapter.access.vehicle, `${label}.access.vehicle`);
     assertText(chapter.access.fees, `${label}.access.fees`);
     assertText(chapter.access.accessibility_notes, `${label}.access.accessibility_notes`);
     assertRecord(chapter.season, `${label}.season`);
+    assertAllowedKeys(chapter.season, `${label}.season`, ['recommended_months', 'closures_note']);
     assertArray(chapter.season.recommended_months, `${label}.season.recommended_months`);
     chapter.season.recommended_months.forEach((month, monthIndex) => {
       if (!Number.isInteger(month) || month < 1 || month > 12) {
@@ -392,6 +498,9 @@ export function validateOriginalManifestV2(input: unknown): OriginalManifestV2 {
     chapter.operational_sources.forEach((source, sourceIndex) => {
       const sourceLabel = `${label}.operational_sources[${sourceIndex}]`;
       assertRecord(source, sourceLabel);
+      assertAllowedKeys(source, sourceLabel, [
+        'title', 'url', 'publisher', 'reviewed_at', 'role', 'authority', 'scope',
+      ]);
       assertText(source.title, `${sourceLabel}.title`);
       assertText(source.url, `${sourceLabel}.url`);
       assertReviewDate(source.reviewed_at, `${sourceLabel}.reviewed_at`);
@@ -407,7 +516,11 @@ export function validateOriginalManifestV2(input: unknown): OriginalManifestV2 {
         availableScopes.add(scope);
       });
     });
-    if (chapter.operational_readiness?.policy !== 'required_before_start') {
+    assertRecord(chapter.operational_readiness, `${label}.operational_readiness`);
+    assertAllowedKeys(chapter.operational_readiness, `${label}.operational_readiness`, [
+      'policy', 'source_scopes', 'alternate_chapter_ids',
+    ]);
+    if (chapter.operational_readiness.policy !== 'required_before_start') {
       throw new OriginalManifestError(
         `${label}.operational_readiness.policy must be required_before_start.`,
       );
@@ -445,8 +558,12 @@ export function validateOriginalManifestV2(input: unknown): OriginalManifestV2 {
         );
       }
     });
+    assertRecord(chapter.validation_selection, `${label}.validation_selection`);
+    assertAllowedKeys(chapter.validation_selection, `${label}.validation_selection`, [
+      'selection_id', 'required_variant_ids',
+    ]);
     assertStableId(
-      chapter.validation_selection?.selection_id,
+      chapter.validation_selection.selection_id,
       `${label}.validation_selection.selection_id`,
     );
     validationSelectionIds.push(chapter.validation_selection.selection_id);
@@ -490,16 +607,7 @@ export function validateOriginalManifestV2(input: unknown): OriginalManifestV2 {
         referencedStoryIds,
         manifest.offline_map.bounds,
       );
-      assertRecord(variant.route, `${label}.variants[${variantIndex}].route`);
-      assertText(variant.route.profile, `${label}.variants[${variantIndex}].route.profile`);
-      assertText(variant.route.direction, `${label}.variants[${variantIndex}].route.direction`);
-      assertRecord(variant.route.geometry, `${label}.variants[${variantIndex}].route.geometry`);
-      assertArray(
-        variant.route.geometry.coordinates,
-        `${label}.variants[${variantIndex}].route.geometry.coordinates`,
-      );
-      assertRecord(variant.route.bounds, `${label}.variants[${variantIndex}].route.bounds`);
-      validateBounds(variant.route.bounds, `${label}.variants[${variantIndex}].route.bounds`);
+      validateRoute(variant.route, `${label}.variants[${variantIndex}].route`);
       assertUnionCoversRoute(
         manifest.offline_map.bounds,
         variant.route.bounds,
@@ -518,10 +626,9 @@ export function validateOriginalManifestV2(input: unknown): OriginalManifestV2 {
   return manifest;
 }
 
-export function listOriginalChapterSelections(
-  input: unknown,
+function listSelectionsFromValidatedManifest(
+  manifest: OriginalManifestV2,
 ): OriginalChapterSelectionItemV2[] {
-  const manifest = validateOriginalManifestV2(input);
   const stories = new Map(manifest.stories.map(story => [story.id, story]));
   return [...manifest.chapters]
     .sort((a, b) => a.sequence - b.sequence || a.id.localeCompare(b.id))
@@ -545,11 +652,10 @@ export function listOriginalChapterSelections(
       })));
 }
 
-export function compileOriginalManifestV2(
-  input: unknown,
+function compileSelectionFromValidatedManifest(
+  manifest: OriginalManifestV2,
   selection: OriginalChapterSelectionV2,
 ): OriginalCompiledChapterManifestV2 {
-  const manifest = validateOriginalManifestV2(input);
   const { chapter, variant } = resolveSelection(manifest, selection);
   return {
     selection: {
@@ -559,4 +665,190 @@ export function compileOriginalManifestV2(
     },
     manifest: validateOriginalManifest(buildCompiledManifest(manifest, chapter, variant)),
   };
+}
+
+export function listOriginalChapterSelections(
+  input: unknown,
+): OriginalChapterSelectionItemV2[] {
+  return listSelectionsFromValidatedManifest(validateOriginalManifestV2(input));
+}
+
+/** Validate the union once, then compile every selectable route for detail hydration. */
+export function compileOriginalManifestV2Selections(input: unknown) {
+  const manifest = validateOriginalManifestV2(input);
+  return listSelectionsFromValidatedManifest(manifest).map(selection => ({
+    selection,
+    compiled: compileSelectionFromValidatedManifest(manifest, {
+      chapter_id: selection.chapter_id,
+      variant_id: selection.variant_id,
+    }),
+  }));
+}
+
+export function compileOriginalManifestV2(
+  input: unknown,
+  selection: OriginalChapterSelectionV2,
+): OriginalCompiledChapterManifestV2 {
+  const manifest = validateOriginalManifestV2(input);
+  return compileSelectionFromValidatedManifest(manifest, selection);
+}
+
+export function validateOriginalConsumerManifest(input: unknown): OriginalManifest {
+  const schemaVersion = input && typeof input === 'object'
+    ? Number((input as { schema_version?: unknown }).schema_version)
+    : 0;
+  if (schemaVersion === 1) return validateOriginalManifest(input);
+  if (schemaVersion === 2) return validateOriginalManifestV2(input);
+  throw new OriginalManifestError('Unsupported Originals manifest schema.');
+}
+
+function validatePreviewIdentity(input: Record<string, unknown>) {
+  assertText(input.manifest_id, 'manifest_preview.manifest_id');
+  assertStableId(input.pack_id, 'manifest_preview.pack_id');
+  assertPositiveInteger(input.version, 'manifest_preview.version');
+  assertText(input.locale, 'manifest_preview.locale');
+  assertText(input.title, 'manifest_preview.title');
+}
+
+/** Validate the deliberately redacted public detail preview for either schema. */
+export function validateOriginalManifestPreview(input: unknown): OriginalManifestPreview {
+  assertRecord(input, 'manifest_preview');
+  validatePreviewIdentity(input);
+  if (input.schema_version === 1) {
+    const preview = input as unknown as OriginalManifestPreviewV1;
+    assertRecord(preview.route, 'manifest_preview.route');
+    assertRecord(preview.route.geometry, 'manifest_preview.route.geometry');
+    if (preview.route.geometry.type !== 'LineString') {
+      throw new OriginalManifestError('manifest_preview.route.geometry must be a LineString.');
+    }
+    assertArray(preview.route.geometry.coordinates, 'manifest_preview.route.geometry.coordinates');
+    assertFinite(preview.route.distance_m, 'manifest_preview.route.distance_m', 1);
+    assertFinite(preview.route.duration_s, 'manifest_preview.route.duration_s', 1);
+    assertArray(preview.stops, 'manifest_preview.stops');
+    preview.stops.forEach((stop, index) => {
+      assertRecord(stop, `manifest_preview.stops[${index}]`);
+      assertStableId(stop.id, `manifest_preview.stops[${index}].id`);
+      assertPositiveInteger(stop.sequence, `manifest_preview.stops[${index}].sequence`);
+      assertText(stop.title, `manifest_preview.stops[${index}].title`);
+      assertRecord(stop.coordinates, `manifest_preview.stops[${index}].coordinates`);
+      assertFinite(stop.coordinates.lat, `manifest_preview.stops[${index}].coordinates.lat`, -90);
+      assertFinite(stop.coordinates.lng, `manifest_preview.stops[${index}].coordinates.lng`, -180);
+    });
+    assertRecord(preview.safety, 'manifest_preview.safety');
+    assertRecord(preview.access, 'manifest_preview.access');
+    assertRecord(preview.season, 'manifest_preview.season');
+    return preview;
+  }
+  if (input.schema_version !== 2) {
+    throw new OriginalManifestError('Unsupported Originals manifest preview schema.');
+  }
+  assertAllowedKeys(input, 'manifest_preview', [
+    'schema_version', 'manifest_id', 'pack_id', 'version', 'locale', 'title',
+    'chapters', 'offline_map',
+  ]);
+  const preview = input as unknown as OriginalManifestPreviewV2;
+  if (preview.offline_map != null) {
+    assertRecord(preview.offline_map, 'manifest_preview.offline_map');
+    assertAllowedKeys(preview.offline_map, 'manifest_preview.offline_map', [
+      'region_id', 'bounds', 'min_zoom', 'max_zoom', 'estimated_bytes',
+    ]);
+    if (preview.offline_map.bounds != null) {
+      assertRecord(preview.offline_map.bounds, 'manifest_preview.offline_map.bounds');
+      validateBounds(preview.offline_map.bounds, 'manifest_preview.offline_map.bounds');
+    }
+  }
+  assertArray(preview.chapters, 'manifest_preview.chapters');
+  assertContiguousSequence(preview.chapters, 'manifest_preview.chapters');
+  const chapterIds: string[] = [];
+  preview.chapters.forEach((chapter, chapterIndex) => {
+    const label = `manifest_preview.chapters[${chapterIndex}]`;
+    assertRecord(chapter, label);
+    assertAllowedKeys(chapter, label, [
+      'id', 'sequence', 'title', 'summary', 'default_variant_id', 'variants',
+    ]);
+    assertStableId(chapter.id, `${label}.id`);
+    chapterIds.push(chapter.id);
+    assertText(chapter.title, `${label}.title`);
+    assertText(chapter.summary, `${label}.summary`);
+    assertStableId(chapter.default_variant_id, `${label}.default_variant_id`);
+    assertArray(chapter.variants, `${label}.variants`);
+    assertContiguousSequence(chapter.variants, `${label}.variants`);
+    const variantIds: string[] = [];
+    chapter.variants.forEach((variant, variantIndex) => {
+      const variantLabel = `${label}.variants[${variantIndex}]`;
+      assertRecord(variant, variantLabel);
+      assertAllowedKeys(variant, variantLabel, [
+        'id', 'sequence', 'title', 'direction', 'distance_m', 'duration_s',
+        'story_count', 'cue_count',
+      ]);
+      assertStableId(variant.id, `${variantLabel}.id`);
+      variantIds.push(variant.id);
+      assertText(variant.title, `${variantLabel}.title`);
+      assertText(variant.direction, `${variantLabel}.direction`);
+      assertFinite(variant.distance_m, `${variantLabel}.distance_m`, 1);
+      assertFinite(variant.duration_s, `${variantLabel}.duration_s`, 1);
+      if (!Number.isInteger(variant.story_count) || variant.story_count < 0) {
+        throw new OriginalManifestError(`${variantLabel}.story_count must be a non-negative integer.`);
+      }
+      if (!Number.isInteger(variant.cue_count) || variant.cue_count < 0) {
+        throw new OriginalManifestError(`${variantLabel}.cue_count must be a non-negative integer.`);
+      }
+    });
+    assertUnique(variantIds, `${label} variant IDs`);
+    if (!variantIds.includes(chapter.default_variant_id)) {
+      throw new OriginalManifestError(`${label}.default_variant_id does not reference a variant.`);
+    }
+  });
+  assertUnique(chapterIds, 'manifest_preview chapter IDs');
+  return preview;
+}
+
+export function resolveOriginalManifestForPlayback(
+  input: unknown,
+  selection?: OriginalChapterSelectionV2,
+) {
+  const manifest = validateOriginalConsumerManifest(input);
+  if (manifest.schema_version === 1) {
+    if (selection) {
+      throw new OriginalManifestError('A chapter selection cannot be used with a V1 Original.');
+    }
+    return { source_schema_version: 1 as const, manifest, selection: undefined };
+  }
+  if (!selection?.chapter_id || !selection.variant_id) {
+    throw new OriginalManifestError('Choose a chapter and direction before starting this Original.');
+  }
+  const compiled = compileOriginalManifestV2(manifest, selection);
+  return {
+    source_schema_version: 2 as const,
+    manifest: compiled.manifest,
+    selection: {
+      schema_version: 1 as const,
+      ...compiled.selection,
+    },
+  };
+}
+
+export function resolveOriginalManifestForSession(
+  input: unknown,
+  session: Pick<OriginalSessionV1, 'chapter_selection'>,
+) {
+  const manifest = validateOriginalConsumerManifest(input);
+  if (manifest.schema_version === 1) {
+    if (session.chapter_selection) {
+      throw new OriginalManifestError('The saved chapter does not match this V1 Original.');
+    }
+    return manifest;
+  }
+  const selection = session.chapter_selection;
+  if (!selection) {
+    throw new OriginalManifestError('The saved Original is missing its chapter selection.');
+  }
+  const compiled = compileOriginalManifestV2(manifest, {
+    chapter_id: selection.chapter_id,
+    variant_id: selection.variant_id,
+  });
+  if (compiled.selection.validation_selection_id !== selection.validation_selection_id) {
+    throw new OriginalManifestError('The saved chapter validation identity no longer matches this Original.');
+  }
+  return compiled.manifest;
 }

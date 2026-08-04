@@ -4,10 +4,11 @@ import type { OriginalAudioAdapter, OriginalAudioPlaybackState } from '../audioA
 import { originalAudioCoordinator } from '../audioCoordinator';
 import { createOriginalBundleStore } from '../bundleStore';
 import { createOriginalHeadlessController } from '../headlessController';
+import { compileOriginalManifestV2 } from '../manifestV2';
 import { createOriginalSession } from '../session';
 import { createOriginalSessionStore } from '../sessionStore';
-import type { OriginalGuestAcquisition, OriginalSummary } from '../types';
-import { AUDIO_ONE, AUDIO_THREE, AUDIO_TWO, originalManifest } from './fixtures';
+import type { OriginalAuthenticatedAcquisition, OriginalGuestAcquisition, OriginalSummary } from '../types';
+import { AUDIO_ONE, AUDIO_THREE, AUDIO_TWO, originalManifest, originalManifestV2 } from './fixtures';
 import { createMemoryOriginalFileAdapter } from './memoryFileAdapter';
 
 function deferred<T>() {
@@ -17,6 +18,7 @@ function deferred<T>() {
 }
 
 async function main() {
+  process.env.EXPO_PUBLIC_ORIGINAL_ASSET_HOSTS = 'https://assets.test';
   originalAudioCoordinator.reset();
   const manifest = originalManifest();
   const files = createMemoryOriginalFileAdapter({
@@ -197,6 +199,85 @@ async function main() {
   assert.equal(postStopDelivery, true, 'a post-stop GPS delivery is discarded instead of queued for the next tour');
   assert.equal(postStopTrackingCalls, 1, 'a post-stop delivery repairs any native task still emitting fixes');
   originalAudioCoordinator.reset();
+
+  const unionManifest = originalManifestV2();
+  const selected = compileOriginalManifestV2(unionManifest, {
+    chapter_id: 'mountain-crossing',
+    variant_id: 'eastbound',
+  });
+  const smokiesSummary: OriginalSummary = {
+    ...summary,
+    id: unionManifest.pack_id,
+    slug: unionManifest.pack_id,
+    version: unionManifest.version,
+    title: unionManifest.title,
+  };
+  await access.claimGuest({
+    guest_access: true,
+    access_type: 'guest_free',
+    pack: smokiesSummary,
+    manifest_path: '/api/originals/smokies-original/versions/1/manifest',
+  });
+  await bundles.download(unionManifest, { ownerScope: 'guest' });
+  await sessions.setActive({
+    ...createOriginalSession(
+      selected.manifest,
+      'guest',
+      20_000,
+      { schema_version: 1, ...selected.selection },
+    ),
+    status: 'active',
+    started_at_ms: 20_000,
+  });
+  const v2Controller = createOriginalHeadlessController({ audio, access, bundles, sessions });
+  const playsBeforeV2 = playCount;
+  const v2Handled = await v2Controller.process([
+    { lat: 0, lng: 0.0045, accuracy_m: 10, heading_deg: 90, speed_mps: 10, timestamp_ms: 21_000 },
+    { lat: 0, lng: 0.0045, accuracy_m: 10, heading_deg: 90, speed_mps: 10, timestamp_ms: 24_100 },
+  ], async () => {});
+  assert.equal(v2Handled, true);
+  assert.equal(playCount, playsBeforeV2 + 1, 'cold restore compiles and plays the exact V2 route selection');
+  assert.equal(
+    (await sessions.loadActive())?.chapter_selection?.variant_id,
+    'eastbound',
+    'cold progress remains bound to the selected route variant',
+  );
+  await v2Controller.stop();
+
+  const accountScope = 'account:expired' as const;
+  const expiredAcquisition: OriginalAuthenticatedAcquisition = {
+    entitlement: {
+      pack_id: unionManifest.pack_id,
+      version: unionManifest.version,
+      access_type: 'explorer_subscription',
+      access_active: true,
+      access_expires_at: Math.floor(Date.now() / 1_000) - 60,
+    },
+    pack: smokiesSummary,
+    trip: {},
+    already_owned: false,
+    replayed: false,
+    credit_balance: 900,
+  };
+  await access.recordEntitlement(expiredAcquisition, 'expired');
+  await sessions.setActive({
+    ...createOriginalSession(
+      selected.manifest,
+      accountScope,
+      30_000,
+      { schema_version: 1, ...selected.selection },
+    ),
+    status: 'active',
+    started_at_ms: 30_000,
+  });
+  let expiredTrackingStopped = 0;
+  const expiredController = createOriginalHeadlessController({ audio, access, bundles, sessions });
+  const playsBeforeExpired = playCount;
+  assert.equal(await expiredController.process([
+    { lat: 0, lng: 0.0045, accuracy_m: 10, heading_deg: 90, speed_mps: 10, timestamp_ms: 31_000 },
+  ], async () => { expiredTrackingStopped += 1; }), true);
+  assert.equal(playCount, playsBeforeExpired, 'expired Explorer access cannot resume narration cold');
+  assert.equal(expiredTrackingStopped, 1, 'expired access stops the native location task');
 
   console.log('Originals cold/headless controller tests passed.');
 }

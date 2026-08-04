@@ -9,7 +9,7 @@ import type {
   OriginalAuthenticatedAcquisition,
   OriginalGuestAcquisition,
   OriginalLocalAccessV1,
-  OriginalManifestV1,
+  OriginalManifest,
   OriginalOwnerScope,
 } from './types';
 
@@ -108,7 +108,9 @@ export function createOriginalAccessStore(
             : null,
           entitlement_id: acquisition.entitlement.id,
           acquisition_type: acquisition.entitlement.acquisition_type,
-          server_verified_at_ms: now,
+          // Do not label the device clock as a trusted server receipt. A
+          // future rollback-resistant anchor must come from a signed or
+          // otherwise authenticated server timestamp.
           pack_summary: acquisition.pack,
           claimed_at_ms: existing?.claimed_at_ms ?? now,
           updated_at_ms: now,
@@ -116,7 +118,7 @@ export function createOriginalAccessStore(
       });
     },
 
-    recordAdminPreview(manifest: OriginalManifestV1, accountId: string | number) {
+    recordAdminPreview(manifest: OriginalManifest, accountId: string | number) {
       return serialized(() => {
         const now = Date.now();
         return saveInternal({

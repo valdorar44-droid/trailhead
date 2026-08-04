@@ -3,6 +3,7 @@ import { createOriginalAccessStore } from '../accessStore';
 import { createOriginalBundleStore } from '../bundleStore';
 import { createOriginalFeedbackStore } from '../feedbackStore';
 import { writeOriginalTextAtomically } from '../fileAdapter';
+import { compileOriginalManifestV2 } from '../manifestV2';
 import {
   originalPackVersionAccessIsExact,
   originalRestoreScopeIsCurrent,
@@ -17,10 +18,11 @@ import {
 } from '../session';
 import { createOriginalSessionStore } from '../sessionStore';
 import type { OriginalAuthenticatedAcquisition, OriginalGuestAcquisition, OriginalSummary } from '../types';
-import { AUDIO_ONE, AUDIO_THREE, AUDIO_TWO, originalManifest } from './fixtures';
+import { AUDIO_ONE, AUDIO_THREE, AUDIO_TWO, originalManifest, originalManifestV2 } from './fixtures';
 import { createMemoryOriginalFileAdapter } from './memoryFileAdapter';
 
 async function main() {
+  process.env.EXPO_PUBLIC_ORIGINAL_ASSET_HOSTS = 'https://assets.test';
   assert.equal(originalRestoreScopeIsCurrent('account:A', 7, 7, 'A'), true);
   assert.equal(originalRestoreScopeIsCurrent('account:A', 7, 7, 'B'), false, 'A restore is rejected after a B switch');
   assert.equal(originalRestoreScopeIsCurrent('account:A', 7, 8, 'A'), false, 'stale same-account restore epochs are rejected');
@@ -39,6 +41,12 @@ async function main() {
       'https://assets.test/three.mp3': AUDIO_THREE,
     },
   });
+  const assetRequests: Array<{ url: string; headers?: Record<string, string> }> = [];
+  const fixtureDownload = files.download.bind(files);
+  files.download = async (url, destination, options = {}) => {
+    assetRequests.push({ url, headers: options.headers });
+    return fixtureDownload(url, destination, options);
+  };
   let mapReady = true;
   const mapAdapter = {
     prepare: async (_map: unknown, identity: { pack_id: string; version: number }) => ({
@@ -51,12 +59,37 @@ async function main() {
   };
   const bundles = createOriginalBundleStore(files, undefined, mapAdapter);
   const manifest = originalManifest();
-  const downloaded = await bundles.download(manifest, { ownerScope: 'guest' });
+  const downloaded = await bundles.download(manifest, {
+    ownerScope: 'guest',
+    headers: {
+      Authorization: 'Bearer account-token',
+      'X-Trailhead-Originals-Preview': 'preview-token',
+    },
+  });
   assert.equal(downloaded.version, 1);
   assert.equal((await bundles.getPinned('guest', manifest.pack_id))?.version, 1);
   assert.equal(await bundles.verify('guest', manifest.pack_id, 1), true);
   assert.equal((await bundles.loadManifest('guest', manifest.pack_id, 1))?.manifest_id, manifest.manifest_id);
   assert((await bundles.assetUri('guest', manifest.pack_id, 1, 'audio-1'))?.includes('/1/assets/'));
+  assert.deepEqual(
+    assetRequests[0]?.headers,
+    {},
+    'account and preview credentials are stripped from an approved cross-origin asset host',
+  );
+  const unapprovedAsset = originalManifest(81);
+  unapprovedAsset.assets[0].path = 'https://untrusted.example/audio.mp3';
+  await assert.rejects(
+    () => bundles.download(unapprovedAsset, {
+      ownerScope: 'guest',
+      headers: { Authorization: 'Bearer must-not-leak' },
+    }),
+    /host is not approved/i,
+  );
+  assert.equal(
+    assetRequests.some(request => request.url.includes('untrusted.example')),
+    false,
+    'an unapproved asset host is rejected before the file adapter sees it',
+  );
 
   const corruptV2 = originalManifest(2);
   corruptV2.assets[0].sha256 = 'f'.repeat(64);
@@ -100,6 +133,36 @@ async function main() {
   await bundles.download(previewLike, { ownerScope: 'guest', pinVersion: false });
   assert.equal((await bundles.getPinned('guest', manifest.pack_id))?.version, 2, 'non-pinned previews do not replace the production pin');
   assert.equal(await bundles.verify('guest', manifest.pack_id, 4), true, 'a non-pinned preview is still fully verified');
+
+  const unionManifest = originalManifestV2();
+  const unionBundle = await bundles.download(unionManifest, { ownerScope: 'guest' });
+  assert.equal(unionBundle.manifest_schema_version, 2);
+  assert.equal(await bundles.verify('guest', unionManifest.pack_id, unionManifest.version), true);
+  const loadedUnion = await bundles.loadManifest('guest', unionManifest.pack_id, unionManifest.version);
+  assert.equal(loadedUnion?.schema_version, 2, 'the offline bundle retains the raw union manifest');
+  assert.equal(
+    loadedUnion && loadedUnion.schema_version === 2 ? loadedUnion.chapters[0].variants.length : 0,
+    2,
+    'one verified bundle contains every selectable route variant',
+  );
+  const revisedUnion = {
+    ...originalManifestV2(),
+    manifest_id: `${unionManifest.manifest_id}:studio-revision-2`,
+    title: `${unionManifest.title} revised`,
+  };
+  const revisedBundle = await bundles.download(revisedUnion, { ownerScope: 'guest' });
+  assert.equal(
+    revisedBundle.manifest_id,
+    revisedUnion.manifest_id,
+    'a same-version Studio manifest with a new immutable identity replaces the stale bundle',
+  );
+  const loadedRevision = await bundles.loadManifest(
+    'guest',
+    revisedUnion.pack_id,
+    revisedUnion.version,
+  );
+  assert.equal(loadedRevision?.manifest_id, revisedUnion.manifest_id);
+  assert.equal(loadedRevision?.title, revisedUnion.title);
 
   const cancelled = new AbortController();
   cancelled.abort();
@@ -204,6 +267,73 @@ async function main() {
   await sessions.setActive(guest);
   assert.equal((await sessions.loadActive())?.session_id, guest.session_id);
   assert.equal((await sessions.list('guest')).length, 1);
+
+  const selectionFiles = createMemoryOriginalFileAdapter();
+  const selectedSessions = createOriginalSessionStore(selectionFiles);
+  const east = compileOriginalManifestV2(unionManifest, {
+    chapter_id: 'mountain-crossing',
+    variant_id: 'eastbound',
+  });
+  const west = compileOriginalManifestV2(unionManifest, {
+    chapter_id: 'mountain-crossing',
+    variant_id: 'westbound',
+  });
+  const eastSelection = { schema_version: 1 as const, ...east.selection };
+  const westSelection = { schema_version: 1 as const, ...west.selection };
+  const eastSession = createOriginalSession(east.manifest, 'guest', 1_000, eastSelection);
+  const westSession = createOriginalSession(west.manifest, 'guest', 2_000, westSelection);
+  await selectedSessions.save(eastSession);
+  await selectedSessions.save(westSession);
+  assert.equal((await selectedSessions.list('guest')).length, 2, 'two route variants coexist for one pack version');
+  assert.equal(
+    (await selectedSessions.load('guest', unionManifest.pack_id, unionManifest.version, eastSelection))?.chapter_selection?.variant_id,
+    'eastbound',
+  );
+  assert.equal(
+    (await selectedSessions.load('guest', unionManifest.pack_id, unionManifest.version, westSelection))?.chapter_selection?.variant_id,
+    'westbound',
+  );
+  assert.equal(
+    await selectedSessions.load('guest', unionManifest.pack_id, unionManifest.version),
+    null,
+    'a V2 session is never guessed from its parent pack identity',
+  );
+  assert(
+    [...selectionFiles.files.keys()].every(path => !path.includes('#')),
+    'selection-aware session paths remain valid URI/file names',
+  );
+  const maxId = `x${'a'.repeat(239)}`;
+  const maxSelection = {
+    schema_version: 1 as const,
+    validation_selection_id: maxId,
+    chapter_id: maxId,
+    variant_id: maxId,
+  };
+  await selectedSessions.save(createOriginalSession(
+    { ...east.manifest, pack_id: maxId },
+    'guest',
+    3_000,
+    maxSelection,
+  ));
+  const maxSessionFile = [...selectionFiles.files.keys()]
+    .find(file => file.includes('/sessions/guest/v2~') && file.endsWith('.json'));
+  assert(maxSessionFile, 'maximum valid V2 identities produce a session file');
+  const maxSessionBasename = maxSessionFile.split('/').pop() ?? '';
+  assert(
+    `${maxSessionBasename}.tmp`.length < 255 && `${maxSessionBasename}.bak`.length < 255,
+    'bounded V2 filenames leave room for atomic temporary and backup suffixes',
+  );
+  const migratedSelections = await selectedSessions.migrateGuestToAccount(84, [{
+    pack_id: unionManifest.pack_id,
+    version: unionManifest.version,
+  }]);
+  assert.equal(migratedSelections.length, 2, 'guest conversion migrates each selected route independently');
+  assert.equal((await selectedSessions.list('account:84')).length, 2);
+  assert.equal(
+    (await selectedSessions.list('guest')).length,
+    1,
+    'the unrelated maximum-ID session remains private to its guest owner',
+  );
 
   const accountScope = 'account:42' as const;
   await sessions.save({

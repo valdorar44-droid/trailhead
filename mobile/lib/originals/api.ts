@@ -1,17 +1,42 @@
 import { TRAILHEAD_API_BASE } from '../apiBase';
 import { storage } from '../storage';
 import type { OriginalFeedbackPayloadV1 } from './feedbackStore';
-import { validateOriginalManifest } from './manifest';
+import { OriginalManifestError } from './manifest';
+import {
+  validateOriginalConsumerManifest,
+  validateOriginalManifestPreview,
+} from './manifestV2';
 import { getOriginalPreviewToken } from './previewAccess';
 import type {
   OriginalAcquisition,
   OriginalCatalogResponse,
   OriginalDetail,
-  OriginalManifestV1,
+  OriginalManifest,
   OriginalAccessMode,
   OriginalOwnedResponse,
   OriginalSummary,
 } from './types';
+
+function validateOriginalDetailResponse(input: unknown): OriginalDetail {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new OriginalManifestError('Original detail must be an object.');
+  }
+  const detail = input as OriginalDetail;
+  if (typeof detail.id !== 'string' || !detail.id.trim()) {
+    throw new OriginalManifestError('Original detail id is required.');
+  }
+  if (typeof detail.slug !== 'string' || !detail.slug.trim()) {
+    throw new OriginalManifestError('Original detail slug is required.');
+  }
+  if (!Number.isInteger(detail.version) || detail.version < 1) {
+    throw new OriginalManifestError('Original detail version is invalid.');
+  }
+  const preview = validateOriginalManifestPreview(detail.manifest_preview);
+  if (preview.pack_id !== String(detail.id) || preview.version !== detail.version) {
+    throw new OriginalManifestError('Original detail and manifest preview identities do not match.');
+  }
+  return { ...detail, manifest_preview: preview };
+}
 
 export class OriginalsApiError extends Error {
   status: number;
@@ -115,12 +140,19 @@ export const originalsApi = {
     });
   },
 
-  async adminPreviewManifest(id: string, signal?: AbortSignal): Promise<OriginalManifestV1> {
+  async adminPreviewManifest(
+    id: string,
+    selection?: { chapter_id: string; variant_id: string },
+    signal?: AbortSignal,
+  ): Promise<OriginalManifest> {
+    const query = selection
+      ? `?chapter_id=${encodeURIComponent(selection.chapter_id)}&variant_id=${encodeURIComponent(selection.variant_id)}`
+      : '';
     const response = await originalsRequest<unknown>(
-      `/api/admin/originals/${encodeURIComponent(id)}/device-preview/manifest`,
+      `/api/admin/originals/${encodeURIComponent(id)}/device-preview/manifest${query}`,
       { signal, requireAuth: true },
     );
-    return validateOriginalManifest(response);
+    return validateOriginalConsumerManifest(response);
   },
 
   availability(signal?: AbortSignal, authToken?: string | null) {
@@ -147,11 +179,12 @@ export const originalsApi = {
     return originalsRequest<OriginalSummary>('/api/originals/featured/current', { signal });
   },
 
-  detail(idOrSlug: string, signal?: AbortSignal, authToken?: string | null) {
-    return originalsRequest<OriginalDetail>(`/api/originals/${encodeURIComponent(idOrSlug)}`, {
+  async detail(idOrSlug: string, signal?: AbortSignal, authToken?: string | null) {
+    const response = await originalsRequest<unknown>(`/api/originals/${encodeURIComponent(idOrSlug)}`, {
       signal,
       ...(authToken !== undefined ? { authToken } : {}),
     });
+    return validateOriginalDetailResponse(response);
   },
 
   acquire(id: string, options: AcquireOriginalOptions = {}) {
@@ -223,11 +256,11 @@ export const originalsApi = {
     version: number,
     signal?: AbortSignal,
     authToken?: string | null,
-  ): Promise<OriginalManifestV1> {
+  ): Promise<OriginalManifest> {
     const response = await originalsRequest<unknown>(
       `/api/originals/${encodeURIComponent(id)}/versions/${encodeURIComponent(String(version))}/manifest`,
       { signal, ...(authToken !== undefined ? { authToken } : {}) },
     );
-    return validateOriginalManifest(response);
+    return validateOriginalConsumerManifest(response);
   },
 };

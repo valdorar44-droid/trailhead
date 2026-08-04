@@ -3,6 +3,7 @@ import { originalLocalAccessIsCurrent } from './accessPolicy';
 import type { OriginalAudioAdapter, OriginalAudioPlaybackState } from './audioAdapter';
 import { originalAudioCoordinator, type OriginalAudioFocusLease } from './audioCoordinator';
 import type { OriginalBundleStore } from './bundleStore';
+import { resolveOriginalManifestForSession } from './manifestV2';
 import { completeOriginalStop, finishManualOriginalStop } from './session';
 import type { OriginalSessionStore } from './sessionStore';
 import { evaluateOriginalLocation } from './triggerEngine';
@@ -61,14 +62,20 @@ export function createOriginalHeadlessController(
     const allowed = access?.owner_scope === session.owner_scope
       && originalLocalAccessIsCurrent(access);
     if (!allowed) return { kind: 'inactive' as const };
-    const [bundle, manifest] = await Promise.all([
+    const [bundle, storedManifest] = await Promise.all([
       dependencies.bundles.get(session.owner_scope, session.pack_id, session.version),
       // StartTour already performed the full hash/map verification. Reading the
       // immutable promoted manifest here keeps a cold cue within the spike's
       // three-second budget without re-hashing the whole pack every GPS fix.
       dependencies.bundles.loadManifest(session.owner_scope, session.pack_id, session.version, false),
     ]);
-    if (!bundle || !manifest || manifest.manifest_id !== session.manifest_id) {
+    if (!bundle || !storedManifest || storedManifest.manifest_id !== session.manifest_id) {
+      return { kind: 'unavailable' as const };
+    }
+    let manifest: OriginalManifestV1;
+    try {
+      manifest = resolveOriginalManifestForSession(storedManifest, session);
+    } catch {
       return { kind: 'unavailable' as const };
     }
     return { kind: 'ready' as const, session, manifest };

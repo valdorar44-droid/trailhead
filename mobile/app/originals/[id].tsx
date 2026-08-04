@@ -33,6 +33,8 @@ import {
   downloadOriginalBundle,
   getOriginalBundleState,
   getOriginalDetail,
+  originalPermanentUnlockOffer,
+  selectOriginalUiChapter,
 } from '@/components/originals/originalsUiService';
 import type { OriginalUiBundleState, OriginalUiDetail } from '@/components/originals/types';
 import { originalStartDestination } from '@/lib/originals/mainMapNavigation';
@@ -65,7 +67,14 @@ export default function OriginalDetailScreen() {
   const originalsAdminRuntime = useOriginalsAdminRuntime();
   const [loadedDetail, setLoadedDetail] = useState<OriginalUiDetail | null>(null);
   const [detailScope, setDetailScope] = useState('');
-  const detail = detailScope === accountScope ? loadedDetail : null;
+  const baseDetail = detailScope === accountScope ? loadedDetail : null;
+  const [selectedChapterId, setSelectedChapterId] = useState('');
+  const [selectedVariantId, setSelectedVariantId] = useState('');
+  const detail = useMemo(() => (
+    baseDetail && selectedChapterId && selectedVariantId
+      ? selectOriginalUiChapter(baseDetail, selectedChapterId, selectedVariantId)
+      : baseDetail
+  ), [baseDetail, selectedChapterId, selectedVariantId]);
   const [bundle, setBundle] = useState<OriginalUiBundleState>(EMPTY_BUNDLE);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -87,6 +96,8 @@ export default function OriginalDetailScreen() {
       if (request !== loadRequestRef.current || currentScopeRef.current !== requestScope) return;
       setLoadedDetail(next);
       setDetailScope(requestScope);
+      setSelectedChapterId(next.defaultChapterId || '');
+      setSelectedVariantId(next.defaultVariantId || '');
       setBundle(nextBundle);
     } catch (loadError: any) {
       if (request !== loadRequestRef.current || currentScopeRef.current !== requestScope) return;
@@ -106,6 +117,8 @@ export default function OriginalDetailScreen() {
     setBundle(EMPTY_BUNDLE);
     setReadinessVisible(false);
     setStartVisible(false);
+    setSelectedChapterId('');
+    setSelectedVariantId('');
   }, [accountScope]);
 
   useEffect(() => {
@@ -137,6 +150,7 @@ export default function OriginalDetailScreen() {
     && user,
   );
   const explorerAccessIncluded = Boolean(detail?.explorerIncluded && hasPlan && user);
+  const permanentUnlockOffer = originalPermanentUnlockOffer(detail);
 
   const acquire = useCallback(async () => {
     if (!detail) return;
@@ -177,7 +191,25 @@ export default function OriginalDetailScreen() {
         );
         return;
       }
-      setLoadedDetail(current => current ? { ...current, access: 'owned' } : current);
+      const authenticatedResult = 'entitlement' in result ? result : null;
+      const acquiredAccessKind = !authenticatedResult
+        ? 'guest_free' as const
+        : authenticatedResult.entitlement.access_type === 'explorer_subscription'
+          ? 'explorer_subscription' as const
+          : authenticatedResult.entitlement.permanent === true || accessMode === 'permanent'
+            ? 'permanent' as const
+            : 'entitled' as const;
+      if (authenticatedResult && Number.isFinite(authenticatedResult.credit_balance)) {
+        const currentUser = useStore.getState().user;
+        if (currentUser && currentUser.id === user?.id) {
+          useStore.setState({ user: { ...currentUser, credits: authenticatedResult.credit_balance } });
+        }
+      }
+      setLoadedDetail(current => current ? {
+        ...current,
+        access: 'owned',
+        accessKind: acquiredAccessKind,
+      } : current);
       setReadinessVisible(true);
     } catch (acquireError: any) {
       Alert.alert('Original not unlocked', acquireError?.message || 'Check your connection and credit balance, then try again.');
@@ -185,6 +217,63 @@ export default function OriginalDetailScreen() {
       setBusy(false);
     }
   }, [canClaimFeatured, detail, explorerAccessIncluded, originalsRuntime, router, user]);
+
+  const keepPermanently = useCallback(async () => {
+    if (!detail || !permanentUnlockOffer || !user) return;
+    setBusy(true);
+    try {
+      const result = await originalsRuntime.acquireOriginal(
+        detail.id,
+        detail.version,
+        `original:${detail.id}:${detail.version}:permanent`,
+        'permanent',
+      );
+      const authenticatedResult = 'entitlement' in result ? result : null;
+      if (
+        !authenticatedResult
+        || !originalPackVersionAccessIsExact(
+          result.pack.id,
+          result.pack.version,
+          detail.id,
+          detail.version,
+        )
+      ) {
+        throw new Error('The permanent access response did not match this Original.');
+      }
+      const currentUser = useStore.getState().user;
+      if (currentUser?.id === user.id && Number.isFinite(authenticatedResult.credit_balance)) {
+        useStore.setState({ user: { ...currentUser, credits: authenticatedResult.credit_balance } });
+      }
+      setLoadedDetail(current => current ? {
+        ...current,
+        access: 'owned',
+        accessKind: 'permanent',
+      } : current);
+      Alert.alert('Kept permanently', `${detail.title} remains available even without Explorer.`);
+    } catch (unlockError: any) {
+      Alert.alert(
+        'Couldn’t keep this Original',
+        unlockError?.message || 'Check your connection and earned-credit balance, then try again.',
+      );
+    } finally {
+      setBusy(false);
+    }
+  }, [detail, originalsRuntime, permanentUnlockOffer, user]);
+
+  const confirmPermanentUnlock = useCallback(() => {
+    if (!detail || !permanentUnlockOffer) return;
+    Alert.alert(
+      'Keep this Original permanently?',
+      `Use ${permanentUnlockOffer.creditCost} earned credits. Your Explorer access remains unchanged.`,
+      [
+        { text: 'Not now', style: 'cancel' },
+        {
+          text: `Use ${permanentUnlockOffer.creditCost} credits`,
+          onPress: () => { void keepPermanently(); },
+        },
+      ],
+    );
+  }, [detail, keepPermanently, permanentUnlockOffer]);
 
   const startDownload = useCallback(async () => {
     if (!detail || bundle.state === 'downloading') return;
@@ -208,7 +297,14 @@ export default function OriginalDetailScreen() {
           if (requestIsCurrent()) setBundle(progress);
         },
       );
-      if (requestIsCurrent()) setBundle(next);
+      if (requestIsCurrent()) {
+        setBundle(next);
+        // Public V2 previews omit route geometry and story transcripts. Once
+        // the union bundle is verified, rehydrate silently so the chosen drive
+        // is usable immediately without closing and reopening this screen.
+        const hydrated = await getOriginalDetail(requestPackId, requestVersion);
+        if (requestIsCurrent()) setLoadedDetail(hydrated);
+      }
     } catch (downloadError: any) {
       if (!requestIsCurrent()) return;
       setBundle(current => ({
@@ -235,26 +331,38 @@ export default function OriginalDetailScreen() {
       const scope = (user?.id == null ? 'guest' : `account:${String(user.id)}`) as OriginalOwnerScope;
       const manifest = await originalBundleStore.loadManifest(scope, detail.id, detail.version);
       if (!manifest) throw new Error('Download and verify this Original before starting.');
-      await originalsRuntime.startTour(manifest);
+      const selection = detail.manifestSchemaVersion === 2
+        ? { chapter_id: selectedChapterId, variant_id: selectedVariantId }
+        : undefined;
+      await originalsRuntime.startTour(manifest, selection);
       setStartVisible(false);
       router.replace(originalStartDestination(detail.id, detail.version) as any);
     } catch (startError: any) {
       throw startError;
     }
-  }, [detail, originalsRuntime, router, user?.id]);
+  }, [detail, originalsRuntime, router, selectedChapterId, selectedVariantId, user?.id]);
 
   const beginSimulation = useCallback(async () => {
     if (!detail || !user?.is_admin) return;
     const scope = `account:${String(user.id)}` as OriginalOwnerScope;
     const manifest = await originalBundleStore.loadManifest(scope, detail.id, detail.version);
     if (!manifest) throw new Error('Download and verify this Original before opening the trigger test.');
-    await originalsAdminRuntime.startSimulation(manifest);
+    const selection = detail.manifestSchemaVersion === 2
+      ? { chapter_id: selectedChapterId, variant_id: selectedVariantId }
+      : undefined;
+    await originalsAdminRuntime.startSimulation(manifest, selection);
     setStartVisible(false);
     router.replace({
       pathname: '/originals/player',
-      params: { id: detail.id, version: String(detail.version), simulate: '1' },
+      params: {
+        id: detail.id,
+        version: String(detail.version),
+        simulate: '1',
+        chapter: selection?.chapter_id,
+        variant: selection?.variant_id,
+      },
     } as any);
-  }, [detail, originalsAdminRuntime, originalsRuntime, router, user?.id, user?.is_admin]);
+  }, [detail, originalsAdminRuntime, router, selectedChapterId, selectedVariantId, user?.id, user?.is_admin]);
 
   const openStart = useCallback(async () => {
     let needsDisclosure = true;
@@ -326,7 +434,14 @@ export default function OriginalDetailScreen() {
         ? 'Resume tour'
         : 'Start tour';
   const primaryAction = adminPreview
-    ? () => router.replace({ pathname: '/originals/preview', params: { id: detail.id } } as any)
+    ? () => router.replace({
+      pathname: '/originals/preview',
+      params: {
+        id: detail.id,
+        chapter: detail.manifestSchemaVersion === 2 ? selectedChapterId : undefined,
+        variant: detail.manifestSchemaVersion === 2 ? selectedVariantId : undefined,
+      },
+    } as any)
     : !owned
     ? acquire
     : !ready
@@ -343,6 +458,12 @@ export default function OriginalDetailScreen() {
       Alert.alert('Couldn’t share', 'Please try again.');
     }
   };
+
+  const chapterSelections = detail.chapterSelections ?? [];
+  const chapterOptions = chapterSelections.filter((selection, index, values) => (
+    values.findIndex(candidate => candidate.chapterId === selection.chapterId) === index
+  ));
+  const activeVariants = chapterSelections.filter(selection => selection.chapterId === selectedChapterId);
 
   return (
     <View testID="original.detail.screen" style={[styles.screen, { backgroundColor: C.bg }] }>
@@ -369,6 +490,70 @@ export default function OriginalDetailScreen() {
             <Text style={[styles.route, { color: C.text2 }]}>{detail.routeLabel}</Text>
           </View>
 
+          {chapterOptions.length ? (
+            <View testID="original.chapter.selector" style={styles.chapterSection}>
+              <Text style={[styles.sectionTitle, { color: C.text }]}>Choose a drive</Text>
+              <View style={styles.chapterList}>
+                {chapterOptions.map(chapter => {
+                  const selected = chapter.chapterId === selectedChapterId;
+                  return (
+                    <TouchableOpacity
+                      key={chapter.chapterId}
+                      testID={`original.chapter.${chapter.chapterId}`}
+                      accessibilityRole="button"
+                      accessibilityState={{ selected }}
+                      activeOpacity={0.78}
+                      onPress={() => {
+                        const defaultVariant = chapterSelections.find(selection => (
+                          selection.chapterId === chapter.chapterId && selection.isDefault
+                        )) ?? chapterSelections.find(selection => selection.chapterId === chapter.chapterId);
+                        setSelectedChapterId(chapter.chapterId);
+                        setSelectedVariantId(defaultVariant?.variantId || '');
+                      }}
+                      style={[
+                        styles.chapterCard,
+                        {
+                          backgroundColor: selected ? C.orange + '10' : C.s1,
+                          borderColor: selected ? C.orange : C.border,
+                        },
+                      ]}
+                    >
+                      <View style={styles.chapterCardCopy}>
+                        <Text style={[styles.chapterTitle, { color: C.text }]}>{chapter.chapterTitle}</Text>
+                        <Text style={[styles.chapterSummary, { color: C.text2 }]} numberOfLines={selected ? undefined : 2}>{chapter.chapterSummary}</Text>
+                      </View>
+                      <Ionicons name={selected ? 'checkmark-circle' : 'chevron-forward'} size={20} color={selected ? C.orange : C.text3} />
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+              {activeVariants.length > 1 ? (
+                <View style={styles.variantList}>
+                  <Text style={[styles.variantLabel, { color: C.text3 }]}>DIRECTION</Text>
+                  {activeVariants.map(variant => {
+                    const selected = variant.variantId === selectedVariantId;
+                    return (
+                      <TouchableOpacity
+                        key={variant.variantId}
+                        testID={`original.variant.${variant.variantId}`}
+                        accessibilityRole="radio"
+                        accessibilityState={{ selected }}
+                        onPress={() => setSelectedVariantId(variant.variantId)}
+                        style={[styles.variantRow, { borderBottomColor: C.border }]}
+                      >
+                        <View style={styles.variantCopy}>
+                          <Text style={[styles.variantTitle, { color: C.text }]}>{variant.variantTitle}</Text>
+                          <Text style={[styles.variantMeta, { color: C.text3 }]}>{variant.distanceLabel} · {variant.durationLabel}</Text>
+                        </View>
+                        <Ionicons name={selected ? 'radio-button-on' : 'radio-button-off'} size={20} color={selected ? C.orange : C.text3} />
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              ) : null}
+            </View>
+          ) : null}
+
           <TrailheadMetricRow metrics={[
             { label: 'DRIVE', value: detail.durationLabel, icon: 'time-outline' },
             { label: 'DISTANCE', value: detail.distanceLabel, icon: 'navigate-outline' },
@@ -381,7 +566,7 @@ export default function OriginalDetailScreen() {
             <InfoPill icon="cloud-download-outline" label={detail.offlineSizeLabel} />
           </View>
 
-          <View style={styles.routePreviewSection}>
+          {detail.route ? <View style={styles.routePreviewSection}>
             <View style={styles.routePreviewHeading}>
               <Text style={[styles.sectionTitle, { color: C.text }]}>{adminPreview ? 'Draft route' : 'Published route'}</Text>
               <Text style={[styles.routePreviewMeta, { color: C.text3 }]}>{detail.distanceLabel} · fixed direction</Text>
@@ -389,7 +574,7 @@ export default function OriginalDetailScreen() {
             <View style={[styles.routePreview, { borderColor: C.border }] }>
               <OriginalRouteMap route={detail.route} projectedProgressM={null} overview />
             </View>
-          </View>
+          </View> : null}
 
           <View style={styles.section}>
             <Text style={[styles.sectionTitle, { color: C.text }]}>The drive</Text>
@@ -488,12 +673,36 @@ export default function OriginalDetailScreen() {
               ))}
             </View>
           ) : null}
+
+          {permanentUnlockOffer ? (
+            <View style={styles.section}>
+              <TrailheadButton
+                testID="original.detail.keep-permanently"
+                label={permanentUnlockOffer.label}
+                icon="lock-open-outline"
+                variant="secondary"
+                loading={busy}
+                onPress={confirmPermanentUnlock}
+              />
+              <Text style={[styles.sourceIntro, { color: C.text2 }]}>Explorer includes this while your membership is active. Permanent access uses earned credits.</Text>
+            </View>
+          ) : null}
         </View>
       </ScrollView>
 
       <View style={[styles.dock, { backgroundColor: C.s1, borderTopColor: C.border, paddingBottom: Math.max(insets.bottom, 12) }] }>
         <View style={styles.dockCopy}>
-          <Text style={[styles.dockPrice, { color: owned || canClaimFeatured ? C.orange : C.text }]}>{adminPreview ? 'Admin device preview' : owned ? 'Yours permanently' : canClaimFeatured ? 'Included this month' : detail.priceCredits === 0 ? 'Free' : `${price} credits`}</Text>
+          <Text style={[styles.dockPrice, { color: owned || canClaimFeatured ? C.orange : C.text }]}>{adminPreview
+            ? 'Admin device preview'
+            : owned
+              ? detail.accessKind === 'explorer_subscription'
+                ? 'Included with Explorer'
+                : 'Yours permanently'
+              : canClaimFeatured
+                ? 'Included this month'
+                : detail.priceCredits === 0
+                  ? 'Free'
+                  : `${price} credits`}</Text>
           <Text style={[styles.dockMeta, { color: C.text3 }]}>{adminPreview ? 'Not published · synthetic GPS only' : owned ? bundleLabel(bundle) : canClaimFeatured ? 'Explorer monthly claim' : detail.priceCredits === 0 ? 'No account required' : user ? `${user.credits} credits available` : 'Account required'}</Text>
         </View>
         <TrailheadButton testID="original.detail.primary" label={primaryLabel} icon={ready ? 'play' : !owned ? detail.priceCredits === 0 ? 'gift-outline' : 'ticket-outline' : 'cloud-download'} variant="primary" loading={busy} onPress={() => void primaryAction()} style={styles.primary} />
@@ -582,7 +791,13 @@ function ReadinessModal({
 
           <View style={styles.assetList}>
             <AssetRow icon="map-outline" label="Fixed route and offline map region" ready={ready} />
-            <AssetRow icon="headset-outline" label={`${detail.storyCount} narrations and transcripts`} ready={ready} />
+            <AssetRow
+              icon="headset-outline"
+              label={detail.manifestSchemaVersion === 2
+                ? `${detail.storyCount} full stories · ${detail.cueCount ?? 0} shorter cues`
+                : `${detail.storyCount} narrations and transcripts`}
+              ready={ready}
+            />
             <AssetRow icon="images-outline" label="Story artwork and source notes" ready={ready} />
           </View>
 
@@ -801,6 +1016,18 @@ const styles = StyleSheet.create({
   creator: { fontSize: 8.5, lineHeight: 12, fontWeight: '900', letterSpacing: 0.8 },
   title: { fontSize: 30, lineHeight: 35, fontWeight: '900', letterSpacing: -0.8 },
   route: { fontSize: 13, lineHeight: 19, fontWeight: '700' },
+  chapterSection: { gap: 10 },
+  chapterList: { gap: 8 },
+  chapterCard: { minHeight: 76, borderWidth: 1, borderRadius: 12, paddingHorizontal: 13, paddingVertical: 11, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  chapterCardCopy: { flex: 1, minWidth: 0 },
+  chapterTitle: { fontSize: 14, lineHeight: 19, fontWeight: '900' },
+  chapterSummary: { marginTop: 3, fontSize: 11.5, lineHeight: 17, fontWeight: '600' },
+  variantList: { marginTop: 3 },
+  variantLabel: { marginBottom: 2, fontSize: 8.5, lineHeight: 12, fontWeight: '900', letterSpacing: 0.8 },
+  variantRow: { minHeight: 52, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  variantCopy: { flex: 1, minWidth: 0 },
+  variantTitle: { fontSize: 12.5, lineHeight: 17, fontWeight: '800' },
+  variantMeta: { marginTop: 2, fontSize: 10, lineHeight: 14, fontWeight: '600' },
   pillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
   pill: { minHeight: 34, borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 5 },
   pillText: { fontSize: 10.5, lineHeight: 14, fontWeight: '800' },

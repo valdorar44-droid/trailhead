@@ -13,6 +13,13 @@ from db import store
 from db.original_manifest_v2 import (
     OriginalManifestV2Error,
     compile_original_manifest_v2_selection,
+    normalize_original_manifest_v2,
+)
+from db.originals_operational import (
+    OriginalOperationalReadinessError,
+    load_operational_candidate,
+    manifest_operational_fields,
+    operational_candidate_sha256,
 )
 
 
@@ -62,15 +69,9 @@ def _v2_payload() -> dict:
         "coordinates": stop["coordinates"],
         "trigger": stop["trigger"],
     } for stop in v1["stops"]]
-    source = {
-        "title": "Test-only official operating conditions",
-        "url": "https://www.nps.gov/grsm/planyourvisit/conditions.htm",
-        "publisher": "National Park Service",
-        "reviewed_at": "2026-08-03",
-        "role": "operational",
-        "authority": "official",
-        "scope": ["route", "access", "fees", "closures", "surface", "season", "safety"],
-    }
+    operational = manifest_operational_fields(
+        load_operational_candidate(), "foothills_parkway"
+    )
     payload["access_policy"] = {
         "schema_version": 1,
         "explorer_included": True,
@@ -83,22 +84,18 @@ def _v2_payload() -> dict:
         "title": payload["title"],
         "stories": stories,
         "chapters": [{
-            "id": "mountain_crossing",
+            "id": "foothills_parkway",
             "sequence": 1,
-            "title": "Mountain Crossing",
+            "title": "Foothills Parkway",
             "summary": "A test-only chapter used to verify the versioned contract.",
             "default_variant_id": "eastbound",
             "safety": v1["safety"],
             "access": v1["access"],
             "season": v1["season"],
-            "operational_sources": [source],
-            "operational_readiness": {
-                "policy": "required_before_start",
-                "source_scopes": source["scope"],
-                "alternate_chapter_ids": [],
-            },
+            "operational_sources": operational["operational_sources"],
+            "operational_readiness": operational["operational_readiness"],
             "validation_selection": {
-                "selection_id": "mountain_crossing_all_variants",
+                "selection_id": "foothills_parkway_all_variants",
                 "required_variant_ids": ["eastbound"],
             },
             "variants": [{
@@ -174,18 +171,18 @@ def test_v2_draft_normalizes_and_compiles_deterministically_to_v1():
     assert first_json == second_json
     compiled_selection = compile_original_manifest_v2_selection(
         normalized,
-        chapter_id="mountain_crossing",
+        chapter_id="foothills_parkway",
         variant_id=None,
         normalize_v1=store._normalize_original_manifest_v1,
     )
     compiled = compiled_selection["manifest"]
     assert compiled_selection["selection"] == {
-        "validation_selection_id": "mountain_crossing_all_variants",
-        "chapter_id": "mountain_crossing",
+        "validation_selection_id": "foothills_parkway_all_variants",
+        "chapter_id": "foothills_parkway",
         "variant_id": "eastbound",
     }
     assert compiled["schema_version"] == 1
-    assert compiled["title"].endswith("\u2014 Mountain Crossing")
+    assert compiled["title"].endswith("\u2014 Foothills Parkway")
     assert [stop["id"] for stop in compiled["stops"]] == [
         stop["id"] for stop in payload["manifest"]["stories"]
     ]
@@ -221,6 +218,139 @@ def test_v2_publication_is_fail_closed_until_every_variant_has_authoritative_val
             publishing=True,
             verified_assets={},
         )
+
+
+def test_v2_publication_requires_and_forwards_exact_per_variant_validation():
+    payload = _v2_payload()
+    payload["manifest"]["narration_profile"] = _test_profile()
+    second = copy.deepcopy(payload["manifest"]["chapters"][0]["variants"][0])
+    second.update({"id": "westbound", "sequence": 2, "title": "Westbound"})
+    second["route"]["geometry"]["coordinates"] = list(reversed(
+        second["route"]["geometry"]["coordinates"],
+    ))
+    payload["manifest"]["chapters"][0]["variants"].append(second)
+    payload["manifest"]["chapters"][0]["validation_selection"]["required_variant_ids"] = [
+        "eastbound", "westbound",
+    ]
+    calls: list[dict] = []
+
+    def normalize_v1(_pack_id: str, _title: str, manifest: dict, **kwargs: object):
+        calls.append({"manifest": manifest, **kwargs})
+        return manifest, json.dumps(manifest, sort_keys=True)
+
+    expected = {
+        "foothills_parkway_all_variants:eastbound",
+        "foothills_parkway_all_variants:westbound",
+    }
+    with pytest.raises(OriginalManifestV2Error, match="every chapter variant"):
+        normalize_original_manifest_v2(
+            payload["manifest"],
+            pack_id=payload["pack_id"],
+            title=payload["title"],
+            version=1,
+            normalize_v1=normalize_v1,
+            publishing=True,
+            validated_selections={"foothills_parkway_all_variants:eastbound"},
+        )
+    normalized, _ = normalize_original_manifest_v2(
+        payload["manifest"],
+        pack_id=payload["pack_id"],
+        title=payload["title"],
+        version=1,
+        normalize_v1=normalize_v1,
+        publishing=True,
+        validated_selections=expected,
+    )
+    assert normalized["schema_version"] == 2
+    assert len(calls) == 2
+    assert all(call["publishing"] is True for call in calls)
+    assert {
+        call["manifest"]["route"]["geometry"]["coordinates"][0][0]
+        for call in calls
+    } == {
+        payload["manifest"]["chapters"][0]["variants"][0]["route"]["geometry"]["coordinates"][0][0],
+        second["route"]["geometry"]["coordinates"][0][0],
+    }
+
+
+def test_v2_compiled_selection_carries_operational_sources_once():
+    payload = _v2_payload()
+    normalized, _ = store._normalize_original_manifest(
+        payload["pack_id"], payload["title"], payload["manifest"], version=2,
+    )
+    selection = compile_original_manifest_v2_selection(
+        normalized,
+        chapter_id="foothills_parkway",
+        variant_id="eastbound",
+        normalize_v1=store._normalize_original_manifest_v1,
+    )
+    stops = selection["manifest"]["stops"]
+    assert any(source["role"] == "operational" for source in stops[0]["citations"])
+    assert all(
+        source["role"] != "operational"
+        for stop in stops[1:]
+        for source in stop["citations"]
+    )
+    compiled = store._compiled_original_validation_selections(normalized)
+    assert [item["key"] for item in compiled] == [
+        "foothills_parkway_all_variants:eastbound",
+    ]
+    material = store._original_validation_material(normalized, draft_revision=4)
+    assert material["operational_readiness_candidates"] == [{
+        "chapter_id": "foothills_parkway",
+        "candidate_id": "smokies-operational-readiness-2026-v1",
+        "candidate_sha256": operational_candidate_sha256(
+            load_operational_candidate()
+        ),
+    }]
+    assert store._original_operational_publication_metadata(normalized) == {
+        "schema_version": 1,
+        "candidates": material["operational_readiness_candidates"],
+    }
+    tampered = copy.deepcopy(normalized)
+    tampered["chapters"][0]["operational_readiness"]["candidate_sha256"] = "0" * 64
+    with pytest.raises(OriginalOperationalReadinessError, match="hash"):
+        store._original_validation_material(tampered, draft_revision=4)
+
+
+def test_v2_validation_aggregate_never_marks_a_partial_selection_set_publishable():
+    base = {
+        "engine_version": store.ORIGINAL_VIRTUAL_VALIDATION_ENGINE_VERSION,
+        "summary": {"required": 13, "passed": 13, "failed": 0, "stop_count": 10},
+        "scenarios": [],
+        "issues": [],
+    }
+    aggregate = store._aggregate_original_validation_selection_results([
+        {
+            **base,
+            "key": "foothills_parkway_all_variants:eastbound",
+            "selection": {
+                "validation_selection_id": "foothills_parkway_all_variants",
+                "chapter_id": "foothills_parkway",
+                "variant_id": "eastbound",
+            },
+            "passed": True,
+        },
+        {
+            **base,
+            "key": "foothills_parkway_all_variants:westbound",
+            "selection": {
+                "validation_selection_id": "foothills_parkway_all_variants",
+                "chapter_id": "foothills_parkway",
+                "variant_id": "westbound",
+            },
+            "passed": False,
+            "summary": {"required": 13, "passed": 12, "failed": 1, "stop_count": 10},
+            "issues": ["Scenario failed: reverse_travel"],
+        },
+    ], execution_errors=False)
+    assert aggregate["status"] == "failed"
+    assert aggregate["passed"] is False
+    assert aggregate["summary"]["selection_count"] == 2
+    assert aggregate["summary"]["validated_selections"] == [
+        "foothills_parkway_all_variants:eastbound",
+    ]
+    assert "westbound" in aggregate["issues"][0]
 
 
 def test_v2_device_preview_fails_with_selection_contract_instead_of_v1_key_error():
@@ -259,7 +389,7 @@ def test_v2_union_offline_bounds_must_cover_every_route_and_cue():
 def test_v2_validation_selection_ids_are_globally_unique():
     payload = _v2_payload()
     second = copy.deepcopy(payload["manifest"]["chapters"][0])
-    second["id"] = "foothills_parkway"
+    second["id"] = "test_second_chapter"
     second["sequence"] = 2
     payload["manifest"]["chapters"].append(second)
     with pytest.raises(OriginalManifestV2Error, match="selection ids must be unique"):

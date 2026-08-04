@@ -238,6 +238,7 @@ export function OriginalsRuntimeProvider({
     version: number,
     expectedScope?: OriginalOwnerScope,
     allowAdminPreview = false,
+    expectedManifestId?: string,
   ) => {
     const requestEpoch = accountStorage.epoch();
     const requestUserId = useStore.getState().user?.id ?? null;
@@ -257,7 +258,10 @@ export function OriginalsRuntimeProvider({
     const allowed = access?.owner_scope === ownerScope && originalLocalAccessIsCurrent(
       access,
       Math.floor(Date.now() / 1_000),
-      { allowAdminPreview: Boolean(currentUser?.is_admin) && allowAdminPreview },
+      {
+        allowAdminPreview: Boolean(currentUser?.is_admin) && allowAdminPreview,
+        manifestId: expectedManifestId,
+      },
     );
     if (!allowed) {
       if (originalLocalAccessIsExplorerSubscription(access)) {
@@ -374,6 +378,7 @@ export function OriginalsRuntimeProvider({
       activeManifest.version,
       activeSession.owner_scope,
       simulationRef.current,
+      activeManifest.manifest_id,
     );
     if (!operationIsCurrent()) return;
     const localUri = await dependencies.bundles.assetUri(
@@ -688,6 +693,7 @@ export function OriginalsRuntimeProvider({
         cleanManifest.version,
         requestScope,
         simulate,
+        cleanManifest.manifest_id,
       );
       requireActiveActivation();
       const installed = await dependencies.bundles.get(ownerScope, cleanManifest.pack_id, cleanManifest.version);
@@ -808,6 +814,7 @@ export function OriginalsRuntimeProvider({
         manifestInput.version,
         requestScope,
         true,
+        manifestInput.manifest_id,
       );
       if (!scopeIsStillCurrent()) throw new Error('The signed-in account changed. Try again.');
       const access = await dependencies.access.get(ownerScope, manifestInput.pack_id, manifestInput.version);
@@ -924,6 +931,7 @@ export function OriginalsRuntimeProvider({
       active.version,
       active.owner_scope,
       simulating,
+      activeManifest.manifest_id,
     );
     if (!operationIsCurrent()) return;
     const verified = await dependencies.bundles.verify(ownerScope, active.pack_id, active.version);
@@ -1178,6 +1186,7 @@ export function OriginalsRuntimeProvider({
       active.version,
       active.owner_scope,
       simulationRef.current,
+      activeManifest.manifest_id,
     );
     if (
       stoppingRef.current
@@ -1428,7 +1437,7 @@ export function OriginalsRuntimeProvider({
     if (!active || !scopeIsStillCurrent()) return null;
     const access = await dependencies.access.get(ownerScope, active.pack_id, active.version);
     const accessAllowed = access?.owner_scope === ownerScope
-      && originalLocalAccessIsCurrent(access);
+      && originalLocalAccessIsCurrent(access, undefined, { manifestId: active.manifest_id });
     if (!accessAllowed || !scopeIsStillCurrent()) return null;
     const [storedManifest, restoredBundle, verified] = await Promise.all([
       dependencies.bundles.loadManifest(ownerScope, active.pack_id, active.version, false),

@@ -15,6 +15,7 @@ import type {
   OriginalAccessMode,
   OriginalOwnedResponse,
   OriginalSummary,
+  OriginalStartReadinessV1,
 } from './types';
 
 function validateOriginalDetailResponse(input: unknown): OriginalDetail {
@@ -262,5 +263,21 @@ export const originalsApi = {
       { signal, ...(authToken !== undefined ? { authToken } : {}) },
     );
     return validateOriginalConsumerManifest(response);
+  },
+
+  startReadiness(
+    id: string,
+    version: number,
+    selection: { chapter_id: string; variant_id?: string },
+    signal?: AbortSignal,
+  ) {
+    return originalsRequest<OriginalStartReadinessV1>(
+      `/api/originals/${encodeURIComponent(id)}/versions/${encodeURIComponent(String(version))}/start-readiness`,
+      {
+        method: 'POST',
+        signal,
+        body: JSON.stringify(selection),
+      },
+    );
   },
 };

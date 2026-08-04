@@ -120,6 +120,8 @@ export function originalManifestV2(version = 1): OriginalManifestV2 {
     }],
     operational_readiness: {
       policy: 'required_before_start' as const,
+      candidate_id: 'test-smokies-operational-v1',
+      candidate_sha256: 'a'.repeat(64),
       source_scopes: ['mountain-crossing-access'],
       alternate_chapter_ids: [] as string[],
     },

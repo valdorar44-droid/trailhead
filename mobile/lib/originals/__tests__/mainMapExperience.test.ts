@@ -126,6 +126,19 @@ const consumerStartBlock = detailScreenSource.slice(
   beginSimulationIndex,
 );
 assert.match(consumerStartBlock, /originalStartDestination/);
+const readinessIndex = consumerStartBlock.indexOf('originalsApi.startReadiness');
+const notificationPermissionIndex = consumerStartBlock.indexOf('Notifications.getPermissionsAsync');
+const runtimeStartIndex = consumerStartBlock.indexOf('originalsRuntime.startTour');
+assert.notEqual(readinessIndex, -1, 'V2 consumer Start must request server-owned operational readiness');
+assert.ok(
+  readinessIndex < notificationPermissionIndex && readinessIndex < runtimeStartIndex,
+  'operational readiness must pass before permissions, location, or playback startup',
+);
+assert.match(
+  consumerStartBlock,
+  /!readiness\.can_start\s*\|\|\s*readiness\.status\s*!==\s*'available'/,
+  'missing, stale, restricted, or unavailable readiness must block Start',
+);
 assert.doesNotMatch(
   consumerStartBlock,
   /\/originals\/player/,

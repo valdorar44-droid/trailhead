@@ -1,0 +1,210 @@
+{
+  "schema_version": 1,
+  "candidate_id": "smokies-operational-readiness-2026-v1",
+  "pack_slug": "great-smoky-mountains-ridges-rivers-living-memory",
+  "park_code": "grsm",
+  "timezone": "America/New_York",
+  "reviewed_at": "2026-08-04T00:00:00Z",
+  "valid_through": "2026-09-03T23:59:59Z",
+  "live_observation_max_age_s": 1800,
+  "sources": [
+    {
+      "id": "grsm-current-cautions",
+      "title": "Current Road, Facility, Trail & Backcountry Cautions and Closures",
+      "url": "https://www.nps.gov/grsm/planyourvisit/temproadclose.htm",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-04",
+      "source_last_updated_at": "2026-07-31",
+      "role": "operational",
+      "authority": "official",
+      "scope": ["closures", "safety"]
+    },
+    {
+      "id": "grsm-seasonal-roads-2026",
+      "title": "Seasonal Road Schedule",
+      "url": "https://www.nps.gov/grsm/planyourvisit/seasonalroads.htm",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-04",
+      "source_last_updated_at": "2026-04-20",
+      "role": "operational",
+      "authority": "official",
+      "scope": ["access", "route", "season", "vehicle-restrictions"]
+    },
+    {
+      "id": "grsm-cades-cove-vehicle-free-2026",
+      "title": "Cades Cove Vehicle-Free Days",
+      "url": "https://www.nps.gov/grsm/planyourvisit/cades-cove-vehicle-free-days.htm",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-04",
+      "source_last_updated_at": "2026-02-09",
+      "role": "operational",
+      "authority": "official",
+      "scope": ["access", "alternates", "route", "season", "vehicle-free-days"]
+    },
+    {
+      "id": "grsm-roaring-fork",
+      "title": "Roaring Fork Motor Nature Trail",
+      "url": "https://www.nps.gov/grsm/planyourvisit/roaringfork.htm",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-04",
+      "source_last_updated_at": "2025-09-26",
+      "role": "operational",
+      "authority": "official",
+      "scope": ["access", "alternates", "route", "vehicle-restrictions"]
+    },
+    {
+      "id": "grsm-fees-2026",
+      "title": "Fees & Passes",
+      "url": "https://www.nps.gov/grsm/planyourvisit/fees.htm",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-04",
+      "source_last_updated_at": "2026-07-07",
+      "role": "operational",
+      "authority": "official",
+      "scope": ["fees", "parking"]
+    },
+    {
+      "id": "grsm-superintendent-compendium-2026",
+      "title": "Superintendent's Compendium",
+      "url": "https://www.nps.gov/grsm/learn/management/compendium.htm",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-04",
+      "source_last_updated_at": "2026-06-06",
+      "role": "operational",
+      "authority": "official",
+      "scope": ["access", "daily-hours", "season", "vehicle-restrictions", "vehicle-free-days"]
+    },
+    {
+      "id": "grsm-auto-touring",
+      "title": "Auto Touring",
+      "url": "https://www.nps.gov/grsm/planyourvisit/autotouring.htm",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-04",
+      "source_last_updated_at": "2025-10-30",
+      "role": "operational",
+      "authority": "official",
+      "scope": ["alternates", "route", "route-context", "surface"]
+    },
+    {
+      "id": "grsm-traffic-travel-tips-2026",
+      "title": "Traffic & Travel Tips",
+      "url": "https://www.nps.gov/grsm/planyourvisit/trafficandtraveltips.htm",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-04",
+      "source_last_updated_at": "2026-05-21",
+      "role": "operational",
+      "authority": "official",
+      "scope": ["alternates", "parking", "safety", "vehicle-restrictions"]
+    }
+  ],
+  "shared_rules": {
+    "current_conditions_source_id": "grsm-current-cautions",
+    "commercial_vehicle_rule": {
+      "source_id": "grsm-superintendent-compendium-2026",
+      "blocked_vehicle_classes": ["commercial_service"]
+    },
+    "parking": {
+      "source_id": "grsm-fees-2026",
+      "tag_required_after_minutes": 15,
+      "tag_is_entrance_fee": false,
+      "fees_usd": {
+        "daily": 5,
+        "weekly": 15,
+        "annual": 40
+      }
+    }
+  },
+  "chapters": [
+    {
+      "chapter_id": "mountain_crossing",
+      "source_ids": [
+        "grsm-current-cautions",
+        "grsm-seasonal-roads-2026",
+        "grsm-fees-2026",
+        "grsm-superintendent-compendium-2026",
+        "grsm-auto-touring",
+        "grsm-traffic-travel-tips-2026"
+      ],
+      "source_scopes": ["route", "access", "fees", "closures", "surface", "season", "safety", "alternates", "parking", "vehicle-restrictions"],
+      "alternate_chapter_ids": ["little_river_cades_cove", "foothills_parkway"],
+      "required_road_ids": ["newfound_gap_road", "kuwohi_road"],
+      "season_windows": [
+        {
+          "road_id": "kuwohi_road",
+          "start_date": "2026-04-01",
+          "end_date": "2026-11-29",
+          "source_id": "grsm-seasonal-roads-2026"
+        }
+      ],
+      "blocked_vehicle_classes": [],
+      "unavailable_message": "Mountain Crossing is unavailable for the selected time or current road conditions. Choose another available chapter."
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "source_ids": [
+        "grsm-current-cautions",
+        "grsm-seasonal-roads-2026",
+        "grsm-cades-cove-vehicle-free-2026",
+        "grsm-fees-2026",
+        "grsm-superintendent-compendium-2026",
+        "grsm-auto-touring",
+        "grsm-traffic-travel-tips-2026"
+      ],
+      "source_scopes": ["route", "access", "fees", "closures", "surface", "season", "safety", "alternates", "daily-hours", "parking", "vehicle-free-days"],
+      "alternate_chapter_ids": ["roaring_fork", "foothills_parkway"],
+      "required_road_ids": ["little_river_road", "cades_cove_loop_road"],
+      "season_windows": [],
+      "vehicle_free_windows": [
+        {
+          "start_date": "2026-05-06",
+          "end_date": "2026-09-30",
+          "weekday": "wednesday",
+          "source_id": "grsm-cades-cove-vehicle-free-2026"
+        }
+      ],
+      "blocked_vehicle_classes": [],
+      "unavailable_message": "Cades Cove is unavailable to motor vehicles at this time. Choose another available chapter."
+    },
+    {
+      "chapter_id": "roaring_fork",
+      "source_ids": [
+        "grsm-current-cautions",
+        "grsm-seasonal-roads-2026",
+        "grsm-roaring-fork",
+        "grsm-fees-2026",
+        "grsm-superintendent-compendium-2026",
+        "grsm-auto-touring",
+        "grsm-traffic-travel-tips-2026"
+      ],
+      "source_scopes": ["route", "access", "fees", "closures", "surface", "season", "safety", "alternates", "parking", "vehicle-restrictions"],
+      "alternate_chapter_ids": ["foothills_parkway"],
+      "required_road_ids": ["roaring_fork_motor_nature_trail"],
+      "season_windows": [
+        {
+          "road_id": "roaring_fork_motor_nature_trail",
+          "start_date": "2026-04-17",
+          "end_date": "2026-11-29",
+          "source_id": "grsm-seasonal-roads-2026"
+        }
+      ],
+      "blocked_vehicle_classes": ["bus", "motorhome", "towing_trailer", "van_over_25_ft"],
+      "unavailable_message": "Roaring Fork is unavailable for the selected time, vehicle, or current road conditions. Choose another available chapter."
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "source_ids": [
+        "grsm-current-cautions",
+        "grsm-seasonal-roads-2026",
+        "grsm-fees-2026",
+        "grsm-auto-touring",
+        "grsm-traffic-travel-tips-2026"
+      ],
+      "source_scopes": ["route", "access", "fees", "closures", "surface", "season", "safety", "alternates", "parking", "route-context"],
+      "alternate_chapter_ids": [],
+      "required_road_ids": ["foothills_parkway_west"],
+      "season_windows": [],
+      "blocked_vehicle_classes": [],
+      "unavailable_message": "Foothills Parkway is unavailable under the current road conditions. Check again before starting."
+    }
+  ]
+}

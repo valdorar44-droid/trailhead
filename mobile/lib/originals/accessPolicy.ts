@@ -24,13 +24,23 @@ export function originalEntitlementAccessType(
 export function originalLocalAccessIsCurrent(
   access: OriginalLocalAccessV1 | null | undefined,
   nowSeconds = Math.floor(Date.now() / 1_000),
-  options: { allowAdminPreview?: boolean } = {},
+  options: { allowAdminPreview?: boolean; manifestId?: string } = {},
 ) {
   if (!access) return false;
   if (access.access_type === 'guest_free') return true;
   if (access.access_type === 'admin_preview') return Boolean(options.allowAdminPreview);
   if (access.access_type === 'entitled' || access.access_type === 'permanent') return true;
   if (access.access_type !== 'explorer_subscription') return false;
+  if (access.access_receipt_required === true) {
+    if (options.manifestId != null && access.manifest_id !== options.manifestId) return false;
+    const expiresAt = access.access_receipt_expires_at;
+    const trustedTimeFloor = Math.max(0, access.trusted_time_floor_s ?? 0, nowSeconds);
+    return access.access_receipt_status === 'valid'
+      && access.access_active === true
+      && typeof expiresAt === 'number'
+      && Number.isFinite(expiresAt)
+      && expiresAt > trustedTimeFloor;
+  }
   const expiresAt = access.access_expires_at;
   return access.access_active === true
     && typeof expiresAt === 'number'

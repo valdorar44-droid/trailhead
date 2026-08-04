@@ -5,6 +5,7 @@ import {
   type OriginalFileAdapter,
 } from './fileAdapter';
 import { originalEntitlementAccessType } from './accessPolicy';
+import { evaluateOriginalEntitlementReceipt } from './trustedEntitlementReceipt';
 import type {
   OriginalAuthenticatedAcquisition,
   OriginalGuestAcquisition,
@@ -24,6 +25,48 @@ const emptyIndex = (): OriginalAccessIndexV1 => ({ schema_version: 1, scopes: {}
 
 function key(record: Pick<OriginalLocalAccessV1, 'pack_id' | 'version'>) {
   return `${record.pack_id}@${record.version}`;
+}
+
+function refreshTrustedExplorerAccess(
+  record: OriginalLocalAccessV1,
+  options: { allowSignedRefresh?: boolean } = {},
+) {
+  if (record.access_type !== 'explorer_subscription' || record.access_receipt_required !== true) {
+    return record;
+  }
+  if (
+    record.entitlement_id == null
+    || !record.manifest_id
+    || !record.access_owner_binding
+  ) {
+    return {
+      ...record,
+      access_active: false,
+      access_receipt_status: 'identity_mismatch' as const,
+    };
+  }
+  const evaluation = evaluateOriginalEntitlementReceipt(record.access_receipt, {
+    ownerBinding: record.access_owner_binding,
+    entitlementId: record.entitlement_id,
+    packId: record.pack_id,
+    version: record.version,
+    manifestId: record.manifest_id,
+  }, {
+    previousTrustedTimeFloorS: record.trusted_time_floor_s,
+    previousReceiptExpiresAtS: record.access_receipt_expires_at,
+    previousMonotonicAnchorMs: record.receipt_monotonic_anchor_ms,
+    previousMonotonicAnchorTimeS: record.receipt_monotonic_anchor_time_s,
+    allowSignedRefresh: options.allowSignedRefresh,
+  });
+  return {
+    ...record,
+    access_active: evaluation.active,
+    access_receipt_status: evaluation.status,
+    trusted_time_floor_s: evaluation.trustedTimeFloorS,
+    access_receipt_expires_at: evaluation.receiptExpiresAtS,
+    receipt_monotonic_anchor_ms: evaluation.monotonicAnchorMs ?? undefined,
+    receipt_monotonic_anchor_time_s: evaluation.monotonicAnchorTimeS ?? undefined,
+  };
 }
 
 export function createOriginalAccessStore(
@@ -91,7 +134,7 @@ export function createOriginalAccessStore(
         ));
         const accessType = originalEntitlementAccessType(acquisition);
         const explorerSubscription = accessType === 'explorer_subscription';
-        return saveInternal({
+        const record = refreshTrustedExplorerAccess({
           schema_version: 1,
           pack_id: acquisition.pack.id,
           version: acquisition.pack.version,
@@ -106,15 +149,39 @@ export function createOriginalAccessStore(
           access_expires_at: explorerSubscription
             ? acquisition.entitlement.access_expires_at ?? null
             : null,
+          access_receipt_required: explorerSubscription
+            ? acquisition.entitlement.access_receipt_required === true
+            : undefined,
+          manifest_id: explorerSubscription
+            ? acquisition.entitlement.manifest_id
+            : undefined,
+          access_owner_binding: explorerSubscription
+            ? acquisition.entitlement.access_owner_binding
+            : undefined,
+          access_receipt_expires_at: explorerSubscription
+            ? acquisition.entitlement.access_receipt_expires_at ?? null
+            : undefined,
+          access_receipt: explorerSubscription
+            ? acquisition.entitlement.access_receipt ?? null
+            : undefined,
+          trusted_time_floor_s: explorerSubscription
+            ? existing?.trusted_time_floor_s
+            : undefined,
+          receipt_monotonic_anchor_ms: explorerSubscription
+            ? existing?.receipt_monotonic_anchor_ms
+            : undefined,
+          receipt_monotonic_anchor_time_s: explorerSubscription
+            ? existing?.receipt_monotonic_anchor_time_s
+            : undefined,
           entitlement_id: acquisition.entitlement.id,
           acquisition_type: acquisition.entitlement.acquisition_type,
-          // Do not label the device clock as a trusted server receipt. A
-          // future rollback-resistant anchor must come from a signed or
-          // otherwise authenticated server timestamp.
+          // Temporary V2 access is validated above against a signed server
+          // receipt. The local floor advances but never extends its expiry.
           pack_summary: acquisition.pack,
           claimed_at_ms: existing?.claimed_at_ms ?? now,
           updated_at_ms: now,
-        });
+        }, { allowSignedRefresh: true });
+        return saveInternal(record);
       });
     },
 
@@ -137,13 +204,28 @@ export function createOriginalAccessStore(
     },
 
     list(ownerScope: OriginalOwnerScope) {
-      return serialized(async () => (await readIndex()).scopes[ownerScope] ?? []);
+      return serialized(async () => {
+        const index = await readIndex();
+        const records = index.scopes[ownerScope] ?? [];
+        const refreshed = records.map(record => refreshTrustedExplorerAccess(record));
+        if (JSON.stringify(records) !== JSON.stringify(refreshed)) {
+          index.scopes[ownerScope] = refreshed;
+          await writeIndex(index);
+        }
+        return refreshed;
+      });
     },
 
     get(ownerScope: OriginalOwnerScope, packId: string, version?: number) {
       return serialized(async () => {
-        const records = (await readIndex()).scopes[ownerScope] ?? [];
-        return records.find(record => (
+        const index = await readIndex();
+        const records = index.scopes[ownerScope] ?? [];
+        const refreshed = records.map(record => refreshTrustedExplorerAccess(record));
+        if (JSON.stringify(records) !== JSON.stringify(refreshed)) {
+          index.scopes[ownerScope] = refreshed;
+          await writeIndex(index);
+        }
+        return refreshed.find(record => (
           record.pack_id === packId && (version == null || record.version === version)
         )) ?? null;
       });

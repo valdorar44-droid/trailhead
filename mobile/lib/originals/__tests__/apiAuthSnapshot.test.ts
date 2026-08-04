@@ -183,6 +183,34 @@ async function main() {
     responseBody = manifest;
     const full = await apiModule.originalsApi.manifest(manifest.pack_id, manifest.version, undefined, null);
     assert.equal(full.schema_version, 2, 'the acquired manifest parser accepts the complete union bundle');
+
+    responseBody = {
+      schema_version: 1,
+      pack_id: manifest.pack_id,
+      version: manifest.version,
+      manifest_id: manifest.manifest_id,
+      chapter_id: 'mountain-crossing',
+      variant_id: 'eastbound',
+      status: 'check_required',
+      can_start: false,
+      reason_code: 'vehicle_class_required',
+      message: 'Choose your vehicle setup before starting this chapter.',
+      notices: [],
+    };
+    const readiness = await apiModule.originalsApi.startReadiness(
+      manifest.pack_id,
+      manifest.version,
+      { chapter_id: 'mountain-crossing', variant_id: 'eastbound' },
+    );
+    assert.equal(readiness.can_start, false);
+    assert.equal(
+      requests.at(-1)?.url,
+      `https://trailhead.test/api/originals/${manifest.pack_id}/versions/${manifest.version}/start-readiness`,
+    );
+    assert.equal(
+      requests.at(-1)?.body,
+      JSON.stringify({ chapter_id: 'mountain-crossing', variant_id: 'eastbound' }),
+    );
   } finally {
     globalThis.fetch = previousFetch;
   }

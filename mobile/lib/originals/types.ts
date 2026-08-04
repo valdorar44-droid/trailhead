@@ -207,8 +207,27 @@ export type OriginalOperationalSourceV2 = OriginalCitationV1 & {
  */
 export type OriginalOperationalReadinessV2 = {
   policy: 'required_before_start';
+  candidate_id: string;
+  candidate_sha256: string;
   source_scopes: string[];
   alternate_chapter_ids: string[];
+};
+
+export type OriginalStartReadinessV1 = {
+  schema_version: 1;
+  pack_id: string;
+  version: number;
+  manifest_id: string;
+  chapter_id?: string;
+  variant_id?: string;
+  candidate_id?: string;
+  candidate_sha256?: string;
+  status: 'available' | 'unavailable' | 'check_required';
+  can_start: boolean;
+  reason_code: string;
+  message: string;
+  alternate_chapter_ids?: string[];
+  notices: Array<Record<string, unknown>>;
 };
 
 export type OriginalChapterValidationSelectionV2 = {
@@ -371,6 +390,40 @@ export type OriginalAccessPolicyV1 = {
 
 export type OriginalEntitlementAccessType = 'explorer_subscription' | 'permanent';
 
+export type OriginalEntitlementReceiptPayloadV1 = {
+  schema_version: 1;
+  issuer: 'trailhead-originals';
+  audience: 'trailhead-originals-mobile';
+  owner_binding: string;
+  entitlement_id: string;
+  pack_id: string;
+  version: number;
+  manifest_id: string;
+  manifest_schema_version: 2;
+  access_type: 'explorer_subscription';
+  issued_at: number;
+  access_expires_at: number;
+  receipt_expires_at: number;
+};
+
+export type OriginalEntitlementReceiptV1 = {
+  schema_version: 1;
+  algorithm: 'Ed25519';
+  key_id: string;
+  payload: OriginalEntitlementReceiptPayloadV1;
+  signature: string;
+};
+
+export type OriginalEntitlementReceiptStatusV1 =
+  | 'valid'
+  | 'missing'
+  | 'invalid'
+  | 'untrusted_key'
+  | 'identity_mismatch'
+  | 'clock_rollback'
+  | 'monotonic_reset'
+  | 'expired';
+
 export type OriginalDetail = OriginalSummary & {
   manifest_preview: OriginalManifestPreview;
 };
@@ -392,6 +445,15 @@ export type OriginalEntitlement = {
   access_active?: boolean;
   /** Unix timestamp in seconds. Null for permanent access. */
   access_expires_at?: number | null;
+  /** Required only for temporary V2 Explorer access. */
+  access_receipt_required?: boolean;
+  /** Exact immutable manifest bound by the temporary-access receipt. */
+  manifest_id?: string;
+  /** Keyed server binding from this authenticated entitlement response. */
+  access_owner_binding?: string | null;
+  /** Short offline receipt deadline, independently capped before subscription expiry. */
+  access_receipt_expires_at?: number | null;
+  access_receipt?: OriginalEntitlementReceiptV1 | null;
   acquired_at?: number | string;
   [key: string]: unknown;
 };
@@ -431,10 +493,26 @@ export type OriginalLocalAccessV1 = {
   access_type: 'guest_free' | 'entitled' | 'explorer_subscription' | 'permanent' | 'admin_preview';
   /** Absent on legacy records. Explorer access is always non-permanent. */
   permanent?: boolean;
-  /** Server snapshot; expiry is independently enforced against the device clock. */
+  /** Server snapshot; required V2 access is additionally bound to the signed receipt below. */
   access_active?: boolean;
   /** Unix timestamp in seconds. Null for permanent access. */
   access_expires_at?: number | null;
+  /** Temporary V2 Explorer access remains locked unless this signed receipt verifies. */
+  access_receipt_required?: boolean;
+  /** Exact immutable manifest verified by the signed temporary-access receipt. */
+  manifest_id?: string;
+  /** Keyed server binding; the client never derives it from the account id. */
+  access_owner_binding?: string | null;
+  /** Short offline deadline from the signed receipt. */
+  access_receipt_expires_at?: number | null;
+  access_receipt?: OriginalEntitlementReceiptV1 | null;
+  access_receipt_status?: OriginalEntitlementReceiptStatusV1;
+  /** Highest trusted server/device time observed for rollback detection. */
+  trusted_time_floor_s?: number;
+  /** Monotonic elapsed-time anchor captured with a fresh signed online receipt. */
+  receipt_monotonic_anchor_ms?: number;
+  /** Signed server time corresponding to the monotonic anchor. */
+  receipt_monotonic_anchor_time_s?: number;
   entitlement_id?: number | string;
   acquisition_type?: string;
   server_verified_at_ms?: number;

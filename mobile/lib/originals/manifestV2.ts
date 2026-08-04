@@ -518,11 +518,21 @@ export function validateOriginalManifestV2(input: unknown): OriginalManifestV2 {
     });
     assertRecord(chapter.operational_readiness, `${label}.operational_readiness`);
     assertAllowedKeys(chapter.operational_readiness, `${label}.operational_readiness`, [
-      'policy', 'source_scopes', 'alternate_chapter_ids',
+      'policy', 'candidate_id', 'candidate_sha256', 'source_scopes',
+      'alternate_chapter_ids',
     ]);
     if (chapter.operational_readiness.policy !== 'required_before_start') {
       throw new OriginalManifestError(
         `${label}.operational_readiness.policy must be required_before_start.`,
+      );
+    }
+    assertStableId(
+      chapter.operational_readiness.candidate_id,
+      `${label}.operational_readiness.candidate_id`,
+    );
+    if (!/^[a-f0-9]{64}$/.test(chapter.operational_readiness.candidate_sha256)) {
+      throw new OriginalManifestError(
+        `${label}.operational_readiness.candidate_sha256 must be a SHA-256 digest.`,
       );
     }
     assertArray(

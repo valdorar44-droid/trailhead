@@ -121,6 +121,8 @@ function chapter(
     }],
     operational_readiness: {
       policy: 'required_before_start',
+      candidate_id: 'test-smokies-operational-v1',
+      candidate_sha256: SHA,
       source_scopes: [`${id}-access`],
       alternate_chapter_ids: alternateChapterIds,
     },

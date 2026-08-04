@@ -8,6 +8,11 @@ import re
 from collections.abc import Callable
 from datetime import date, datetime, timezone
 
+from db.originals_operational import (
+    OriginalOperationalReadinessError,
+    validate_manifest_operational_binding,
+)
+
 
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,239}$")
 _LOCALE_RE = re.compile(r"^[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})?$")
@@ -183,8 +188,14 @@ def _profile(value: object, *, required: bool) -> dict | None:
 
 def _compile(manifest: dict, chapter: dict, variant: dict, stories: dict[str, dict]) -> dict:
     stops = []
-    for cue in variant["cue_refs"]:
+    for cue_index, cue in enumerate(variant["cue_refs"]):
         story = stories[cue["story_id"]]
+        citations = copy.deepcopy(story["citations"])
+        if cue_index == 0:
+            # V1 publication validation expects operational provenance alongside
+            # the compiled route. Keep it on one stop to avoid multiplying the
+            # same sources across every story in the consumer bundle.
+            citations.extend(copy.deepcopy(chapter["operational_sources"]))
         stop = {
             "id": story["id"],
             "sequence": cue["sequence"],
@@ -194,7 +205,7 @@ def _compile(manifest: dict, chapter: dict, variant: dict, stories: dict[str, di
             "audio_asset_id": story["audio_asset_id"],
             "audio_duration_s": story["audio_duration_s"],
             "trigger": copy.deepcopy(cue["trigger"]),
-            "citations": copy.deepcopy(story["citations"]),
+            "citations": citations,
         }
         for source, target in ((cue, "explore_place_id"), (story, "artwork_asset_id")):
             if target in source:
@@ -224,6 +235,7 @@ def normalize_original_manifest_v2(
     normalize_v1: Callable[..., tuple[dict, str]],
     publishing: bool = False,
     verified_assets: dict[str, dict] | None = None,
+    validated_selections: set[str] | None = None,
 ) -> tuple[dict, str]:
     """Normalize V2 and validate every selectable compilation through V1."""
     raw = copy.deepcopy(_object(manifest, "Original V2 manifest"))
@@ -233,11 +245,6 @@ def normalize_original_manifest_v2(
     }, "Original V2 manifest")
     if raw.get("schema_version") != 2:
         raise OriginalManifestV2Error("Original V2 manifest schema_version must be 2")
-    # S1 must bind an authoritative report to every compiled selection first.
-    if publishing:
-        raise OriginalManifestV2Error(
-            "OriginalManifestV2 publication requires authoritative validation for every chapter variant"
-        )
     supplied_pack = raw.get("pack_id")
     supplied_version = raw.get("version")
     if supplied_pack is not None and supplied_pack != pack_id:
@@ -330,6 +337,7 @@ def normalize_original_manifest_v2(
     chapters: list[dict] = []
     referenced: set[str] = set()
     selection_ids: list[str] = []
+    required_validation_selections: set[str] = set()
     for raw_chapter, chapter_id in zip(raw_chapters, chapter_ids):
         chapter = copy.deepcopy(raw_chapter)
         _forbid_keys(chapter, {
@@ -366,15 +374,38 @@ def normalize_original_manifest_v2(
             for scope in _items(source.get("scope"), f"Original V2 chapter {chapter_id} source scopes", 20):
                 available_scopes.add(_stable_id(scope, f"Original V2 chapter {chapter_id} source scope"))
         readiness = _object(chapter.get("operational_readiness"), f"Original V2 chapter {chapter_id} readiness")
-        _forbid_keys(readiness, {"policy", "source_scopes", "alternate_chapter_ids"}, f"Original V2 chapter {chapter_id} readiness")
+        _forbid_keys(readiness, {
+            "policy", "candidate_id", "candidate_sha256", "source_scopes",
+            "alternate_chapter_ids",
+        }, f"Original V2 chapter {chapter_id} readiness")
         if readiness.get("policy") != "required_before_start":
             raise OriginalManifestV2Error(f"Original V2 chapter {chapter_id} readiness policy is invalid")
+        readiness["candidate_id"] = _stable_id(
+            readiness.get("candidate_id"),
+            f"Original V2 chapter {chapter_id} operational candidate id",
+        )
+        candidate_sha256 = str(readiness.get("candidate_sha256") or "").strip().lower()
+        if not re.fullmatch(r"[a-f0-9]{64}", candidate_sha256):
+            raise OriginalManifestV2Error(
+                f"Original V2 chapter {chapter_id} operational candidate SHA-256 is invalid"
+            )
+        readiness["candidate_sha256"] = candidate_sha256
         readiness_scopes = [_stable_id(scope, f"Original V2 chapter {chapter_id} readiness scope") for scope in _items(readiness.get("source_scopes"), f"Original V2 chapter {chapter_id} readiness scopes", 20)]
         if not set(readiness_scopes).issubset(available_scopes):
             raise OriginalManifestV2Error(f"Original V2 chapter {chapter_id} readiness lacks a source")
         alternate_ids = [_stable_id(item, f"Original V2 chapter {chapter_id} alternate") for item in _items(readiness.get("alternate_chapter_ids"), f"Original V2 chapter {chapter_id} alternates", 20, required=False)]
         if chapter_id in alternate_ids or not set(alternate_ids).issubset(set(chapter_ids)):
             raise OriginalManifestV2Error(f"Original V2 chapter {chapter_id} alternate is invalid")
+        if publishing:
+            try:
+                validate_manifest_operational_binding(
+                    chapter_id=chapter_id,
+                    operational_sources=sources,
+                    operational_readiness=readiness,
+                    require_current=True,
+                )
+            except OriginalOperationalReadinessError as exc:
+                raise OriginalManifestV2Error(str(exc)) from exc
         variants: list[dict] = []
         for raw_variant in _items(chapter.get("variants"), f"Original V2 chapter {chapter_id} variants", 10):
             variant = copy.deepcopy(_object(raw_variant, f"Original V2 chapter {chapter_id} variant"))
@@ -446,9 +477,17 @@ def normalize_original_manifest_v2(
         required_variants = [_stable_id(item, f"Original V2 chapter {chapter_id} required variant") for item in _items(validation.get("required_variant_ids"), f"Original V2 chapter {chapter_id} required variants", 10)]
         if sorted(required_variants) != sorted(variant_ids):
             raise OriginalManifestV2Error(f"Original V2 chapter {chapter_id} validation must include every variant")
+        required_validation_selections.update(
+            f"{validation['selection_id']}:{variant_id}"
+            for variant_id in required_variants
+        )
         chapters.append(chapter)
     chapters = _ordered(chapters, "Original V2 chapter")
     _unique(selection_ids, "Original V2 validation selection ids")
+    if publishing and set(validated_selections or ()) != required_validation_selections:
+        raise OriginalManifestV2Error(
+            "OriginalManifestV2 publication requires authoritative validation for every chapter variant"
+        )
     if set(stories_by_id) != referenced:
         raise OriginalManifestV2Error("Every Original V2 story must be referenced by at least one variant")
     review = copy.deepcopy(_object(raw.get("review"), "Original V2 review"))
@@ -488,7 +527,14 @@ def normalize_original_manifest_v2(
         result.update({"manifest_id": f"original_manifest_{pack_id}_v{version}", "pack_id": pack_id, "version": version})
     for chapter in chapters:
         for variant in chapter["variants"]:
-            normalize_v1(pack_id, f"{clean_title} \u2014 {chapter['title']}", _compile(result, chapter, variant, stories_by_id), version=version, publishing=False, verified_assets=verified_assets)
+            normalize_v1(
+                pack_id,
+                f"{clean_title} \u2014 {chapter['title']}",
+                _compile(result, chapter, variant, stories_by_id),
+                version=version,
+                publishing=publishing,
+                verified_assets=verified_assets,
+            )
     encoded = json.dumps(result, separators=(",", ":"), sort_keys=True, ensure_ascii=False)
     if len(encoded.encode()) > _MAX_BYTES:
         raise OriginalManifestV2Error("Original V2 manifest exceeds the size limit")
@@ -556,3 +602,24 @@ def original_manifest_v2_preview(manifest: dict) -> dict:
         "chapters": chapters,
         "offline_map": {key: offline[key] for key in ("region_id", "bounds", "min_zoom", "max_zoom", "estimated_bytes") if key in offline},
     }
+
+
+def original_manifest_v2_operational_bindings(manifest: dict) -> list[dict]:
+    """Return deterministic chapter-to-candidate bindings for validation metadata."""
+
+    if int(manifest.get("schema_version") or 0) != 2:
+        return []
+    bindings = []
+    for chapter in manifest.get("chapters") or []:
+        readiness = chapter.get("operational_readiness") or {}
+        bindings.append({
+            "chapter_id": str(chapter.get("id") or ""),
+            "candidate_id": str(readiness.get("candidate_id") or ""),
+            "candidate_sha256": str(readiness.get("candidate_sha256") or "").lower(),
+        })
+    return sorted(
+        bindings,
+        key=lambda item: (
+            item["chapter_id"], item["candidate_id"], item["candidate_sha256"],
+        ),
+    )

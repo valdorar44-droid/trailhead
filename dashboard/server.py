@@ -253,6 +253,7 @@ from db.store import (
     claim_featured_authored_original, get_published_original_version,
     list_owned_authored_originals, restore_owned_authored_originals,
     get_published_original_manifest,
+    get_published_original_start_readiness,
     save_authored_original_asset_record, list_authored_original_asset_records,
     attest_authored_original_generator_license,
     get_authored_original_asset_record_admin,
@@ -12616,8 +12617,22 @@ class OriginalOperationalReadinessV2(BaseModel):
     model_config = {"extra": "forbid", "strict": True}
 
     policy: Literal["required_before_start"] = "required_before_start"
+    candidate_id: str = Field(min_length=1, max_length=240)
+    candidate_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     source_scopes: list[str] = Field(min_length=1, max_length=20)
     alternate_chapter_ids: list[str] = Field(default_factory=list, max_length=20)
+
+
+class OriginalStartReadinessRequestV1(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    chapter_id: str = Field(min_length=1, max_length=240)
+    variant_id: Optional[str] = Field(default=None, max_length=240)
+    vehicle_class: Optional[Literal[
+        "passenger", "motorcycle", "commercial_service", "bus", "motorhome",
+        "towing_trailer", "van_over_25_ft",
+    ]] = None
+    planned_stop_minutes: Optional[int] = Field(default=None, ge=0, le=1440)
 
 
 class OriginalChapterValidationSelectionV2(BaseModel):
@@ -15400,6 +15415,33 @@ async def api_original_manifest(
     if not manifest:
         raise HTTPException(404, "Trailhead Original manifest not found")
     return manifest
+
+
+@app.post("/api/originals/{pack_id}/versions/{version}/start-readiness")
+async def api_original_start_readiness(
+    pack_id: str,
+    version: int,
+    body: OriginalStartReadinessRequestV1,
+    user: dict | None = Depends(_optional_user),
+):
+    """Fail-closed operational check used immediately before Start Tour."""
+
+    _require_originals_feature(user)
+    try:
+        # A trusted NPS reader will supply a server-owned observation here.
+        # Public request data can never claim that roads are open.
+        return get_published_original_start_readiness(
+            pack_id,
+            version,
+            chapter_id=body.chapter_id,
+            variant_id=body.variant_id,
+            user_id=user["id"] if user else None,
+            vehicle_class=body.vehicle_class,
+            planned_stop_minutes=body.planned_stop_minutes,
+            observation=None,
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
 
 
 @app.get("/api/originals/{pack_id}")

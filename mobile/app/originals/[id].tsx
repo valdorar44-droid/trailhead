@@ -22,6 +22,7 @@ import { useStore } from '@/lib/store';
 import {
   originalBundleStore,
   originalPackVersionAccessIsExact,
+  originalsApi,
   useOriginalsAdminRuntime,
   useOriginalsRuntime,
   type OriginalOwnerScope,
@@ -319,6 +320,22 @@ export default function OriginalDetailScreen() {
     if (!detail) return;
     if (detail.adminPreview) throw new Error('Unpublished Studio drafts can run only in the no-driving trigger test.');
     try {
+      const scope = (user?.id == null ? 'guest' : `account:${String(user.id)}`) as OriginalOwnerScope;
+      const manifest = await originalBundleStore.loadManifest(scope, detail.id, detail.version);
+      if (!manifest) throw new Error('Download and verify this Original before starting.');
+      const selection = detail.manifestSchemaVersion === 2
+        ? { chapter_id: selectedChapterId, variant_id: selectedVariantId }
+        : undefined;
+      if (manifest.schema_version === 2 && selection) {
+        const readiness = await originalsApi.startReadiness(
+          detail.id,
+          detail.version,
+          selection,
+        );
+        if (!readiness.can_start || readiness.status !== 'available') {
+          throw new Error(readiness.message || 'Current operating information could not be verified. Check again before starting.');
+        }
+      }
       if (Platform.OS === 'android') {
         const currentNotifications = await Notifications.getPermissionsAsync();
         const notifications = currentNotifications.status === 'granted'
@@ -328,12 +345,6 @@ export default function OriginalDetailScreen() {
           throw new Error('Allow notifications so Android can show the active-tour location service.');
         }
       }
-      const scope = (user?.id == null ? 'guest' : `account:${String(user.id)}`) as OriginalOwnerScope;
-      const manifest = await originalBundleStore.loadManifest(scope, detail.id, detail.version);
-      if (!manifest) throw new Error('Download and verify this Original before starting.');
-      const selection = detail.manifestSchemaVersion === 2
-        ? { chapter_id: selectedChapterId, variant_id: selectedVariantId }
-        : undefined;
       await originalsRuntime.startTour(manifest, selection);
       setStartVisible(false);
       router.replace(originalStartDestination(detail.id, detail.version) as any);

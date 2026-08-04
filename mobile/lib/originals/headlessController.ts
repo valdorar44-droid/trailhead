@@ -60,7 +60,7 @@ export function createOriginalHeadlessController(
     }
     const access = await dependencies.access.get(session.owner_scope, session.pack_id, session.version);
     const allowed = access?.owner_scope === session.owner_scope
-      && originalLocalAccessIsCurrent(access);
+      && originalLocalAccessIsCurrent(access, undefined, { manifestId: session.manifest_id });
     if (!allowed) return { kind: 'inactive' as const };
     const [bundle, storedManifest] = await Promise.all([
       dependencies.bundles.get(session.owner_scope, session.pack_id, session.version),

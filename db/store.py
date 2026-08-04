@@ -15,8 +15,16 @@ from db.originals_validation import (
     validate_original_route_network,
 )
 from db.original_manifest_v2 import (
+    compile_original_manifest_v2_selection,
     normalize_original_manifest_v2,
+    original_manifest_v2_operational_bindings,
     original_manifest_v2_preview,
+)
+from db.originals_operational import (
+    OriginalOperationalReadinessError,
+    evaluate_chapter_readiness,
+    operational_candidate_sha256,
+    validate_manifest_operational_binding,
 )
 
 # Report expiry by type (seconds)
@@ -12540,6 +12548,7 @@ def _normalize_original_manifest(
     version: int | None = None,
     publishing: bool = False,
     verified_assets: dict[str, dict] | None = None,
+    validated_selections: set[str] | None = None,
 ) -> tuple[dict, str]:
     """Keep V1 unchanged while accepting a fail-closed V2 authoring draft."""
     schema_version = manifest.get("schema_version") if isinstance(manifest, dict) else None
@@ -12561,6 +12570,7 @@ def _normalize_original_manifest(
             normalize_v1=_normalize_original_manifest_v1,
             publishing=publishing,
             verified_assets=verified_assets,
+            validated_selections=validated_selections,
         )
     raise ValueError("Original manifest schema_version must be 1 or 2")
 
@@ -12821,22 +12831,21 @@ def _authored_original_preview_manifest_from_row(
     pack: sqlite3.Row | dict,
     verified_assets: dict[str, dict],
 ) -> dict:
-    pack_id = str(pack["id"])
-    draft_revision = int(pack["draft_revision"])
-    if draft_revision < 1:
-        raise ValueError("Original draft revision is invalid")
-    preview_version = ORIGINAL_DEVICE_PREVIEW_VERSION_BASE + draft_revision
-    manifest, _ = _normalize_original_manifest(
-        pack_id,
-        pack["draft_title"],
-        _decode_pack_json(pack["draft_original_manifest_json"], None),
-        version=preview_version,
-        publishing=False,
-    )
-    if manifest.get("schema_version") == 2:
+    authored = _decode_pack_json(pack["draft_original_manifest_json"], None)
+    if isinstance(authored, dict) and authored.get("schema_version") == 2:
         raise ValueError(
             "OriginalManifestV2 device preview requires an explicit chapter and variant selection"
         )
+    manifest = _authored_original_validation_manifest_from_row(pack, verified_assets)
+    return manifest
+
+
+def _bind_authored_original_preview_assets(
+    manifest: dict,
+    verified_assets: dict[str, dict],
+    pack_id: str,
+) -> dict:
+    """Bind immutable uploads to either V1 stops or V2 shared stories."""
     assets_by_id = {asset["id"]: asset for asset in manifest["assets"]}
     for asset in manifest["assets"]:
         verified = verified_assets.get(asset["id"])
@@ -12859,18 +12868,22 @@ def _authored_original_preview_manifest_from_row(
             asset["id"],
             asset["sha256"],
         )
-    for stop in manifest["stops"]:
-        narration = assets_by_id.get(stop["audio_asset_id"])
-        verified_narration = verified_assets.get(stop["audio_asset_id"])
+
+    schema_version = int(manifest.get("schema_version") or 0)
+    narrative_items = manifest.get("stops") if schema_version == 1 else manifest.get("stories")
+    narrative_label = "stop" if schema_version == 1 else "story"
+    for item in narrative_items or []:
+        narration = assets_by_id.get(item["audio_asset_id"])
+        verified_narration = verified_assets.get(item["audio_asset_id"])
         if (
             not narration
             or narration["kind"] != "narration"
             or not verified_narration
             or verified_narration.get("transcript_sha256")
-            != original_transcript_sha256(stop["transcript"])
+            != original_transcript_sha256(item["transcript"])
         ):
             raise ValueError(
-                f"Original stop {stop['id']} narration does not match its current transcript"
+                f"Original {narrative_label} {item['id']} narration does not match its current transcript"
             )
         media_metadata = _decode_pack_json(
             verified_narration.get("media_metadata_json"), {},
@@ -12878,12 +12891,33 @@ def _authored_original_preview_manifest_from_row(
         verified_duration = float(media_metadata.get("duration_s") or 0)
         if (
             verified_duration <= 0
-            or abs(stop["audio_duration_s"] - verified_duration)
+            or abs(item["audio_duration_s"] - verified_duration)
             > max(0.25, verified_duration * 0.05)
         ):
             raise ValueError(
-                f"Original stop {stop['id']} narration duration does not match its verified audio"
+                f"Original {narrative_label} {item['id']} narration duration does not match its verified audio"
             )
+    return manifest
+
+
+def _authored_original_validation_manifest_from_row(
+    pack: sqlite3.Row | dict,
+    verified_assets: dict[str, dict],
+) -> dict:
+    """Build the immutable V1 or V2 input for authoritative route validation."""
+    pack_id = str(pack["id"])
+    draft_revision = int(pack["draft_revision"])
+    if draft_revision < 1:
+        raise ValueError("Original draft revision is invalid")
+    preview_version = ORIGINAL_DEVICE_PREVIEW_VERSION_BASE + draft_revision
+    manifest, _ = _normalize_original_manifest(
+        pack_id,
+        pack["draft_title"],
+        _decode_pack_json(pack["draft_original_manifest_json"], None),
+        version=preview_version,
+        publishing=False,
+    )
+    _bind_authored_original_preview_assets(manifest, verified_assets, pack_id)
     manifest["manifest_id"] = (
         f"original_preview_manifest_{pack_id}_r{draft_revision}"
     )
@@ -12908,10 +12942,69 @@ def get_authored_original_device_preview_manifest(pack_id: str) -> dict | None:
         db.close()
 
 
+def _get_authored_original_validation_manifest(pack_id: str) -> dict | None:
+    """Build a hash-bound root manifest for one authoritative validation run."""
+    pack_id = _validate_canonical_id(pack_id, "Original id")
+    db = _conn()
+    try:
+        pack = db.execute(
+            """SELECT * FROM authored_trip_packs
+               WHERE id=? AND content_kind='original_drive'""",
+            (pack_id,),
+        ).fetchone()
+        if not pack:
+            return None
+        return _authored_original_validation_manifest_from_row(
+            pack,
+            _verified_original_asset_map_db(db, pack_id),
+        )
+    finally:
+        db.close()
+
+
 def _original_validation_hash(value: object) -> str:
     return hashlib.sha256(
         json.dumps(value, separators=(",", ":"), sort_keys=True, ensure_ascii=False).encode("utf-8")
     ).hexdigest()
+
+
+def _compiled_original_validation_selections(manifest: dict) -> list[dict]:
+    """Compile every V2 route variant while keeping the V1 path unchanged."""
+    if int(manifest.get("schema_version") or 0) == 1:
+        return [{"key": "manifest", "selection": None, "manifest": manifest}]
+    if int(manifest.get("schema_version") or 0) != 2:
+        raise ValueError("Original validation manifest schema is unsupported")
+    selections: list[dict] = []
+    for chapter in manifest.get("chapters") or []:
+        validation = chapter.get("validation_selection") or {}
+        selection_id = str(validation.get("selection_id") or "").strip()
+        required_variants = set(validation.get("required_variant_ids") or [])
+        for variant in chapter.get("variants") or []:
+            variant_id = str(variant.get("id") or "").strip()
+            if variant_id not in required_variants:
+                continue
+            compiled = compile_original_manifest_v2_selection(
+                manifest,
+                chapter_id=str(chapter.get("id") or ""),
+                variant_id=variant_id,
+                normalize_v1=_normalize_original_manifest_v1,
+            )
+            selection = compiled["selection"]
+            selections.append({
+                "key": f"{selection_id}:{variant_id}",
+                "selection": selection,
+                "manifest": compiled["manifest"],
+            })
+    expected = sum(
+        len((chapter.get("validation_selection") or {}).get("required_variant_ids") or [])
+        for chapter in manifest.get("chapters") or []
+    )
+    if not selections or len(selections) != expected:
+        raise ValueError("Original V2 validation selection coverage is incomplete")
+    keys = [item["key"] for item in selections]
+    if len(keys) != len(set(keys)):
+        raise ValueError("Original V2 validation selection keys must be unique")
+    return selections
 
 
 def _original_validation_material(manifest: dict, draft_revision: int) -> dict:
@@ -12925,6 +13018,24 @@ def _original_validation_material(manifest: dict, draft_revision: int) -> dict:
     manifest_sha256 = _original_validation_hash(manifest)
     assets_sha256 = _original_validation_hash(assets)
     validator_source_sha256 = trusted_originals_validator_source_sha256()
+    validation_selections = [{
+        "key": item["key"],
+        "selection": item["selection"],
+        "geometry_sha256": original_route_geometry_sha256(
+            item["manifest"]["route"]["geometry"]["coordinates"],
+        ),
+    } for item in _compiled_original_validation_selections(manifest)]
+    operational_readiness_candidates = original_manifest_v2_operational_bindings(manifest)
+    if int(manifest.get("schema_version") or 0) == 2:
+        for chapter in manifest.get("chapters") or []:
+            # Validation may run before the review window expires, but it must
+            # still bind to an exact checked-in candidate and projection.
+            validate_manifest_operational_binding(
+                chapter_id=str(chapter.get("id") or ""),
+                operational_sources=chapter.get("operational_sources"),
+                operational_readiness=chapter.get("operational_readiness"),
+                require_current=False,
+            )
     input_sha256 = _original_validation_hash({
         "draft_revision": int(draft_revision),
         "manifest_sha256": manifest_sha256,
@@ -12933,6 +13044,8 @@ def _original_validation_material(manifest: dict, draft_revision: int) -> dict:
         "engine_version": ORIGINAL_VIRTUAL_VALIDATION_ENGINE_VERSION,
         "validator_source_sha256": validator_source_sha256,
         "scenario_ids": ORIGINAL_VIRTUAL_VALIDATION_REQUIRED_SCENARIOS,
+        "validation_selections": validation_selections,
+        "operational_readiness_candidates": operational_readiness_candidates,
     })
     return {
         "draft_revision": int(draft_revision),
@@ -12940,7 +13053,20 @@ def _original_validation_material(manifest: dict, draft_revision: int) -> dict:
         "assets_sha256": assets_sha256,
         "validator_source_sha256": validator_source_sha256,
         "input_sha256": input_sha256,
+        "validation_selections": validation_selections,
+        "operational_readiness_candidates": operational_readiness_candidates,
     }
+
+
+def _original_operational_publication_metadata(manifest: dict) -> dict | None:
+    if int(manifest.get("schema_version") or 0) != 2:
+        return None
+    candidates = original_manifest_v2_operational_bindings(manifest)
+    if not candidates:
+        raise ValueError(
+            "Original V2 publication is missing operational readiness candidates"
+        )
+    return {"schema_version": 1, "candidates": candidates}
 
 
 def _original_route_structural_summary(manifest: dict) -> dict:
@@ -13106,7 +13232,7 @@ def create_authored_original_virtual_validation_run(
 ) -> dict:
     """Persist a hash-bound running report before any trusted worker executes."""
     pack_id = _validate_canonical_id(pack_id, "Original id")
-    manifest = get_authored_original_device_preview_manifest(pack_id)
+    manifest = _get_authored_original_validation_manifest(pack_id)
     if not manifest:
         raise ValueError("Trailhead Original not found")
     draft_revision = int(manifest["version"]) - ORIGINAL_DEVICE_PREVIEW_VERSION_BASE
@@ -13143,6 +13269,123 @@ def create_authored_original_virtual_validation_run(
     finally:
         db.close()
     return _original_validation_report_from_row(row, current_material=material)
+
+
+def _execute_original_validation_selection(
+    selection_item: dict,
+    *,
+    runner,
+    route_network_validator,
+    validator_source_sha256: str,
+) -> dict:
+    manifest = selection_item["manifest"]
+    network_summary = route_network_validator(
+        manifest,
+        valhalla_url=settings.valhalla_url,
+    )
+    geometry_sha256 = original_route_geometry_sha256(
+        manifest["route"]["geometry"]["coordinates"],
+    )
+    if (
+        not isinstance(network_summary, dict)
+        or network_summary.get("geometry_sha256") != geometry_sha256
+    ):
+        raise OriginalValidationRunnerError(
+            "Route-network validation is for different geometry"
+        )
+    raw = runner(
+        manifest,
+        required_scenario_ids=ORIGINAL_VIRTUAL_VALIDATION_REQUIRED_SCENARIOS,
+        expected_engine_version=ORIGINAL_VIRTUAL_VALIDATION_ENGINE_VERSION,
+        expected_validator_source_sha256=validator_source_sha256,
+    )
+    result = normalize_original_validation_output(
+        raw,
+        manifest=manifest,
+        required_scenario_ids=ORIGINAL_VIRTUAL_VALIDATION_REQUIRED_SCENARIOS,
+        expected_engine_version=ORIGINAL_VIRTUAL_VALIDATION_ENGINE_VERSION,
+        expected_validator_source_sha256=validator_source_sha256,
+    )
+    passed = result["passed"] is True
+    summary = dict(result["summary"])
+    route_summary = _original_route_structural_summary(manifest)
+    runner_route_summary = result["route_summary"]
+    route_summary.update({
+        "runner_maximum_segment_m": runner_route_summary["maximum_segment_m"],
+        "runner_discontinuity_count": int(runner_route_summary["discontinuity_count"]),
+        "self_intersection_count": int(runner_route_summary["self_intersection_count"]),
+        "runner_stop_projection_failures": int(runner_route_summary["stop_projection_failures"]),
+        "network": network_summary,
+    })
+    summary["route"] = route_summary
+    issues = list(result["issues"])
+    if (
+        route_summary["discontinuity_count"]
+        or route_summary["runner_discontinuity_count"]
+        or route_summary["runner_stop_projection_failures"]
+    ):
+        passed = False
+        issues.append("Authored route contains implausible geometry discontinuities")
+    return {
+        "key": selection_item["key"],
+        "selection": selection_item["selection"],
+        "engine_version": result["engine_version"],
+        "passed": passed,
+        "summary": summary,
+        "scenarios": result["scenarios"],
+        "issues": issues,
+    }
+
+
+def _aggregate_original_validation_selection_results(
+    selection_results: list[dict],
+    *,
+    execution_errors: bool,
+) -> dict:
+    if not selection_results:
+        raise OriginalValidationRunnerError("Original V2 validation returned no selections")
+    versions = {
+        item["engine_version"] for item in selection_results
+        if item["engine_version"]
+    }
+    if len(versions) > 1:
+        raise OriginalValidationRunnerError(
+            "Original V2 selections used different trigger-engine versions"
+        )
+    passed = all(item["passed"] for item in selection_results)
+    summary = {
+        "required": sum(int(item["summary"]["required"]) for item in selection_results),
+        "passed": sum(int(item["summary"]["passed"]) for item in selection_results),
+        "failed": sum(int(item["summary"]["failed"]) for item in selection_results),
+        "stop_count": sum(int(item["summary"]["stop_count"]) for item in selection_results),
+        "selection_count": len(selection_results),
+        "selections_passed": sum(bool(item["passed"]) for item in selection_results),
+        "selections_failed": sum(not bool(item["passed"]) for item in selection_results),
+        "validated_selections": [
+            item["key"] for item in selection_results if item["passed"]
+        ],
+    }
+    scenarios = [{
+        "selection_key": item["key"],
+        "selection": item["selection"],
+        "passed": item["passed"],
+        "summary": item["summary"],
+        "scenarios": item["scenarios"],
+        "issues": item["issues"],
+    } for item in selection_results]
+    issues = [
+        f"{item['key']}: {issue}"
+        for item in selection_results
+        for issue in item["issues"]
+    ]
+    return {
+        "engine_version": next(iter(versions), None),
+        "passed": passed,
+        "summary": summary,
+        "scenarios": scenarios,
+        "issues": issues,
+        "status": "error" if execution_errors else ("passed" if passed else "failed"),
+    }
 
 
 def execute_authored_original_virtual_validation_run(
@@ -13204,58 +13447,59 @@ def execute_authored_original_virtual_validation_run(
                 )
 
         execute_network = route_network_validator or validate_original_route_network
-        network_summary = execute_network(
-            manifest,
-            valhalla_url=settings.valhalla_url,
-        )
-        if (
-            not isinstance(network_summary, dict)
-            or network_summary.get("geometry_sha256")
-            != original_route_geometry_sha256(manifest["route"]["geometry"]["coordinates"])
-        ):
-            raise OriginalValidationRunnerError(
-                "Route-network validation is for different geometry"
-            )
         execute = runner or run_originals_validation_cli
-        raw = execute(
-            manifest,
-            required_scenario_ids=ORIGINAL_VIRTUAL_VALIDATION_REQUIRED_SCENARIOS,
-            expected_engine_version=ORIGINAL_VIRTUAL_VALIDATION_ENGINE_VERSION,
-            expected_validator_source_sha256=material["validator_source_sha256"],
-        )
-        result = normalize_original_validation_output(
-            raw,
-            manifest=manifest,
-            required_scenario_ids=ORIGINAL_VIRTUAL_VALIDATION_REQUIRED_SCENARIOS,
-            expected_engine_version=ORIGINAL_VIRTUAL_VALIDATION_ENGINE_VERSION,
-            expected_validator_source_sha256=material["validator_source_sha256"],
-        )
-        engine_version = result["engine_version"]
-        passed = result["passed"] is True
-        summary = dict(result["summary"])
-        route_summary = _original_route_structural_summary(manifest)
-        runner_route_summary = result["route_summary"]
-        route_summary.update({
-            "runner_maximum_segment_m": runner_route_summary["maximum_segment_m"],
-            "runner_discontinuity_count": int(runner_route_summary["discontinuity_count"]),
-            "self_intersection_count": int(runner_route_summary["self_intersection_count"]),
-            "runner_stop_projection_failures": int(runner_route_summary["stop_projection_failures"]),
-            "network": network_summary,
-        })
-        summary["route"] = route_summary
-        if (
-            route_summary["discontinuity_count"]
-            or route_summary["runner_discontinuity_count"]
-            or route_summary["runner_stop_projection_failures"]
-        ):
-            passed = False
-            result["issues"] = [
-                *result["issues"],
-                "Authored route contains implausible geometry discontinuities",
-            ]
-        status = "passed" if passed else "failed"
-        scenarios = result["scenarios"]
-        issues = result["issues"]
+        selection_items = _compiled_original_validation_selections(manifest)
+        if len(selection_items) == 1 and selection_items[0]["selection"] is None:
+            selection_result = _execute_original_validation_selection(
+                selection_items[0],
+                runner=execute,
+                route_network_validator=execute_network,
+                validator_source_sha256=material["validator_source_sha256"],
+            )
+            engine_version = selection_result["engine_version"]
+            passed = selection_result["passed"]
+            summary = selection_result["summary"]
+            scenarios = selection_result["scenarios"]
+            issues = selection_result["issues"]
+            status = "passed" if passed else "failed"
+        else:
+            selection_results: list[dict] = []
+            execution_errors = False
+            for selection_item in selection_items:
+                try:
+                    selection_results.append(_execute_original_validation_selection(
+                        selection_item,
+                        runner=execute,
+                        route_network_validator=execute_network,
+                        validator_source_sha256=material["validator_source_sha256"],
+                    ))
+                except Exception as exc:
+                    execution_errors = True
+                    clean = re.sub(r"\s+", " ", str(exc or "Selection validation failed")).strip()
+                    selection_results.append({
+                        "key": selection_item["key"],
+                        "selection": selection_item["selection"],
+                        "engine_version": None,
+                        "passed": False,
+                        "summary": {
+                            "required": len(ORIGINAL_VIRTUAL_VALIDATION_REQUIRED_SCENARIOS),
+                            "passed": 0,
+                            "failed": len(ORIGINAL_VIRTUAL_VALIDATION_REQUIRED_SCENARIOS),
+                            "stop_count": len(selection_item["manifest"].get("stops") or []),
+                        },
+                        "scenarios": [],
+                        "issues": [clean[:1000] or "Selection validation failed"],
+                    })
+            aggregate = _aggregate_original_validation_selection_results(
+                selection_results,
+                execution_errors=execution_errors,
+            )
+            engine_version = aggregate["engine_version"]
+            passed = aggregate["passed"]
+            summary = aggregate["summary"]
+            scenarios = aggregate["scenarios"]
+            issues = aggregate["issues"]
+            status = aggregate["status"]
     except Exception as exc:
         clean = re.sub(r"\s+", " ", str(exc or "Virtual validation failed")).strip()
         issues = [clean[:1000] or "Virtual validation failed"]
@@ -13323,7 +13567,7 @@ def get_authored_original_virtual_validation_report(
         if not row:
             return None
         try:
-            manifest = _authored_original_preview_manifest_from_row(
+            manifest = _authored_original_validation_manifest_from_row(
                 pack, _verified_original_asset_map_db(db, pack_id),
             )
             material = _original_validation_material(manifest, int(pack["draft_revision"]))
@@ -13354,7 +13598,7 @@ def get_latest_authored_original_virtual_validation_report(pack_id: str) -> dict
         if not row:
             return None
         try:
-            manifest = _authored_original_preview_manifest_from_row(
+            manifest = _authored_original_validation_manifest_from_row(
                 pack, _verified_original_asset_map_db(db, pack_id),
             )
             material = _original_validation_material(manifest, int(pack["draft_revision"]))
@@ -13764,7 +14008,7 @@ def validate_authored_original_draft(pack_id: str) -> dict | None:
     verified_assets = _verified_original_asset_map_db(db, pack_id)
     current_validation_report = None
     try:
-        preview_manifest = _authored_original_preview_manifest_from_row(pack, verified_assets)
+        preview_manifest = _authored_original_validation_manifest_from_row(pack, verified_assets)
         validation_material = _original_validation_material(
             preview_manifest, int(pack["draft_revision"]),
         )
@@ -13797,6 +14041,10 @@ def validate_authored_original_draft(pack_id: str) -> dict | None:
     if unresolved_path:
         issues.append(f"Original publish content is unresolved at {unresolved_path}")
     try:
+        validated_selections = (
+            set(current_validation_report["summary"].get("validated_selections") or [])
+            if current_validation_report else None
+        )
         _normalize_original_manifest(
             pack_id,
             pack["draft_title"],
@@ -13804,6 +14052,7 @@ def validate_authored_original_draft(pack_id: str) -> dict | None:
             version=next_version,
             publishing=True,
             verified_assets=verified_assets,
+            validated_selections=validated_selections,
         )
     except ValueError as exc:
         issues.append(str(exc))
@@ -13866,7 +14115,7 @@ def publish_authored_trip_pack(
                 raise ValueError(f"Original publish content is unresolved at {unresolved_path}")
             original_manifest = _decode_pack_json(pack["draft_original_manifest_json"], None)
             verified_assets = _verified_original_asset_map_db(db, pack_id)
-            preview_manifest = _authored_original_preview_manifest_from_row(pack, verified_assets)
+            preview_manifest = _authored_original_validation_manifest_from_row(pack, verified_assets)
             validation_material = _original_validation_material(
                 preview_manifest, int(pack["draft_revision"]),
             )
@@ -13889,6 +14138,24 @@ def publish_authored_trip_pack(
                 "engine_version": validation_report_row["engine_version"],
                 "completed_at": int(validation_report_row["completed_at"]),
             }
+            validation_summary = _decode_pack_json(
+                validation_report_row["summary_json"], {},
+            )
+            validated_selections = (
+                set(validation_summary.get("validated_selections") or [])
+                if preview_manifest.get("schema_version") == 2 else None
+            )
+            if validated_selections is not None:
+                published_validation_metadata["virtual_validation_report"][
+                    "validated_selections"
+                ] = sorted(validated_selections)
+            operational_publication_metadata = (
+                _original_operational_publication_metadata(preview_manifest)
+            )
+            if operational_publication_metadata is not None:
+                published_validation_metadata["operational_readiness"] = (
+                    operational_publication_metadata
+                )
             _, original_manifest_json = _normalize_original_manifest(
                 pack_id,
                 pack["draft_title"],
@@ -13896,6 +14163,7 @@ def publish_authored_trip_pack(
                 version=version,
                 publishing=True,
                 verified_assets=verified_assets,
+                validated_selections=validated_selections,
             )
         db.execute(
             """INSERT INTO authored_trip_pack_versions
@@ -14397,6 +14665,39 @@ def _trip_pack_entitlement_result(
         "access_active": access_active,
         "access_expires_at": access_expires_at,
     }
+    original_manifest = _decode_pack_json(raw.get("original_manifest_json"), {})
+    requires_signed_receipt = bool(
+        explorer_subscription
+        and isinstance(original_manifest, dict)
+        and original_manifest.get("schema_version") == 2
+    )
+    if requires_signed_receipt:
+        # Keep receipt signing separate from the entitlement and publication
+        # models. Missing signing configuration fails safe on new clients while
+        # preserving the entitlement, download, and progress for later refresh.
+        from db.original_entitlement_receipt import issue_original_entitlement_receipt
+
+        entitlement["access_receipt_required"] = True
+        entitlement["manifest_id"] = str(original_manifest.get("manifest_id") or "")
+        receipt = (
+            issue_original_entitlement_receipt(
+                user_id=raw["user_id"],
+                entitlement_id=raw["id"],
+                pack_id=raw["pack_id"],
+                version=int(raw["version"]),
+                manifest_id=str(original_manifest.get("manifest_id") or ""),
+                access_expires_at=int(access_expires_at),
+            )
+            if access_active and access_expires_at is not None
+            else None
+        )
+        entitlement["access_receipt"] = receipt
+        entitlement["access_owner_binding"] = (
+            receipt["payload"]["owner_binding"] if receipt else None
+        )
+        entitlement["access_receipt_expires_at"] = (
+            int(receipt["payload"]["receipt_expires_at"]) if receipt else None
+        )
     pack = {
         "id": raw["pack_id"],
         "slug": raw["slug"],
@@ -14993,6 +15294,120 @@ def get_published_original_manifest(
     if not isinstance(manifest, dict):
         raise ValueError("Published Original manifest is unavailable")
     return _original_manifest_for_client(manifest)
+
+
+def get_published_original_start_readiness(
+    pack_id_or_slug: str,
+    version: int,
+    *,
+    chapter_id: str | None,
+    variant_id: str | None,
+    user_id: int | None = None,
+    vehicle_class: str | None = None,
+    planned_stop_minutes: int | None = None,
+    now: _datetime | None = None,
+    observation: object | None = None,
+) -> dict:
+    """Evaluate the server-owned gate immediately before a consumer tour starts.
+
+    `observation` is an internal injection point for the future trusted NPS
+    reader.  It is never accepted from the public API.  Until that reader
+    supplies a fresh candidate-bound observation, V2 starts fail closed.
+    """
+
+    manifest = get_published_original_manifest(
+        pack_id_or_slug,
+        version,
+        user_id=user_id,
+    )
+    if manifest is None:
+        raise ValueError("Published Original manifest was not found")
+    if int(manifest.get("schema_version") or 0) == 1:
+        return {
+            "schema_version": 1,
+            "pack_id": manifest["pack_id"],
+            "version": int(manifest["version"]),
+            "manifest_id": manifest["manifest_id"],
+            "status": "available",
+            "can_start": True,
+            "reason_code": "legacy_v1_start_policy",
+            "message": "This Original uses its published V1 start policy.",
+            "notices": [],
+        }
+    if int(manifest.get("schema_version") or 0) != 2:
+        raise ValueError("Published Original manifest schema is unsupported")
+    clean_chapter_id = str(chapter_id or "").strip()
+    chapter = next((
+        item for item in manifest.get("chapters") or []
+        if item.get("id") == clean_chapter_id
+    ), None)
+    if not chapter:
+        raise ValueError("Original chapter selection was not found")
+    clean_variant_id = str(variant_id or chapter.get("default_variant_id") or "").strip()
+    if not any(
+        item.get("id") == clean_variant_id for item in chapter.get("variants") or []
+    ):
+        raise ValueError("Original route variant selection was not found")
+    effective_now = now or _datetime.now(_timezone.utc)
+    try:
+        candidate = validate_manifest_operational_binding(
+            chapter_id=clean_chapter_id,
+            operational_sources=chapter.get("operational_sources"),
+            operational_readiness=chapter.get("operational_readiness"),
+            now=effective_now,
+            require_current=False,
+        )
+        if vehicle_class is None:
+            candidate_chapter = next(
+                item for item in candidate["chapters"]
+                if item["chapter_id"] == clean_chapter_id
+            )
+            result = {
+                "schema_version": 1,
+                "candidate_id": candidate["candidate_id"],
+                "candidate_sha256": operational_candidate_sha256(candidate),
+                "chapter_id": clean_chapter_id,
+                "source_ids": list(candidate_chapter["source_ids"]),
+                "alternate_chapter_ids": list(candidate_chapter["alternate_chapter_ids"]),
+                "notices": [],
+                "status": "check_required",
+                "reason_code": "vehicle_class_required",
+                "message": "Choose your vehicle setup before starting this chapter.",
+            }
+        else:
+            result = evaluate_chapter_readiness(
+                candidate,
+                chapter_id=clean_chapter_id,
+                now=effective_now,
+                vehicle_class=vehicle_class,
+                planned_stop_minutes=planned_stop_minutes,
+                observation=observation,
+            )
+    except OriginalOperationalReadinessError:
+        result = {
+            "schema_version": 1,
+            "candidate_id": str(
+                (chapter.get("operational_readiness") or {}).get("candidate_id") or ""
+            ),
+            "candidate_sha256": str(
+                (chapter.get("operational_readiness") or {}).get("candidate_sha256") or ""
+            ),
+            "chapter_id": clean_chapter_id,
+            "source_ids": [],
+            "alternate_chapter_ids": [],
+            "notices": [],
+            "status": "check_required",
+            "reason_code": "operational_binding_unavailable",
+            "message": "Current operating information could not be verified. Check again before starting.",
+        }
+    return {
+        **result,
+        "pack_id": manifest["pack_id"],
+        "version": int(manifest["version"]),
+        "manifest_id": manifest["manifest_id"],
+        "variant_id": clean_variant_id,
+        "can_start": result.get("status") == "available",
+    }
 
 
 def _original_manifest_for_client(manifest: dict) -> dict:

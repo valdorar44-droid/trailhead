@@ -1,6 +1,6 @@
 # Great Smoky Mountains Original — Active Checkpoint
 
-Last updated: 2026-08-03 (S0 implementation complete; review checkpoint)
+Last updated: 2026-08-04 (S1 routes and operations started)
 
 ## Resume protocol
 
@@ -172,7 +172,18 @@ The runtime keeps a single queued story; story timing and trigger spacing must p
 
 ## Next exact action
 
-Stop for S0 review. After approval, begin S1 with exact Mapbox road variants for Mountain Crossing, Cades Cove/Little River, Roaring Fork, and Foothills Parkway. Bind current operational sources, add the trusted-time receipt, and build deterministic per-selection validation. Do not draft Cherokee interpretation or generate narration in S1.
+Implement S1 only: exact Mapbox road variants for Mountain Crossing, Cades Cove/Little River, Roaring Fork, and Foothills Parkway; current official operational sources and readiness rules; a trusted server-time entitlement receipt; and deterministic validation for every chapter/variant. Do not draft Cherokee interpretation or generate narration in S1.
+
+## S1 baseline
+
+- User approval to begin: 2026-08-04.
+- Baseline HEAD: `d50b2ad22ff500a2d4ab5eda8cc09f541559ff5b` on `feat/trailhead-1.0.10-overhaul`.
+- Protected hashes at start:
+  - Explore serving index: `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
+  - App Store copy: `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+- Existing dirty state remains limited to the two protected files and `.cursor/`.
+- Route policy: Mapbox Directions is authoritative for routable roads. Map Matching may be used only for an authoritative trace that cannot route because of a current seasonal closure. Turf/geometric operations are limited to cue projection, ambiguity checks, bounds, and offline coverage.
+- S1 deliberately excludes scripts, pronunciations, cultural interpretation, Cartesia auditions, narration generation, public rollout, mobile OTA, and native builds.
 
 ## Do not repeat
 

@@ -1,6 +1,6 @@
 # Great Smoky Mountains Original — Active Checkpoint
 
-Last updated: 2026-08-04 (S1 routes and operations started)
+Last updated: 2026-08-04 (S1 routes and operations checkpointed)
 
 ## Resume protocol
 
@@ -172,7 +172,7 @@ The runtime keeps a single queued story; story timing and trigger spacing must p
 
 ## Next exact action
 
-Implement S1 only: exact Mapbox road variants for Mountain Crossing, Cades Cove/Little River, Roaring Fork, and Foothills Parkway; current official operational sources and readiness rules; a trusted server-time entitlement receipt; and deterministic validation for every chapter/variant. Do not draft Cherokee interpretation or generate narration in S1.
+Review the accepted S1 packet, then begin S2 with claim-level source and media-rights dossiers plus compensated EBCI outreach. Before any consumer Start Tour or internal device preview, add a trusted current-road reader and bind the user's selected vehicle/rig class. Do not draft Cherokee interpretation, create pronunciations, or generate narration before those editorial/cultural gates are approved.
 
 ## S1 baseline
 
@@ -184,6 +184,41 @@ Implement S1 only: exact Mapbox road variants for Mountain Crossing, Cades Cove/
 - Existing dirty state remains limited to the two protected files and `.cursor/`.
 - Route policy: Mapbox Directions is authoritative for routable roads. Map Matching may be used only for an authoritative trace that cannot route because of a current seasonal closure. Turf/geometric operations are limited to cue projection, ambiguity checks, bounds, and offline coverage.
 - S1 deliberately excludes scripts, pronunciations, cultural interpretation, Cartesia auditions, narration generation, public rollout, mobile OTA, and native builds.
+
+## S1 completion evidence
+
+- Baseline checkpoint: `0948b8292860bc4a270a7ef77f509901fcbcdd76`.
+- Route candidate commit: `75a32e64b72bfe6c5aec814b091413c20df484dc`.
+- S1 readiness/validation/access commit: `0d3388ce0aeaa3abad7947fd38e3da357c52b649`.
+- Six exact candidate variants were generated through Mapbox Directions with `driving` provenance:
+  - Mountain Crossing, Tennessee to North Carolina: 75.44 km.
+  - Mountain Crossing, North Carolina to Tennessee: 74.53 km.
+  - Little River and Cades Cove: 59.71 km.
+  - Roaring Fork one-way: 8.20 km.
+  - Foothills Parkway west to east: 50.88 km.
+  - Foothills Parkway east to west: 50.88 km.
+- The two independent live route builds produced identical geometry per variant. The ignored redacted route-evidence artifact SHA-256 is `2220dc9a1bfca4eaa63386c40946fbbebf9a2a6a2dd3f4f16ea31c1800a1c2dd`; no token or provider request URL is persisted.
+- Route evidence is explicitly `candidate_only` and `temporary_use_only`. It has no publication ingestion path. Before S4, add a compiler-enforced rights gate rather than copying this candidate geometry into a permanent/offline manifest.
+- Operational candidate `smokies-operational-readiness-2026-v1` is bound by canonical SHA-256 `17b9eea045ac2369e7679f5fbec3291cca46374b004165f15087ceb4bded7a21` and expires on 2026-09-03. Its official NPS projection covers route, access, fees, closures, surface, season, safety, vehicle restrictions, parking, vehicle-free days, and chapter alternates.
+- Every V2 chapter carries that candidate ID/hash. Authoritative validation input and publication metadata bind the same values; missing, altered, untrusted, or expired candidates fail publication.
+- Every chapter/variant compiles independently into the trusted V1-shaped validator. Publication requires the exact complete set of passing selection keys; a failed direction cannot be hidden by another passing variant. Published Moab V1 remains unchanged.
+- The consumer Start action calls the server-owned readiness endpoint before notification permission, location, or playback. Missing/stale/incomplete observations and unknown vehicle class return `check_required`. The backend no longer assumes every user drives a passenger vehicle.
+- A trusted live NPS current-road reader is intentionally not implemented in this packet. Until it supplies explicit fresh candidate-bound states for every required road, all Smokies starts remain blocked. Absence from a closure page is never treated as proof that a road is open.
+- Temporary V2 Explorer access uses an Ed25519 receipt bound to entitlement, keyed non-enumerable owner subject, pack, version, and exact immutable manifest. The offline receipt defaults to 72 hours and never exceeds subscription expiry.
+- Monotonic elapsed time advances receipt expiry even if the wall clock is frozen. Wall-clock rollback or a monotonic reset locks temporary playback until a fresh authenticated receipt; download and progress remain intact. Permanent ownership and V1 access are unchanged.
+- Receipt activation requires backend `TRAILHEAD_ORIGINALS_RECEIPT_PRIVATE_KEY`, `TRAILHEAD_ORIGINALS_RECEIPT_KEY_ID`, `TRAILHEAD_ORIGINALS_RECEIPT_OWNER_BINDING_KEY`, optional bounded `TRAILHEAD_ORIGINALS_RECEIPT_TTL_SECONDS`, and mobile `EXPO_PUBLIC_ORIGINALS_ENTITLEMENT_RECEIPT_KEYS`. Missing or mismatched configuration fails temporary V2 playback closed.
+- Residual hardening before public activation:
+  - Bind the selected server/profile vehicle class instead of leaving Start blocked on unknown.
+  - Add the trusted current-road reader and explicit observation provenance.
+  - Consider binding canonical manifest content SHA in the receipt in addition to immutable manifest ID and verified bundle hash.
+  - A JS runtime whose monotonic origin resets on process restart may require an authenticated refresh more often; native attestation remains future hardening for rooted-device tampering.
+- Final backend evidence: 140 passed plus 13 subtests across V1/V2 manifests, Originals APIs, network validation, receipts, operations, and route candidates. The vehicle-class correction then passed 70 focused backend tests.
+- Complete mobile `npm run test:originals`, focused API/Main Map regressions, strict `npx tsc --noEmit`, Python compilation, and whitespace checks pass.
+- Two independent audits found no remaining P0. The final vehicle-class P1 was corrected fail-closed and its focused tests pass.
+- Protected hashes remain unchanged:
+  - Explore serving index: `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
+  - App Store copy: `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+- No backend deployment, preview/production OTA, native build, public stage change, script drafting, cultural interpretation, audio generation, or Cartesia credit spend occurred.
 
 ## Do not repeat
 

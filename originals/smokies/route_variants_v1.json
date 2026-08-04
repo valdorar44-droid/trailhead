@@ -1,0 +1,338 @@
+{
+  "schema_version": 1,
+  "kind": "trailhead_original_route_spec",
+  "product_id": "great_smoky_mountains_ridges_rivers_living_memory",
+  "provider_policy": {
+    "authoring_engine": "mapbox_directions",
+    "profile": "mapbox/driving",
+    "map_matching": "authoritative_trace_only",
+    "geometric_operations": [
+      "bounds",
+      "distance_cross_check",
+      "corridor_coverage"
+    ],
+    "output_persistence": "candidate_evidence_only"
+  },
+  "expected_variant_count": 6,
+  "variants": [
+    {
+      "id": "mountain-crossing-tn-to-nc",
+      "chapter_id": "mountain_crossing",
+      "variant_id": "tn_to_nc",
+      "sequence": 1,
+      "title": "Sugarlands to Cherokee",
+      "direction": "one_way",
+      "route_strategy": "directions",
+      "reverse_pair_id": "mountain-crossing-nc-to-tn",
+      "expected_distance_m": {
+        "minimum": 70000,
+        "maximum": 82000
+      },
+      "max_control_snap_m": 150,
+      "required_road_name_patterns": [
+        "Fighting Creek Gap Road",
+        "Newfound Gap Road",
+        "(?:Kuwohi|Clingmans Dome)"
+      ],
+      "anchors": [
+        {
+          "id": "sugarlands",
+          "label": "Sugarlands Visitor Center",
+          "coordinates": [-83.536535, 35.685654]
+        },
+        {
+          "id": "newfound_gap_return",
+          "label": "Newfound Gap approach to Kuwohi",
+          "coordinates": [-83.425329, 35.611035]
+        },
+        {
+          "id": "kuwohi",
+          "label": "Kuwohi visitor contact station",
+          "coordinates": [-83.496037, 35.557367]
+        },
+        {
+          "id": "newfound_gap_outbound",
+          "label": "Newfound Gap return from Kuwohi",
+          "coordinates": [-83.425329, 35.611035]
+        },
+        {
+          "id": "oconaluftee",
+          "label": "Oconaluftee Visitor Center",
+          "coordinates": [-83.306213, 35.51313]
+        },
+        {
+          "id": "cherokee",
+          "label": "Cherokee chapter endpoint",
+          "coordinates": [-83.316414, 35.484558]
+        }
+      ]
+    },
+    {
+      "id": "mountain-crossing-nc-to-tn",
+      "chapter_id": "mountain_crossing",
+      "variant_id": "nc_to_tn",
+      "sequence": 2,
+      "title": "Cherokee to Sugarlands",
+      "direction": "one_way",
+      "route_strategy": "directions",
+      "reverse_pair_id": "mountain-crossing-tn-to-nc",
+      "expected_distance_m": {
+        "minimum": 70000,
+        "maximum": 82000
+      },
+      "max_control_snap_m": 150,
+      "required_road_name_patterns": [
+        "Fighting Creek Gap Road",
+        "Newfound Gap Road",
+        "(?:Kuwohi|Clingmans Dome)"
+      ],
+      "anchors": [
+        {
+          "id": "cherokee",
+          "label": "Cherokee chapter endpoint",
+          "coordinates": [-83.316414, 35.484558]
+        },
+        {
+          "id": "oconaluftee",
+          "label": "Oconaluftee Visitor Center",
+          "coordinates": [-83.306213, 35.51313]
+        },
+        {
+          "id": "newfound_gap_outbound",
+          "label": "Newfound Gap",
+          "coordinates": [-83.425329, 35.611035]
+        },
+        {
+          "id": "kuwohi",
+          "label": "Kuwohi visitor contact station",
+          "coordinates": [-83.496037, 35.557367]
+        },
+        {
+          "id": "newfound_gap_return",
+          "label": "Newfound Gap return from Kuwohi",
+          "coordinates": [-83.425329, 35.611035]
+        },
+        {
+          "id": "sugarlands",
+          "label": "Sugarlands Visitor Center",
+          "coordinates": [-83.536535, 35.685654]
+        }
+      ]
+    },
+    {
+      "id": "little-river-cades-cove-loop",
+      "chapter_id": "little_river_cades_cove",
+      "variant_id": "sugarlands_to_cades_cove_loop",
+      "sequence": 1,
+      "title": "Sugarlands, Little River and Cades Cove",
+      "direction": "one_way",
+      "route_strategy": "directions",
+      "expected_distance_m": {
+        "minimum": 57000,
+        "maximum": 63000
+      },
+      "max_control_snap_m": 150,
+      "required_road_name_patterns": [
+        "Little River (?:Gorge )?Road",
+        "Laurel Creek Road",
+        "Cades Cove Loop Road"
+      ],
+      "anchors": [
+        {
+          "id": "sugarlands",
+          "label": "Sugarlands Visitor Center",
+          "coordinates": [-83.536535, 35.685654]
+        },
+        {
+          "id": "townsend_wye",
+          "label": "Townsend Wye",
+          "coordinates": [-83.707792, 35.659619]
+        },
+        {
+          "id": "cades_cove_entrance",
+          "label": "Cades Cove entrance",
+          "coordinates": [-83.774084, 35.606472]
+        },
+        {
+          "id": "john_oliver_place",
+          "label": "John Oliver Place",
+          "coordinates": [-83.795177, 35.609788]
+        },
+        {
+          "id": "methodist_church",
+          "label": "Cades Cove Methodist Church",
+          "coordinates": [-83.817307, 35.607289]
+        },
+        {
+          "id": "missionary_baptist_church",
+          "label": "Cades Cove Missionary Baptist Church",
+          "coordinates": [-83.82621, 35.608003]
+        },
+        {
+          "id": "abrams_falls_trailhead",
+          "label": "Abrams Falls trailhead",
+          "coordinates": [-83.852552, 35.591125]
+        },
+        {
+          "id": "cable_mill",
+          "label": "Cable Mill and Cades Cove Visitor Center",
+          "coordinates": [-83.84444, 35.585073]
+        },
+        {
+          "id": "tipton_place",
+          "label": "Tipton Place",
+          "coordinates": [-83.812353, 35.588019]
+        },
+        {
+          "id": "carter_shields_cabin",
+          "label": "Carter Shields Cabin",
+          "coordinates": [-83.798632, 35.589604]
+        },
+        {
+          "id": "cades_cove_exit",
+          "label": "Cades Cove loop exit",
+          "coordinates": [-83.774084, 35.606472]
+        }
+      ]
+    },
+    {
+      "id": "roaring-fork-one-way",
+      "chapter_id": "roaring_fork",
+      "variant_id": "one_way",
+      "sequence": 1,
+      "title": "Roaring Fork Motor Nature Trail",
+      "direction": "one_way",
+      "route_strategy": "directions",
+      "expected_distance_m": {
+        "minimum": 7500,
+        "maximum": 9000
+      },
+      "max_control_snap_m": 100,
+      "required_road_name_patterns": [
+        "Roaring Fork Motor Nature Trail"
+      ],
+      "anchors": [
+        {
+          "id": "roaring_fork_entrance",
+          "label": "Roaring Fork entrance",
+          "coordinates": [-83.481259, 35.678529]
+        },
+        {
+          "id": "grotto_falls_parking",
+          "label": "Grotto Falls parking",
+          "coordinates": [-83.463302, 35.680272]
+        },
+        {
+          "id": "roaring_fork_upper",
+          "label": "Roaring Fork upper road control",
+          "coordinates": [-83.463592, 35.692081]
+        },
+        {
+          "id": "roaring_fork_mid",
+          "label": "Roaring Fork mid-route control",
+          "coordinates": [-83.471039, 35.698154]
+        },
+        {
+          "id": "thousand_drips",
+          "label": "Place of a Thousand Drips",
+          "coordinates": [-83.482567, 35.71121]
+        },
+        {
+          "id": "roaring_fork_exit",
+          "label": "Roaring Fork exit",
+          "coordinates": [-83.485081, 35.714143]
+        }
+      ]
+    },
+    {
+      "id": "foothills-parkway-west-to-east",
+      "chapter_id": "foothills_parkway",
+      "variant_id": "west_to_east",
+      "sequence": 1,
+      "title": "Chilhowee Lake to Wears Valley",
+      "direction": "one_way",
+      "route_strategy": "directions",
+      "reverse_pair_id": "foothills-parkway-east-to-west",
+      "expected_distance_m": {
+        "minimum": 49000,
+        "maximum": 53000
+      },
+      "max_control_snap_m": 100,
+      "required_road_name_patterns": [
+        "Foothills Parkway"
+      ],
+      "anchors": [
+        {
+          "id": "chilhowee_terminus",
+          "label": "Foothills Parkway at Chilhowee Lake",
+          "coordinates": [-84.009998, 35.557408]
+        },
+        {
+          "id": "look_rock",
+          "label": "Look Rock",
+          "coordinates": [-83.943764, 35.631089]
+        },
+        {
+          "id": "walland_east_connection",
+          "label": "Walland east connection",
+          "coordinates": [-83.821911, 35.718401]
+        },
+        {
+          "id": "foothills_missing_link",
+          "label": "Foothills Parkway completed link",
+          "coordinates": [-83.715222, 35.713752]
+        },
+        {
+          "id": "wears_valley_terminus",
+          "label": "Foothills Parkway at Wears Valley",
+          "coordinates": [-83.645637, 35.720484]
+        }
+      ]
+    },
+    {
+      "id": "foothills-parkway-east-to-west",
+      "chapter_id": "foothills_parkway",
+      "variant_id": "east_to_west",
+      "sequence": 2,
+      "title": "Wears Valley to Chilhowee Lake",
+      "direction": "one_way",
+      "route_strategy": "directions",
+      "reverse_pair_id": "foothills-parkway-west-to-east",
+      "expected_distance_m": {
+        "minimum": 49000,
+        "maximum": 53000
+      },
+      "max_control_snap_m": 100,
+      "required_road_name_patterns": [
+        "Foothills Parkway"
+      ],
+      "anchors": [
+        {
+          "id": "wears_valley_terminus",
+          "label": "Foothills Parkway at Wears Valley",
+          "coordinates": [-83.645637, 35.720484]
+        },
+        {
+          "id": "foothills_missing_link",
+          "label": "Foothills Parkway completed link",
+          "coordinates": [-83.715222, 35.713752]
+        },
+        {
+          "id": "walland_east_connection",
+          "label": "Walland east connection",
+          "coordinates": [-83.821911, 35.718401]
+        },
+        {
+          "id": "look_rock",
+          "label": "Look Rock",
+          "coordinates": [-83.943764, 35.631089]
+        },
+        {
+          "id": "chilhowee_terminus",
+          "label": "Foothills Parkway at Chilhowee Lake",
+          "coordinates": [-84.009998, 35.557408]
+        }
+      ]
+    }
+  ]
+}

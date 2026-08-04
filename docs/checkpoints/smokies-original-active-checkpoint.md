@@ -1,6 +1,6 @@
 # Great Smoky Mountains Original — Active Checkpoint
 
-Last updated: 2026-08-03 21:27 CDT (America/Winnipeg)
+Last updated: 2026-08-03 (S0 implementation baseline)
 
 ## Resume protocol
 
@@ -14,8 +14,8 @@ Read this file before continuing the Great Smoky Mountains Original. Do not repe
 ## Baseline and cleanup evidence
 
 - Branch: `feat/trailhead-1.0.10-overhaul`.
-- Baseline HEAD: `f1f6a24eccf568665260b44cb76b18e50d7ebd72`.
-- Intentional checkpoint file: this document only.
+- S0 baseline HEAD: `0fedb49adadbe0cdda5880d981709447504f03f6`.
+- Intentional baseline-checkpoint file: this document only.
 - Existing dirty state, preserved:
   - `M dashboard/explore_serving_index_v2.json`
   - `M docs/app-store-copy.md`
@@ -30,10 +30,10 @@ Read this file before continuing the Great Smoky Mountains Original. Do not repe
 ## Existing Originals foundation — verified
 
 - The paid Smokies product will reuse the existing authored pack, immutable version, acquisition, owner-scoped bundle, main-map playback, background location, captions, progress, offline map, validation, and Plan ownership systems. No second tour engine or ownership store is allowed.
-- Allowed existing Original prices are `0`, `250`, `500`, and `900` credits.
-- Existing behavior gives ordinary Explorer members a 20% discount. A featured monthly Original may be claimed for zero credits and remains permanently owned.
+- Allowed existing Original prices are `0`, `250`, `500`, and `900` credits. Smokies uses a per-pack policy with `permanent_credit_price: 900` and `explorer_included: true`.
+- Explorer access lasts while the subscription is active. Subscription expiry locks playback while preserving progress and downloaded files; resubscription restores access without a redownload. A 900-credit unlock is permanent, and all existing permanent ownership remains permanent.
 - Existing acquisition is idempotent; later immutable versions remain available to prior owners.
-- ElevenLabs generation and provenance are already supported. Publishing verifies the reviewed transcript hash, provider, model, voice, license attestation, probed duration, artwork, citations, operational scope, and route validation.
+- Both Cartesia and ElevenLabs generation/provenance are supported. The dedicated Originals Cartesia endpoint exists, while the newer generic Studio path defaults to ElevenLabs. The immutable published Moab asset revisions—not a mutable Studio default—must determine the Smokies baseline provider and voice.
 - The trusted Node runner shares the mobile trigger engine and covers 13 continuous-route scenarios. Studio cannot forge a passing result.
 - The published Moab product is 65 miles, 4–6 hours, 11 stories, and about 24 MB on the tested device bundle. Only stories 1–2 are present in local UI evidence; each is about one minute. The checked-in ten-stop draft fixture is obsolete and must not be used as production truth.
 - Before comparing final Smokies size or pacing to Moab, export a redacted production manifest inventory containing stop IDs, audio durations, byte sizes, hashes, provider/model/voice, and route progress—but no transcript text or secrets.
@@ -84,23 +84,24 @@ The runtime keeps a single queued story; story timing and trigger spacing must p
 
 ## Audio and bundle targets
 
-- Keep the approved ElevenLabs voice initially, then run an actual device A/B of 64 kbps and 96 kbps spoken-word output before choosing the final format.
+- The user confirmed that Cartesia Pro is active. Do not generate production narration until scripts and pronunciations are locked, Cartesia training opt-out is confirmed, the account's actual balance/overage price is checked, and the independent 225,000-credit / $15-before-tax renderer caps are active.
+- If the immutable Moab inventory is consistently Cartesia, preserve its exact voice as the baseline and audition it with the pinned `sonic-3.5-2026-05-04` snapshot. If Moab is ElevenLabs or mixed, stop after S0 and present the inventory before selecting the narrator.
+- Generate one archival WAV master per approved asset. Locally encode that identical master at 64, 96, and 128 kbps for device listening; do not spend TTS credits to compare compression.
 - At the existing 128 kbps default, 150–180 minutes of narration alone is roughly 144–173 MB. Lower bitrates must be chosen by listening tests, not assumption.
 - Estimate the final union offline map and asset bundle only after all Mapbox route variants, corridor bounds, zoom ranges, and licensed media are fixed. Initial planning range: 250–500 MB.
 - Rerender only changed or failed assets. Preserve provider, voice, model, license, duration, byte size, transcript hash, and audio hash internally.
 
-## Entitlement and store-policy gate
+## Entitlement and credit gate
 
-- Recommended catalog price: `900` credits. Existing Explorer discount becomes `720` credits outside the featured month.
-- Recommended Explorer launch offer: make Smokies the featured monthly Original, allowing Explorer members to claim it free and keep it permanently. This reuses existing entitlement semantics.
-- Do not unlock this digital tour through an in-app Stripe/browser credit purchase in the released apps. Apple and Google treat premium in-app content and sold virtual credits as store-billing territory unless a specific eligible external/alternative-billing program applies.
-- Before public paid acquisition, implement StoreKit/Google Play Billing for the relevant product or credit packs, or explicitly choose a compliant consumption-only/external-program model by storefront. Preserve earned/referral/prize credits separately from purchased-credit receipts.
-- This billing gate does not block route work, source dossiers, scripts, audio previews, bundle preparation, validation, or internal acquisition tests.
+- Smokies costs `900` earned credits for permanent ownership and is included while Explorer is active. Credits cannot be purchased.
+- Disable creation of new public credit packages and checkouts with the stable `credits_earned_only` response. Preserve historical balances, earned sources, refunds, and settlement webhooks for already-open payment sessions.
+- Subscription expiry must not delete downloads or progress. Resubscription or permanent ownership restores playback without redownloading.
+- Existing permanent Original ownership remains permanent and published Moab V1 manifests remain immutable.
 
 ## Implementation packets
 
-1. **S0 — Product and compliance specification**
-   - Approve Manifest V2, featured-month Explorer semantics, 900-credit price, and store-billing approach.
+1. **S0 — Product contract and provenance**
+   - Implement Manifest V2, Explorer-included access, 900 earned-credit permanent ownership, and earned-only checkout behavior.
    - Export the redacted Moab production inventory.
 2. **S1 — Routes and operations**
    - Build exact routable variants with Mapbox/road-network validation.
@@ -110,23 +111,24 @@ The runtime keeps a single queued story; story timing and trigger spacing must p
    - Establish EBCI review/participation before Cherokee scripts are finalized.
 4. **S3 — Editorial scripts and audio**
    - Write and human-edit 42–48 stories plus short notes.
-   - Render ElevenLabs previews; A/B bitrate and pacing on Android and iPhone.
+   - Render reviewed Cartesia auditions only after the provider/voice and data-terms gates pass; A/B local bitrate encodes and pacing on Android and iPhone.
 5. **S4 — Bundle and deterministic validation**
    - Validate every chapter and direction against continuous fixtures, trigger spacing, queue drain, map matching, ambiguous geometry, and offline integrity.
 6. **S5 — Internal paired preview**
    - Android first, then iOS from the same SHA; test chapter selection, acquisition, download, background playback, interruptions, completion, End Tour, and restore.
-7. **S6 — Paid rollout**
-   - Enable only after compliant store billing/entitlement tests, complete cultural/source review, zero P0/P1 defects, and explicit approval.
+7. **S6 — Public rollout**
+   - Enable only after entitlement tests, complete cultural/source review, commercial-license evidence, zero P0/P1 defects, and explicit approval.
 
-## Open decisions
+## Fixed S0 decisions
 
-1. Confirm Manifest V2 with selectable chapters rather than separate V1 products.
-2. Confirm the current Explorer model: one featured Original claimed free permanently, then a 20% discount on other Originals. A different `all Originals included while subscribed` model would require new subscription entitlement and revocation semantics.
-3. Confirm 900 credits as the first premium price before storefront product configuration.
+1. One backward-compatible Manifest V2 product with four selectable chapters.
+2. Explorer access while subscribed; permanent ownership costs 900 earned credits.
+3. Credits are earned-only; new purchase/checkout creation is disabled while historical settlement remains intact.
+4. Cartesia Pro is active, but production rendering stays locked until scripts, pronunciations, data terms, balance/overage price, and hard spend caps are verified.
 
 ## Next exact action
 
-After the user approves the three defaults above, implement S0 only: add the versioned manifest/schema/compiler tests and the redacted production-inventory export. Stop for review before route sourcing or story drafting.
+Implement S0 only: add the versioned manifest/schema/compiler and access-policy tests, disable new credit purchases safely, and export the redacted production Moab inventory through a temporary Railway SSH key. Remove that key after evidence is verified. Stop for review before route sourcing, story drafting, or narration generation.
 
 ## Do not repeat
 

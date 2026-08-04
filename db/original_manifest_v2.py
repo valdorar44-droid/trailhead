@@ -341,8 +341,15 @@ def normalize_original_manifest_v2(
         chapter["sequence"] = _sequence(chapter.get("sequence"), f"Original V2 chapter {chapter_id} sequence")
         chapter["title"] = _text(chapter.get("title"), f"Original V2 chapter {chapter_id} title", 200)
         chapter["summary"] = _text(chapter.get("summary"), f"Original V2 chapter {chapter_id} summary", 2000)
-        for key in ("safety", "access", "season"):
-            chapter[key] = copy.deepcopy(_object(chapter.get(key), f"Original V2 chapter {chapter_id} {key}"))
+        chapter_objects = {
+            "safety": {"summary", "emergency_note", "disclaimers"},
+            "access": {"surface", "vehicle", "fees", "accessibility_notes"},
+            "season": {"recommended_months", "closures_note"},
+        }
+        for key, allowed_fields in chapter_objects.items():
+            label = f"Original V2 chapter {chapter_id} {key}"
+            chapter[key] = copy.deepcopy(_object(chapter.get(key), label))
+            _forbid_keys(chapter[key], allowed_fields, label)
         sources = _items(chapter.get("operational_sources"), f"Original V2 chapter {chapter_id} operational sources", 100)
         available_scopes: set[str] = set()
         for source in sources:
@@ -375,7 +382,13 @@ def normalize_original_manifest_v2(
             variant["id"] = _stable_id(variant.get("id"), f"Original V2 chapter {chapter_id} variant id")
             variant["sequence"] = _sequence(variant.get("sequence"), f"Original V2 variant {variant['id']} sequence")
             variant["title"] = _text(variant.get("title"), f"Original V2 variant {variant['id']} title", 200)
-            variant["route"] = copy.deepcopy(_object(variant.get("route"), f"Original V2 variant {variant['id']} route"))
+            route_label = f"Original V2 variant {variant['id']} route"
+            variant["route"] = copy.deepcopy(_object(variant.get("route"), route_label))
+            _forbid_keys(
+                variant["route"],
+                {"profile", "direction", "geometry", "bounds", "distance_m", "duration_s"},
+                route_label,
+            )
             route_bounds = _bounds(variant["route"].get("bounds"), f"Original V2 variant {variant['id']} route bounds")
             if (
                 route_bounds["north"] > union_bounds["north"]
@@ -384,7 +397,9 @@ def normalize_original_manifest_v2(
                 or route_bounds["west"] < union_bounds["west"]
             ):
                 raise OriginalManifestV2Error(f"Original V2 variant {variant['id']} route is outside the union offline map")
-            geometry = _object(variant["route"].get("geometry"), f"Original V2 variant {variant['id']} geometry")
+            geometry_label = f"Original V2 variant {variant['id']} geometry"
+            geometry = _object(variant["route"].get("geometry"), geometry_label)
+            _forbid_keys(geometry, {"type", "coordinates"}, geometry_label)
             for coordinate in _items(geometry.get("coordinates"), f"Original V2 variant {variant['id']} coordinates", 20_000):
                 if not isinstance(coordinate, list) or len(coordinate) != 2:
                     raise OriginalManifestV2Error(f"Original V2 variant {variant['id']} coordinate is invalid")
@@ -397,14 +412,22 @@ def normalize_original_manifest_v2(
                 if cue["story_id"] not in stories_by_id:
                     raise OriginalManifestV2Error(f"Original V2 variant {variant['id']} references an unknown story")
                 cue["sequence"] = _sequence(cue.get("sequence"), f"Original V2 variant {variant['id']} cue sequence")
-                cue["coordinates"] = copy.deepcopy(_object(cue.get("coordinates"), f"Original V2 variant {variant['id']} cue coordinates"))
+                coordinate_label = f"Original V2 variant {variant['id']} cue coordinates"
+                cue["coordinates"] = copy.deepcopy(_object(cue.get("coordinates"), coordinate_label))
+                _forbid_keys(cue["coordinates"], {"lat", "lng"}, coordinate_label)
                 _bounds_contains(
                     union_bounds,
                     cue["coordinates"].get("lng"),
                     cue["coordinates"].get("lat"),
                     f"Original V2 variant {variant['id']} cue",
                 )
-                cue["trigger"] = copy.deepcopy(_object(cue.get("trigger"), f"Original V2 variant {variant['id']} cue trigger"))
+                trigger_label = f"Original V2 variant {variant['id']} cue trigger"
+                cue["trigger"] = copy.deepcopy(_object(cue.get("trigger"), trigger_label))
+                _forbid_keys(cue["trigger"], {
+                    "enter_radius_m", "exit_radius_m", "lead_time_s",
+                    "route_progress_start_m", "route_progress_end_m",
+                    "approach_bearing_deg", "bearing_tolerance_deg",
+                }, trigger_label)
                 cues.append(cue)
                 referenced.add(cue["story_id"])
             variant["cue_refs"] = _ordered(cues, f"Original V2 variant {variant['id']} cue")
@@ -428,6 +451,20 @@ def normalize_original_manifest_v2(
     _unique(selection_ids, "Original V2 validation selection ids")
     if set(stories_by_id) != referenced:
         raise OriginalManifestV2Error("Every Original V2 story must be referenced by at least one variant")
+    review = copy.deepcopy(_object(raw.get("review"), "Original V2 review"))
+    _forbid_keys(review, {
+        "editorial_status", "field_drive_completed_at", "source_review_completed_at",
+        "route_network_override",
+    }, "Original V2 review")
+    if review.get("route_network_override") is not None:
+        override_label = "Original V2 review route_network_override"
+        override = copy.deepcopy(_object(review["route_network_override"], override_label))
+        _forbid_keys(override, {
+            "schema_version", "status", "finding_codes", "reason",
+            "official_source_url", "approved_at", "approved_by_admin_user_id",
+        }, override_label)
+        review["route_network_override"] = override
+
     result = {
         "schema_version": 2,
         "locale": locale,
@@ -436,7 +473,7 @@ def normalize_original_manifest_v2(
         "chapters": chapters,
         "assets": assets,
         "offline_map": offline_map,
-        "review": copy.deepcopy(_object(raw.get("review"), "Original V2 review")),
+        "review": review,
     }
     narration_profile = _profile(raw.get("narration_profile"), required=publishing)
     if narration_profile is not None:

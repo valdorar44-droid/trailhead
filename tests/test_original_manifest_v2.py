@@ -308,9 +308,76 @@ def test_v2_narration_attestations_require_timezone_aware_iso_timestamps():
         )
 
 
-def test_v2_store_normalizer_rejects_unknown_internal_fields_without_api_model():
+def _v2_payload_with_every_optional_internal_object() -> dict:
     payload = _v2_payload()
-    payload["manifest"]["stories"][0]["internal_notes"] = "must not persist"
+    payload["manifest"]["narration_profile"] = _test_profile()
+    payload["manifest"]["review"]["route_network_override"] = {
+        "schema_version": 1,
+        "status": "approved",
+        "finding_codes": ["seasonal_access"],
+        "reason": "The official source documents seasonal access for this route.",
+        "official_source_url": "https://www.nps.gov/grsm/planyourvisit/conditions.htm",
+        "approved_at": "2026-08-03T00:00:00Z",
+        "approved_by_admin_user_id": 1,
+    }
+    return payload
+
+
+def _manifest_object_at(root: dict, path: tuple[str | int, ...]) -> dict:
+    value: object = root
+    for segment in path:
+        value = value[segment]  # type: ignore[index]
+    assert isinstance(value, dict)
+    return value
+
+
+def test_v2_store_normalizer_accepts_known_optional_nested_objects():
+    payload = _v2_payload_with_every_optional_internal_object()
+    normalized, _ = store._normalize_original_manifest(
+        payload["pack_id"], payload["title"], payload["manifest"],
+    )
+    assert normalized["review"]["route_network_override"]["status"] == "approved"
+    assert normalized["narration_profile"]["provider"] == "cartesia"
+
+
+@pytest.mark.parametrize(("label", "path"), [
+    ("manifest", ()),
+    ("offline map", ("offline_map",)),
+    ("offline bounds", ("offline_map", "bounds")),
+    ("asset", ("assets", 0)),
+    ("story", ("stories", 0)),
+    ("story source", ("stories", 0, "citations", 0)),
+    ("chapter", ("chapters", 0)),
+    ("chapter safety", ("chapters", 0, "safety")),
+    ("chapter access", ("chapters", 0, "access")),
+    ("chapter season", ("chapters", 0, "season")),
+    ("operational source", ("chapters", 0, "operational_sources", 0)),
+    ("operational readiness", ("chapters", 0, "operational_readiness")),
+    ("validation selection", ("chapters", 0, "validation_selection")),
+    ("variant", ("chapters", 0, "variants", 0)),
+    ("route", ("chapters", 0, "variants", 0, "route")),
+    ("route geometry", ("chapters", 0, "variants", 0, "route", "geometry")),
+    ("route bounds", ("chapters", 0, "variants", 0, "route", "bounds")),
+    ("cue", ("chapters", 0, "variants", 0, "cue_refs", 0)),
+    ("cue coordinates", ("chapters", 0, "variants", 0, "cue_refs", 0, "coordinates")),
+    ("cue trigger", ("chapters", 0, "variants", 0, "cue_refs", 0, "trigger")),
+    ("review", ("review",)),
+    ("route network override", ("review", "route_network_override")),
+    ("narration profile", ("narration_profile",)),
+    ("narration generation", ("narration_profile", "generation")),
+    ("narration archive", ("narration_profile", "archival_master")),
+    ("narration delivery", ("narration_profile", "mobile_delivery")),
+    ("commercial license", ("narration_profile", "commercial_license")),
+    ("training opt-out", ("narration_profile", "training_opt_out")),
+])
+def test_v2_store_normalizer_rejects_unknown_internal_fields_recursively(
+    label: str,
+    path: tuple[str | int, ...],
+):
+    payload = _v2_payload_with_every_optional_internal_object()
+    _manifest_object_at(payload["manifest"], path)["internal_notes"] = (
+        f"must not persist from {label}"
+    )
     with pytest.raises(OriginalManifestV2Error, match="unsupported fields: internal_notes"):
         store._normalize_original_manifest(
             payload["pack_id"], payload["title"], payload["manifest"],

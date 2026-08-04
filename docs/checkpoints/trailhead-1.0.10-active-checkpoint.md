@@ -4,6 +4,8 @@ Active Trails packet: [`trails-active-checkpoint.md`](./trails-active-checkpoint
 
 Active Explore and Community Trails packet: [`explore-trails-active-checkpoint.md`](./explore-trails-active-checkpoint.md). Read it for the current E1-E5 scope and review boundaries.
 
+Active Great Smoky Mountains Original packet: [`smokies-original-active-checkpoint.md`](./smokies-original-active-checkpoint.md). Read it before any Smokies route, content, narration, entitlement, or paid-release work.
+
 Last updated: 2026-07-23 09:51:01 CDT (America/Winnipeg)
 
 ## Resume protocol

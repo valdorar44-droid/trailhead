@@ -1,6 +1,6 @@
 # Great Smoky Mountains Original — Active Checkpoint
 
-Last updated: 2026-08-03 (S0 implementation baseline)
+Last updated: 2026-08-03 (S0 implementation complete; review checkpoint)
 
 ## Resume protocol
 
@@ -126,9 +126,53 @@ The runtime keeps a single queued story; story timing and trigger spacing must p
 3. Credits are earned-only; new purchase/checkout creation is disabled while historical settlement remains intact.
 4. Cartesia Pro is active, but production rendering stays locked until scripts, pronunciations, data terms, balance/overage price, and hard spend caps are verified.
 
+## S0 completion evidence
+
+- Baseline checkpoint commit: `462fb3eb4095665de22d93d1e00df3df39911b92`.
+- Protected hashes remain unchanged:
+  - Explore serving index: `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
+  - App Store copy: `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+- A query-only exporter was added for immutable published narration evidence. It uses SQLite URI `mode=ro`, `PRAGMA query_only=ON`, and binds each record by pack, asset ID, and the manifest's published SHA-256. Its output allowlist excludes transcripts, paths, credentials, administrator identity, and internal asset/stop IDs.
+- The temporary Railway SSH key `trailhead-codex-temp` was removed after the evidence was collected and its absence was verified.
+- Published Moab pack `original_e0d3d4de1a9a40fcb01efc7e7a02e3c7`, version `1`, binds exactly 11 narration assets. All 11 use:
+  - Provider: `elevenlabs`.
+  - Model: `eleven_multilingual_v2`.
+  - Voice: `JBFqnCBsd6RMkjVDRZzb`.
+  - Output: `mp3_44100_128`.
+  - License status: `attested`.
+- Redacted local evidence: `output/smokies-original/moab-narration-inventory-v1.json`, SHA-256 `f32f6d1c3c7e595c99f8d971ce88dbbe00a2839528c5d69db27852e08bb380e0`. This evidence is intentionally ignored rather than committed.
+- Moab does not establish Cartesia/Katie continuity. Selecting Katie for Smokies is a deliberate new editorial voice decision and remains subject to the three-script audition gate.
+- S0 implementation commits:
+  - Backend contract and provenance: `e8e57a6f`.
+  - Initial mobile access/manifest contract: `08e34875`.
+  - Recursive server redaction hardening: `65c6a39b`.
+  - Complete mobile V2 selection/runtime path: `9dbe1862`.
+- `OriginalManifestV2` now has shared stories, selectable chapters and variants, globally unique validation selections, operational source/readiness contracts, union offline coverage, deterministic V2-to-V1 compilation, strict source rights/review evidence, and server-only narration reproducibility metadata.
+- Consumer manifests and public previews do not expose provider, voice, model, license, training-choice, transcripts, route geometry, or other acquired content before access. Both server and client reject unknown nested fields rather than persisting internal notes.
+- V1 normalization, published Moab V1 manifests, and the existing trigger engine remain unchanged. V2 publication is fail-closed until S1 supplies authoritative validation for every chapter/variant.
+- Mobile stores one verified union bundle by immutable pack/version and keeps progress in bounded, collision-checked chapter/variant session identities. Detail selection, foreground playback, cold/headless restore, admin simulation, force-stop recovery, and player routing all compile the explicit selection into the existing V1 trigger engine without creating another player.
+- Same-version Studio revisions replace stale bundles atomically unless manifest ID, schema, and canonical content all match. Approved cross-origin asset hosts receive no account or preview credentials; unapproved origins fail closed.
+- Chapter cards distinguish full stories from shorter cues, preserve progress per direction, use accurate grouped seasonal labels, and never display editorial claim IDs as reader copy.
+- The per-pack access policy is implemented end to end:
+  - Active Explorer access costs zero credits and is temporary.
+  - Permanent ownership costs exactly 900 earned credits with no subscription discount.
+  - Expiry preserves local download, session, and progress but blocks manifest, asset, foreground, and headless playback access.
+  - Renewal or permanent upgrade restores the same owner/pack/version record without redownloading.
+  - Explorer access is labelled as included, never permanent, and exposes a confirmed `Keep permanently · 900 credits` action.
+  - Policy-bearing Originals cannot enter the legacy monthly featured-claim lane.
+- New credit-package listing and checkout creation return stable `credits_earned_only` responses. Delayed historical Stripe sessions settle atomically only when package, credits, USD amount, user, and signed session metadata match the frozen legacy package table.
+- Backend acceptance after recursive hardening: 105 passed plus 10 subtests; the V2-focused suite alone has 43 passing tests. Python compilation and whitespace checks pass.
+- Complete `npm run test:originals` passes, including V1 Moab, V2 API/redaction, union bundles, foreground/headless playback, access expiry, permanent unlock, stale-bundle replacement, bounded session files, per-selection progress, and asset-header security. Strict `npx tsc --noEmit` and whitespace checks pass.
+- A final independent re-audit found no unresolved P0/P1 across the S0 backend/mobile contract.
+- No production backend deployment, mobile OTA, binary, public stage change, route generation, script drafting, narration generation, or Cartesia credit spend occurred in S0.
+- Open activation work:
+  - Server-owned validation reports for every V2 selection.
+  - Exact route and operational source construction in S1.
+  - A server-authenticated time anchor or signed entitlement receipt before public premium release. Device wall time alone remains an acknowledged P2 because clock rollback can extend offline Explorer access and clock skew can reject a valid review date.
+
 ## Next exact action
 
-Implement S0 only: add the versioned manifest/schema/compiler and access-policy tests, disable new credit purchases safely, and export the redacted production Moab inventory through a temporary Railway SSH key. Remove that key after evidence is verified. Stop for review before route sourcing, story drafting, or narration generation.
+Stop for S0 review. After approval, begin S1 with exact Mapbox road variants for Mountain Crossing, Cades Cove/Little River, Roaring Fork, and Foothills Parkway. Bind current operational sources, add the trusted-time receipt, and build deterministic per-selection validation. Do not draft Cherokee interpretation or generate narration in S1.
 
 ## Do not repeat
 
@@ -137,6 +181,8 @@ Implement S0 only: add the versioned manifest/schema/compiler and access-policy 
 - Viator/GuideAlong/Shaka product-page research unless pricing/features change materially.
 - Buying a competitor tour for extraction.
 - Treating the obsolete ten-stop Moab fixture as production content.
+- Re-exporting Moab provenance or re-registering the temporary Railway key without new evidence that the immutable publication changed.
+- Reworking the completed S0 earned-only, access-policy, or Manifest V2 contract while it remains green.
 
 ## Task-owned background processes
 

@@ -162,6 +162,16 @@ def _ready_payload(*, price: int = 0, title: str | None = None) -> dict:
     return payload
 
 
+def _access_policy_payload(*, title: str = "Premium Original") -> dict:
+    payload = _ready_payload(price=900, title=title)
+    payload["public_metadata"]["access_policy"] = {
+        "schema_version": 1,
+        "explorer_included": True,
+        "permanent_credit_price": 900,
+    }
+    return payload
+
+
 def _legacy_template() -> dict:
     return {
         "schema_version": 2,
@@ -1294,6 +1304,298 @@ class TrailheadOriginalsTests(unittest.TestCase):
         self.assertEqual(acquired["entitlement"]["explorer_discount"], 100)
         self.assertEqual(acquired["entitlement"]["credits_charged"], 400)
         self.assertEqual(acquired["credit_balance"], 0)
+
+    def test_explicit_explorer_access_expires_and_renews_without_losing_local_ownership(self):
+        published = self._publish(
+            _access_policy_payload(title="Smokies Explorer Original"),
+            pack_id="original_smokies_explorer",
+        )
+        explorer = store.create_user(
+            "smokies-explorer@example.com", "smokies_explorer", "hash", "smokies-code",
+        )
+        active_until = int(time.time()) + 30 * 86400
+        store.set_user_plan(explorer, "com.trailhead.explorer.monthly.v2", active_until)
+
+        acquired = store.acquire_authored_original(
+            explorer, published["id"], "smokies-explorer-access",
+            version=published["version"], access_mode="explorer",
+        )
+        self.assertEqual(acquired["entitlement"]["acquisition_type"], "explorer_included")
+        self.assertEqual(acquired["entitlement"]["credits_charged"], 0)
+        self.assertFalse(acquired["entitlement"]["permanent"])
+        self.assertTrue(acquired["entitlement"]["access_active"])
+        self.assertEqual(acquired["entitlement"]["access_expires_at"], active_until)
+        self.assertEqual(acquired["pack"]["explorer_price_credits"], 900)
+        entitlement_id = acquired["entitlement"]["id"]
+        trip_id = acquired["trip"]["trip_id"]
+
+        manifest = store.get_published_original_manifest(
+            published["id"], published["version"], user_id=explorer,
+        )
+        asset = manifest["assets"][0]
+        record = store.get_published_original_asset_record(
+            published["id"], asset["id"], asset["sha256"], explorer,
+        )
+        self.assertFalse(record["free_access"])
+        self.assertTrue(store.validate_original_analytics_dimensions(
+            published["id"], published["version"], "moab_story_01", explorer,
+        ))
+        store.submit_original_feedback(
+            pack_id=published["id"], version=published["version"],
+            idempotency_key="smokies-active-feedback", category="general",
+            message="Playback stayed clear while the phone was locked.",
+            platform="android", user_id=explorer,
+        )
+
+        store.set_user_plan(explorer, "free")
+        locked = store.list_owned_authored_originals(explorer)[0]
+        self.assertEqual(locked["entitlement"]["id"], entitlement_id)
+        self.assertEqual(locked["trip"]["trip_id"], trip_id)
+        self.assertFalse(locked["entitlement"]["access_active"])
+        self.assertIsNone(locked["entitlement"]["access_expires_at"])
+        with self.assertRaises(store.OriginalManifestAccessError):
+            store.get_published_original_manifest(
+                published["id"], published["version"], user_id=explorer,
+            )
+        with self.assertRaises(store.OriginalManifestAccessError):
+            store.get_published_original_asset_record(
+                published["id"], asset["id"], asset["sha256"], explorer,
+            )
+        self.assertFalse(store.validate_original_analytics_dimensions(
+            published["id"], published["version"], "moab_story_01", explorer,
+        ))
+        with self.assertRaises(store.OriginalFeedbackTokenError):
+            store.submit_original_feedback(
+                pack_id=published["id"], version=published["version"],
+                idempotency_key="smokies-expired-feedback", category="general",
+                message="This should remain locked until renewal.",
+                platform="android", user_id=explorer,
+            )
+        with patch.dict(os.environ, {"TRAILHEAD_ORIGINALS_ENABLED": "1"}):
+            with self.assertRaises(HTTPException) as expired_api:
+                asyncio.run(api_acquire_original(
+                    published["id"], "smokies-expired-api", {"id": explorer},
+                    published["version"], "explorer",
+                ))
+        self.assertEqual(expired_api.exception.status_code, 403)
+        self.assertEqual(expired_api.exception.detail["code"], "explorer_required")
+
+        renewed_until = int(time.time()) + 60 * 86400
+        store.set_user_plan(explorer, "com.trailhead.explorer.annual.v2", renewed_until)
+        restored = store.acquire_authored_original(
+            explorer, published["id"], "smokies-explorer-renewed",
+            version=published["version"], access_mode="explorer",
+        )
+        self.assertTrue(restored["already_owned"])
+        self.assertEqual(restored["entitlement"]["id"], entitlement_id)
+        self.assertEqual(restored["trip"]["trip_id"], trip_id)
+        self.assertTrue(restored["entitlement"]["access_active"])
+        self.assertEqual(restored["entitlement"]["access_expires_at"], renewed_until)
+        self.assertEqual(store.get_user_by_id(explorer)["credits"], 0)
+        self.assertEqual(
+            store.get_published_original_manifest(
+                published["id"], published["version"], user_id=explorer,
+            )["manifest_id"],
+            manifest["manifest_id"],
+        )
+
+    def test_explorer_access_upgrades_in_place_at_exact_permanent_price_once(self):
+        published = self._publish(
+            _access_policy_payload(title="Smokies Permanent Original"),
+            pack_id="original_smokies_permanent",
+        )
+        explorer = store.create_user(
+            "smokies-owner@example.com", "smokies_owner", "hash", "smokies-owner-code",
+        )
+        store.set_user_plan(
+            explorer, "com.trailhead.explorer.monthly.v2", int(time.time()) + 30 * 86400,
+        )
+        temporary = store.acquire_authored_original(
+            explorer, published["id"], "smokies-temporary",
+            version=published["version"], access_mode="explorer",
+        )
+        store.add_credits(explorer, 900, "Earned contribution credits")
+
+        upgraded = store.acquire_authored_original(
+            explorer, published["id"], "smokies-permanent-upgrade",
+            version=published["version"], access_mode="permanent",
+        )
+        replay = store.acquire_authored_original(
+            explorer, published["id"], "smokies-permanent-upgrade",
+            version=published["version"], access_mode="permanent",
+        )
+
+        self.assertTrue(upgraded["upgraded_to_permanent"])
+        self.assertFalse(upgraded["already_owned"])
+        self.assertEqual(upgraded["entitlement"]["id"], temporary["entitlement"]["id"])
+        self.assertEqual(upgraded["trip"]["trip_id"], temporary["trip"]["trip_id"])
+        self.assertEqual(upgraded["entitlement"]["acquisition_type"], "purchase")
+        self.assertTrue(upgraded["entitlement"]["permanent"])
+        self.assertEqual(upgraded["entitlement"]["credits_charged"], 900)
+        self.assertEqual(upgraded["entitlement"]["explorer_discount"], 0)
+        self.assertEqual(upgraded["credit_balance"], 0)
+        self.assertTrue(replay["replayed"])
+        self.assertEqual(replay["entitlement"]["id"], upgraded["entitlement"]["id"])
+        self.assertEqual(store.get_user_by_id(explorer)["credits"], 0)
+        debits = [
+            row for row in store.get_credit_history(explorer)
+            if row["amount"] == -900
+        ]
+        self.assertEqual(len(debits), 1)
+
+        store.set_user_plan(explorer, "free")
+        self.assertTrue(store.validate_original_analytics_dimensions(
+            published["id"], published["version"], "moab_story_01", explorer,
+        ))
+        self.assertIsNotNone(store.get_published_original_manifest(
+            published["id"], published["version"], user_id=explorer,
+        ))
+
+        direct_owner = store.create_user(
+            "smokies-direct-owner@example.com", "smokies_direct_owner", "hash", "direct-code",
+        )
+        store.set_user_plan(
+            direct_owner, "com.trailhead.explorer.monthly.v2", int(time.time()) + 30 * 86400,
+        )
+        store.add_credits(direct_owner, 900, "Earned route contribution credits")
+        direct = store.acquire_authored_original(
+            direct_owner, published["id"], "smokies-direct-permanent",
+            version=published["version"], access_mode="permanent",
+        )
+        self.assertEqual(direct["entitlement"]["credits_charged"], 900)
+        self.assertEqual(direct["entitlement"]["explorer_discount"], 0)
+        self.assertTrue(direct["entitlement"]["permanent"])
+
+    def test_temporary_explorer_access_never_unlocks_permanent_version_updates(self):
+        first = self._publish(
+            _access_policy_payload(title="Smokies Version One"),
+            pack_id="original_smokies_versions",
+        )
+        explorer = store.create_user(
+            "smokies-versions@example.com", "smokies_versions", "hash", "versions-code",
+        )
+        store.set_user_plan(
+            explorer, "com.trailhead.explorer.monthly.v2", int(time.time()) + 30 * 86400,
+        )
+        temporary = store.acquire_authored_original(
+            explorer, first["id"], "smokies-v1-temporary",
+            version=1, access_mode="explorer",
+        )
+        with self.assertRaises(store.InsufficientOriginalCreditsError) as upgrade_error:
+            store.acquire_authored_original(
+                explorer, first["id"], "smokies-v1-permanent-no-balance",
+                version=1, access_mode="permanent",
+            )
+        self.assertEqual(upgrade_error.exception.credits_needed, 900)
+        still_temporary = store.list_owned_authored_originals(explorer)[0]
+        self.assertEqual(still_temporary["entitlement"]["id"], temporary["entitlement"]["id"])
+        self.assertEqual(still_temporary["trip"]["trip_id"], temporary["trip"]["trip_id"])
+        self.assertEqual(still_temporary["entitlement"]["acquisition_type"], "explorer_included")
+
+        self._save(
+            _access_policy_payload(title="Smokies Version Two"),
+            pack_id=first["id"],
+        )
+        second = store.publish_authored_trip_pack(
+            first["id"], self.admin, required_content_kind="original_drive",
+        )
+        self.assertEqual(second["version"], 2)
+        with self.assertRaises(store.InsufficientOriginalCreditsError) as version_error:
+            store.acquire_authored_original(
+                explorer, first["id"], "smokies-v2-permanent-no-balance",
+                version=2, access_mode="permanent",
+            )
+        self.assertEqual(version_error.exception.credits_needed, 900)
+        self.assertEqual(
+            {item["entitlement"]["version"] for item in store.list_owned_authored_originals(explorer)},
+            {1},
+        )
+
+    def test_original_access_mode_is_explicit_and_legacy_purchase_behavior_is_unchanged(self):
+        policy_original = self._publish(
+            _access_policy_payload(title="Smokies Access Modes"),
+            pack_id="original_smokies_modes",
+        )
+        explorer = store.create_user(
+            "smokies-modes@example.com", "smokies_modes", "hash", "modes-code",
+        )
+        store.set_user_plan(
+            explorer, "com.trailhead.explorer.monthly.v2", int(time.time()) + 30 * 86400,
+        )
+        acquired = store.acquire_authored_original(
+            explorer, policy_original["id"], "smokies-mode-key",
+            version=1, access_mode="explorer",
+        )
+        self.assertEqual(acquired["pack"]["access_policy"]["permanent_credit_price"], 900)
+        self.assertEqual(policy_original["explorer_price_credits"], 900)
+        with self.assertRaises(store.OriginalAcquisitionConflictError):
+            store.acquire_authored_original(
+                explorer, policy_original["id"], "smokies-mode-key",
+                version=1, access_mode="permanent",
+            )
+
+        api_explorer = store.create_user(
+            "smokies-api@example.com", "smokies_api", "hash", "smokies-api-code",
+        )
+        store.set_user_plan(
+            api_explorer, "com.trailhead.explorer.monthly.v2", int(time.time()) + 30 * 86400,
+        )
+        with patch.dict(os.environ, {"TRAILHEAD_ORIGINALS_ENABLED": "1"}):
+            api_acquired = asyncio.run(api_acquire_original(
+                policy_original["id"], "smokies-api-mode", {"id": api_explorer}, 1, "explorer",
+            ))
+        self.assertEqual(api_acquired["entitlement"]["acquisition_type"], "explorer_included")
+
+        legacy = self._publish(
+            _ready_payload(price=250, title="Legacy Paid Original"),
+            pack_id="original_legacy_access_mode",
+        )
+        with self.assertRaisesRegex(ValueError, "not included with Explorer"):
+            store.acquire_authored_original(
+                explorer, legacy["id"], "legacy-explorer-mode",
+                version=1, access_mode="explorer",
+            )
+        store.add_credits(explorer, 200, "Legacy discounted balance")
+        legacy_purchase = store.acquire_authored_original(
+            explorer, legacy["id"], "legacy-permanent-mode",
+            version=1, access_mode="permanent",
+        )
+        self.assertEqual(legacy_purchase["entitlement"]["explorer_discount"], 50)
+        self.assertEqual(legacy_purchase["entitlement"]["credits_charged"], 200)
+
+    def test_policy_original_cannot_enter_or_be_claimed_through_legacy_feature_lane(self):
+        published = self._publish(
+            _access_policy_payload(title="Smokies Policy Original"),
+            pack_id="original_smokies_not_featured",
+        )
+        month = datetime.now(timezone.utc).strftime("%Y-%m")
+        with self.assertRaisesRegex(ValueError, "legacy featured claim lane"):
+            store.select_featured_original(month, published["id"], self.admin)
+
+        # Defense in depth for any policy-bearing row inserted by an older
+        # admin deployment before the selection guard existed.
+        db = store._conn()
+        db.execute(
+            """INSERT INTO authored_original_features
+               (period_month,pack_id,version,selected_by,selected_at)
+               VALUES (?,?,?,?,?)""",
+            (month, published["id"], published["version"], self.admin, int(time.time())),
+        )
+        db.commit()
+        db.close()
+        explorer = store.create_user(
+            "smokies-feature-guard@example.com",
+            "smokies_feature_guard",
+            "hash",
+            "smokies-feature-code",
+        )
+        store.set_user_plan(
+            explorer, "com.trailhead.explorer.monthly.v2", int(time.time()) + 86400,
+        )
+        with self.assertRaises(store.FeaturedOriginalUnavailableError):
+            store.claim_featured_authored_original(
+                explorer, "smokies-policy-feature-claim", month,
+            )
 
     def test_restore_keeps_entitlement_version_and_original_provenance(self):
         published = self._publish()

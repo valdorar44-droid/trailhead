@@ -182,7 +182,7 @@ from db.store import (
     set_email_verification, verify_email_token, set_password_reset, reset_password_with_token,
     add_credits, deduct_credits, get_credit_history, grant_signup_rewards,
     get_user_report_count_today, get_report_credits_today,
-    is_stripe_session_fulfilled, fulfill_stripe_purchase,
+    LEGACY_CREDIT_PACKAGES_V1, settle_stripe_credit_purchase,
     create_report_idempotent, get_report_by_client_id, get_reports_near, get_reports_along_route,
     upvote_report, downvote_report, confirm_report,
     get_leaderboard, is_reporter_restricted, check_and_update_streak,
@@ -237,7 +237,7 @@ from db.store import (
     InsufficientTripPackCreditsError, FeaturedTripPackUnavailableError,
     InsufficientOriginalCreditsError, OriginalAcquisitionConflictError,
     FeaturedOriginalUnavailableError, MonthlyOriginalClaimUsedError,
-    ExplorerOriginalClaimRequiredError,
+    ExplorerOriginalClaimRequiredError, ExplorerOriginalAccessRequiredError,
     MonthlyTripPackClaimUsedError, ExplorerTripPackClaimRequiredError,
     OriginalManifestAccessError,
     OriginalFeedbackTokenError, OriginalFeedbackConflictError,
@@ -383,6 +383,12 @@ CREDIT_PACKAGES = {
     "overlander": {"credits": 1000, "price_cents": 1799, "label": "Overlander", "popular": False},
     "trailhead":  {"credits": 3000, "price_cents": 3999, "label": "Trailhead+", "popular": False},
 }
+
+if {
+    key: {"credits": value["credits"], "price_cents": value["price_cents"]}
+    for key, value in CREDIT_PACKAGES.items()
+} != LEGACY_CREDIT_PACKAGES_V1:
+    raise RuntimeError("Historical credit package settlement metadata drifted")
 
 SIGNUP_BONUS       = 20
 REFERRAL_BONUS     = 20
@@ -12492,6 +12498,178 @@ class OriginalManifestV1(BaseModel):
     review: OriginalReviewV1
 
 
+class OriginalNarrationGenerationV1(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    output_format: Literal["wav"] = "wav"
+    sample_rate_hz: int = Field(ge=8000, le=192000)
+    channels: Literal[1, 2]
+
+
+class OriginalNarrationArchiveV1(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    mime_type: Literal["audio/wav"] = "audio/wav"
+    sample_rate_hz: int = Field(ge=8000, le=192000)
+    channels: Literal[1, 2]
+    bit_depth: Literal[16, 24, 32]
+
+
+class OriginalNarrationDeliveryV1(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    # The immutable Originals upload/probe pipeline currently supports MP3.
+    # Adding another delivery codec requires a coordinated pipeline change.
+    mime_type: Literal["audio/mpeg"]
+    bitrate_kbps: int = Field(ge=32, le=320)
+    sample_rate_hz: int = Field(ge=8000, le=192000)
+    channels: Literal[1, 2]
+
+
+class OriginalNarrationCommercialLicenseV1(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    status: Literal["attested"] = "attested"
+    plan: Literal["pro", "startup", "enterprise"]
+    attested_at: str = Field(min_length=10, max_length=40)
+
+
+class OriginalNarrationTrainingOptOutV1(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    status: Literal["confirmed"] = "confirmed"
+    confirmed_at: str = Field(min_length=10, max_length=40)
+
+
+class OriginalNarrationProfileV1(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    schema_version: Literal[1] = 1
+    provider: Literal["cartesia", "elevenlabs"]
+    voice_id: str = Field(min_length=1, max_length=240)
+    model_snapshot: str = Field(min_length=1, max_length=240)
+    api_version: str = Field(min_length=1, max_length=240)
+    language: str = Field(min_length=1, max_length=40)
+    generation: OriginalNarrationGenerationV1
+    archival_master: OriginalNarrationArchiveV1
+    mobile_delivery: OriginalNarrationDeliveryV1
+    commercial_license: OriginalNarrationCommercialLicenseV1
+    training_opt_out: OriginalNarrationTrainingOptOutV1
+
+
+class OriginalStorySourceV2(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    title: str = Field(min_length=1, max_length=300)
+    url: str = Field(pattern=r"^https://", max_length=2000)
+    publisher: str = Field(min_length=1, max_length=200)
+    role: Literal["story"] = "story"
+    authority: Literal["official", "authoritative"]
+    reviewed_at: str = Field(min_length=10, max_length=40)
+    rights_status: Literal[
+        "public_domain", "licensed", "permission_confirmed", "reference_only",
+    ]
+    affected_claims: list[str] = Field(min_length=1, max_length=100)
+
+
+class OriginalStoryV2(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    id: str = Field(min_length=1, max_length=240)
+    kind: Literal["story", "cue"]
+    title: str = Field(min_length=1, max_length=200)
+    transcript: str = Field(min_length=1, max_length=20000)
+    audio_asset_id: str = Field(min_length=1, max_length=240)
+    audio_duration_s: float = Field(gt=0, le=3600)
+    artwork_asset_id: Optional[str] = Field(default=None, max_length=240)
+    citations: list[OriginalStorySourceV2] = Field(min_length=1, max_length=50)
+
+
+class OriginalCueReferenceV2(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    story_id: str = Field(min_length=1, max_length=240)
+    sequence: int = Field(ge=1)
+    coordinates: OriginalCoordinatesV1
+    explore_place_id: Optional[str] = Field(default=None, max_length=240)
+    trigger: OriginalTriggerV1
+
+
+class OriginalRouteVariantV2(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    id: str = Field(min_length=1, max_length=240)
+    sequence: int = Field(ge=1)
+    title: str = Field(min_length=1, max_length=200)
+    route: OriginalRouteV1
+    cue_refs: list[OriginalCueReferenceV2] = Field(min_length=1, max_length=250)
+
+
+class OriginalOperationalSourceV2(OriginalCitationV1):
+    role: Literal["operational"]
+    authority: Literal["official", "authoritative"]
+    reviewed_at: str = Field(min_length=10, max_length=40)
+    scope: list[str] = Field(min_length=1, max_length=20)
+
+
+class OriginalOperationalReadinessV2(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    policy: Literal["required_before_start"] = "required_before_start"
+    source_scopes: list[str] = Field(min_length=1, max_length=20)
+    alternate_chapter_ids: list[str] = Field(default_factory=list, max_length=20)
+
+
+class OriginalChapterValidationSelectionV2(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    selection_id: str = Field(min_length=1, max_length=240)
+    required_variant_ids: list[str] = Field(min_length=1, max_length=10)
+
+
+class OriginalChapterV2(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    id: str = Field(min_length=1, max_length=240)
+    sequence: int = Field(ge=1)
+    title: str = Field(min_length=1, max_length=200)
+    summary: str = Field(min_length=1, max_length=2000)
+    default_variant_id: str = Field(min_length=1, max_length=240)
+    safety: OriginalSafetyV1
+    access: OriginalAccessV1
+    season: OriginalSeasonV1
+    operational_sources: list[OriginalOperationalSourceV2] = Field(min_length=1, max_length=100)
+    operational_readiness: OriginalOperationalReadinessV2
+    validation_selection: OriginalChapterValidationSelectionV2
+    variants: list[OriginalRouteVariantV2] = Field(min_length=1, max_length=10)
+
+
+class OriginalManifestV2(BaseModel):
+    """Admin authoring shape; immutable identity fields are server-owned."""
+
+    model_config = {"extra": "forbid", "strict": True}
+
+    schema_version: Literal[2] = 2
+    manifest_id: Optional[str] = Field(default=None, max_length=400)
+    pack_id: Optional[str] = Field(default=None, max_length=240)
+    version: Optional[int] = Field(default=None, ge=1)
+    locale: str = Field(default="en-US", min_length=2, max_length=20)
+    title: str = Field(min_length=1, max_length=200)
+    stories: list[OriginalStoryV2] = Field(min_length=1, max_length=250)
+    chapters: list[OriginalChapterV2] = Field(min_length=1, max_length=20)
+    assets: list[OriginalAssetV1] = Field(default_factory=list, max_length=500)
+    offline_map: OriginalOfflineMapV1
+    review: OriginalReviewV1
+    # Optional for route/editorial drafts; mandatory at the publication gate.
+    narration_profile: Optional[OriginalNarrationProfileV1] = None
+
+
+OriginalManifestDraft = Annotated[
+    OriginalManifestV1 | OriginalManifestV2,
+    Field(discriminator="schema_version"),
+]
+
+
 class AuthoredTripPackDraftRequest(BaseModel):
     model_config = {"extra": "forbid", "strict": True}
 
@@ -12506,6 +12684,14 @@ class AuthoredTripPackDraftRequest(BaseModel):
     template: TripDocumentPayload
 
 
+class OriginalAccessPolicyV1(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    schema_version: Literal[1] = 1
+    explorer_included: bool = False
+    permanent_credit_price: Literal[0, 250, 500, 900]
+
+
 class AuthoredOriginalDraftRequest(BaseModel):
     model_config = {"extra": "forbid", "strict": True}
 
@@ -12518,7 +12704,8 @@ class AuthoredOriginalDraftRequest(BaseModel):
     public_metadata: dict = Field(default_factory=dict)
     validation_metadata: dict = Field(default_factory=dict)
     template: TripDocumentPayload
-    manifest: OriginalManifestV1
+    manifest: OriginalManifestDraft
+    access_policy: Optional[OriginalAccessPolicyV1] = None
 
 
 class OriginalAssetUploadRequest(BaseModel):
@@ -14118,6 +14305,11 @@ def _raise_account_store_error(exc: Exception) -> None:
             "code": "explorer_required",
             "message": "The featured monthly Trailhead Original is included with Explorer.",
         })
+    if isinstance(exc, ExplorerOriginalAccessRequiredError):
+        raise HTTPException(403, {
+            "code": "explorer_required",
+            "message": "An active Explorer membership is required for this Trailhead Original.",
+        })
     if isinstance(exc, FeaturedTripPackUnavailableError):
         raise HTTPException(404, {
             "code": "featured_pack_unavailable",
@@ -14462,6 +14654,9 @@ def _save_authored_original_request(
 ) -> dict:
     template = body.template.model_dump(mode="json", exclude_none=True)
     manifest = body.manifest.model_dump(mode="json", exclude_none=True)
+    public_metadata = dict(body.public_metadata)
+    if body.access_policy is not None:
+        public_metadata["access_policy"] = body.access_policy.model_dump(mode="json")
     try:
         return save_authored_trip_pack_draft(
             pack_id=pack_id,
@@ -14470,7 +14665,7 @@ def _save_authored_original_request(
             summary=body.summary,
             price_credits=body.price_credits,
             coverage_region=body.coverage_region,
-            public_metadata=body.public_metadata,
+            public_metadata=public_metadata,
             validation_metadata=body.validation_metadata,
             template=template,
             admin_user_id=admin["id"],
@@ -15225,6 +15420,7 @@ async def api_acquire_original(
     idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
     user: dict | None = Depends(_optional_user),
     version: Optional[int] = None,
+    access_mode: Literal["explorer", "permanent"] = "permanent",
 ):
     _require_originals_feature(user)
     try:
@@ -15259,7 +15455,8 @@ async def api_acquire_original(
         })
     try:
         return acquire_authored_original(
-            user["id"], original["id"], idempotency_key, version=original["version"],
+            user["id"], original["id"], idempotency_key,
+            version=original["version"], access_mode=access_mode,
         )
     except Exception as exc:
         _raise_account_store_error(exc)
@@ -25777,53 +25974,57 @@ async def credits_route(user: dict = Depends(_current_user)):
 
 @app.get("/api/credits/packages")
 async def credit_packages():
-    return [
-        {"id": pid, **{k: v for k, v in pkg.items()},
-         "price_display": f"${pkg['price_cents']/100:.2f}"}
-        for pid, pkg in CREDIT_PACKAGES.items()
-    ]
+    raise HTTPException(410, {
+        "code": "credits_earned_only",
+        "message": "Trail credits are earned through Trailhead contributions and cannot be purchased.",
+        "purchase_available": False,
+    })
 
 class CheckoutRequest(BaseModel):
     package_id: str
 
 @app.post("/api/credits/checkout")
 async def create_checkout(body: CheckoutRequest, user: dict = Depends(_current_user)):
-    if not settings.stripe_secret_key:
-        raise HTTPException(503, "Payment system not configured. Contact support.")
-    pkg = CREDIT_PACKAGES.get(body.package_id)
-    if not pkg:
-        raise HTTPException(400, "Invalid package")
+    raise HTTPException(410, {
+        "code": "credits_earned_only",
+        "message": "Trail credits are earned through Trailhead contributions and cannot be purchased.",
+        "purchase_available": False,
+    })
+
+
+def _legacy_credit_settlement_from_session(session: object) -> dict | None:
+    """Validate a delayed checkout against the frozen historical package table."""
+    if not hasattr(session, "get"):
+        return None
+    if session.get("mode") != "payment" or session.get("payment_status") != "paid":
+        return None
+    if str(session.get("currency") or "").lower() != "usd":
+        return None
     try:
-        import stripe as _stripe
-        _stripe.api_key = settings.stripe_secret_key
-        session = _stripe.checkout.Session.create(
-            payment_method_types=["card"],
-            line_items=[{
-                "price_data": {
-                    "currency": "usd",
-                    "unit_amount": pkg["price_cents"],
-                    "product_data": {
-                        "name": f"Trailhead Credits — {pkg['label']}",
-                        "description": f"{pkg['credits']} trail credits for trip planning, route tools, and travel briefs",
-                        "images": [f"{settings.public_url}/static/credits-icon.png"],
-                    },
-                },
-                "quantity": 1,
-            }],
-            mode="payment",
-            success_url=f"{settings.public_url}/credits/success?session_id={{CHECKOUT_SESSION_ID}}",
-            cancel_url=f"{settings.public_url}/credits/cancel",
-            metadata={
-                "user_id": str(user["id"]),
-                "package_id": body.package_id,
-                "credits": str(pkg["credits"]),
-                "username": user["username"],
-            },
-            customer_email=user["email"],
-        )
-        return {"url": session.url, "session_id": session.id}
-    except Exception as e:
-        raise HTTPException(500, f"Checkout error: {e}")
+        metadata = dict(session.get("metadata") or {})
+        package_id = str(metadata.get("package_id") or "").strip()
+        package = CREDIT_PACKAGES.get(package_id)
+        user_id = int(metadata.get("user_id") or 0)
+        credits = int(metadata.get("credits") or 0)
+        amount_total = int(session.get("amount_total"))
+        session_id = str(session.get("id") or "").strip()
+    except (TypeError, ValueError):
+        return None
+    if (
+        not package
+        or user_id < 1
+        or not session_id
+        or credits != int(package["credits"])
+        or amount_total != int(package["price_cents"])
+    ):
+        return None
+    return {
+        "session_id": session_id,
+        "user_id": user_id,
+        "package_id": package_id,
+        "credits": credits,
+        "amount_total": amount_total,
+    }
 
 from fastapi import Request as _Request
 
@@ -25842,18 +26043,19 @@ async def stripe_webhook(request: _Request):
 
     if event["type"] == "checkout.session.completed":
         sess = event["data"]["object"]
-        if sess.get("payment_status") == "paid":
-            meta = sess.get("metadata", {})
-            session_id = sess["id"]
-            try:
-                uid = int(meta.get("user_id", 0))
-                credits = int(meta.get("credits", 0))
-                pkg_id = meta.get("package_id", "")
-            except (ValueError, TypeError):
-                return {"received": True}
-            if uid and credits and not is_stripe_session_fulfilled(session_id):
-                add_credits(uid, credits, f"Purchased {pkg_id} pack — {credits} credits")
-                fulfill_stripe_purchase(session_id, uid, credits)
+        settlement = _legacy_credit_settlement_from_session(sess)
+        if settlement:
+            settle_stripe_credit_purchase(
+                settlement["session_id"],
+                settlement["user_id"],
+                settlement["package_id"],
+                settlement["credits"],
+                settlement["amount_total"],
+                (
+                    f"Purchased {settlement['package_id']} pack — "
+                    f"{settlement['credits']} credits"
+                ),
+            )
 
     return {"received": True}
 

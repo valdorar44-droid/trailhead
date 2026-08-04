@@ -1,6 +1,6 @@
 """SQLite WAL store. Schema + queries."""
 from __future__ import annotations
-import base64, sqlite3, json, time, math, hashlib, secrets, re, io, struct, wave, zlib, os, ipaddress
+import base64, sqlite3, json, time, math, hashlib, secrets, re, io, struct, wave, zlib, os, ipaddress, copy
 from datetime import date as _date, datetime as _datetime, timedelta as _timedelta, timezone as _timezone
 from pathlib import Path as _Path
 from urllib.parse import quote as _url_quote, unquote as _url_unquote, urlsplit as _urlsplit
@@ -13,6 +13,10 @@ from db.originals_validation import (
     run_originals_validation_cli,
     trusted_originals_validator_source_sha256,
     validate_original_route_network,
+)
+from db.original_manifest_v2 import (
+    normalize_original_manifest_v2,
+    original_manifest_v2_preview,
 )
 
 # Report expiry by type (seconds)
@@ -6496,6 +6500,83 @@ def fulfill_stripe_purchase(session_id: str, user_id: int, credits: int):
     db.close()
 
 
+LEGACY_CREDIT_PACKAGES_V1 = {
+    "starter": {"credits": 100, "price_cents": 299},
+    "explorer": {"credits": 350, "price_cents": 799},
+    "overlander": {"credits": 1000, "price_cents": 1799},
+    "trailhead": {"credits": 3000, "price_cents": 3999},
+}
+
+
+def settle_stripe_credit_purchase(
+    session_id: str,
+    user_id: int,
+    package_id: str,
+    credits: int,
+    amount_cents: int,
+    reason: str,
+) -> bool:
+    """Settle one already-open Stripe credit session exactly once.
+
+    New credit checkouts are disabled, but Stripe may still deliver a delayed or
+    retried completion webhook for a session created before that change. The
+    fulfillment marker, account balance, and ledger entry therefore have to
+    commit in one transaction.
+    """
+    clean_session_id = str(session_id or "").strip()
+    clean_package_id = str(package_id or "").strip()
+    clean_reason = re.sub(r"\s+", " ", str(reason or "")).strip()
+    if not clean_session_id or len(clean_session_id) > 255:
+        raise ValueError("Stripe session id is invalid")
+    if isinstance(user_id, bool) or not isinstance(user_id, int) or user_id < 1:
+        raise ValueError("Stripe settlement user id is invalid")
+    package = LEGACY_CREDIT_PACKAGES_V1.get(clean_package_id)
+    if (
+        not package
+        or isinstance(credits, bool)
+        or not isinstance(credits, int)
+        or isinstance(amount_cents, bool)
+        or not isinstance(amount_cents, int)
+        or credits != package["credits"]
+        or amount_cents != package["price_cents"]
+    ):
+        raise ValueError("Stripe settlement does not match a historical credit package")
+    if not clean_reason or len(clean_reason) > 500:
+        raise ValueError("Stripe settlement reason is invalid")
+
+    now = int(time.time())
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        existing = db.execute(
+            "SELECT user_id,credits FROM stripe_purchases WHERE session_id=?",
+            (clean_session_id,),
+        ).fetchone()
+        if existing:
+            if int(existing["user_id"]) != user_id or int(existing["credits"]) != credits:
+                raise ValueError("Stripe settlement metadata does not match the fulfilled session")
+            db.commit()
+            return False
+        if not db.execute("SELECT 1 FROM users WHERE id=?", (user_id,)).fetchone():
+            raise ValueError("Stripe settlement account was not found")
+        db.execute(
+            "INSERT INTO stripe_purchases (session_id,user_id,credits,created_at) VALUES (?,?,?,?)",
+            (clean_session_id, user_id, credits, now),
+        )
+        db.execute("UPDATE users SET credits=credits+? WHERE id=?", (credits, user_id))
+        db.execute(
+            "INSERT INTO credit_transactions (user_id,amount,reason,created_at) VALUES (?,?,?,?)",
+            (user_id, credits, clean_reason, now),
+        )
+        db.commit()
+        return True
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
 def is_reporter_restricted(user_id: int) -> tuple[bool, int]:
     """Returns (restricted, seconds_remaining)."""
     db = _conn()
@@ -11057,6 +11138,133 @@ ORIGINAL_FEEDBACK_TOKEN_ISSUANCE_WINDOW_SECONDS = 7 * 86400
 ORIGINAL_FEEDBACK_TOKEN_ISSUANCE_IP_LIMIT = 10
 ORIGINAL_FEEDBACK_TOKEN_ISSUANCE_INSTALL_LIMIT = 10
 TRIP_PACK_EXPLORER_DISCOUNT_PERCENT = 20
+ORIGINAL_ACCESS_POLICY_PRICES = {0, 250, 500, 900}
+ORIGINAL_ACCESS_MODES = {"explorer", "permanent"}
+
+
+def _original_access_policy(
+    public_metadata: object,
+    list_price_credits: int,
+) -> tuple[dict, bool]:
+    """Return the immutable access policy and whether the version declared it.
+
+    Older published Originals have no policy and keep their existing purchase,
+    Explorer discount, and featured-claim behavior. New policy-bearing versions
+    can be included with an active Explorer subscription without turning that
+    temporary access into permanent ownership.
+    """
+    metadata = public_metadata if isinstance(public_metadata, dict) else _decode_pack_json(
+        public_metadata, {},
+    )
+    raw = metadata.get("access_policy") if isinstance(metadata, dict) else None
+    if raw is None:
+        return ({
+            "schema_version": 1,
+            "explorer_included": False,
+            "permanent_credit_price": int(list_price_credits),
+        }, False)
+    if not isinstance(raw, dict) or set(raw) != {
+        "schema_version", "explorer_included", "permanent_credit_price",
+    }:
+        raise ValueError("Original access policy fields are invalid")
+    if raw.get("schema_version") != 1:
+        raise ValueError("Original access policy schema_version must be 1")
+    if not isinstance(raw.get("explorer_included"), bool):
+        raise ValueError("Original access policy explorer_included must be boolean")
+    permanent_price = raw.get("permanent_credit_price")
+    if (
+        isinstance(permanent_price, bool)
+        or not isinstance(permanent_price, int)
+        or permanent_price not in ORIGINAL_ACCESS_POLICY_PRICES
+    ):
+        raise ValueError("Original permanent credit price must be 0, 250, 500, or 900")
+    if permanent_price != int(list_price_credits):
+        raise ValueError("Original permanent credit price must match its catalog price")
+    return ({
+        "schema_version": 1,
+        "explorer_included": raw["explorer_included"],
+        "permanent_credit_price": permanent_price,
+    }, True)
+
+
+def _original_access_decision_db(
+    db: sqlite3.Connection,
+    user_id: int | None,
+    version_row: sqlite3.Row | dict,
+    *,
+    now: int | None = None,
+) -> dict:
+    """Resolve access to one immutable Original version from server-owned state."""
+    raw = dict(version_row)
+    pack_id = str(raw.get("pack_id") or "").strip()
+    version = int(raw.get("version") or 0)
+    price_credits = int(raw.get("price_credits") or 0)
+    policy, policy_explicit = _original_access_policy(
+        raw.get("public_metadata"), price_credits,
+    )
+    if not pack_id or version < 1:
+        raise ValueError("Original access version identity is incomplete")
+    if price_credits == 0:
+        return {
+            "allowed": True,
+            "access_type": "public_free",
+            "permanent": True,
+            "access_expires_at": None,
+            "entitlement_id": None,
+        }
+    if user_id is None:
+        return {
+            "allowed": False,
+            "access_type": "none",
+            "permanent": False,
+            "access_expires_at": None,
+            "entitlement_id": None,
+        }
+    entitlement = db.execute(
+        """SELECT id,acquisition_type FROM authored_trip_pack_entitlements
+           WHERE user_id=? AND pack_id=? AND version=?
+             AND content_kind='original_drive' LIMIT 1""",
+        (user_id, pack_id, version),
+    ).fetchone()
+    if not entitlement:
+        return {
+            "allowed": False,
+            "access_type": "none",
+            "permanent": False,
+            "access_expires_at": None,
+            "entitlement_id": None,
+        }
+    if entitlement["acquisition_type"] != "explorer_included":
+        return {
+            "allowed": True,
+            "access_type": "permanent",
+            "permanent": True,
+            "access_expires_at": None,
+            "entitlement_id": entitlement["id"],
+        }
+    user = db.execute(
+        "SELECT plan_type,plan_expires_at FROM users WHERE id=?", (user_id,),
+    ).fetchone()
+    expires_at = (
+        int(user["plan_expires_at"])
+        if user and user["plan_expires_at"] is not None
+        else None
+    )
+    active = bool(
+        policy_explicit
+        and policy.get("explorer_included")
+        and user
+        and _active_explorer_monitor_plan(
+            user["plan_type"], user["plan_expires_at"], now or int(time.time()),
+        )
+    )
+    return {
+        "allowed": active,
+        "access_type": "explorer_subscription",
+        "permanent": False,
+        "access_expires_at": expires_at,
+        "entitlement_id": entitlement["id"],
+    }
 
 
 class InsufficientTripPackCreditsError(ValueError):
@@ -11102,6 +11310,10 @@ class ExplorerTripPackClaimRequiredError(ValueError):
 
 
 class ExplorerOriginalClaimRequiredError(ExplorerTripPackClaimRequiredError):
+    pass
+
+
+class ExplorerOriginalAccessRequiredError(PermissionError):
     pass
 
 
@@ -11822,7 +12034,7 @@ def _original_unresolved_copy_path(value: object, path: str = "content") -> str 
     return None
 
 
-def _normalize_original_manifest(
+def _normalize_original_manifest_v1(
     pack_id: str,
     title: str,
     manifest: dict,
@@ -12320,6 +12532,39 @@ def _normalize_original_manifest(
     return _json_object(result, "Original manifest", 4 * 1024 * 1024)
 
 
+def _normalize_original_manifest(
+    pack_id: str,
+    title: str,
+    manifest: dict,
+    *,
+    version: int | None = None,
+    publishing: bool = False,
+    verified_assets: dict[str, dict] | None = None,
+) -> tuple[dict, str]:
+    """Keep V1 unchanged while accepting a fail-closed V2 authoring draft."""
+    schema_version = manifest.get("schema_version") if isinstance(manifest, dict) else None
+    if schema_version == 1:
+        return _normalize_original_manifest_v1(
+            pack_id,
+            title,
+            manifest,
+            version=version,
+            publishing=publishing,
+            verified_assets=verified_assets,
+        )
+    if schema_version == 2:
+        return normalize_original_manifest_v2(
+            manifest,
+            pack_id=pack_id,
+            title=title,
+            version=version,
+            normalize_v1=_normalize_original_manifest_v1,
+            publishing=publishing,
+            verified_assets=verified_assets,
+        )
+    raise ValueError("Original manifest schema_version must be 1 or 2")
+
+
 def _validate_trip_pack_fields(
     pack_id: str,
     slug: str,
@@ -12357,6 +12602,15 @@ def _validate_trip_pack_fields(
     public_metadata, public_metadata_json = _json_object(
         public_metadata, "Trip pack public metadata", 256 * 1024,
     )
+    if content_kind == "original_drive":
+        access_policy, access_policy_explicit = _original_access_policy(
+            public_metadata, price_credits,
+        )
+        if access_policy_explicit:
+            public_metadata["access_policy"] = access_policy
+            public_metadata_json = json.dumps(
+                public_metadata, separators=(",", ":"), sort_keys=True,
+            )
     validation_metadata, validation_metadata_json = _json_object(
         validation_metadata, "Trip pack validation metadata", 256 * 1024,
     )
@@ -12579,6 +12833,10 @@ def _authored_original_preview_manifest_from_row(
         version=preview_version,
         publishing=False,
     )
+    if manifest.get("schema_version") == 2:
+        raise ValueError(
+            "OriginalManifestV2 device preview requires an explicit chapter and variant selection"
+        )
     assets_by_id = {asset["id"]: asset for asset in manifest["assets"]}
     for asset in manifest["assets"]:
         verified = verified_assets.get(asset["id"])
@@ -13332,11 +13590,9 @@ def submit_original_feedback(
 
         token_row = None
         if user_id is not None:
-            if int(version_row["price_credits"]) > 0 and not db.execute(
-                """SELECT 1 FROM authored_trip_pack_entitlements
-                   WHERE user_id=? AND pack_id=? AND version=? AND content_kind='original_drive'""",
-                (user_id, pack_id, version),
-            ).fetchone():
+            if not _original_access_decision_db(
+                db, user_id, version_row, now=now,
+            )["allowed"]:
                 raise OriginalFeedbackTokenError("Acquire this Original before sending feedback")
             existing = db.execute(
                 "SELECT * FROM authored_original_feedback WHERE user_id=? AND idempotency_key=?",
@@ -13682,6 +13938,7 @@ def publish_authored_trip_pack(
 
 def _public_trip_pack_from_row(row: sqlite3.Row | dict, include_template: bool = False) -> dict:
     raw = dict(row)
+    public_metadata = _decode_pack_json(raw.get("public_metadata"), {})
     result = {
         "id": raw["id"],
         "slug": raw["slug"],
@@ -13693,15 +13950,29 @@ def _public_trip_pack_from_row(row: sqlite3.Row | dict, include_template: bool =
         "free": int(raw["price_credits"]) == 0,
         "content_kind": raw.get("content_kind") or "trip_pack",
         "coverage_region": raw["coverage_region"],
-        "public_metadata": _decode_pack_json(raw.get("public_metadata"), {}),
+        "public_metadata": public_metadata,
         "validation_metadata": _decode_pack_json(raw.get("validation_metadata"), {}),
         "published_at": int(raw["published_at"]),
         "featured": bool(raw.get("featured") or 0),
     }
+    if result["content_kind"] == "original_drive":
+        access_policy, access_policy_explicit = _original_access_policy(
+            public_metadata, result["price_credits"],
+        )
+        result["access_policy"] = access_policy
+        if access_policy_explicit and access_policy["explorer_included"]:
+            # Subscription access is temporary; the permanent price is never
+            # represented as a discounted purchase.
+            result["explorer_price_credits"] = access_policy["permanent_credit_price"]
     if include_template:
         result["template"] = _decode_pack_json(raw.get("template_json"), {})
         if result["content_kind"] == "original_drive":
-            result["original_manifest"] = _decode_pack_json(raw.get("original_manifest_json"), None)
+            manifest = _decode_pack_json(raw.get("original_manifest_json"), None)
+            result["original_manifest"] = (
+                _original_manifest_for_client(manifest)
+                if isinstance(manifest, dict)
+                else None
+            )
     return result
 
 
@@ -13776,6 +14047,8 @@ def get_published_trip_pack(
 def _original_manifest_preview(manifest: dict | None) -> dict | None:
     if not isinstance(manifest, dict):
         return None
+    if manifest.get("schema_version") == 2:
+        return original_manifest_v2_preview(manifest)
     stops = []
     for raw_stop in manifest.get("stops") or []:
         if not isinstance(raw_stop, dict):
@@ -13963,14 +14236,23 @@ def select_featured_original(
                 (pack_id,),
             ).fetchone()
             version = int(row["version"]) if row and row["version"] else None
-        if version is None or not db.execute(
-            """SELECT 1 FROM authored_trip_pack_versions version
+        version_row = None if version is None else db.execute(
+            """SELECT version.price_credits,version.public_metadata
+               FROM authored_trip_pack_versions version
                JOIN authored_trip_packs pack ON pack.id=version.pack_id
                WHERE version.pack_id=? AND version.version=? AND pack.status='published'
                  AND pack.content_kind='original_drive'""",
             (pack_id, version),
-        ).fetchone():
+        ).fetchone()
+        if version is None or not version_row:
             raise ValueError("Published Original version not found")
+        _, policy_explicit = _original_access_policy(
+            version_row["public_metadata"], int(version_row["price_credits"]),
+        )
+        if policy_explicit:
+            raise ValueError(
+                "Policy-based Trailhead Originals cannot use the legacy featured claim lane"
+            )
         db.execute(
             """INSERT INTO authored_original_features
                (period_month,pack_id,version,selected_by,selected_at)
@@ -14071,6 +14353,34 @@ def _trip_pack_entitlement_result(
     already_owned: bool,
 ) -> dict:
     raw = dict(row)
+    public_metadata = _decode_pack_json(raw["public_metadata"], {})
+    access_policy, access_policy_explicit = _original_access_policy(
+        public_metadata, int(raw["price_credits"]),
+    ) if (raw.get("content_kind") or "trip_pack") == "original_drive" else ({}, False)
+    explorer_subscription = (
+        (raw.get("content_kind") or "trip_pack") == "original_drive"
+        and raw["acquisition_type"] == "explorer_included"
+    )
+    access_expires_at = None
+    access_active = True
+    if explorer_subscription:
+        user = db.execute(
+            "SELECT plan_type,plan_expires_at FROM users WHERE id=?",
+            (raw["user_id"],),
+        ).fetchone()
+        access_expires_at = (
+            int(user["plan_expires_at"])
+            if user and user["plan_expires_at"] is not None
+            else None
+        )
+        access_active = bool(
+            user
+            and access_policy_explicit
+            and access_policy.get("explorer_included")
+            and _active_explorer_monitor_plan(
+                user["plan_type"], user["plan_expires_at"], int(time.time()),
+            )
+        )
     entitlement = {
         "id": raw["id"],
         "pack_id": raw["pack_id"],
@@ -14082,7 +14392,10 @@ def _trip_pack_entitlement_result(
         "claim_month": raw["claim_month"],
         "trip_id": raw["trip_id"],
         "acquired_at": int(raw["acquired_at"]),
-        "permanent": True,
+        "access_type": "explorer_subscription" if explorer_subscription else "permanent",
+        "permanent": not explorer_subscription,
+        "access_active": access_active,
+        "access_expires_at": access_expires_at,
     }
     pack = {
         "id": raw["pack_id"],
@@ -14095,12 +14408,15 @@ def _trip_pack_entitlement_result(
         "free": int(raw["price_credits"]) == 0,
         "content_kind": raw.get("content_kind") or "trip_pack",
         "coverage_region": raw["coverage_region"],
-        "public_metadata": _decode_pack_json(raw["public_metadata"], {}),
+        "public_metadata": public_metadata,
         "validation_metadata": _decode_pack_json(raw["validation_metadata"], {}),
         "published_at": int(raw["published_at"]),
     }
     if pack["content_kind"] == "original_drive":
         pack.pop("validation_metadata", None)
+        pack["access_policy"] = access_policy
+        if access_policy_explicit and access_policy.get("explorer_included"):
+            pack["explorer_price_credits"] = access_policy["permanent_credit_price"]
     trip_row = db.execute(
         "SELECT * FROM trip_documents_v2 WHERE user_id=? AND id=?",
         (raw["user_id"], raw["trip_id"]),
@@ -14150,6 +14466,7 @@ def _acquire_authored_trip_pack(
     claim_month: str | None = None,
     required_content_kind: str = "trip_pack",
     requested_version: int | None = None,
+    original_access_mode: str | None = None,
 ) -> dict:
     idempotency_key = str(idempotency_key or "").strip()
     if not _IDEMPOTENCY_KEY_RE.fullmatch(idempotency_key):
@@ -14160,6 +14477,12 @@ def _acquire_authored_trip_pack(
         pack_id = _validate_canonical_id(pack_id, "trip pack id")
     if required_content_kind not in TRIP_PACK_CONTENT_KINDS:
         raise ValueError("Invalid authored content kind")
+    if original_access_mode is not None:
+        original_access_mode = str(original_access_mode or "").strip().lower()
+        if required_content_kind != "original_drive":
+            raise ValueError("Access mode is supported only for Trailhead Originals")
+        if original_access_mode not in ORIGINAL_ACCESS_MODES:
+            raise ValueError("Original access mode must be explorer or permanent")
     if requested_version is not None:
         if required_content_kind != "original_drive":
             raise ValueError("Explicit versions are supported only for Trailhead Originals")
@@ -14171,13 +14494,20 @@ def _acquire_authored_trip_pack(
             raise ValueError("Original version must be a positive integer")
     if claim_month is not None and requested_version is not None:
         raise ValueError("Featured claims use the selected immutable version")
-    request_hash = hashlib.sha256(json.dumps({
+    request_material = {
         "pack_id": pack_id,
         "version": requested_version,
         "claim_month": claim_month,
         "mode": "featured_claim" if claim_month else "purchase",
         "content_kind": required_content_kind,
-    }, separators=(",", ":"), sort_keys=True).encode("utf-8")).hexdigest()
+    }
+    # Preserve the historical permanent-purchase request hash so retries made
+    # by older clients still replay after this additive contract ships.
+    if original_access_mode == "explorer":
+        request_material["original_access_mode"] = "explorer"
+    request_hash = hashlib.sha256(json.dumps(
+        request_material, separators=(",", ":"), sort_keys=True,
+    ).encode("utf-8")).hexdigest()
     now = int(time.time())
     db = _conn()
     try:
@@ -14203,6 +14533,14 @@ def _acquire_authored_trip_pack(
                 raise ValueError("Acquisition request record is incomplete")
             replay = _restore_trip_pack_entitlement_db(db, replay, user_id, now)
             result = _trip_pack_entitlement_result(db, replay, already_owned=True)
+            if (
+                original_access_mode == "explorer"
+                and result["entitlement"]["acquisition_type"] == "explorer_included"
+                and not result["entitlement"]["access_active"]
+            ):
+                raise ExplorerOriginalAccessRequiredError(
+                    "An active Explorer membership is required for subscription access"
+                )
             result["replayed"] = True
             result["credit_balance"] = int(db.execute(
                 "SELECT credits FROM users WHERE id=?", (user_id,),
@@ -14264,6 +14602,36 @@ def _acquire_authored_trip_pack(
                     raise ValueError("Published Trailhead Original not found")
                 raise ValueError("Published trip pack not found")
 
+        user = db.execute(
+            "SELECT credits,plan_type,plan_expires_at FROM users WHERE id=?", (user_id,),
+        ).fetchone()
+        if not user:
+            raise ValueError("Account not found")
+        explorer_active = _active_explorer_monitor_plan(
+            user["plan_type"], user["plan_expires_at"], now,
+        )
+        list_price = int(version_row["price_credits"])
+        original_policy: dict = {}
+        original_policy_explicit = False
+        resolved_original_access_mode = original_access_mode or "permanent"
+        if required_content_kind == "original_drive":
+            original_policy, original_policy_explicit = _original_access_policy(
+                version_row["public_metadata"], list_price,
+            )
+            if claim_month and original_policy_explicit:
+                raise FeaturedOriginalUnavailableError(
+                    "This Trailhead Original uses its own access policy"
+                )
+            if (
+                not claim_month
+                and resolved_original_access_mode == "explorer"
+                and (
+                    not original_policy_explicit
+                    or not original_policy.get("explorer_included")
+                )
+            ):
+                raise ValueError("This Trailhead Original is not included with Explorer")
+
         owned_sql = (
             _trip_pack_entitlement_query()
             + " WHERE entitlement.user_id=? AND entitlement.pack_id=?"
@@ -14274,6 +14642,68 @@ def _acquire_authored_trip_pack(
             owned_params.append(int(version_row["version"]))
         owned = db.execute(owned_sql, owned_params).fetchone()
         if owned:
+            owned_is_explorer_access = (
+                required_content_kind == "original_drive"
+                and owned["acquisition_type"] == "explorer_included"
+            )
+            if (
+                owned_is_explorer_access
+                and resolved_original_access_mode == "explorer"
+                and not explorer_active
+            ):
+                raise ExplorerOriginalAccessRequiredError(
+                    "An active Explorer membership is required for subscription access"
+                )
+            if owned_is_explorer_access and resolved_original_access_mode == "permanent":
+                credits_charged = int(original_policy["permanent_credit_price"])
+                if credits_charged:
+                    db.execute(
+                        "UPDATE users SET credits=credits-? WHERE id=? AND credits>=?",
+                        (credits_charged, user_id, credits_charged),
+                    )
+                    if db.execute("SELECT changes()").fetchone()[0] == 0:
+                        raise InsufficientOriginalCreditsError(
+                            int(user["credits"] or 0), credits_charged, list_price,
+                        )
+                    db.execute(
+                        """INSERT INTO credit_transactions (user_id,amount,reason,created_at)
+                           VALUES (?,?,?,?)""",
+                        (
+                            user_id,
+                            -credits_charged,
+                            f"Trailhead Original: {version_row['title']}",
+                            now,
+                        ),
+                    )
+                db.execute(
+                    """UPDATE authored_trip_pack_entitlements
+                       SET acquisition_type='purchase',credits_charged=?,explorer_discount=0
+                       WHERE id=? AND acquisition_type='explorer_included'""",
+                    (credits_charged, owned["id"]),
+                )
+                if db.execute("SELECT changes()").fetchone()[0] != 1:
+                    raise OriginalAcquisitionConflictError(
+                        "The Original access changed before permanent ownership completed"
+                    )
+                db.execute(
+                    """INSERT INTO authored_trip_pack_acquisition_requests
+                       (user_id,idempotency_key,request_hash,entitlement_id,created_at)
+                       VALUES (?,?,?,?,?)""",
+                    (user_id, idempotency_key, request_hash, owned["id"], now),
+                )
+                upgraded = db.execute(
+                    _trip_pack_entitlement_query() + " WHERE entitlement.id=?",
+                    (owned["id"],),
+                ).fetchone()
+                upgraded = _restore_trip_pack_entitlement_db(db, upgraded, user_id, now)
+                result = _trip_pack_entitlement_result(db, upgraded, already_owned=False)
+                result["upgraded_to_permanent"] = True
+                result["replayed"] = False
+                result["credit_balance"] = int(db.execute(
+                    "SELECT credits FROM users WHERE id=?", (user_id,),
+                ).fetchone()[0])
+                db.commit()
+                return result
             owned = _restore_trip_pack_entitlement_db(db, owned, user_id, now)
             db.execute(
                 """INSERT INTO authored_trip_pack_acquisition_requests
@@ -14289,20 +14719,21 @@ def _acquire_authored_trip_pack(
             db.commit()
             return result
 
-        user = db.execute(
-            "SELECT credits,plan_type,plan_expires_at FROM users WHERE id=?", (user_id,),
-        ).fetchone()
-        if not user:
-            raise ValueError("Account not found")
-        explorer_active = _active_explorer_monitor_plan(
-            user["plan_type"], user["plan_expires_at"], now,
-        )
-        list_price = int(version_row["price_credits"])
+        if (
+            required_content_kind == "original_drive"
+            and not claim_month
+            and resolved_original_access_mode == "explorer"
+            and not explorer_active
+        ):
+            raise ExplorerOriginalAccessRequiredError(
+                "An active Explorer membership is required for subscription access"
+            )
         latest_owned_version = None
         if required_content_kind == "original_drive":
             latest_owned_version = db.execute(
                 """SELECT MAX(version) FROM authored_trip_pack_entitlements
-                   WHERE user_id=? AND pack_id=? AND content_kind='original_drive'""",
+                   WHERE user_id=? AND pack_id=? AND content_kind='original_drive'
+                     AND acquisition_type!='explorer_included'""",
                 (user_id, pack_id),
             ).fetchone()[0]
         if claim_month:
@@ -14336,14 +14767,31 @@ def _acquire_authored_trip_pack(
             acquisition_type = "version_update"
             credits_charged = 0
             explorer_discount = 0
+        elif (
+            required_content_kind == "original_drive"
+            and resolved_original_access_mode == "explorer"
+        ):
+            acquisition_type = "explorer_included"
+            credits_charged = 0
+            explorer_discount = 0
         elif list_price == 0:
             acquisition_type = "free"
             explorer_discount = 0
             credits_charged = 0
         else:
             acquisition_type = "purchase"
-            explorer_discount = list_price * TRIP_PACK_EXPLORER_DISCOUNT_PERCENT // 100 if explorer_active else 0
-            credits_charged = list_price - explorer_discount
+            explorer_discount = (
+                0
+                if required_content_kind == "original_drive" and original_policy_explicit
+                else list_price * TRIP_PACK_EXPLORER_DISCOUNT_PERCENT // 100
+                if explorer_active
+                else 0
+            )
+            credits_charged = (
+                int(original_policy["permanent_credit_price"])
+                if required_content_kind == "original_drive" and original_policy_explicit
+                else list_price - explorer_discount
+            )
             db.execute(
                 "UPDATE users SET credits=credits-? WHERE id=? AND credits>=?",
                 (credits_charged, user_id, credits_charged),
@@ -14422,6 +14870,7 @@ def acquire_authored_original(
     pack_id: str,
     idempotency_key: str,
     version: int | None = None,
+    access_mode: str = "permanent",
 ) -> dict:
     return _acquire_authored_trip_pack(
         user_id,
@@ -14429,6 +14878,7 @@ def acquire_authored_original(
         pack_id=pack_id,
         required_content_kind="original_drive",
         requested_version=version,
+        original_access_mode=access_mode,
     )
 
 
@@ -14521,7 +14971,8 @@ def get_published_original_manifest(
         raise ValueError("Original version must be a positive integer")
     db = _conn()
     row = db.execute(
-        """SELECT p.id,v.version,v.price_credits,v.original_manifest_json
+        """SELECT p.id AS pack_id,v.version,v.price_credits,v.public_metadata,
+                  v.original_manifest_json
            FROM authored_trip_packs p
            JOIN authored_trip_pack_versions v ON v.pack_id=p.id
            WHERE (p.id=? OR v.slug=?) AND v.version=?
@@ -14533,20 +14984,23 @@ def get_published_original_manifest(
     if not row:
         db.close()
         return None
-    if int(row["price_credits"]) > 0:
-        entitled = user_id is not None and db.execute(
-            """SELECT 1 FROM authored_trip_pack_entitlements
-               WHERE user_id=? AND pack_id=? AND version=? LIMIT 1""",
-            (user_id, row["id"], version),
-        ).fetchone()
-        if not entitled:
-            db.close()
-            raise OriginalManifestAccessError("Acquire this Original before downloading it")
+    access = _original_access_decision_db(db, user_id, row)
+    if not access["allowed"]:
+        db.close()
+        raise OriginalManifestAccessError("Acquire this Original before downloading it")
     manifest = _decode_pack_json(row["original_manifest_json"], None)
     db.close()
     if not isinstance(manifest, dict):
         raise ValueError("Published Original manifest is unavailable")
-    return manifest
+    return _original_manifest_for_client(manifest)
+
+
+def _original_manifest_for_client(manifest: dict) -> dict:
+    """Remove server-only provenance from an acquired consumer manifest."""
+    result = copy.deepcopy(manifest)
+    if result.get("schema_version") == 2:
+        result.pop("narration_profile", None)
+    return result
 
 
 def get_published_original_asset_record(
@@ -14563,7 +15017,8 @@ def get_published_original_asset_record(
         raise ValueError("Original asset sha256 is invalid")
     db = _conn()
     versions = db.execute(
-        """SELECT v.version,v.price_credits,v.original_manifest_json
+        """SELECT v.pack_id,v.version,v.price_credits,v.public_metadata,
+                  v.original_manifest_json
            FROM authored_trip_packs p
            JOIN authored_trip_pack_versions v ON v.pack_id=p.id
            WHERE p.id=? AND p.status='published' AND p.content_kind='original_drive'
@@ -14585,15 +15040,9 @@ def get_published_original_asset_record(
         if not manifest_asset:
             continue
         matched = True
-        if int(version_row["price_credits"]) == 0:
-            authorized = True
-            free_access = True
-        elif user_id is not None:
-            authorized = bool(db.execute(
-                """SELECT 1 FROM authored_trip_pack_entitlements
-                   WHERE user_id=? AND pack_id=? AND version=? LIMIT 1""",
-                (user_id, pack_id, int(version_row["version"])),
-            ).fetchone())
+        access = _original_access_decision_db(db, user_id, version_row)
+        authorized = bool(access["allowed"])
+        free_access = access["access_type"] == "public_free"
         if authorized:
             break
     if not matched:
@@ -14631,34 +15080,37 @@ def validate_original_analytics_dimensions(
         stop_id = _validate_canonical_id(stop_id, "Original analytics stop id")
     db = _conn()
     row = db.execute(
-        """SELECT v.price_credits,v.original_manifest_json
+        """SELECT v.pack_id,v.version,v.price_credits,v.public_metadata,
+                  v.original_manifest_json
            FROM authored_trip_packs p
            JOIN authored_trip_pack_versions v ON v.pack_id=p.id
            WHERE p.id=? AND v.version=? AND p.status='published'
              AND p.content_kind='original_drive' AND v.content_kind='original_drive'""",
         (pack_id, version),
     ).fetchone()
-    db.close()
     if not row:
-        return False
-    if int(row["price_credits"]) > 0:
-        if user_id is None:
-            return False
-        db = _conn()
-        entitled = db.execute(
-            """SELECT 1 FROM authored_trip_pack_entitlements
-               WHERE user_id=? AND pack_id=? AND version=? LIMIT 1""",
-            (user_id, pack_id, version),
-        ).fetchone()
         db.close()
-        if not entitled:
-            return False
+        return False
+    if not _original_access_decision_db(db, user_id, row)["allowed"]:
+        db.close()
+        return False
+    db.close()
     if stop_id is None:
         return True
     manifest = _decode_pack_json(row["original_manifest_json"], {})
+    return _original_manifest_has_event_id(manifest, stop_id)
+
+
+def _original_manifest_has_event_id(manifest: dict, event_id: str) -> bool:
+    """Resolve V1 stop or V2 shared-story identity for private analytics."""
+    collection = (
+        manifest.get("stories")
+        if manifest.get("schema_version") == 2
+        else manifest.get("stops")
+    )
     return any(
-        isinstance(stop, dict) and stop.get("id") == stop_id
-        for stop in (manifest.get("stops") or [])
+        isinstance(item, dict) and item.get("id") == event_id
+        for item in (collection or [])
     )
 
 

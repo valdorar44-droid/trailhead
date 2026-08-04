@@ -325,3 +325,95 @@ new evidence.
 - The complete gate is not repeated. All other phases already passed in that
   run; only these two assertions were rerun, following the one-reproduction,
   one-correction release rule.
+
+## Final Android 1.0.12 candidate and Google Play submission
+
+Final immutable mobile source:
+`e8bd03013024f7d43f790d8ee309f2c72b8f1b81`.
+
+Final backend hardening is live:
+
+- Railway deployment: `1dfb838d-dc4e-4cea-9176-a63aeaa205bc`.
+- Terminal state: `SUCCESS`.
+- Image digest:
+  `sha256:21ef69cdfbacf378636bfa42ba95283f9a557a62b96e443c7608b8ac06c04e3f`.
+- `/api/health`, `/privacy`, `/delete-account`, and `/delete-data` returned
+  HTTP 200; unauthenticated Viator admin diagnostics returned HTTP 401.
+
+Exact-candidate Android evidence:
+
+- Preview build 73: EAS build
+  `9bf8636b-f000-4457-aa9f-8f5f15afd219`, runtime
+  `native-1.0.12-android.1`, fingerprint
+  `77859791be6f2b35cf06b590d2a6e17167c91fa0`.
+- Preview APK SHA-256:
+  `d45a322d52ec27ff2c5e7c4df4dc0a7ebf48e44ac3007471e05e80e7b6108491`.
+- Installed on Samsung `RFCR408DA9B` (`SM-A326U1`) as version `1.0.12`,
+  version code `73`; the stale debug package was removed without clearing the
+  signed-in release app.
+- DHU passed head-unit-only Search -> destination -> Start, real route and
+  maneuver display, off-route state, report/recenter/zoom controls, reconnect
+  with the active route restored, and End with the foreground service and live
+  notification stopped. Evidence lives under
+  `output/android-auto/1.0.12-vc73-preflight/`,
+  `output/android-auto/1.0.12-vc73-session/`, and
+  `mobile/output/android-auto/1.0.12-vc73-session/`.
+- Navigation-start screenshot SHA-256:
+  `a26a9ece73735d60948984076ed1eb020cc696009f78d75fa89e2cf7190f4f82`.
+- Reconnect screenshot SHA-256:
+  `ad582657e30334d211828bf9bc1579e58e2e2bfbabb4804c1a5b9ab34229631e`.
+
+Production artifact:
+
+- EAS build 74: `d52daf57-7d59-4bba-97fb-d5c3495f36f3`, version `1.0.12`,
+  runtime `native-1.0.12-android.1`, fingerprint
+  `6826b766fe834f018f67d227fb2e409bfaf44714`.
+- AAB path:
+  `output/play/build74-final/trailhead-1.0.12-vc74.aab`.
+- AAB SHA-256:
+  `522f82f82d34378eb61b9b2c3cd7ea745c9261403f4a6259cdcab24b751b7055`.
+- Decoded base-manifest SHA-256:
+  `a871fb4d93dcf840dbdaaa9cbd6d7b4dd30a11b7c927dd1d35d7c252e66d0cbb`.
+- Bundletool validation, package/version/runtime checks, signature verification,
+  native-drift comparison, permission denylist, Android Auto component checks,
+  app-link checks, and upload-certificate verification all passed. The preview
+  and production fingerprints differ only in the expected
+  `expoConfig.releaseCommitSha` source.
+- Play reported one non-blocking warning: no R8/Proguard deobfuscation mapping
+  file. Native debug symbols are attached, and the release does not rely on an
+  unverified mapping file.
+
+Google Play state after submission:
+
+- Internal testing is live on `74 (1.0.12)` and the former `36 (1.0.4)` bundle
+  is no longer the active internal release.
+- Production has `74 (1.0.12)` staged for a 100% rollout; `63 (1.0.10)` is not
+  included.
+- Closed testing Alpha has `74 (1.0.12)` staged for a 100% rollout; the former
+  `36 (1.0.4)` bundle is not included.
+- Store metadata is `Trailhead`, with short description
+  `Offline maps, camps, trails, navigation and route planning` and the reviewed
+  full description. No consumer AI label or unfinished copy is included.
+- The privacy policy, Ads, Data Safety, Health, background-location, and
+  foreground-service declarations are included in the same review package.
+- Google Play confirmed `9 changes sent for review`. The Publishing overview
+  now shows `Changes in review`; Play's automated quick checks were still
+  running when this checkpoint was recorded, so this is not a claim of Google
+  approval or public availability.
+
+Protected files remain unchanged:
+
+- Explore index SHA-256:
+  `c0726d8166ab7d110f437ff4e6acde7aa09702354f053103e3f6630a0129b869`.
+- App Store copy SHA-256:
+  `126af147b650c2f1077fb73036d26f34f940422c07a3193bade047c73b5c225a`.
+
+Open deterministic P0/P1 defects: none. External Google automated checks and
+policy review remain pending. The exact next action is to monitor the Play
+submission once, respond only to a concrete review result, and avoid rebuilding
+or resubmitting the accepted candidate speculatively.
+
+Do not repeat the policy videos, Data Safety questionnaire, broad Android
+crawls, Memory Gate, Layers, NPS, Originals lifecycle, Trails, Android Auto, or
+bundle decoding without new evidence. Task-owned DHU, Metro, Gradle, Maestro,
+and test processes still running: none.

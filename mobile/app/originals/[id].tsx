@@ -129,7 +129,14 @@ export default function OriginalDetailScreen() {
     if (!detail || detail.priceCredits === 0) return 0;
     return hasPlan ? detail.explorerPriceCredits || detail.priceCredits : detail.priceCredits;
   }, [detail, hasPlan]);
-  const canClaimFeatured = Boolean(detail?.featured && detail.priceCredits > 0 && hasPlan && user);
+  const canClaimFeatured = Boolean(
+    detail?.featured
+    && !detail.explorerIncluded
+    && detail.priceCredits > 0
+    && hasPlan
+    && user,
+  );
+  const explorerAccessIncluded = Boolean(detail?.explorerIncluded && hasPlan && user);
 
   const acquire = useCallback(async () => {
     if (!detail) return;
@@ -139,9 +146,15 @@ export default function OriginalDetailScreen() {
     }
     setBusy(true);
     try {
+      const accessMode = explorerAccessIncluded ? 'explorer' : 'permanent';
       const result = canClaimFeatured
         ? await originalsRuntime.claimFeaturedOriginal(`original-featured:${new Date().toISOString().slice(0, 7)}:${detail.id}:${detail.version}`)
-        : await originalsRuntime.acquireOriginal(detail.id, detail.version, `original:${detail.id}:${detail.version}`);
+        : await originalsRuntime.acquireOriginal(
+          detail.id,
+          detail.version,
+          `original:${detail.id}:${detail.version}:${accessMode}`,
+          accessMode,
+        );
       if (!originalPackVersionAccessIsExact(
         result.pack.id,
         result.pack.version,
@@ -171,7 +184,7 @@ export default function OriginalDetailScreen() {
     } finally {
       setBusy(false);
     }
-  }, [canClaimFeatured, detail, originalsRuntime, router, user]);
+  }, [canClaimFeatured, detail, explorerAccessIncluded, originalsRuntime, router, user]);
 
   const startDownload = useCallback(async () => {
     if (!detail || bundle.state === 'downloading') return;
@@ -298,6 +311,8 @@ export default function OriginalDetailScreen() {
     : !owned
     ? canClaimFeatured
       ? 'Claim monthly Original'
+      : explorerAccessIncluded
+      ? 'Included with Explorer'
       : detail.priceCredits === 0
       ? 'Get free Original'
       : user

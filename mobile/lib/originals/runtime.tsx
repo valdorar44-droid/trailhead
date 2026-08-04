@@ -22,6 +22,11 @@ import {
   type OriginalAccessStore,
 } from './accessStore';
 import {
+  ORIGINAL_EXPLORER_ACCESS_REQUIRED,
+  originalLocalAccessIsCurrent,
+  originalLocalAccessIsExplorerSubscription,
+} from './accessPolicy';
+import {
   ORIGINALS_ANALYTICS_EVENTS,
   trackOriginalsAnalyticsEvent,
 } from './analytics';
@@ -69,6 +74,7 @@ import { evaluateOriginalLocation, remainingOriginalTriggerStops } from './trigg
 import type {
   OriginalLocationSample,
   OriginalAcquisition,
+  OriginalAccessMode,
   OriginalAuthenticatedAcquisition,
   OriginalManifestV1,
   OriginalOwnerScope,
@@ -131,7 +137,12 @@ export type OriginalsRuntimeValue = {
   replayStory: (stopId: string) => Promise<void>;
   seekStory: (positionMs: number) => Promise<void>;
   setMuted: (muted: boolean) => Promise<void>;
-  acquireOriginal: (id: string, version: number, idempotencyKey?: string) => Promise<OriginalAcquisition>;
+  acquireOriginal: (
+    id: string,
+    version: number,
+    idempotencyKey?: string,
+    accessMode?: OriginalAccessMode,
+  ) => Promise<OriginalAcquisition>;
   claimFeaturedOriginal: (idempotencyKey?: string) => Promise<OriginalAcquisition>;
   beginAudioInterruption: (kind: 'navigation' | 'hazard') => Promise<() => Promise<void>>;
   migrateGuestToAccount: (accountId: string | number) => Promise<OriginalSessionV1[]>;
@@ -228,17 +239,15 @@ export function OriginalsRuntimeProvider({
     const access = await dependencies.access.get(ownerScope, packId, version);
     if (!scopeIsStillCurrent()) throw new Error('The signed-in account changed. Try again.');
     const currentUser = useStore.getState().user;
-    const allowed = access?.owner_scope === ownerScope && (
-      ownerScope === 'guest'
-        ? access.access_type === 'guest_free'
-        : access.access_type === 'entitled'
-          || (
-            access.access_type === 'admin_preview'
-            && Boolean(currentUser?.is_admin)
-            && allowAdminPreview
-          )
+    const allowed = access?.owner_scope === ownerScope && originalLocalAccessIsCurrent(
+      access,
+      Math.floor(Date.now() / 1_000),
+      { allowAdminPreview: Boolean(currentUser?.is_admin) && allowAdminPreview },
     );
     if (!allowed) {
+      if (originalLocalAccessIsExplorerSubscription(access)) {
+        throw new Error(ORIGINAL_EXPLORER_ACCESS_REQUIRED);
+      }
       throw new Error(ownerScope === 'guest'
         ? 'Get this free Original on this device before downloading or starting it.'
         : 'Restore or acquire this exact Original version for the signed-in account.');
@@ -1213,7 +1222,12 @@ export function OriginalsRuntimeProvider({
     if (mountedRef.current) setMutedState(nextMuted);
   }, [dependencies.audio]);
 
-  const acquireOriginal = useCallback(async (id: string, version: number, idempotencyKey?: string) => {
+  const acquireOriginal = useCallback(async (
+    id: string,
+    version: number,
+    idempotencyKey?: string,
+    accessMode: OriginalAccessMode = 'permanent',
+  ) => {
     const requestEpoch = accountStorage.epoch();
     const requestUserId = useStore.getState().user?.id ?? null;
     const requestScope = originalOwnerScopeForAccount(requestUserId);
@@ -1228,6 +1242,7 @@ export function OriginalsRuntimeProvider({
     const acquisition: OriginalAcquisition = await originalsApi.acquire(id, {
       idempotencyKey,
       version,
+      accessMode,
       authToken: requestToken,
     });
     if (!scopeIsStillCurrent()) throw new Error('The signed-in account changed. Try again.');
@@ -1390,11 +1405,8 @@ export function OriginalsRuntimeProvider({
     const active = latestForScope;
     if (!active || !scopeIsStillCurrent()) return null;
     const access = await dependencies.access.get(ownerScope, active.pack_id, active.version);
-    const accessAllowed = access?.owner_scope === ownerScope && (
-      ownerScope === 'guest'
-        ? access.access_type === 'guest_free'
-        : access.access_type === 'entitled'
-    );
+    const accessAllowed = access?.owner_scope === ownerScope
+      && originalLocalAccessIsCurrent(access);
     if (!accessAllowed || !scopeIsStillCurrent()) return null;
     const [restoredManifest, restoredBundle, verified] = await Promise.all([
       dependencies.bundles.loadManifest(ownerScope, active.pack_id, active.version, false),

@@ -26,6 +26,16 @@ const stubs: Record<string, string> = {
   `,
   '@/lib/originals': `
     export const ORIGINALS_ANALYTICS_EVENTS = { downloadResult: 'originals_download_result' };
+    export const ORIGINAL_EXPLORER_ACCESS_REQUIRED = 'An active Explorer membership is required to play this Original.';
+    export function originalLocalAccessIsCurrent(access, nowSeconds = Math.floor(Date.now() / 1000), options = {}) {
+      if (!access) return false;
+      if (access.access_type === 'guest_free' || access.access_type === 'entitled' || access.access_type === 'permanent') return true;
+      if (access.access_type === 'admin_preview') return Boolean(options.allowAdminPreview);
+      return access.access_type === 'explorer_subscription'
+        && access.access_active === true
+        && typeof access.access_expires_at === 'number'
+        && access.access_expires_at > nowSeconds;
+    }
     export function trackOriginalsAnalyticsEvent() {}
     export async function getOriginalPreviewToken() { return globalThis.__ownedOriginalsPreviewToken || null; }
     export const originalAccessStore = {
@@ -368,6 +378,11 @@ async function main() {
       items: [{
         ...summary,
         coverage_region: 'north_america',
+        access_policy: {
+          schema_version: 1,
+          explorer_included: true,
+          permanent_credit_price: 900,
+        },
         public_metadata: { ...summary.public_metadata, hero_image_url: AUTHORED_ARTWORK_URI },
       }],
     };
@@ -376,6 +391,8 @@ async function main() {
   assert.equal(guestPreviewCatalog.length, 1, 'a guest preview credential unlocks the internal catalog');
   assert.equal(guestPreviewCatalog[0]?.heroImageUrl, AUTHORED_ARTWORK_URI);
   assert.equal(guestPreviewCatalog[0]?.region, 'North America', 'internal coverage slugs are formatted for people');
+  assert.equal(guestPreviewCatalog[0]?.explorerIncluded, true);
+  assert.equal(guestPreviewCatalog[0]?.permanentPriceCredits, 900);
   assert.deepEqual(availabilityCalls[0], [undefined, null], 'guest availability is explicitly pinned anonymous');
   assert.equal((catalogCalls[0]?.[0] as { authToken?: string | null })?.authToken, null);
 

@@ -3,6 +3,8 @@ import { accountStorage } from '@/lib/storage';
 import {
   ORIGINALS_ANALYTICS_EVENTS,
   originalAccessStore,
+  originalLocalAccessIsCurrent,
+  ORIGINAL_EXPLORER_ACCESS_REQUIRED,
   originalBundleStore,
   originalOwnerScopeForAccount,
   getOriginalPreviewToken,
@@ -14,6 +16,7 @@ import {
   type OriginalBundleProgress,
   type OriginalBundleRecord,
   type OriginalAcquisition,
+  type OriginalAccessMode,
   type OriginalDetail,
   type OriginalManifestPreviewV1,
   type OriginalManifestV1,
@@ -157,7 +160,8 @@ function hasExactAccess(
   slug: string,
   version: number,
 ) {
-  return records.has(identityKey(packId, version)) || records.has(identityKey(slug, version));
+  return originalLocalAccessIsCurrent(records.get(identityKey(packId, version)))
+    || originalLocalAccessIsCurrent(records.get(identityKey(slug, version)));
 }
 
 async function accessRecords(
@@ -223,6 +227,16 @@ function summaryToUi(
   const durationS = numberValue(meta, ['duration_s', 'route_duration_s'], numberValue(route, ['duration_s']));
   const storyCount = numberValue(meta, ['story_count', 'stop_count'], 0);
   const totalBytes = numberValue(meta, ['offline_bytes', 'offline_size_bytes', 'bundle_bytes'], options.bundle?.total_bytes || 0);
+  const metadataPolicy = record(meta.access_policy);
+  const accessPolicy = item.access_policy ?? (
+    metadataPolicy.schema_version === 1
+      ? {
+        schema_version: 1 as const,
+        explorer_included: metadataPolicy.explorer_included === true,
+        permanent_credit_price: Number(metadataPolicy.permanent_credit_price),
+      }
+      : undefined
+  );
   const access = options.owned ? 'owned' : item.free || item.price_credits === 0 ? 'free' : 'paid';
   const terminalCount = options.session
     ? new Set([
@@ -249,6 +263,10 @@ function summaryToUi(
     offlineSizeLabel: textValue(meta, ['offline_size_label'], formatBytes(totalBytes)),
     priceCredits: item.price_credits,
     explorerPriceCredits: item.explorer_price_credits,
+    explorerIncluded: accessPolicy?.explorer_included === true,
+    permanentPriceCredits: Number.isFinite(accessPolicy?.permanent_credit_price)
+      ? accessPolicy?.permanent_credit_price
+      : item.price_credits,
     access,
     featured: item.featured,
     heroImageUrl: originalHeroImageUrl(item, meta),
@@ -419,6 +437,9 @@ function cachedManifestToUi(
 }
 
 async function cachedAccessDetail(access: OriginalLocalAccessV1, scope: OriginalOwnerScope) {
+  if (!originalLocalAccessIsCurrent(access, undefined, {
+    allowAdminPreview: Boolean(useStore.getState().user?.is_admin),
+  })) return null;
   const bundle = await originalBundleStore.get(scope, access.pack_id, access.version);
   if (!bundle) return null;
   const manifest = await originalBundleStore.loadManifest(
@@ -556,7 +577,11 @@ export async function listOwnedOriginals(): Promise<OriginalOwnedUiLoadResult> {
         ? await cachedAccessDetail(access, scope).catch(() => null)
         : null;
       return {
-        placeholder: summaryToUi(pack, { owned: true, bundle, session }),
+        placeholder: summaryToUi(pack, {
+          owned: originalLocalAccessIsCurrent(access),
+          bundle,
+          session,
+        }),
         cached,
       };
     })));
@@ -708,7 +733,11 @@ export async function getOriginalDetail(id: string, requestedVersion?: number): 
     : 'Trailhead Originals availability could not be verified. Connect and try again.');
 }
 
-export async function acquireOriginal(id: string, version: number): Promise<OriginalUiAcquireResult> {
+export async function acquireOriginal(
+  id: string,
+  version: number,
+  accessMode: OriginalAccessMode = 'permanent',
+): Promise<OriginalUiAcquireResult> {
   const accountId = useStore.getState().user?.id ?? null;
   const requestToken = accountId == null ? null : useStore.getState().token ?? null;
   if (accountId != null && !requestToken) throw new Error('Sign in to acquire this Original.');
@@ -721,8 +750,9 @@ export async function acquireOriginal(id: string, version: number): Promise<Orig
     useStore.getState().user?.id ?? null,
   );
   const acquisition: OriginalAcquisition = await originalsApi.acquire(id, {
-    idempotencyKey: `original:${id}:${version}`,
+    idempotencyKey: `original:${id}:${version}:${accessMode}`,
     version,
+    accessMode,
     authToken: requestToken,
   });
   if (!scopeIsCurrent()) throw new Error(ACCOUNT_CHANGED_ERROR);
@@ -835,6 +865,12 @@ export async function downloadOriginalBundle(
     ));
     if (!scopeIsCurrent()) throw new Error(ACCOUNT_CHANGED_ERROR);
     if (!access) throw new Error('Acquire this exact Original version before downloading it.');
+    if (!originalLocalAccessIsCurrent(access)) {
+      if (access.access_type === 'explorer_subscription') {
+        throw new Error(ORIGINAL_EXPLORER_ACCESS_REQUIRED);
+      }
+      throw new Error('Restore or acquire this exact Original version before downloading it.');
+    }
     const manifest = await originalsApi.manifest(access.pack_id, version, undefined, requestToken);
     if (!scopeIsCurrent()) throw new Error(ACCOUNT_CHANGED_ERROR);
     const previewToken = await getOriginalPreviewToken().catch(() => null);

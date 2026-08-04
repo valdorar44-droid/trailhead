@@ -1,4 +1,5 @@
 import type { OriginalAccessStore } from './accessStore';
+import { originalLocalAccessIsCurrent } from './accessPolicy';
 import type { OriginalAudioAdapter, OriginalAudioPlaybackState } from './audioAdapter';
 import { originalAudioCoordinator, type OriginalAudioFocusLease } from './audioCoordinator';
 import type { OriginalBundleStore } from './bundleStore';
@@ -57,11 +58,8 @@ export function createOriginalHeadlessController(
       return { kind: 'inactive' as const };
     }
     const access = await dependencies.access.get(session.owner_scope, session.pack_id, session.version);
-    const allowed = access?.owner_scope === session.owner_scope && (
-      session.owner_scope === 'guest'
-        ? access.access_type === 'guest_free'
-        : access.access_type === 'entitled'
-    );
+    const allowed = access?.owner_scope === session.owner_scope
+      && originalLocalAccessIsCurrent(access);
     if (!allowed) return { kind: 'inactive' as const };
     const [bundle, manifest] = await Promise.all([
       dependencies.bundles.get(session.owner_scope, session.pack_id, session.version),

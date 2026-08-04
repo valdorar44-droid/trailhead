@@ -51,6 +51,8 @@ export type OriginalUiSummary = {
   offlineSizeLabel: string;
   priceCredits: number;
   explorerPriceCredits: number;
+  explorerIncluded?: boolean;
+  permanentPriceCredits?: number;
   access: OriginalAccessState;
   adminPreview?: boolean;
   featured: boolean;

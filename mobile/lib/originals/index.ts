@@ -1,5 +1,6 @@
 export * from './api';
 export * from './accessStore';
+export * from './accessPolicy';
 export * from './accountCleanup';
 export * from './analytics';
 export * from './audioAdapter';
@@ -13,6 +14,7 @@ export * from './feedbackStore';
 export * from './locationAdapter';
 export * from './localAccessSummary';
 export * from './manifest';
+export * from './manifestV2';
 export * from './mapAdapter';
 export * from './ownership';
 export * from './previewAccess';

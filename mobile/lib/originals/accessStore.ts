@@ -4,6 +4,7 @@ import {
   writeOriginalTextAtomically,
   type OriginalFileAdapter,
 } from './fileAdapter';
+import { originalEntitlementAccessType } from './accessPolicy';
 import type {
   OriginalAuthenticatedAcquisition,
   OriginalGuestAcquisition,
@@ -80,18 +81,36 @@ export function createOriginalAccessStore(
     },
 
     recordEntitlement(acquisition: OriginalAuthenticatedAcquisition, accountId: string | number) {
-      return serialized(() => {
+      return serialized(async () => {
         const now = Date.now();
+        const ownerScope = `account:${accountId}` as OriginalOwnerScope;
+        const index = await readIndex();
+        const existing = (index.scopes[ownerScope] ?? []).find(record => (
+          record.pack_id === acquisition.pack.id
+          && record.version === acquisition.pack.version
+        ));
+        const accessType = originalEntitlementAccessType(acquisition);
+        const explorerSubscription = accessType === 'explorer_subscription';
         return saveInternal({
           schema_version: 1,
           pack_id: acquisition.pack.id,
           version: acquisition.pack.version,
           slug: acquisition.pack.slug,
           title: acquisition.pack.title,
-          owner_scope: `account:${accountId}`,
-          access_type: 'entitled',
+          owner_scope: ownerScope,
+          access_type: accessType,
+          permanent: explorerSubscription ? false : true,
+          access_active: explorerSubscription
+            ? acquisition.entitlement.access_active === true
+            : true,
+          access_expires_at: explorerSubscription
+            ? acquisition.entitlement.access_expires_at ?? null
+            : null,
+          entitlement_id: acquisition.entitlement.id,
+          acquisition_type: acquisition.entitlement.acquisition_type,
+          server_verified_at_ms: now,
           pack_summary: acquisition.pack,
-          claimed_at_ms: now,
+          claimed_at_ms: existing?.claimed_at_ms ?? now,
           updated_at_ms: now,
         });
       });

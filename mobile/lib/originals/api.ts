@@ -8,6 +8,7 @@ import type {
   OriginalCatalogResponse,
   OriginalDetail,
   OriginalManifestV1,
+  OriginalAccessMode,
   OriginalOwnedResponse,
   OriginalSummary,
 } from './types';
@@ -70,6 +71,7 @@ export type ListOriginalsOptions = {
 export type AcquireOriginalOptions = {
   idempotencyKey?: string;
   version?: number;
+  accessMode?: OriginalAccessMode;
   signal?: AbortSignal;
   authToken?: string | null;
 };
@@ -153,8 +155,12 @@ export const originalsApi = {
   },
 
   acquire(id: string, options: AcquireOriginalOptions = {}) {
-    const query = options.version == null ? '' : `?version=${encodeURIComponent(String(options.version))}`;
-    return originalsRequest<OriginalAcquisition>(`/api/originals/${encodeURIComponent(id)}/acquire${query}`, {
+    const query = new URLSearchParams();
+    if (options.version != null) query.set('version', String(options.version));
+    if (options.accessMode) query.set('access_mode', options.accessMode);
+    const encoded = query.toString();
+    const suffix = encoded ? `?${encoded}` : '';
+    return originalsRequest<OriginalAcquisition>(`/api/originals/${encodeURIComponent(id)}/acquire${suffix}`, {
       method: 'POST',
       signal: options.signal,
       ...(Object.prototype.hasOwnProperty.call(options, 'authToken') ? { authToken: options.authToken } : {}),

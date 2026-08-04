@@ -54,7 +54,7 @@ export type OriginalStopV1 = {
   citations: OriginalCitationV1[];
 };
 
-export type OriginalAssetKind = 'audio' | 'image' | 'transcript' | 'route' | 'other' | string;
+export type OriginalAssetKind = 'narration' | 'audio' | 'image' | 'transcript' | 'route' | 'other' | string;
 
 export type OriginalAssetV1 = {
   id: string;
@@ -107,6 +107,182 @@ export type OriginalManifestV1 = {
   };
 };
 
+/**
+ * Internal production metadata used to reproduce narration assets. This is
+ * deliberately not a consumer-facing badge or provider label.
+ */
+export type OriginalNarrationProfileV1 = Readonly<{
+  schema_version: 1;
+  provider: 'cartesia' | 'elevenlabs';
+  voice_id: string;
+  model_snapshot: string;
+  api_version: string;
+  language: string;
+  generation: Readonly<{
+    output_format: 'wav';
+    sample_rate_hz: number;
+    channels: 1 | 2;
+  }>;
+  archival_master: Readonly<{
+    mime_type: 'audio/wav';
+    sample_rate_hz: number;
+    channels: 1 | 2;
+    bit_depth: 16 | 24 | 32;
+  }>;
+  mobile_delivery: Readonly<{
+    mime_type: 'audio/mpeg';
+    bitrate_kbps: number;
+    sample_rate_hz: number;
+    channels: 1 | 2;
+  }>;
+  commercial_license: Readonly<{
+    status: 'attested';
+    plan: 'pro' | 'startup' | 'enterprise';
+    attested_at: string;
+  }>;
+  training_opt_out: Readonly<{
+    status: 'confirmed';
+    confirmed_at: string;
+  }>;
+}>;
+
+export type OriginalStoryKindV2 = 'story' | 'cue';
+
+export type OriginalStorySourceRightsV2 =
+  | 'public_domain'
+  | 'licensed'
+  | 'permission_confirmed'
+  | 'reference_only';
+
+export type OriginalStorySourceV2 = {
+  title: string;
+  url: string;
+  publisher: string;
+  role: 'story';
+  authority: 'official' | 'authoritative';
+  reviewed_at: string;
+  rights_status: OriginalStorySourceRightsV2;
+  /** Stable claim IDs from the story's claim-level editorial dossier. */
+  affected_claims: string[];
+};
+
+/** Shared narration content. Route-specific placement lives on cue_refs. */
+export type OriginalStoryV2 = {
+  id: string;
+  kind: OriginalStoryKindV2;
+  title: string;
+  transcript: string;
+  audio_asset_id: string;
+  audio_duration_s: number;
+  artwork_asset_id?: string;
+  citations: OriginalStorySourceV2[];
+};
+
+export type OriginalCueReferenceV2 = {
+  story_id: string;
+  sequence: number;
+  coordinates: { lat: number; lng: number };
+  explore_place_id?: string;
+  trigger: OriginalTriggerV1;
+};
+
+export type OriginalRouteVariantV2 = {
+  id: string;
+  sequence: number;
+  title: string;
+  route: OriginalRouteV1;
+  cue_refs: OriginalCueReferenceV2[];
+};
+
+export type OriginalOperationalSourceV2 = OriginalCitationV1 & {
+  role: 'operational';
+  authority: 'official' | 'authoritative';
+  reviewed_at: string;
+  scope: string[];
+};
+
+/**
+ * Declares how current conditions must be checked. It intentionally carries
+ * no editable pass/fail value; readiness remains server-owned and current.
+ */
+export type OriginalOperationalReadinessV2 = {
+  policy: 'required_before_start';
+  source_scopes: string[];
+  alternate_chapter_ids: string[];
+};
+
+export type OriginalChapterValidationSelectionV2 = {
+  selection_id: string;
+  required_variant_ids: string[];
+};
+
+export type OriginalChapterV2 = {
+  id: string;
+  sequence: number;
+  title: string;
+  summary: string;
+  default_variant_id: string;
+  safety: OriginalManifestV1['safety'];
+  access: OriginalManifestV1['access'];
+  season: OriginalManifestV1['season'];
+  operational_sources: OriginalOperationalSourceV2[];
+  operational_readiness: OriginalOperationalReadinessV2;
+  validation_selection: OriginalChapterValidationSelectionV2;
+  variants: OriginalRouteVariantV2[];
+};
+
+export type OriginalManifestV2 = {
+  schema_version: 2;
+  manifest_id: string;
+  pack_id: string;
+  version: number;
+  locale: string;
+  title: string;
+  stories: OriginalStoryV2[];
+  chapters: OriginalChapterV2[];
+  assets: OriginalAssetV1[];
+  /** One union map region shared by every selectable chapter. */
+  offline_map: OriginalOfflineMapV1;
+  review: OriginalManifestV1['review'];
+};
+
+export type OriginalChapterSelectionV2 = {
+  chapter_id: string;
+  /** Omit to compile the chapter's declared default variant. */
+  variant_id?: string;
+};
+
+export type OriginalChapterSelectionItemV2 = {
+  chapter_id: string;
+  chapter_sequence: number;
+  chapter_title: string;
+  chapter_summary: string;
+  variant_id: string;
+  variant_sequence: number;
+  variant_title: string;
+  is_default: boolean;
+  direction: string;
+  distance_m: number;
+  duration_s: number;
+  story_count: number;
+  cue_count: number;
+  validation_selection_id: string;
+};
+
+/**
+ * The V1-shaped route is for the trigger engine and validator. Persistence
+ * must retain this explicit selection identity; current V1 stores key only by
+ * canonical pack/version and are not V2-selection aware.
+ */
+export type OriginalCompiledChapterManifestV2 = {
+  selection: {
+    validation_selection_id: string;
+    chapter_id: string;
+    variant_id: string;
+  };
+  manifest: OriginalManifestV1;
+};
+
 export type OriginalManifestPreviewStopV1 = Pick<
   OriginalStopV1,
   'id' | 'sequence' | 'title' | 'coordinates'
@@ -139,9 +315,21 @@ export type OriginalSummary = {
   free: boolean;
   coverage_region: string;
   public_metadata: Record<string, unknown>;
+  /** Immutable per-version access policy. Older Originals omit this field. */
+  access_policy?: OriginalAccessPolicyV1;
   published_at: number | string;
   featured: boolean;
 };
+
+export type OriginalAccessMode = 'explorer' | 'permanent';
+
+export type OriginalAccessPolicyV1 = {
+  schema_version: 1;
+  explorer_included: boolean;
+  permanent_credit_price: number;
+};
+
+export type OriginalEntitlementAccessType = 'explorer_subscription' | 'permanent';
 
 export type OriginalDetail = OriginalSummary & {
   manifest_preview: OriginalManifestPreviewV1;
@@ -158,7 +346,12 @@ export type OriginalEntitlement = {
   version: number;
   user_id?: number;
   trip_id?: string | null;
-  access_type?: string;
+  acquisition_type?: string;
+  access_type?: OriginalEntitlementAccessType;
+  permanent?: boolean;
+  access_active?: boolean;
+  /** Unix timestamp in seconds. Null for permanent access. */
+  access_expires_at?: number | null;
   acquired_at?: number | string;
   [key: string]: unknown;
 };
@@ -171,6 +364,7 @@ export type OriginalAuthenticatedAcquisition = {
   already_owned: boolean;
   replayed: boolean;
   credit_balance: number;
+  upgraded_to_permanent?: boolean;
 };
 
 export type OriginalGuestAcquisition = {
@@ -193,7 +387,17 @@ export type OriginalLocalAccessV1 = {
   slug: string;
   title: string;
   owner_scope: OriginalOwnerScope;
-  access_type: 'guest_free' | 'entitled' | 'admin_preview';
+  /** `entitled` is retained for local records written by older clients. */
+  access_type: 'guest_free' | 'entitled' | 'explorer_subscription' | 'permanent' | 'admin_preview';
+  /** Absent on legacy records. Explorer access is always non-permanent. */
+  permanent?: boolean;
+  /** Server snapshot; expiry is independently enforced against the device clock. */
+  access_active?: boolean;
+  /** Unix timestamp in seconds. Null for permanent access. */
+  access_expires_at?: number | null;
+  entitlement_id?: number | string;
+  acquisition_type?: string;
+  server_verified_at_ms?: number;
   pack_summary?: OriginalSummary;
   manifest_path?: string;
   claimed_at_ms: number;

@@ -76,8 +76,16 @@ async function main() {
   }) as typeof fetch;
 
   try {
-    await apiModule.originalsApi.acquire('moab', { version: 1, authToken: 'account-a-token' });
+    await apiModule.originalsApi.acquire('moab', {
+      version: 1,
+      accessMode: 'explorer',
+      authToken: 'account-a-token',
+    });
     assert.equal(requests[0]?.headers.Authorization, 'Bearer account-a-token');
+    assert.equal(
+      requests[0]?.url,
+      'https://trailhead.test/api/originals/moab/acquire?version=1&access_mode=explorer',
+    );
     assert.equal(globals.__originalsStorageReads, 0, 'a pinned operation never rereads a later account token');
 
     await apiModule.originalsApi.acquire('moab', { version: 1, authToken: null });

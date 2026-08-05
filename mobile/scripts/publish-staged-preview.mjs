@@ -104,7 +104,10 @@ execute(process.execPath, ['scripts/local-expo-module-resolution.test.mjs']);
 execute(process.execPath, ['scripts/upload-sentry-update-sourcemaps.mjs', '--check-env']);
 execute('npx', [
   '--yes', 'expo', 'export', '--platform', platform, '--output-dir', 'dist',
-  '--source-maps', '--clear', '--max-workers', '2',
+  // Keep preview exports within the same bounded-memory envelope as the
+  // production publisher. Parallel Metro workers can exhaust the WSL release
+  // runner when a stale native build process is still winding down.
+  '--source-maps', '--clear', '--max-workers', '1',
 ]);
 execute(process.execPath, ['scripts/upload-sentry-update-sourcemaps.mjs']);
 execute('npx', [

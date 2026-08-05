@@ -292,15 +292,24 @@ contains('scripts/release-identity.test.mjs', 'must outrank', 'Release identity 
     'Guarded publisher must validate Sentry credentials before publishing.',
   );
 expect(
-  otaPublisher.includes("'--skip-bundler'")
-    && otaPublisher.includes("'--input-dir', 'dist'")
+  otaPublisher.includes("{ platform: 'android', inputDir: 'dist-android' }")
+    && otaPublisher.includes("{ platform: 'ios', inputDir: 'dist-ios' }")
+    && otaPublisher.includes("'--skip-bundler'")
+    && otaPublisher.includes("'--input-dir', inputDir")
+    && otaPublisher.includes("'--output-dir', stage.inputDir")
     && otaPublisher.includes("'--source-maps'")
-    && otaPublisher.includes("'--max-workers', '2'"),
-  'OTA publisher must publish the exact source-mapped export.',
+    && otaPublisher.includes("'--max-workers', '1'")
+    && otaPublisher.includes("updateArgsFor(stage)"),
+  'OTA publisher must sequentially publish each exact source-mapped native export.',
 );
+const stagedSentryUpload = otaPublisher.indexOf(
+  "'scripts/upload-sentry-update-sourcemaps.mjs',\n    '--input-dir', stage.inputDir",
+);
+const stagedUpdatePublish = otaPublisher.indexOf("run('npx', updateArgsFor(stage), { capture: true })");
 expect(
-  otaPublisher.lastIndexOf("['scripts/upload-sentry-update-sourcemaps.mjs']")
-    < otaPublisher.lastIndexOf("run('npx', updateArgs, { capture: true })"),
+  stagedSentryUpload >= 0
+    && stagedUpdatePublish >= 0
+    && stagedSentryUpload < stagedUpdatePublish,
   'Sentry source maps must upload successfully before OTA publication.',
 );
   expect(

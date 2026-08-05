@@ -66,3 +66,30 @@ Commit this checkpoint, run the production environment/prepreview gate once, tag
 - Do not rebuild native binaries.
 - Do not rerun broad Map, Explore, NPS, Trails, Originals, Android Auto, Layers, or memory crawls.
 - Do not modify the protected Explore index, App Store copy, or `.cursor/`.
+
+## Production completion
+
+- Published: `2026-08-05T02:31:26-05:00`
+- Immutable tag/source: `v1.0.11-welcome-ota1` / `20fd29c7b1e9bbf1a8512ef4e7c1c26571fa7c4b`
+- Production candidate branch: `production-candidate-20fd29c7b1e9bbf1a8512ef4e7c1c26571fa7c4b-msfrdi6s-2b45a7f107439bb4b4bb9089`
+- Candidate branch ID: `019fd0d4-4cf5-7c24-917e-1d706b51e4f5`
+- Production channel ID: `019dc26b-268a-794b-8aa8-3497b4d38487`
+- Android update: `019fd0d4-67b5-7c2c-9107-00d08304e3db`
+- Android group: `90a3a5d2-a7e7-4958-a1e1-39960f87dfda`
+- Android runtime: `native-1.0.11-android.1`
+- iOS update: `019fd0d4-bff6-7c4c-83ae-194ce98cde8b`
+- iOS group: `2017bfc6-9b0b-4a2f-8560-a6f5db7bca1d`
+- iOS runtime: `native-1.0.11-ios.1`
+- Android Sentry artifact bundle: `13d9c0c7-98f7-5912-9984-fa1c140f63ba`
+- iOS Sentry artifact bundle: `e5d08a83-5a09-5af0-aea3-bcb2e627cd42`
+- Runtime coverage: exact match, 14 runtime-platform pairs.
+- Live channel verification: production resolves to candidate branch ID `019fd0d4-4cf5-7c24-917e-1d706b51e4f5`.
+- Previous production branch remains the immediate rollback target: `production-candidate-b8d9dc8b16883f97c6c44b15f33429dc4d4fb737-msbf24qt-6122bfe38d18bcbce0f06c2a`.
+- Production publisher outcome: passed build ancestry, source/native-tree review, paired build evidence, sequential exports, Sentry uploads, paired update identity, legacy runtime preservation, and atomic channel promotion.
+- Pre-production gate outcome: 980 backend tests, 135 subtests, Android Auto unit tests, TypeScript, native drift, copy/privacy, Explore, Offline, Originals, Trails, and whitespace all passed.
+- Open P0/P1 defects: none in this packet.
+- Background processes: none.
+
+## Next action
+
+Allow compatible 1.0.11 installs to receive the update on launch/relaunch. Resume the Great Smoky Mountains Original from its existing checkpoint; do not repeat Welcome, broad Explore, Trails, memory, Layers, Android Auto, or Originals lifecycle work without new evidence.

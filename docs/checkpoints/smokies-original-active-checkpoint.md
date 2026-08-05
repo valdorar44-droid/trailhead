@@ -252,6 +252,7 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 ## S2 source-dossier completion candidate
 
 - Completed locally: 2026-08-05 on branch `feat/smokies-original-s2` from baseline `8dc6a4bd959f98e4baa328ff3cd8bc3d224f6e76`.
+- Accepted S2 implementation commit: `d862abf986276e6ce097e5454e7b1ab53c7189ee`.
 - Generated artifact: `originals/smokies/source_dossiers_v1.json`, SHA-256 `4f81200308052c3f3fba227434d5372a8a0fd5504354839448e13e2b69338011`.
 - The deterministic dossier contains 28 reviewed official sources, 47 claim records, 45 full-story outlines, 32 shorter cues, and eight media leads.
 - Three entries remain deliberately blocked for compensated EBCI participation and review: `mc_story_15`, `mc_cue_07`, and `cc_story_04`. The checked-in EBCI brief is a draft only; it was not sent and contains no private reviewer information.

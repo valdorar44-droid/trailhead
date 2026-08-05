@@ -41,7 +41,11 @@ No Mapbox candidate geometry is persisted in this evidence.
 - Geometry simplification: none.
 - Endpoint merge tolerance: one metre.
 - Snapshot SHA-256: `667962182156619a6f24b836d5fc8d036bff8117b93a0137956e902d9b702027`.
-- Route-evidence SHA-256: `5533ab4e2b3243d03f29637b4bd92323dec6eb634c7a2c5dd2762009cd04ec09`.
+- Route-spec SHA-256: `025db561e9cd1cc77e65f6a738e96548943a031d0f14d90b0fc1d6685af1a65b`.
+- Compiler version: `1.1.0`.
+- Compiler-source SHA-256: `2da05e38dccd52b5d4198523fa14d3d5c6c35b015456e5c638676087ed95b137`.
+- Algorithm-contract SHA-256: `a616137a9637fa7649f22325ff0e6ab65655030806e50501d6762d21c91eab22`.
+- Route-evidence SHA-256: `ce9e35b42f60d0eaa02b501dbc70a0d3973be0e4b49b0332ae761a75ceeeb9f2`.
 
 The refresh process retrieves sorted GRSM object IDs first, then downloads
 pinned batches of 500 with an exact field list. It hashes layer metadata before
@@ -78,9 +82,12 @@ The five source geometry IDs that require review are:
 - `e165ffe3-8f56-47e4-902b-9937312df435`
 - `f117d383-5e50-4e7f-95c3-8b862c38370e`
 
-Trailhead does not silently reverse those records. The assembled line remains
-blocked until NPS data support or another authoritative source resolves the
-direction discrepancy.
+Trailhead pins this exact reviewed anomaly set. A source refresh that adds,
+removes, or changes any of these conflicts fails the compiler rather than
+silently promoting the route. Trailhead does not silently reverse those
+records. The assembled line remains blocked until NPS data support or another
+authoritative source resolves the direction discrepancy through a reviewed
+source revision.
 
 John Oliver Place, Abrams Falls Trailhead, and Cable Mill are intentionally
 projected story landmarks, not route waypoints. This removes the detours seen

@@ -16,6 +16,7 @@ import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import date
+from pathlib import Path
 from typing import Iterable
 from urllib.parse import urlsplit
 
@@ -118,6 +119,30 @@ EXPECTED_ROAD_COUNTS = {
     "Roaring Fork Motor Nature Trail": 41,
     "Sugarlands Visitor Center Loop Road": 8,
     "Townsend Entrance Road": 15,
+}
+
+EXPECTED_CADES_DIRECTION_CONFLICT_GEOMETRY_IDS = frozenset(
+    {
+        "008ef10d-f967-4bd4-a210-2184dc1e85e1",
+        "160be5ea-ae63-4498-bb61-900d174ae5b2",
+        "20fd255b-e779-4922-bc39-fd663ea73ca3",
+        "e165ffe3-8f56-47e4-902b-9937312df435",
+        "f117d383-5e50-4e7f-95c3-8b862c38370e",
+    }
+)
+
+OFFICIAL_ROUTE_GENERATOR_VERSION = "1.1.0"
+OFFICIAL_ROUTE_ALGORITHM_CONTRACT = {
+    "graph": "directed_nps_public_roads",
+    "route_controls": "identity_bound_reviewed_anchors",
+    "cue_landmarks": "project_only_never_route",
+    "endpoint_join_tolerance_m": ENDPOINT_JOIN_TOLERANCE_M,
+    "geometry_simplification": "none",
+    "source_direction": "rdoneway_fail_closed",
+    "source_conflicts": "exact_reviewed_set_fail_closed",
+    "cades_direction_conflict_geometry_ids": sorted(
+        EXPECTED_CADES_DIRECTION_CONFLICT_GEOMETRY_IDS
+    ),
 }
 
 EXPECTED_FACILITY_POLICY = {
@@ -317,6 +342,10 @@ def _canonical_json(value: object) -> str:
 
 def canonical_sha256(value: object) -> str:
     return hashlib.sha256(_canonical_json(value).encode("utf-8")).hexdigest()
+
+
+def official_route_generator_source_sha256() -> str:
+    return hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
 
 
 def _sha256_text(value: object, label: str) -> str:
@@ -1599,6 +1628,13 @@ def build_official_route_evidence(snapshot_payload: dict, route_spec: dict) -> d
         *loop["source_traversal"],
         *connector["source_traversal"],
     ]
+    cades_direction_conflicts = frozenset(loop["direction_conflict_geometry_ids"])
+    if cades_direction_conflicts != EXPECTED_CADES_DIRECTION_CONFLICT_GEOMETRY_IDS:
+        raise OriginalRouteSourceError(
+            "Cades Cove reviewed direction conflict set changed: "
+            f"expected {sorted(EXPECTED_CADES_DIRECTION_CONFLICT_GEOMETRY_IDS)}, "
+            f"got {sorted(cades_direction_conflicts)}"
+        )
     output_variants.append(
         _route_output(
             snapshot=snapshot,
@@ -1614,10 +1650,10 @@ def build_official_route_evidence(snapshot_payload: dict, route_spec: dict) -> d
             ),
             blockers=(
                 ["nps_one_way_digitization_conflict"]
-                if loop["direction_conflict_geometry_ids"]
+                if cades_direction_conflicts
                 else []
             ),
-            direction_conflict_geometry_ids=loop["direction_conflict_geometry_ids"],
+            direction_conflict_geometry_ids=sorted(cades_direction_conflicts),
         )
     )
 
@@ -1685,6 +1721,15 @@ def build_official_route_evidence(snapshot_payload: dict, route_spec: dict) -> d
         "kind": "trailhead_original_official_route_evidence",
         "product_id": PRODUCT_ID,
         "source_snapshot_sha256": nps_road_snapshot_sha256(snapshot),
+        "route_spec_sha256": canonical_sha256(spec),
+        "generator": {
+            "name": "smokies_official_route_compiler",
+            "version": OFFICIAL_ROUTE_GENERATOR_VERSION,
+            "source_sha256": official_route_generator_source_sha256(),
+            "algorithm_contract_sha256": canonical_sha256(
+                OFFICIAL_ROUTE_ALGORITHM_CONTRACT
+            ),
+        },
         "source_policy": {
             "geometry_authority": "nps_public_roads",
             "license": "us-pd",

@@ -1,4 +1,10 @@
 {
+  "generator": {
+    "algorithm_contract_sha256": "a616137a9637fa7649f22325ff0e6ab65655030806e50501d6762d21c91eab22",
+    "name": "smokies_official_route_compiler",
+    "source_sha256": "2da05e38dccd52b5d4198523fa14d3d5c6c35b015456e5c638676087ed95b137",
+    "version": "1.1.0"
+  },
   "kind": "trailhead_original_official_route_evidence",
   "product_id": "great_smoky_mountains_ridges_rivers_living_memory",
   "publication_blockers": [
@@ -8,6 +14,7 @@
     "editorial_and_cultural_review"
   ],
   "publication_status": "blocked",
+  "route_spec_sha256": "025db561e9cd1cc77e65f6a738e96548943a031d0f14d90b0fc1d6685af1a65b",
   "schema_version": 1,
   "source_policy": {
     "endpoint_join_tolerance_m": 1.0,

@@ -10,16 +10,21 @@ from unittest.mock import patch
 
 from db.originals_route_sources import (
     ENDPOINT_JOIN_TOLERANCE_M,
+    EXPECTED_CADES_DIRECTION_CONFLICT_GEOMETRY_IDS,
     EXPECTED_FACILITY_COUNTS,
     EXPECTED_ROAD_COUNTS,
+    OFFICIAL_ROUTE_ALGORITHM_CONTRACT,
+    OFFICIAL_ROUTE_GENERATOR_VERSION,
     SELECTED_FEATURE_COUNT,
     OriginalRouteSourceError,
     Projection,
     RoadGraph,
     _append_geometry,
+    _normalize_route_spec_for_evidence,
     build_official_route_evidence,
     canonical_sha256,
     normalize_nps_road_snapshot,
+    official_route_generator_source_sha256,
 )
 from scripts.build_smokies_official_routes import check
 from scripts.build_smokies_original_routes import load_route_spec
@@ -124,6 +129,21 @@ class SmokiesOfficialRouteEvidenceTests(unittest.TestCase):
     def test_checked_route_evidence_is_deterministic(self):
         self.assertEqual(self.evidence, self.rebuilt)
         self.assertEqual(canonical_sha256(self.evidence), canonical_sha256(self.rebuilt))
+        self.assertEqual(
+            self.evidence["route_spec_sha256"],
+            canonical_sha256(_normalize_route_spec_for_evidence(self.route_spec)),
+        )
+        self.assertEqual(
+            self.evidence["generator"],
+            {
+                "name": "smokies_official_route_compiler",
+                "version": OFFICIAL_ROUTE_GENERATOR_VERSION,
+                "source_sha256": official_route_generator_source_sha256(),
+                "algorithm_contract_sha256": canonical_sha256(
+                    OFFICIAL_ROUTE_ALGORITHM_CONTRACT
+                ),
+            },
+        )
         self.assertTrue(self.evidence["source_policy"]["operational_readiness_separate"])
         self.assertFalse(self.evidence["source_policy"]["mapbox_candidate_geometry_persisted"])
 
@@ -148,7 +168,25 @@ class SmokiesOfficialRouteEvidenceTests(unittest.TestCase):
         cades = self.by_id["little-river-cades-cove-loop"]
         self.assertEqual(cades["status"], "blocked_source_review")
         self.assertEqual(cades["blocking_issues"], ["nps_one_way_digitization_conflict"])
-        self.assertEqual(len(cades["source_direction_conflict_geometry_ids"]), 5)
+        self.assertEqual(
+            set(cades["source_direction_conflict_geometry_ids"]),
+            EXPECTED_CADES_DIRECTION_CONFLICT_GEOMETRY_IDS,
+        )
+
+    def test_cades_direction_conflict_set_cannot_silently_change(self):
+        changed = copy.deepcopy(self.snapshot)
+        target = next(
+            item
+            for item in changed["features"]
+            if item["geometry_id"]
+            in EXPECTED_CADES_DIRECTION_CONFLICT_GEOMETRY_IDS
+        )
+        target["one_way"] = None
+        with self.assertRaisesRegex(
+            OriginalRouteSourceError,
+            "Cades Cove reviewed direction conflict set changed",
+        ):
+            build_official_route_evidence(changed, self.route_spec)
 
     def test_routes_have_no_unreviewed_seams_and_reference_only_snapshot_features(self):
         source_ids = {item["geometry_id"] for item in self.snapshot["features"]}

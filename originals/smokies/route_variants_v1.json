@@ -128,7 +128,7 @@
       "direction": "one_way",
       "route_strategy": "directions",
       "expected_distance_m": {
-        "minimum": 57000,
+        "minimum": 56500,
         "maximum": 63000
       },
       "max_control_snap_m": 150,

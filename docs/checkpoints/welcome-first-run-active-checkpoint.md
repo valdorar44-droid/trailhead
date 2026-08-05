@@ -1,6 +1,6 @@
 # Trailhead Welcome + First Run — Active Checkpoint
 
-Last updated: 2026-08-05 (approved implementation checkpoint)
+Last updated: 2026-08-05 (Android preview accepted by focused QA; awaiting user review)
 
 ## Resume protocol
 
@@ -17,6 +17,8 @@ Read this file before continuing the Welcome/first-run packet. Do not repeat the
 - Baseline checkpoint commit: `c569e83d65d2210ee53641c335b4626dd7250fce`.
 - Approved welcome implementation: `d5ad339a` (`feat(onboarding): rebuild first-run welcome`).
 - Release-guard correction: `65964b7d` (`test(release): align drift guard with staged exports`).
+- Clean-gate corrections: `6c9fdef0` (`test(release): repair clean prepreview assertions`).
+- Android preview source: `9a321a1b5b36948d141e04d12842e0ddb7d5e8eb` (`fix(release): bound staged preview exports`).
 - Smokies S2 remains checkpointed at `4e8b98da` and is not part of this packet.
 - Existing protected dirty state remains intentionally unstaged:
   - `M dashboard/explore_serving_index_v2.json`
@@ -73,6 +75,8 @@ Read this file before continuing the Welcome/first-run packet. Do not repeat the
 - `npm run audit:native-drift`: pass with only expected missing local secret warnings.
 - `git diff --check`: pass.
 - The native-drift check was stale after the safer sequential publisher refactor. It now validates separate `dist-android`/`dist-ios` exports, one worker, per-stage Sentry uploads, and publication only after both uploads.
+- The one full pre-preview run exposed only three clean-checkout gate defects: an implicit callback type, stale Explore memory-guard regexes, and missing ignored/hash-pinned NPS audit inputs. The focused corrections now pass TypeScript, Explore memory guard, mission smoke, and the 14-test NPS child suite. Do not rerun the full gate for this packet.
+- The first staged publish was interrupted by WSL memory exhaustion while stale Gradle/Java work and parallel Metro workers overlapped. `9a321a1b` makes staged preview exports single-worker and adds a native-drift regression assertion. A clean retry completed without raising Node's heap.
 
 ## Preview compatibility and device rule
 
@@ -84,6 +88,34 @@ Read this file before continuing the Welcome/first-run packet. Do not repeat the
 - Compatible iOS preview target after Android acceptance: build 61, from the identical accepted SHA.
 - Publish only from a clean detached worktree after fingerprint compatibility evidence passes.
 
+## Android preview and focused device evidence
+
+- Android build: 69.
+- Runtime: `native-1.0.10-android.7`.
+- Source: `9a321a1b5b36948d141e04d12842e0ddb7d5e8eb`.
+- Update ID: `019fd0a5-bd3c-7a05-8591-9e8bdffcadee`.
+- Update group: `a03e1810-2150-4cc4-bc35-940ca340629e`.
+- Existing iOS preview counterpart remained unchanged:
+  - Runtime `native-1.0.10-ios.6`
+  - Group `6478d4ec-5063-4934-888e-04d9555e63ed`
+- Sentry artifact bundle: `980db129-0d78-5d31-a2bb-880b9fb8d2b2`.
+- Device: AVD `TrailheadCapture1080x1920`, clean app data, build-69 APK.
+- Expo Updates logs confirm the exact update ID, runtime, and full release SHA were downloaded and restarted.
+- Focused paths passed:
+  - Welcome renders the licensed tilted collage, Trailhead mark, approved copy, and all three actions without clipping.
+  - `Get started` completes all four setup questions and the optional rig step, then opens Explore.
+  - `No preference` remains exclusive and current-step selection feedback is correct.
+  - `Skip for now` on the rig step continues to `Plan around`.
+  - `Explore first` opens Explore directly.
+  - `Sign in` opens the existing login/create-account path.
+  - No crash, blank frame, or React error occurred. One pre-existing oversized-SecureStore warning remains outside this packet.
+- Evidence directory: `C:\Users\User\Documents\Codex\evidence\trailhead\welcome-1.0.11\android`.
+- Key SHA-256 evidence:
+  - `welcome.png`: `b6867b9e446e6168c1212181d6285e9418380e4fcaad228b10c3b0a3606893a4`
+  - `setup-complete.png`: `8c3c1fc5a44d3c36e2f743a533c2032805c73ff294d89896818a7e49238ff3b8`
+  - `explore-first-result.png`: `3f822d366283beb9f393185e9ed8f39c743359d8ec3ae3744f2260c9d381b8a7`
+  - `sign-in-result.png`: `575c39855c41924ca68729e9b3ee6e4b1255df1e153f8a2dbcee5de4a05cd36d`
+
 ## Do not repeat
 
 - Do not redesign the welcome again unless device evidence reveals a specific defect.
@@ -93,4 +125,4 @@ Read this file before continuing the Welcome/first-run packet. Do not repeat the
 
 ## Next exact action
 
-Push this checkpoint, create a clean detached worktree at its immutable SHA, compare its native fingerprint to Android build 69, and run the pre-preview gate once. If compatible, publish the Android preview, install/reset build 69 on `TrailheadCapture1080x1920`, and verify the real first-run welcome, setup, Explore-first, Sign-in, optional rig/Suspension, and Profile replay. Stop for Android acceptance before publishing the identical SHA to iOS build 61.
+Show the Android welcome evidence to the user and obtain acceptance. Then publish iOS preview from the identical `9a321a1b` SHA to compatible build 61, spot-check the welcome and shared action paths, record the iOS update identity, and close this packet. Profile replay and the Suspension selector remain covered by focused characterization tests; perform a physical replay spot-check on iOS if the signed-in profile is available. Resume Smokies S2 afterward from `4e8b98da` without repeating completed Welcome work.

@@ -356,3 +356,18 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 - Do not regenerate the temporary S1 Mapbox candidates or redo S0/S1/S2.
 - Do not repeat broad app, Explore, Map, Layers, memory, Originals lifecycle, or Android Auto crawls for this data-only packet.
 - Do not generate paid narration or contact outside reviewers without the remaining approvals.
+
+## S2C route gaps and Start Tour readiness baseline
+
+- Started: 2026-08-05.
+- Branch: `feat/smokies-original-s2`.
+- Baseline HEAD: `f2bdbf6fc1ec4948f74305d28e2276f240637d7e`.
+- The worktree is clean. Protected main-worktree state remains unchanged:
+  - `dashboard/explore_serving_index_v2.json`: `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
+  - `docs/app-store-copy.md`: `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+  - `.cursor/` remains untracked and protected in the main worktree.
+- This packet will reuse the existing Originals Builder/Studio rather than create a second authoring system. The audit will map permanent route evidence, sources, cue review, operational observations, and publication validation onto existing Studio contracts before any UI change.
+- Source work is limited to authoritative EBCI/NCDOT geometry for the Cherokee extension and official resolution evidence for the five pinned Cades Cove direction anomalies. No Mapbox candidate geometry will be persisted as permanent evidence.
+- Start Tour work is limited to a trusted, timestamped current-road observation contract and server-owned selected-rig binding. Missing, stale, incomplete, or incompatible evidence remains fail-closed.
+- This packet does not contact EBCI or another outside party, draft cultural interpretation or pronunciation, generate narration, spend Cartesia credits, deploy, publish an OTA, change a public stage, or modify Moab V1.
+- Existing task-owned background processes at start: none. Long-running host Node/Python processes predate this packet and are not owned or stopped by it.

@@ -114,9 +114,9 @@ function assetRequest(path: string, headers: Record<string, string>) {
       : new URL(path.replace(/^\/+/, ''), api);
   const configured = (process.env.EXPO_PUBLIC_ORIGINAL_ASSET_HOSTS ?? '')
     .split(',')
-    .map(value => value.trim())
+    .map((value: string) => value.trim())
     .filter(Boolean)
-    .map(value => new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`).origin);
+    .map((value: string) => new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`).origin);
   const allowedOrigins = new Set([
     api.origin,
     'https://cdn.gettrailhead.app',

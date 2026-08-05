@@ -178,7 +178,8 @@ function validateStory(story: OriginalStoryV2, index: number) {
     const citationLabel = `${label}.citations[${citationIndex}]`;
     assertAllowedKeys(citation, citationLabel, [
       'title', 'url', 'publisher', 'role', 'authority', 'reviewed_at',
-      'rights_status', 'affected_claims',
+      'rights_status', 'affected_claims', 'cultural_approval_record_id',
+      'cultural_approval_record_sha256', 'cultural_approved_at',
     ]);
     assertText(citation.title, `${citationLabel}.title`);
     assertText(citation.url, `${citationLabel}.url`);
@@ -200,6 +201,31 @@ function validateStory(story: OriginalStoryV2, index: number) {
       assertStableId(claimId, `${citationLabel}.affected_claims[${claimIndex}]`);
     });
     assertUnique(citation.affected_claims, `${citationLabel}.affected_claims`);
+    const approvalFields = [
+      'cultural_approval_record_id',
+      'cultural_approval_record_sha256',
+      'cultural_approved_at',
+    ] as const;
+    const presentApprovalFields = approvalFields.filter(key => citation[key] != null);
+    if (presentApprovalFields.length > 0 && presentApprovalFields.length !== approvalFields.length) {
+      throw new OriginalManifestError(`${citationLabel} cultural approval evidence is incomplete.`);
+    }
+    if (presentApprovalFields.length) {
+      assertStableId(
+        citation.cultural_approval_record_id,
+        `${citationLabel}.cultural_approval_record_id`,
+      );
+      assertText(
+        citation.cultural_approval_record_sha256,
+        `${citationLabel}.cultural_approval_record_sha256`,
+      );
+      if (!/^[a-f0-9]{64}$/i.test(citation.cultural_approval_record_sha256)) {
+        throw new OriginalManifestError(
+          `${citationLabel}.cultural_approval_record_sha256 must be a SHA-256 digest.`,
+        );
+      }
+      assertReviewDate(citation.cultural_approved_at, `${citationLabel}.cultural_approved_at`);
+    }
   });
 }
 

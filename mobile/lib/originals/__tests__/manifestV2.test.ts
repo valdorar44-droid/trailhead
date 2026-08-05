@@ -433,6 +433,18 @@ assertInvalid(candidate => {
   candidate.stories[0].citations[0].affected_claims = [];
 }, /affected_claims must contain/);
 
+const culturalEvidenceCandidate = clonedManifest();
+Object.assign(culturalEvidenceCandidate.stories[0].citations[0], {
+  cultural_approval_record_id: 'ebci_scope_review_001',
+  cultural_approval_record_sha256: 'b'.repeat(64),
+  cultural_approved_at: '2026-08-01',
+});
+assert.doesNotThrow(() => validateOriginalManifestV2(culturalEvidenceCandidate));
+
+assertInvalid(candidate => {
+  candidate.stories[0].citations[0].cultural_approval_record_id = 'ebci_scope_review_001';
+}, /cultural approval evidence is incomplete/);
+
 assertInvalid(candidate => {
   // The non-default variant is also compiled and validated.
   candidate.chapters[1].variants[1].cue_refs[1].trigger.route_progress_end_m = 9_999;

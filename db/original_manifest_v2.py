@@ -304,7 +304,8 @@ def normalize_original_manifest_v2(
             citation = _object(citation, f"Original V2 story {story['id']} source")
             _forbid_keys(citation, {
                 "title", "url", "publisher", "role", "authority", "reviewed_at",
-                "rights_status", "affected_claims",
+                "rights_status", "affected_claims", "cultural_approval_record_id",
+                "cultural_approval_record_sha256", "cultural_approved_at",
             }, f"Original V2 story {story['id']} source")
             if citation.get("role") != "story" or citation.get("authority") not in {"official", "authoritative"}:
                 raise OriginalManifestV2Error(f"Original V2 story {story['id']} citations must be authoritative story sources")
@@ -326,6 +327,33 @@ def normalize_original_manifest_v2(
                 )
             ]
             _unique(claim_ids, f"Original V2 story {story['id']} affected claims")
+            approval_fields = {
+                "cultural_approval_record_id",
+                "cultural_approval_record_sha256",
+                "cultural_approved_at",
+            }
+            present_approval = {
+                key for key in approval_fields if citation.get(key) not in (None, "")
+            }
+            if present_approval and present_approval != approval_fields:
+                raise OriginalManifestV2Error(
+                    f"Original V2 story {story['id']} cultural approval evidence is incomplete"
+                )
+            if present_approval:
+                citation["cultural_approval_record_id"] = _stable_id(
+                    citation["cultural_approval_record_id"],
+                    f"Original V2 story {story['id']} cultural approval record",
+                )
+                approval_sha = str(citation["cultural_approval_record_sha256"]).strip().lower()
+                if not re.fullmatch(r"[a-f0-9]{64}", approval_sha):
+                    raise OriginalManifestV2Error(
+                        f"Original V2 story {story['id']} cultural approval SHA-256 is invalid"
+                    )
+                citation["cultural_approval_record_sha256"] = approval_sha
+                citation["cultural_approved_at"] = _review_date(
+                    citation["cultural_approved_at"],
+                    f"Original V2 story {story['id']} cultural approval date",
+                )
         stories.append(story)
     stories.sort(key=lambda item: item["id"])
     _unique([item["id"] for item in stories], "Original V2 story ids")

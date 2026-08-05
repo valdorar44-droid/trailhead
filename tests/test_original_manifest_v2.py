@@ -407,6 +407,24 @@ def test_v2_story_sources_require_rights_and_claim_level_binding():
         )
 
 
+def test_v2_cultural_approval_evidence_is_all_or_nothing():
+    payload = _v2_payload()
+    citation = payload["manifest"]["stories"][0]["citations"][0]
+    citation.update({
+        "cultural_approval_record_id": "ebci_scope_review_001",
+        "cultural_approval_record_sha256": "b" * 64,
+        "cultural_approved_at": "2026-08-03",
+    })
+    store._normalize_original_manifest(
+        payload["pack_id"], payload["title"], payload["manifest"],
+    )
+    citation.pop("cultural_approval_record_sha256")
+    with pytest.raises(OriginalManifestV2Error, match="approval evidence is incomplete"):
+        store._normalize_original_manifest(
+            payload["pack_id"], payload["title"], payload["manifest"],
+        )
+
+
 def test_v2_narration_profile_must_match_immutable_delivery_asset_format():
     payload = _v2_payload()
     payload["manifest"]["narration_profile"] = _test_profile()

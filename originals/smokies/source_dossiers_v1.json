@@ -1,0 +1,2352 @@
+{
+  "claims": [
+    {
+      "chapter_id": "little_river_cades_cove",
+      "cultural_gate": "not_required",
+      "id": "cc_cable_mill",
+      "source_ids": [
+        "nps_grsm_cable_mill"
+      ],
+      "statement": "Cable Mill used water from Mill Creek to power its gristmill and grind corn for Cades Cove households.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "cultural_gate": "ebci_required",
+      "id": "cc_cherokee_context",
+      "source_ids": [
+        "ebci_cultural_irb",
+        "ebci_cultural_resources"
+      ],
+      "statement": "Any account of Cherokee presence, place names, or cultural relationships in Cades Cove requires EBCI review rather than generalized retelling.",
+      "status": "cultural_review_required"
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "cultural_gate": "not_required",
+      "id": "cc_churches",
+      "source_ids": [
+        "nps_grsm_cades_cove",
+        "nps_grsm_cades_history"
+      ],
+      "statement": "Churches served religious, civic, and social roles in the valley community.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "cultural_gate": "not_required",
+      "id": "cc_cove_geology",
+      "source_ids": [
+        "nps_grsm_geology"
+      ],
+      "statement": "Cades Cove's broad valley reflects a different geologic setting from the surrounding ridges.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "cultural_gate": "not_required",
+      "id": "cc_farming",
+      "source_ids": [
+        "nps_grsm_cades_history"
+      ],
+      "statement": "Cove farms combined crops, livestock, outbuildings, and shared seasonal labor.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "cultural_gate": "not_required",
+      "id": "cc_general_store",
+      "source_ids": [
+        "nps_grsm_general_stores"
+      ],
+      "statement": "General stores near mills functioned as commercial, credit, and social centers.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "cultural_gate": "not_required",
+      "id": "cc_john_oliver",
+      "source_ids": [
+        "nps_grsm_cades_cove",
+        "nps_grsm_cades_history"
+      ],
+      "statement": "The John Oliver homesite helps locate one family's experience within early cove settlement and later park acquisition.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "cultural_gate": "not_required",
+      "id": "cc_little_river",
+      "source_ids": [
+        "nps_grsm_natural_features"
+      ],
+      "statement": "Little River and its tributaries visibly connect rainfall, steep relief, and downstream valleys.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "cultural_gate": "not_required",
+      "id": "cc_logging_corridor",
+      "source_ids": [
+        "nps_grsm_people",
+        "nps_grsm_timeline"
+      ],
+      "statement": "Logging communities and rail corridors changed the Little River landscape before park creation.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "cultural_gate": "not_required",
+      "id": "cc_loop_context",
+      "source_ids": [
+        "nps_grsm_cades_cove"
+      ],
+      "statement": "The Cades Cove road is an eleven-mile, one-way loop connecting historic sites, trailheads, and wildlife-viewing areas.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "cultural_gate": "not_required",
+      "id": "cc_park_acquisition",
+      "source_ids": [
+        "nps_grsm_cades_history",
+        "nps_grsm_people"
+      ],
+      "statement": "Park land acquisition dispersed the community through sales, court challenges, and life leases.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "cultural_gate": "not_required",
+      "id": "cc_population",
+      "source_ids": [
+        "nps_grsm_cades_history",
+        "nps_grsm_timeline"
+      ],
+      "statement": "The valley's population and public institutions grew through the nineteenth century.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "cultural_gate": "not_required",
+      "id": "cc_settlement",
+      "source_ids": [
+        "nps_grsm_cades_history"
+      ],
+      "statement": "European-American settlement began in the early nineteenth century and developed into a farming community.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "cultural_gate": "not_required",
+      "id": "cc_waterfall_landscape",
+      "source_ids": [
+        "nps_grsm_geology",
+        "nps_grsm_natural_features"
+      ],
+      "statement": "Abrams Falls and other park waterfalls form where moving water meets resistant rock and steep elevation change.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "cultural_gate": "not_required",
+      "id": "cc_wildlife",
+      "source_ids": [
+        "nps_grsm_black_bears",
+        "nps_grsm_cades_cove"
+      ],
+      "statement": "Open fields and forest edges make the cove a common wildlife-viewing area, but viewing must remain at a safe distance.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "cultural_gate": "not_required",
+      "id": "fp_air_monitoring",
+      "source_ids": [
+        "nps_grsm_air_quality"
+      ],
+      "statement": "Look Rock is an air-quality monitoring and viewing location where haze and visibility can be discussed with measured context.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "cultural_gate": "not_required",
+      "id": "fp_forest_mosaic",
+      "source_ids": [
+        "nps_grsm_statistics",
+        "nps_grsm_vegetation"
+      ],
+      "statement": "The long view spans a mosaic of forest communities structured by elevation and aspect.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "cultural_gate": "not_required",
+      "id": "fp_geologic_view",
+      "source_ids": [
+        "nps_grsm_geology"
+      ],
+      "statement": "Parkway overlooks reveal the layered ridges produced by ancient mountain building and long erosion.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "cultural_gate": "not_required",
+      "id": "fp_long_build",
+      "source_ids": [
+        "nps_grsm_foothills",
+        "nps_grsm_foothills_history"
+      ],
+      "statement": "Construction unfolded in separated segments over decades and the full authorized corridor remains incomplete.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "cultural_gate": "not_required",
+      "id": "fp_missing_link",
+      "source_ids": [
+        "nps_grsm_missing_link_bridge"
+      ],
+      "statement": "The Missing Link used multiple bridges, including an 800-foot curved bridge carried on tall piers, to cross steep terrain.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "cultural_gate": "not_required",
+      "id": "fp_scenic_corridor",
+      "source_ids": [
+        "nps_grsm_foothills"
+      ],
+      "statement": "Foothills Parkway was authorized as a scenic corridor along the Tennessee side of the Smokies.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "cultural_gate": "not_required",
+      "id": "mc_bear_country",
+      "source_ids": [
+        "nps_grsm_black_bears"
+      ],
+      "statement": "Black bears inhabit all elevations of the park and require distance and food-storage discipline.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "cultural_gate": "not_required",
+      "id": "mc_biodiversity",
+      "source_ids": [
+        "nps_grsm_animals",
+        "nps_grsm_nature"
+      ],
+      "statement": "The park's elevation and climate gradients support exceptional biological diversity.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "cultural_gate": "not_required",
+      "id": "mc_ccc_legacy",
+      "source_ids": [
+        "nps_grsm_history_culture",
+        "nps_grsm_newfound_gap_road"
+      ],
+      "statement": "Civilian Conservation Corps-era stonework and road features remain visible along the corridor.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "cultural_gate": "not_required",
+      "id": "mc_deep_geology",
+      "source_ids": [
+        "nps_grsm_geology"
+      ],
+      "statement": "Most exposed park rocks began as sediments and were later folded and uplifted during continental collisions.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "cultural_gate": "not_required",
+      "id": "mc_elk_restoration",
+      "source_ids": [
+        "nps_grsm_animals",
+        "nps_grsm_elk"
+      ],
+      "statement": "Elk were reintroduced to the park and are now visible in some North Carolina valleys, subject to wildlife-viewing distance rules.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "cultural_gate": "not_required",
+      "id": "mc_forest_zones",
+      "source_ids": [
+        "nps_grsm_vegetation"
+      ],
+      "statement": "Elevation and slope help organize distinct forest communities along the crossing.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "cultural_gate": "not_required",
+      "id": "mc_gap_context",
+      "source_ids": [
+        "nps_grsm_kuwohi_area"
+      ],
+      "statement": "Newfound Gap is a high pass connecting the Tennessee and North Carolina sides of the park.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "cultural_gate": "not_required",
+      "id": "mc_gateway_watershed",
+      "source_ids": [
+        "nps_grsm_natural_features"
+      ],
+      "statement": "Sugarlands begins beside a connected mountain watershed whose streams visibly shape the road corridor.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "cultural_gate": "not_required",
+      "id": "mc_haze_and_pollution",
+      "source_ids": [
+        "nps_grsm_air_quality"
+      ],
+      "statement": "Natural blue haze and modern air pollution are different phenomena, and pollution can reduce views and harm high-elevation ecosystems.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "cultural_gate": "not_required",
+      "id": "mc_high_country",
+      "source_ids": [
+        "nps_grsm_nature",
+        "nps_grsm_vegetation"
+      ],
+      "statement": "High-elevation habitat supports species and forest communities uncommon in the surrounding lowlands.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "cultural_gate": "ebci_required",
+      "id": "mc_kuwohi_living_meaning",
+      "source_ids": [
+        "ebci_cultural_irb",
+        "ebci_cultural_resources"
+      ],
+      "statement": "Any interpretation of Kuwohi's living cultural meaning, Cherokee language, or pronunciation requires EBCI participation and approval.",
+      "status": "cultural_review_required"
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "cultural_gate": "not_required",
+      "id": "mc_kuwohi_name",
+      "source_ids": [
+        "nps_grsm_kuwohi_restoration"
+      ],
+      "statement": "The U.S. Board on Geographic Names restored the name Kuwohi in 2024 after an EBCI-led request.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "cultural_gate": "not_required",
+      "id": "mc_logging_recovery",
+      "source_ids": [
+        "nps_grsm_history_culture",
+        "nps_grsm_people"
+      ],
+      "statement": "Industrial logging transformed much of the forest before park protection allowed broad recovery.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "cultural_gate": "not_required",
+      "id": "mc_mountain_farm",
+      "source_ids": [
+        "nps_grsm_mountain_farm",
+        "nps_grsm_oconaluftee"
+      ],
+      "statement": "Historic structures relocated and assembled at the Mountain Farm Museum interpret agricultural life in the region.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "cultural_gate": "not_required",
+      "id": "mc_oconaluftee_valley",
+      "source_ids": [
+        "nps_grsm_oconaluftee"
+      ],
+      "statement": "The Oconaluftee corridor presents river-valley ecology and preserved mountain-farm interpretation near the park's southern entrance.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "cultural_gate": "not_required",
+      "id": "mc_park_creation",
+      "source_ids": [
+        "nps_grsm_people",
+        "nps_grsm_timeline"
+      ],
+      "statement": "Creating the park protected forest while requiring more than a thousand landowners to leave homes and communities.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "cultural_gate": "not_required",
+      "id": "mc_rain_and_streams",
+      "source_ids": [
+        "nps_grsm_natural_features",
+        "nps_grsm_statistics"
+      ],
+      "statement": "High-elevation rainfall feeds a dense network of mountain streams and waterfalls.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "cultural_gate": "not_required",
+      "id": "mc_road_engineering",
+      "source_ids": [
+        "nps_grsm_newfound_gap_road"
+      ],
+      "statement": "Newfound Gap Road was redesigned in the 1930s as a scenic, safer cross-mountain corridor.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "cultural_gate": "not_required",
+      "id": "mc_segregated_landscape",
+      "source_ids": [
+        "nps_grsm_segregation"
+      ],
+      "statement": "Some early visitor facilities at Newfound Gap were planned or operated within a segregated public landscape.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "roaring_fork",
+      "cultural_gate": "not_required",
+      "id": "rf_farm_community",
+      "source_ids": [
+        "nps_grsm_history_culture",
+        "nps_grsm_roaring_fork"
+      ],
+      "statement": "Preserved cabins, mills, and farm sites record community life before the national park.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "roaring_fork",
+      "cultural_gate": "not_required",
+      "id": "rf_ogle_farm",
+      "source_ids": [
+        "nps_grsm_roaring_fork"
+      ],
+      "statement": "The Noah Ogle farmstead interprets a mountain household at the edge of the motor trail.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "roaring_fork",
+      "cultural_gate": "not_required",
+      "id": "rf_old_growth",
+      "source_ids": [
+        "nps_grsm_nature",
+        "nps_grsm_roaring_fork"
+      ],
+      "statement": "The route passes mature and old-growth forest shaped by elevation, moisture, and past land use.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "roaring_fork",
+      "cultural_gate": "not_required",
+      "id": "rf_preservation",
+      "source_ids": [
+        "nps_grsm_people",
+        "nps_grsm_roaring_fork"
+      ],
+      "statement": "The surviving road, structures, and forest let visitors read both natural change and human land use in one compact corridor.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "roaring_fork",
+      "cultural_gate": "not_required",
+      "id": "rf_route_character",
+      "source_ids": [
+        "nps_grsm_roaring_fork"
+      ],
+      "statement": "Roaring Fork Motor Nature Trail is a narrow, winding, seasonal one-way road through a stream valley.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "roaring_fork",
+      "cultural_gate": "not_required",
+      "id": "rf_stream",
+      "source_ids": [
+        "nps_grsm_natural_features",
+        "nps_grsm_roaring_fork"
+      ],
+      "statement": "The fast-flowing Roaring Fork gives the road and district their name.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "roaring_fork",
+      "cultural_gate": "not_required",
+      "id": "rf_waterfalls",
+      "source_ids": [
+        "nps_grsm_geology",
+        "nps_grsm_roaring_fork"
+      ],
+      "statement": "Waterfalls and cascades reflect steep terrain, resistant rock, and abundant rainfall.",
+      "status": "source_verified"
+    }
+  ],
+  "cultural_review": {
+    "authority": "Eastern Band of Cherokee Indians Cultural Institutional Review Board",
+    "blocked_entry_ids": [
+      "cc_story_04",
+      "mc_cue_07",
+      "mc_story_15"
+    ],
+    "compensation_required": true,
+    "contact_path": "EBCI Cultural IRB and Tribal Cultural Resources Department; request scope determination before recruiting a compensated reviewer or storyteller.",
+    "official_review_url": "https://www.ebci.gov/cultural-institutional-review-board/",
+    "prohibited_until_approved": [
+      "cultural_interpretation",
+      "pronunciation_guide",
+      "script_drafting",
+      "tts_rendering"
+    ],
+    "status": "required_before_drafting"
+  },
+  "entries": [
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_scenic_corridor"
+      ],
+      "directional_adaptation": true,
+      "id": "fp_cue_01",
+      "kind": "cue",
+      "purpose": "State the chapter direction and scenic purpose.",
+      "route_context": "chilhowee_terminus",
+      "script_status": "outline_only",
+      "sequence": 1,
+      "target_words": 80,
+      "title": "Parkway orientation",
+      "visible_scene": "A ridge road opens toward the national park."
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_geologic_view"
+      ],
+      "directional_adaptation": true,
+      "id": "fp_cue_02",
+      "kind": "cue",
+      "purpose": "Invite the passenger to notice depth in the ridge sequence.",
+      "route_context": "chilhowee_terminus",
+      "script_status": "outline_only",
+      "sequence": 2,
+      "target_words": 80,
+      "title": "First long view",
+      "visible_scene": "The trees open to distant ridges."
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_air_monitoring"
+      ],
+      "directional_adaptation": true,
+      "id": "fp_cue_03",
+      "kind": "cue",
+      "purpose": "Identify the primary viewpoint without asserting visibility.",
+      "route_context": "look_rock",
+      "script_status": "outline_only",
+      "sequence": 3,
+      "target_words": 80,
+      "title": "Look Rock",
+      "visible_scene": "The observation area and tower access appear."
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_forest_mosaic"
+      ],
+      "directional_adaptation": true,
+      "id": "fp_cue_04",
+      "kind": "cue",
+      "purpose": "Point out the forest mosaic before the longer ecology story.",
+      "route_context": "look_rock",
+      "script_status": "outline_only",
+      "sequence": 4,
+      "target_words": 80,
+      "title": "Forest from the ridge",
+      "visible_scene": "The road crosses a change in slope and exposure."
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_long_build"
+      ],
+      "directional_adaptation": true,
+      "id": "fp_cue_05",
+      "kind": "cue",
+      "purpose": "Orient the passenger to the segmented parkway history.",
+      "route_context": "walland_east_connection",
+      "script_status": "outline_only",
+      "sequence": 5,
+      "target_words": 80,
+      "title": "Walland connection",
+      "visible_scene": "The parkway meets a major gap in its historic construction sequence."
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_missing_link"
+      ],
+      "directional_adaptation": true,
+      "id": "fp_cue_06",
+      "kind": "cue",
+      "purpose": "Call attention to the engineering before the full story.",
+      "route_context": "foothills_missing_link",
+      "script_status": "outline_only",
+      "sequence": 6,
+      "target_words": 80,
+      "title": "Across the Missing Link",
+      "visible_scene": "Bridges carry the road across steep terrain."
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_scenic_corridor"
+      ],
+      "directional_adaptation": true,
+      "id": "fp_cue_07",
+      "kind": "cue",
+      "purpose": "Close the chapter and return the listener to ordinary navigation context.",
+      "route_context": "wears_valley_terminus",
+      "script_status": "outline_only",
+      "sequence": 7,
+      "target_words": 80,
+      "title": "Wears Valley end",
+      "visible_scene": "The scenic section descends toward the valley road network."
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_scenic_corridor"
+      ],
+      "directional_adaptation": true,
+      "id": "fp_story_01",
+      "kind": "story",
+      "purpose": "Explain the scenic-corridor purpose and its relationship to the national park.",
+      "route_context": "chilhowee_terminus",
+      "script_status": "outline_only",
+      "sequence": 1,
+      "target_words": 450,
+      "title": "A parkway made for the view",
+      "visible_scene": "The road runs along lower ridges facing the Smokies."
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_long_build"
+      ],
+      "directional_adaptation": true,
+      "id": "fp_story_02",
+      "kind": "story",
+      "purpose": "Tell the multi-decade construction story without framing incompletion as failure alone.",
+      "route_context": "walland_east_connection",
+      "script_status": "outline_only",
+      "sequence": 2,
+      "target_words": 450,
+      "title": "The unfinished road",
+      "visible_scene": "Completed pavement ends while the authorized corridor continues on maps."
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_missing_link"
+      ],
+      "directional_adaptation": true,
+      "id": "fp_story_03",
+      "kind": "story",
+      "purpose": "Make engineering visible in the road's most difficult section.",
+      "route_context": "foothills_missing_link",
+      "script_status": "outline_only",
+      "sequence": 3,
+      "target_words": 450,
+      "title": "Bridging the Missing Link",
+      "visible_scene": "Elevated bridges cross steep, broken terrain."
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_geologic_view"
+      ],
+      "directional_adaptation": true,
+      "id": "fp_story_04",
+      "kind": "story",
+      "purpose": "Connect the panorama to mountain building and erosion.",
+      "route_context": "look_rock",
+      "script_status": "outline_only",
+      "sequence": 4,
+      "target_words": 450,
+      "title": "Reading the ridgelines",
+      "visible_scene": "Successive mountain ridges stack across the horizon."
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_forest_mosaic"
+      ],
+      "directional_adaptation": true,
+      "id": "fp_story_05",
+      "kind": "story",
+      "purpose": "Show how elevation and aspect organize the broad view.",
+      "route_context": "look_rock",
+      "script_status": "outline_only",
+      "sequence": 5,
+      "target_words": 450,
+      "title": "A forest mosaic from above",
+      "visible_scene": "Different slopes and elevations carry subtly different forests."
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_air_monitoring"
+      ],
+      "directional_adaptation": true,
+      "id": "fp_story_06",
+      "kind": "story",
+      "purpose": "Use monitoring context to distinguish weather, natural haze, and pollution without guessing from one view.",
+      "route_context": "look_rock",
+      "script_status": "outline_only",
+      "sequence": 6,
+      "target_words": 450,
+      "title": "What the view says about the air",
+      "visible_scene": "Visibility changes across the same mountain panorama."
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "claim_ids": [
+        "cc_little_river"
+      ],
+      "directional_adaptation": false,
+      "id": "cc_cue_01",
+      "kind": "cue",
+      "purpose": "Ask passengers to notice how tightly road and river share the gorge.",
+      "route_context": "sugarlands",
+      "script_status": "outline_only",
+      "sequence": 1,
+      "target_words": 80,
+      "title": "River road",
+      "visible_scene": "Little River runs beside the road."
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "claim_ids": [
+        "cc_little_river"
+      ],
+      "directional_adaptation": false,
+      "id": "cc_cue_02",
+      "kind": "cue",
+      "purpose": "Mark the transition from Little River corridor toward Cades Cove.",
+      "route_context": "townsend_wye",
+      "script_status": "outline_only",
+      "sequence": 2,
+      "target_words": 80,
+      "title": "Townsend Wye",
+      "visible_scene": "Roads and water meet at the Wye."
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "claim_ids": [
+        "cc_loop_context"
+      ],
+      "directional_adaptation": false,
+      "id": "cc_cue_03",
+      "kind": "cue",
+      "purpose": "State the real loop shape and invite a slower pace without operational timing claims.",
+      "route_context": "cades_cove_entrance",
+      "script_status": "outline_only",
+      "sequence": 3,
+      "target_words": 80,
+      "title": "One-way loop",
+      "visible_scene": "The loop narrows into a one-way scenic road."
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "claim_ids": [
+        "cc_john_oliver"
+      ],
+      "directional_adaptation": false,
+      "id": "cc_cue_04",
+      "kind": "cue",
+      "purpose": "Point out the homesite before the related story.",
+      "route_context": "john_oliver_place",
+      "script_status": "outline_only",
+      "sequence": 4,
+      "target_words": 80,
+      "title": "The first homesite",
+      "visible_scene": "A cabin sits back from the road."
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "claim_ids": [
+        "cc_churches"
+      ],
+      "directional_adaptation": false,
+      "id": "cc_cue_05",
+      "kind": "cue",
+      "purpose": "Orient the passenger among distinct community sites.",
+      "route_context": "methodist_church",
+      "script_status": "outline_only",
+      "sequence": 5,
+      "target_words": 80,
+      "title": "Church row",
+      "visible_scene": "Churches and cemeteries appear near the loop."
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "claim_ids": [
+        "cc_waterfall_landscape"
+      ],
+      "directional_adaptation": false,
+      "id": "cc_cue_06",
+      "kind": "cue",
+      "purpose": "Name the stop without implying an easy or immediate waterfall view.",
+      "route_context": "abrams_falls_trailhead",
+      "script_status": "outline_only",
+      "sequence": 6,
+      "target_words": 80,
+      "title": "Abrams Falls trailhead",
+      "visible_scene": "The signed trailhead appears beside the loop."
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "claim_ids": [
+        "cc_cable_mill",
+        "cc_general_store"
+      ],
+      "directional_adaptation": false,
+      "id": "cc_cue_07",
+      "kind": "cue",
+      "purpose": "Identify the most substantial services and historic stop on the loop.",
+      "route_context": "cable_mill",
+      "script_status": "outline_only",
+      "sequence": 7,
+      "target_words": 80,
+      "title": "Cable Mill stop",
+      "visible_scene": "The visitor center and mill complex approach."
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "claim_ids": [
+        "cc_wildlife"
+      ],
+      "directional_adaptation": false,
+      "id": "cc_cue_08",
+      "kind": "cue",
+      "purpose": "Prepare the wildlife story without promising animals.",
+      "route_context": "tipton_place",
+      "script_status": "outline_only",
+      "sequence": 8,
+      "target_words": 80,
+      "title": "Fields and forest",
+      "visible_scene": "Open grass meets wooded slopes."
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "claim_ids": [
+        "cc_loop_context",
+        "cc_park_acquisition"
+      ],
+      "directional_adaptation": false,
+      "id": "cc_cue_09",
+      "kind": "cue",
+      "purpose": "Close the circular geography and point back to the community story.",
+      "route_context": "cades_cove_exit",
+      "script_status": "outline_only",
+      "sequence": 9,
+      "target_words": 80,
+      "title": "Completing the loop",
+      "visible_scene": "The road returns to the valley entrance."
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "claim_ids": [
+        "cc_little_river"
+      ],
+      "directional_adaptation": false,
+      "id": "cc_story_01",
+      "kind": "story",
+      "purpose": "Introduce water as the chapter's physical thread.",
+      "route_context": "sugarlands",
+      "script_status": "outline_only",
+      "sequence": 1,
+      "target_words": 450,
+      "title": "Following Little River",
+      "visible_scene": "The road and river travel together through a steep valley."
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "claim_ids": [
+        "cc_logging_corridor"
+      ],
+      "directional_adaptation": false,
+      "id": "cc_story_02",
+      "kind": "story",
+      "purpose": "Connect the drive to the region's logging economy and later recovery.",
+      "route_context": "sugarlands",
+      "script_status": "outline_only",
+      "sequence": 2,
+      "target_words": 450,
+      "title": "Rails, timber, and a changed valley",
+      "visible_scene": "Recovered forest borders the old Little River corridor."
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "claim_ids": [
+        "cc_cove_geology"
+      ],
+      "directional_adaptation": false,
+      "id": "cc_story_03",
+      "kind": "story",
+      "purpose": "Explain the geologic contrast that made farming land possible here.",
+      "route_context": "townsend_wye",
+      "script_status": "outline_only",
+      "sequence": 3,
+      "target_words": 450,
+      "title": "Why the cove opens wide",
+      "visible_scene": "A broad valley replaces the confined river gorge."
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "claim_ids": [
+        "cc_cherokee_context"
+      ],
+      "directional_adaptation": false,
+      "id": "cc_story_04",
+      "kind": "story",
+      "purpose": "Reserve Cherokee history and place relationships for compensated EBCI participation.",
+      "route_context": "cades_cove_entrance",
+      "script_status": "blocked_cultural_review",
+      "sequence": 4,
+      "target_words": 500,
+      "title": "Before the farms",
+      "visible_scene": "The loop enters a valley with a longer history than its preserved cabins."
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "claim_ids": [
+        "cc_settlement"
+      ],
+      "directional_adaptation": false,
+      "id": "cc_story_05",
+      "kind": "story",
+      "purpose": "Place early settlement within work, family, and landscape rather than a pioneer myth.",
+      "route_context": "john_oliver_place",
+      "script_status": "outline_only",
+      "sequence": 5,
+      "target_words": 450,
+      "title": "Building a valley community",
+      "visible_scene": "A log home and cleared field sit against wooded ridges."
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "claim_ids": [
+        "cc_farming"
+      ],
+      "directional_adaptation": false,
+      "id": "cc_story_06",
+      "kind": "story",
+      "purpose": "Describe mixed farm labor and seasonal cooperation.",
+      "route_context": "john_oliver_place",
+      "script_status": "outline_only",
+      "sequence": 6,
+      "target_words": 450,
+      "title": "The work behind a farm",
+      "visible_scene": "House, fields, fences, and outbuildings form one working system."
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "claim_ids": [
+        "cc_john_oliver"
+      ],
+      "directional_adaptation": false,
+      "id": "cc_story_10",
+      "kind": "story",
+      "purpose": "Use the site to make park acquisition personal and specific.",
+      "route_context": "john_oliver_place",
+      "script_status": "outline_only",
+      "sequence": 7,
+      "target_words": 450,
+      "title": "John Oliver's long argument",
+      "visible_scene": "The Oliver cabin remains one of the loop's earliest homesites."
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "claim_ids": [
+        "cc_churches"
+      ],
+      "directional_adaptation": false,
+      "id": "cc_story_07",
+      "kind": "story",
+      "purpose": "Explain churches as social institutions and leave room for documented disagreement rather than nostalgia.",
+      "route_context": "methodist_church",
+      "script_status": "outline_only",
+      "sequence": 8,
+      "target_words": 450,
+      "title": "Churches and a divided community",
+      "visible_scene": "A white church and cemetery sit beside the loop."
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "claim_ids": [
+        "cc_population"
+      ],
+      "directional_adaptation": false,
+      "id": "cc_story_08",
+      "kind": "story",
+      "purpose": "Use population and institution growth to show a connected community.",
+      "route_context": "missionary_baptist_church",
+      "script_status": "outline_only",
+      "sequence": 9,
+      "target_words": 450,
+      "title": "A valley full of families",
+      "visible_scene": "Homesites and public buildings appear across the open cove."
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "claim_ids": [
+        "cc_park_acquisition"
+      ],
+      "directional_adaptation": false,
+      "id": "cc_story_09",
+      "kind": "story",
+      "purpose": "Explain sales, resistance, life leases, and dispersal without presenting removal as frictionless.",
+      "route_context": "missionary_baptist_church",
+      "script_status": "outline_only",
+      "sequence": 10,
+      "target_words": 500,
+      "title": "When the park arrived",
+      "visible_scene": "Preserved structures stand in a landscape emptied of its former community."
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "claim_ids": [
+        "cc_waterfall_landscape"
+      ],
+      "directional_adaptation": false,
+      "id": "cc_story_13",
+      "kind": "story",
+      "purpose": "Relate waterfall form to rock resistance and moving water without turning the drive into a hike claim.",
+      "route_context": "abrams_falls_trailhead",
+      "script_status": "outline_only",
+      "sequence": 11,
+      "target_words": 450,
+      "title": "A waterfall shaped by rock",
+      "visible_scene": "The trailhead points toward a powerful waterfall beyond the road."
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "claim_ids": [
+        "cc_cable_mill"
+      ],
+      "directional_adaptation": false,
+      "id": "cc_story_11",
+      "kind": "story",
+      "purpose": "Show how water power connected grain, households, and local exchange.",
+      "route_context": "cable_mill",
+      "script_status": "outline_only",
+      "sequence": 12,
+      "target_words": 450,
+      "title": "Water power at Cable Mill",
+      "visible_scene": "A millrace and gristmill occupy the valley floor."
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "claim_ids": [
+        "cc_general_store"
+      ],
+      "directional_adaptation": false,
+      "id": "cc_story_12",
+      "kind": "story",
+      "purpose": "Describe general stores as commercial and social infrastructure.",
+      "route_context": "cable_mill",
+      "script_status": "outline_only",
+      "sequence": 13,
+      "target_words": 450,
+      "title": "The store beside the mill",
+      "visible_scene": "The Becky Cable house stands near the mill complex."
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "claim_ids": [
+        "cc_wildlife"
+      ],
+      "directional_adaptation": false,
+      "id": "cc_story_14",
+      "kind": "story",
+      "purpose": "Explain why animals are visible here and why a sighting is never promised.",
+      "route_context": "tipton_place",
+      "script_status": "outline_only",
+      "sequence": 14,
+      "target_words": 450,
+      "title": "Wildlife in a worked landscape",
+      "visible_scene": "Fields meet forest along the back half of the loop."
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "claim_ids": [
+        "mc_gap_context"
+      ],
+      "directional_adaptation": true,
+      "id": "mc_cue_01",
+      "kind": "cue",
+      "purpose": "State the route shape, expected high point, and that conditions can differ by elevation.",
+      "route_context": "sugarlands",
+      "script_status": "outline_only",
+      "sequence": 1,
+      "target_words": 80,
+      "title": "Crossing orientation",
+      "visible_scene": "The route leaves one park entrance for the other side of the mountains."
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "claim_ids": [
+        "mc_gateway_watershed"
+      ],
+      "directional_adaptation": true,
+      "id": "mc_cue_02",
+      "kind": "cue",
+      "purpose": "Prompt a visible observation before the longer watershed story.",
+      "route_context": "sugarlands",
+      "script_status": "outline_only",
+      "sequence": 2,
+      "target_words": 80,
+      "title": "Watch the water",
+      "visible_scene": "A creek runs close to the road."
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "claim_ids": [
+        "mc_deep_geology"
+      ],
+      "directional_adaptation": true,
+      "id": "mc_cue_03",
+      "kind": "cue",
+      "purpose": "Direct attention to the roadcut without overstating a formation identification.",
+      "route_context": "newfound_gap_return",
+      "script_status": "outline_only",
+      "sequence": 3,
+      "target_words": 80,
+      "title": "Rock at the roadside",
+      "visible_scene": "A cut exposes folded or layered rock."
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "claim_ids": [
+        "mc_forest_zones"
+      ],
+      "directional_adaptation": true,
+      "id": "mc_cue_04",
+      "kind": "cue",
+      "purpose": "Mark a visible forest transition.",
+      "route_context": "newfound_gap_return",
+      "script_status": "outline_only",
+      "sequence": 4,
+      "target_words": 80,
+      "title": "Forest turning point",
+      "visible_scene": "Leaf and canopy character change with the climb."
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "claim_ids": [
+        "mc_gap_context"
+      ],
+      "directional_adaptation": true,
+      "id": "mc_cue_05",
+      "kind": "cue",
+      "purpose": "Prepare the driver for the high pass and optional stop.",
+      "route_context": "newfound_gap_outbound",
+      "script_status": "outline_only",
+      "sequence": 5,
+      "target_words": 80,
+      "title": "Newfound Gap ahead",
+      "visible_scene": "The crest and memorial area approach."
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "claim_ids": [
+        "mc_high_country"
+      ],
+      "directional_adaptation": true,
+      "id": "mc_cue_06",
+      "kind": "cue",
+      "purpose": "Identify the optional summit spur without making an operational-open claim.",
+      "route_context": "kuwohi",
+      "script_status": "outline_only",
+      "sequence": 6,
+      "target_words": 80,
+      "title": "Kuwohi turn",
+      "visible_scene": "The summit road branches from the crossing."
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "claim_ids": [
+        "mc_kuwohi_living_meaning"
+      ],
+      "directional_adaptation": true,
+      "id": "mc_cue_07",
+      "kind": "cue",
+      "purpose": "Hold pronunciation and cultural explanation for EBCI-approved wording.",
+      "route_context": "kuwohi",
+      "script_status": "blocked_cultural_review",
+      "sequence": 7,
+      "target_words": 80,
+      "title": "Name with care",
+      "visible_scene": "Kuwohi signage appears along the summit approach."
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "claim_ids": [
+        "mc_forest_zones"
+      ],
+      "directional_adaptation": true,
+      "id": "mc_cue_08",
+      "kind": "cue",
+      "purpose": "Help passengers notice the ecological descent.",
+      "route_context": "newfound_gap_outbound",
+      "script_status": "outline_only",
+      "sequence": 8,
+      "target_words": 80,
+      "title": "Descending forest",
+      "visible_scene": "High forest gives way to lower-elevation communities."
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "claim_ids": [
+        "mc_oconaluftee_valley"
+      ],
+      "directional_adaptation": true,
+      "id": "mc_cue_09",
+      "kind": "cue",
+      "purpose": "Introduce the river valley and optional stop.",
+      "route_context": "oconaluftee",
+      "script_status": "outline_only",
+      "sequence": 9,
+      "target_words": 80,
+      "title": "Oconaluftee approach",
+      "visible_scene": "The valley widens near the visitor center."
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "claim_ids": [
+        "mc_bear_country",
+        "mc_elk_restoration"
+      ],
+      "directional_adaptation": true,
+      "id": "mc_cue_10",
+      "kind": "cue",
+      "purpose": "Give one brief wildlife-distance reminder tied to the visible setting.",
+      "route_context": "oconaluftee",
+      "script_status": "outline_only",
+      "sequence": 10,
+      "target_words": 80,
+      "title": "Wildlife distance",
+      "visible_scene": "Open fields may draw drivers' attention away from the road."
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "claim_ids": [
+        "mc_gateway_watershed"
+      ],
+      "directional_adaptation": true,
+      "id": "mc_story_01",
+      "kind": "story",
+      "purpose": "Open with the watershed and orient the passenger to a cross-mountain journey.",
+      "route_context": "sugarlands",
+      "script_status": "outline_only",
+      "sequence": 1,
+      "target_words": 450,
+      "title": "Where the crossing begins",
+      "visible_scene": "The road leaves Sugarlands beside forest and moving water."
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "claim_ids": [
+        "mc_deep_geology"
+      ],
+      "directional_adaptation": true,
+      "id": "mc_story_02",
+      "kind": "story",
+      "purpose": "Connect visible rock to the park's deep geologic history.",
+      "route_context": "sugarlands",
+      "script_status": "outline_only",
+      "sequence": 2,
+      "target_words": 450,
+      "title": "Mountains made from an ancient basin",
+      "visible_scene": "Layered rock appears in cuts beside the climbing road."
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "claim_ids": [
+        "mc_rain_and_streams"
+      ],
+      "directional_adaptation": true,
+      "id": "mc_story_03",
+      "kind": "story",
+      "purpose": "Explain how elevation and rainfall feed the park's waterways.",
+      "route_context": "newfound_gap_return",
+      "script_status": "outline_only",
+      "sequence": 3,
+      "target_words": 450,
+      "title": "Rain becomes a river",
+      "visible_scene": "Creeks gather below steep, wet slopes."
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "claim_ids": [
+        "mc_forest_zones"
+      ],
+      "directional_adaptation": true,
+      "id": "mc_story_04",
+      "kind": "story",
+      "purpose": "Let passengers notice the forest transition rather than listing species without context.",
+      "route_context": "newfound_gap_return",
+      "script_status": "outline_only",
+      "sequence": 4,
+      "target_words": 450,
+      "title": "Forests stacked by elevation",
+      "visible_scene": "Tree communities change as the road climbs."
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "claim_ids": [
+        "mc_biodiversity"
+      ],
+      "directional_adaptation": true,
+      "id": "mc_story_05",
+      "kind": "story",
+      "purpose": "Explain why short horizontal distance contains exceptional biological variety.",
+      "route_context": "newfound_gap_return",
+      "script_status": "outline_only",
+      "sequence": 5,
+      "target_words": 450,
+      "title": "A compressed continent of life",
+      "visible_scene": "Moist coves and high ridges pass within one drive."
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "claim_ids": [
+        "mc_road_engineering"
+      ],
+      "directional_adaptation": true,
+      "id": "mc_story_06",
+      "kind": "story",
+      "purpose": "Tell the road's 1930s redesign as engineering shaped around a scenic landscape.",
+      "route_context": "newfound_gap_return",
+      "script_status": "outline_only",
+      "sequence": 6,
+      "target_words": 450,
+      "title": "Designing Newfound Gap Road",
+      "visible_scene": "Curves, retaining walls, and framed vistas follow the terrain."
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "claim_ids": [
+        "mc_ccc_legacy"
+      ],
+      "directional_adaptation": true,
+      "id": "mc_story_07",
+      "kind": "story",
+      "purpose": "Connect surviving construction details to the people and program that built them.",
+      "route_context": "newfound_gap_return",
+      "script_status": "outline_only",
+      "sequence": 7,
+      "target_words": 450,
+      "title": "Stonework of the CCC",
+      "visible_scene": "Historic masonry and guardwalls sit at the road edge."
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "claim_ids": [
+        "mc_segregated_landscape"
+      ],
+      "directional_adaptation": true,
+      "id": "mc_story_08",
+      "kind": "story",
+      "purpose": "Acknowledge how segregation shaped the early public landscape without treating it as an aside.",
+      "route_context": "newfound_gap_outbound",
+      "script_status": "outline_only",
+      "sequence": 8,
+      "target_words": 500,
+      "title": "A park built in a segregated era",
+      "visible_scene": "Historic visitor facilities occupy the gap."
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "claim_ids": [
+        "mc_park_creation"
+      ],
+      "directional_adaptation": true,
+      "id": "mc_story_09",
+      "kind": "story",
+      "purpose": "Hold conservation success and the cost paid by former residents in the same story.",
+      "route_context": "newfound_gap_outbound",
+      "script_status": "outline_only",
+      "sequence": 9,
+      "target_words": 500,
+      "title": "Protection and displacement",
+      "visible_scene": "Recovered forest now covers former homes and holdings."
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "claim_ids": [
+        "mc_logging_recovery"
+      ],
+      "directional_adaptation": true,
+      "id": "mc_story_10",
+      "kind": "story",
+      "purpose": "Show how industrial logging changed the mountains and how forest recovery followed.",
+      "route_context": "newfound_gap_outbound",
+      "script_status": "outline_only",
+      "sequence": 10,
+      "target_words": 450,
+      "title": "Forest after the logging boom",
+      "visible_scene": "Second-growth forest fills much of the visible slope."
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "claim_ids": [
+        "mc_haze_and_pollution"
+      ],
+      "directional_adaptation": true,
+      "id": "mc_story_11",
+      "kind": "story",
+      "purpose": "Separate the mountains' visual character from harmful air pollution.",
+      "route_context": "newfound_gap_outbound",
+      "script_status": "outline_only",
+      "sequence": 11,
+      "target_words": 450,
+      "title": "The blue view and the white veil",
+      "visible_scene": "Layered ridges fade into blue or pale haze."
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "claim_ids": [
+        "mc_gap_context"
+      ],
+      "directional_adaptation": true,
+      "id": "mc_story_12",
+      "kind": "story",
+      "purpose": "Explain the gap as geography, route, and turning point in the drive.",
+      "route_context": "newfound_gap_outbound",
+      "script_status": "outline_only",
+      "sequence": 12,
+      "target_words": 450,
+      "title": "The pass between two watersheds",
+      "visible_scene": "The road crests at Newfound Gap."
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "claim_ids": [
+        "mc_high_country"
+      ],
+      "directional_adaptation": true,
+      "id": "mc_story_13",
+      "kind": "story",
+      "purpose": "Connect high-elevation habitat to species and communities found far south of their broader range.",
+      "route_context": "kuwohi",
+      "script_status": "outline_only",
+      "sequence": 13,
+      "target_words": 450,
+      "title": "Life in the high country",
+      "visible_scene": "Cool, wind-shaped forest surrounds the Kuwohi road."
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "claim_ids": [
+        "mc_kuwohi_name"
+      ],
+      "directional_adaptation": true,
+      "id": "mc_story_14",
+      "kind": "story",
+      "purpose": "Cover the official 2024 name restoration as a factual civic event.",
+      "route_context": "kuwohi",
+      "script_status": "outline_only",
+      "sequence": 14,
+      "target_words": 450,
+      "title": "Restoring the name Kuwohi",
+      "visible_scene": "The signed summit road and high peak dominate the view."
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "claim_ids": [
+        "mc_kuwohi_living_meaning"
+      ],
+      "directional_adaptation": true,
+      "id": "mc_story_15",
+      "kind": "story",
+      "purpose": "Reserve this entry for the scope and voice approved through compensated EBCI participation.",
+      "route_context": "kuwohi",
+      "script_status": "blocked_cultural_review",
+      "sequence": 15,
+      "target_words": 500,
+      "title": "Cultural interpretation reserved",
+      "visible_scene": "No cultural scene description has been drafted before EBCI review."
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "claim_ids": [
+        "mc_oconaluftee_valley"
+      ],
+      "directional_adaptation": true,
+      "id": "mc_story_16",
+      "kind": "story",
+      "purpose": "Shift from high-country ecology to the Oconaluftee river-valley landscape.",
+      "route_context": "oconaluftee",
+      "script_status": "outline_only",
+      "sequence": 16,
+      "target_words": 450,
+      "title": "Down to the Oconaluftee",
+      "visible_scene": "The road follows forest and river into a broader valley."
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "claim_ids": [
+        "mc_mountain_farm"
+      ],
+      "directional_adaptation": true,
+      "id": "mc_story_17",
+      "kind": "story",
+      "purpose": "Explain what the assembled buildings can—and cannot—show about regional farm life.",
+      "route_context": "oconaluftee",
+      "script_status": "outline_only",
+      "sequence": 17,
+      "target_words": 450,
+      "title": "A farm museum made from many places",
+      "visible_scene": "Historic farm structures stand near the visitor center."
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "claim_ids": [
+        "mc_bear_country",
+        "mc_elk_restoration"
+      ],
+      "directional_adaptation": true,
+      "id": "mc_story_18",
+      "kind": "story",
+      "purpose": "Tell the restoration story while keeping wildlife-viewing guidance factual and concise.",
+      "route_context": "oconaluftee",
+      "script_status": "outline_only",
+      "sequence": 18,
+      "target_words": 450,
+      "title": "Elk return to the valley",
+      "visible_scene": "Open fields near Oconaluftee may hold grazing elk."
+    },
+    {
+      "chapter_id": "roaring_fork",
+      "claim_ids": [
+        "rf_route_character"
+      ],
+      "directional_adaptation": false,
+      "id": "rf_cue_01",
+      "kind": "cue",
+      "purpose": "State the route form before entry.",
+      "route_context": "roaring_fork_entrance",
+      "script_status": "outline_only",
+      "sequence": 1,
+      "target_words": 80,
+      "title": "One way from here",
+      "visible_scene": "The motor trail begins as a narrow one-way road."
+    },
+    {
+      "chapter_id": "roaring_fork",
+      "claim_ids": [
+        "rf_ogle_farm"
+      ],
+      "directional_adaptation": false,
+      "id": "rf_cue_02",
+      "kind": "cue",
+      "purpose": "Identify the optional stop.",
+      "route_context": "roaring_fork_entrance",
+      "script_status": "outline_only",
+      "sequence": 2,
+      "target_words": 80,
+      "title": "Ogle farmstead",
+      "visible_scene": "The preserved farmstead is near the road."
+    },
+    {
+      "chapter_id": "roaring_fork",
+      "claim_ids": [
+        "rf_waterfalls"
+      ],
+      "directional_adaptation": false,
+      "id": "rf_cue_04",
+      "kind": "cue",
+      "purpose": "Name the access point without implying parking or trail conditions.",
+      "route_context": "grotto_falls_parking",
+      "script_status": "outline_only",
+      "sequence": 3,
+      "target_words": 80,
+      "title": "Grotto Falls trail access",
+      "visible_scene": "A signed trail parking area appears."
+    },
+    {
+      "chapter_id": "roaring_fork",
+      "claim_ids": [
+        "rf_stream"
+      ],
+      "directional_adaptation": false,
+      "id": "rf_cue_03",
+      "kind": "cue",
+      "purpose": "Prompt passengers to listen and look for the stream.",
+      "route_context": "roaring_fork_upper",
+      "script_status": "outline_only",
+      "sequence": 4,
+      "target_words": 80,
+      "title": "Water beside the road",
+      "visible_scene": "The stream draws close."
+    },
+    {
+      "chapter_id": "roaring_fork",
+      "claim_ids": [
+        "rf_waterfalls"
+      ],
+      "directional_adaptation": false,
+      "id": "rf_cue_05",
+      "kind": "cue",
+      "purpose": "Mark the visible cascade before the full water story.",
+      "route_context": "thousand_drips",
+      "script_status": "outline_only",
+      "sequence": 5,
+      "target_words": 80,
+      "title": "Thousand Drips",
+      "visible_scene": "Thin cascades break across roadside rock."
+    },
+    {
+      "chapter_id": "roaring_fork",
+      "claim_ids": [
+        "rf_route_character"
+      ],
+      "directional_adaptation": false,
+      "id": "rf_cue_06",
+      "kind": "cue",
+      "purpose": "Close the route and release the chapter cleanly.",
+      "route_context": "roaring_fork_exit",
+      "script_status": "outline_only",
+      "sequence": 6,
+      "target_words": 80,
+      "title": "Leaving the motor trail",
+      "visible_scene": "The one-way corridor returns toward Gatlinburg."
+    },
+    {
+      "chapter_id": "roaring_fork",
+      "claim_ids": [
+        "rf_route_character"
+      ],
+      "directional_adaptation": false,
+      "id": "rf_story_01",
+      "kind": "story",
+      "purpose": "Introduce the route's physical character without generic safety filler.",
+      "route_context": "roaring_fork_entrance",
+      "script_status": "outline_only",
+      "sequence": 1,
+      "target_words": 450,
+      "title": "A road that asks you to slow down",
+      "visible_scene": "A narrow one-way road enters dense forest."
+    },
+    {
+      "chapter_id": "roaring_fork",
+      "claim_ids": [
+        "rf_ogle_farm"
+      ],
+      "directional_adaptation": false,
+      "id": "rf_story_03",
+      "kind": "story",
+      "purpose": "Introduce a household and working landscape at the corridor entrance.",
+      "route_context": "roaring_fork_entrance",
+      "script_status": "outline_only",
+      "sequence": 2,
+      "target_words": 450,
+      "title": "The Ogle farm at the edge of town",
+      "visible_scene": "A preserved farmstead sits before the loop."
+    },
+    {
+      "chapter_id": "roaring_fork",
+      "claim_ids": [
+        "rf_stream"
+      ],
+      "directional_adaptation": false,
+      "id": "rf_story_02",
+      "kind": "story",
+      "purpose": "Make the route name legible in the visible landscape.",
+      "route_context": "roaring_fork_upper",
+      "script_status": "outline_only",
+      "sequence": 3,
+      "target_words": 450,
+      "title": "The stream behind the name",
+      "visible_scene": "Fast water runs close to the road."
+    },
+    {
+      "chapter_id": "roaring_fork",
+      "claim_ids": [
+        "rf_old_growth"
+      ],
+      "directional_adaptation": false,
+      "id": "rf_story_04",
+      "kind": "story",
+      "purpose": "Connect moisture, land-use history, and surviving mature forest.",
+      "route_context": "roaring_fork_upper",
+      "script_status": "outline_only",
+      "sequence": 4,
+      "target_words": 450,
+      "title": "Old trees and a wet forest",
+      "visible_scene": "Large trunks and layered canopy crowd the road."
+    },
+    {
+      "chapter_id": "roaring_fork",
+      "claim_ids": [
+        "rf_farm_community"
+      ],
+      "directional_adaptation": false,
+      "id": "rf_story_05",
+      "kind": "story",
+      "purpose": "Describe the corridor as a lived community, not a scattered collection of props.",
+      "route_context": "roaring_fork_mid",
+      "script_status": "outline_only",
+      "sequence": 5,
+      "target_words": 450,
+      "title": "Homes, mills, and neighbors",
+      "visible_scene": "Cabins and mill sites appear between forested slopes."
+    },
+    {
+      "chapter_id": "roaring_fork",
+      "claim_ids": [
+        "rf_waterfalls"
+      ],
+      "directional_adaptation": false,
+      "id": "rf_story_06",
+      "kind": "story",
+      "purpose": "Use visible water to connect rainfall, gradient, and geology.",
+      "route_context": "thousand_drips",
+      "script_status": "outline_only",
+      "sequence": 6,
+      "target_words": 450,
+      "title": "Water falling through resistant rock",
+      "visible_scene": "Cascades descend beside the road."
+    },
+    {
+      "chapter_id": "roaring_fork",
+      "claim_ids": [
+        "rf_preservation"
+      ],
+      "directional_adaptation": false,
+      "id": "rf_story_07",
+      "kind": "story",
+      "purpose": "Close with the way natural recovery and human history overlap.",
+      "route_context": "roaring_fork_exit",
+      "script_status": "outline_only",
+      "sequence": 7,
+      "target_words": 450,
+      "title": "Reading two landscapes at once",
+      "visible_scene": "The route leaves forest, water, and preserved structures behind."
+    }
+  ],
+  "locale": "en-US",
+  "media_candidates": [
+    {
+      "chapter_id": "little_river_cades_cove",
+      "id": "media_cc_cable_mill",
+      "intended_use": "story_artwork",
+      "rights_policy_url": "https://www.nps.gov/aboutus/disclaimer.htm",
+      "rights_requirements": [
+        "asset_url",
+        "dimensions",
+        "exact_credit",
+        "identity_match",
+        "license_record",
+        "rights_basis",
+        "sha256"
+      ],
+      "source_page_url": "https://www.nps.gov/grsm/planyourvisit/cadescove.htm",
+      "status": "exact_asset_not_selected",
+      "subject": "Exact Cable Mill or Becky Cable house scene"
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "id": "media_cc_cove",
+      "intended_use": "chapter_artwork",
+      "rights_policy_url": "https://www.nps.gov/aboutus/disclaimer.htm",
+      "rights_requirements": [
+        "asset_url",
+        "dimensions",
+        "exact_credit",
+        "identity_match",
+        "license_record",
+        "rights_basis",
+        "sha256"
+      ],
+      "source_page_url": "https://www.nps.gov/grsm/planyourvisit/cadescove.htm",
+      "status": "exact_asset_not_selected",
+      "subject": "Exact Cades Cove landscape or historic structure"
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "id": "media_fp_engineering",
+      "intended_use": "story_artwork",
+      "rights_policy_url": "https://www.nps.gov/aboutus/disclaimer.htm",
+      "rights_requirements": [
+        "asset_url",
+        "dimensions",
+        "exact_credit",
+        "identity_match",
+        "license_record",
+        "rights_basis",
+        "sha256"
+      ],
+      "source_page_url": "https://www.nps.gov/grsm/learn/news/foothills-parkway-opening.htm",
+      "status": "exact_asset_not_selected",
+      "subject": "Exact Missing Link bridge or construction scene"
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "id": "media_fp_panorama",
+      "intended_use": "chapter_artwork",
+      "rights_policy_url": "https://www.nps.gov/aboutus/disclaimer.htm",
+      "rights_requirements": [
+        "asset_url",
+        "dimensions",
+        "exact_credit",
+        "identity_match",
+        "license_record",
+        "rights_basis",
+        "sha256"
+      ],
+      "source_page_url": "https://www.nps.gov/places/foothills-parkway.htm",
+      "status": "candidate_requires_clearance",
+      "subject": "Exact Foothills Parkway ridge panorama"
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "id": "media_mc_kuwohi",
+      "intended_use": "chapter_artwork",
+      "rights_policy_url": "https://www.nps.gov/aboutus/disclaimer.htm",
+      "rights_requirements": [
+        "asset_url",
+        "dimensions",
+        "exact_credit",
+        "identity_match",
+        "license_record",
+        "rights_basis",
+        "sha256"
+      ],
+      "source_page_url": "https://www.nps.gov/grsm/planyourvisit/kuwohi-nfg.htm",
+      "status": "exact_asset_not_selected",
+      "subject": "Exact Kuwohi or Newfound Gap landscape"
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "id": "media_mc_oconaluftee",
+      "intended_use": "story_artwork",
+      "rights_policy_url": "https://www.nps.gov/aboutus/disclaimer.htm",
+      "rights_requirements": [
+        "asset_url",
+        "dimensions",
+        "exact_credit",
+        "identity_match",
+        "license_record",
+        "rights_basis",
+        "sha256"
+      ],
+      "source_page_url": "https://www.nps.gov/grsm/planyourvisit/oconaluftee.htm",
+      "status": "exact_asset_not_selected",
+      "subject": "Exact Oconaluftee valley or Mountain Farm Museum scene"
+    },
+    {
+      "chapter_id": "roaring_fork",
+      "id": "media_rf_ogle",
+      "intended_use": "story_artwork",
+      "rights_policy_url": "https://www.nps.gov/aboutus/disclaimer.htm",
+      "rights_requirements": [
+        "asset_url",
+        "dimensions",
+        "exact_credit",
+        "identity_match",
+        "license_record",
+        "rights_basis",
+        "sha256"
+      ],
+      "source_page_url": "https://www.nps.gov/grsm/planyourvisit/roaringfork.htm",
+      "status": "exact_asset_not_selected",
+      "subject": "Exact Noah Ogle farmstead scene"
+    },
+    {
+      "chapter_id": "roaring_fork",
+      "id": "media_rf_stream",
+      "intended_use": "chapter_artwork",
+      "rights_policy_url": "https://www.nps.gov/aboutus/disclaimer.htm",
+      "rights_requirements": [
+        "asset_url",
+        "dimensions",
+        "exact_credit",
+        "identity_match",
+        "license_record",
+        "rights_basis",
+        "sha256"
+      ],
+      "source_page_url": "https://www.nps.gov/grsm/planyourvisit/roaringfork.htm",
+      "status": "exact_asset_not_selected",
+      "subject": "Exact Roaring Fork stream and motor-trail scene"
+    }
+  ],
+  "product_id": "great_smoky_mountains_ridges_rivers_living_memory",
+  "reviewed_at": "2026-08-05",
+  "schema_version": 1,
+  "source_review_max_age_days": 180,
+  "sources": [
+    {
+      "authority": "official",
+      "id": "ebci_cultural_irb",
+      "publisher": "Eastern Band of Cherokee Indians",
+      "reviewed_at": "2026-08-05",
+      "rights_status": "reference_only",
+      "role": "story",
+      "scope": [
+        "cultural_review",
+        "research_sovereignty"
+      ],
+      "title": "Cultural Institutional Review Board",
+      "url": "https://www.ebci.gov/cultural-institutional-review-board/"
+    },
+    {
+      "authority": "official",
+      "id": "ebci_cultural_resources",
+      "publisher": "Eastern Band of Cherokee Indians",
+      "reviewed_at": "2026-08-05",
+      "rights_status": "reference_only",
+      "role": "story",
+      "scope": [
+        "cultural_contact",
+        "cultural_practices"
+      ],
+      "title": "Enrollment and Cultural Resources Contact",
+      "url": "https://www.ebci.gov/enrollment/"
+    },
+    {
+      "authority": "official",
+      "id": "nps_grsm_air_quality",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-05",
+      "rights_status": "reference_only",
+      "role": "story",
+      "scope": [
+        "air_quality",
+        "haze",
+        "monitoring"
+      ],
+      "title": "Air Quality",
+      "url": "https://www.nps.gov/grsm/learn/nature/air-quality.htm"
+    },
+    {
+      "authority": "official",
+      "id": "nps_grsm_animals",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-05",
+      "rights_status": "reference_only",
+      "role": "story",
+      "scope": [
+        "biodiversity",
+        "wildlife"
+      ],
+      "title": "Animals",
+      "url": "https://www.nps.gov/grsm/learn/nature/animals.htm"
+    },
+    {
+      "authority": "official",
+      "id": "nps_grsm_black_bears",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-05",
+      "rights_status": "reference_only",
+      "role": "story",
+      "scope": [
+        "black_bears",
+        "wildlife_viewing"
+      ],
+      "title": "Black Bears",
+      "url": "https://www.nps.gov/grsm/learn/nature/black-bears.htm"
+    },
+    {
+      "authority": "official",
+      "id": "nps_grsm_cable_mill",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-05",
+      "rights_status": "reference_only",
+      "role": "story",
+      "scope": [
+        "cable_mill",
+        "corn_milling",
+        "gristmill",
+        "water_power"
+      ],
+      "title": "Cable Mill Historic Area",
+      "url": "https://www.nps.gov/places/cable-mill-historic-area.htm"
+    },
+    {
+      "authority": "official",
+      "id": "nps_grsm_cades_cove",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-05",
+      "rights_status": "reference_only",
+      "role": "story",
+      "scope": [
+        "cades_cove",
+        "historic_structures",
+        "loop_road",
+        "wildlife"
+      ],
+      "title": "Cades Cove",
+      "url": "https://www.nps.gov/grsm/planyourvisit/cadescove.htm"
+    },
+    {
+      "authority": "official",
+      "id": "nps_grsm_cades_history",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-05",
+      "rights_status": "reference_only",
+      "role": "story",
+      "scope": [
+        "agriculture",
+        "cades_cove",
+        "churches",
+        "community",
+        "displacement"
+      ],
+      "title": "History of Cades Cove",
+      "url": "https://www.nps.gov/grsm/learn/historyculture/cades-cove-history.htm"
+    },
+    {
+      "authority": "official",
+      "id": "nps_grsm_elk",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-05",
+      "rights_status": "reference_only",
+      "role": "story",
+      "scope": [
+        "elk",
+        "restoration",
+        "wildlife_viewing"
+      ],
+      "title": "Elk",
+      "url": "https://www.nps.gov/grsm/learn/nature/elk.htm"
+    },
+    {
+      "authority": "official",
+      "id": "nps_grsm_foothills",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-05",
+      "rights_status": "reference_only",
+      "role": "story",
+      "scope": [
+        "authorization",
+        "foothills_parkway",
+        "scenic_drive"
+      ],
+      "title": "Foothills Parkway",
+      "url": "https://www.nps.gov/places/foothills-parkway.htm"
+    },
+    {
+      "authority": "official",
+      "id": "nps_grsm_foothills_history",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-05",
+      "rights_status": "reference_only",
+      "role": "story",
+      "scope": [
+        "engineering",
+        "foothills_parkway",
+        "missing_link"
+      ],
+      "title": "Foothills Parkway design and technical studies",
+      "url": "https://www.nps.gov/grsm/learn/news/national-park-service-plans-to-complete-additional-design-work-and-technical-studies-for-foothills-parkway-section-8d.htm"
+    },
+    {
+      "authority": "official",
+      "id": "nps_grsm_general_stores",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-05",
+      "rights_status": "reference_only",
+      "role": "story",
+      "scope": [
+        "becky_cable",
+        "commerce",
+        "community"
+      ],
+      "title": "General Stores",
+      "url": "https://www.nps.gov/grsm/learn/historyculture/stores.htm"
+    },
+    {
+      "authority": "official",
+      "id": "nps_grsm_geology",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-05",
+      "rights_status": "reference_only",
+      "role": "story",
+      "scope": [
+        "cades_cove",
+        "erosion",
+        "mountain_building",
+        "rock"
+      ],
+      "title": "Geology",
+      "url": "https://www.nps.gov/grsm/learn/nature/geology.htm"
+    },
+    {
+      "authority": "official",
+      "id": "nps_grsm_history_culture",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-05",
+      "rights_status": "reference_only",
+      "role": "story",
+      "scope": [
+        "ccc",
+        "communities",
+        "logging",
+        "park_history"
+      ],
+      "title": "History & Culture",
+      "url": "https://www.nps.gov/grsm/learn/historyculture/index.htm"
+    },
+    {
+      "authority": "official",
+      "id": "nps_grsm_kuwohi_area",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-05",
+      "rights_status": "reference_only",
+      "role": "story",
+      "scope": [
+        "kuwohi",
+        "newfound_gap",
+        "visitor_context"
+      ],
+      "title": "Kuwohi & Newfound Gap Area",
+      "url": "https://www.nps.gov/grsm/planyourvisit/kuwohi-nfg.htm"
+    },
+    {
+      "authority": "official",
+      "id": "nps_grsm_kuwohi_restoration",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-05",
+      "rights_status": "reference_only",
+      "role": "story",
+      "scope": [
+        "kuwohi",
+        "name_restoration"
+      ],
+      "title": "Kuwohi name restored to the highest peak in the Smokies",
+      "url": "https://www.nps.gov/grsm/learn/news/kuwohi-name-restored-to-the-highest-peak-in-the-smokies.htm"
+    },
+    {
+      "authority": "official",
+      "id": "nps_grsm_missing_link_bridge",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-05",
+      "rights_status": "reference_only",
+      "role": "story",
+      "scope": [
+        "bridge_engineering",
+        "foothills_parkway",
+        "missing_link"
+      ],
+      "title": "Foothills Parkway Missing Link bridge construction",
+      "url": "https://www.nps.gov/grsm/learn/news/fhp-contract-award.htm"
+    },
+    {
+      "authority": "official",
+      "id": "nps_grsm_mountain_farm",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-05",
+      "rights_status": "reference_only",
+      "role": "story",
+      "scope": [
+        "historic_structures",
+        "mountain_farm",
+        "relocation"
+      ],
+      "title": "Mountain Farm Museum",
+      "url": "https://www.nps.gov/places/mountain-farm-museum.htm"
+    },
+    {
+      "authority": "official",
+      "id": "nps_grsm_natural_features",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-05",
+      "rights_status": "reference_only",
+      "role": "story",
+      "scope": [
+        "biodiversity",
+        "rainfall",
+        "streams",
+        "waterfalls"
+      ],
+      "title": "Natural Features & Ecosystems",
+      "url": "https://www.nps.gov/grsm/learn/nature/naturalfeaturesandecosystems.htm"
+    },
+    {
+      "authority": "official",
+      "id": "nps_grsm_nature",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-05",
+      "rights_status": "reference_only",
+      "role": "story",
+      "scope": [
+        "biodiversity",
+        "climate",
+        "old_growth",
+        "species"
+      ],
+      "title": "Nature & Science",
+      "url": "https://www.nps.gov/grsm/learn/nature/index.htm"
+    },
+    {
+      "authority": "official",
+      "id": "nps_grsm_newfound_gap_road",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-05",
+      "rights_status": "reference_only",
+      "role": "story",
+      "scope": [
+        "ccc",
+        "engineering",
+        "newfound_gap_road"
+      ],
+      "title": "Newfound Gap Road Historic Corridor",
+      "url": "https://www.nps.gov/grsm/learn/news/newfound-gap-road-to-reopen-ahead-of-schedule-following-major-repairs.htm"
+    },
+    {
+      "authority": "official",
+      "id": "nps_grsm_oconaluftee",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-05",
+      "rights_status": "reference_only",
+      "role": "story",
+      "scope": [
+        "mountain_farm",
+        "oconaluftee",
+        "visitor_context"
+      ],
+      "title": "Oconaluftee Area",
+      "url": "https://www.nps.gov/grsm/planyourvisit/oconaluftee.htm"
+    },
+    {
+      "authority": "official",
+      "id": "nps_grsm_people",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-05",
+      "rights_status": "reference_only",
+      "role": "story",
+      "scope": [
+        "communities",
+        "displacement",
+        "forest_recovery",
+        "logging"
+      ],
+      "title": "People",
+      "url": "https://www.nps.gov/grsm/learn/historyculture/people.htm"
+    },
+    {
+      "authority": "official",
+      "id": "nps_grsm_roaring_fork",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-05",
+      "rights_status": "reference_only",
+      "role": "story",
+      "scope": [
+        "historic_farms",
+        "old_growth",
+        "roaring_fork",
+        "waterfalls"
+      ],
+      "title": "Roaring Fork Motor Nature Trail",
+      "url": "https://www.nps.gov/grsm/planyourvisit/roaringfork.htm"
+    },
+    {
+      "authority": "official",
+      "id": "nps_grsm_segregation",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-05",
+      "rights_status": "reference_only",
+      "role": "story",
+      "scope": [
+        "civil_rights",
+        "newfound_gap"
+      ],
+      "title": "Segregation at Great Smoky Mountains National Park",
+      "url": "https://www.nps.gov/grsm/learn/historyculture/segregation-at-great-smoky-mountains-national-park.htm"
+    },
+    {
+      "authority": "official",
+      "id": "nps_grsm_statistics",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-05",
+      "rights_status": "reference_only",
+      "role": "story",
+      "scope": [
+        "park_scale",
+        "roads",
+        "species",
+        "streams"
+      ],
+      "title": "Park Statistics",
+      "url": "https://www.nps.gov/grsm/learn/management/statistics.htm"
+    },
+    {
+      "authority": "official",
+      "id": "nps_grsm_timeline",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-05",
+      "rights_status": "reference_only",
+      "role": "story",
+      "scope": [
+        "cades_cove",
+        "logging",
+        "park_creation",
+        "road_history"
+      ],
+      "title": "Smoky Mountain Timeline",
+      "url": "https://www.nps.gov/grsm/learn/historyculture/timeline.htm"
+    },
+    {
+      "authority": "official",
+      "id": "nps_grsm_vegetation",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-05",
+      "rights_status": "reference_only",
+      "role": "story",
+      "scope": [
+        "elevation",
+        "forest",
+        "habitat"
+      ],
+      "title": "Vegetation Types",
+      "url": "https://www.nps.gov/grsm/learn/nature/vegetation-types.htm"
+    }
+  ],
+  "target_counts": {
+    "foothills_parkway": {
+      "cue": 7,
+      "story": 6
+    },
+    "little_river_cades_cove": {
+      "cue": 9,
+      "story": 14
+    },
+    "mountain_crossing": {
+      "cue": 10,
+      "story": 18
+    },
+    "roaring_fork": {
+      "cue": 6,
+      "story": 7
+    }
+  },
+  "title": "Great Smoky Mountains: Ridges, Rivers & Living Memory"
+}

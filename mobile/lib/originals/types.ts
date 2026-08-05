@@ -164,6 +164,10 @@ export type OriginalStorySourceV2 = {
   rights_status: OriginalStorySourceRightsV2;
   /** Stable claim IDs from the story's claim-level editorial dossier. */
   affected_claims: string[];
+  /** Immutable cultural-review evidence, present only for approved cultural claims. */
+  cultural_approval_record_id?: string;
+  cultural_approval_record_sha256?: string;
+  cultural_approved_at?: string;
 };
 
 /** Shared narration content. Route-specific placement lives on cue_refs. */

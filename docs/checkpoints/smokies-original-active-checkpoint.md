@@ -233,3 +233,57 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 ## Task-owned background processes
 
 - None. No Gradle, Metro, Maestro, EAS, Railway, cleanup, DiskPart, or compaction task remains running.
+
+## S2 source-dossier baseline
+
+- Started: 2026-08-05.
+- Isolated worktree: `/home/sean/.openclaw/worktrees/trailhead-smokies-s2`.
+- Branch: `feat/smokies-original-s2`.
+- Baseline HEAD: `8dc6a4bd959f98e4baa328ff3cd8bc3d224f6e76`.
+- The S2 worktree was clean at creation. The main worktree's protected user changes remain outside this worktree and retain their checkpointed hashes:
+  - Explore serving index: `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
+  - App Store copy: `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+  - `.cursor/` remains untracked and protected in the main worktree.
+- This packet is limited to a deterministic claim/source dossier, a fail-closed media-rights ledger, a 45-story/32-cue editorial map, and an EBCI cultural-review brief.
+- This packet does not write narration scripts, choose pronunciations, contact outside parties, generate audio, spend Cartesia credits, deploy a backend, publish an OTA, or change any public stage.
+- Existing S0/S1 contracts, Moab provenance, route candidates, entitlements, and operational readiness will not be rebuilt.
+- Task-owned background processes at start: none.
+
+## S2 source-dossier completion candidate
+
+- Completed locally: 2026-08-05 on branch `feat/smokies-original-s2` from baseline `8dc6a4bd959f98e4baa328ff3cd8bc3d224f6e76`.
+- Generated artifact: `originals/smokies/source_dossiers_v1.json`, SHA-256 `4f81200308052c3f3fba227434d5372a8a0fd5504354839448e13e2b69338011`.
+- The deterministic dossier contains 28 reviewed official sources, 47 claim records, 45 full-story outlines, 32 shorter cues, and eight media leads.
+- Three entries remain deliberately blocked for compensated EBCI participation and review: `mc_story_15`, `mc_cue_07`, and `cc_story_04`. The checked-in EBCI brief is a draft only; it was not sent and contains no private reviewer information.
+- Every culturally approved claim must bind one immutable approval record ID, date, SHA-256, and the exact complete set of reviewed claim IDs. Manifest V2 citations now preserve that approval provenance through optional strict fields; partial evidence fails in both backend and mobile validators.
+- Every media candidate remains unavailable. Approval requires an exact asset URL, displayed credit, documented subject/location identity match, rights basis, license/permission record, dimensions, and downloaded-file SHA-256. No image was downloaded or licensed in this packet.
+- Exact NPS sources now support the Cable Mill water-power claim and Foothills Parkway Missing Link engineering claim. The elk story and cue are tied to the Oconaluftee scene, and one-way Cades Cove/Roaring Fork entries are route-monotonic.
+- The official NPS Great Smoky Mountains road-centerline dataset, updated March 2026, is the preferred next candidate for durable park-road geometry. The S1 Mapbox geometry remains temporary candidate evidence and cannot enter an offline or published manifest.
+- The Cades Cove candidate still needs a route-permanence rebuild that keeps the driving line on the loop and projects landmarks as cue anchors. A separate Townsend-start decision and an approved public-road source for the short Cherokee extension remain open.
+- Start Tour remains fail-closed. A trusted, timestamped road observation and server-owned vehicle/rig binding remain required before an internal consumer preview.
+- Verification:
+  - 87 focused backend tests passed across the dossier, Manifest V2, operational readiness, and route candidate contracts.
+  - Complete mobile `npm run test:originals` passed, including the new cultural-approval citation contract.
+  - Strict mobile `npx tsc --noEmit` passed.
+  - Deterministic builder `--check`, Python compilation, and whitespace checks passed.
+  - Independent audit found no P0; all reported P1 source, scene, media-identity, and provenance findings were corrected before this candidate was checkpointed.
+- Protected main-worktree state remains unchanged:
+  - `dashboard/explore_serving_index_v2.json`: `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
+  - `docs/app-store-copy.md`: `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+  - `.cursor/` remains untracked and protected in the main worktree.
+- No narration script, pronunciation guide, audio, Cartesia request, external outreach, backend deployment, OTA, native build, or public-stage change occurred.
+- Task-owned background processes at completion: none. The temporary ignored `node_modules` symlink used for mobile verification was removed.
+
+### Next exact action after S2 commit
+
+1. Build the permanent route-evidence packet from official NPS road centerlines, keeping landmarks separate from the drive line and resolving Townsend/Cherokee coverage.
+2. Prepare the trusted current-road observation and saved-rig binding required by Start Tour.
+3. Ask the user before sending the draft EBCI scope/participation outreach; do not draft Cherokee interpretation or pronunciation while review is pending.
+4. Begin full scripts and Cartesia auditions only after route, cultural, media-rights, and editorial review gates are locked.
+
+### Do not repeat after this checkpoint
+
+- S0 Manifest V2, earned-credit, access-policy, or Moab provenance work.
+- S1 Mapbox route-candidate generation or broad operational-source research.
+- The 28-source S2 official-page sweep unless a source becomes stale or a claim changes.
+- Narrator selection or paid rendering before scripts and pronunciations are approved.

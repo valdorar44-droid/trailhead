@@ -377,6 +377,7 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 - Completed locally: 2026-08-05.
 - Branch: `feat/smokies-original-s2`.
 - Implementation baseline HEAD: `e037f2ecee52c9e87c698141ec27b7c5d6d8da27`.
+- Accepted implementation commit: `6977c289243109732cbbf7c44eb0f1e601e8421a`.
 - Protected main-worktree state remains unchanged:
   - `dashboard/explore_serving_index_v2.json`: `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
   - `docs/app-store-copy.md`: `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.

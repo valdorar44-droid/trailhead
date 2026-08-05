@@ -27,6 +27,7 @@ import {
   markWelcomeGateSeen,
   markWelcomeSetupSkipped,
   saveWelcomeSetupPreferences,
+  shouldPreserveCompletedWelcomeSetup,
   shouldShowWelcomeGate,
   WELCOME_PENDING_ATTR_KEY,
   WELCOME_WALKTHROUGH_SEEN_KEY,
@@ -410,12 +411,13 @@ function RootLayout() {
     logWelcomeEvent('welcome_walkthrough_seen', { source: 'profile' });
   }
 
-  function goToProfileFromWalkthrough() {
+  function reviewSetupFromWalkthrough() {
     setWelcomeVisible(false);
     storage.set(WELCOME_WALKTHROUGH_SEEN_KEY, '1').catch(() => {});
-    storage.set(WELCOME_PENDING_ATTR_KEY, '1').catch(() => {});
     logWelcomeEvent('welcome_walkthrough_cta', { source: 'profile', signed_in: !!user });
-    router.push('/(tabs)/profile');
+    setWelcomeGateSource('profile');
+    setWelcomeGateMode('setup');
+    setWelcomeGateVisible(true);
   }
 
   function dismissWelcomeGate(choice: WelcomeGateChoice) {
@@ -427,13 +429,6 @@ function RootLayout() {
   function shouldRouteWelcomeToGuide() {
     const path = String(pathname || '').toLowerCase();
     return !/(route-builder|map|profile|plan|report)/.test(path);
-  }
-
-  function createAccountFromWelcomeGate() {
-    dismissWelcomeGate('create_account');
-    storage.set(WELCOME_PENDING_ATTR_KEY, '1').catch(() => {});
-    logWelcomeEvent('welcome_gate_cta', { action: 'create_account', signed_in: !!user });
-    router.push({ pathname: '/(tabs)/profile', params: { auth: 'register' } } as any);
   }
 
   function signInFromWelcomeGate() {
@@ -470,10 +465,18 @@ function RootLayout() {
     setWelcomeGateMode('welcome');
   }
 
-  function skipWelcomeSetup(preferences: Partial<WelcomeSetupPreferences>) {
-    markWelcomeSetupSkipped(preferences).catch(() => {});
+  function skipWelcomeSetup(preferences: WelcomeSetupPreferences) {
+    const preserveCompletedSetup = shouldPreserveCompletedWelcomeSetup(
+      welcomeGateSource,
+      preferences.completedAt,
+    );
+    if (preserveCompletedSetup) {
+      saveWelcomeSetupPreferences(preferences).catch(() => {});
+    } else {
+      markWelcomeSetupSkipped(preferences).catch(() => {});
+    }
     logWelcomeEvent('welcome_gate_cta', {
-      action: 'setup_skip',
+      action: preserveCompletedSetup ? 'setup_close' : 'setup_skip',
       source: welcomeGateSource,
       signed_in: !!user,
     });
@@ -718,7 +721,7 @@ function RootLayout() {
   useEffect(() => {
     if (welcomeSetupRunId <= 0) return;
     setWelcomeGateSource('profile');
-    setWelcomeGateMode('welcome');
+    setWelcomeGateMode('setup');
     setWelcomeGateVisible(true);
     logWelcomeEvent('welcome_gate_seen', { source: 'profile_setup' });
   }, [welcomeSetupRunId]);
@@ -757,9 +760,9 @@ function RootLayout() {
       <StatusBar style={themeMode === 'dark' ? 'light' : 'dark'} />
       <Stack screenOptions={{ headerShown: false }} />
       <WelcomeGate
+        key={`${welcomeGateMode}:${welcomeGateVisible ? 'visible' : 'hidden'}`}
         visible={welcomeGateVisible}
         initialMode={welcomeGateMode}
-        onCreateAccount={createAccountFromWelcomeGate}
         onSignIn={signInFromWelcomeGate}
         onContinue={continueFromWelcomeGate}
         onSetupComplete={completeWelcomeSetup}
@@ -768,7 +771,7 @@ function RootLayout() {
       <WelcomeOnboardingModal
         visible={welcomeVisible}
         onClose={closeWelcomeWalkthrough}
-        onSetupRig={goToProfileFromWalkthrough}
+        onReviewSetup={reviewSetupFromWalkthrough}
       />
       {updateBanner && (
         <View style={{

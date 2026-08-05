@@ -1,4 +1,19 @@
 import { accountStorage, storage } from '@/lib/storage';
+import { VISIBLE_WELCOME_TRAVEL_NEEDS } from '@/lib/welcomeFirstRun';
+
+export {
+  VISIBLE_WELCOME_TRAVEL_NEEDS,
+  WELCOME_FIRST_RUN_COPY,
+  WELCOME_PRIMARY_STEP_TOTAL,
+  WELCOME_SETUP_OPTION_LABELS,
+  WELCOME_SETUP_QUESTIONS,
+  hasWelcomeRigEdits,
+  shouldPreserveCompletedWelcomeSetup,
+  visibleWelcomeTravelNeeds,
+  welcomeCurrentStepSelectionCount,
+  welcomePrimaryStepNumber,
+  welcomeSetupSteps,
+} from '@/lib/welcomeFirstRun';
 
 export const WELCOME_GATE_SEEN_KEY = 'trailhead_welcome_gate_seen_v1';
 export const WELCOME_WALKTHROUGH_SEEN_KEY = 'trailhead_first_run_onboarding_seen_v3';
@@ -13,6 +28,8 @@ export type WelcomeCampingStyle = 'campgrounds' | 'dispersed' | 'rv_parks' | 'mi
 export type WelcomeCampType = 'dispersed' | 'developed' | 'private' | 'rv_parks' | 'any';
 export type WelcomeTravelParty = 'solo' | 'two_people' | 'family' | 'group';
 export type WelcomeTravelNeed = 'pets' | 'kids' | 'towing' | 'downloads';
+export type WelcomeVisibleTravelNeed = (typeof VISIBLE_WELCOME_TRAVEL_NEEDS)[number];
+export type WelcomeSetupStep = import('@/lib/welcomeFirstRun').WelcomeFirstRunStep;
 
 export type WelcomeSetupPreferences = {
   vehicle: WelcomeVehicleChoice | null;
@@ -35,7 +52,7 @@ function normalizeCampingStyles(preferences: Partial<WelcomeSetupPreferences>): 
   return [];
 }
 
-function normalizeWelcomeSetupPreferences(preferences: Partial<WelcomeSetupPreferences>): WelcomeSetupPreferences {
+export function normalizeWelcomeSetupPreferences(preferences: Partial<WelcomeSetupPreferences>): WelcomeSetupPreferences {
   return {
     vehicle: preferences.vehicle ?? null,
     camping: preferences.camping ?? null,

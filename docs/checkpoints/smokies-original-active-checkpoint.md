@@ -288,3 +288,13 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 - S1 Mapbox route-candidate generation or broad operational-source research.
 - The 28-source S2 official-page sweep unless a source becomes stale or a claim changes.
 - Narrator selection or paid rendering before scripts and pronunciations are approved.
+
+## S2B permanent-route baseline
+
+- Started: 2026-08-05.
+- Branch: `feat/smokies-original-s2`.
+- Baseline HEAD: `298784692261e905bd2c16eb5e8da22d372cf961`.
+- Scope is limited to official road-source inspection, deterministic chapter-road extraction, landmark-to-route projection, and explicit coverage gaps.
+- Mapbox remains temporary validation/runtime navigation data. It will not be copied into a permanent or offline Original bundle.
+- No narration, cultural interpretation, media download, Cartesia request, deployment, OTA, public stage, trusted-road readiness, or saved-rig behavior is included.
+- The main worktree protected hashes remain the accepted S2 values. Task-owned background processes at start: none.

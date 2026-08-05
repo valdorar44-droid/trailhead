@@ -298,3 +298,57 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 - Mapbox remains temporary validation/runtime navigation data. It will not be copied into a permanent or offline Original bundle.
 - No narration, cultural interpretation, media download, Cartesia request, deployment, OTA, public stage, trusted-road readiness, or saved-rig behavior is included.
 - The main worktree protected hashes remain the accepted S2 values. Task-owned background processes at start: none.
+
+## S2B permanent-route completion
+
+- Completed locally: 2026-08-05 on branch `feat/smokies-original-s2`.
+- Baseline checkpoint commit: `4a45a310d985cbc8c0d95df1971b5abb705f508a`.
+- Accepted implementation commit: `c833018b2eb69e38178cfb3f62f42b52c608bfa2`.
+- The permanent authoring evidence now comes from the official National Park Service `NPS Public Roads Geographic` layer. Mapbox remains the runtime maneuver engine and its temporary S1 route geometry is not persisted in this packet.
+- The source reader is deterministic and fail-closed:
+  - It retrieves sorted GRSM object IDs first, then exact 500-record batches.
+  - It pins the selected fields, geometry flags, service/schema hashes, source CRS, transformation, coordinate precision, and one-metre endpoint tolerance.
+  - Every selected feature must remain an extant, unrestricted, publicly displayed GRSM road with the reviewed accuracy, maintainer, class, stable IDs, and geographic envelope.
+  - Source refresh, local rebuild, and no-network deterministic check are separate explicit commands.
+- Checked source/evidence counts and hashes:
+  - GRSM source features: 1,926.
+  - Reviewed chapter-road features: 639.
+  - Snapshot canonical SHA-256: `667962182156619a6f24b836d5fc8d036bff8117b93a0137956e902d9b702027`.
+  - Snapshot file SHA-256: `e287c702a0c47b18abaa9593079bbd8d5822b459a17d845e5dec16cf7e4be118`.
+  - Route-evidence canonical SHA-256: `5533ab4e2b3243d03f29637b4bd92323dec6eb634c7a2c5dd2762009cd04ec09`.
+  - Route-evidence file SHA-256: `9868fe40efdbb2c3f682ab08617072c14d788571f945edc072e71bd1307da358`.
+- Chapter results:
+  - Mountain Crossing TN to NC: 69,101.1 m. Sugarlands, Fighting Creek, Newfound Gap, Morton Mountain Tunnel, Kuwohi, and Oconaluftee are represented through source-directed geometry. It remains blocked because NPS coverage ends before Cherokee and the incomplete line is below the reviewed full-chapter distance.
+  - Mountain Crossing NC to TN: 68,831.7 m. It is independently resolved through the directed graph rather than mechanically reversing one-way lanes. It carries the same Cherokee and distance blockers.
+  - Little River and Cades Cove: 56,937.5 m. Landmarks are projected as cues instead of route detours, but five exact NPS geometry records conflict with the declared one-way direction, so the chapter remains blocked for source review.
+  - Roaring Fork: 8,561.4 m. Static reference geometry passed; seasonal/current readiness remains a separate Start Tour gate.
+  - Foothills Parkway: 50,816.7 m in each direction. The reviewed Missing Link and Wears Valley access records are included; the two variants are exact geometry reverses because the source supplies no one-way conflict.
+- `route_variants_v1.json` lowers the reviewed Cades Cove minimum from 57,000 m to 56,500 m because the corrected official route no longer detours through off-route story landmarks.
+- Verification:
+  - Deterministic `--check` passed without network access and reproduced both canonical hashes.
+  - Python compilation and whitespace checks passed.
+  - 36 focused tests plus four subtests passed across S0/S1/S2 route, dossier, and official-source contracts.
+  - Tests cover source/query drift, per-feature public provenance, geometry integrity, directed traversal, boundary joins, route controls versus cue landmarks, distance/road-name contracts, Cades conflicts, reverse variants, and deterministic output.
+  - Independent final re-audit found no unresolved P0/P1, no credentials/private data, and no persisted Mapbox geometry.
+  - Mobile sources did not change in S2B. The accepted S2 complete `npm run test:originals` and strict TypeScript result remain the current mobile evidence and were not repeated.
+- Protected main-worktree state remains unchanged:
+  - `dashboard/explore_serving_index_v2.json`: `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
+  - `docs/app-store-copy.md`: `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+  - `.cursor/` remains untracked and protected in the main worktree.
+- No narration, pronunciation work, media download, Cartesia request, external outreach, backend deployment, OTA, native build, or public-stage change occurred.
+- Task-owned background processes at completion: none.
+
+### Next exact action after S2B
+
+1. Resolve the short Cherokee extension using an approved authoritative EBCI or NCDOT public-road source, or obtain product/editorial approval to end Mountain Crossing at the NPS extent.
+2. Resolve the five enumerated Cades Cove source-direction conflicts without silently rewriting official data.
+3. Implement the trusted current-road observation reader and bind the server-owned saved rig before any consumer Start Tour.
+4. Ask the user before sending the prepared compensated EBCI participation/review request. Cherokee interpretation and pronunciation remain blocked until that review exists.
+5. Begin full script drafting and Cartesia auditions only after route, cultural, media-rights, and editorial gates are locked.
+
+### Do not repeat after S2B
+
+- Do not refetch the NPS road snapshot unless its service metadata or accepted source policy changes.
+- Do not regenerate the temporary S1 Mapbox candidates or redo S0/S1/S2.
+- Do not repeat broad app, Explore, Map, Layers, memory, Originals lifecycle, or Android Auto crawls for this data-only packet.
+- Do not generate paid narration or contact outside reviewers without the remaining approvals.

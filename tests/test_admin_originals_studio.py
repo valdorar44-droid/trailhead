@@ -22,6 +22,21 @@ class OriginalsStudioInlineHandlerTests(unittest.TestCase):
             completed.stderr or completed.stdout,
         )
 
+    def test_v2_device_preview_selection_contract(self):
+        completed = subprocess.run(
+            ["node", "dashboard/admin.originals-v2-preview.test.mjs"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+        self.assertEqual(
+            completed.returncode,
+            0,
+            completed.stderr or completed.stdout,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

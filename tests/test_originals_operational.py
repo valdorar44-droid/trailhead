@@ -141,6 +141,15 @@ def test_server_owned_start_readiness_fails_closed_without_trusted_observation(m
         "get_published_original_manifest",
         lambda *_args, **_kwargs: copy.deepcopy(manifest),
     )
+    monkeypatch.setattr(
+        store,
+        "resolve_user_original_vehicle_binding",
+        lambda _user_id, binding_id: (
+            {"status": "ready", "vehicle_class": "passenger"}
+            if binding_id == "ovb_test_current_binding_12345"
+            else {"status": "vehicle_setup_required", "vehicle_class": None}
+        ),
+    )
     result = store.get_published_original_start_readiness(
         "original_smokies",
         1,
@@ -152,7 +161,7 @@ def test_server_owned_start_readiness_fails_closed_without_trusted_observation(m
     )
     assert result["status"] == "check_required"
     assert result["can_start"] is False
-    assert result["reason_code"] == "vehicle_class_required"
+    assert result["reason_code"] == "vehicle_setup_required"
     assert result["candidate_id"] == candidate["candidate_id"]
     assert result["candidate_sha256"] == operational_candidate_sha256(candidate)
 
@@ -162,7 +171,7 @@ def test_server_owned_start_readiness_fails_closed_without_trusted_observation(m
         chapter_id="foothills_parkway",
         variant_id="west_to_east",
         user_id=7,
-        vehicle_class="passenger",
+        vehicle_binding_id="ovb_test_current_binding_12345",
         now=NOW,
         observation=None,
     )
@@ -175,7 +184,7 @@ def test_server_owned_start_readiness_fails_closed_without_trusted_observation(m
         chapter_id="foothills_parkway",
         variant_id="west_to_east",
         user_id=7,
-        vehicle_class="passenger",
+        vehicle_binding_id="ovb_test_current_binding_12345",
         now=NOW,
         observation=_observation(candidate, "foothills_parkway"),
     )

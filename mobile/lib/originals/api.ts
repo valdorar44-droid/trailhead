@@ -17,6 +17,11 @@ import type {
   OriginalSummary,
   OriginalStartReadinessV1,
 } from './types';
+import type {
+  OriginalVehicleBindingEnvelopeV1,
+  OriginalVehicleBindingInputV1,
+  OriginalVehicleBindingV1,
+} from './vehicleBinding';
 
 function validateOriginalDetailResponse(input: unknown): OriginalDetail {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
@@ -107,6 +112,11 @@ export type SubmitOriginalFeedbackOptions = {
   authToken?: string | null;
   guestToken?: string;
   signal?: AbortSignal;
+};
+
+export type OriginalVehicleBindingRequestOptions = {
+  signal?: AbortSignal;
+  authToken?: string | null;
 };
 
 export type OriginalPreviewTokenResponse = {
@@ -229,6 +239,51 @@ export const originalsApi = {
     });
   },
 
+  getVehicleBinding(options: OriginalVehicleBindingRequestOptions = {}) {
+    return originalsRequest<OriginalVehicleBindingEnvelopeV1>(
+      '/api/account/originals/vehicle-binding',
+      {
+        signal: options.signal,
+        ...(Object.prototype.hasOwnProperty.call(options, 'authToken')
+          ? { authToken: options.authToken }
+          : {}),
+        requireAuth: true,
+      },
+    );
+  },
+
+  putVehicleBinding(
+    payload: OriginalVehicleBindingInputV1,
+    options: OriginalVehicleBindingRequestOptions = {},
+  ) {
+    return originalsRequest<OriginalVehicleBindingV1>(
+      '/api/account/originals/vehicle-binding',
+      {
+        method: 'PUT',
+        signal: options.signal,
+        ...(Object.prototype.hasOwnProperty.call(options, 'authToken')
+          ? { authToken: options.authToken }
+          : {}),
+        requireAuth: true,
+        body: JSON.stringify(payload),
+      },
+    );
+  },
+
+  deleteVehicleBinding(options: OriginalVehicleBindingRequestOptions = {}) {
+    return originalsRequest<{ deleted: boolean }>(
+      '/api/account/originals/vehicle-binding',
+      {
+        method: 'DELETE',
+        signal: options.signal,
+        ...(Object.prototype.hasOwnProperty.call(options, 'authToken')
+          ? { authToken: options.authToken }
+          : {}),
+        requireAuth: true,
+      },
+    );
+  },
+
   feedbackGuestToken(packId: string, version: number, installId: string, signal?: AbortSignal) {
     return originalsRequest<{ token: string; expires_at?: string }>('/api/originals/feedback/guest-token', {
       method: 'POST',
@@ -268,14 +323,22 @@ export const originalsApi = {
   startReadiness(
     id: string,
     version: number,
-    selection: { chapter_id: string; variant_id?: string },
-    signal?: AbortSignal,
+    selection: {
+      chapter_id: string;
+      variant_id?: string;
+      vehicle_binding_id?: string;
+      planned_stop_minutes?: number;
+    },
+    options: OriginalVehicleBindingRequestOptions = {},
   ) {
     return originalsRequest<OriginalStartReadinessV1>(
       `/api/originals/${encodeURIComponent(id)}/versions/${encodeURIComponent(String(version))}/start-readiness`,
       {
         method: 'POST',
-        signal,
+        signal: options.signal,
+        ...(Object.prototype.hasOwnProperty.call(options, 'authToken')
+          ? { authToken: options.authToken }
+          : {}),
         body: JSON.stringify(selection),
       },
     );

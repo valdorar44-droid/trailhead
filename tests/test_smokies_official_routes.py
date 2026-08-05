@@ -10,9 +10,15 @@ from unittest.mock import patch
 
 from db.originals_route_sources import (
     ENDPOINT_JOIN_TOLERANCE_M,
+    EXPECTED_CADES_DIRECTION_OVERRIDES,
     EXPECTED_CADES_DIRECTION_CONFLICT_GEOMETRY_IDS,
     EXPECTED_FACILITY_COUNTS,
     EXPECTED_ROAD_COUNTS,
+    GRSM_MAP_PDF_SHA256,
+    NC_ONEMAP_CONNECTOR_NGUIDS,
+    NC_ONEMAP_CROSS_SOURCE_HANDOFF_MAX_M,
+    NC_ONEMAP_NORMALIZED_CONNECTOR_SHA256,
+    NC_ONEMAP_TERMS_SNAPSHOT_SHA256,
     OFFICIAL_ROUTE_ALGORITHM_CONTRACT,
     OFFICIAL_ROUTE_GENERATOR_VERSION,
     SELECTED_FEATURE_COUNT,
@@ -20,9 +26,11 @@ from db.originals_route_sources import (
     Projection,
     RoadGraph,
     _append_geometry,
+    _append_reviewed_cross_source_geometry,
     _normalize_route_spec_for_evidence,
     build_official_route_evidence,
     canonical_sha256,
+    normalize_official_route_source_supplement,
     normalize_nps_road_snapshot,
     official_route_generator_source_sha256,
 )
@@ -32,6 +40,9 @@ from scripts.build_smokies_original_routes import load_route_spec
 
 ROOT = Path(__file__).resolve().parents[1]
 SNAPSHOT_PATH = ROOT / "originals" / "smokies" / "nps_public_roads_snapshot_v1.json"
+SOURCE_SUPPLEMENT_PATH = (
+    ROOT / "originals" / "smokies" / "official_route_source_supplement_v1.json"
+)
 EVIDENCE_PATH = ROOT / "originals" / "smokies" / "official_route_evidence_v1.json"
 ROUTE_SPEC_PATH = ROOT / "originals" / "smokies" / "route_variants_v1.json"
 
@@ -117,13 +128,106 @@ class SmokiesOfficialRoadSnapshotTests(unittest.TestCase):
             normalize_nps_road_snapshot(changed)
 
 
+class SmokiesOfficialRouteSourceSupplementTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.raw = json.loads(SOURCE_SUPPLEMENT_PATH.read_text(encoding="utf-8"))
+        cls.supplement = normalize_official_route_source_supplement(cls.raw)
+
+    def test_checked_supplement_is_canonical_and_hash_bound(self):
+        self.assertEqual(self.supplement, self.raw)
+        connector = self.supplement["nc_onemap_ebci_connector"]
+        self.assertEqual(len(connector["features"]), 23)
+        self.assertEqual(connector["ordered_nguids"], list(NC_ONEMAP_CONNECTOR_NGUIDS))
+        self.assertEqual(
+            connector["source"]["normalized_features_sha256"],
+            NC_ONEMAP_NORMALIZED_CONNECTOR_SHA256,
+        )
+        self.assertEqual(
+            connector["source"]["terms_snapshot_sha256"],
+            NC_ONEMAP_TERMS_SNAPSHOT_SHA256,
+        )
+        direction = self.supplement["cades_direction_override"]
+        self.assertEqual(direction["source"]["official_map_pdf_sha256"], GRSM_MAP_PDF_SHA256)
+        self.assertEqual(len(direction["overrides"]), 5)
+
+    def test_connector_retains_exact_ebci_lineage_and_two_way_traits(self):
+        connector = self.supplement["nc_onemap_ebci_connector"]
+        for feature in connector["features"]:
+            self.assertEqual(feature["discrepancy_agency_id"], "ebcinctb1.swain.nc.us")
+            self.assertEqual(feature["municipality_left"], "Eastern Band of Cherokee Indians")
+            self.assertEqual(feature["municipality_right"], "Eastern Band of Cherokee Indians")
+            self.assertIsNone(feature["one_way"])
+        self.assertIn("free and unrestricted use policy", json.dumps(connector["terms_snapshot"]))
+
+    def test_connector_identity_terms_and_geometry_drift_fail_closed(self):
+        changed = copy.deepcopy(self.raw)
+        changed["nc_onemap_ebci_connector"]["features"][0]["nguid"] = (
+            "RCL_unreviewed@ebcinctb1.swain.nc.us"
+        )
+        with self.assertRaisesRegex(OriginalRouteSourceError, "unreviewed NGUID"):
+            normalize_official_route_source_supplement(changed)
+
+        changed = copy.deepcopy(self.raw)
+        changed["nc_onemap_ebci_connector"]["features"][0]["municipality_left"] = "Cherokee"
+        with self.assertRaisesRegex(OriginalRouteSourceError, "municipality"):
+            normalize_official_route_source_supplement(changed)
+
+        changed = copy.deepcopy(self.raw)
+        changed["nc_onemap_ebci_connector"]["features"][0]["geometry"]["coordinates"][0][0] += 0.00001
+        with self.assertRaisesRegex(OriginalRouteSourceError, "feature hash"):
+            normalize_official_route_source_supplement(changed)
+
+        changed = copy.deepcopy(self.raw)
+        changed["nc_onemap_ebci_connector"]["terms_snapshot"]["source"] = "changed"
+        with self.assertRaisesRegex(OriginalRouteSourceError, "terms snapshot hash"):
+            normalize_official_route_source_supplement(changed)
+
+    def test_cades_crosswalk_and_map_evidence_drift_fail_closed(self):
+        direction = self.supplement["cades_direction_override"]
+        expected = {
+            (
+                item.national_geometry_id,
+                item.grsm_global_id,
+                item.grsm_object_id,
+            )
+            for item in EXPECTED_CADES_DIRECTION_OVERRIDES
+        }
+        observed = {
+            (
+                item["national_geometry_id"],
+                item["grsm_global_id"],
+                item["grsm_object_id"],
+            )
+            for item in direction["overrides"]
+        }
+        self.assertEqual(observed, expected)
+
+        changed = copy.deepcopy(self.raw)
+        changed["cades_direction_override"]["overrides"][0]["grsm_global_id"] = (
+            "00000000-0000-0000-0000-000000000001"
+        )
+        with self.assertRaisesRegex(OriginalRouteSourceError, "crosswalk"):
+            normalize_official_route_source_supplement(changed)
+
+        changed = copy.deepcopy(self.raw)
+        changed["cades_direction_override"]["source"]["official_map_pdf_sha256"] = "0" * 64
+        with self.assertRaisesRegex(OriginalRouteSourceError, "official_map_pdf_sha256"):
+            normalize_official_route_source_supplement(changed)
+
+
 class SmokiesOfficialRouteEvidenceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.snapshot = json.loads(SNAPSHOT_PATH.read_text(encoding="utf-8"))
+        cls.source_supplement = json.loads(
+            SOURCE_SUPPLEMENT_PATH.read_text(encoding="utf-8")
+        )
         cls.route_spec = load_route_spec(ROUTE_SPEC_PATH)
         cls.evidence = json.loads(EVIDENCE_PATH.read_text(encoding="utf-8"))
-        cls.rebuilt = build_official_route_evidence(cls.snapshot, cls.route_spec)
+        cls.rebuilt = build_official_route_evidence(
+            cls.snapshot, cls.route_spec, cls.source_supplement
+        )
         cls.by_id = {item["id"]: item for item in cls.evidence["variants"]}
 
     def test_checked_route_evidence_is_deterministic(self):
@@ -146,9 +250,21 @@ class SmokiesOfficialRouteEvidenceTests(unittest.TestCase):
         )
         self.assertTrue(self.evidence["source_policy"]["operational_readiness_separate"])
         self.assertFalse(self.evidence["source_policy"]["mapbox_candidate_geometry_persisted"])
+        self.assertEqual(
+            self.evidence["source_policy"]["geometry_authority"],
+            "nps_public_roads",
+        )
+        self.assertEqual(self.evidence["source_policy"]["license"], "us-pd")
+        self.assertEqual(
+            [item["id"] for item in self.evidence["source_policy"]["geometry_authorities"]],
+            ["nps_public_roads", "nc_onemap_ng911"],
+        )
 
-    def test_ready_and_blocked_variants_are_explicit(self):
+    def test_all_static_official_route_variants_are_candidates(self):
         for route_id in (
+            "mountain-crossing-tn-to-nc",
+            "mountain-crossing-nc-to-tn",
+            "little-river-cades-cove-loop",
             "roaring-fork-one-way",
             "foothills-parkway-west-to-east",
             "foothills-parkway-east-to-west",
@@ -157,20 +273,23 @@ class SmokiesOfficialRouteEvidenceTests(unittest.TestCase):
             self.assertEqual(self.by_id[route_id]["blocking_issues"], [])
         for route_id in ("mountain-crossing-tn-to-nc", "mountain-crossing-nc-to-tn"):
             route = self.by_id[route_id]
-            self.assertEqual(route["status"], "blocked_source_review")
-            self.assertIn(
-                "cherokee_extension_requires_separate_authoritative_public_road_source",
-                route["blocking_issues"],
-            )
             cherokee = next(item for item in route["landmarks"] if item["anchor_id"] == "cherokee")
-            self.assertEqual(cherokee["status"], "outside_official_coverage")
-            self.assertGreater(cherokee["lateral_distance_m"], 2_000)
+            self.assertEqual(cherokee["status"], "on_route")
+            self.assertLess(cherokee["lateral_distance_m"], 75)
+            self.assertLessEqual(
+                route["cross_source_handoff_gap_m"],
+                NC_ONEMAP_CROSS_SOURCE_HANDOFF_MAX_M,
+            )
+            self.assertTrue(set(NC_ONEMAP_CONNECTOR_NGUIDS).issubset(route["source_geometry_ids"]))
         cades = self.by_id["little-river-cades-cove-loop"]
-        self.assertEqual(cades["status"], "blocked_source_review")
-        self.assertEqual(cades["blocking_issues"], ["nps_one_way_digitization_conflict"])
         self.assertEqual(
             set(cades["source_direction_conflict_geometry_ids"]),
             EXPECTED_CADES_DIRECTION_CONFLICT_GEOMETRY_IDS,
+        )
+        self.assertEqual(cades["source_direction_override"]["kind"], "CadesDirectionOverrideV1")
+        self.assertEqual(
+            cades["source_direction_override"]["reviewed_traversal_direction"],
+            "reverse",
         )
 
     def test_cades_direction_conflict_set_cannot_silently_change(self):
@@ -186,10 +305,14 @@ class SmokiesOfficialRouteEvidenceTests(unittest.TestCase):
             OriginalRouteSourceError,
             "Cades Cove reviewed direction conflict set changed",
         ):
-            build_official_route_evidence(changed, self.route_spec)
+            build_official_route_evidence(
+                changed, self.route_spec, self.source_supplement
+            )
 
     def test_routes_have_no_unreviewed_seams_and_reference_only_snapshot_features(self):
-        source_ids = {item["geometry_id"] for item in self.snapshot["features"]}
+        source_ids = {
+            item["geometry_id"] for item in self.snapshot["features"]
+        } | set(NC_ONEMAP_CONNECTOR_NGUIDS)
         for route in self.evidence["variants"]:
             self.assertLessEqual(route["maximum_join_gap_m"], ENDPOINT_JOIN_TOLERANCE_M)
             self.assertTrue(set(route["source_geometry_ids"]).issubset(source_ids))
@@ -219,6 +342,14 @@ class SmokiesOfficialRouteEvidenceTests(unittest.TestCase):
         feature_by_id = {
             item["geometry_id"]: item for item in self.snapshot["features"]
         }
+        feature_by_id.update(
+            {
+                item["nguid"]: {"one_way": None}
+                for item in self.source_supplement["nc_onemap_ebci_connector"][
+                    "features"
+                ]
+            }
+        )
         for route_id in (
             "mountain-crossing-tn-to-nc",
             "mountain-crossing-nc-to-tn",
@@ -250,11 +381,15 @@ class SmokiesOfficialRouteEvidenceTests(unittest.TestCase):
         changed = copy.deepcopy(self.route_spec)
         changed["provider_policy"]["output_persistence"] = "permanent"
         with self.assertRaisesRegex(OriginalRouteSourceError, "provider policy"):
-            build_official_route_evidence(self.snapshot, changed)
+            build_official_route_evidence(
+                self.snapshot, changed, self.source_supplement
+            )
         changed = copy.deepcopy(self.route_spec)
         changed["variants"][0]["max_control_snap_m"] = 900
         with self.assertRaisesRegex(OriginalRouteSourceError, "snap limit"):
-            build_official_route_evidence(self.snapshot, changed)
+            build_official_route_evidence(
+                self.snapshot, changed, self.source_supplement
+            )
 
 
 class SmokiesOfficialRoutePrimitiveTests(unittest.TestCase):
@@ -265,6 +400,16 @@ class SmokiesOfficialRoutePrimitiveTests(unittest.TestCase):
         self.assertEqual(len(target), 3)
         with self.assertRaisesRegex(OriginalRouteSourceError, "unreviewed"):
             _append_geometry(target, [[-82.9, 35.0], [-82.8, 35.0]])
+
+    def test_cross_source_handoff_is_narrowly_bounded(self):
+        target = [[-83.0, 35.0], [-82.999, 35.0]]
+        nearby = [[-82.99905, 35.00001], [-82.998, 35.0]]
+        gap = _append_reviewed_cross_source_geometry(target, nearby)
+        self.assertLess(gap, NC_ONEMAP_CROSS_SOURCE_HANDOFF_MAX_M)
+        with self.assertRaisesRegex(OriginalRouteSourceError, "handoff changed"):
+            _append_reviewed_cross_source_geometry(
+                [[-83.0, 35.0]], [[-82.999, 35.0], [-82.998, 35.0]]
+            )
 
     def test_one_way_graph_rejects_reverse_traversal(self):
         feature = {
@@ -295,6 +440,7 @@ class SmokiesOfficialRoutePrimitiveTests(unittest.TestCase):
             result = check(
                 Namespace(
                     snapshot=SNAPSHOT_PATH,
+                    source_supplement=SOURCE_SUPPLEMENT_PATH,
                     route_spec=ROUTE_SPEC_PATH,
                     evidence=EVIDENCE_PATH,
                 )

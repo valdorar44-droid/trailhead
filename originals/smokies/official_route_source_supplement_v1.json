@@ -1,0 +1,1683 @@
+{
+  "cades_direction_override": {
+    "map_review": {
+      "map_revision": "2024 reduced 508",
+      "north_leg_direction": "westbound",
+      "review_method": "human_visual_review",
+      "reviewed_loop_travel": "counterclockwise",
+      "south_leg_direction": "eastbound"
+    },
+    "overrides": [
+      {
+        "data_access": "Unrestricted",
+        "grsm_global_id": "9ee04325-3318-41d2-883a-1005f58cb29d",
+        "grsm_object_id": 1255,
+        "national_geometry_id": "008ef10d-f967-4bd4-a210-2184dc1e85e1",
+        "public_restriction": "Open Year Round",
+        "reviewed_traversal_direction": "reverse",
+        "source_date_epoch_ms": 1415196566000,
+        "source_one_way": "With Digitized",
+        "source_road_status": "Existing",
+        "validation_result": "Raw",
+        "xy_accuracy": "Unknown"
+      },
+      {
+        "data_access": "Unrestricted",
+        "grsm_global_id": "f0000aca-f855-4196-86f2-23dbda878670",
+        "grsm_object_id": 1270,
+        "national_geometry_id": "160be5ea-ae63-4498-bb61-900d174ae5b2",
+        "public_restriction": "Open Year Round",
+        "reviewed_traversal_direction": "reverse",
+        "source_date_epoch_ms": 1415196566000,
+        "source_one_way": "With Digitized",
+        "source_road_status": "Existing",
+        "validation_result": "Raw",
+        "xy_accuracy": "Unknown"
+      },
+      {
+        "data_access": "Unrestricted",
+        "grsm_global_id": "ff5c1bc2-b513-4b80-98a2-0bd7295608c2",
+        "grsm_object_id": 1271,
+        "national_geometry_id": "20fd255b-e779-4922-bc39-fd663ea73ca3",
+        "public_restriction": "Open Year Round",
+        "reviewed_traversal_direction": "reverse",
+        "source_date_epoch_ms": 1415196566000,
+        "source_one_way": "With Digitized",
+        "source_road_status": "Existing",
+        "validation_result": "Raw",
+        "xy_accuracy": "Unknown"
+      },
+      {
+        "data_access": "Unrestricted",
+        "grsm_global_id": "77c44571-dbdc-45dd-873d-2cdf9abf9b35",
+        "grsm_object_id": 1254,
+        "national_geometry_id": "e165ffe3-8f56-47e4-902b-9937312df435",
+        "public_restriction": "Open Year Round",
+        "reviewed_traversal_direction": "reverse",
+        "source_date_epoch_ms": 1415196566000,
+        "source_one_way": "With Digitized",
+        "source_road_status": "Existing",
+        "validation_result": "Raw",
+        "xy_accuracy": "Unknown"
+      },
+      {
+        "data_access": "Unrestricted",
+        "grsm_global_id": "891458c4-694b-4f7f-b948-81700117a132",
+        "grsm_object_id": 98,
+        "national_geometry_id": "f117d383-5e50-4e7f-95c3-8b862c38370e",
+        "public_restriction": "Open Year Round",
+        "reviewed_traversal_direction": "reverse",
+        "source_date_epoch_ms": 1415196566000,
+        "source_one_way": "With Digitized",
+        "source_road_status": "Temporarily Closed",
+        "validation_result": "Raw",
+        "xy_accuracy": "Unknown"
+      }
+    ],
+    "query": {
+      "f": "json",
+      "orderByFields": "OBJECTID",
+      "outFields": "OBJECTID,RDONEWAY,RDSTATUS,PUBRESTRICT,DATAACCESS,SOURCEDATE,XYACCURACY,VALID_RESULT,GlobalID",
+      "returnGeometry": "false",
+      "where": "OBJECTID IN (98,1254,1255,1270,1271)"
+    },
+    "source": {
+      "access_data_url": "https://www.nps.gov/grsm/planyourvisit/access_data.htm",
+      "agency": "National Park Service",
+      "attribution": "National Park Service, Great Smoky Mountains National Park",
+      "item_sha256": "f5dd6adc21fdb235710f1678e2d58b424d3355940f2954a74680b14d16bddd25",
+      "item_url": "https://www.arcgis.com/sharing/rest/content/items/cbe5d107b9bf451fa9e1ca903d7a9f48",
+      "layer_definition_sha256": "612f5623ed4cf9606c4b5699d07a9caafe697b9117b05e9d006d4b17350b5127",
+      "layer_url": "https://services1.arcgis.com/fBc8EJBxQRMcHlei/arcgis/rest/services/GRSM_ROADS/FeatureServer/0",
+      "license": "nps_item_specific_redistribution_terms",
+      "map_page_url": "https://www.nps.gov/grsm/planyourvisit/maps.htm",
+      "map_pdf_url": "https://www.nps.gov/grsm/planyourvisit/upload/grsmmap_2024_reduced_508.pdf",
+      "official_map_pdf_bytes": 6221950,
+      "official_map_pdf_sha256": "7cc2dc86a08f2b506f0900170e5e242247ca245e2c80dad44cdf037d0d27b933",
+      "output_spatial_reference": "EPSG:4326",
+      "query_contract_sha256": "ee3b0a145875a071d7fad3082552577b4630ae87a83d1a9b8358c46f6e9472a4",
+      "raw_query_response_sha256": "a777de3c055f84a84c779d48c90a2cb43bed491acaec81fbb989881e89aa9d05",
+      "reviewed_at": "2026-08-05",
+      "reviewed_by": "Trailhead product engineering",
+      "source_spatial_reference": "EPSG:4269",
+      "title": "GRSM_ROADS",
+      "use_constraints": [
+        "direction_override_only_for_exact_reviewed_segments",
+        "geometry_remains_from_pinned_nps_public_roads_snapshot",
+        "official_map_is_direction_evidence_not_route_geometry",
+        "operational_readiness_and_closures_are_separate",
+        "no_nps_endorsement"
+      ]
+    }
+  },
+  "kind": "smokies_official_route_source_supplement",
+  "nc_onemap_ebci_connector": {
+    "features": [
+      {
+        "date_updated_epoch_ms": 1755605908000,
+        "discrepancy_agency_id": "ebcinctb1.swain.nc.us",
+        "geometry": {
+          "coordinates": [
+            [
+              -83.3111883,
+              35.4929873
+            ],
+            [
+              -83.3110577,
+              35.4931497
+            ]
+          ],
+          "type": "LineString"
+        },
+        "legacy_street_name": "Acquoni",
+        "legacy_street_type": "Rd",
+        "municipality_left": "Eastern Band of Cherokee Indians",
+        "municipality_right": "Eastern Band of Cherokee Indians",
+        "nguid": "RCL_1017@ebcinctb1.swain.nc.us",
+        "one_way": null,
+        "postal_community_left": "Cherokee",
+        "postal_community_right": "Cherokee",
+        "road_class": null,
+        "source_object_id": "789",
+        "speed_limit_mph": 25,
+        "street_name": "Acquoni",
+        "street_post_type": "Road"
+      },
+      {
+        "date_updated_epoch_ms": 1755605908000,
+        "discrepancy_agency_id": "ebcinctb1.swain.nc.us",
+        "geometry": {
+          "coordinates": [
+            [
+              -83.314011,
+              35.4859019
+            ],
+            [
+              -83.3139504,
+              35.486103
+            ],
+            [
+              -83.3139145,
+              35.4862198
+            ],
+            [
+              -83.3138829,
+              35.4863186
+            ]
+          ],
+          "type": "LineString"
+        },
+        "legacy_street_name": "Acquoni",
+        "legacy_street_type": "Rd",
+        "municipality_left": "Eastern Band of Cherokee Indians",
+        "municipality_right": "Eastern Band of Cherokee Indians",
+        "nguid": "RCL_1282@ebcinctb1.swain.nc.us",
+        "one_way": null,
+        "postal_community_left": "Cherokee",
+        "postal_community_right": "Cherokee",
+        "road_class": null,
+        "source_object_id": "783",
+        "speed_limit_mph": 25,
+        "street_name": "Acquoni",
+        "street_post_type": "Road"
+      },
+      {
+        "date_updated_epoch_ms": 1755605908000,
+        "discrepancy_agency_id": "ebcinctb1.swain.nc.us",
+        "geometry": {
+          "coordinates": [
+            [
+              -83.3061214,
+              35.4993967
+            ],
+            [
+              -83.3061061,
+              35.4994616
+            ],
+            [
+              -83.3060903,
+              35.499523
+            ],
+            [
+              -83.3060426,
+              35.4997051
+            ]
+          ],
+          "type": "LineString"
+        },
+        "legacy_street_name": "Acquoni",
+        "legacy_street_type": "Rd",
+        "municipality_left": "Eastern Band of Cherokee Indians",
+        "municipality_right": "Eastern Band of Cherokee Indians",
+        "nguid": "RCL_1383@ebcinctb1.swain.nc.us",
+        "one_way": null,
+        "postal_community_left": "Cherokee",
+        "postal_community_right": "Cherokee",
+        "road_class": null,
+        "source_object_id": "796",
+        "speed_limit_mph": 25,
+        "street_name": "Acquoni",
+        "street_post_type": "Road"
+      },
+      {
+        "date_updated_epoch_ms": 1755605908000,
+        "discrepancy_agency_id": "ebcinctb1.swain.nc.us",
+        "geometry": {
+          "coordinates": [
+            [
+              -83.3155884,
+              35.484648
+            ],
+            [
+              -83.3156491,
+              35.4846882
+            ],
+            [
+              -83.3158497,
+              35.4848416
+            ],
+            [
+              -83.3160261,
+              35.4849808
+            ],
+            [
+              -83.3161149,
+              35.4850421
+            ],
+            [
+              -83.316216,
+              35.4851136
+            ],
+            [
+              -83.3163174,
+              35.4851824
+            ],
+            [
+              -83.3164041,
+              35.4852356
+            ],
+            [
+              -83.3165019,
+              35.4852849
+            ],
+            [
+              -83.3166101,
+              35.4853232
+            ],
+            [
+              -83.3166965,
+              35.4853462
+            ],
+            [
+              -83.316785,
+              35.4853592
+            ]
+          ],
+          "type": "LineString"
+        },
+        "legacy_street_name": "Drama",
+        "legacy_street_type": "Rd",
+        "municipality_left": "Eastern Band of Cherokee Indians",
+        "municipality_right": "Eastern Band of Cherokee Indians",
+        "nguid": "RCL_1413@ebcinctb1.swain.nc.us",
+        "one_way": null,
+        "postal_community_left": "Cherokee",
+        "postal_community_right": "Cherokee",
+        "road_class": null,
+        "source_object_id": "289",
+        "speed_limit_mph": 25,
+        "street_name": "Drama",
+        "street_post_type": "Road"
+      },
+      {
+        "date_updated_epoch_ms": 1755605908000,
+        "discrepancy_agency_id": "ebcinctb1.swain.nc.us",
+        "geometry": {
+          "coordinates": [
+            [
+              -83.3102111,
+              35.4942159
+            ],
+            [
+              -83.3100049,
+              35.4944783
+            ]
+          ],
+          "type": "LineString"
+        },
+        "legacy_street_name": "Acquoni",
+        "legacy_street_type": "Rd",
+        "municipality_left": "Eastern Band of Cherokee Indians",
+        "municipality_right": "Eastern Band of Cherokee Indians",
+        "nguid": "RCL_1435@ebcinctb1.swain.nc.us",
+        "one_way": null,
+        "postal_community_left": "Cherokee",
+        "postal_community_right": "Cherokee",
+        "road_class": null,
+        "source_object_id": "792",
+        "speed_limit_mph": 25,
+        "street_name": "Acquoni",
+        "street_post_type": "Road"
+      },
+      {
+        "date_updated_epoch_ms": 1755605908000,
+        "discrepancy_agency_id": "ebcinctb1.swain.nc.us",
+        "geometry": {
+          "coordinates": [
+            [
+              -83.315053,
+              35.4845209
+            ],
+            [
+              -83.315496,
+              35.4846166
+            ],
+            [
+              -83.3155884,
+              35.484648
+            ]
+          ],
+          "type": "LineString"
+        },
+        "legacy_street_name": "Drama",
+        "legacy_street_type": "Rd",
+        "municipality_left": "Eastern Band of Cherokee Indians",
+        "municipality_right": "Eastern Band of Cherokee Indians",
+        "nguid": "RCL_1464@ebcinctb1.swain.nc.us",
+        "one_way": null,
+        "postal_community_left": "Cherokee",
+        "postal_community_right": "Cherokee",
+        "road_class": null,
+        "source_object_id": "300",
+        "speed_limit_mph": 25,
+        "street_name": "Drama",
+        "street_post_type": "Road"
+      },
+      {
+        "date_updated_epoch_ms": 1755605908000,
+        "discrepancy_agency_id": "ebcinctb1.swain.nc.us",
+        "geometry": {
+          "coordinates": [
+            [
+              -83.3026217,
+              35.4994813
+            ],
+            [
+              -83.3024429,
+              35.4994898
+            ],
+            [
+              -83.3022624,
+              35.4995044
+            ],
+            [
+              -83.3021033,
+              35.4995219
+            ],
+            [
+              -83.3019648,
+              35.4995401
+            ],
+            [
+              -83.3018063,
+              35.4995691
+            ],
+            [
+              -83.3016699,
+              35.4995989
+            ],
+            [
+              -83.3014859,
+              35.4996457
+            ],
+            [
+              -83.3012783,
+              35.4997103
+            ],
+            [
+              -83.3011269,
+              35.4997645
+            ],
+            [
+              -83.3009875,
+              35.4998225
+            ],
+            [
+              -83.3008376,
+              35.4998924
+            ],
+            [
+              -83.3007106,
+              35.4999579
+            ],
+            [
+              -83.300578,
+              35.5000303
+            ],
+            [
+              -83.3004465,
+              35.5001106
+            ],
+            [
+              -83.3003168,
+              35.5001963
+            ],
+            [
+              -83.300219,
+              35.5002644
+            ],
+            [
+              -83.3001199,
+              35.500335
+            ],
+            [
+              -83.3000286,
+              35.5004119
+            ],
+            [
+              -83.2999366,
+              35.5004953
+            ],
+            [
+              -83.2998301,
+              35.5005983
+            ],
+            [
+              -83.2997357,
+              35.5006957
+            ],
+            [
+              -83.2996392,
+              35.5008111
+            ],
+            [
+              -83.2994776,
+              35.501019
+            ],
+            [
+              -83.2993433,
+              35.5012437
+            ],
+            [
+              -83.2992018,
+              35.5015361
+            ],
+            [
+              -83.2990972,
+              35.5018234
+            ],
+            [
+              -83.2990557,
+              35.5019654
+            ],
+            [
+              -83.2990323,
+              35.5020953
+            ],
+            [
+              -83.2990098,
+              35.5023226
+            ],
+            [
+              -83.2990155,
+              35.5025585
+            ],
+            [
+              -83.2990312,
+              35.5027271
+            ],
+            [
+              -83.2990635,
+              35.5029173
+            ],
+            [
+              -83.2991216,
+              35.503143
+            ],
+            [
+              -83.2992206,
+              35.5034315
+            ],
+            [
+              -83.299302,
+              35.503613
+            ],
+            [
+              -83.299417,
+              35.5038171
+            ],
+            [
+              -83.2995356,
+              35.5039903
+            ],
+            [
+              -83.2996656,
+              35.5041548
+            ],
+            [
+              -83.299831,
+              35.5043417
+            ],
+            [
+              -83.3000444,
+              35.5045325
+            ],
+            [
+              -83.3002533,
+              35.5047012
+            ],
+            [
+              -83.3005015,
+              35.5048712
+            ],
+            [
+              -83.3007659,
+              35.5050253
+            ],
+            [
+              -83.3010362,
+              35.5051596
+            ],
+            [
+              -83.3011302,
+              35.5051993
+            ]
+          ],
+          "type": "LineString"
+        },
+        "legacy_street_name": "Newfound Gap",
+        "legacy_street_type": "Rd",
+        "municipality_left": "Eastern Band of Cherokee Indians",
+        "municipality_right": "Eastern Band of Cherokee Indians",
+        "nguid": "RCL_1676@ebcinctb1.swain.nc.us",
+        "one_way": null,
+        "postal_community_left": "Cherokee",
+        "postal_community_right": "Cherokee",
+        "road_class": null,
+        "source_object_id": "338",
+        "speed_limit_mph": 35,
+        "street_name": "Newfound Gap",
+        "street_post_type": "Road"
+      },
+      {
+        "date_updated_epoch_ms": 1755605908000,
+        "discrepancy_agency_id": "ebcinctb1.swain.nc.us",
+        "geometry": {
+          "coordinates": [
+            [
+              -83.3115865,
+              35.4924853
+            ],
+            [
+              -83.3114055,
+              35.4927121
+            ],
+            [
+              -83.3112365,
+              35.4929274
+            ],
+            [
+              -83.3111883,
+              35.4929873
+            ]
+          ],
+          "type": "LineString"
+        },
+        "legacy_street_name": "Acquoni",
+        "legacy_street_type": "Rd",
+        "municipality_left": "Eastern Band of Cherokee Indians",
+        "municipality_right": "Eastern Band of Cherokee Indians",
+        "nguid": "RCL_1829@ebcinctb1.swain.nc.us",
+        "one_way": null,
+        "postal_community_left": "Cherokee",
+        "postal_community_right": "Cherokee",
+        "road_class": null,
+        "source_object_id": "788",
+        "speed_limit_mph": 25,
+        "street_name": "Acquoni",
+        "street_post_type": "Road"
+      },
+      {
+        "date_updated_epoch_ms": 1755605908000,
+        "discrepancy_agency_id": "ebcinctb1.swain.nc.us",
+        "geometry": {
+          "coordinates": [
+            [
+              -83.3060426,
+              35.4997051
+            ],
+            [
+              -83.3059756,
+              35.4999714
+            ]
+          ],
+          "type": "LineString"
+        },
+        "legacy_street_name": "Acquoni",
+        "legacy_street_type": "Rd",
+        "municipality_left": "Eastern Band of Cherokee Indians",
+        "municipality_right": "Eastern Band of Cherokee Indians",
+        "nguid": "RCL_1873@ebcinctb1.swain.nc.us",
+        "one_way": null,
+        "postal_community_left": "Cherokee",
+        "postal_community_right": "Cherokee",
+        "road_class": null,
+        "source_object_id": "797",
+        "speed_limit_mph": 25,
+        "street_name": "Acquoni",
+        "street_post_type": "Road"
+      },
+      {
+        "date_updated_epoch_ms": 1755605908000,
+        "discrepancy_agency_id": "ebcinctb1.swain.nc.us",
+        "geometry": {
+          "coordinates": [
+            [
+              -83.3110577,
+              35.4931497
+            ],
+            [
+              -83.3109311,
+              35.4933071
+            ],
+            [
+              -83.3108995,
+              35.4933493
+            ]
+          ],
+          "type": "LineString"
+        },
+        "legacy_street_name": "Acquoni",
+        "legacy_street_type": "Rd",
+        "municipality_left": "Eastern Band of Cherokee Indians",
+        "municipality_right": "Eastern Band of Cherokee Indians",
+        "nguid": "RCL_1935@ebcinctb1.swain.nc.us",
+        "one_way": null,
+        "postal_community_left": "Cherokee",
+        "postal_community_right": "Cherokee",
+        "road_class": null,
+        "source_object_id": "790",
+        "speed_limit_mph": 25,
+        "street_name": "Acquoni",
+        "street_post_type": "Road"
+      },
+      {
+        "date_updated_epoch_ms": 1755605908000,
+        "discrepancy_agency_id": "ebcinctb1.swain.nc.us",
+        "geometry": {
+          "coordinates": [
+            [
+              -83.3108995,
+              35.4933493
+            ],
+            [
+              -83.3108422,
+              35.4934194
+            ],
+            [
+              -83.3107453,
+              35.4935434
+            ],
+            [
+              -83.3105999,
+              35.4937282
+            ],
+            [
+              -83.3104705,
+              35.4938898
+            ],
+            [
+              -83.3104111,
+              35.4939676
+            ],
+            [
+              -83.3103089,
+              35.4940951
+            ],
+            [
+              -83.3102111,
+              35.4942159
+            ]
+          ],
+          "type": "LineString"
+        },
+        "legacy_street_name": "Acquoni",
+        "legacy_street_type": "Rd",
+        "municipality_left": "Eastern Band of Cherokee Indians",
+        "municipality_right": "Eastern Band of Cherokee Indians",
+        "nguid": "RCL_196@ebcinctb1.swain.nc.us",
+        "one_way": null,
+        "postal_community_left": "Cherokee",
+        "postal_community_right": "Cherokee",
+        "road_class": null,
+        "source_object_id": "791",
+        "speed_limit_mph": 25,
+        "street_name": "Acquoni",
+        "street_post_type": "Road"
+      },
+      {
+        "date_updated_epoch_ms": 1755605908000,
+        "discrepancy_agency_id": "ebcinctb1.swain.nc.us",
+        "geometry": {
+          "coordinates": [
+            [
+              -83.3131923,
+              35.4886374
+            ],
+            [
+              -83.3131552,
+              35.4887604
+            ],
+            [
+              -83.3130851,
+              35.4889979
+            ],
+            [
+              -83.3130462,
+              35.4891266
+            ],
+            [
+              -83.3130067,
+              35.4892589
+            ],
+            [
+              -83.312937,
+              35.4894936
+            ],
+            [
+              -83.3129081,
+              35.4896035
+            ]
+          ],
+          "type": "LineString"
+        },
+        "legacy_street_name": "Acquoni",
+        "legacy_street_type": "Rd",
+        "municipality_left": "Eastern Band of Cherokee Indians",
+        "municipality_right": "Eastern Band of Cherokee Indians",
+        "nguid": "RCL_2079@ebcinctb1.swain.nc.us",
+        "one_way": null,
+        "postal_community_left": "Cherokee",
+        "postal_community_right": "Cherokee",
+        "road_class": null,
+        "source_object_id": "785",
+        "speed_limit_mph": 25,
+        "street_name": "Acquoni",
+        "street_post_type": "Road"
+      },
+      {
+        "date_updated_epoch_ms": 1755605908000,
+        "discrepancy_agency_id": "ebcinctb1.swain.nc.us",
+        "geometry": {
+          "coordinates": [
+            [
+              -83.3129081,
+              35.4896035
+            ],
+            [
+              -83.3128809,
+              35.4897065
+            ],
+            [
+              -83.3128252,
+              35.4898908
+            ],
+            [
+              -83.3127566,
+              35.490119
+            ],
+            [
+              -83.3126817,
+              35.4903705
+            ],
+            [
+              -83.3126194,
+              35.4905761
+            ],
+            [
+              -83.3125707,
+              35.4907379
+            ],
+            [
+              -83.3124965,
+              35.4909911
+            ],
+            [
+              -83.3124325,
+              35.4912051
+            ],
+            [
+              -83.3123827,
+              35.491345
+            ],
+            [
+              -83.3123317,
+              35.4914619
+            ],
+            [
+              -83.3122739,
+              35.4915724
+            ],
+            [
+              -83.3121939,
+              35.4916968
+            ],
+            [
+              -83.3120898,
+              35.4918405
+            ],
+            [
+              -83.3119942,
+              35.491965
+            ],
+            [
+              -83.3119,
+              35.4920833
+            ]
+          ],
+          "type": "LineString"
+        },
+        "legacy_street_name": "Acquoni",
+        "legacy_street_type": "Rd",
+        "municipality_left": "Eastern Band of Cherokee Indians",
+        "municipality_right": "Eastern Band of Cherokee Indians",
+        "nguid": "RCL_212@ebcinctb1.swain.nc.us",
+        "one_way": null,
+        "postal_community_left": "Cherokee",
+        "postal_community_right": "Cherokee",
+        "road_class": null,
+        "source_object_id": "786",
+        "speed_limit_mph": 25,
+        "street_name": "Acquoni",
+        "street_post_type": "Road"
+      },
+      {
+        "date_updated_epoch_ms": 1755605908000,
+        "discrepancy_agency_id": "ebcinctb1.swain.nc.us",
+        "geometry": {
+          "coordinates": [
+            [
+              -83.3035607,
+              35.4995671
+            ],
+            [
+              -83.3034536,
+              35.4995508
+            ],
+            [
+              -83.3032774,
+              35.4995263
+            ],
+            [
+              -83.3031167,
+              35.4995059
+            ],
+            [
+              -83.3029806,
+              35.4994943
+            ],
+            [
+              -83.3028704,
+              35.4994872
+            ],
+            [
+              -83.3027565,
+              35.4994835
+            ],
+            [
+              -83.3026217,
+              35.4994813
+            ]
+          ],
+          "type": "LineString"
+        },
+        "legacy_street_name": "Newfound Gap",
+        "legacy_street_type": "Rd",
+        "municipality_left": "Eastern Band of Cherokee Indians",
+        "municipality_right": "Eastern Band of Cherokee Indians",
+        "nguid": "RCL_2182@ebcinctb1.swain.nc.us",
+        "one_way": null,
+        "postal_community_left": "Cherokee",
+        "postal_community_right": "Cherokee",
+        "road_class": null,
+        "source_object_id": "440",
+        "speed_limit_mph": 35,
+        "street_name": "Newfound Gap",
+        "street_post_type": "Road"
+      },
+      {
+        "date_updated_epoch_ms": 1755605908000,
+        "discrepancy_agency_id": "ebcinctb1.swain.nc.us",
+        "geometry": {
+          "coordinates": [
+            [
+              -83.3144513,
+              35.4843999
+            ],
+            [
+              -83.3143914,
+              35.484589
+            ],
+            [
+              -83.3143345,
+              35.4847841
+            ],
+            [
+              -83.3142646,
+              35.4850304
+            ],
+            [
+              -83.3142029,
+              35.4852436
+            ],
+            [
+              -83.314137,
+              35.4854706
+            ],
+            [
+              -83.3140814,
+              35.4856635
+            ],
+            [
+              -83.314011,
+              35.4859019
+            ]
+          ],
+          "type": "LineString"
+        },
+        "legacy_street_name": "Acquoni",
+        "legacy_street_type": "Rd",
+        "municipality_left": "Eastern Band of Cherokee Indians",
+        "municipality_right": "Eastern Band of Cherokee Indians",
+        "nguid": "RCL_2278@ebcinctb1.swain.nc.us",
+        "one_way": null,
+        "postal_community_left": "Cherokee",
+        "postal_community_right": "Cherokee",
+        "road_class": null,
+        "source_object_id": "782",
+        "speed_limit_mph": 25,
+        "street_name": "Acquoni",
+        "street_post_type": "Road"
+      },
+      {
+        "date_updated_epoch_ms": 1755605908000,
+        "discrepancy_agency_id": "ebcinctb1.swain.nc.us",
+        "geometry": {
+          "coordinates": [
+            [
+              -83.3144513,
+              35.4843999
+            ],
+            [
+              -83.3145232,
+              35.4844124
+            ],
+            [
+              -83.3146763,
+              35.4844402
+            ],
+            [
+              -83.3147692,
+              35.4844596
+            ],
+            [
+              -83.315053,
+              35.4845209
+            ]
+          ],
+          "type": "LineString"
+        },
+        "legacy_street_name": "Drama",
+        "legacy_street_type": "Rd",
+        "municipality_left": "Eastern Band of Cherokee Indians",
+        "municipality_right": "Eastern Band of Cherokee Indians",
+        "nguid": "RCL_2285@ebcinctb1.swain.nc.us",
+        "one_way": null,
+        "postal_community_left": "Cherokee",
+        "postal_community_right": "Cherokee",
+        "road_class": null,
+        "source_object_id": "467",
+        "speed_limit_mph": 25,
+        "street_name": "Drama",
+        "street_post_type": "Road"
+      },
+      {
+        "date_updated_epoch_ms": 1755605908000,
+        "discrepancy_agency_id": "ebcinctb1.swain.nc.us",
+        "geometry": {
+          "coordinates": [
+            [
+              -83.3100049,
+              35.4944783
+            ],
+            [
+              -83.3099154,
+              35.4945924
+            ],
+            [
+              -83.3096889,
+              35.4948769
+            ]
+          ],
+          "type": "LineString"
+        },
+        "legacy_street_name": "Acquoni",
+        "legacy_street_type": "Rd",
+        "municipality_left": "Eastern Band of Cherokee Indians",
+        "municipality_right": "Eastern Band of Cherokee Indians",
+        "nguid": "RCL_2538@ebcinctb1.swain.nc.us",
+        "one_way": null,
+        "postal_community_left": "Cherokee",
+        "postal_community_right": "Cherokee",
+        "road_class": null,
+        "source_object_id": "793",
+        "speed_limit_mph": 25,
+        "street_name": "Acquoni",
+        "street_post_type": "Road"
+      },
+      {
+        "date_updated_epoch_ms": 1755605908000,
+        "discrepancy_agency_id": "ebcinctb1.swain.nc.us",
+        "geometry": {
+          "coordinates": [
+            [
+              -83.3011302,
+              35.5051993
+            ],
+            [
+              -83.301313,
+              35.5052881
+            ],
+            [
+              -83.3016005,
+              35.505426
+            ],
+            [
+              -83.3026352,
+              35.5059272
+            ],
+            [
+              -83.3033719,
+              35.5062867
+            ],
+            [
+              -83.3037591,
+              35.5065006
+            ],
+            [
+              -83.3040876,
+              35.5067027
+            ],
+            [
+              -83.3044443,
+              35.5069513
+            ],
+            [
+              -83.3047993,
+              35.5072336
+            ],
+            [
+              -83.3051526,
+              35.5075493
+            ],
+            [
+              -83.3053551,
+              35.5077587
+            ],
+            [
+              -83.305576,
+              35.5079926
+            ],
+            [
+              -83.3058244,
+              35.5082953
+            ],
+            [
+              -83.306022,
+              35.5085719
+            ],
+            [
+              -83.3061992,
+              35.508852
+            ],
+            [
+              -83.3063588,
+              35.509123
+            ],
+            [
+              -83.306487,
+              35.5093825
+            ],
+            [
+              -83.3066072,
+              35.5096506
+            ],
+            [
+              -83.3067076,
+              35.5099321
+            ],
+            [
+              -83.3068041,
+              35.510236
+            ],
+            [
+              -83.3068861,
+              35.5105573
+            ],
+            [
+              -83.3069494,
+              35.5109127
+            ],
+            [
+              -83.3069812,
+              35.511191
+            ],
+            [
+              -83.3069985,
+              35.5114837
+            ],
+            [
+              -83.3070014,
+              35.5117631
+            ],
+            [
+              -83.3069861,
+              35.5121185
+            ],
+            [
+              -83.306955,
+              35.5126603
+            ],
+            [
+              -83.3069235,
+              35.5130959
+            ],
+            [
+              -83.306903,
+              35.5133537
+            ],
+            [
+              -83.3068631,
+              35.5139637
+            ],
+            [
+              -83.3068311,
+              35.5147114
+            ],
+            [
+              -83.3068271,
+              35.5148723
+            ],
+            [
+              -83.3068185,
+              35.515013
+            ],
+            [
+              -83.3068106,
+              35.5153024
+            ],
+            [
+              -83.3068075,
+              35.5154794
+            ],
+            [
+              -83.306796,
+              35.5157353
+            ],
+            [
+              -83.3067859,
+              35.5159155
+            ],
+            [
+              -83.3067723,
+              35.5162471
+            ]
+          ],
+          "type": "LineString"
+        },
+        "legacy_street_name": "Newfound Gap",
+        "legacy_street_type": "Rd",
+        "municipality_left": "Eastern Band of Cherokee Indians",
+        "municipality_right": "Eastern Band of Cherokee Indians",
+        "nguid": "RCL_2753@ebcinctb1.swain.nc.us",
+        "one_way": null,
+        "postal_community_left": "Cherokee",
+        "postal_community_right": "Cherokee",
+        "road_class": null,
+        "source_object_id": "572",
+        "speed_limit_mph": 35,
+        "street_name": "Newfound Gap",
+        "street_post_type": "Road"
+      },
+      {
+        "date_updated_epoch_ms": 1755605908000,
+        "discrepancy_agency_id": "ebcinctb1.swain.nc.us",
+        "geometry": {
+          "coordinates": [
+            [
+              -83.3096889,
+              35.4948769
+            ],
+            [
+              -83.3095192,
+              35.4950824
+            ],
+            [
+              -83.3092464,
+              35.495383
+            ],
+            [
+              -83.3090069,
+              35.4955986
+            ],
+            [
+              -83.3088036,
+              35.495772
+            ],
+            [
+              -83.3086205,
+              35.4959365
+            ],
+            [
+              -83.3084565,
+              35.4960969
+            ],
+            [
+              -83.3083021,
+              35.4962645
+            ],
+            [
+              -83.308159,
+              35.4964433
+            ],
+            [
+              -83.3080314,
+              35.4966053
+            ],
+            [
+              -83.3078782,
+              35.4967962
+            ],
+            [
+              -83.3077459,
+              35.4969618
+            ],
+            [
+              -83.307619,
+              35.4971244
+            ],
+            [
+              -83.3075013,
+              35.497272
+            ],
+            [
+              -83.3073778,
+              35.4974291
+            ],
+            [
+              -83.3072715,
+              35.4975635
+            ],
+            [
+              -83.3071694,
+              35.4976955
+            ],
+            [
+              -83.3070614,
+              35.4978357
+            ],
+            [
+              -83.3069392,
+              35.4979934
+            ],
+            [
+              -83.3067934,
+              35.4981753
+            ],
+            [
+              -83.3065512,
+              35.4984889
+            ],
+            [
+              -83.3063495,
+              35.4987596
+            ],
+            [
+              -83.3062829,
+              35.4988812
+            ]
+          ],
+          "type": "LineString"
+        },
+        "legacy_street_name": "Acquoni",
+        "legacy_street_type": "Rd",
+        "municipality_left": "Eastern Band of Cherokee Indians",
+        "municipality_right": "Eastern Band of Cherokee Indians",
+        "nguid": "RCL_2798@ebcinctb1.swain.nc.us",
+        "one_way": null,
+        "postal_community_left": "Cherokee",
+        "postal_community_right": "Cherokee",
+        "road_class": null,
+        "source_object_id": "794",
+        "speed_limit_mph": 25,
+        "street_name": "Acquoni",
+        "street_post_type": "Road"
+      },
+      {
+        "date_updated_epoch_ms": 1755605908000,
+        "discrepancy_agency_id": "ebcinctb1.swain.nc.us",
+        "geometry": {
+          "coordinates": [
+            [
+              -83.3062829,
+              35.4988812
+            ],
+            [
+              -83.3062462,
+              35.4989643
+            ],
+            [
+              -83.3062016,
+              35.4990918
+            ],
+            [
+              -83.3061598,
+              35.4992341
+            ],
+            [
+              -83.3061298,
+              35.4993611
+            ],
+            [
+              -83.3061214,
+              35.4993967
+            ]
+          ],
+          "type": "LineString"
+        },
+        "legacy_street_name": "Acquoni",
+        "legacy_street_type": "Rd",
+        "municipality_left": "Eastern Band of Cherokee Indians",
+        "municipality_right": "Eastern Band of Cherokee Indians",
+        "nguid": "RCL_279@ebcinctb1.swain.nc.us",
+        "one_way": null,
+        "postal_community_left": "Cherokee",
+        "postal_community_right": "Cherokee",
+        "road_class": null,
+        "source_object_id": "795",
+        "speed_limit_mph": 25,
+        "street_name": "Acquoni",
+        "street_post_type": "Road"
+      },
+      {
+        "date_updated_epoch_ms": 1755605908000,
+        "discrepancy_agency_id": "ebcinctb1.swain.nc.us",
+        "geometry": {
+          "coordinates": [
+            [
+              -83.3119,
+              35.4920833
+            ],
+            [
+              -83.3117421,
+              35.4922854
+            ],
+            [
+              -83.3115865,
+              35.4924853
+            ]
+          ],
+          "type": "LineString"
+        },
+        "legacy_street_name": "Acquoni",
+        "legacy_street_type": "Rd",
+        "municipality_left": "Eastern Band of Cherokee Indians",
+        "municipality_right": "Eastern Band of Cherokee Indians",
+        "nguid": "RCL_406@ebcinctb1.swain.nc.us",
+        "one_way": null,
+        "postal_community_left": "Cherokee",
+        "postal_community_right": "Cherokee",
+        "road_class": null,
+        "source_object_id": "787",
+        "speed_limit_mph": 25,
+        "street_name": "Acquoni",
+        "street_post_type": "Road"
+      },
+      {
+        "date_updated_epoch_ms": 1755605908000,
+        "discrepancy_agency_id": "ebcinctb1.swain.nc.us",
+        "geometry": {
+          "coordinates": [
+            [
+              -83.3059756,
+              35.4999714
+            ],
+            [
+              -83.3057829,
+              35.4999407
+            ],
+            [
+              -83.305372,
+              35.4998695
+            ],
+            [
+              -83.3050467,
+              35.4998164
+            ],
+            [
+              -83.3049983,
+              35.4998085
+            ],
+            [
+              -83.3047589,
+              35.49977
+            ],
+            [
+              -83.3046052,
+              35.4997472
+            ],
+            [
+              -83.3043257,
+              35.4996993
+            ],
+            [
+              -83.3040744,
+              35.4996542
+            ],
+            [
+              -83.3039585,
+              35.4996358
+            ],
+            [
+              -83.3036469,
+              35.499582
+            ],
+            [
+              -83.3035607,
+              35.4995671
+            ]
+          ],
+          "type": "LineString"
+        },
+        "legacy_street_name": "Tsali",
+        "legacy_street_type": "Blvd",
+        "municipality_left": "Eastern Band of Cherokee Indians",
+        "municipality_right": "Eastern Band of Cherokee Indians",
+        "nguid": "RCL_678@ebcinctb1.swain.nc.us",
+        "one_way": null,
+        "postal_community_left": "Cherokee",
+        "postal_community_right": "Cherokee",
+        "road_class": null,
+        "source_object_id": "1271",
+        "speed_limit_mph": 35,
+        "street_name": "Tsali",
+        "street_post_type": "Boulevard"
+      },
+      {
+        "date_updated_epoch_ms": 1755605908000,
+        "discrepancy_agency_id": "ebcinctb1.swain.nc.us",
+        "geometry": {
+          "coordinates": [
+            [
+              -83.3138829,
+              35.4863186
+            ],
+            [
+              -83.3138562,
+              35.4864134
+            ],
+            [
+              -83.3137986,
+              35.4866143
+            ],
+            [
+              -83.3137226,
+              35.486859
+            ],
+            [
+              -83.313655,
+              35.4870815
+            ],
+            [
+              -83.3135855,
+              35.487312
+            ],
+            [
+              -83.3135157,
+              35.4875461
+            ],
+            [
+              -83.3134527,
+              35.4877645
+            ],
+            [
+              -83.3133695,
+              35.4880321
+            ],
+            [
+              -83.3132962,
+              35.488283
+            ],
+            [
+              -83.3132355,
+              35.4884912
+            ],
+            [
+              -83.3131923,
+              35.4886374
+            ]
+          ],
+          "type": "LineString"
+        },
+        "legacy_street_name": "Acquoni",
+        "legacy_street_type": "Rd",
+        "municipality_left": "Eastern Band of Cherokee Indians",
+        "municipality_right": "Eastern Band of Cherokee Indians",
+        "nguid": "RCL_795@ebcinctb1.swain.nc.us",
+        "one_way": null,
+        "postal_community_left": "Cherokee",
+        "postal_community_right": "Cherokee",
+        "road_class": null,
+        "source_object_id": "784",
+        "speed_limit_mph": 25,
+        "street_name": "Acquoni",
+        "street_post_type": "Road"
+      }
+    ],
+    "ordered_nguids": [
+      "RCL_2753@ebcinctb1.swain.nc.us",
+      "RCL_1676@ebcinctb1.swain.nc.us",
+      "RCL_2182@ebcinctb1.swain.nc.us",
+      "RCL_678@ebcinctb1.swain.nc.us",
+      "RCL_1873@ebcinctb1.swain.nc.us",
+      "RCL_1383@ebcinctb1.swain.nc.us",
+      "RCL_279@ebcinctb1.swain.nc.us",
+      "RCL_2798@ebcinctb1.swain.nc.us",
+      "RCL_2538@ebcinctb1.swain.nc.us",
+      "RCL_1435@ebcinctb1.swain.nc.us",
+      "RCL_196@ebcinctb1.swain.nc.us",
+      "RCL_1935@ebcinctb1.swain.nc.us",
+      "RCL_1017@ebcinctb1.swain.nc.us",
+      "RCL_1829@ebcinctb1.swain.nc.us",
+      "RCL_406@ebcinctb1.swain.nc.us",
+      "RCL_212@ebcinctb1.swain.nc.us",
+      "RCL_2079@ebcinctb1.swain.nc.us",
+      "RCL_795@ebcinctb1.swain.nc.us",
+      "RCL_1282@ebcinctb1.swain.nc.us",
+      "RCL_2278@ebcinctb1.swain.nc.us",
+      "RCL_2285@ebcinctb1.swain.nc.us",
+      "RCL_1464@ebcinctb1.swain.nc.us",
+      "RCL_1413@ebcinctb1.swain.nc.us"
+    ],
+    "query": {
+      "f": "json",
+      "geometryPrecision": "7",
+      "orderByFields": "nguid",
+      "outFields": "objectid,nguid,dateupdate,discrpagid,oneway,st_name,st_postyp,lst_name,lst_typ,roadclass,speedlimit,incmuni_l,incmuni_r,postcomm_l,postcomm_r,f_gc_src_obj_id",
+      "outSR": "4326",
+      "returnGeometry": "true",
+      "returnM": "false",
+      "returnZ": "false",
+      "where": "nguid IN ('RCL_2753@ebcinctb1.swain.nc.us','RCL_1676@ebcinctb1.swain.nc.us','RCL_2182@ebcinctb1.swain.nc.us','RCL_678@ebcinctb1.swain.nc.us','RCL_1873@ebcinctb1.swain.nc.us','RCL_1383@ebcinctb1.swain.nc.us','RCL_279@ebcinctb1.swain.nc.us','RCL_2798@ebcinctb1.swain.nc.us','RCL_2538@ebcinctb1.swain.nc.us','RCL_1435@ebcinctb1.swain.nc.us','RCL_196@ebcinctb1.swain.nc.us','RCL_1935@ebcinctb1.swain.nc.us','RCL_1017@ebcinctb1.swain.nc.us','RCL_1829@ebcinctb1.swain.nc.us','RCL_406@ebcinctb1.swain.nc.us','RCL_212@ebcinctb1.swain.nc.us','RCL_2079@ebcinctb1.swain.nc.us','RCL_795@ebcinctb1.swain.nc.us','RCL_1282@ebcinctb1.swain.nc.us','RCL_2278@ebcinctb1.swain.nc.us','RCL_2285@ebcinctb1.swain.nc.us','RCL_1464@ebcinctb1.swain.nc.us','RCL_1413@ebcinctb1.swain.nc.us')"
+    },
+    "source": {
+      "agency": "NC 911 Board; NG911; CGIA",
+      "attribution": "NC OneMap; NC 911 Board; NG911; CGIA; Eastern Band of Cherokee Indians",
+      "coordinate_precision": 7,
+      "copyright_text": "NC 911 Board;NG911;CGIA",
+      "custodian": "North Carolina Center for Geographic Information and Analysis",
+      "iteminfo_sha256": "c2a53973683f2e7023f7328326b05dcc92bfc0c3a8714f9bc388575efc6870c6",
+      "iteminfo_url": "https://services.nconemap.gov/secure/rest/services/NC1Map_Transportation/FeatureServer/0/iteminfo",
+      "layer_definition_sha256": "28028b5772c3f18eb9d5f143016e589a2258baaf6ab9231ba94f458ca3042695",
+      "layer_url": "https://services.nconemap.gov/secure/rest/services/NC1Map_Transportation/FeatureServer/0",
+      "license": "free_unrestricted_use",
+      "normalized_features_sha256": "b771cf89c50445c4686f50d7753a30a092c1d0bdfe7de5955eb2d05c2c58f925",
+      "normalizer": "trailhead_nc_onemap_ng911_connector_v1",
+      "output_spatial_reference": "EPSG:4326",
+      "query_contract_sha256": "cc6bf02fc9a7e91c1aa3d2a782d21b25b631ec932d1e91a1e59eed672f68d12c",
+      "raw_selected_features_sha256": "0628a72f02b604a791b72966f3696d3becdf2dd2159e97ab934334550bb12771",
+      "reviewed_at": "2026-08-05",
+      "reviewed_by": "Trailhead product engineering",
+      "service_version": 10.91,
+      "simplification": "none",
+      "source_spatial_reference": "NAD83(2011) / North Carolina (ftUS):103122 (latest 6543)",
+      "terms_data_url": "https://www.arcgis.com/sharing/rest/content/items/e60514c3b78542ef9902e3d7f7a671c1/data",
+      "terms_snapshot_sha256": "658e20ec4cb792d4b0a713d2c5cfda12622a33a17f6d5848f062338de97be134",
+      "terms_url": "https://www.nconemap.gov/pages/terms",
+      "title": "NC OneMap NG911 Centerlines",
+      "use_constraints": [
+        "reference_geometry_not_live_closure_feed",
+        "eastern_band_lineage_from_ng911_agency_fields",
+        "cross_source_handoff_is_explicit_and_bounded",
+        "navigation_requires_routable_engine_and_current_readiness",
+        "no_agency_endorsement"
+      ]
+    },
+    "terms_snapshot": {
+      "folderId": null,
+      "source": "PAGEEDITOR",
+      "values": {
+        "layout": {
+          "sections": [
+            {
+              "containment": "fixed",
+              "isFooter": false,
+              "rows": [
+                {
+                  "cards": [
+                    {
+                      "component": {
+                        "name": "markdown-card",
+                        "settings": {
+                          "markdown": "<h4>Disclaimer</h4>\n<p>The NC Center for Geographic Information and Analysis (CGIA) is charged with the development and maintenance of NC OneMap and, in cooperation with partner organizations, is committed to offering access to current State geospatial information at no charge. By sharing their content, all partner organizations understand this free and unrestricted use policy. Although every effort has been made to ensure the accuracy of information, errors and conditions originating from sources used to develop the data may be reflected in the information supplied. The user must be aware of possible conditions and bear responsibility with respect to errors, collection methodologies, currency, and other conditions related to all data, web services or applications.<br><br>\n\nWhile every effort has been made by data providers to ensure this information is accurate and reliable, there is no assumption of liability for any damages caused by inaccuracies in the data, web services or applications. There is no warranty, express or implied, nor does the fact of access or distribution constitute any such warranty.<br><br>\n\nWritten release agreements to authorize use of the geospatial data, web services, and applications found on the NC OneMap website are not required and will not be issued. The use of trade names or commercial products does not constitute their endorsement by CGIA or North Carolina State Government. Any sale of this data must not violate applicable state laws or regulations.</p><p><br></p>\n\n<h4>Website Citation</h4><p>When citing NC OneMap in printed or online publications please use the following citation:</p>\n\n<pre role=\"textbox\" tabindex=\"0\" aria-label=\"Code block (read only)\"><em>NC OneMap (2019)</em>. North Carolina Department of Information Technology, Government Data Analytics Center, Center for Geographic<br>Information and Analysis. Available at www.nconemap.gov.</pre><p>\n</p>",
+                          "schemaVersion": 2.1
+                        }
+                      },
+                      "showEditor": false,
+                      "width": 12
+                    }
+                  ]
+                }
+              ],
+              "style": {
+                "background": {
+                  "color": "#f3f3f3",
+                  "display": {},
+                  "isFile": false,
+                  "isUrl": true,
+                  "position": {
+                    "x": "center",
+                    "y": "center"
+                  },
+                  "state": "",
+                  "transparency": 0
+                },
+                "color": "#4d4d4d",
+                "rowLayout": "box"
+              },
+              "visibility": {
+                "access": "default",
+                "groups": []
+              }
+            }
+          ]
+        },
+        "sites": [
+          {
+            "id": "33650305fdf24a1bb46465e4bc598e93",
+            "title": "NC OneMap"
+          },
+          {
+            "id": "a0424edfcf8845c3beb9e56ee6db7508",
+            "title": "NC OneMap - Copied"
+          }
+        ],
+        "updatedAt": "2026-07-22T11:46:21.656Z",
+        "updatedBy": "nconemap"
+      }
+    }
+  },
+  "product_id": "great_smoky_mountains_ridges_rivers_living_memory",
+  "retrieved_at": "2026-08-05",
+  "schema_version": 1
+}

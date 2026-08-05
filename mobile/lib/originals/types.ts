@@ -168,6 +168,8 @@ export type OriginalStorySourceV2 = {
   cultural_approval_record_id?: string;
   cultural_approval_record_sha256?: string;
   cultural_approved_at?: string;
+  /** Hash of the exact reviewer-approved pronunciation bundle. */
+  cultural_pronunciation_bundle_sha256?: string;
 };
 
 /** Shared narration content. Route-specific placement lives on cue_refs. */

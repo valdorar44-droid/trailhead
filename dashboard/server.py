@@ -253,7 +253,11 @@ from db.store import (
     claim_featured_authored_original, get_published_original_version,
     list_owned_authored_originals, restore_owned_authored_originals,
     get_published_original_manifest,
+    get_published_original_server_manifest,
     get_published_original_start_readiness,
+    get_user_original_vehicle_binding,
+    upsert_user_original_vehicle_binding,
+    delete_user_original_vehicle_binding,
     save_authored_original_asset_record, list_authored_original_asset_records,
     attest_authored_original_generator_license,
     get_authored_original_asset_record_admin,
@@ -312,6 +316,16 @@ from db.store import (
     create_trip_brief_and_backup_v1,
     get_referral_summary, issue_account_deletion_authorization,
     consume_account_deletion_authorization,
+)
+from db.originals_current_roads import (
+    OriginalCurrentRoadsError,
+    build_operational_observation,
+    default_current_road_reader,
+)
+from db.originals_operational import load_operational_candidate
+from db.originals_route_evidence import (
+    OriginalRouteEvidenceError,
+    load_registered_route_evidence,
 )
 from ingestors.active import get_active_activities, get_active_campgrounds
 from ingestors.fcc import get_mobile_coverage
@@ -10973,6 +10987,83 @@ def _require_originals_feature(user: dict | None = None) -> None:
         })
 
 
+def _originals_road_readiness_available(user: dict | None) -> bool:
+    configured = str(
+        os.getenv("TRAILHEAD_ORIGINALS_ROAD_READINESS_ENABLED") or "off"
+    ).strip().lower()
+    stage = {
+        "1": "public",
+        "true": "public",
+        "on": "public",
+        "enabled": "public",
+        "0": "off",
+        "false": "off",
+    }.get(configured, configured)
+    return bool(
+        stage == "public"
+        or (
+            stage == "internal"
+            and isinstance(user, dict)
+            and user.get("is_admin")
+        )
+    )
+
+
+def _trusted_original_road_observation(
+    *,
+    pack_id: str,
+    version: int,
+    chapter_id: str,
+    variant_id: str | None,
+    user: dict | None,
+    now: datetime,
+) -> dict | None:
+    """Build one fail-closed, server-owned road observation for Start Tour."""
+
+    if not _originals_road_readiness_available(user):
+        return None
+    manifest = get_published_original_server_manifest(
+        pack_id,
+        version,
+        user_id=user["id"] if user else None,
+    )
+    if not isinstance(manifest, dict) or int(manifest.get("schema_version") or 0) != 2:
+        return None
+    chapter = next((
+        item
+        for item in manifest.get("chapters") or []
+        if isinstance(item, dict) and item.get("id") == chapter_id
+    ), None)
+    if not isinstance(chapter, dict):
+        return None
+    selected_variant_id = str(
+        variant_id or chapter.get("default_variant_id") or ""
+    ).strip()
+    if not any(
+        isinstance(item, dict) and item.get("id") == selected_variant_id
+        for item in chapter.get("variants") or []
+    ):
+        return None
+    binding = manifest.get("route_evidence")
+    if not isinstance(binding, dict):
+        return None
+    try:
+        route_evidence = load_registered_route_evidence(binding.get("evidence_id"))
+        feed = default_current_road_reader.get(now=now)
+        return build_operational_observation(
+            candidate=load_operational_candidate(),
+            route_evidence=route_evidence,
+            route_evidence_sha256=str(binding.get("evidence_sha256") or ""),
+            chapter_id=chapter_id,
+            variant_id=selected_variant_id,
+            feed=feed,
+        )
+    except (OriginalCurrentRoadsError, OriginalRouteEvidenceError, ValueError):
+        # An unavailable, stale, or changed official source must become the
+        # existing check-required response, never an inferred open state.
+        return None
+
+
 def _require_product_feature(env_name: str, user: dict | None = None) -> None:
     if not _product_feature_enabled(env_name, user):
         raise HTTPException(404, {
@@ -12623,11 +12714,55 @@ class OriginalOperationalReadinessV2(BaseModel):
     alternate_chapter_ids: list[str] = Field(default_factory=list, max_length=20)
 
 
+class OriginalRouteEvidenceBindingV1(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    schema_version: Literal[1] = 1
+    evidence_id: str = Field(min_length=1, max_length=240)
+    evidence_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    product_id: str = Field(min_length=1, max_length=240)
+    route_spec_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    source_snapshot_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
+class OriginalVehicleBindingInputV1(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    vehicle_kind: Literal[
+        "passenger", "motorcycle", "motorhome", "bus", "commercial_service",
+        "van_camper", "other",
+    ]
+    vehicle_length_ft: Optional[float] = Field(default=None, ge=1, le=100)
+    is_towing: bool
+
+
+class OriginalVehicleBindingV1(OriginalVehicleBindingInputV1):
+    schema_version: Literal[1] = 1
+    binding_id: str = Field(pattern=r"^ovb_[A-Za-z0-9_-]{20,80}$")
+    revision: int = Field(ge=1)
+    vehicle_class: Optional[Literal[
+        "passenger", "motorcycle", "commercial_service", "bus", "motorhome",
+        "towing_trailer", "van_over_25_ft",
+    ]] = None
+    complete: bool
+    updated_at: int = Field(ge=0)
+
+
+class OriginalVehicleBindingEnvelopeV1(BaseModel):
+    binding: Optional[OriginalVehicleBindingV1] = None
+
+
 class OriginalStartReadinessRequestV1(BaseModel):
     model_config = {"extra": "forbid", "strict": True}
 
     chapter_id: str = Field(min_length=1, max_length=240)
     variant_id: Optional[str] = Field(default=None, max_length=240)
+    vehicle_binding_id: Optional[str] = Field(
+        default=None,
+        pattern=r"^ovb_[A-Za-z0-9_-]{20,80}$",
+    )
+    # Accepted only so an older preview client receives a fail-closed response
+    # instead of a transport error. This field is never used as authority.
     vehicle_class: Optional[Literal[
         "passenger", "motorcycle", "commercial_service", "bus", "motorhome",
         "towing_trailer", "van_over_25_ft",
@@ -12675,6 +12810,7 @@ class OriginalManifestV2(BaseModel):
     assets: list[OriginalAssetV1] = Field(default_factory=list, max_length=500)
     offline_map: OriginalOfflineMapV1
     review: OriginalReviewV1
+    route_evidence: Optional[OriginalRouteEvidenceBindingV1] = None
     # Optional for route/editorial drafts; mandatory at the publication gate.
     narration_profile: Optional[OriginalNarrationProfileV1] = None
 
@@ -14991,10 +15127,16 @@ async def api_admin_create_original(
 @app.get("/api/admin/originals/{pack_id}/device-preview/manifest")
 async def api_admin_original_device_preview_manifest(
     pack_id: str,
+    chapter_id: str | None = Query(default=None),
+    variant_id: str | None = Query(default=None),
     admin: dict = Depends(_require_admin),
 ):
     try:
-        manifest = get_authored_original_device_preview_manifest(pack_id)
+        manifest = get_authored_original_device_preview_manifest(
+            pack_id,
+            chapter_id=chapter_id,
+            variant_id=variant_id,
+        )
     except Exception as exc:
         _raise_account_store_error(exc)
     if not manifest:
@@ -15397,6 +15539,33 @@ async def api_restore_originals(user: dict = Depends(_current_user)):
     return {"items": restore_owned_authored_originals(user["id"])}
 
 
+@app.get(
+    "/api/account/originals/vehicle-binding",
+    response_model=OriginalVehicleBindingEnvelopeV1,
+)
+async def api_get_original_vehicle_binding(user: dict = Depends(_current_user)):
+    return {"binding": get_user_original_vehicle_binding(user["id"])}
+
+
+@app.put(
+    "/api/account/originals/vehicle-binding",
+    response_model=OriginalVehicleBindingV1,
+)
+async def api_put_original_vehicle_binding(
+    body: OriginalVehicleBindingInputV1,
+    user: dict = Depends(_current_user),
+):
+    try:
+        return upsert_user_original_vehicle_binding(user["id"], body.model_dump())
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
+@app.delete("/api/account/originals/vehicle-binding")
+async def api_delete_original_vehicle_binding(user: dict = Depends(_current_user)):
+    return {"deleted": delete_user_original_vehicle_binding(user["id"])}
+
+
 @app.get("/api/originals/{pack_id}/versions/{version}/manifest")
 async def api_original_manifest(
     pack_id: str,
@@ -15428,17 +15597,26 @@ async def api_original_start_readiness(
 
     _require_originals_feature(user)
     try:
-        # A trusted NPS reader will supply a server-owned observation here.
-        # Public request data can never claim that roads are open.
+        effective_now = datetime.now(timezone.utc)
+        observation = await asyncio.to_thread(
+            _trusted_original_road_observation,
+            pack_id=pack_id,
+            version=version,
+            chapter_id=body.chapter_id,
+            variant_id=body.variant_id,
+            user=user,
+            now=effective_now,
+        )
         return get_published_original_start_readiness(
             pack_id,
             version,
             chapter_id=body.chapter_id,
             variant_id=body.variant_id,
             user_id=user["id"] if user else None,
-            vehicle_class=body.vehicle_class,
+            vehicle_binding_id=body.vehicle_binding_id,
             planned_stop_minutes=body.planned_stop_minutes,
-            observation=None,
+            now=effective_now,
+            observation=observation,
         )
     except Exception as exc:
         _raise_account_store_error(exc)

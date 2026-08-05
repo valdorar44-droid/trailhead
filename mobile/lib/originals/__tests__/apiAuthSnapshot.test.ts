@@ -184,6 +184,38 @@ async function main() {
     const full = await apiModule.originalsApi.manifest(manifest.pack_id, manifest.version, undefined, null);
     assert.equal(full.schema_version, 2, 'the acquired manifest parser accepts the complete union bundle');
 
+    const binding = {
+      schema_version: 1 as const,
+      binding_id: 'ovb_test_binding_12345678901234567890',
+      revision: 1,
+      vehicle_kind: 'passenger' as const,
+      vehicle_length_ft: 19,
+      is_towing: false,
+      vehicle_class: 'passenger' as const,
+      complete: true,
+      updated_at: 1,
+    };
+    responseBody = { binding };
+    const fetchedBinding = await apiModule.originalsApi.getVehicleBinding({
+      authToken: 'captured-originals-token',
+    });
+    assert.equal(fetchedBinding.binding?.binding_id, binding.binding_id);
+    assert.equal(requests.at(-1)?.headers.Authorization, 'Bearer captured-originals-token');
+    assert.equal(requests.at(-1)?.url, 'https://trailhead.test/api/account/originals/vehicle-binding');
+
+    responseBody = binding;
+    await apiModule.originalsApi.putVehicleBinding({
+      vehicle_kind: 'passenger',
+      vehicle_length_ft: 19,
+      is_towing: false,
+    }, { authToken: 'captured-originals-token' });
+    assert.equal(requests.at(-1)?.headers.Authorization, 'Bearer captured-originals-token');
+    assert.equal(
+      requests.at(-1)?.body,
+      JSON.stringify({ vehicle_kind: 'passenger', vehicle_length_ft: 19, is_towing: false }),
+    );
+    assert.equal(String(requests.at(-1)?.body).includes('make'), false);
+
     responseBody = {
       schema_version: 1,
       pack_id: manifest.pack_id,
@@ -193,14 +225,19 @@ async function main() {
       variant_id: 'eastbound',
       status: 'check_required',
       can_start: false,
-      reason_code: 'vehicle_class_required',
-      message: 'Choose your vehicle setup before starting this chapter.',
+      reason_code: 'current_conditions_unavailable',
+      message: 'Current operating information could not be verified.',
       notices: [],
     };
     const readiness = await apiModule.originalsApi.startReadiness(
       manifest.pack_id,
       manifest.version,
-      { chapter_id: 'mountain-crossing', variant_id: 'eastbound' },
+      {
+        chapter_id: 'mountain-crossing',
+        variant_id: 'eastbound',
+        vehicle_binding_id: binding.binding_id,
+      },
+      { authToken: 'captured-originals-token' },
     );
     assert.equal(readiness.can_start, false);
     assert.equal(
@@ -209,8 +246,13 @@ async function main() {
     );
     assert.equal(
       requests.at(-1)?.body,
-      JSON.stringify({ chapter_id: 'mountain-crossing', variant_id: 'eastbound' }),
+      JSON.stringify({
+        chapter_id: 'mountain-crossing',
+        variant_id: 'eastbound',
+        vehicle_binding_id: binding.binding_id,
+      }),
     );
+    assert.equal(String(requests.at(-1)?.body).includes('vehicle_class'), false);
   } finally {
     globalThis.fetch = previousFetch;
   }

@@ -1128,6 +1128,17 @@ td.name{color:var(--text);font-weight:600;}
                     <button class="btn btn-primary btn-sm" type="button" onclick="generateOriginalPreviewLink()">Generate app link</button>
                   </div>
                 </div>
+                <div id="originals-preview-selection" class="originals-form" style="display:none;margin-bottom:10px;" aria-label="Draft route selection">
+                  <div class="originals-field">
+                    <label for="originals-preview-chapter">CHAPTER</label>
+                    <select id="originals-preview-chapter" class="originals-select" onchange="handleOriginalPreviewChapterChange()"></select>
+                  </div>
+                  <div class="originals-field">
+                    <label for="originals-preview-variant">ROUTE</label>
+                    <select id="originals-preview-variant" class="originals-select" onchange="handleOriginalPreviewVariantChange()"></select>
+                  </div>
+                  <div id="originals-preview-selection-status" class="originals-place-status wide" role="status" aria-live="polite"></div>
+                </div>
                 <div id="originals-preview-output" class="originals-empty">Save the draft before creating a preview link.</div>
               </div>
 
@@ -2741,6 +2752,7 @@ function showOriginalEditor(original, isNew = false) {
       if ([
         'originals-feature-month', 'originals-feature-version', 'originals-narration-audio',
         'originals-preview-expiry', 'originals-feedback-status', 'originals-feedback-category',
+        'originals-preview-chapter', 'originals-preview-variant',
         'original-stop-source-index', 'originals-simulator', 'originals-simulator-speed-input',
         'originals-simulator-direction', 'originals-simulator-time-scale',
         'originals-license-terms-id', 'originals-license-terms-version',
@@ -3116,6 +3128,147 @@ async function runOriginalVirtualValidation() {
   }
 }
 
+function originalDevicePreviewOptions(manifest) {
+  const schemaVersion = Number(manifest && manifest.schema_version || 0);
+  if (schemaVersion !== 2) return { schemaVersion, chapters: [] };
+  const chapters = (Array.isArray(manifest.chapters) ? manifest.chapters : [])
+    .filter(chapter => chapter && typeof chapter === 'object' && String(chapter.id || '').trim())
+    .map((chapter, chapterIndex) => ({
+      id: String(chapter.id).trim(),
+      sequence: Number(chapter.sequence) || chapterIndex + 1,
+      title: String(chapter.title || '').trim() || `Chapter ${chapterIndex + 1}`,
+      defaultVariantId: String(chapter.default_variant_id || '').trim(),
+      variants: (Array.isArray(chapter.variants) ? chapter.variants : [])
+        .filter(variant => variant && typeof variant === 'object' && String(variant.id || '').trim())
+        .map((variant, variantIndex) => ({
+          id: String(variant.id).trim(),
+          sequence: Number(variant.sequence) || variantIndex + 1,
+          title: String(variant.title || '').trim() || `Route ${variantIndex + 1}`,
+          direction: String(variant.direction || (variant.route && variant.route.direction) || '').trim(),
+          distanceM: Number(variant.distance_m ?? (variant.route && variant.route.distance_m)),
+          durationS: Number(variant.duration_s ?? (variant.route && variant.route.duration_s)),
+          storyCount: Number(variant.story_count),
+          cueCount: Number(variant.cue_count),
+        }))
+        .sort((left, right) => left.sequence - right.sequence || left.id.localeCompare(right.id)),
+    }))
+    .sort((left, right) => left.sequence - right.sequence || left.id.localeCompare(right.id));
+  return { schemaVersion: 2, chapters };
+}
+
+function resolveOriginalDevicePreviewSelection(options, chapterId = '', variantId = '') {
+  if (!options || options.schemaVersion !== 2) {
+    return { valid: true, schemaVersion: Number(options && options.schemaVersion || 0), chapter: null, variant: null };
+  }
+  if (!options.chapters.length) {
+    return { valid: false, schemaVersion: 2, reason: 'This draft has no previewable chapters.' };
+  }
+  const cleanChapterId = String(chapterId || '').trim();
+  const chapter = cleanChapterId
+    ? options.chapters.find(item => item.id === cleanChapterId)
+    : options.chapters[0];
+  if (!chapter) {
+    return { valid: false, schemaVersion: 2, reason: 'Choose a chapter from this saved draft.' };
+  }
+  if (!chapter.variants.length) {
+    return { valid: false, schemaVersion: 2, chapter, reason: `${chapter.title} has no previewable routes.` };
+  }
+  const cleanVariantId = String(variantId || '').trim();
+  const fallbackVariant = chapter.variants.find(item => item.id === chapter.defaultVariantId) || chapter.variants[0];
+  const variant = cleanVariantId
+    ? chapter.variants.find(item => item.id === cleanVariantId)
+    : fallbackVariant;
+  if (!variant) {
+    return { valid: false, schemaVersion: 2, chapter, reason: 'Choose a route from this chapter.' };
+  }
+  return { valid: true, schemaVersion: 2, chapter, variant };
+}
+
+function setOriginalPreviewSelectionStatus(selection) {
+  const status = document.getElementById('originals-preview-selection-status');
+  if (!status) return;
+  if (!selection || !selection.valid || !selection.chapter || !selection.variant) {
+    status.textContent = selection && selection.reason || 'Choose a chapter and route before creating the app link.';
+    status.style.color = 'var(--red)';
+    return;
+  }
+  const variant = selection.variant;
+  const details = [
+    variant.direction ? originalHumanLabel(variant.direction) : '',
+    Number.isFinite(variant.distanceM) ? formatDistance(variant.distanceM) : '',
+    Number.isFinite(variant.durationS) ? formatDuration(variant.durationS) : '',
+    Number.isFinite(variant.storyCount) ? `${variant.storyCount} ${variant.storyCount === 1 ? 'story' : 'stories'}` : '',
+    Number.isFinite(variant.cueCount) && variant.cueCount > 0 ? `${variant.cueCount} short ${variant.cueCount === 1 ? 'cue' : 'cues'}` : '',
+  ].filter(Boolean);
+  status.textContent = `${selection.chapter.title} · ${variant.title}${details.length ? ` · ${details.join(' · ')}` : ''}`;
+  status.style.color = 'var(--text2)';
+}
+
+function renderOriginalDevicePreviewSelection(manifestOverride = null) {
+  const host = document.getElementById('originals-preview-selection');
+  const chapterSelect = document.getElementById('originals-preview-chapter');
+  const variantSelect = document.getElementById('originals-preview-variant');
+  if (!host || !chapterSelect || !variantSelect) return null;
+  let manifest = manifestOverride;
+  if (!manifest) {
+    try { manifest = parseOriginalJsonField('originals-manifest-json', 'Offline manifest'); }
+    catch(e) {
+      host.style.display = 'grid';
+      chapterSelect.innerHTML = '<option value="">Fix manifest JSON</option>';
+      variantSelect.innerHTML = '<option value="">Unavailable</option>';
+      chapterSelect.disabled = true;
+      variantSelect.disabled = true;
+      const invalid = { valid: false, schemaVersion: 2, reason: e.message };
+      setOriginalPreviewSelectionStatus(invalid);
+      return invalid;
+    }
+  }
+  const options = originalDevicePreviewOptions(manifest);
+  if (options.schemaVersion !== 2) {
+    host.style.display = 'none';
+    chapterSelect.innerHTML = '';
+    variantSelect.innerHTML = '';
+    chapterSelect.disabled = false;
+    variantSelect.disabled = false;
+    return { valid: true, schemaVersion: options.schemaVersion, chapter: null, variant: null };
+  }
+  host.style.display = 'grid';
+  const currentChapter = options.chapters.some(item => item.id === chapterSelect.value)
+    ? chapterSelect.value
+    : options.chapters[0] && options.chapters[0].id || '';
+  chapterSelect.innerHTML = options.chapters.length
+    ? options.chapters.map(chapter => `<option value="${esc(chapter.id)}">${esc(chapter.title)}</option>`).join('')
+    : '<option value="">No chapters available</option>';
+  chapterSelect.value = currentChapter;
+  chapterSelect.disabled = !options.chapters.length;
+  const chapter = options.chapters.find(item => item.id === currentChapter);
+  const currentVariant = chapter && chapter.variants.some(item => item.id === variantSelect.value)
+    ? variantSelect.value
+    : chapter && (chapter.variants.find(item => item.id === chapter.defaultVariantId) || chapter.variants[0])?.id || '';
+  variantSelect.innerHTML = chapter && chapter.variants.length
+    ? chapter.variants.map(variant => `<option value="${esc(variant.id)}">${esc(variant.title)}</option>`).join('')
+    : '<option value="">No routes available</option>';
+  variantSelect.value = currentVariant;
+  variantSelect.disabled = !chapter || !chapter.variants.length;
+  const selection = resolveOriginalDevicePreviewSelection(options, currentChapter, currentVariant);
+  setOriginalPreviewSelectionStatus(selection);
+  return selection;
+}
+
+function handleOriginalPreviewChapterChange() {
+  const chapterSelect = document.getElementById('originals-preview-chapter');
+  const variantSelect = document.getElementById('originals-preview-variant');
+  if (variantSelect) variantSelect.value = '';
+  const selection = renderOriginalDevicePreviewSelection();
+  if (chapterSelect && selection && selection.chapter) chapterSelect.value = selection.chapter.id;
+  clearOriginalPreviewLink('Generate a new app link for this chapter and route.');
+}
+
+function handleOriginalPreviewVariantChange() {
+  renderOriginalDevicePreviewSelection();
+  clearOriginalPreviewLink('Generate a new app link for this chapter and route.');
+}
+
 function clearOriginalPreviewLink(message = '') {
   const host = document.getElementById('originals-preview-output');
   if (!host) return;
@@ -3127,12 +3280,28 @@ async function generateOriginalPreviewLink() {
   if (!selectedOriginalId) return toast('Save the draft before creating a preview link', 'err');
   if (originalEditorDirty) return toast('Save changes before creating a preview link', 'err');
   try {
+    const manifest = parseOriginalJsonField('originals-manifest-json', 'Offline manifest');
+    const previewSelection = renderOriginalDevicePreviewSelection(manifest);
+    if (!previewSelection || !previewSelection.valid) {
+      throw new Error(previewSelection && previewSelection.reason || 'Choose a chapter and route before creating the app link');
+    }
     const expiresIn = Number(document.getElementById('originals-preview-expiry').value || 3600);
     const result = await api('/api/admin/originals/preview-token', {
       method: 'POST', body: JSON.stringify({ expires_in_seconds: expiresIn })
     });
     if (!result || !result.token) throw new Error('Preview token was not returned');
-    const link = `trailhead://originals/${encodeURIComponent(selectedOriginalId)}?originals_preview_token=${encodeURIComponent(result.token)}`;
+    let link;
+    if (previewSelection.schemaVersion === 2) {
+      const query = new URLSearchParams({
+        id: selectedOriginalId,
+        chapter: previewSelection.chapter.id,
+        variant: previewSelection.variant.id,
+        originals_preview_token: result.token,
+      });
+      link = `trailhead://originals/preview?${query.toString()}`;
+    } else {
+      link = `trailhead://originals/${encodeURIComponent(selectedOriginalId)}?originals_preview_token=${encodeURIComponent(result.token)}`;
+    }
     const host = document.getElementById('originals-preview-output');
     host.className = '';
     host.innerHTML = `<div class="originals-preview-link"><input id="originals-preview-link-value" class="originals-input" readonly aria-label="Short-lived internal app preview link"><div class="originals-actions"><button class="btn btn-primary btn-sm" type="button" onclick="copyOriginalPreviewLink()">Copy link</button><a id="originals-preview-open" class="btn btn-ghost btn-sm" href="#">Open app</a></div></div><div class="originals-sensitive-note">INTERNAL · EXPIRES ${esc(originalReportTime(result.expires_at))} · Do not paste this token into an HTTPS URL or public channel.</div>`;
@@ -3263,6 +3432,7 @@ function renderOriginalPreview(manifestOverride = null) {
   if (!manifest) {
     try { manifest = parseOriginalJsonField('originals-manifest-json', 'Offline manifest'); }
     catch(e) {
+      renderOriginalDevicePreviewSelection(null);
       document.getElementById('originals-metrics').innerHTML = '';
       document.getElementById('originals-route').innerHTML = `<div class="originals-empty" style="margin:18px;color:var(--red);">${esc(e.message)}</div>`;
       document.getElementById('originals-stops').innerHTML = '<div class="originals-empty">Fix manifest JSON.</div>';
@@ -3270,6 +3440,7 @@ function renderOriginalPreview(manifestOverride = null) {
       return;
     }
   }
+  renderOriginalDevicePreviewSelection(manifest);
   const route = manifest.route || {};
   const stops = Array.isArray(manifest.stops) ? manifest.stops : [];
   const assets = Array.isArray(manifest.assets) ? manifest.assets : [];

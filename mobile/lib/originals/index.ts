@@ -26,3 +26,4 @@ export * from './sessionStore';
 export * from './triggerEngine';
 export * from './triggerSimulation';
 export * from './types';
+export * from './vehicleBinding';

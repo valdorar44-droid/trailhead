@@ -1,6 +1,6 @@
 # Great Smoky Mountains Original — Active Checkpoint
 
-Last updated: 2026-08-04 (S1 routes and operations checkpointed)
+Last updated: 2026-08-05 (S2C route/readiness/Studio candidate complete)
 
 ## Resume protocol
 
@@ -371,3 +371,66 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 - Start Tour work is limited to a trusted, timestamped current-road observation contract and server-owned selected-rig binding. Missing, stale, incomplete, or incompatible evidence remains fail-closed.
 - This packet does not contact EBCI or another outside party, draft cultural interpretation or pronunciation, generate narration, spend Cartesia credits, deploy, publish an OTA, change a public stage, or modify Moab V1.
 - Existing task-owned background processes at start: none. Long-running host Node/Python processes predate this packet and are not owned or stopped by it.
+
+## S2C route gaps, Start Tour readiness, and Studio completion candidate
+
+- Completed locally: 2026-08-05.
+- Branch: `feat/smokies-original-s2`.
+- Implementation baseline HEAD: `e037f2ecee52c9e87c698141ec27b7c5d6d8da27`.
+- Protected main-worktree state remains unchanged:
+  - `dashboard/explore_serving_index_v2.json`: `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
+  - `docs/app-store-copy.md`: `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+  - `.cursor/` remains untracked and protected in the main worktree.
+- The existing Originals Builder/Studio was extended rather than replaced:
+  - V2 device previews expose exact Chapter and Route selectors from the saved manifest.
+  - Generated internal links bind the exact pack, chapter, variant, and short-lived preview token.
+  - Incomplete or stale selections fail before a token is persisted; V1 preview links remain unchanged.
+- Permanent route gaps are resolved without persisting Mapbox candidate geometry:
+  - Mountain Crossing uses the reviewed NPS public-road lineage plus an exact 23-segment NC OneMap EBCI-boundary connector.
+  - Little River/Cades Cove uses an exact five-record NPS official-map direction override instead of silently rewriting the source.
+  - All six chapter variants are `official_geometry_candidate`, have empty geometry blockers, and are ready for editorial cue placement.
+  - Route-evidence canonical SHA-256: `95f199551ac949b081f0a8a55d46e0bf261987b211be08835f93387258844159`.
+  - NPS snapshot canonical SHA-256: `667962182156619a6f24b836d5fc8d036bff8117b93a0137956e902d9b702027`.
+  - Official source-supplement SHA-256: `64e4617f24c2c22908dbfee4b4da8b8d80500e25edf5326d21e6adcc44d20684`.
+  - The publication gate binds the product, route spec, source snapshot, checked evidence hash, exact six-variant coverage, geometry/distance tolerance, source authority, license policy, and root blocker state.
+- Start Tour now has a server-owned, fail-closed readiness path:
+  - A bounded NPS Great Smoky Mountains alert reader pins HTTPS host/path, content type, response size, schema, park identity, record count, current dates, exact road-segment identities, ETag/Last-Modified, and a five-minute single-flight cache.
+  - Network, schema, date, identity, classification, or source ambiguity returns the existing `check_required` state; absence from the feed is never described as proof that a road is safe.
+  - The blocking reader runs off the async request loop. An omitted route variant resolves to the chapter default before observation construction.
+  - Active information records carrying road IDs or closure dates fail closed.
+  - `TRAILHEAD_ORIGINALS_ROAD_READINESS_ENABLED` defaults to `off`; `internal` requires an authenticated administrator. Public activation was not enabled.
+  - NPS-only routes can use the current NPS observation when the internal gate is enabled. Mountain Crossing remains `check_required` until a separately trusted current source covers its cross-agency Cherokee extension.
+- Start Tour also uses an owner-scoped minimal vehicle binding:
+  - Only vehicle kind, restriction-relevant length, towing state, and the server-derived restriction class leave the device.
+  - Make, model, year, nickname, and unrelated rig details remain local.
+  - Relevant changes rotate the opaque binding. Account deletion removes it. A legacy client-supplied class is accepted only for transport compatibility and is never trusted as authority.
+  - Profile synchronizes the minimal projection; Start fetches the current binding immediately before readiness and rejects stale account/session generations.
+- Cultural review is now bound to immutable reviewed work, not reusable labels:
+  - Smokies stories must match the exact checked-in dossier story-to-claim registry.
+  - Any future EBCI approval must match the exact product, dossier SHA-256, approved claim set, normalized story transcript SHA-256 map, pronunciation-bundle SHA-256, approval record SHA-256, and approval date.
+  - A changed dossier, script, pronunciation bundle, product, claim scope, or approval record fails closed.
+  - The approval registry remains empty. No Cherokee interpretation or pronunciation is approved or generated.
+- Product publication deliberately remains blocked. The checked evidence still lists `trusted_current_road_observation`, `server_owned_vehicle_class`, and `editorial_and_cultural_review` as root blockers until the final authored product is assembled, current sources are activated for every selected route, the user has a valid saved rig binding, and editorial/cultural review is complete.
+- Verification:
+  - 112 focused backend tests passed across current roads, cultural review, route evidence, vehicle binding, operational readiness, and Manifest V2.
+  - The broad Originals/Smokies backend run produced 242 passes plus 24 passing subtests. Its only initial failure was the isolated worktree lacking `tsx`; the exact trusted-validator contract then passed against the already-installed main dependency tree.
+  - Complete `npm run test:originals` passed, including renderer ownership, V1/V2 access, Studio preview links, route projection, trigger simulation, vehicle binding, background/headless runtime, audio, offline packs, analytics privacy, and stop-race coverage.
+  - Strict mobile `npx tsc --noEmit`, Python compilation, deterministic route builder `--check`, and `git diff --check` passed.
+  - A final independent read-only safety audit found no remaining P0/P1 in the async reader, information-row handling, default-variant resolution, or immutable cultural approval contract; its separate focused run passed 88 tests.
+- No backend deployment, preview or production OTA, native build, public stage change, narration script, pronunciation guide, media download, Cartesia request/credit spend, or external outreach occurred.
+- Task-owned background processes at completion: none. The temporary ignored `mobile/node_modules` test symlink was removed.
+
+### Next exact action after S2C
+
+1. Review this S2C packet, then begin S3 editorial production inside the existing Originals Studio.
+2. Draft and source-lock the non-gated scenic, ecology, engineering, and general-history stories first; keep the three EBCI-gated entries blocked.
+3. Obtain explicit approval before sending the prepared compensated EBCI participation/review request. Do not draft Cherokee interpretation or pronunciations while that review is pending.
+4. Establish a trusted current source for the Cherokee extension before Mountain Crossing can leave `check_required`.
+5. Lock all reviewed scripts and pronunciations before any Cartesia audition or production rendering. Enforce the existing 225,000-credit and $15-before-tax caps.
+
+### Do not repeat after S2C
+
+- S0/S1/S2 Moab provenance, entitlement, Manifest V2, Mapbox route-candidate, or 28-source dossier work.
+- S2B NPS road snapshot fetching or broad permanent-route reconstruction unless accepted source metadata changes.
+- Broad Map, Explore, Layers, Memory, Originals lifecycle, Android Auto, or store-screenshot crawls.
+- Paid narration, competitor-tour extraction, cultural interpretation, or external outreach before the corresponding review gate.

@@ -53,7 +53,7 @@ function signedPreviewToken(expiresAtSeconds: number) {
 
 async function main() {
   const globals = globalThis as typeof globalThis & { __previewStorage?: Map<string, string> };
-  globals.__previewStorage = new Map();
+  globals.__previewStorage?.clear();
   const preview = await loadPreviewAccess();
   const nowMs = Date.now();
   const expiresAtMs = nowMs + 60 * 60 * 1_000;
@@ -65,6 +65,29 @@ async function main() {
   assert.deepEqual(destination, { pathname: '/originals/[id]', params: { id: 'moab' } });
   assert.equal(await preview.getOriginalPreviewToken(nowMs), token);
   assert.equal(await preview.getOriginalPreviewToken(expiresAtMs + 1), null, 'the signed server expiry is honored');
+
+  const v2Token = signedPreviewToken((nowMs + 30 * 60 * 1_000) / 1_000);
+  const v2Destination = await preview.consumeOriginalPreviewUrl(
+    `trailhead://originals/preview?id=smokies&chapter=mountain_crossing&variant=eastbound&originals_preview_token=${encodeURIComponent(v2Token)}`,
+  );
+  assert.deepEqual(v2Destination, {
+    pathname: '/originals/preview',
+    params: {
+      id: 'smokies',
+      chapter: 'mountain_crossing',
+      variant: 'eastbound',
+    },
+  });
+  assert.equal(await preview.getOriginalPreviewToken(nowMs), v2Token);
+
+  globals.__previewStorage?.clear();
+  await assert.rejects(
+    preview.consumeOriginalPreviewUrl(
+      `trailhead://originals/preview?id=smokies&chapter=mountain_crossing&originals_preview_token=${encodeURIComponent(v2Token)}`,
+    ),
+    /Choose a chapter and route/,
+  );
+  assert.equal(await preview.getOriginalPreviewToken(nowMs), null, 'an incomplete V2 link is never stored');
 
   await assert.rejects(
     preview.consumeOriginalPreviewUrl(

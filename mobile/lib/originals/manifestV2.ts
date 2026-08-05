@@ -180,6 +180,7 @@ function validateStory(story: OriginalStoryV2, index: number) {
       'title', 'url', 'publisher', 'role', 'authority', 'reviewed_at',
       'rights_status', 'affected_claims', 'cultural_approval_record_id',
       'cultural_approval_record_sha256', 'cultural_approved_at',
+      'cultural_pronunciation_bundle_sha256',
     ]);
     assertText(citation.title, `${citationLabel}.title`);
     assertText(citation.url, `${citationLabel}.url`);
@@ -225,6 +226,17 @@ function validateStory(story: OriginalStoryV2, index: number) {
         );
       }
       assertReviewDate(citation.cultural_approved_at, `${citationLabel}.cultural_approved_at`);
+      if (citation.cultural_pronunciation_bundle_sha256 != null) {
+        assertText(
+          citation.cultural_pronunciation_bundle_sha256,
+          `${citationLabel}.cultural_pronunciation_bundle_sha256`,
+        );
+        if (!/^[a-f0-9]{64}$/i.test(citation.cultural_pronunciation_bundle_sha256)) {
+          throw new OriginalManifestError(
+            `${citationLabel}.cultural_pronunciation_bundle_sha256 must be a SHA-256 digest.`,
+          );
+        }
+      }
     }
   });
 }

@@ -25,9 +25,31 @@ if str(REPO_ROOT) not in sys.path:
 
 from db.originals_route_sources import (
     DATUM_TRANSFORMATION,
+    EXPECTED_CADES_DIRECTION_OVERRIDES,
     EXPECTED_FACILITY_COUNTS,
     EXPECTED_FACILITY_POLICY,
     EXPECTED_ROAD_COUNTS,
+    GRSM_CADES_QUERY_SHA256,
+    GRSM_MAP_PAGE_URL,
+    GRSM_MAP_PDF_BYTES,
+    GRSM_MAP_PDF_SHA256,
+    GRSM_MAP_PDF_URL,
+    GRSM_ROADS_ACCESS_DATA_URL,
+    GRSM_ROADS_ITEM_SHA256,
+    GRSM_ROADS_ITEM_URL,
+    GRSM_ROADS_LAYER_DEFINITION_SHA256,
+    GRSM_ROADS_LAYER_URL,
+    NC_ONEMAP_CONNECTOR_NGUIDS,
+    NC_ONEMAP_ITEMINFO_SHA256,
+    NC_ONEMAP_LAYER_DEFINITION_SHA256,
+    NC_ONEMAP_NORMALIZED_CONNECTOR_SHA256,
+    NC_ONEMAP_RAW_CONNECTOR_QUERY_SHA256,
+    NC_ONEMAP_ROAD_ITEMINFO_URL,
+    NC_ONEMAP_ROAD_LAYER_URL,
+    NC_ONEMAP_SOURCE_SPATIAL_REFERENCE,
+    NC_ONEMAP_TERMS_DATA_URL,
+    NC_ONEMAP_TERMS_SNAPSHOT_SHA256,
+    NC_ONEMAP_TERMS_URL,
     NPS_DISCLAIMER_URL,
     NPS_PUBLIC_DOMAIN_URL,
     NPS_QUERY_FIELDS,
@@ -44,17 +66,24 @@ from db.originals_route_sources import (
     OriginalRouteSourceError,
     build_official_route_evidence,
     canonical_sha256,
+    normalize_official_route_source_supplement,
     normalize_nps_road_snapshot,
+    reviewed_cades_direction_query_contract,
+    reviewed_nc_onemap_connector_query_contract,
     reviewed_query_contract,
 )
 from scripts.build_smokies_original_routes import load_route_spec
 
 
 DEFAULT_SNAPSHOT = REPO_ROOT / "originals" / "smokies" / "nps_public_roads_snapshot_v1.json"
+DEFAULT_SOURCE_SUPPLEMENT = (
+    REPO_ROOT / "originals" / "smokies" / "official_route_source_supplement_v1.json"
+)
 DEFAULT_ROUTE_SPEC = REPO_ROOT / "originals" / "smokies" / "route_variants_v1.json"
 DEFAULT_EVIDENCE = REPO_ROOT / "originals" / "smokies" / "official_route_evidence_v1.json"
 DEFAULT_AUDIT_DIRECTORY = REPO_ROOT / "output" / "smokies-original" / "official-road-audit"
 MAX_RESPONSE_BYTES = 64 * 1024 * 1024
+MAX_MAP_PDF_BYTES = 16 * 1024 * 1024
 USER_AGENT = "Trailhead-Originals-Authoring/1.0"
 
 
@@ -86,6 +115,22 @@ def _request_json(url: str, *, data: dict[str, str] | None = None) -> dict:
     if not isinstance(result, dict) or result.get("error"):
         raise OriginalRouteSourceError("Official NPS road source returned an error")
     return result
+
+
+def _request_bytes(url: str, *, maximum_bytes: int, label: str) -> bytes:
+    request = urllib_request.Request(
+        url,
+        method="GET",
+        headers={"User-Agent": USER_AGENT, "Accept": "application/octet-stream"},
+    )
+    try:
+        with urllib_request.urlopen(request, timeout=120) as response:
+            payload = response.read(maximum_bytes + 1)
+    except OSError as exc:
+        raise OriginalRouteSourceError(f"{label} is unavailable") from exc
+    if len(payload) > maximum_bytes:
+        raise OriginalRouteSourceError(f"{label} exceeded the safety cap")
+    return payload
 
 
 def _post_query(parameters: dict[str, str]) -> dict:
@@ -176,6 +221,43 @@ def _normalize_raw_feature(raw_feature: dict) -> dict:
         "xy_accuracy": _optional_text(attributes.get("XYACCURACY")),
         "access_notes": _optional_text(attributes.get("ACCESSNOTES")),
         "route_id": _optional_text(attributes.get("ROUTEID")),
+        "geometry": {
+            "type": "LineString",
+            "coordinates": [
+                [round(float(coordinate[0]), 7), round(float(coordinate[1]), 7)]
+                for coordinate in paths[0]
+            ],
+        },
+    }
+
+
+def _normalize_nc_onemap_raw_feature(raw_feature: dict) -> dict:
+    attributes = raw_feature.get("attributes")
+    geometry = raw_feature.get("geometry")
+    if not isinstance(attributes, dict) or not isinstance(geometry, dict):
+        raise OriginalRouteSourceError("NC OneMap connector feature is malformed")
+    paths = geometry.get("paths")
+    if not isinstance(paths, list) or len(paths) != 1 or not isinstance(paths[0], list):
+        raise OriginalRouteSourceError("NC OneMap connector must be a single path")
+    source_object_id = attributes.get("f_gc_src_obj_id")
+    if source_object_id is not None:
+        source_object_id = str(source_object_id)
+    return {
+        "nguid": _optional_text(attributes.get("nguid")),
+        "date_updated_epoch_ms": attributes.get("dateupdate"),
+        "discrepancy_agency_id": _optional_text(attributes.get("discrpagid")),
+        "one_way": _optional_text(attributes.get("oneway")),
+        "street_name": _optional_text(attributes.get("st_name")),
+        "street_post_type": _optional_text(attributes.get("st_postyp")),
+        "legacy_street_name": _optional_text(attributes.get("lst_name")),
+        "legacy_street_type": _optional_text(attributes.get("lst_typ")),
+        "road_class": _optional_text(attributes.get("roadclass")),
+        "speed_limit_mph": attributes.get("speedlimit"),
+        "municipality_left": _optional_text(attributes.get("incmuni_l")),
+        "municipality_right": _optional_text(attributes.get("incmuni_r")),
+        "postal_community_left": _optional_text(attributes.get("postcomm_l")),
+        "postal_community_right": _optional_text(attributes.get("postcomm_r")),
+        "source_object_id": source_object_id,
         "geometry": {
             "type": "LineString",
             "coordinates": [
@@ -354,6 +436,174 @@ def fetch_snapshot(*, retrieved_at: str, reviewed_by: str) -> tuple[dict, dict]:
     return normalize_nps_road_snapshot(snapshot), audit
 
 
+def fetch_source_supplement(*, retrieved_at: str, reviewed_by: str) -> dict:
+    nc_layer = _request_json(f"{NC_ONEMAP_ROAD_LAYER_URL}?f=pjson")
+    nc_iteminfo = _request_json(f"{NC_ONEMAP_ROAD_ITEMINFO_URL}?f=pjson")
+    nc_terms = _request_json(f"{NC_ONEMAP_TERMS_DATA_URL}?f=pjson")
+    for value, expected, label in (
+        (nc_layer, NC_ONEMAP_LAYER_DEFINITION_SHA256, "NC OneMap layer definition"),
+        (nc_iteminfo, NC_ONEMAP_ITEMINFO_SHA256, "NC OneMap item information"),
+        (nc_terms, NC_ONEMAP_TERMS_SNAPSHOT_SHA256, "NC OneMap terms"),
+    ):
+        if canonical_sha256(value) != expected:
+            raise OriginalRouteSourceError(f"{label} changed without review")
+    nc_query = reviewed_nc_onemap_connector_query_contract()
+    nc_raw = _request_json(
+        f"{NC_ONEMAP_ROAD_LAYER_URL}/query",
+        data=nc_query,
+    )
+    if canonical_sha256(nc_raw) != NC_ONEMAP_RAW_CONNECTOR_QUERY_SHA256:
+        raise OriginalRouteSourceError("NC OneMap connector query result changed")
+    nc_raw_features = nc_raw.get("features")
+    if not isinstance(nc_raw_features, list):
+        raise OriginalRouteSourceError("NC OneMap connector query returned no features")
+    nc_features = [_normalize_nc_onemap_raw_feature(item) for item in nc_raw_features]
+    nc_features.sort(key=lambda item: str(item.get("nguid") or ""))
+    if canonical_sha256(nc_features) != NC_ONEMAP_NORMALIZED_CONNECTOR_SHA256:
+        raise OriginalRouteSourceError("NC OneMap connector normalized features changed")
+
+    cades_layer = _request_json(f"{GRSM_ROADS_LAYER_URL}?f=pjson")
+    cades_item = _request_json(f"{GRSM_ROADS_ITEM_URL}?f=pjson")
+    for value, expected, label in (
+        (cades_layer, GRSM_ROADS_LAYER_DEFINITION_SHA256, "GRSM roads layer"),
+        (cades_item, GRSM_ROADS_ITEM_SHA256, "GRSM roads item"),
+    ):
+        if canonical_sha256(value) != expected:
+            raise OriginalRouteSourceError(f"{label} changed without review")
+    cades_query = reviewed_cades_direction_query_contract()
+    cades_raw = _request_json(
+        f"{GRSM_ROADS_LAYER_URL}/query",
+        data=cades_query,
+    )
+    if canonical_sha256(cades_raw) != GRSM_CADES_QUERY_SHA256:
+        raise OriginalRouteSourceError("GRSM Cades direction query changed")
+    cades_features = cades_raw.get("features")
+    if not isinstance(cades_features, list):
+        raise OriginalRouteSourceError("GRSM Cades direction query returned no features")
+    cades_by_object_id: dict[int, dict] = {}
+    for raw_feature in cades_features:
+        attributes = raw_feature.get("attributes") if isinstance(raw_feature, dict) else None
+        if not isinstance(attributes, dict) or not isinstance(attributes.get("OBJECTID"), int):
+            raise OriginalRouteSourceError("GRSM Cades direction row is malformed")
+        cades_by_object_id[attributes["OBJECTID"]] = attributes
+    overrides = []
+    for expected in EXPECTED_CADES_DIRECTION_OVERRIDES:
+        attributes = cades_by_object_id.get(expected.grsm_object_id)
+        if attributes is None:
+            raise OriginalRouteSourceError("GRSM Cades direction row is missing")
+        overrides.append(
+            {
+                "national_geometry_id": expected.national_geometry_id,
+                "grsm_global_id": _guid(attributes.get("GlobalID")),
+                "grsm_object_id": expected.grsm_object_id,
+                "source_one_way": _optional_text(attributes.get("RDONEWAY")),
+                "source_road_status": _optional_text(attributes.get("RDSTATUS")),
+                "public_restriction": _optional_text(attributes.get("PUBRESTRICT")),
+                "data_access": _optional_text(attributes.get("DATAACCESS")),
+                "source_date_epoch_ms": attributes.get("SOURCEDATE"),
+                "xy_accuracy": _optional_text(attributes.get("XYACCURACY")),
+                "validation_result": _optional_text(attributes.get("VALID_RESULT")),
+                "reviewed_traversal_direction": "reverse",
+            }
+        )
+    map_pdf = _request_bytes(
+        GRSM_MAP_PDF_URL,
+        maximum_bytes=MAX_MAP_PDF_BYTES,
+        label="Official GRSM park map",
+    )
+    if len(map_pdf) != GRSM_MAP_PDF_BYTES or hashlib.sha256(map_pdf).hexdigest() != GRSM_MAP_PDF_SHA256:
+        raise OriginalRouteSourceError("Official GRSM park map changed without review")
+
+    supplement = {
+        "schema_version": 1,
+        "kind": "smokies_official_route_source_supplement",
+        "product_id": PRODUCT_ID,
+        "retrieved_at": retrieved_at,
+        "nc_onemap_ebci_connector": {
+            "source": {
+                "agency": "NC 911 Board; NG911; CGIA",
+                "custodian": "North Carolina Center for Geographic Information and Analysis",
+                "title": "NC OneMap NG911 Centerlines",
+                "layer_url": NC_ONEMAP_ROAD_LAYER_URL,
+                "iteminfo_url": NC_ONEMAP_ROAD_ITEMINFO_URL,
+                "terms_url": NC_ONEMAP_TERMS_URL,
+                "terms_data_url": NC_ONEMAP_TERMS_DATA_URL,
+                "license": "free_unrestricted_use",
+                "attribution": (
+                    "NC OneMap; NC 911 Board; NG911; CGIA; "
+                    "Eastern Band of Cherokee Indians"
+                ),
+                "copyright_text": "NC 911 Board;NG911;CGIA",
+                "service_version": 10.91,
+                "source_spatial_reference": NC_ONEMAP_SOURCE_SPATIAL_REFERENCE,
+                "output_spatial_reference": OUTPUT_SPATIAL_REFERENCE,
+                "layer_definition_sha256": NC_ONEMAP_LAYER_DEFINITION_SHA256,
+                "iteminfo_sha256": NC_ONEMAP_ITEMINFO_SHA256,
+                "terms_snapshot_sha256": NC_ONEMAP_TERMS_SNAPSHOT_SHA256,
+                "query_contract_sha256": canonical_sha256(nc_query),
+                "raw_selected_features_sha256": NC_ONEMAP_RAW_CONNECTOR_QUERY_SHA256,
+                "normalized_features_sha256": NC_ONEMAP_NORMALIZED_CONNECTOR_SHA256,
+                "normalizer": "trailhead_nc_onemap_ng911_connector_v1",
+                "coordinate_precision": 7,
+                "simplification": "none",
+                "use_constraints": [
+                    "reference_geometry_not_live_closure_feed",
+                    "eastern_band_lineage_from_ng911_agency_fields",
+                    "cross_source_handoff_is_explicit_and_bounded",
+                    "navigation_requires_routable_engine_and_current_readiness",
+                    "no_agency_endorsement",
+                ],
+                "reviewed_at": retrieved_at,
+                "reviewed_by": reviewed_by,
+            },
+            "terms_snapshot": nc_terms,
+            "query": nc_query,
+            "ordered_nguids": list(NC_ONEMAP_CONNECTOR_NGUIDS),
+            "features": nc_features,
+        },
+        "cades_direction_override": {
+            "source": {
+                "agency": "National Park Service",
+                "title": "GRSM_ROADS",
+                "item_url": GRSM_ROADS_ITEM_URL,
+                "layer_url": GRSM_ROADS_LAYER_URL,
+                "access_data_url": GRSM_ROADS_ACCESS_DATA_URL,
+                "map_page_url": GRSM_MAP_PAGE_URL,
+                "map_pdf_url": GRSM_MAP_PDF_URL,
+                "license": "nps_item_specific_redistribution_terms",
+                "attribution": "National Park Service, Great Smoky Mountains National Park",
+                "source_spatial_reference": "EPSG:4269",
+                "output_spatial_reference": OUTPUT_SPATIAL_REFERENCE,
+                "layer_definition_sha256": GRSM_ROADS_LAYER_DEFINITION_SHA256,
+                "item_sha256": GRSM_ROADS_ITEM_SHA256,
+                "query_contract_sha256": canonical_sha256(cades_query),
+                "raw_query_response_sha256": GRSM_CADES_QUERY_SHA256,
+                "official_map_pdf_sha256": GRSM_MAP_PDF_SHA256,
+                "official_map_pdf_bytes": GRSM_MAP_PDF_BYTES,
+                "use_constraints": [
+                    "direction_override_only_for_exact_reviewed_segments",
+                    "geometry_remains_from_pinned_nps_public_roads_snapshot",
+                    "official_map_is_direction_evidence_not_route_geometry",
+                    "operational_readiness_and_closures_are_separate",
+                    "no_nps_endorsement",
+                ],
+                "reviewed_at": retrieved_at,
+                "reviewed_by": reviewed_by,
+            },
+            "query": cades_query,
+            "map_review": {
+                "review_method": "human_visual_review",
+                "map_revision": "2024 reduced 508",
+                "north_leg_direction": "westbound",
+                "south_leg_direction": "eastbound",
+                "reviewed_loop_travel": "counterclockwise",
+            },
+            "overrides": overrides,
+        },
+    }
+    return normalize_official_route_source_supplement(supplement)
+
+
 def _load_json(path: Path, label: str) -> dict:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -379,9 +629,13 @@ def _atomic_write(path: Path, value: object) -> None:
             pass
 
 
-def build_from_snapshot(snapshot: dict, route_spec_path: Path) -> dict:
+def build_from_snapshot(
+    snapshot: dict,
+    route_spec_path: Path,
+    source_supplement: dict,
+) -> dict:
     strict_spec = load_route_spec(route_spec_path)
-    return build_official_route_evidence(snapshot, strict_spec)
+    return build_official_route_evidence(snapshot, strict_spec, source_supplement)
 
 
 def refresh(args: argparse.Namespace) -> int:
@@ -389,7 +643,10 @@ def refresh(args: argparse.Namespace) -> int:
         retrieved_at=args.retrieved_at,
         reviewed_by=args.reviewed_by,
     )
-    evidence = build_from_snapshot(snapshot, args.route_spec)
+    source_supplement = normalize_official_route_source_supplement(
+        _load_json(args.source_supplement, "official route source supplement")
+    )
+    evidence = build_from_snapshot(snapshot, args.route_spec, source_supplement)
     _atomic_write(args.snapshot, snapshot)
     _atomic_write(args.evidence, evidence)
     raw_hash = snapshot["source"]["raw_selected_features_sha256"]
@@ -400,6 +657,34 @@ def refresh(args: argparse.Namespace) -> int:
                 "snapshot": str(args.snapshot),
                 "snapshot_sha256": canonical_sha256(snapshot),
                 "selected_feature_count": len(snapshot["features"]),
+                "source_supplement": str(args.source_supplement),
+                "source_supplement_sha256": canonical_sha256(source_supplement),
+                "evidence": str(args.evidence),
+                "evidence_sha256": canonical_sha256(evidence),
+                "publication_status": evidence["publication_status"],
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+def refresh_supplement(args: argparse.Namespace) -> int:
+    source_supplement = fetch_source_supplement(
+        retrieved_at=args.retrieved_at,
+        reviewed_by=args.reviewed_by,
+    )
+    snapshot = normalize_nps_road_snapshot(
+        _load_json(args.snapshot, "NPS public-road snapshot")
+    )
+    evidence = build_from_snapshot(snapshot, args.route_spec, source_supplement)
+    _atomic_write(args.source_supplement, source_supplement)
+    _atomic_write(args.evidence, evidence)
+    print(
+        json.dumps(
+            {
+                "source_supplement": str(args.source_supplement),
+                "source_supplement_sha256": canonical_sha256(source_supplement),
                 "evidence": str(args.evidence),
                 "evidence_sha256": canonical_sha256(evidence),
                 "publication_status": evidence["publication_status"],
@@ -415,7 +700,17 @@ def check(args: argparse.Namespace) -> int:
     snapshot = normalize_nps_road_snapshot(snapshot_raw)
     if snapshot != snapshot_raw:
         raise OriginalRouteSourceError("Checked NPS snapshot is not canonical")
-    expected_evidence = build_from_snapshot(snapshot, args.route_spec)
+    source_supplement_raw = _load_json(
+        args.source_supplement, "official route source supplement"
+    )
+    source_supplement = normalize_official_route_source_supplement(
+        source_supplement_raw
+    )
+    if source_supplement != source_supplement_raw:
+        raise OriginalRouteSourceError("Checked official source supplement is not canonical")
+    expected_evidence = build_from_snapshot(
+        snapshot, args.route_spec, source_supplement
+    )
     checked_evidence = _load_json(args.evidence, "official route evidence")
     if checked_evidence != expected_evidence:
         raise OriginalRouteSourceError("Checked official route evidence is stale")
@@ -425,6 +720,7 @@ def check(args: argparse.Namespace) -> int:
                 "snapshot_sha256": canonical_sha256(snapshot),
                 "evidence_sha256": canonical_sha256(expected_evidence),
                 "selected_feature_count": len(snapshot["features"]),
+                "source_supplement_sha256": canonical_sha256(source_supplement),
                 "publication_status": expected_evidence["publication_status"],
             },
             sort_keys=True,
@@ -437,12 +733,16 @@ def rebuild(args: argparse.Namespace) -> int:
     snapshot = normalize_nps_road_snapshot(
         _load_json(args.snapshot, "NPS public-road snapshot")
     )
-    evidence = build_from_snapshot(snapshot, args.route_spec)
+    source_supplement = normalize_official_route_source_supplement(
+        _load_json(args.source_supplement, "official route source supplement")
+    )
+    evidence = build_from_snapshot(snapshot, args.route_spec, source_supplement)
     _atomic_write(args.evidence, evidence)
     print(
         json.dumps(
             {
                 "snapshot_sha256": canonical_sha256(snapshot),
+                "source_supplement_sha256": canonical_sha256(source_supplement),
                 "evidence_sha256": canonical_sha256(evidence),
                 "publication_status": evidence["publication_status"],
             },
@@ -456,9 +756,13 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     action = parser.add_mutually_exclusive_group(required=True)
     action.add_argument("--refresh-source", action="store_true")
+    action.add_argument("--refresh-supplemental-sources", action="store_true")
     action.add_argument("--build", action="store_true")
     action.add_argument("--check", action="store_true")
     parser.add_argument("--snapshot", type=Path, default=DEFAULT_SNAPSHOT)
+    parser.add_argument(
+        "--source-supplement", type=Path, default=DEFAULT_SOURCE_SUPPLEMENT
+    )
     parser.add_argument("--route-spec", type=Path, default=DEFAULT_ROUTE_SPEC)
     parser.add_argument("--evidence", type=Path, default=DEFAULT_EVIDENCE)
     parser.add_argument("--audit-directory", type=Path, default=DEFAULT_AUDIT_DIRECTORY)
@@ -471,6 +775,8 @@ def main() -> int:
     args = parse_args()
     if args.refresh_source:
         return refresh(args)
+    if args.refresh_supplemental_sources:
+        return refresh_supplement(args)
     if args.build:
         return rebuild(args)
     return check(args)

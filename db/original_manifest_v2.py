@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import re
 from collections.abc import Callable
@@ -11,6 +12,16 @@ from datetime import date, datetime, timezone
 from db.originals_operational import (
     OriginalOperationalReadinessError,
     validate_manifest_operational_binding,
+)
+from db.originals_cultural_review import (
+    OriginalCulturalReviewError,
+    validate_cultural_claim_approval,
+    validate_cultural_story_claims,
+)
+from db.originals_route_evidence import (
+    OriginalRouteEvidenceError,
+    normalize_route_evidence_binding,
+    validate_manifest_route_evidence,
 )
 
 
@@ -236,12 +247,14 @@ def normalize_original_manifest_v2(
     publishing: bool = False,
     verified_assets: dict[str, dict] | None = None,
     validated_selections: set[str] | None = None,
+    route_evidence_document: dict | None = None,
 ) -> tuple[dict, str]:
     """Normalize V2 and validate every selectable compilation through V1."""
     raw = copy.deepcopy(_object(manifest, "Original V2 manifest"))
     _forbid_keys(raw, {
         "schema_version", "manifest_id", "pack_id", "version", "locale", "title",
         "stories", "chapters", "assets", "offline_map", "review", "narration_profile",
+        "route_evidence",
     }, "Original V2 manifest")
     if raw.get("schema_version") != 2:
         raise OriginalManifestV2Error("Original V2 manifest schema_version must be 2")
@@ -257,6 +270,12 @@ def normalize_original_manifest_v2(
     clean_title = _text(title, "Original V2 title", 200)
     if _text(raw.get("title"), "Original V2 manifest title", 200) != clean_title:
         raise OriginalManifestV2Error("Original V2 manifest title must match its authored pack")
+    raw_route_evidence = raw.get("route_evidence")
+    cultural_product_id = str(
+        raw_route_evidence.get("product_id")
+        if isinstance(raw_route_evidence, dict)
+        else pack_id
+    ).strip()
 
     offline_map = copy.deepcopy(_object(raw.get("offline_map"), "Original V2 offline map"))
     _forbid_keys(offline_map, {"region_id", "bounds", "min_zoom", "max_zoom", "estimated_bytes"}, "Original V2 offline map")
@@ -300,12 +319,14 @@ def normalize_original_manifest_v2(
             if not assets_by_id.get(story["artwork_asset_id"], {}).get("kind") == "image":
                 raise OriginalManifestV2Error(f"Original V2 story {story['id']} must reference an image asset")
         citations = _items(story.get("citations"), f"Original V2 story {story['id']} citations", 50)
+        story_claim_ids: list[str] = []
         for citation in citations:
             citation = _object(citation, f"Original V2 story {story['id']} source")
             _forbid_keys(citation, {
                 "title", "url", "publisher", "role", "authority", "reviewed_at",
                 "rights_status", "affected_claims", "cultural_approval_record_id",
                 "cultural_approval_record_sha256", "cultural_approved_at",
+                "cultural_pronunciation_bundle_sha256",
             }, f"Original V2 story {story['id']} source")
             if citation.get("role") != "story" or citation.get("authority") not in {"official", "authoritative"}:
                 raise OriginalManifestV2Error(f"Original V2 story {story['id']} citations must be authoritative story sources")
@@ -327,6 +348,7 @@ def normalize_original_manifest_v2(
                 )
             ]
             _unique(claim_ids, f"Original V2 story {story['id']} affected claims")
+            story_claim_ids.extend(claim_ids)
             approval_fields = {
                 "cultural_approval_record_id",
                 "cultural_approval_record_sha256",
@@ -336,6 +358,13 @@ def normalize_original_manifest_v2(
                 key for key in approval_fields if citation.get(key) not in (None, "")
             }
             if present_approval and present_approval != approval_fields:
+                raise OriginalManifestV2Error(
+                    f"Original V2 story {story['id']} cultural approval evidence is incomplete"
+                )
+            if (
+                citation.get("cultural_pronunciation_bundle_sha256") not in (None, "")
+                and present_approval != approval_fields
+            ):
                 raise OriginalManifestV2Error(
                     f"Original V2 story {story['id']} cultural approval evidence is incomplete"
                 )
@@ -354,6 +383,42 @@ def normalize_original_manifest_v2(
                     citation["cultural_approved_at"],
                     f"Original V2 story {story['id']} cultural approval date",
                 )
+                if citation.get("cultural_pronunciation_bundle_sha256") not in (None, ""):
+                    pronunciation_sha = str(
+                        citation["cultural_pronunciation_bundle_sha256"]
+                    ).strip().lower()
+                    if not re.fullmatch(r"[a-f0-9]{64}", pronunciation_sha):
+                        raise OriginalManifestV2Error(
+                            f"Original V2 story {story['id']} cultural pronunciation SHA-256 is invalid"
+                        )
+                    citation["cultural_pronunciation_bundle_sha256"] = pronunciation_sha
+            try:
+                validate_cultural_claim_approval(
+                    product_id=cultural_product_id,
+                    story_id=story["id"],
+                    transcript_sha256=hashlib.sha256(
+                        story["transcript"].encode("utf-8")
+                    ).hexdigest(),
+                    claim_ids=claim_ids,
+                    approval_record_id=citation.get("cultural_approval_record_id"),
+                    approval_record_sha256=citation.get(
+                        "cultural_approval_record_sha256"
+                    ),
+                    approved_at=citation.get("cultural_approved_at"),
+                    pronunciation_bundle_sha256=citation.get(
+                        "cultural_pronunciation_bundle_sha256"
+                    ),
+                )
+            except OriginalCulturalReviewError as exc:
+                raise OriginalManifestV2Error(str(exc)) from exc
+        try:
+            validate_cultural_story_claims(
+                product_id=cultural_product_id,
+                story_id=story["id"],
+                claim_ids=story_claim_ids,
+            )
+        except OriginalCulturalReviewError as exc:
+            raise OriginalManifestV2Error(str(exc)) from exc
         stories.append(story)
     stories.sort(key=lambda item: item["id"])
     _unique([item["id"] for item in stories], "Original V2 story ids")
@@ -542,6 +607,21 @@ def normalize_original_manifest_v2(
         "offline_map": offline_map,
         "review": review,
     }
+    try:
+        route_evidence = normalize_route_evidence_binding(
+            raw.get("route_evidence"), required=publishing,
+        )
+        if route_evidence is not None:
+            result["route_evidence"] = route_evidence
+        if publishing:
+            validate_manifest_route_evidence(
+                result,
+                route_evidence,
+                expected_product_id=pack_id,
+                evidence_document=route_evidence_document,
+            )
+    except OriginalRouteEvidenceError as exc:
+        raise OriginalManifestV2Error(str(exc)) from exc
     narration_profile = _profile(raw.get("narration_profile"), required=publishing)
     if narration_profile is not None:
         expected_mime = narration_profile["mobile_delivery"]["mime_type"]
@@ -624,12 +704,23 @@ def original_manifest_v2_preview(manifest: dict) -> dict:
             "variants": variants,
         })
     offline = manifest.get("offline_map") if isinstance(manifest.get("offline_map"), dict) else {}
-    return {
+    preview = {
         "schema_version": 2,
         **{key: manifest[key] for key in ("manifest_id", "pack_id", "version", "locale", "title") if key in manifest},
         "chapters": chapters,
         "offline_map": {key: offline[key] for key in ("region_id", "bounds", "min_zoom", "max_zoom", "estimated_bytes") if key in offline},
     }
+    route_evidence = manifest.get("route_evidence")
+    if isinstance(route_evidence, dict):
+        preview["route_evidence"] = {
+            key: route_evidence[key]
+            for key in (
+                "schema_version", "evidence_id", "evidence_sha256", "product_id",
+                "route_spec_sha256", "source_snapshot_sha256",
+            )
+            if key in route_evidence
+        }
+    return preview
 
 
 def original_manifest_v2_operational_bindings(manifest: dict) -> list[dict]:

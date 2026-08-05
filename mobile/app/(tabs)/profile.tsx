@@ -57,6 +57,7 @@ import { eraseTripRepositoryScope } from '@/lib/tripRepository';
 import { clearExpoOfflineV2Scope } from '@/lib/offlineV2/expoRuntime';
 import { AUDIO_LOCATION_TASK } from '@/lib/backgroundTasks';
 import { clearOriginalsAccountScope, stopOriginalsForAccountDeparture } from '@/lib/originals/accountCleanup';
+import { originalsApi, projectOriginalVehicleBinding } from '@/lib/originals';
 import { removeAccountPushToken, removeLocalPushRegistration } from '@/lib/deviceNotifications';
 import { cancelTripRepositorySync } from '@/lib/tripRepositorySync';
 import { accountDeletionAuthMethod } from '@/lib/accountDeletion';
@@ -282,8 +283,8 @@ export default function ProfileScreen() {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
   const router = useRouter();
-  const params = useLocalSearchParams<{ support?: string; support_thread_id?: string; prizes?: string; auth?: string; referral_code?: string }>();
-  const { user, rigProfile, setAuth, signOut, clearAuthAndLocalData, setRigProfile } = useStore();
+  const params = useLocalSearchParams<{ support?: string; support_thread_id?: string; prizes?: string; auth?: string; referral_code?: string; vehicle?: string | string[] }>();
+  const { user, token, rigProfile, setAuth, signOut, clearAuthAndLocalData, setRigProfile } = useStore();
 
   function accountRequestIsCurrent(epoch: number, accountId: string | number | null | undefined) {
     return accountStorage.epoch() === epoch
@@ -744,6 +745,15 @@ export default function ProfileScreen() {
     setProfileSection('community');
     void openContest();
   }, [params.prizes, user?.id]);
+
+  useEffect(() => {
+    const vehicleTarget = Array.isArray(params.vehicle) ? params.vehicle[0] : params.vehicle;
+    if (vehicleTarget !== '1') return;
+    setProfileSection('rig');
+    setRigDraft(rigProfile ?? DEFAULT_RIG);
+    setRigSection('vehicle');
+    setEditingRig(true);
+  }, [params.vehicle]);
 
   const selectedSupportThread = supportThreads.find(thread => thread.id === supportSelectedThreadId) ?? null;
 
@@ -1671,8 +1681,21 @@ export default function ProfileScreen() {
       Alert.alert('Add a make and model to save');
       return;
     }
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = user?.id;
+    const requestToken = token;
     setRigProfile(rigDraft);
     setEditingRig(false);
+    if (!requestToken || requestAccountId == null) return;
+    const projection = projectOriginalVehicleBinding(rigDraft);
+    void originalsApi.putVehicleBinding(projection, { authToken: requestToken })
+      .catch(() => {
+        if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
+        Alert.alert(
+          'Vehicle saved on this phone',
+          'Connect and save again before starting an Original.',
+        );
+      });
   }
 
   async function importGpx() {

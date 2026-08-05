@@ -86,13 +86,26 @@ export async function consumeOriginalPreviewUrl(url: string | null | undefined) 
   }
   const token = parsed.searchParams.get('originals_preview_token');
   if (!token) return null;
-  await saveOriginalPreviewAccess(token);
   const pathParts = [parsed.hostname, ...parsed.pathname.split('/')]
     .map(value => value.trim())
     .filter(Boolean);
   const originalsIndex = pathParts.findIndex(value => value === 'originals');
   const id = originalsIndex >= 0 ? pathParts[originalsIndex + 1] : undefined;
-  return id
-    ? { pathname: '/originals/[id]' as const, params: { id } }
-    : { pathname: '/originals' as const };
+  const previewRoute = id === 'preview';
+  const previewId = parsed.searchParams.get('id')?.trim() || '';
+  const chapter = parsed.searchParams.get('chapter')?.trim() || '';
+  const variant = parsed.searchParams.get('variant')?.trim() || '';
+  if (previewRoute && (!previewId || !chapter || !variant)) {
+    throw new Error('Choose a chapter and route in Originals Studio, then generate a new app link.');
+  }
+  const destination = previewRoute
+    ? {
+      pathname: '/originals/preview' as const,
+      params: { id: previewId, chapter, variant },
+    }
+    : id
+      ? { pathname: '/originals/[id]' as const, params: { id } }
+      : { pathname: '/originals' as const };
+  await saveOriginalPreviewAccess(token);
+  return destination;
 }

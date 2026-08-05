@@ -126,14 +126,21 @@ const consumerStartBlock = detailScreenSource.slice(
   beginSimulationIndex,
 );
 assert.match(consumerStartBlock, /originalStartDestination/);
+const bindingLookupIndex = consumerStartBlock.indexOf('originalsApi.getVehicleBinding');
 const readinessIndex = consumerStartBlock.indexOf('originalsApi.startReadiness');
 const notificationPermissionIndex = consumerStartBlock.indexOf('Notifications.getPermissionsAsync');
 const runtimeStartIndex = consumerStartBlock.indexOf('originalsRuntime.startTour');
 assert.notEqual(readinessIndex, -1, 'V2 consumer Start must request server-owned operational readiness');
+assert.notEqual(bindingLookupIndex, -1, 'V2 consumer Start must resolve the server-owned vehicle binding');
+assert.ok(bindingLookupIndex < readinessIndex, 'vehicle binding must resolve before operational readiness');
 assert.ok(
   readinessIndex < notificationPermissionIndex && readinessIndex < runtimeStartIndex,
   'operational readiness must pass before permissions, location, or playback startup',
 );
+assert.ok(consumerStartBlock.includes('vehicle_binding_id: binding.binding_id'));
+assert.ok(consumerStartBlock.includes('authToken: requestToken'));
+assert.equal(consumerStartBlock.includes('vehicle_class:'), false);
+assert.ok(consumerStartBlock.includes('accountStorage.epoch() === requestEpoch'));
 assert.match(
   consumerStartBlock,
   /!readiness\.can_start\s*\|\|\s*readiness\.status\s*!==\s*'available'/,

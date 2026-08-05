@@ -131,17 +131,173 @@ EXPECTED_CADES_DIRECTION_CONFLICT_GEOMETRY_IDS = frozenset(
     }
 )
 
-OFFICIAL_ROUTE_GENERATOR_VERSION = "1.1.0"
+# Reviewed supplemental public-road evidence. These URLs and hashes are pinned
+# deliberately: a source refresh must fail closed until a human reviews the
+# changed official record and updates this contract.
+NC_ONEMAP_ROAD_LAYER_URL = (
+    "https://services.nconemap.gov/secure/rest/services/"
+    "NC1Map_Transportation/FeatureServer/0"
+)
+NC_ONEMAP_ROAD_ITEMINFO_URL = f"{NC_ONEMAP_ROAD_LAYER_URL}/iteminfo"
+NC_ONEMAP_TERMS_URL = "https://www.nconemap.gov/pages/terms"
+NC_ONEMAP_TERMS_DATA_URL = (
+    "https://www.arcgis.com/sharing/rest/content/items/"
+    "e60514c3b78542ef9902e3d7f7a671c1/data"
+)
+NC_ONEMAP_LAYER_DEFINITION_SHA256 = (
+    "28028b5772c3f18eb9d5f143016e589a2258baaf6ab9231ba94f458ca3042695"
+)
+NC_ONEMAP_ITEMINFO_SHA256 = (
+    "c2a53973683f2e7023f7328326b05dcc92bfc0c3a8714f9bc388575efc6870c6"
+)
+NC_ONEMAP_TERMS_SNAPSHOT_SHA256 = (
+    "658e20ec4cb792d4b0a713d2c5cfda12622a33a17f6d5848f062338de97be134"
+)
+NC_ONEMAP_RAW_CONNECTOR_QUERY_SHA256 = (
+    "0628a72f02b604a791b72966f3696d3becdf2dd2159e97ab934334550bb12771"
+)
+NC_ONEMAP_NORMALIZED_CONNECTOR_SHA256 = (
+    "b771cf89c50445c4686f50d7753a30a092c1d0bdfe7de5955eb2d05c2c58f925"
+)
+NC_ONEMAP_SOURCE_SPATIAL_REFERENCE = (
+    "NAD83(2011) / North Carolina (ftUS):103122 (latest 6543)"
+)
+NC_ONEMAP_CONNECTOR_NGUIDS = (
+    "RCL_2753@ebcinctb1.swain.nc.us",
+    "RCL_1676@ebcinctb1.swain.nc.us",
+    "RCL_2182@ebcinctb1.swain.nc.us",
+    "RCL_678@ebcinctb1.swain.nc.us",
+    "RCL_1873@ebcinctb1.swain.nc.us",
+    "RCL_1383@ebcinctb1.swain.nc.us",
+    "RCL_279@ebcinctb1.swain.nc.us",
+    "RCL_2798@ebcinctb1.swain.nc.us",
+    "RCL_2538@ebcinctb1.swain.nc.us",
+    "RCL_1435@ebcinctb1.swain.nc.us",
+    "RCL_196@ebcinctb1.swain.nc.us",
+    "RCL_1935@ebcinctb1.swain.nc.us",
+    "RCL_1017@ebcinctb1.swain.nc.us",
+    "RCL_1829@ebcinctb1.swain.nc.us",
+    "RCL_406@ebcinctb1.swain.nc.us",
+    "RCL_212@ebcinctb1.swain.nc.us",
+    "RCL_2079@ebcinctb1.swain.nc.us",
+    "RCL_795@ebcinctb1.swain.nc.us",
+    "RCL_1282@ebcinctb1.swain.nc.us",
+    "RCL_2278@ebcinctb1.swain.nc.us",
+    "RCL_2285@ebcinctb1.swain.nc.us",
+    "RCL_1464@ebcinctb1.swain.nc.us",
+    "RCL_1413@ebcinctb1.swain.nc.us",
+)
+NC_ONEMAP_QUERY_FIELDS = (
+    "objectid",
+    "nguid",
+    "dateupdate",
+    "discrpagid",
+    "oneway",
+    "st_name",
+    "st_postyp",
+    "lst_name",
+    "lst_typ",
+    "roadclass",
+    "speedlimit",
+    "incmuni_l",
+    "incmuni_r",
+    "postcomm_l",
+    "postcomm_r",
+    "f_gc_src_obj_id",
+)
+NC_ONEMAP_CONNECTOR_ROAD_COUNTS = {
+    "Acquoni Road": 16,
+    "Drama Road": 3,
+    "Newfound Gap Road": 3,
+    "Tsali Boulevard": 1,
+}
+NC_ONEMAP_EBCI_AGENCY_ID = "ebcinctb1.swain.nc.us"
+NC_ONEMAP_EBCI_NAME = "Eastern Band of Cherokee Indians"
+NC_ONEMAP_POSTAL_COMMUNITY = "Cherokee"
+NC_ONEMAP_UPDATED_EPOCH_MS = 1_755_605_908_000
+NC_ONEMAP_CONNECTOR_MAX_CONTROL_SNAP_M = 150.0
+NC_ONEMAP_CROSS_SOURCE_HANDOFF_MAX_M = 10.0
+
+GRSM_ROADS_ITEM_URL = (
+    "https://www.arcgis.com/sharing/rest/content/items/"
+    "cbe5d107b9bf451fa9e1ca903d7a9f48"
+)
+GRSM_ROADS_LAYER_URL = (
+    "https://services1.arcgis.com/fBc8EJBxQRMcHlei/arcgis/rest/services/"
+    "GRSM_ROADS/FeatureServer/0"
+)
+GRSM_ROADS_ACCESS_DATA_URL = "https://www.nps.gov/grsm/planyourvisit/access_data.htm"
+GRSM_MAP_PAGE_URL = "https://www.nps.gov/grsm/planyourvisit/maps.htm"
+GRSM_MAP_PDF_URL = (
+    "https://www.nps.gov/grsm/planyourvisit/upload/grsmmap_2024_reduced_508.pdf"
+)
+GRSM_ROADS_LAYER_DEFINITION_SHA256 = (
+    "612f5623ed4cf9606c4b5699d07a9caafe697b9117b05e9d006d4b17350b5127"
+)
+GRSM_ROADS_ITEM_SHA256 = (
+    "f5dd6adc21fdb235710f1678e2d58b424d3355940f2954a74680b14d16bddd25"
+)
+GRSM_CADES_QUERY_SHA256 = (
+    "a777de3c055f84a84c779d48c90a2cb43bed491acaec81fbb989881e89aa9d05"
+)
+GRSM_MAP_PDF_SHA256 = (
+    "7cc2dc86a08f2b506f0900170e5e242247ca245e2c80dad44cdf037d0d27b933"
+)
+GRSM_MAP_PDF_BYTES = 6_221_950
+GRSM_CADES_SOURCE_DATE_EPOCH_MS = 1_415_196_566_000
+
+
+@dataclass(frozen=True)
+class CadesDirectionOverrideV1:
+    national_geometry_id: str
+    grsm_global_id: str
+    grsm_object_id: int
+
+
+EXPECTED_CADES_DIRECTION_OVERRIDES = (
+    CadesDirectionOverrideV1(
+        "008ef10d-f967-4bd4-a210-2184dc1e85e1",
+        "9ee04325-3318-41d2-883a-1005f58cb29d",
+        1255,
+    ),
+    CadesDirectionOverrideV1(
+        "160be5ea-ae63-4498-bb61-900d174ae5b2",
+        "f0000aca-f855-4196-86f2-23dbda878670",
+        1270,
+    ),
+    CadesDirectionOverrideV1(
+        "20fd255b-e779-4922-bc39-fd663ea73ca3",
+        "ff5c1bc2-b513-4b80-98a2-0bd7295608c2",
+        1271,
+    ),
+    CadesDirectionOverrideV1(
+        "e165ffe3-8f56-47e4-902b-9937312df435",
+        "77c44571-dbdc-45dd-873d-2cdf9abf9b35",
+        1254,
+    ),
+    CadesDirectionOverrideV1(
+        "f117d383-5e50-4e7f-95c3-8b862c38370e",
+        "891458c4-694b-4f7f-b948-81700117a132",
+        98,
+    ),
+)
+
+OFFICIAL_ROUTE_GENERATOR_VERSION = "1.2.0"
 OFFICIAL_ROUTE_ALGORITHM_CONTRACT = {
-    "graph": "directed_nps_public_roads",
+    "graph": "directed_pinned_official_roads",
     "route_controls": "identity_bound_reviewed_anchors",
     "cue_landmarks": "project_only_never_route",
     "endpoint_join_tolerance_m": ENDPOINT_JOIN_TOLERANCE_M,
+    "cross_source_handoff_max_m": NC_ONEMAP_CROSS_SOURCE_HANDOFF_MAX_M,
     "geometry_simplification": "none",
     "source_direction": "rdoneway_fail_closed",
-    "source_conflicts": "exact_reviewed_set_fail_closed",
+    "source_conflicts": "exact_reviewed_override_set_fail_closed",
+    "cherokee_connector_nguids": list(NC_ONEMAP_CONNECTOR_NGUIDS),
     "cades_direction_conflict_geometry_ids": sorted(
         EXPECTED_CADES_DIRECTION_CONFLICT_GEOMETRY_IDS
+    ),
+    "cades_direction_override_global_ids": sorted(
+        item.grsm_global_id for item in EXPECTED_CADES_DIRECTION_OVERRIDES
     ),
 }
 
@@ -219,6 +375,35 @@ def reviewed_query_contract() -> dict:
         "return_true_curves": False,
         "coordinate_precision": 7,
         "endpoint_join_tolerance_m": ENDPOINT_JOIN_TOLERANCE_M,
+    }
+
+
+def reviewed_nc_onemap_connector_query_contract() -> dict[str, str]:
+    quoted_ids = ",".join(f"'{value}'" for value in NC_ONEMAP_CONNECTOR_NGUIDS)
+    return {
+        "where": f"nguid IN ({quoted_ids})",
+        "outFields": ",".join(NC_ONEMAP_QUERY_FIELDS),
+        "orderByFields": "nguid",
+        "returnGeometry": "true",
+        "outSR": "4326",
+        "returnZ": "false",
+        "returnM": "false",
+        "geometryPrecision": "7",
+        "f": "json",
+    }
+
+
+def reviewed_cades_direction_query_contract() -> dict[str, str]:
+    object_ids = sorted(item.grsm_object_id for item in EXPECTED_CADES_DIRECTION_OVERRIDES)
+    return {
+        "where": f"OBJECTID IN ({','.join(str(value) for value in object_ids)})",
+        "outFields": (
+            "OBJECTID,RDONEWAY,RDSTATUS,PUBRESTRICT,DATAACCESS,SOURCEDATE,"
+            "XYACCURACY,VALID_RESULT,GlobalID"
+        ),
+        "returnGeometry": "false",
+        "orderByFields": "OBJECTID",
+        "f": "json",
     }
 
 _GUID_RE = re.compile(
@@ -705,6 +890,428 @@ def nps_road_snapshot_sha256(payload: dict) -> str:
     return canonical_sha256(normalize_nps_road_snapshot(payload))
 
 
+def normalize_official_route_source_supplement(payload: dict) -> dict:
+    raw = copy.deepcopy(_object(payload, "official route source supplement"))
+    _forbid_keys(
+        raw,
+        {
+            "schema_version",
+            "kind",
+            "product_id",
+            "retrieved_at",
+            "nc_onemap_ebci_connector",
+            "cades_direction_override",
+        },
+        "official route source supplement",
+    )
+    if (
+        raw.get("schema_version") != 1
+        or raw.get("kind") != "smokies_official_route_source_supplement"
+        or raw.get("product_id") != PRODUCT_ID
+    ):
+        raise OriginalRouteSourceError("Official route source supplement identity is invalid")
+    retrieved_at = _iso_date(
+        raw.get("retrieved_at"), "official route source supplement retrieved_at"
+    )
+
+    connector = copy.deepcopy(
+        _object(raw.get("nc_onemap_ebci_connector"), "NC OneMap EBCI connector")
+    )
+    _forbid_keys(
+        connector,
+        {"source", "terms_snapshot", "query", "ordered_nguids", "features"},
+        "NC OneMap EBCI connector",
+    )
+    connector_source = copy.deepcopy(
+        _object(connector.get("source"), "NC OneMap connector source")
+    )
+    _forbid_keys(
+        connector_source,
+        {
+            "agency",
+            "custodian",
+            "title",
+            "layer_url",
+            "iteminfo_url",
+            "terms_url",
+            "terms_data_url",
+            "license",
+            "attribution",
+            "copyright_text",
+            "service_version",
+            "source_spatial_reference",
+            "output_spatial_reference",
+            "layer_definition_sha256",
+            "iteminfo_sha256",
+            "terms_snapshot_sha256",
+            "query_contract_sha256",
+            "raw_selected_features_sha256",
+            "normalized_features_sha256",
+            "normalizer",
+            "coordinate_precision",
+            "simplification",
+            "use_constraints",
+            "reviewed_at",
+            "reviewed_by",
+        },
+        "NC OneMap connector source",
+    )
+    connector_expected = {
+        "agency": "NC 911 Board; NG911; CGIA",
+        "custodian": "North Carolina Center for Geographic Information and Analysis",
+        "title": "NC OneMap NG911 Centerlines",
+        "layer_url": NC_ONEMAP_ROAD_LAYER_URL,
+        "iteminfo_url": NC_ONEMAP_ROAD_ITEMINFO_URL,
+        "terms_url": NC_ONEMAP_TERMS_URL,
+        "terms_data_url": NC_ONEMAP_TERMS_DATA_URL,
+        "license": "free_unrestricted_use",
+        "attribution": (
+            "NC OneMap; NC 911 Board; NG911; CGIA; "
+            "Eastern Band of Cherokee Indians"
+        ),
+        "copyright_text": "NC 911 Board;NG911;CGIA",
+        "service_version": 10.91,
+        "source_spatial_reference": NC_ONEMAP_SOURCE_SPATIAL_REFERENCE,
+        "output_spatial_reference": OUTPUT_SPATIAL_REFERENCE,
+        "layer_definition_sha256": NC_ONEMAP_LAYER_DEFINITION_SHA256,
+        "iteminfo_sha256": NC_ONEMAP_ITEMINFO_SHA256,
+        "terms_snapshot_sha256": NC_ONEMAP_TERMS_SNAPSHOT_SHA256,
+        "query_contract_sha256": canonical_sha256(
+            reviewed_nc_onemap_connector_query_contract()
+        ),
+        "raw_selected_features_sha256": NC_ONEMAP_RAW_CONNECTOR_QUERY_SHA256,
+        "normalized_features_sha256": NC_ONEMAP_NORMALIZED_CONNECTOR_SHA256,
+        "normalizer": "trailhead_nc_onemap_ng911_connector_v1",
+        "coordinate_precision": 7,
+        "simplification": "none",
+        "use_constraints": [
+            "reference_geometry_not_live_closure_feed",
+            "eastern_band_lineage_from_ng911_agency_fields",
+            "cross_source_handoff_is_explicit_and_bounded",
+            "navigation_requires_routable_engine_and_current_readiness",
+            "no_agency_endorsement",
+        ],
+    }
+    for key, expected in connector_expected.items():
+        if connector_source.get(key) != expected:
+            raise OriginalRouteSourceError(
+                f"NC OneMap connector {key} changed without review"
+            )
+    connector_source["reviewed_at"] = _iso_date(
+        connector_source.get("reviewed_at"), "NC OneMap connector review date"
+    )
+    connector_source["reviewed_by"] = _text(
+        connector_source.get("reviewed_by"), "NC OneMap connector reviewer", maximum=120
+    )
+    terms_snapshot = copy.deepcopy(
+        _object(connector.get("terms_snapshot"), "NC OneMap terms snapshot")
+    )
+    if canonical_sha256(terms_snapshot) != NC_ONEMAP_TERMS_SNAPSHOT_SHA256:
+        raise OriginalRouteSourceError("NC OneMap terms snapshot hash changed")
+    terms_text = _canonical_json(terms_snapshot)
+    for required_phrase in (
+        "free and unrestricted use policy",
+        "Written release agreements to authorize use",
+        "not required and will not be issued",
+        "Website Citation",
+    ):
+        if required_phrase not in terms_text:
+            raise OriginalRouteSourceError("NC OneMap reviewed terms text changed")
+    connector_query = copy.deepcopy(
+        _object(connector.get("query"), "NC OneMap connector query")
+    )
+    if connector_query != reviewed_nc_onemap_connector_query_contract():
+        raise OriginalRouteSourceError("NC OneMap connector query changed without review")
+    if connector.get("ordered_nguids") != list(NC_ONEMAP_CONNECTOR_NGUIDS):
+        raise OriginalRouteSourceError("NC OneMap connector NGUID order changed")
+
+    connector_features: list[dict] = []
+    for index, item in enumerate(
+        _list(connector.get("features"), "NC OneMap connector features", minimum=23, maximum=23)
+    ):
+        feature = copy.deepcopy(_object(item, f"NC OneMap connector feature {index}"))
+        _forbid_keys(
+            feature,
+            {
+                "nguid",
+                "date_updated_epoch_ms",
+                "discrepancy_agency_id",
+                "one_way",
+                "street_name",
+                "street_post_type",
+                "legacy_street_name",
+                "legacy_street_type",
+                "road_class",
+                "speed_limit_mph",
+                "municipality_left",
+                "municipality_right",
+                "postal_community_left",
+                "postal_community_right",
+                "source_object_id",
+                "geometry",
+            },
+            f"NC OneMap connector feature {index}",
+        )
+        nguid = _text(feature.get("nguid"), "NC OneMap connector NGUID", maximum=254)
+        if nguid not in NC_ONEMAP_CONNECTOR_NGUIDS:
+            raise OriginalRouteSourceError("NC OneMap connector contains an unreviewed NGUID")
+        feature["nguid"] = nguid
+        if feature.get("date_updated_epoch_ms") != NC_ONEMAP_UPDATED_EPOCH_MS:
+            raise OriginalRouteSourceError("NC OneMap connector update timestamp changed")
+        if feature.get("discrepancy_agency_id") != NC_ONEMAP_EBCI_AGENCY_ID:
+            raise OriginalRouteSourceError("NC OneMap connector lost EBCI agency lineage")
+        if feature.get("one_way") is not None:
+            raise OriginalRouteSourceError("NC OneMap connector one-way status changed")
+        for key in (
+            "street_name",
+            "street_post_type",
+            "legacy_street_name",
+            "legacy_street_type",
+            "source_object_id",
+        ):
+            feature[key] = _text(feature.get(key), f"NC OneMap connector {key}", maximum=100)
+        feature["road_class"] = _optional_text(
+            feature.get("road_class"), "NC OneMap connector road_class", maximum=80
+        )
+        road_name = f"{feature['street_name']} {feature['street_post_type']}"
+        speed_limit = feature.get("speed_limit_mph")
+        expected_speed = 35 if road_name in {"Newfound Gap Road", "Tsali Boulevard"} else 25
+        if road_name not in NC_ONEMAP_CONNECTOR_ROAD_COUNTS or speed_limit != expected_speed:
+            raise OriginalRouteSourceError("NC OneMap connector road traits changed")
+        if feature.get("municipality_left") != NC_ONEMAP_EBCI_NAME or feature.get(
+            "municipality_right"
+        ) != NC_ONEMAP_EBCI_NAME:
+            raise OriginalRouteSourceError("NC OneMap connector municipality changed")
+        if feature.get("postal_community_left") != NC_ONEMAP_POSTAL_COMMUNITY or feature.get(
+            "postal_community_right"
+        ) != NC_ONEMAP_POSTAL_COMMUNITY:
+            raise OriginalRouteSourceError("NC OneMap connector postal community changed")
+        geometry = copy.deepcopy(
+            _object(feature.get("geometry"), "NC OneMap connector geometry")
+        )
+        _forbid_keys(geometry, {"type", "coordinates"}, "NC OneMap connector geometry")
+        if geometry.get("type") != "LineString":
+            raise OriginalRouteSourceError("NC OneMap connector geometry must be a LineString")
+        coordinates = [
+            _grsm_coordinate(value, f"NC OneMap connector {nguid} coordinate")
+            for value in _list(
+                geometry.get("coordinates"),
+                "NC OneMap connector coordinates",
+                minimum=2,
+                maximum=20_000,
+            )
+        ]
+        if any(first == second for first, second in zip(coordinates, coordinates[1:])):
+            raise OriginalRouteSourceError(
+                "NC OneMap connector geometry contains duplicate adjacent points"
+            )
+        if any(
+            distance_m(first, second) > 2_000
+            for first, second in zip(coordinates, coordinates[1:])
+        ):
+            raise OriginalRouteSourceError(
+                "NC OneMap connector geometry contains an implausible internal jump"
+            )
+        feature["geometry"] = {"type": "LineString", "coordinates": coordinates}
+        connector_features.append(feature)
+    connector_features.sort(key=lambda item: item["nguid"])
+    connector_ids = [item["nguid"] for item in connector_features]
+    if set(connector_ids) != set(NC_ONEMAP_CONNECTOR_NGUIDS) or len(connector_ids) != len(
+        set(connector_ids)
+    ):
+        raise OriginalRouteSourceError("NC OneMap connector NGUID coverage changed")
+    connector_road_counts = dict(
+        sorted(
+            Counter(
+                f"{item['street_name']} {item['street_post_type']}"
+                for item in connector_features
+            ).items()
+        )
+    )
+    if connector_road_counts != NC_ONEMAP_CONNECTOR_ROAD_COUNTS:
+        raise OriginalRouteSourceError("NC OneMap connector road counts changed")
+    if canonical_sha256(connector_features) != NC_ONEMAP_NORMALIZED_CONNECTOR_SHA256:
+        raise OriginalRouteSourceError("NC OneMap connector normalized feature hash changed")
+
+    direction = copy.deepcopy(
+        _object(raw.get("cades_direction_override"), "Cades direction override")
+    )
+    _forbid_keys(
+        direction,
+        {"source", "query", "map_review", "overrides"},
+        "Cades direction override",
+    )
+    direction_source = copy.deepcopy(
+        _object(direction.get("source"), "Cades direction override source")
+    )
+    _forbid_keys(
+        direction_source,
+        {
+            "agency",
+            "title",
+            "item_url",
+            "layer_url",
+            "access_data_url",
+            "map_page_url",
+            "map_pdf_url",
+            "license",
+            "attribution",
+            "source_spatial_reference",
+            "output_spatial_reference",
+            "layer_definition_sha256",
+            "item_sha256",
+            "query_contract_sha256",
+            "raw_query_response_sha256",
+            "official_map_pdf_sha256",
+            "official_map_pdf_bytes",
+            "use_constraints",
+            "reviewed_at",
+            "reviewed_by",
+        },
+        "Cades direction override source",
+    )
+    direction_expected = {
+        "agency": "National Park Service",
+        "title": "GRSM_ROADS",
+        "item_url": GRSM_ROADS_ITEM_URL,
+        "layer_url": GRSM_ROADS_LAYER_URL,
+        "access_data_url": GRSM_ROADS_ACCESS_DATA_URL,
+        "map_page_url": GRSM_MAP_PAGE_URL,
+        "map_pdf_url": GRSM_MAP_PDF_URL,
+        "license": "nps_item_specific_redistribution_terms",
+        "attribution": "National Park Service, Great Smoky Mountains National Park",
+        "source_spatial_reference": "EPSG:4269",
+        "output_spatial_reference": OUTPUT_SPATIAL_REFERENCE,
+        "layer_definition_sha256": GRSM_ROADS_LAYER_DEFINITION_SHA256,
+        "item_sha256": GRSM_ROADS_ITEM_SHA256,
+        "query_contract_sha256": canonical_sha256(
+            reviewed_cades_direction_query_contract()
+        ),
+        "raw_query_response_sha256": GRSM_CADES_QUERY_SHA256,
+        "official_map_pdf_sha256": GRSM_MAP_PDF_SHA256,
+        "official_map_pdf_bytes": GRSM_MAP_PDF_BYTES,
+        "use_constraints": [
+            "direction_override_only_for_exact_reviewed_segments",
+            "geometry_remains_from_pinned_nps_public_roads_snapshot",
+            "official_map_is_direction_evidence_not_route_geometry",
+            "operational_readiness_and_closures_are_separate",
+            "no_nps_endorsement",
+        ],
+    }
+    for key, expected in direction_expected.items():
+        if direction_source.get(key) != expected:
+            raise OriginalRouteSourceError(
+                f"Cades direction override {key} changed without review"
+            )
+    direction_source["reviewed_at"] = _iso_date(
+        direction_source.get("reviewed_at"), "Cades direction override review date"
+    )
+    direction_source["reviewed_by"] = _text(
+        direction_source.get("reviewed_by"),
+        "Cades direction override reviewer",
+        maximum=120,
+    )
+    direction_query = copy.deepcopy(
+        _object(direction.get("query"), "Cades direction override query")
+    )
+    if direction_query != reviewed_cades_direction_query_contract():
+        raise OriginalRouteSourceError("Cades direction override query changed without review")
+    if direction.get("map_review") != {
+        "review_method": "human_visual_review",
+        "map_revision": "2024 reduced 508",
+        "north_leg_direction": "westbound",
+        "south_leg_direction": "eastbound",
+        "reviewed_loop_travel": "counterclockwise",
+    }:
+        raise OriginalRouteSourceError("Cades official-map direction review changed")
+
+    expected_by_national = {
+        item.national_geometry_id: item for item in EXPECTED_CADES_DIRECTION_OVERRIDES
+    }
+    direction_overrides: list[dict] = []
+    for index, item in enumerate(
+        _list(direction.get("overrides"), "Cades direction overrides", minimum=5, maximum=5)
+    ):
+        override = copy.deepcopy(_object(item, f"Cades direction override {index}"))
+        _forbid_keys(
+            override,
+            {
+                "national_geometry_id",
+                "grsm_global_id",
+                "grsm_object_id",
+                "source_one_way",
+                "source_road_status",
+                "public_restriction",
+                "data_access",
+                "source_date_epoch_ms",
+                "xy_accuracy",
+                "validation_result",
+                "reviewed_traversal_direction",
+            },
+            f"Cades direction override {index}",
+        )
+        national_id = _guid(
+            override.get("national_geometry_id"), "Cades national geometry ID"
+        )
+        expected = expected_by_national.get(national_id)
+        if expected is None:
+            raise OriginalRouteSourceError("Cades override contains an unreviewed NPS segment")
+        if (
+            _guid(override.get("grsm_global_id"), "Cades GRSM GlobalID")
+            != expected.grsm_global_id
+            or override.get("grsm_object_id") != expected.grsm_object_id
+        ):
+            raise OriginalRouteSourceError("Cades override source crosswalk changed")
+        expected_status = (
+            "Temporarily Closed" if expected.grsm_object_id == 98 else "Existing"
+        )
+        if override.get("source_road_status") != expected_status:
+            raise OriginalRouteSourceError("Cades static road status changed without review")
+        expected_traits = {
+            "source_one_way": "With Digitized",
+            "public_restriction": "Open Year Round",
+            "data_access": "Unrestricted",
+            "source_date_epoch_ms": GRSM_CADES_SOURCE_DATE_EPOCH_MS,
+            "xy_accuracy": "Unknown",
+            "validation_result": "Raw",
+            "reviewed_traversal_direction": "reverse",
+        }
+        if any(override.get(key) != value for key, value in expected_traits.items()):
+            raise OriginalRouteSourceError("Cades direction evidence changed without review")
+        override["national_geometry_id"] = national_id
+        override["grsm_global_id"] = expected.grsm_global_id
+        direction_overrides.append(override)
+    direction_overrides.sort(key=lambda item: item["national_geometry_id"])
+    if [item["national_geometry_id"] for item in direction_overrides] != sorted(
+        expected_by_national
+    ):
+        raise OriginalRouteSourceError("Cades direction override coverage changed")
+
+    return {
+        "schema_version": 1,
+        "kind": "smokies_official_route_source_supplement",
+        "product_id": PRODUCT_ID,
+        "retrieved_at": retrieved_at,
+        "nc_onemap_ebci_connector": {
+            "source": connector_source,
+            "terms_snapshot": terms_snapshot,
+            "query": connector_query,
+            "ordered_nguids": list(NC_ONEMAP_CONNECTOR_NGUIDS),
+            "features": connector_features,
+        },
+        "cades_direction_override": {
+            "source": direction_source,
+            "query": direction_query,
+            "map_review": copy.deepcopy(direction["map_review"]),
+            "overrides": direction_overrides,
+        },
+    }
+
+
+def official_route_source_supplement_sha256(payload: dict) -> str:
+    return canonical_sha256(normalize_official_route_source_supplement(payload))
+
+
 def distance_m(first: list[float], second: list[float]) -> float:
     lon1, lat1 = map(math.radians, first)
     lon2, lat2 = map(math.radians, second)
@@ -734,6 +1341,28 @@ def _append_geometry(target: list[list[float]], addition: Iterable[list[float]])
             )
         if boundary_gap < 0.02:
             clean_addition = clean_addition[1:]
+    target.extend(clean_addition)
+    return boundary_gap
+
+
+def _append_reviewed_cross_source_geometry(
+    target: list[list[float]], addition: Iterable[list[float]]
+) -> float:
+    """Join two pinned official centerlines across their reviewed source offset."""
+
+    clean_addition = [
+        [round(float(coordinate[0]), 7), round(float(coordinate[1]), 7)]
+        for coordinate in addition
+    ]
+    if not target or not clean_addition:
+        raise OriginalRouteSourceError("Reviewed cross-source handoff requires both geometries")
+    boundary_gap = distance_m(target[-1], clean_addition[0])
+    if boundary_gap > NC_ONEMAP_CROSS_SOURCE_HANDOFF_MAX_M + 1e-6:
+        raise OriginalRouteSourceError(
+            "NC OneMap cross-source handoff changed beyond the reviewed tolerance"
+        )
+    if boundary_gap < 0.02:
+        clean_addition = clean_addition[1:]
     target.extend(clean_addition)
     return boundary_gap
 
@@ -1139,6 +1768,52 @@ def _derive_via(graph: RoadGraph, controls: list[dict], *, max_control_snap_m: f
     }
 
 
+def _nc_onemap_connector_features(supplement: dict) -> list[dict]:
+    return [
+        {
+            "geometry_id": item["nguid"],
+            "road_name": f"{item['street_name']} {item['street_post_type']}",
+            "one_way": None,
+            "geometry": copy.deepcopy(item["geometry"]),
+        }
+        for item in supplement["nc_onemap_ebci_connector"]["features"]
+    ]
+
+
+def _derive_nc_onemap_connector(
+    supplement: dict,
+    *,
+    nps_handoff: list[float],
+    cherokee_anchor: list[float],
+) -> dict:
+    connector = _derive_via(
+        RoadGraph(_nc_onemap_connector_features(supplement)),
+        [
+            {
+                "id": "nps_oconaluftee_handoff",
+                "label": "NPS and NC OneMap handoff",
+                "coordinates": nps_handoff,
+            },
+            {
+                "id": "cherokee",
+                "label": "Cherokee chapter endpoint",
+                "coordinates": cherokee_anchor,
+            },
+        ],
+        max_control_snap_m=NC_ONEMAP_CONNECTOR_MAX_CONTROL_SNAP_M,
+    )
+    traversal_ids = [item["geometry_id"] for item in connector["source_traversal"]]
+    if traversal_ids != list(NC_ONEMAP_CONNECTOR_NGUIDS):
+        raise OriginalRouteSourceError("NC OneMap connector traversal changed")
+    handoff = connector["control_progress"]["nps_oconaluftee_handoff"]
+    cherokee = connector["control_progress"]["cherokee"]
+    if handoff["lateral_distance_m"] > NC_ONEMAP_CROSS_SOURCE_HANDOFF_MAX_M:
+        raise OriginalRouteSourceError("NC OneMap connector handoff moved")
+    if cherokee["lateral_distance_m"] > NC_ONEMAP_CONNECTOR_MAX_CONTROL_SNAP_M:
+        raise OriginalRouteSourceError("NC OneMap Cherokee endpoint moved")
+    return connector
+
+
 def _ordered_chain(features: list[dict], start_anchor: list[float]) -> dict:
     graph = RoadGraph(features)
     degrees = {node: len(edges) for node, edges in graph.adjacency.items()}
@@ -1216,14 +1891,22 @@ def _landmark_projection(
     }
 
 
-def _road_names(snapshot: dict, feature_ids: set[str]) -> list[str]:
-    return sorted(
-        {
-            item["road_name"]
-            for item in snapshot["features"]
-            if item["geometry_id"] in feature_ids
-        }
+def _road_names(
+    snapshot: dict,
+    feature_ids: set[str],
+    supplemental_features: Iterable[dict] = (),
+) -> list[str]:
+    names = {
+        item["road_name"]
+        for item in snapshot["features"]
+        if item["geometry_id"] in feature_ids
+    }
+    names.update(
+        item["road_name"]
+        for item in supplemental_features
+        if item["geometry_id"] in feature_ids
     )
+    return sorted(names)
 
 
 EXPECTED_VARIANT_ORDER = [
@@ -1384,6 +2067,9 @@ def _route_output(
     maximum_join_gap_m: float,
     blockers: list[str] | None = None,
     direction_conflict_geometry_ids: list[str] | None = None,
+    supplemental_features: Iterable[dict] = (),
+    cross_source_handoff_gap_m: float | None = None,
+    direction_override: dict | None = None,
 ) -> dict:
     blockers = list(blockers or [])
     distance = line_length_m(geometry)
@@ -1391,7 +2077,7 @@ def _route_output(
     if not expected["minimum"] <= distance <= expected["maximum"]:
         blockers.append("distance_outside_reviewed_range")
     feature_ids = {item["geometry_id"] for item in source_traversal}
-    road_names = _road_names(snapshot, feature_ids)
+    road_names = _road_names(snapshot, feature_ids, supplemental_features)
     road_evidence = " | ".join(road_names)
     missing_patterns = [
         pattern
@@ -1406,7 +2092,7 @@ def _route_output(
     if any(second + 0.1 < first for first, second in zip(progress, progress[1:])):
         blockers.append("landmark_order_is_ambiguous")
     blockers = sorted(set(blockers))
-    return {
+    output = {
         "id": variant["id"],
         "chapter_id": variant["chapter_id"],
         "variant_id": variant["variant_id"],
@@ -1429,10 +2115,24 @@ def _route_output(
         "maximum_join_gap_m": round(maximum_join_gap_m, 3),
         "landmarks": landmarks,
     }
+    if cross_source_handoff_gap_m is not None:
+        if cross_source_handoff_gap_m > NC_ONEMAP_CROSS_SOURCE_HANDOFF_MAX_M + 1e-6:
+            raise OriginalRouteSourceError("Route contains an unreviewed cross-source handoff")
+        output["cross_source_handoff_gap_m"] = round(cross_source_handoff_gap_m, 3)
+    if direction_override is not None:
+        output["source_direction_override"] = copy.deepcopy(direction_override)
+    return output
 
 
-def build_official_route_evidence(snapshot_payload: dict, route_spec: dict) -> dict:
+def build_official_route_evidence(
+    snapshot_payload: dict,
+    route_spec: dict,
+    source_supplement_payload: dict,
+) -> dict:
     snapshot = normalize_nps_road_snapshot(snapshot_payload)
+    source_supplement = normalize_official_route_source_supplement(
+        source_supplement_payload
+    )
     spec = _normalize_route_spec_for_evidence(route_spec)
     variants = spec["variants"]
     variants_by_id = {item["id"]: item for item in variants}
@@ -1481,31 +2181,47 @@ def build_official_route_evidence(snapshot_payload: dict, route_spec: dict) -> d
         mountain_controls,
         max_control_snap_m=mountain_forward["max_control_snap_m"],
     )
-    mountain_geometry = mountain["geometry"]
+    connector_features = _nc_onemap_connector_features(source_supplement)
+    mountain_connector = _derive_nc_onemap_connector(
+        source_supplement,
+        nps_handoff=mountain["geometry"][-1],
+        cherokee_anchor=mountain_anchors["cherokee"]["coordinates"],
+    )
+    mountain_geometry = copy.deepcopy(mountain["geometry"])
+    mountain_cross_source_gap = _append_reviewed_cross_source_geometry(
+        mountain_geometry, mountain_connector["geometry"]
+    )
     mountain_progress = mountain["control_progress"]
     mountain_landmarks = []
     for anchor in mountain_forward["anchors"]:
         progress_key = "kuwohi_route_control" if anchor["id"] == "kuwohi" else anchor["id"]
-        forced = (
-            mountain_progress[progress_key]["route_progress_m"]
-            if progress_key in mountain_progress
-            else None
-        )
+        if anchor["id"] == "cherokee":
+            forced = line_length_m(mountain_geometry)
+        else:
+            forced = (
+                mountain_progress[progress_key]["route_progress_m"]
+                if progress_key in mountain_progress
+                else None
+            )
         mountain_landmarks.append(
             _landmark_projection(anchor, mountain_geometry, forced_progress_m=forced)
         )
-    mountain_blockers = [
-        "cherokee_extension_requires_separate_authoritative_public_road_source"
-    ]
     output_variants.append(
         _route_output(
             snapshot=snapshot,
             variant=mountain_forward,
             geometry=mountain_geometry,
-            source_traversal=mountain["source_traversal"],
+            source_traversal=[
+                *mountain["source_traversal"],
+                *mountain_connector["source_traversal"],
+            ],
             landmarks=mountain_landmarks,
-            maximum_join_gap_m=mountain["maximum_join_gap_m"],
-            blockers=mountain_blockers,
+            maximum_join_gap_m=max(
+                mountain["maximum_join_gap_m"],
+                mountain_connector["maximum_join_gap_m"],
+            ),
+            supplemental_features=connector_features,
+            cross_source_handoff_gap_m=mountain_cross_source_gap,
         )
     )
     mountain_reverse = variants_by_id["mountain-crossing-nc-to-tn"]
@@ -1536,7 +2252,22 @@ def build_official_route_evidence(snapshot_payload: dict, route_spec: dict) -> d
         mountain_reverse_controls,
         max_control_snap_m=mountain_reverse["max_control_snap_m"],
     )
-    mountain_reverse_geometry = mountain_reverse_derived["geometry"]
+    mountain_reverse_connector = _derive_nc_onemap_connector(
+        source_supplement,
+        nps_handoff=mountain_reverse_derived["geometry"][0],
+        cherokee_anchor=mountain_reverse_anchors["cherokee"]["coordinates"],
+    )
+    mountain_reverse_connector_geometry = list(
+        reversed(mountain_reverse_connector["geometry"])
+    )
+    mountain_reverse_geometry = copy.deepcopy(mountain_reverse_connector_geometry)
+    mountain_reverse_cross_source_gap = _append_reviewed_cross_source_geometry(
+        mountain_reverse_geometry, mountain_reverse_derived["geometry"]
+    )
+    mountain_reverse_nps_offset = (
+        line_length_m(mountain_reverse_geometry)
+        - line_length_m(mountain_reverse_derived["geometry"])
+    )
     mountain_reverse_progress = mountain_reverse_derived["control_progress"]
     mountain_reverse_landmarks = []
     for anchor in mountain_reverse["anchors"]:
@@ -1544,7 +2275,8 @@ def build_official_route_evidence(snapshot_payload: dict, route_spec: dict) -> d
         forced = (
             0.0
             if anchor["id"] == "cherokee"
-            else mountain_reverse_progress[progress_key]["route_progress_m"]
+            else mountain_reverse_nps_offset
+            + mountain_reverse_progress[progress_key]["route_progress_m"]
         )
         mountain_reverse_landmarks.append(
             _landmark_projection(
@@ -1558,10 +2290,17 @@ def build_official_route_evidence(snapshot_payload: dict, route_spec: dict) -> d
             snapshot=snapshot,
             variant=mountain_reverse,
             geometry=mountain_reverse_geometry,
-            source_traversal=mountain_reverse_derived["source_traversal"],
+            source_traversal=[
+                *_reverse_traversal(mountain_reverse_connector["source_traversal"]),
+                *mountain_reverse_derived["source_traversal"],
+            ],
             landmarks=mountain_reverse_landmarks,
-            maximum_join_gap_m=mountain_reverse_derived["maximum_join_gap_m"],
-            blockers=mountain_blockers,
+            maximum_join_gap_m=max(
+                mountain_reverse_connector["maximum_join_gap_m"],
+                mountain_reverse_derived["maximum_join_gap_m"],
+            ),
+            supplemental_features=connector_features,
+            cross_source_handoff_gap_m=mountain_reverse_cross_source_gap,
         )
     )
 
@@ -1635,6 +2374,32 @@ def build_official_route_evidence(snapshot_payload: dict, route_spec: dict) -> d
             f"expected {sorted(EXPECTED_CADES_DIRECTION_CONFLICT_GEOMETRY_IDS)}, "
             f"got {sorted(cades_direction_conflicts)}"
         )
+    cades_conflict_traversal = {
+        item["geometry_id"]: item["direction"]
+        for item in cades_traversal
+        if item["geometry_id"] in cades_direction_conflicts
+    }
+    if cades_conflict_traversal != {
+        geometry_id: "reverse"
+        for geometry_id in EXPECTED_CADES_DIRECTION_CONFLICT_GEOMETRY_IDS
+    }:
+        raise OriginalRouteSourceError("Cades reviewed traversal direction changed")
+    cades_override_source = source_supplement["cades_direction_override"]
+    cades_direction_override = {
+        "schema_version": 1,
+        "kind": "CadesDirectionOverrideV1",
+        "basis": "official_grsm_map_and_current_grsm_crosswalk",
+        "reviewed_traversal_direction": "reverse",
+        "source_evidence_sha256": canonical_sha256(cades_override_source),
+        "crosswalk": [
+            {
+                "national_geometry_id": item["national_geometry_id"],
+                "grsm_global_id": item["grsm_global_id"],
+                "grsm_object_id": item["grsm_object_id"],
+            }
+            for item in cades_override_source["overrides"]
+        ],
+    }
     output_variants.append(
         _route_output(
             snapshot=snapshot,
@@ -1648,12 +2413,8 @@ def build_official_route_evidence(snapshot_payload: dict, route_spec: dict) -> d
                 loop["maximum_join_gap_m"],
                 connector["maximum_join_gap_m"],
             ),
-            blockers=(
-                ["nps_one_way_digitization_conflict"]
-                if cades_direction_conflicts
-                else []
-            ),
             direction_conflict_geometry_ids=sorted(cades_direction_conflicts),
+            direction_override=cades_direction_override,
         )
     )
 
@@ -1721,6 +2482,9 @@ def build_official_route_evidence(snapshot_payload: dict, route_spec: dict) -> d
         "kind": "trailhead_original_official_route_evidence",
         "product_id": PRODUCT_ID,
         "source_snapshot_sha256": nps_road_snapshot_sha256(snapshot),
+        "source_supplement_sha256": official_route_source_supplement_sha256(
+            source_supplement
+        ),
         "route_spec_sha256": canonical_sha256(spec),
         "generator": {
             "name": "smokies_official_route_compiler",
@@ -1731,15 +2495,33 @@ def build_official_route_evidence(snapshot_payload: dict, route_spec: dict) -> d
             ),
         },
         "source_policy": {
+            # Legacy readers treat this as the primary authority. The complete
+            # reviewed authority set is additive below.
             "geometry_authority": "nps_public_roads",
             "license": "us-pd",
+            "geometry_authorities": [
+                {
+                    "id": "nps_public_roads",
+                    "license": "us-pd",
+                    "attribution": "National Park Service",
+                },
+                {
+                    "id": "nc_onemap_ng911",
+                    "license": "free_unrestricted_use",
+                    "attribution": (
+                        "NC OneMap; NC 911 Board; NG911; CGIA; "
+                        "Eastern Band of Cherokee Indians"
+                    ),
+                },
+            ],
+            "cades_direction_authority": "grsm_official_map_and_roads_crosswalk",
             "operational_readiness_separate": True,
             "mapbox_candidate_geometry_persisted": False,
             "endpoint_join_tolerance_m": ENDPOINT_JOIN_TOLERANCE_M,
+            "cross_source_handoff_max_m": NC_ONEMAP_CROSS_SOURCE_HANDOFF_MAX_M,
         },
         "publication_status": "blocked",
         "publication_blockers": [
-            "mountain_crossing_cherokee_extension",
             "trusted_current_road_observation",
             "server_owned_vehicle_class",
             "editorial_and_cultural_review",
@@ -1748,5 +2530,15 @@ def build_official_route_evidence(snapshot_payload: dict, route_spec: dict) -> d
     }
 
 
-def official_route_evidence_sha256(snapshot_payload: dict, route_spec: dict) -> str:
-    return canonical_sha256(build_official_route_evidence(snapshot_payload, route_spec))
+def official_route_evidence_sha256(
+    snapshot_payload: dict,
+    route_spec: dict,
+    source_supplement_payload: dict,
+) -> str:
+    return canonical_sha256(
+        build_official_route_evidence(
+            snapshot_payload,
+            route_spec,
+            source_supplement_payload,
+        )
+    )

@@ -19,10 +19,13 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/lib/design';
 import { useStore } from '@/lib/store';
+import { accountStorage } from '@/lib/storage';
 import {
+  originalVehicleBindingMatchesProjection,
   originalBundleStore,
   originalPackVersionAccessIsExact,
   originalsApi,
+  projectOriginalVehicleBinding,
   useOriginalsAdminRuntime,
   useOriginalsRuntime,
   type OriginalOwnerScope,
@@ -58,11 +61,14 @@ export default function OriginalDetailScreen() {
   const versionValue = Array.isArray(params.version) ? params.version[0] : params.version;
   const requestedVersion = Number.isFinite(Number(versionValue)) ? Number(versionValue) : undefined;
   const user = useStore(state => state.user);
+  const token = useStore(state => state.token);
+  const rigProfile = useStore(state => state.rigProfile);
   const accountScope = user?.id == null ? 'guest' : `account:${String(user.id)}`;
   const currentScopeRef = useRef(accountScope);
   currentScopeRef.current = accountScope;
   const loadRequestRef = useRef(0);
   const downloadRequestRef = useRef(0);
+  const startRequestRef = useRef(0);
   const hasPlan = useStore(state => state.hasPlan);
   const originalsRuntime = useOriginalsRuntime();
   const originalsAdminRuntime = useOriginalsAdminRuntime();
@@ -319,19 +325,52 @@ export default function OriginalDetailScreen() {
   const beginStart = useCallback(async () => {
     if (!detail) return;
     if (detail.adminPreview) throw new Error('Unpublished Studio drafts can run only in the no-driving trigger test.');
+    const request = ++startRequestRef.current;
+    const requestEpoch = accountStorage.epoch();
+    const requestUserId = user?.id;
+    const requestToken = token;
+    const requestScope = (requestUserId == null ? 'guest' : `account:${String(requestUserId)}`) as OriginalOwnerScope;
+    const requestIsCurrent = () => request === startRequestRef.current
+      && accountStorage.epoch() === requestEpoch
+      && currentScopeRef.current === requestScope
+      && String(useStore.getState().user?.id ?? '') === String(requestUserId ?? '');
+    const reviewVehicle = () => {
+      setStartVisible(false);
+      router.push({ pathname: '/(tabs)/profile', params: { vehicle: '1' } } as any);
+    };
     try {
-      const scope = (user?.id == null ? 'guest' : `account:${String(user.id)}`) as OriginalOwnerScope;
-      const manifest = await originalBundleStore.loadManifest(scope, detail.id, detail.version);
+      const manifest = await originalBundleStore.loadManifest(requestScope, detail.id, detail.version);
+      if (!requestIsCurrent()) throw new Error('Your account changed. Start again.');
       if (!manifest) throw new Error('Download and verify this Original before starting.');
       const selection = detail.manifestSchemaVersion === 2
         ? { chapter_id: selectedChapterId, variant_id: selectedVariantId }
         : undefined;
       if (manifest.schema_version === 2 && selection) {
+        if (!requestToken || requestUserId == null) {
+          reviewVehicle();
+          return;
+        }
+        const bindingEnvelope = await originalsApi.getVehicleBinding({ authToken: requestToken });
+        if (!requestIsCurrent()) throw new Error('Your account changed. Start again.');
+        const binding = bindingEnvelope.binding;
+        if (!binding || (rigProfile && !originalVehicleBindingMatchesProjection(
+          binding,
+          projectOriginalVehicleBinding(rigProfile),
+        ))) {
+          reviewVehicle();
+          return;
+        }
         const readiness = await originalsApi.startReadiness(
           detail.id,
           detail.version,
-          selection,
+          { ...selection, vehicle_binding_id: binding.binding_id },
+          { authToken: requestToken },
         );
+        if (!requestIsCurrent()) throw new Error('Your account changed. Start again.');
+        if (readiness.reason_code.startsWith('vehicle_setup_')) {
+          reviewVehicle();
+          return;
+        }
         if (!readiness.can_start || readiness.status !== 'available') {
           throw new Error(readiness.message || 'Current operating information could not be verified. Check again before starting.');
         }
@@ -345,13 +384,14 @@ export default function OriginalDetailScreen() {
           throw new Error('Allow notifications so Android can show the active-tour location service.');
         }
       }
+      if (!requestIsCurrent()) throw new Error('Your account changed. Start again.');
       await originalsRuntime.startTour(manifest, selection);
       setStartVisible(false);
       router.replace(originalStartDestination(detail.id, detail.version) as any);
     } catch (startError: any) {
       throw startError;
     }
-  }, [detail, originalsRuntime, router, selectedChapterId, selectedVariantId, user?.id]);
+  }, [detail, originalsRuntime, rigProfile, router, selectedChapterId, selectedVariantId, token, user?.id]);
 
   const beginSimulation = useCallback(async () => {
     if (!detail || !user?.is_admin) return;

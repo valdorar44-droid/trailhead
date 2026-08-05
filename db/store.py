@@ -26,6 +26,12 @@ from db.originals_operational import (
     operational_candidate_sha256,
     validate_manifest_operational_binding,
 )
+from db.originals_vehicle_binding import (
+    derive_original_vehicle_class,
+    normalize_original_vehicle_binding_input,
+    original_vehicle_profile_sha256,
+)
+from db.originals_cultural_review import cultural_dossier_binding
 
 # Report expiry by type (seconds)
 EXPIRY_BY_TYPE = {
@@ -964,6 +970,18 @@ def init_db():
             apple_sub                TEXT,
             google_sub               TEXT,
             created_at               INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS user_original_vehicle_bindings_v1 (
+            user_id               INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+            binding_id            TEXT NOT NULL UNIQUE,
+            revision              INTEGER NOT NULL CHECK(revision >= 1),
+            vehicle_kind          TEXT NOT NULL,
+            vehicle_length_ft     REAL,
+            is_towing             INTEGER NOT NULL CHECK(is_towing IN (0, 1)),
+            derived_vehicle_class TEXT,
+            profile_sha256        TEXT NOT NULL,
+            created_at            INTEGER NOT NULL,
+            updated_at            INTEGER NOT NULL
         );
         CREATE TABLE IF NOT EXISTS credit_transactions (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1914,6 +1932,18 @@ def init_db():
         "ALTER TABLE trips ADD COLUMN version INTEGER NOT NULL DEFAULT 1",
         "CREATE INDEX IF NOT EXISTS idx_trips_user_updated ON trips(user_id, updated_at)",
         "CREATE TABLE IF NOT EXISTS stripe_purchases (session_id TEXT PRIMARY KEY, user_id INTEGER NOT NULL, credits INTEGER NOT NULL, created_at INTEGER NOT NULL)",
+        """CREATE TABLE IF NOT EXISTS user_original_vehicle_bindings_v1 (
+            user_id               INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+            binding_id            TEXT NOT NULL UNIQUE,
+            revision              INTEGER NOT NULL CHECK(revision >= 1),
+            vehicle_kind          TEXT NOT NULL,
+            vehicle_length_ft     REAL,
+            is_towing             INTEGER NOT NULL CHECK(is_towing IN (0, 1)),
+            derived_vehicle_class TEXT,
+            profile_sha256        TEXT NOT NULL,
+            created_at            INTEGER NOT NULL,
+            updated_at            INTEGER NOT NULL
+        )""",
         """CREATE TABLE IF NOT EXISTS camp_planning_brief_unlocks (
             user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             facility_id   TEXT NOT NULL,
@@ -5729,6 +5759,7 @@ def delete_user(user_id: int) -> None:
         db.execute("PRAGMA foreign_keys=OFF")
         _delete_user_support_data(db, user_id)
         _delete_user_trail_route_data(db, user_id)
+        db.execute("DELETE FROM user_original_vehicle_bindings_v1 WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM authored_trip_pack_acquisition_requests WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM authored_trip_pack_entitlements WHERE user_id=?", (user_id,))
         db.execute("UPDATE authored_trip_packs SET created_by=NULL WHERE created_by=?", (user_id,))
@@ -6100,6 +6131,7 @@ def _delete_user_full(user_id: int) -> None:
     db = _conn()
     _delete_user_support_data(db, user_id)
     _delete_user_trail_route_data(db, user_id)
+    db.execute("DELETE FROM user_original_vehicle_bindings_v1 WHERE user_id=?", (user_id,))
     # Tables with REFERENCES users(id) — strict foreign key constraints, delete first
     db.execute("DELETE FROM contributor_badges WHERE user_id=? OR granted_by=?", (user_id, user_id))
     db.execute("DELETE FROM contest_events      WHERE user_id=?",    (user_id,))
@@ -12830,12 +12862,23 @@ def list_authored_trip_packs_admin(content_kind: str | None = None) -> list[dict
 def _authored_original_preview_manifest_from_row(
     pack: sqlite3.Row | dict,
     verified_assets: dict[str, dict],
+    *,
+    chapter_id: str | None = None,
+    variant_id: str | None = None,
 ) -> dict:
     authored = _decode_pack_json(pack["draft_original_manifest_json"], None)
     if isinstance(authored, dict) and authored.get("schema_version") == 2:
-        raise ValueError(
-            "OriginalManifestV2 device preview requires an explicit chapter and variant selection"
-        )
+        if not chapter_id or not variant_id:
+            raise ValueError(
+                "OriginalManifestV2 device preview requires explicit chapter_id and variant_id"
+            )
+        manifest = _authored_original_validation_manifest_from_row(pack, verified_assets)
+        return compile_original_manifest_v2_selection(
+            manifest,
+            chapter_id=chapter_id,
+            variant_id=variant_id,
+            normalize_v1=_normalize_original_manifest_v1,
+        )["manifest"]
     manifest = _authored_original_validation_manifest_from_row(pack, verified_assets)
     return manifest
 
@@ -12924,7 +12967,12 @@ def _authored_original_validation_manifest_from_row(
     return manifest
 
 
-def get_authored_original_device_preview_manifest(pack_id: str) -> dict | None:
+def get_authored_original_device_preview_manifest(
+    pack_id: str,
+    *,
+    chapter_id: str | None = None,
+    variant_id: str | None = None,
+) -> dict | None:
     """Build a read-only, hash-bound manifest for testing the current draft."""
     pack_id = _validate_canonical_id(pack_id, "Original id")
     db = _conn()
@@ -12937,7 +12985,12 @@ def get_authored_original_device_preview_manifest(pack_id: str) -> dict | None:
         if not pack:
             return None
         verified_assets = _verified_original_asset_map_db(db, pack_id)
-        return _authored_original_preview_manifest_from_row(pack, verified_assets)
+        return _authored_original_preview_manifest_from_row(
+            pack,
+            verified_assets,
+            chapter_id=chapter_id,
+            variant_id=variant_id,
+        )
     finally:
         db.close()
 
@@ -14156,6 +14209,19 @@ def publish_authored_trip_pack(
                 published_validation_metadata["operational_readiness"] = (
                     operational_publication_metadata
                 )
+            raw_route_binding = (
+                original_manifest.get("route_evidence")
+                if isinstance(original_manifest, dict)
+                else None
+            )
+            cultural_product_id = str(
+                raw_route_binding.get("product_id")
+                if isinstance(raw_route_binding, dict)
+                else pack_id
+            ).strip()
+            cultural_binding = cultural_dossier_binding(cultural_product_id)
+            if cultural_binding is not None:
+                published_validation_metadata["cultural_review"] = cultural_binding
             _, original_manifest_json = _normalize_original_manifest(
                 pack_id,
                 pack["draft_title"],
@@ -15296,6 +15362,182 @@ def get_published_original_manifest(
     return _original_manifest_for_client(manifest)
 
 
+def get_published_original_server_manifest(
+    pack_id_or_slug: str,
+    version: int,
+    user_id: int | None = None,
+) -> dict | None:
+    """Load a published manifest with server-only provenance intact.
+
+    This follows the same entitlement check as the consumer getter and exists
+    only so trusted readiness readers can bind current observations to the
+    immutable route-evidence record. It is not exposed as a public endpoint.
+    """
+
+    clean = str(pack_id_or_slug or "").strip()
+    if not isinstance(version, int) or version < 1:
+        raise ValueError("Original version must be a positive integer")
+    db = _conn()
+    row = db.execute(
+        """SELECT p.id AS pack_id,v.version,v.price_credits,v.public_metadata,
+                  v.original_manifest_json
+           FROM authored_trip_packs p
+           JOIN authored_trip_pack_versions v ON v.pack_id=p.id
+           WHERE (p.id=? OR v.slug=?) AND v.version=?
+             AND p.status='published' AND p.content_kind='original_drive'
+             AND v.content_kind='original_drive'
+           LIMIT 1""",
+        (clean, clean, version),
+    ).fetchone()
+    if not row:
+        db.close()
+        return None
+    access = _original_access_decision_db(db, user_id, row)
+    if not access["allowed"]:
+        db.close()
+        raise OriginalManifestAccessError("Acquire this Original before downloading it")
+    manifest = _decode_pack_json(row["original_manifest_json"], None)
+    db.close()
+    if not isinstance(manifest, dict):
+        raise ValueError("Published Original manifest is unavailable")
+    return copy.deepcopy(manifest)
+
+
+def _original_vehicle_binding_result(row: sqlite3.Row | dict) -> dict:
+    vehicle_class = row["derived_vehicle_class"]
+    return {
+        "schema_version": 1,
+        "binding_id": row["binding_id"],
+        "revision": int(row["revision"]),
+        "vehicle_kind": row["vehicle_kind"],
+        "vehicle_length_ft": (
+            float(row["vehicle_length_ft"])
+            if row["vehicle_length_ft"] is not None
+            else None
+        ),
+        "is_towing": bool(row["is_towing"]),
+        "vehicle_class": vehicle_class,
+        "complete": vehicle_class is not None,
+        "updated_at": int(row["updated_at"]),
+    }
+
+
+def get_user_original_vehicle_binding(user_id: int) -> dict | None:
+    db = _conn()
+    try:
+        row = db.execute(
+            "SELECT * FROM user_original_vehicle_bindings_v1 WHERE user_id=?",
+            (int(user_id),),
+        ).fetchone()
+        return _original_vehicle_binding_result(row) if row else None
+    finally:
+        db.close()
+
+
+def upsert_user_original_vehicle_binding(user_id: int, profile: object) -> dict:
+    """Bind one privacy-minimized vehicle projection to an account.
+
+    Identical updates are idempotent. Any restriction-relevant change rotates
+    the opaque binding id so a delayed Start request cannot reuse stale setup.
+    """
+
+    normalized = normalize_original_vehicle_binding_input(profile)
+    profile_sha256 = original_vehicle_profile_sha256(normalized)
+    vehicle_class = derive_original_vehicle_class(normalized)
+    now = int(time.time())
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute(
+            "SELECT * FROM user_original_vehicle_bindings_v1 WHERE user_id=?",
+            (int(user_id),),
+        ).fetchone()
+        if row and row["profile_sha256"] == profile_sha256:
+            result = _original_vehicle_binding_result(row)
+            db.commit()
+            return result
+        revision = int(row["revision"]) + 1 if row else 1
+        binding_id = "ovb_" + secrets.token_urlsafe(24)
+        created_at = int(row["created_at"]) if row else now
+        db.execute(
+            """INSERT INTO user_original_vehicle_bindings_v1 (
+                   user_id,binding_id,revision,vehicle_kind,vehicle_length_ft,
+                   is_towing,derived_vehicle_class,profile_sha256,created_at,updated_at
+               ) VALUES (?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(user_id) DO UPDATE SET
+                   binding_id=excluded.binding_id,
+                   revision=excluded.revision,
+                   vehicle_kind=excluded.vehicle_kind,
+                   vehicle_length_ft=excluded.vehicle_length_ft,
+                   is_towing=excluded.is_towing,
+                   derived_vehicle_class=excluded.derived_vehicle_class,
+                   profile_sha256=excluded.profile_sha256,
+                   updated_at=excluded.updated_at""",
+            (
+                int(user_id),
+                binding_id,
+                revision,
+                normalized["vehicle_kind"],
+                normalized["vehicle_length_ft"],
+                int(normalized["is_towing"]),
+                vehicle_class,
+                profile_sha256,
+                created_at,
+                now,
+            ),
+        )
+        saved = db.execute(
+            "SELECT * FROM user_original_vehicle_bindings_v1 WHERE user_id=?",
+            (int(user_id),),
+        ).fetchone()
+        if not saved:
+            raise RuntimeError("Vehicle binding was not saved")
+        db.commit()
+        return _original_vehicle_binding_result(saved)
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def delete_user_original_vehicle_binding(user_id: int) -> bool:
+    db = _conn()
+    try:
+        cursor = db.execute(
+            "DELETE FROM user_original_vehicle_bindings_v1 WHERE user_id=?",
+            (int(user_id),),
+        )
+        db.commit()
+        return cursor.rowcount > 0
+    finally:
+        db.close()
+
+
+def resolve_user_original_vehicle_binding(
+    user_id: int | None,
+    binding_id: str | None,
+) -> dict:
+    """Resolve a binding without revealing whether another account owns an id."""
+
+    clean_binding_id = str(binding_id or "").strip()
+    if user_id is None or not clean_binding_id:
+        return {"status": "vehicle_setup_required", "vehicle_class": None}
+    binding = get_user_original_vehicle_binding(int(user_id))
+    if binding is None:
+        return {"status": "vehicle_setup_required", "vehicle_class": None}
+    if not secrets.compare_digest(binding["binding_id"], clean_binding_id):
+        return {"status": "vehicle_setup_changed", "vehicle_class": None}
+    if binding["vehicle_class"] is None:
+        return {"status": "vehicle_setup_incomplete", "vehicle_class": None}
+    return {
+        "status": "ready",
+        "vehicle_class": binding["vehicle_class"],
+        "binding_id": binding["binding_id"],
+        "revision": binding["revision"],
+    }
+
+
 def get_published_original_start_readiness(
     pack_id_or_slug: str,
     version: int,
@@ -15303,7 +15545,7 @@ def get_published_original_start_readiness(
     chapter_id: str | None,
     variant_id: str | None,
     user_id: int | None = None,
-    vehicle_class: str | None = None,
+    vehicle_binding_id: str | None = None,
     planned_stop_minutes: int | None = None,
     now: _datetime | None = None,
     observation: object | None = None,
@@ -15312,7 +15554,8 @@ def get_published_original_start_readiness(
 
     `observation` is an internal injection point for the future trusted NPS
     reader.  It is never accepted from the public API.  Until that reader
-    supplies a fresh candidate-bound observation, V2 starts fail closed.
+    supplies a fresh candidate-bound observation, V2 starts fail closed. The
+    operational vehicle class is resolved only from an opaque account binding.
     """
 
     manifest = get_published_original_manifest(
@@ -15357,11 +15600,20 @@ def get_published_original_start_readiness(
             now=effective_now,
             require_current=False,
         )
-        if vehicle_class is None:
+        vehicle_binding = resolve_user_original_vehicle_binding(
+            user_id,
+            vehicle_binding_id,
+        )
+        if vehicle_binding["status"] != "ready":
             candidate_chapter = next(
                 item for item in candidate["chapters"]
                 if item["chapter_id"] == clean_chapter_id
             )
+            messages = {
+                "vehicle_setup_required": "Review your vehicle setup before starting this chapter.",
+                "vehicle_setup_changed": "Your saved vehicle setup changed. Review it before starting this chapter.",
+                "vehicle_setup_incomplete": "Add the vehicle type and length needed for this chapter check.",
+            }
             result = {
                 "schema_version": 1,
                 "candidate_id": candidate["candidate_id"],
@@ -15371,15 +15623,15 @@ def get_published_original_start_readiness(
                 "alternate_chapter_ids": list(candidate_chapter["alternate_chapter_ids"]),
                 "notices": [],
                 "status": "check_required",
-                "reason_code": "vehicle_class_required",
-                "message": "Choose your vehicle setup before starting this chapter.",
+                "reason_code": vehicle_binding["status"],
+                "message": messages[vehicle_binding["status"]],
             }
         else:
             result = evaluate_chapter_readiness(
                 candidate,
                 chapter_id=clean_chapter_id,
                 now=effective_now,
-                vehicle_class=vehicle_class,
+                vehicle_class=vehicle_binding["vehicle_class"],
                 planned_stop_minutes=planned_stop_minutes,
                 observation=observation,
             )
@@ -15415,6 +15667,7 @@ def _original_manifest_for_client(manifest: dict) -> dict:
     result = copy.deepcopy(manifest)
     if result.get("schema_version") == 2:
         result.pop("narration_profile", None)
+        result.pop("route_evidence", None)
     return result
 
 

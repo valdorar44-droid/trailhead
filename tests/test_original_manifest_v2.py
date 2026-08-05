@@ -3,8 +3,10 @@ import json
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
+from dashboard import server
 from dashboard.server import (
     AuthoredOriginalDraftRequest,
     OriginalNarrationProfileV1,
@@ -21,6 +23,7 @@ from db.originals_operational import (
     manifest_operational_fields,
     operational_candidate_sha256,
 )
+from db.originals_route_evidence import canonical_sha256
 
 
 FIXTURE_PATH = (
@@ -146,6 +149,82 @@ def _test_profile() -> dict:
     }
 
 
+def _test_route_evidence(manifest: dict) -> tuple[dict, dict]:
+    variants = []
+    for chapter in manifest["chapters"]:
+        for variant in chapter["variants"]:
+            geometry = copy.deepcopy(variant["route"]["geometry"])
+            variants.append({
+                "chapter_id": chapter["id"],
+                "variant_id": variant["id"],
+                "status": "official_geometry_candidate",
+                "geometry_ready_for_editorial_cues": True,
+                "blocking_issues": [],
+                "geometry": geometry,
+                "geometry_sha256": canonical_sha256(geometry),
+                "distance_m": variant["route"]["distance_m"],
+            })
+    evidence = {
+        "schema_version": 1,
+        "kind": "trailhead_original_official_route_evidence",
+        "product_id": "original_moab_canyons_to_sky",
+        "publication_status": "ready_for_publication",
+        "publication_blockers": [],
+        "route_spec_sha256": "a" * 64,
+        "source_snapshot_sha256": "b" * 64,
+        "source_policy": {
+            "geometry_authority": "nps_public_roads",
+            "license": "us-pd",
+            "mapbox_candidate_geometry_persisted": False,
+        },
+        "variants": variants,
+    }
+    binding = {
+        "schema_version": 1,
+        "evidence_id": "test-original-routes-v1",
+        "evidence_sha256": canonical_sha256(evidence),
+        "product_id": evidence["product_id"],
+        "route_spec_sha256": evidence["route_spec_sha256"],
+        "source_snapshot_sha256": evidence["source_snapshot_sha256"],
+    }
+    return evidence, binding
+
+
+def _verified_assets_for_v2(payload: dict) -> dict[str, dict]:
+    stories_by_asset = {
+        story["audio_asset_id"]: story
+        for story in payload["manifest"]["stories"]
+    }
+    verified: dict[str, dict] = {}
+    for asset in payload["manifest"]["assets"]:
+        record = {
+            "kind": asset["kind"],
+            "mime_type": asset["mime_type"],
+            "byte_count": asset["bytes"],
+            "sha256": asset["sha256"],
+            "media_metadata_json": "{}",
+        }
+        story = stories_by_asset.get(asset["id"])
+        if story is not None:
+            record["transcript_sha256"] = store.original_transcript_sha256(
+                story["transcript"]
+            )
+            record["media_metadata_json"] = json.dumps({
+                "duration_s": story["audio_duration_s"],
+            })
+        verified[asset["id"]] = record
+    return verified
+
+
+def _v2_preview_row(payload: dict) -> dict:
+    return {
+        "id": payload["pack_id"],
+        "draft_revision": 1,
+        "draft_title": payload["title"],
+        "draft_original_manifest_json": json.dumps(payload["manifest"]),
+    }
+
+
 def test_v1_request_and_normalizer_remain_unchanged():
     payload = _v1_payload()
     parsed = AuthoredOriginalDraftRequest.model_validate(payload)
@@ -242,6 +321,8 @@ def test_v2_publication_requires_and_forwards_exact_per_variant_validation():
         "foothills_parkway_all_variants:eastbound",
         "foothills_parkway_all_variants:westbound",
     }
+    route_evidence, binding = _test_route_evidence(payload["manifest"])
+    payload["manifest"]["route_evidence"] = binding
     with pytest.raises(OriginalManifestV2Error, match="every chapter variant"):
         normalize_original_manifest_v2(
             payload["manifest"],
@@ -260,6 +341,7 @@ def test_v2_publication_requires_and_forwards_exact_per_variant_validation():
         normalize_v1=normalize_v1,
         publishing=True,
         validated_selections=expected,
+        route_evidence_document=route_evidence,
     )
     assert normalized["schema_version"] == 2
     assert len(calls) == 2
@@ -271,6 +353,38 @@ def test_v2_publication_requires_and_forwards_exact_per_variant_validation():
         payload["manifest"]["chapters"][0]["variants"][0]["route"]["geometry"]["coordinates"][0][0],
         second["route"]["geometry"]["coordinates"][0][0],
     }
+
+
+def test_v2_publication_requires_server_owned_route_evidence():
+    payload = _v2_payload()
+    payload["manifest"]["narration_profile"] = _test_profile()
+    with pytest.raises(OriginalManifestV2Error, match="server-owned route evidence"):
+        normalize_original_manifest_v2(
+            payload["manifest"],
+            pack_id=payload["pack_id"],
+            title=payload["title"],
+            version=1,
+            normalize_v1=lambda *_args, **_kwargs: ({}, "{}"),
+            publishing=True,
+            validated_selections={"foothills_parkway_all_variants:eastbound"},
+        )
+
+
+def test_v2_route_evidence_is_server_only_consumer_metadata():
+    payload = _v2_payload()
+    evidence, binding = _test_route_evidence(payload["manifest"])
+    payload["manifest"]["route_evidence"] = binding
+    normalized, _ = normalize_original_manifest_v2(
+        payload["manifest"],
+        pack_id=payload["pack_id"],
+        title=payload["title"],
+        version=1,
+        normalize_v1=store._normalize_original_manifest_v1,
+        route_evidence_document=evidence,
+    )
+    assert normalized["route_evidence"] == binding
+    assert "route_evidence" not in store._original_manifest_for_client(normalized)
+    assert store._original_manifest_preview(normalized)["route_evidence"] == binding
 
 
 def test_v2_compiled_selection_carries_operational_sources_once():
@@ -353,15 +467,104 @@ def test_v2_validation_aggregate_never_marks_a_partial_selection_set_publishable
     assert "westbound" in aggregate["issues"][0]
 
 
-def test_v2_device_preview_fails_with_selection_contract_instead_of_v1_key_error():
+@pytest.mark.parametrize(
+    ("chapter_id", "variant_id"),
+    [
+        (None, None),
+        ("foothills_parkway", None),
+        (None, "eastbound"),
+    ],
+)
+def test_v2_device_preview_requires_exact_selection(chapter_id, variant_id):
     payload = _v2_payload()
-    with pytest.raises(ValueError, match="explicit chapter and variant selection"):
-        store._authored_original_preview_manifest_from_row({
-            "id": payload["pack_id"],
-            "draft_revision": 1,
-            "draft_title": payload["title"],
-            "draft_original_manifest_json": json.dumps(payload["manifest"]),
-        }, {})
+    with pytest.raises(ValueError, match="explicit chapter_id and variant_id"):
+        store._authored_original_preview_manifest_from_row(
+            _v2_preview_row(payload),
+            {},
+            chapter_id=chapter_id,
+            variant_id=variant_id,
+        )
+
+
+@pytest.mark.parametrize(
+    ("chapter_id", "variant_id", "message"),
+    [
+        ("missing_chapter", "eastbound", "chapter selection was not found"),
+        ("foothills_parkway", "missing_variant", "route variant selection was not found"),
+    ],
+)
+def test_v2_device_preview_rejects_unknown_selection(chapter_id, variant_id, message):
+    payload = _v2_payload()
+    with pytest.raises(OriginalManifestV2Error, match=message):
+        store._authored_original_preview_manifest_from_row(
+            _v2_preview_row(payload),
+            _verified_assets_for_v2(payload),
+            chapter_id=chapter_id,
+            variant_id=variant_id,
+        )
+
+
+def test_v2_device_preview_compiles_selected_variant_to_hash_bound_v1():
+    payload = _v2_payload()
+    preview = store._authored_original_preview_manifest_from_row(
+        _v2_preview_row(payload),
+        _verified_assets_for_v2(payload),
+        chapter_id="foothills_parkway",
+        variant_id="eastbound",
+    )
+
+    assert preview["schema_version"] == 1
+    assert preview["pack_id"] == payload["pack_id"]
+    assert preview["version"] == store.ORIGINAL_DEVICE_PREVIEW_VERSION_BASE + 1
+    assert preview["manifest_id"] == f"original_preview_manifest_{payload['pack_id']}_r1"
+    assert preview["route"] == payload["manifest"]["chapters"][0]["variants"][0]["route"]
+    assert [item["id"] for item in preview["stops"]] == [
+        item["story_id"]
+        for item in payload["manifest"]["chapters"][0]["variants"][0]["cue_refs"]
+    ]
+    assert all(
+        asset["path"].startswith(
+            f"/api/admin/originals/{payload['pack_id']}/assets/"
+        )
+        for asset in preview["assets"]
+    )
+
+
+def test_admin_v2_device_preview_endpoint_forwards_selection(monkeypatch):
+    captured = {}
+
+    def fake_preview(pack_id, *, chapter_id=None, variant_id=None):
+        captured.update({
+            "pack_id": pack_id,
+            "chapter_id": chapter_id,
+            "variant_id": variant_id,
+        })
+        return {"schema_version": 1, "manifest_id": "test_preview"}
+
+    monkeypatch.setattr(server, "get_authored_original_device_preview_manifest", fake_preview)
+    previous_override = server.app.dependency_overrides.get(server._require_admin)
+    server.app.dependency_overrides[server._require_admin] = lambda: {"id": "test_admin"}
+    try:
+        response = TestClient(server.app).get(
+            "/api/admin/originals/smokies/device-preview/manifest",
+            params={
+                "chapter_id": "foothills_parkway",
+                "variant_id": "eastbound",
+            },
+        )
+    finally:
+        if previous_override is None:
+            server.app.dependency_overrides.pop(server._require_admin, None)
+        else:
+            server.app.dependency_overrides[server._require_admin] = previous_override
+
+    assert response.status_code == 200
+    assert response.json()["manifest_id"] == "test_preview"
+    assert captured == {
+        "pack_id": "smokies",
+        "chapter_id": "foothills_parkway",
+        "variant_id": "eastbound",
+    }
 
 
 def test_v2_requires_exact_validation_variant_coverage():
@@ -420,6 +623,27 @@ def test_v2_cultural_approval_evidence_is_all_or_nothing():
     )
     citation.pop("cultural_approval_record_sha256")
     with pytest.raises(OriginalManifestV2Error, match="approval evidence is incomplete"):
+        store._normalize_original_manifest(
+            payload["pack_id"], payload["title"], payload["manifest"],
+        )
+
+
+def test_v2_blocks_ebci_claims_until_an_immutable_approval_is_registered():
+    payload = _v2_payload()
+    citation = payload["manifest"]["stories"][0]["citations"][0]
+    citation["affected_claims"] = ["mc_kuwohi_living_meaning"]
+    with pytest.raises(OriginalManifestV2Error, match="EBCI cultural review"):
+        store._normalize_original_manifest(
+            payload["pack_id"], payload["title"], payload["manifest"],
+        )
+    payload["manifest"]["stories"][0]["id"] = "mc_story_15"
+    citation.update({
+        "cultural_approval_record_id": "unregistered_review",
+        "cultural_approval_record_sha256": "c" * 64,
+        "cultural_approved_at": "2026-08-03",
+        "cultural_pronunciation_bundle_sha256": "d" * 64,
+    })
+    with pytest.raises(OriginalManifestV2Error, match="not registered"):
         store._normalize_original_manifest(
             payload["pack_id"], payload["title"], payload["manifest"],
         )

@@ -1,6 +1,6 @@
 # Great Smoky Mountains Original — Active Checkpoint
 
-Last updated: 2026-08-05 (S2C route/readiness/Studio candidate complete)
+Last updated: 2026-08-06 (S2D media-rights record and EBCI outreach packet complete)
 
 ## Resume protocol
 
@@ -435,3 +435,37 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 - S2B NPS road snapshot fetching or broad permanent-route reconstruction unless accepted source metadata changes.
 - Broad Map, Explore, Layers, Memory, Originals lifecycle, Android Auto, or store-screenshot crawls.
 - Paid narration, competitor-tour extraction, cultural interpretation, or external outreach before the corresponding review gate.
+
+## S2D media-rights and EBCI outreach baseline
+
+- Date: 2026-08-06. Branch: `feat/smokies-original-s2`. Baseline HEAD: `83638e587f682cee59f2975a7a17184369ec85f9`. Worktree: `/home/sean/.openclaw/worktrees/trailhead-smokies-s2`.
+- Main checkout at the same moment: `feat/trailhead-1.0.10-overhaul` at `8dc6a4bd959f98e4baa328ff3cd8bc3d224f6e76`, carrying only the three protected dirty entries.
+- Protected hashes unchanged:
+  - Explore serving index: `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`
+  - App Store copy: `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`
+- Scope locked with the user: docs-only packet — no code, audio, narration, or Studio work. EBCI compensation stays OPEN: the letters propose paid participation and invite the EBCI to set terms; no figure is named. Vehicle-class and current-road hardening already shipped in S2C and was not revisited.
+
+## S2D media-rights and EBCI outreach completion
+
+- `docs/originals/smokies-media-rights-v1.md` records all eight dossier media candidates, each carrying the seven required rights fields (`asset_url`, `dimensions`, `exact_credit`, `identity_match`, `license_record`, `rights_basis`, `sha256`), with access date 2026-08-06 and hashes re-verified at completion.
+- Asset mix: six public domain (two NPS staff photos via Commons, three LOC HABS/HAER scans via Commons, one FHWA photo via Commons) and two CC BY 4.0 (Kuwohi tower by APK; Noah Ogle cabin by Sarah Stierch). The CC BY rows are flagged non-public-domain and require product attribution if ever approved.
+- Originals live outside the repository at `/home/sean/.openclaw/evidence/smokies-media-s2/originals/`, mirrored to `C:\Users\User\Documents\Codex\evidence\trailhead\smokies-s2-media\`.
+- NPS disclaimer (`https://www.nps.gov/aboutus/disclaimer.htm`, accessed 2026-08-06) reviewed verbatim: NPS-created works are public domain; commercial republication must carry "No claim to original U.S. Government works" (17 U.S.C. § 403); the Arrowhead trademark is excluded and appears in no candidate; third-party NPS-hosted assets require individual review — none used.
+- Envato: three Elements candidates (GPCYQEB, QMBV2WR, AD54PH5) remain `pending_membership_download` because browser automation was unavailable this session. `docs/licenses/envato/smokies-1.0/README.md` placeholder records the deferral; certificates and SHA-256 are pending. No Envato asset is licensed or ingested.
+- `docs/originals/smokies-ebci-outreach-packet-v1.md` holds two paste-ready letters (Division of Commerce / Destination Marketing participation request; Cultural IRB scope determination), shared commitments, timeline, attachment list, and a decision-log stub. Status: draft — Sean sends; the agent never sends.
+- EBCI contact paths verified 2026-08-06: `/cultural-institutional-review-board/` HTTP 200 (`CIRB@ebci-nsn.gov`, (828) 359-1500), `/division-of-commerce/` HTTP 200 (contains Destination Marketing; main line 828-497-7000, `info@ebci.gov`), `/enrollment/` HTTP 200, `/contact/` HTTP 200; slugs `/commerce/`, `/destination-marketing/`, `/tourism/` return 404.
+- Gates held: `scripts/build_smokies_source_dossiers.py` and the fail-closed media-rights test are unchanged — zero approved media. Studio builder, Cartesia, narration, pronunciations, and Start Tour remain blocked. No EBCI outreach was sent and no Cherokee interpretation was drafted.
+
+### Next exact action after S2D
+
+1. Sean reviews `docs/originals/smokies-ebci-outreach-packet-v1.md`, fills the signature/contact fields, and sends both letters if approved; responses are recorded in the packet's decision log.
+2. When browser automation is available, download the three Envato candidates through the active Elements membership, store certificate PDFs and SHA-256s under `docs/licenses/envato/smokies-1.0/`, and update the media-rights record.
+3. Begin S3 editorial production for non-gated scenic, ecology, engineering, and general-history stories inside the Originals Studio; keep the three EBCI-gated entries blocked until cultural review completes.
+4. No media asset may be ingested; the builder gate stays fail-closed until an exact asset is explicitly approved with matching hash and credit.
+
+### Do not repeat after S2D
+
+- Media candidate selection, download, hashing, or Commons/LOC metadata verification for the eight dossier slots unless an asset is swapped.
+- EBCI page or contact re-verification unless a letter bounces or the EBCI site structure changes.
+- S2/S2B/S2C dossier, route evidence, current-road reader, and vehicle-binding work.
+- Any Cherokee interpretation, pronunciation, narration, or outreach send before the corresponding gate approval.

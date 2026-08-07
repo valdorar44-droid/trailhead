@@ -92,6 +92,7 @@ function RootLayout() {
   const sessionId    = useStore(s => s.sessionId);
   const welcomePromptRunId = useStore(s => s.welcomePromptRunId);
   const welcomeSetupRunId = useStore(s => s.welcomeSetupRunId);
+  const welcomeGateRunId = useStore(s => s.welcomeGateRunId);
   const router       = useRouter();
   const pathname     = usePathname();
   const insets       = useSafeAreaInsets();
@@ -439,7 +440,9 @@ function RootLayout() {
   }
 
   function continueFromWelcomeGate() {
-    markWelcomeSetupSkipped().catch(() => {});
+    if (welcomeGateSource === 'first_open') {
+      markWelcomeSetupSkipped().catch(() => {});
+    }
     dismissWelcomeGate('continue');
     logWelcomeEvent('welcome_gate_cta', { action: 'continue', signed_in: !!user });
     if (shouldRouteWelcomeToGuide()) router.push('/(tabs)/guide' as any);
@@ -725,6 +728,14 @@ function RootLayout() {
     setWelcomeGateVisible(true);
     logWelcomeEvent('welcome_gate_seen', { source: 'profile_setup' });
   }, [welcomeSetupRunId]);
+
+  useEffect(() => {
+    if (welcomeGateRunId <= 0) return;
+    setWelcomeGateSource('profile');
+    setWelcomeGateMode('welcome');
+    setWelcomeGateVisible(true);
+    logWelcomeEvent('welcome_gate_seen', { source: 'profile_reopen' });
+  }, [welcomeGateRunId]);
 
   useEffect(() => {
     if (!startupReady || launchLoaderVisible || welcomeGateChecked.current) return;

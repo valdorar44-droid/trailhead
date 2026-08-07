@@ -171,7 +171,7 @@ export default function WelcomeGate({
   const [needs, setNeeds] = useState<WelcomeTravelNeed[]>([]);
   const [rigDraft, setRigDraft] = useState<RigProfile>(DEFAULT_RIG);
   const [setupCompletedAt, setSetupCompletedAt] = useState<number | undefined>();
-  const [setupHydrated, setSetupHydrated] = useState(initialMode !== 'setup');
+  const [setupHydrated, setSetupHydrated] = useState(false);
   const [expandedRigSections, setExpandedRigSections] = useState<Record<RigSectionId, boolean>>({
     basics: true,
     capability: false,
@@ -192,25 +192,23 @@ export default function WelcomeGate({
     setParty(null);
     setNeeds([]);
     setSetupCompletedAt(undefined);
-    setSetupHydrated(initialMode !== 'setup');
-    const savedRig = initialMode === 'setup' ? useStore.getState().rigProfile : null;
+    setSetupHydrated(false);
+    const savedRig = useStore.getState().rigProfile;
     setRigDraft(savedRig ? { ...DEFAULT_RIG, ...savedRig } : DEFAULT_RIG);
     setExpandedRigSections({ basics: true, capability: false, suspension: false, range: false, dimensions: false, recovery: false, towing: false });
 
-    if (initialMode === 'setup') {
-      loadWelcomeSetupPreferences().then(saved => {
-        if (cancelled || !saved) return;
-        setVehicle(saved.vehicle);
-        setCampTypes(saved.campingStyles ?? []);
-        setParty(saved.party);
-        setNeeds(saved.needs);
-        setSetupCompletedAt(saved.completedAt);
-      }).catch(() => {
-        // Stored setup is optional; a failed read should still leave the form usable.
-      }).finally(() => {
-        if (!cancelled) setSetupHydrated(true);
-      });
-    }
+    loadWelcomeSetupPreferences().then(saved => {
+      if (cancelled || !saved) return;
+      setVehicle(saved.vehicle);
+      setCampTypes(saved.campingStyles ?? []);
+      setParty(saved.party);
+      setNeeds(saved.needs);
+      setSetupCompletedAt(saved.completedAt);
+    }).catch(() => {
+      // Stored setup is optional; a failed read should still leave the form usable.
+    }).finally(() => {
+      if (!cancelled) setSetupHydrated(true);
+    });
 
     return () => { cancelled = true; };
   }, [initialMode, visible]);

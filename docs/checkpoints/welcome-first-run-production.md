@@ -93,3 +93,29 @@ Commit this checkpoint, run the production environment/prepreview gate once, tag
 ## Next action
 
 Allow compatible 1.0.11 installs to receive the update on launch/relaunch. Resume the Great Smoky Mountains Original from its existing checkpoint; do not repeat Welcome, broad Explore, Trails, memory, Layers, Android Auto, or Originals lifecycle work without new evidence.
+
+## Production completion ? OTA2 (Trip setup reopen)
+
+- Published: `2026-08-07T02:57:14-05:00`
+- Change: cherry-pick `ac0f6b47` of accepted `d10d0ef5` (reopen welcome screen from Profile > Settings > Trip setup); five changed files byte-identical to the feature-branch commit.
+- Immutable tag/source: `v1.0.11-welcome-ota2` / `ac0f6b47d8acd6f1efd4415848b0fcdd04abecf8`
+- Production candidate branch: `production-candidate-ac0f6b47d8acd6f1efd4415848b0fcdd04abecf8-msimxn3w-9ec984600c11c1f1deb4b648`
+- Candidate branch ID: `019fdb31-8981-74cd-869f-db93e338952f`
+- Production channel ID: `019dc26b-268a-794b-8aa8-3497b4d38487`
+- Android update: `019fdb31-a028-7261-ab0b-78fbdc81258c`
+- Android group: `e7bf9c98-b92e-4f03-9ba3-a391f4631fc6`
+- Android runtime: `native-1.0.11-android.1`
+- iOS update: `019fdb31-f100-7a54-92de-296b06516ca8`
+- iOS group: `ec3e976a-5516-46a7-b0ba-580aa4e02a49`
+- iOS runtime: `native-1.0.11-ios.1`
+- Paired binary source (unchanged): `0f7431d32088405f4c381ed1a220fcb2169ec761` (Android build 70 `723dca56-01a3-416b-a22d-98c838a849ee`, iOS build 62 `712109e9-6b7f-4f72-ab51-2aa42a6095da`)
+- Sentry debug IDs: Android `1bc74ad1-69c3-4bd9-a00b-f23c488d4d36`, iOS `cde37c03-626f-4b07-86ea-1482880361c5`
+- Runtime coverage: exact match, 14 runtime-platform pairs (12 preserved legacy pairs plus the replaced 1.0.11 pair).
+- Live channel verification: production resolves to candidate branch ID `019fdb31-8981-74cd-869f-db93e338952f`.
+- Immediate rollback target (OTA1): `production-candidate-20fd29c7b1e9bbf1a8512ef4e7c1c26571fa7c4b-msfrdi6s-2b45a7f107439bb4b4bb9089` (branch ID `019fd0d4-4cf5-7c24-917e-1d706b51e4f5`).
+- Pre-publish device evidence: physical Samsung SM-A326U1 (build 69 + preview OTA `019fdb0b`) confirmed signed-in reopen via Trip setup, Get started into setup wizard, and clean Later dismissal; evidence in `C:\Users\User\Documents\Codex\evidence\trailhead\welcome-1.0.11\samsung-physical-2026-08-07`.
+- Focused gates in the release worktree: welcome/first-run contract, TypeScript, native-OTA compatibility, production runtime matrix, publisher CLI, and local Expo module resolution all passed. Publisher outcome: ancestry, native-tree equality, paired build evidence, sequential exports, Sentry uploads, paired update identity, legacy runtime preservation, and atomic channel promotion all passed.
+
+## Next action
+
+Allow compatible 1.0.11 installs to receive the update on launch/relaunch. To observe production delivery on the Samsung, install Android production build 70 (1.0.11 runtime) and relaunch. Resume the Great Smoky Mountains Original from its existing checkpoint; do not repeat Welcome, broad Explore, Trails, memory, Layers, Android Auto, or Originals lifecycle work without new evidence.

@@ -115,6 +115,16 @@ assert.match(walkthroughSource, /accessibilityLabel="Walkthrough progress"/);
 
 const layoutSource = fs.readFileSync(path.resolve('app/_layout.tsx'), 'utf8');
 assert.match(layoutSource, /if \(welcomeSetupRunId <= 0\) return;[\s\S]*?setWelcomeGateMode\('setup'\)/);
+assert.match(layoutSource, /if \(welcomeGateRunId <= 0\) return;[\s\S]*?setWelcomeGateMode\('welcome'\)/);
+assert.match(layoutSource, /logWelcomeEvent\('welcome_gate_seen', \{ source: 'profile_reopen' \}\)/);
+assert.match(layoutSource, /if \(welcomeGateSource === 'first_open'\) \{\s*markWelcomeSetupSkipped\(\)\.catch\(\(\) => \{\}\);\s*\}/);
+const storeSource = fs.readFileSync(path.resolve('lib/store.ts'), 'utf8');
+assert.match(storeSource, /welcomeGateRunId: 0,/);
+assert.match(storeSource, /startWelcomeGate: \(\) => set\(state => \(\{ welcomeGateRunId: state\.welcomeGateRunId \+ 1 \}\)\)/);
+const profileSource = fs.readFileSync(path.resolve('app/(tabs)/profile.tsx'), 'utf8');
+assert.match(profileSource, /id: 'trip-setup', icon: 'options-outline', label: 'Trip setup', color: C\.orange, onPress: startWelcomeGate/);
+assert.match(gateSource, /const savedRig = useStore\.getState\(\)\.rigProfile;/);
+assert.match(gateSource, /setSetupHydrated\(false\)/);
 assert.match(layoutSource, /shouldPreserveCompletedWelcomeSetup\([\s\S]*?welcomeGateSource,[\s\S]*?preferences\.completedAt/);
 assert.match(layoutSource, /preserveCompletedSetup[\s\S]*?saveWelcomeSetupPreferences\(preferences\)[\s\S]*?markWelcomeSetupSkipped\(preferences\)/);
 

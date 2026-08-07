@@ -380,6 +380,7 @@ export default function ProfileScreen() {
   const addTripToHistory = useStore(st => st.addTripToHistory);
   const startWelcomePrompt = useStore(st => st.startWelcomePrompt);
   const startWelcomeSetup = useStore(st => st.startWelcomeSetup);
+  const startWelcomeGate = useStore(st => st.startWelcomeGate);
   const [offlineTripSummaries, setOfflineTripSummaries] = useState<Array<TripResult & { cached_at: number }>>([]);
   const googleClientIds = useMemo(() => ({
     iosClientId: expoExtraValue('googleIosClientId'),
@@ -2283,7 +2284,7 @@ export default function ProfileScreen() {
                       { id: 'email', icon: 'at-outline', label: 'Email', color: C.orange, onPress: () => contactSupport('Trailhead question') },
                     ]
                   : [
-                      { id: 'trip-setup', icon: 'options-outline', label: 'Trip setup', color: C.orange, onPress: startWelcomeSetup },
+                      { id: 'trip-setup', icon: 'options-outline', label: 'Trip setup', color: C.orange, onPress: startWelcomeGate },
                       { id: 'walkthrough', icon: 'trail-sign-outline', label: 'Walkthrough', color: C.orange, onPress: startWelcomePrompt },
                       { id: 'trip-audio', icon: 'mic-outline', label: 'Trip audio', color: C.orange, onPress: () => router.push('/(tabs)/guide?view=narrations' as any) },
                       { id: 'weather', icon: 'partly-sunny-outline', label: 'Weather', color: C.orange, onPress: () => router.push('/(tabs)/guide?view=weather' as any) },

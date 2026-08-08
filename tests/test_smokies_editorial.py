@@ -5,6 +5,7 @@ import json
 from db.originals_editorial import (
     SMOKIES_DOSSIER_PATH,
     SMOKIES_EDITORIAL_PATH,
+    SMOKIES_CADES_COVE_EDITORIAL_PATH,
     SMOKIES_MOUNTAIN_CROSSING_EDITORIAL_PATH,
     editorial_transcript_sha256,
     editorial_word_count,
@@ -22,10 +23,10 @@ def _raw():
 
 def test_smokies_editorial_packets_are_complete_and_long_form():
     packet = load_smokies_editorial_packet()
-    assert packet["summary"]["chapter_count"] == 2
-    assert packet["summary"]["story_count"] == 23
-    assert packet["summary"]["cue_count"] == 16
-    assert packet["summary"]["estimated_duration_s"] >= 75 * 60
+    assert packet["summary"]["chapter_count"] == 3
+    assert packet["summary"]["story_count"] == 36
+    assert packet["summary"]["cue_count"] == 25
+    assert packet["summary"]["estimated_duration_s"] >= 120 * 60
     expected_foothills_ids = {
         *(f"fp_story_{index:02d}" for index in range(1, 7)),
         *(f"fp_cue_{index:02d}" for index in range(1, 8)),
@@ -34,13 +35,19 @@ def test_smokies_editorial_packets_are_complete_and_long_form():
         *(f"mc_story_{index:02d}" for index in (*range(1, 15), *range(16, 19))),
         *(f"mc_cue_{index:02d}" for index in (*range(1, 7), *range(8, 11))),
     }
+    expected_cades_cove_ids = {
+        *(f"cc_story_{index:02d}" for index in (1, 2, 3, *range(5, 15))),
+        *(f"cc_cue_{index:02d}" for index in range(1, 10)),
+    }
     assert {entry["id"] for entry in packet["entries"]} == {
         *expected_foothills_ids,
         *expected_mountain_crossing_ids,
+        *expected_cades_cove_ids,
     }
     assert {chapter["chapter_id"] for chapter in packet["chapters"]} == {
         "foothills_parkway",
         "mountain_crossing",
+        "little_river_cades_cove",
     }
     assert all(len(chapter["artifact_sha256"]) == 64 for chapter in packet["chapters"])
     for entry in packet["entries"]:
@@ -64,6 +71,18 @@ def test_mountain_crossing_packet_keeps_cultural_entries_blocked():
     assert packet["chapter_id"] == "mountain_crossing"
     assert "mc_story_15" not in {entry["id"] for entry in packet["entries"]}
     assert "mc_cue_07" not in {entry["id"] for entry in packet["entries"]}
+    assert validate_smokies_editorial_packet(
+        packet,
+        dossier,
+        dossier_file_sha256=packet["dossier_sha256"],
+    ) == []
+
+
+def test_cades_cove_packet_keeps_cultural_entry_blocked():
+    packet = json.loads(SMOKIES_CADES_COVE_EDITORIAL_PATH.read_text(encoding="utf-8"))
+    dossier = json.loads(SMOKIES_DOSSIER_PATH.read_text(encoding="utf-8"))
+    assert packet["chapter_id"] == "little_river_cades_cove"
+    assert "cc_story_04" not in {entry["id"] for entry in packet["entries"]}
     assert validate_smokies_editorial_packet(
         packet,
         dossier,

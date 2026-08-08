@@ -17,9 +17,13 @@ SMOKIES_EDITORIAL_PATH = REPO_ROOT / "originals" / "smokies" / "editorial_script
 SMOKIES_MOUNTAIN_CROSSING_EDITORIAL_PATH = (
     REPO_ROOT / "originals" / "smokies" / "editorial_mountain_crossing_v1.json"
 )
+SMOKIES_CADES_COVE_EDITORIAL_PATH = (
+    REPO_ROOT / "originals" / "smokies" / "editorial_cades_cove_v1.json"
+)
 SMOKIES_EDITORIAL_PATHS = (
     SMOKIES_EDITORIAL_PATH,
     SMOKIES_MOUNTAIN_CROSSING_EDITORIAL_PATH,
+    SMOKIES_CADES_COVE_EDITORIAL_PATH,
 )
 SMOKIES_PRODUCT_ID = "great_smoky_mountains_ridges_rivers_living_memory"
 

@@ -1,6 +1,6 @@
 # Great Smoky Mountains Original — Active Checkpoint
 
-Last updated: 2026-08-06 (S2D media-rights record and EBCI outreach packet complete)
+Last updated: 2026-08-08 (S3E directional adaptation and trigger-spacing packet complete)
 
 ## Resume protocol
 
@@ -847,3 +847,76 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 - S0/S1/S2 provenance, entitlement, route construction, media-rights, Moab inventory, or app lifecycle work.
 - Broad Map, Explore, Layers, Memory, NPS, Android Auto, Offline, or store-screenshot tests.
 - Cartesia generation, EBCI interpretation/pronunciation, Envato work, deployment, OTA, or native builds.
+
+## S3E directional adaptation and trigger-spacing completion
+
+- Completed: 2026-08-08 00:17 CDT.
+- Branch: `feat/smokies-original-s2`.
+- Baseline checkpoint commit: `1cf78889d79fd462f2413bfc1859b9b181f41a90`.
+- Directional/runtime implementation commit: `88e6a945b9aad9df5022b7a1710ea5be5873dd26`.
+- Roaring Fork evidence commit: `cc6ccfe15ac2e7027909f0122afb4c828203ff0d`.
+- Protected main-worktree state remains unchanged:
+  - Explore serving index: `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
+  - App Store copy: `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+  - `.cursor/` remains untracked and protected in the main worktree.
+
+### Completed behavior and evidence
+
+- The existing source-locked editorial system now reviews both permanent directions for Mountain Crossing and Foothills Parkway. It does not duplicate shared stories or create a second player.
+- Exactly eight short cues carry reviewed reverse-direction transcript overrides:
+  - Foothills Parkway east to west: `fp_cue_01`, `fp_cue_05`, `fp_cue_07`.
+  - Mountain Crossing North Carolina to Tennessee: `mc_cue_01`, `mc_cue_02`, `mc_cue_04`, `mc_cue_08`, `mc_cue_09`.
+- Seven long stories were made direction-neutral so one reviewed narration remains valid in both directions. Direction-neutral source-locked titles now include `Sugarlands and the watershed`, `The Oconaluftee valley`, and `A long view`.
+- Manifest V2 now supports selection-bound alternate transcript/title/audio records. Unknown, duplicate, unused, and semantically empty overrides fail closed. Every alternate narration asset is format-checked, and every alternate transcript hash is independently rechecked by the cultural-approval gate.
+- The only culturally blocked entries remain `cc_story_04`, `mc_story_15`, and `mc_cue_07`; none is authored or overridden.
+- Foreground, background/headless, and validation playback now share one durable ordered FIFO and one promotion helper. Legacy `queued_stop_id` remains a mirrored head for mixed 1.0.11 writers; absent, empty, conflicting, completed, and stale legacy states are reconciled deterministically without dropping the canonical tail.
+- Validator V3 is source-controlled as `original-trigger-v3` / `originals_virtual_route_v3`. It rejects publication when route-end audio backlog exceeds 240 seconds or trigger-to-play latency exceeds 180 seconds, even if the FIFO eventually drains every story in order without overlap.
+- The Virtual Drive Lab marks every pending FIFO story as queued. Obsolete one-slot `queue_full` diagnostics and consumer wording were removed.
+- Current combined reviewed base library:
+  - Four chapters, 43 full stories, 31 short cues, and 74 entries.
+  - 21,679 base words and 8,970 estimated seconds: about 149 minutes 30 seconds before the three culturally gated entries.
+  - Eight reverse-direction cue overrides across the two bidirectional chapters.
+  - Combined editorial artifact SHA-256: `0a5d40ea5285da1da78a9d076b049936c4f168fd7010a42487ca76f1225dc672`.
+  - Source dossier file SHA-256: `bc1bdbd18a79d7b5e0417d17d149044b97ccc485c068712423f25efec67ab561`.
+- Chapter artifact SHA-256 values:
+  - Foothills Parkway: `e53effe10f7631dd2e183bae8e2c684fd37780a30e6ad8487106c10ca1415660`.
+  - Mountain Crossing: `c685b2fafc11a38c7041174d6fc61cedab54abe39894347a55039d62b7932fb9`.
+  - Little River and Cades Cove: `707359658d3aa34856104a945a402577ffb3f7c7de8b2f3adf6920ce3e73cac0`.
+  - Roaring Fork: `d61f9e04b943fe7ff2b9a57735b1f515dff0d37f23d5a6c50dcc18fec095162c`.
+- `originals/smokies/roaring_fork_trigger_preflight_v1.json` is a deterministic authoring-only placement packet using the checked 8,561.4-m official NPS route geometry and no Mapbox network request. Artifact SHA-256: `063983f3c0d756bceba911744844478272edf36a3c88c9df081e44077dcbb3d4`.
+- The preflight binds the exact accepted FIFO runtime commit `88e6a945...` and SHA-256 values for the session, trigger engine, validator, foreground runtime, and headless controller. It no longer describes the obsolete one-pending-slot runtime.
+
+### Verification
+
+- 165 focused Python tests plus seven subtests passed across Manifest V2, cultural review, Studio, editorial, source dossiers, operational readiness, route evidence, official routes, and Roaring Fork placement evidence.
+- After the final runtime-evidence rebind, all nine Roaring Fork preflight tests and its deterministic `--check` passed again.
+- Complete mobile `npm run test:originals` passed, including Manifest V2, mixed-writer FIFO migration, multi-entry background drain, runtime stop races, validator limits, privacy, V1 Moab compatibility, and the existing map/player lifecycle.
+- Strict mobile `npx tsc --noEmit --pretty false` passed.
+- Originals Studio JavaScript contract tests, Python compilation, dossier and preflight deterministic builders, and `git diff --check` passed.
+- Independent final audits found no unresolved P0/P1 after the exact runtime evidence was rebound.
+- No Android/iOS build, runtime, or update identity changed because this packet was not deployed. No preview or production OTA was published.
+
+### Intentional publication blockers
+
+- Roaring Fork remains `blocked_pending_exact_scene_resolution_real_audio_durations_and_fifo_validation`; this is an honest content-timing gate, not a hidden runtime failure.
+- The exact Noah Ogle landmark is absent from the checked route evidence, so `rf_cue_02` and `rf_story_03` currently use an entrance proxy and cannot publish.
+- Exact-scene clusters remain at the entrance, Thousand Drips, and the route exit. They were not moved away from what the passenger can see merely to manufacture spacing.
+- Real rendered audio durations remain unavailable. Authoring estimates show route-end tails of approximately 315 seconds at 15 mph, 953 seconds at 36 mph, 1,189 seconds at 65 mph, and 1,228 seconds at 75 mph. The validator therefore stays fail-closed until the editorial/placement design is resolved and real audio is tested.
+
+### Next exact action after S3E
+
+1. Resolve the Roaring Fork exact-scene timing honestly: add a checked Noah Ogle landmark, then decide which clustered material becomes one consolidated narration, an explicit stopped-vehicle story, or a separately selectable deeper story. Do not scatter exact-scene openings down the road.
+2. Rebuild the preflight with the accepted placement design. Keep the 240-second route-end and 180-second trigger-to-play limits unchanged.
+3. Complete compensated EBCI scope/review before drafting or voicing the three culturally blocked entries.
+4. After scripts, pronunciations, and placement are locked, verify Cartesia training opt-out, balance, overage rate, the 225,000-credit cap, and the $15-before-tax cap before generating the three representative auditions.
+
+### Do not repeat after S3E
+
+- The completed first-draft writing, broad source research, route reconstruction, Moab provenance, Manifest V2 ownership, or earned-credit work.
+- The directional inventory, eight cue adaptations, FIFO architecture, mixed-writer migration, or one-slot diagnostic cleanup while their tests remain green.
+- Broad Map, Explore, Layers, Memory, NPS, Android Auto, Offline, Originals lifecycle, or store-screenshot crawls.
+- Cartesia generation, cultural interpretation/pronunciation, media ingestion, deployment, OTA, native build, or public-stage changes before their explicit gates.
+
+## Task-owned background processes at S3E completion
+
+- None. The temporary ignored `mobile/node_modules` verification symlink was removed. No Metro, Gradle, Maestro, pytest, TTS renderer, EAS, Railway, cleanup, or compaction task remains running.

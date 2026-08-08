@@ -1120,3 +1120,33 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 ## Task-owned background processes at S3G completion
 
 - None. No Metro, Gradle, Maestro, pytest, Cartesia renderer, EAS, Railway, or cleanup task remains running.
+
+## S3H capability-gated long-form playback baseline
+
+- Started: 2026-08-08.
+- Branch: `feat/smokies-original-s2`.
+- Baseline HEAD: `8f93a549ff244d317039bc533b9db39b75112c0d`.
+- Worktree was clean at start.
+- Protected main-worktree state remains unchanged:
+  - Explore serving index: `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
+  - App Store copy: `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+  - `.cursor/` remains untracked and protected in the main worktree.
+- Scope is limited to a capability/min-runtime-gated consumer contract for guaranteed autoplay cues, capacity-aware longer stories, explicit parked stories, and after-route stories; durable scheduling; player/library presentation; and deterministic tests.
+- Existing Moab V1 behavior, published manifests, other app features, route geometry, scripts, cultural scope, preflight limits, and protected files remain unchanged.
+- This packet may add a new internal manifest schema or capability only when older 1.0.11 consumers are filtered before manifest parsing. It must not silently reinterpret the current strict V2 contract.
+- No paid narration, media ingestion, deployment, OTA, native build, or public-stage change is included in the baseline.
+- Task-owned background processes at start: none.
+
+### Next exact action after this baseline
+
+1. Audit backend/mobile manifest parsing, catalog filtering, runtime scheduling, player state, and validation boundaries.
+2. Select the smallest fail-closed schema and minimum-runtime/capability gate that prevents old clients from seeing or autoplaying the Smokies pack.
+3. Implement hard-cue priority, immutable-duration capacity admission, explicit parked playback, after-route availability, durable restart, and source/hash binding.
+4. Run focused backend/mobile contract, scheduling, parser, catalog, privacy/copy, and deterministic preflight checks once.
+5. Stop before paid Cartesia auditions unless the new runtime is complete, source-bound, and independently audited.
+
+### Do not repeat during S3H
+
+- Noah Ogle research, S3G delivery classification/timing analysis, S0-S3F provenance/cultural/editorial work, or FIFO migration.
+- Broad Map, Explore, Layers, Memory, NPS, Android Auto, Offline, Originals lifecycle, or store work.
+- Paid narration, media ingestion, deployment, OTA, native builds, or public release.

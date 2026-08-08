@@ -23,11 +23,22 @@ const loader = scripts.slice(loaderStart, loaderEnd);
 assert.match(loader, /\/api\/admin\/originals-editorial\/smokies/);
 assert.match(loader, /selectedSmokiesEditorialId = null/);
 assert.match(loader, /renderSmokiesEditorialPacket\(\)/);
+assert.match(loader, /Smokies chapter drafts loaded/);
 
 const panelStart = html.indexOf('id="smokies-editorial-card"');
 const panelEnd = html.indexOf('id="originals-editor-empty"', panelStart);
 const panel = html.slice(panelStart, panelEnd);
 assert.doesNotMatch(panel, /\bAI\b/i, 'the editorial review surface must not use an AI label');
 assert.doesNotMatch(panel, /Cartesia|ElevenLabs/i, 'provider wording does not belong in script review');
+assert.match(panel, /Load chapter drafts/);
+
+const rendererStart = scripts.indexOf('function editorialChapterLabel(');
+const rendererEnd = scripts.indexOf('\nasync function loadSmokiesEditorialPacket()', rendererStart);
+assert.ok(rendererStart >= 0 && rendererEnd > rendererStart, 'could not isolate chapter-aware renderer');
+const renderer = scripts.slice(rendererStart, rendererEnd);
+assert.match(renderer, /mountain_crossing: 'Mountain Crossing'/);
+assert.match(renderer, /foothills_parkway: 'Foothills Parkway'/);
+assert.match(renderer, /packet\.chapter_ids/);
+assert.match(renderer, /Smokies source-locked scripts/);
 
 console.log('Originals Studio source-locked editorial tests passed.');

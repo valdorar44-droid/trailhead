@@ -5,6 +5,7 @@ import json
 from db.originals_editorial import (
     SMOKIES_DOSSIER_PATH,
     SMOKIES_EDITORIAL_PATH,
+    SMOKIES_MOUNTAIN_CROSSING_EDITORIAL_PATH,
     editorial_transcript_sha256,
     editorial_word_count,
     load_smokies_editorial_packet,
@@ -19,15 +20,29 @@ def _raw():
     )
 
 
-def test_foothills_editorial_packet_is_complete_and_long_form():
+def test_smokies_editorial_packets_are_complete_and_long_form():
     packet = load_smokies_editorial_packet()
-    assert packet["summary"]["story_count"] == 6
-    assert packet["summary"]["cue_count"] == 7
-    assert packet["summary"]["estimated_duration_s"] >= 20 * 60
-    assert {entry["id"] for entry in packet["entries"]} == {
+    assert packet["summary"]["chapter_count"] == 2
+    assert packet["summary"]["story_count"] == 23
+    assert packet["summary"]["cue_count"] == 16
+    assert packet["summary"]["estimated_duration_s"] >= 75 * 60
+    expected_foothills_ids = {
         *(f"fp_story_{index:02d}" for index in range(1, 7)),
         *(f"fp_cue_{index:02d}" for index in range(1, 8)),
     }
+    expected_mountain_crossing_ids = {
+        *(f"mc_story_{index:02d}" for index in (*range(1, 15), *range(16, 19))),
+        *(f"mc_cue_{index:02d}" for index in (*range(1, 7), *range(8, 11))),
+    }
+    assert {entry["id"] for entry in packet["entries"]} == {
+        *expected_foothills_ids,
+        *expected_mountain_crossing_ids,
+    }
+    assert {chapter["chapter_id"] for chapter in packet["chapters"]} == {
+        "foothills_parkway",
+        "mountain_crossing",
+    }
+    assert all(len(chapter["artifact_sha256"]) == 64 for chapter in packet["chapters"])
     for entry in packet["entries"]:
         assert entry["script_status"] == "draft_review_required"
         assert entry["transcript_sha256"] == editorial_transcript_sha256(entry["transcript"])
@@ -39,6 +54,21 @@ def test_foothills_editorial_packet_is_complete_and_long_form():
         else:
             assert 50 <= entry["word_count"] <= 120
             assert entry["estimated_duration_s"] < 60
+
+
+def test_mountain_crossing_packet_keeps_cultural_entries_blocked():
+    packet = json.loads(
+        SMOKIES_MOUNTAIN_CROSSING_EDITORIAL_PATH.read_text(encoding="utf-8")
+    )
+    dossier = json.loads(SMOKIES_DOSSIER_PATH.read_text(encoding="utf-8"))
+    assert packet["chapter_id"] == "mountain_crossing"
+    assert "mc_story_15" not in {entry["id"] for entry in packet["entries"]}
+    assert "mc_cue_07" not in {entry["id"] for entry in packet["entries"]}
+    assert validate_smokies_editorial_packet(
+        packet,
+        dossier,
+        dossier_file_sha256=packet["dossier_sha256"],
+    ) == []
 
 
 def test_editorial_packet_rejects_cultural_and_source_drift():

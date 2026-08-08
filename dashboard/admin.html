@@ -919,7 +919,7 @@ td.name{color:var(--text);font-weight:600;}
                   <div class="section-label">SMOKIES EDITORIAL · SOURCE LOCKED</div>
                   <div style="color:var(--text2);font-size:11px;line-height:1.5;margin-top:6px;">Review long-form feature stories and short road cues before narration is created.</div>
                 </div>
-                <button class="btn btn-primary btn-sm" id="smokies-editorial-load" type="button" onclick="loadSmokiesEditorialPacket()">Load Foothills draft</button>
+                <button class="btn btn-primary btn-sm" id="smokies-editorial-load" type="button" onclick="loadSmokiesEditorialPacket()">Load chapter drafts</button>
               </div>
               <div id="smokies-editorial-summary" class="originals-sensitive-note">No editorial packet loaded.</div>
               <div id="smokies-editorial-content" class="originals-empty" style="margin-top:12px;">Load the checked packet to review its scripts and sources.</div>
@@ -2627,12 +2627,23 @@ function editorialDurationLabel(seconds) {
   return `${minutes}:${String(total % 60).padStart(2, '0')}`;
 }
 
+function editorialChapterLabel(chapterId) {
+  const labels = {
+    mountain_crossing: 'Mountain Crossing',
+    foothills_parkway: 'Foothills Parkway',
+  };
+  return labels[String(chapterId || '')] || String(chapterId || '').replaceAll('_', ' ');
+}
+
 function renderSmokiesEditorialPacket() {
   const host = document.getElementById('smokies-editorial-content');
   const summary = document.getElementById('smokies-editorial-summary');
   const packet = smokiesEditorialPacket;
   if (!host || !summary || !packet || !Array.isArray(packet.entries)) return;
+  const chapterOrder = Array.isArray(packet.chapter_ids) ? packet.chapter_ids : [];
   const entries = packet.entries.slice().sort((left, right) => {
+    const chapterDifference = chapterOrder.indexOf(left.chapter_id) - chapterOrder.indexOf(right.chapter_id);
+    if (chapterDifference) return chapterDifference;
     if (left.kind !== right.kind) return left.kind === 'story' ? -1 : 1;
     return Number(left.sequence || 0) - Number(right.sequence || 0) || String(left.id).localeCompare(String(right.id));
   });
@@ -2641,7 +2652,7 @@ function renderSmokiesEditorialPacket() {
   }
   const selected = entries.find(item => item.id === selectedSmokiesEditorialId);
   const metrics = packet.summary || {};
-  summary.textContent = `${Number(metrics.story_count || 0)} LONG STORIES · ${Number(metrics.cue_count || 0)} SHORT CUES · ${Number(metrics.word_count || 0).toLocaleString()} WORDS · ${editorialDurationLabel(metrics.estimated_duration_s)} ESTIMATED · REVIEW REQUIRED`;
+  summary.textContent = `${Number(metrics.chapter_count || 0)} CHAPTERS · ${Number(metrics.story_count || 0)} LONG STORIES · ${Number(metrics.cue_count || 0)} SHORT CUES · ${Number(metrics.word_count || 0).toLocaleString()} WORDS · ${editorialDurationLabel(metrics.estimated_duration_s)} ESTIMATED · REVIEW REQUIRED`;
   if (!selected) {
     host.className = 'originals-empty';
     host.textContent = 'This editorial packet has no reviewable entries.';
@@ -2649,14 +2660,14 @@ function renderSmokiesEditorialPacket() {
   }
   host.className = 'originals-editorial-layout';
   const sources = Array.isArray(selected.sources) ? selected.sources : [];
-  host.innerHTML = `<div class="originals-editorial-list" role="list" aria-label="Foothills Parkway scripts">
+  host.innerHTML = `<div class="originals-editorial-list" role="list" aria-label="Smokies source-locked scripts">
     ${entries.map(item => `<button type="button" class="originals-editorial-item${item.id === selected.id ? ' active' : ''}" onclick="selectSmokiesEditorialEntryEncoded('${encodeURIComponent(item.id)}')" aria-current="${item.id === selected.id ? 'true' : 'false'}">
       <span class="originals-editorial-item-title">${esc(item.title || item.id)}</span>
-      <span class="originals-editorial-item-meta">${esc(String(item.kind || '').toUpperCase())} ${Number(item.sequence || 0)} · ${Number(item.word_count || 0)} WORDS · ${esc(editorialDurationLabel(item.estimated_duration_s))}</span>
+      <span class="originals-editorial-item-meta">${esc(editorialChapterLabel(item.chapter_id).toUpperCase())} · ${esc(String(item.kind || '').toUpperCase())} ${Number(item.sequence || 0)} · ${Number(item.word_count || 0)} WORDS · ${esc(editorialDurationLabel(item.estimated_duration_s))}</span>
     </button>`).join('')}
   </div>
   <article class="originals-editorial-detail" aria-live="polite">
-    <div class="originals-editorial-kicker">${esc(String(selected.kind || '').toUpperCase())} ${Number(selected.sequence || 0)} · DRAFT REVIEW REQUIRED</div>
+    <div class="originals-editorial-kicker">${esc(editorialChapterLabel(selected.chapter_id).toUpperCase())} · ${esc(String(selected.kind || '').toUpperCase())} ${Number(selected.sequence || 0)} · DRAFT REVIEW REQUIRED</div>
     <h3 class="originals-editorial-title">${esc(selected.title || selected.id)}</h3>
     <div class="originals-editorial-scene"><strong>Visible scene:</strong> ${esc(selected.visible_scene || '')}<br><strong>Editorial purpose:</strong> ${esc(selected.purpose || '')}</div>
     <div class="originals-editorial-transcript">${esc(selected.transcript || '')}</div>
@@ -2685,7 +2696,7 @@ async function loadSmokiesEditorialPacket() {
     smokiesEditorialPacket = await api('/api/admin/originals-editorial/smokies');
     selectedSmokiesEditorialId = null;
     renderSmokiesEditorialPacket();
-    toast('Foothills editorial packet loaded', 'originals-ok');
+    toast('Smokies chapter drafts loaded', 'originals-ok');
   } catch(e) {
     if (host) {
       host.className = 'originals-empty';
@@ -2695,7 +2706,7 @@ async function loadSmokiesEditorialPacket() {
   } finally {
     if (button) {
       button.disabled = false;
-      button.textContent = 'Reload Foothills draft';
+      button.textContent = 'Reload chapter drafts';
     }
   }
 }

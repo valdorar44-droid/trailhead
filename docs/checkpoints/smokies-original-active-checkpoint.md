@@ -1226,3 +1226,35 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 ## Task-owned background processes at S3H completion
 
 - None. No Metro, Gradle, Maestro, pytest, Cartesia renderer, EAS, Railway, or cleanup task remains running.
+
+## S4 Cartesia audition baseline
+
+- Started: 2026-08-08.
+- Branch: `feat/smokies-original-s2`.
+- Baseline HEAD: `1f93c816fcb2f7088000825452b15350bfeb56cf`.
+- Worktree was clean at start.
+- Protected main-checkout state remains unchanged:
+  - Explore serving index: `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
+  - App Store copy: `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+  - `.cursor/` remains untracked and protected in the main checkout.
+- The user confirmed Cartesia Pro is active. Current official pricing lists 100,000 monthly Pro credits and commercial-use permission.
+- The production Railway service has a configured server-only Cartesia API key, API version `2026-03-01`, and public voice `f786b574-daa5-4673-aa0c-cbe3e8534c02` (`Katie - Friendly Fixer`). The current service model is the moving `sonic-3.5` alias; auditions must instead pin `sonic-3.5-2026-05-04`.
+- The standard API key can verify the voice but cannot read billing usage; Cartesia's documented usage endpoint requires an admin key. The signed-in Playground is the authoritative balance surface.
+- Cartesia moved training controls from its old form to `https://play.cartesia.ai/privacy/data-controls`. The current account setting remains unverified because the browser-control connection is unavailable in this session.
+- No script or audio may be sent to Cartesia until the Playground data-control status and current balance are confirmed. This is a data-use gate, not a rendering failure.
+- This packet may lock three culturally safe audition scripts and implement the capped, resumable archival renderer while the account gate is pending.
+- No batch narration, backend deployment, OTA, native build, public-stage change, or consumer release is included.
+
+### Next exact action after this baseline
+
+1. Lock the source-reviewed scenic, human-history, and culturally safe technical-pronunciation audition scripts.
+2. Add a dry-run-first renderer with transcript hashes, immutable model/voice/API version, a 225,000-credit ceiling, a $15-before-tax ceiling, resumable generation, 429 backoff, and real WAV evidence.
+3. Add local 64/96/128 kbps encodes from each WAV master and deterministic duration/hash manifests.
+4. Confirm the Playground data-control status and current balance before the first paid API call.
+5. Generate only the three auditions, run real-duration validation, and stop for Android/iPhone listening review.
+
+### Do not repeat during S4
+
+- S0-S3H provenance, cultural-policy, route, editorial, Ogle, long-form runtime, or trusted-validator work.
+- Moab provider provenance, broad Cartesia model research, or competitor-tour research.
+- Broad app crawls, deployment, OTA, native builds, public-stage changes, or batch narration.

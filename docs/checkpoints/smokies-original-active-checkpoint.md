@@ -750,3 +750,68 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 - Foothills, Mountain Crossing, or Cades Cove research and first-draft work.
 - S0/S1/S2 provenance, routes, route evidence, media-rights inventory, Moab validation, or broad app testing.
 - EBCI outreach, Cherokee interpretation/pronunciation, Envato work, or paid narration.
+
+## S3D Roaring Fork editorial completion
+
+- Completed: 2026-08-07.
+- Baseline checkpoint commit: `fada34d7`.
+- Accepted implementation commit: `2c57d2138e2f95b4da7f2ebf3e9a3d44315f3414`.
+- Baseline correction is durable:
+  - Roaring Fork contains seven source-cleared stories, not six.
+  - `rf_story_03` is the factual Noah “Bud” Ogle farmstead entry and its `rf_ogle_farm` claim is explicitly `cultural_gate: not_required`.
+  - The only culturally blocked entries remain `cc_story_04`, `mc_story_15`, and `mc_cue_07`.
+- Added `originals/smokies/editorial_roaring_fork_v1.json`:
+  - Artifact SHA-256: `85f4912276338e48ecd5a46971fada986a67965f833afacff4af6e750c00b7fb`.
+  - Seven source-locked feature stories and six short road cues.
+  - 3,581 words and 1,480 estimated seconds at 145 words per minute: about 24 minutes 40 seconds.
+  - Feature stories range from 452 to 478 words and approximately 3:07 to 3:18 each.
+  - Short cues range from 55 to 61 words and approximately 23 to 25 seconds each.
+- Official NPS source pages rechecked for this packet:
+  - Roaring Fork route, Noah Ogle farmstead, stream, old-growth glimpses, Grotto Falls access, historic structures, and Place of a Thousand Drips: `https://www.nps.gov/grsm/planyourvisit/roaringfork.htm`.
+  - Park history and cultural-resource framing: `https://www.nps.gov/grsm/learn/historyculture/index.htm`.
+  - Forest, elevation, rainfall, humidity, biodiversity, and park-wide old growth: `https://www.nps.gov/grsm/learn/nature/index.htm`.
+  - Streams, rainfall, elevation gradient, and waterfalls: `https://www.nps.gov/grsm/learn/nature/naturalfeaturesandecosystems.htm`.
+  - Resistant rock, mountain building, erosion, and waterfall formation: `https://www.nps.gov/grsm/learn/nature/geology.htm`.
+  - Settlement, mills, logging, displacement, forest retention, and preserved structures: `https://www.nps.gov/grsm/learn/historyculture/people.htm`.
+- Source-depth audit corrections applied before acceptance:
+  - Rewrote the community story to remove invented household tasks, neighbor relationships, missing property features, and unsupported seasonal details.
+  - Reworked the route introduction to replace repetition and unsupported design intent with the sourced 5.5-mile route and documented stream, old-growth, cabin, and mill sequence.
+  - Locked the exact one-way story/cue order in tests, including the dossier’s intentional `01, 03, 02` story and `01, 02, 04, 03` cue ordering.
+- Operational separation is preserved:
+  - The live 2026 seasonal dates, current closure status, parking pressure/tag availability, vehicle restrictions, weather, and trail conditions remain Start Tour readiness data.
+  - Permanent narration makes no promise of road availability, parking, trail access, waterfall flow, or vehicle compatibility.
+- Media remains gated:
+  - Roaring Fork media records remain `exact_asset_not_selected`/candidate-only.
+  - No public-domain or attributed candidate was treated as approved, downloaded, ingested, or bundled.
+- The existing chapter-aware Originals Studio now exposes `Roaring Fork`; no second Studio, manifest, player, map, ownership, entitlement, or download system was introduced.
+- Current combined reviewed draft library:
+  - Four route chapters, 43 full stories, and 31 short cues.
+  - 21,682 words and 8,970 estimated seconds: about 149 minutes 30 seconds.
+  - Combined editorial artifact SHA-256: `180ec7c0fff35eec2379a1a1b72336b050223f17dda54771c0ff98e69dc588fa`.
+  - The three culturally gated entries account for the difference from the planned 45 stories and 32 cues.
+- Verification:
+  - 137 focused backend tests plus four subtests passed across editorial, Studio, source dossiers, cultural review, Manifest V2, route evidence, operational readiness, and official route fixtures.
+  - Originals Studio JavaScript contract test passed.
+  - Python compilation, JSON parsing, public-copy/encoding scan, exact sequence assertion, independent source-depth audit, protected-file hashes, and `git diff --check` passed.
+  - No open P0/P1 defect remains in this packet.
+- Protected main-worktree hashes remain unchanged:
+  - Explore serving index: `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
+  - App Store copy: `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+  - `.cursor/` remains untracked and protected in the main worktree.
+- No Cartesia request, credit spend, narration audio, media ingestion, EBCI outreach, deployment, OTA, native build, or public-stage change occurred.
+- Task-owned background processes at completion: none.
+
+### Next exact action after S3D
+
+1. Review all four completed chapters in the existing Originals Studio and apply one bounded editorial revision pass to any specifically identified story.
+2. Build direction-specific transition and cue adaptations for Mountain Crossing and Foothills Parkway while preserving the one-way Cades Cove and Roaring Fork sequences.
+3. Run queue-spacing and route-speed fixtures for the clustered Roaring Fork entrance, upper corridor, Thousand Drips, and exit anchors before any audio lock.
+4. Complete compensated EBCI scope/review before drafting or voicing the three culturally blocked entries.
+5. Lock accepted scripts and pronunciations, then verify Cartesia training opt-out, balance, overage rate, 225,000-credit cap, and $15-before-tax cap before generating the three representative auditions.
+
+### Do not repeat after S3D
+
+- First-draft research or wholesale rewriting for any of the four completed chapters without a specific editorial/source finding.
+- S0/S1/S2 provenance, route construction, media-rights inventory, Moab validation, or completed app lifecycle testing.
+- Broad app crawls, paid narration, deployment, public release, or store work.
+- Cultural interpretation, pronunciation, or blocked scripts before compensated EBCI participation and approval.

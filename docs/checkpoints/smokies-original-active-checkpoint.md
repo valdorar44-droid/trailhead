@@ -666,3 +666,55 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 - Foothills or Mountain Crossing research and first-draft work.
 - S0/S1/S2 provenance, routes, route evidence, media-rights inventory, Moab validation, or broad app testing.
 - EBCI outreach, Cherokee interpretation/pronunciation, Envato work, or paid narration.
+
+## S3C Little River and Cades Cove editorial completion
+
+- Completed: 2026-08-07.
+- Baseline checkpoint commit: `8b96cf14`.
+- Accepted implementation commit: `2ba38455a05cad9b53733e260b0e69fa156b05bd`.
+- Added `originals/smokies/editorial_cades_cove_v1.json`:
+  - Artifact SHA-256: `a0c4bafda0b593160d27dfc3d86df9150084f1d2a7039d6ba5cd378de610677a`.
+  - Thirteen source-locked non-cultural feature stories and nine short road cues.
+  - 6,423 words and 2,660 estimated seconds at 145 words per minute: about 44 minutes 20 seconds.
+  - Feature stories remain within the enforced 450–725-word range; cues remain within the enforced 50–120-word range.
+- `cc_story_04` remains absent and fail-closed for compensated EBCI participation and cultural review. No substitute Cherokee history, place relationship, sacred tradition, or pronunciation was drafted.
+- Official NPS source pages rechecked for this packet:
+  - Cades Cove planning and one-way loop: `https://www.nps.gov/grsm/planyourvisit/cadescove.htm`.
+  - Cades Cove settlement, community labor, acquisition, life leases, schools, and post office: `https://www.nps.gov/grsm/learn/historyculture/cades-cove-history.htm`.
+  - Cable Mill: `https://www.nps.gov/places/cable-mill-historic-area.htm`.
+  - General stores: `https://www.nps.gov/grsm/learn/historyculture/stores.htm`.
+  - Geology, natural features, people, timeline, and black bears remain bound through the existing reviewed dossier records.
+- Operational separation is preserved:
+  - Vehicle-free periods, closures, congestion, fees, trail conditions, water hazards, weather, wildlife distances, and active notices remain live Start Tour readiness data.
+  - Immutable narration makes no promise of access, safety, wildlife sightings, or current conditions.
+- The existing chapter-aware Originals Studio now exposes `Little River & Cades Cove`; no second Studio, manifest, player, map, ownership, entitlement, or download system was introduced.
+- Current combined reviewed draft library:
+  - Three chapters, 36 full stories, and 25 short cues.
+  - 18,101 words and 7,490 estimated seconds: about 124 minutes 50 seconds.
+  - Combined editorial artifact SHA-256: `fdb51d911a6c6944f18b23753b28d0f89a18f947bf1b1c93d13a50a52025aeb2`.
+- Verification:
+  - 136 focused backend tests plus four subtests passed across editorial, Studio, source dossiers, cultural review, Manifest V2, route evidence, operational readiness, and official route fixtures.
+  - Originals Studio JavaScript contract test passed.
+  - Python compilation, JSON parsing, public-copy/encoding scan, source-lock validation, protected-file hashes, and `git diff --check` passed.
+  - No open P0/P1 defect was found in this packet.
+- Protected main-worktree hashes remain unchanged:
+  - Explore serving index: `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
+  - App Store copy: `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+  - `.cursor/` remains untracked and protected in the main worktree.
+- No Cartesia request, credit spend, narration audio, media ingestion, EBCI outreach, deployment, OTA, native build, or public-stage change occurred.
+- Task-owned background processes at completion: none.
+
+### Next exact action after S3C
+
+1. Review the Little River and Cades Cove chapter in the existing Originals Studio and apply one bounded editorial revision pass if requested.
+2. Draft the six non-cultural Roaring Fork feature stories and six short road cues while keeping the cultural entry `rf_story_03` blocked for EBCI participation and review.
+3. Author direction-specific transition/cue adaptations for bidirectional chapters before final compilation.
+4. Complete the cultural and pronunciation gates before any blocked script or narration asset.
+5. Lock all accepted scripts, then verify Cartesia training opt-out, balance, overage rate, 225,000-credit cap, and $15-before-tax cap before generating the three representative auditions.
+
+### Do not repeat after S3C
+
+- Foothills, Mountain Crossing, or Cades Cove first-draft research unless a reviewer identifies a specific claim or editorial issue.
+- S0/S1/S2 provenance, routes, route evidence, media-rights inventory, Moab validation, or completed app lifecycle testing.
+- Broad app crawls, paid narration, deployment, public release, or store work.
+- Cultural interpretation, pronunciation, or blocked entries before compensated EBCI participation and approval.

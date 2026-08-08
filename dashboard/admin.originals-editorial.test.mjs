@@ -39,6 +39,7 @@ const renderer = scripts.slice(rendererStart, rendererEnd);
 assert.match(renderer, /mountain_crossing: 'Mountain Crossing'/);
 assert.match(renderer, /foothills_parkway: 'Foothills Parkway'/);
 assert.match(renderer, /little_river_cades_cove: 'Little River & Cades Cove'/);
+assert.match(renderer, /roaring_fork: 'Roaring Fork'/);
 assert.match(renderer, /packet\.chapter_ids/);
 assert.match(renderer, /Smokies source-locked scripts/);
 

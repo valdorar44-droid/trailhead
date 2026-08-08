@@ -707,7 +707,7 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 ### Next exact action after S3C
 
 1. Review the Little River and Cades Cove chapter in the existing Originals Studio and apply one bounded editorial revision pass if requested.
-2. Draft the six non-cultural Roaring Fork feature stories and six short road cues while keeping the cultural entry `rf_story_03` blocked for EBCI participation and review.
+2. Draft the seven source-cleared Roaring Fork feature stories and six short road cues; `rf_story_03` is the factual Noah Ogle farmstead entry and is not culturally blocked in the authoritative dossier.
 3. Author direction-specific transition/cue adaptations for bidirectional chapters before final compilation.
 4. Complete the cultural and pronunciation gates before any blocked script or narration asset.
 5. Lock all accepted scripts, then verify Cartesia training opt-out, balance, overage rate, 225,000-credit cap, and $15-before-tax cap before generating the three representative auditions.
@@ -730,8 +730,8 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
   - Explore serving index: `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
   - App Store copy: `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
   - `.cursor/` remains untracked and protected in the main worktree.
-- Scope is the six non-cultural Roaring Fork feature stories and six short road cues already defined in the checked source dossier.
-- `rf_story_03` remains blocked for compensated EBCI participation and cultural review. No substitute Cherokee history, place relationship, sacred tradition, or pronunciation will be drafted.
+- Scope is the seven source-cleared Roaring Fork feature stories and six short road cues already defined in the checked source dossier.
+- Baseline audit correction: `rf_story_03` is the factual Noah Ogle farmstead entry, its sole claim `rf_ogle_farm` is explicitly `cultural_gate: not_required`, and it is not in `cultural_review.blocked_entry_ids`. The only blocked entries remain `cc_story_04`, `mc_story_15`, and `mc_cue_07`; no cultural interpretation or pronunciation will be added to Roaring Fork.
 - Feature stories continue to target approximately 3–5 minutes. Cues remain short scene/location transitions and are not counted as full stories.
 - Current one-way/seasonal access, vehicle restrictions, closures, weather, trail conditions, wildlife notices, and congestion remain live Start Tour readiness data rather than immutable narration.
 - The chapter will use the existing chapter-aware Originals Studio and source-lock validator. No parallel Studio, manifest, player, map, ownership, entitlement, or download system will be introduced.
@@ -741,7 +741,7 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 ### Next exact action after this baseline
 
 1. Recheck only the registered official NPS sources used by the Roaring Fork claims.
-2. Draft and source-lock the six approved feature stories and six cues.
+2. Draft and source-lock the seven approved feature stories and six cues.
 3. Extend the existing Studio/loader/tests for the fourth chapter and run focused safeguards.
 4. Stop for script review before directional adaptation, final compilation, or narration generation.
 

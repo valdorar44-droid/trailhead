@@ -314,6 +314,11 @@ td.name{color:var(--text);font-weight:600;}
 .originals-editorial-title{font-size:22px;font-weight:900;line-height:1.15;margin-top:6px;}
 .originals-editorial-scene{color:var(--text2);font-size:12px;line-height:1.55;margin-top:10px;padding:10px;border-left:3px solid var(--orange);background:var(--s2);}
 .originals-editorial-transcript{color:var(--text);font-size:14px;line-height:1.75;white-space:pre-wrap;margin-top:16px;}
+.originals-editorial-variants{display:flex;flex-direction:column;gap:10px;margin-top:18px;padding-top:14px;border-top:1px solid var(--border);}
+.originals-editorial-variant{border:1px solid var(--border);border-radius:10px;background:var(--s2);padding:12px;}
+.originals-editorial-variant-title{color:var(--orange);font-size:12px;font-weight:900;line-height:1.4;}
+.originals-editorial-variant-meta{color:var(--text3);font:9px/1.5 var(--mono);margin-top:3px;}
+.originals-editorial-variant-copy{color:var(--text);font-size:13px;line-height:1.7;white-space:pre-wrap;margin-top:9px;}
 .originals-editorial-sources{display:flex;flex-direction:column;gap:7px;margin-top:18px;padding-top:14px;border-top:1px solid var(--border);}
 .originals-editorial-source{color:var(--orange);font-size:11px;line-height:1.45;text-decoration:none;overflow-wrap:anywhere;}
 .originals-editorial-source:hover{text-decoration:underline;}
@@ -2637,6 +2642,14 @@ function editorialChapterLabel(chapterId) {
   return labels[String(chapterId || '')] || String(chapterId || '').replaceAll('_', ' ');
 }
 
+function editorialVariantLabel(chapterId, variantId) {
+  const labels = {
+    'foothills_parkway:east_to_west': 'Wears Valley to Chilhowee Lake',
+    'mountain_crossing:nc_to_tn': 'Cherokee to Sugarlands',
+  };
+  return labels[`${String(chapterId || '')}:${String(variantId || '')}`] || 'Alternate direction';
+}
+
 function renderSmokiesEditorialPacket() {
   const host = document.getElementById('smokies-editorial-content');
   const summary = document.getElementById('smokies-editorial-summary');
@@ -2662,10 +2675,11 @@ function renderSmokiesEditorialPacket() {
   }
   host.className = 'originals-editorial-layout';
   const sources = Array.isArray(selected.sources) ? selected.sources : [];
+  const variantOverrides = Array.isArray(selected.variant_overrides) ? selected.variant_overrides : [];
   host.innerHTML = `<div class="originals-editorial-list" role="list" aria-label="Smokies source-locked scripts">
     ${entries.map(item => `<button type="button" class="originals-editorial-item${item.id === selected.id ? ' active' : ''}" onclick="selectSmokiesEditorialEntryEncoded('${encodeURIComponent(item.id)}')" aria-current="${item.id === selected.id ? 'true' : 'false'}">
       <span class="originals-editorial-item-title">${esc(item.title || item.id)}</span>
-      <span class="originals-editorial-item-meta">${esc(editorialChapterLabel(item.chapter_id).toUpperCase())} · ${esc(String(item.kind || '').toUpperCase())} ${Number(item.sequence || 0)} · ${Number(item.word_count || 0)} WORDS · ${esc(editorialDurationLabel(item.estimated_duration_s))}</span>
+      <span class="originals-editorial-item-meta">${esc(editorialChapterLabel(item.chapter_id).toUpperCase())} · ${esc(String(item.kind || '').toUpperCase())} ${Number(item.sequence || 0)} · ${Number(item.word_count || 0)} WORDS · ${esc(editorialDurationLabel(item.estimated_duration_s))}${Array.isArray(item.variant_overrides) && item.variant_overrides.length ? ` · ${item.variant_overrides.length} DIRECTION VERSION${item.variant_overrides.length === 1 ? '' : 'S'}` : ''}</span>
     </button>`).join('')}
   </div>
   <article class="originals-editorial-detail" aria-live="polite">
@@ -2673,6 +2687,7 @@ function renderSmokiesEditorialPacket() {
     <h3 class="originals-editorial-title">${esc(selected.title || selected.id)}</h3>
     <div class="originals-editorial-scene"><strong>Visible scene:</strong> ${esc(selected.visible_scene || '')}<br><strong>Editorial purpose:</strong> ${esc(selected.purpose || '')}</div>
     <div class="originals-editorial-transcript">${esc(selected.transcript || '')}</div>
+    ${variantOverrides.length ? `<section class="originals-editorial-variants" aria-label="Direction versions"><div class="section-label">DIRECTION VERSIONS</div>${variantOverrides.map(override => `<div class="originals-editorial-variant"><div class="originals-editorial-variant-title">${esc(editorialVariantLabel(override.chapter_id, override.variant_id))} · ${esc(override.title || selected.title || selected.id)}</div><div class="originals-editorial-variant-meta">${Number(override.word_count || 0)} WORDS · ${esc(editorialDurationLabel(override.estimated_duration_s))} · TRANSCRIPT ${esc(String(override.transcript_sha256 || '').slice(0, 12))}</div><div class="originals-editorial-variant-copy">${esc(override.transcript || '')}</div></div>`).join('')}</section>` : ''}
     <div class="originals-editorial-sources"><div class="section-label">REVIEWED SOURCES</div>${sources.map(source => `<a class="originals-editorial-source" href="${esc(source.url || '#')}" target="_blank" rel="noopener noreferrer">${esc(source.publisher || '')} · ${esc(source.title || source.id || '')}</a>`).join('')}</div>
     <div class="originals-sensitive-note">TRANSCRIPT ${esc(String(selected.transcript_sha256 || '').slice(0, 12))} · DOSSIER ${esc(String(packet.dossier_sha256 || '').slice(0, 12))} · NO AUDIO GENERATED</div>
   </article>`;

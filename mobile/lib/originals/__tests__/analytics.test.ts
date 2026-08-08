@@ -18,6 +18,7 @@ function main() {
     coordinates: [-109.5498, 38.5733],
     route_geometry: { type: 'LineString', coordinates: [[-109.5, 38.5]] },
     traveled_route: [[-109.5, 38.5]],
+    pending_stop_ids: ['private-upcoming-story'],
   });
   assert.deepEqual(clean, {
     sessionId: '',
@@ -33,6 +34,8 @@ function main() {
   assert(!serialized.includes('38.5733'));
   assert(!serialized.includes('-109.5498'));
   assert(!serialized.includes('route_geometry'));
+  assert(!serialized.includes('pending_stop_ids'));
+  assert(!serialized.includes('private-upcoming-story'));
   assert(!serialized.includes('precise-user-bucket'));
 
   assert.equal(sanitizeOriginalsAnalyticsPayload('originals_location', {

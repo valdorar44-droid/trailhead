@@ -4,7 +4,11 @@ import type { OriginalAudioAdapter, OriginalAudioPlaybackState } from './audioAd
 import { originalAudioCoordinator, type OriginalAudioFocusLease } from './audioCoordinator';
 import type { OriginalBundleStore } from './bundleStore';
 import { resolveOriginalManifestForSession } from './manifestV2';
-import { completeOriginalStop, finishManualOriginalStop } from './session';
+import {
+  completeOriginalStop,
+  finishManualOriginalStop,
+  promoteNextOriginalStop,
+} from './session';
 import type { OriginalSessionStore } from './sessionStore';
 import { evaluateOriginalLocation } from './triggerEngine';
 import type { OriginalLocationSample, OriginalManifestV1, OriginalSessionV1 } from './types';
@@ -242,10 +246,9 @@ export function createOriginalHeadlessController(
     if (!await activeSessionStillMatches(active, operationGeneration, stopId)) return;
     const manualReplay = finishManualOriginalStop(active, stopId);
     let next = manualReplay ?? completeOriginalStop(active, stopId, manifest.stops.map(stop => stop.id));
-    const queued = next.queued_stop_id;
-    if (queued) {
-      next = { ...next, current_stop_id: queued, queued_stop_id: null, current_audio_position_ms: 0 };
-    }
+    const promotion = promoteNextOriginalStop(next);
+    next = promotion.session;
+    const queued = promotion.promoted_stop_id;
     const saved = await dependencies.sessions.setActiveIfCurrent(active.session_id, next);
     if (!saved || generation !== operationGeneration) return;
     if (next.status === 'completed' || (manualReplay && next.status !== 'active')) {

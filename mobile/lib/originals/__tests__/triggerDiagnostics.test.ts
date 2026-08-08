@@ -142,18 +142,27 @@ const queued = evaluateOriginalLocation(manifest, queuedArmed.session, sample(0.
 expectDecision(queued, 'queued');
 assert.equal(queued.session.queued_stop_id, 'story-1');
 
-const queueFull = evaluateOriginalLocation(
+const queueTailArmed = evaluateOriginalLocation(
   manifest,
-  { ...activeSession(), current_stop_id: 'story-1', queued_stop_id: 'story-2' },
-  sample(0.0162),
+  {
+    ...activeSession(),
+    current_stop_id: 'story-1',
+    pending_stop_ids: ['story-2'],
+    queued_stop_id: 'story-2',
+    triggered_stop_ids: ['story-1', 'story-2'],
+  },
+  sample(0.0162, 1_000),
 );
-expectDecision(queueFull, 'queue_full');
-assert.equal(queueFull.decision.stop_id, 'story-2');
-assert.deepEqual(queueFull.decision.queue, {
-  queued_stop_id: 'story-2',
-  following_stop_id: 'story-3',
-  following_stop_eligible: true,
-});
+expectDecision(queueTailArmed, 'armed');
+const queueTail = evaluateOriginalLocation(
+  manifest,
+  queueTailArmed.session,
+  sample(0.0162, 4_100),
+);
+expectDecision(queueTail, 'queued');
+assert.equal(queueTail.decision.stop_id, 'story-3');
+assert.deepEqual(queueTail.session.pending_stop_ids, ['story-2', 'story-3']);
+assert.equal(queueTail.session.queued_stop_id, 'story-2');
 
 const noRemaining = evaluateOriginalLocation(
   manifest,

@@ -63,6 +63,7 @@ import {
   finishManualOriginalStop,
   normalizeCompletedOriginalSession,
   originalStopCanReplay,
+  promoteNextOriginalStop,
   skipOriginalStop,
   startManualOriginalStop,
 } from './session';
@@ -464,8 +465,9 @@ export function OriginalsRuntimeProvider({
       completedStopId,
       activeManifest.stops.map(stop => stop.id),
     );
-    const queued = next.queued_stop_id;
-    if (queued) next = { ...next, current_stop_id: queued, queued_stop_id: null, current_audio_position_ms: 0 };
+    const promotion = promoteNextOriginalStop(next);
+    next = promotion.session;
+    const queued = promotion.promoted_stop_id;
     await publishSession(next);
     if (
       stoppingRef.current
@@ -1100,8 +1102,9 @@ export function OriginalsRuntimeProvider({
       active.current_stop_id,
       activeManifest.stops.map(stop => stop.id),
     );
-    const queued = next.queued_stop_id;
-    if (queued) next = { ...next, current_stop_id: queued, queued_stop_id: null, current_audio_position_ms: 0 };
+    const promotion = promoteNextOriginalStop(next);
+    next = promotion.session;
+    const queued = promotion.promoted_stop_id;
     await publishSession(next);
     if (
       stoppingRef.current

@@ -140,6 +140,15 @@ function manifestV2(): OriginalManifestV2 {
     variant('westbound', 2, 'reverse', ['gap-cue', 'ridge-story']),
   ];
   const foothillsVariants = [variant('westbound', 1, 'forward', ['foothills-story'])];
+  const reverseGapCue = story('gap-cue', 'cue');
+  reverseGapCue.variant_overrides = [{
+    chapter_id: 'mountain-crossing',
+    variant_id: 'westbound',
+    title: 'Reverse gap cue',
+    transcript: 'Reviewed reverse-direction transcript for gap-cue.',
+    audio_asset_id: 'audio-gap-cue-westbound',
+    audio_duration_s: 29,
+  }];
   return {
     schema_version: 2,
     manifest_id: 'smokies-original:1',
@@ -149,7 +158,7 @@ function manifestV2(): OriginalManifestV2 {
     title: 'Great Smoky Mountains: Ridges, Rivers & Living Memory',
     stories: [
       story('ridge-story', 'story'),
-      story('gap-cue', 'cue'),
+      reverseGapCue,
       story('foothills-story', 'story'),
     ],
     // Deliberately reverse input order; declared sequences define selection order.
@@ -160,6 +169,7 @@ function manifestV2(): OriginalManifestV2 {
     assets: [
       { id: 'audio-ridge-story', kind: 'narration', path: 'ridge.mp3', mime_type: 'audio/mpeg', bytes: 10, sha256: SHA },
       { id: 'audio-gap-cue', kind: 'narration', path: 'gap.mp3', mime_type: 'audio/mpeg', bytes: 10, sha256: SHA },
+      { id: 'audio-gap-cue-westbound', kind: 'narration', path: 'gap-westbound.mp3', mime_type: 'audio/mpeg', bytes: 10, sha256: SHA },
       { id: 'audio-foothills-story', kind: 'narration', path: 'foothills.mp3', mime_type: 'audio/mpeg', bytes: 10, sha256: SHA },
     ],
     offline_map: {
@@ -289,6 +299,7 @@ assert.equal(compiledDefault.offline_map.region_id, 'smokies-original-union-v1')
 assert.deepEqual(compiledDefault.assets.map(asset => asset.id), [
   'audio-foothills-story',
   'audio-gap-cue',
+  'audio-gap-cue-westbound',
   'audio-ridge-story',
 ]);
 assert.equal(validateOriginalManifest(compiledDefault), compiledDefault);
@@ -317,6 +328,11 @@ assert.equal(compiledReverse.manifest_id, compiledDefault.manifest_id);
 assert.notDeepEqual(compiledReverseResult.selection, compiledDefaultResult.selection);
 assert.deepEqual(compiledReverse.stops.map(stop => stop.id), ['gap-cue', 'ridge-story']);
 assert.equal(compiledReverse.route.direction, 'reverse');
+assert.equal(compiledReverse.stops[0].title, 'Reverse gap cue');
+assert.equal(compiledReverse.stops[0].transcript, 'Reviewed reverse-direction transcript for gap-cue.');
+assert.equal(compiledReverse.stops[0].audio_asset_id, 'audio-gap-cue-westbound');
+assert.equal(compiledReverse.stops[0].audio_duration_s, 29);
+assert.equal(compiledDefault.stops[1].audio_asset_id, 'audio-gap-cue');
 
 assert.throws(
   () => resolveOriginalManifestForPlayback(manifest),
@@ -424,6 +440,37 @@ assertInvalid(candidate => {
 assertInvalid(candidate => {
   candidate.assets.find(asset => asset.id === 'audio-ridge-story')!.mime_type = 'audio/mp4';
 }, /asset format must be audio\/mpeg/);
+
+assertInvalid(candidate => {
+  candidate.stories[1].variant_overrides![0].variant_id = 'missing';
+}, /unknown chapter route variant/);
+
+assertInvalid(candidate => {
+  candidate.stories[1].variant_overrides!.push({
+    ...candidate.stories[1].variant_overrides![0],
+  });
+}, /variant_overrides selections must be unique/);
+
+assertInvalid(candidate => {
+  candidate.stories[1].variant_overrides![0].audio_asset_id = 'missing-audio';
+}, /must reference a narration asset/);
+
+assertInvalid(candidate => {
+  const story = candidate.stories[1];
+  story.variant_overrides![0] = {
+    chapter_id: 'mountain-crossing',
+    variant_id: 'westbound',
+    title: story.title,
+    transcript: story.transcript,
+    audio_asset_id: story.audio_asset_id,
+    audio_duration_s: story.audio_duration_s,
+  };
+}, /must change its effective narration/);
+
+assertInvalid(candidate => {
+  candidate.stories[1].variant_overrides![0].chapter_id = 'foothills-parkway';
+  candidate.stories[1].variant_overrides![0].variant_id = 'westbound';
+}, /unused by that route variant/);
 
 assertInvalid(candidate => {
   (candidate.stories[0].citations[0] as unknown as { rights_status: string }).rights_status = 'unknown';

@@ -12665,6 +12665,17 @@ class OriginalStorySourceV2(BaseModel):
     affected_claims: list[str] = Field(min_length=1, max_length=100)
 
 
+class OriginalStoryVariantOverrideV2(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    chapter_id: str = Field(min_length=1, max_length=240)
+    variant_id: str = Field(min_length=1, max_length=240)
+    title: Optional[str] = Field(default=None, min_length=1, max_length=200)
+    transcript: str = Field(min_length=1, max_length=20000)
+    audio_asset_id: str = Field(min_length=1, max_length=240)
+    audio_duration_s: float = Field(gt=0, le=3600)
+
+
 class OriginalStoryV2(BaseModel):
     model_config = {"extra": "forbid", "strict": True}
 
@@ -12676,6 +12687,9 @@ class OriginalStoryV2(BaseModel):
     audio_duration_s: float = Field(gt=0, le=3600)
     artwork_asset_id: Optional[str] = Field(default=None, max_length=240)
     citations: list[OriginalStorySourceV2] = Field(min_length=1, max_length=50)
+    variant_overrides: Optional[list[OriginalStoryVariantOverrideV2]] = Field(
+        default=None, min_length=1, max_length=20,
+    )
 
 
 class OriginalCueReferenceV2(BaseModel):

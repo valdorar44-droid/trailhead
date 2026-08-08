@@ -122,6 +122,50 @@ async function main() {
   assert.equal(releaseSessionCount, 1, 'a lock-screen user pause releases the idle native audio session');
 
   await sessions.setActive({
+    ...createOriginalSession(manifest, 'guest', 30_000),
+    status: 'active',
+    started_at_ms: 30_000,
+  });
+  const playsBeforeQueue = playCount;
+  await controller.process([
+    { lat: 0, lng: 0.0045, accuracy_m: 10, heading_deg: 90, speed_mps: 10, timestamp_ms: 31_000 },
+    { lat: 0, lng: 0.0045, accuracy_m: 10, heading_deg: 90, speed_mps: 10, timestamp_ms: 34_100 },
+    { lat: 0, lng: 0.0108, accuracy_m: 10, heading_deg: 90, speed_mps: 10, timestamp_ms: 38_000 },
+    { lat: 0, lng: 0.0108, accuracy_m: 10, heading_deg: 90, speed_mps: 10, timestamp_ms: 41_100 },
+    { lat: 0, lng: 0.0162, accuracy_m: 10, heading_deg: 90, speed_mps: 10, timestamp_ms: 45_000 },
+    { lat: 0, lng: 0.0162, accuracy_m: 10, heading_deg: 90, speed_mps: 10, timestamp_ms: 48_100 },
+  ], async () => {});
+  const queuedSession = await sessions.loadActive();
+  assert.equal(queuedSession?.current_stop_id, 'story-1');
+  assert.deepEqual(queuedSession?.pending_stop_ids, ['story-2', 'story-3']);
+  assert.equal(queuedSession?.queued_stop_id, 'story-2');
+  assert.equal(playCount, playsBeforeQueue + 1, 'only the FIFO head plays while later cues queue');
+
+  stateListener?.({ ...audioState, did_finish: true });
+  await controller.flush();
+  const secondPlaying = await sessions.loadActive();
+  assert.equal(secondPlaying?.current_stop_id, 'story-2');
+  assert.deepEqual(secondPlaying?.pending_stop_ids, ['story-3']);
+  assert.equal(secondPlaying?.queued_stop_id, 'story-3');
+  assert.equal(playCount, playsBeforeQueue + 2);
+
+  stateListener?.({ ...audioState, did_finish: true });
+  await controller.flush();
+  const thirdPlaying = await sessions.loadActive();
+  assert.equal(thirdPlaying?.current_stop_id, 'story-3');
+  assert.deepEqual(thirdPlaying?.pending_stop_ids, []);
+  assert.equal(thirdPlaying?.queued_stop_id, null);
+  assert.equal(playCount, playsBeforeQueue + 3);
+
+  stateListener?.({ ...audioState, did_finish: true });
+  await controller.flush();
+  const queueDrained = await sessions.loadActive();
+  assert.equal(queueDrained?.status, 'completed');
+  assert.equal(queueDrained?.current_stop_id, null);
+  assert.deepEqual(queueDrained?.pending_stop_ids, []);
+  assert.deepEqual(queueDrained?.completed_stop_ids, ['story-1', 'story-2', 'story-3']);
+
+  await sessions.setActive({
     ...createOriginalSession(manifest, 'guest', 8_000),
     status: 'active',
     started_at_ms: 8_000,

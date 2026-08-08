@@ -159,7 +159,7 @@ function validateStory(story: OriginalStoryV2, index: number) {
   assertRecord(story, label);
   assertAllowedKeys(story, label, [
     'id', 'kind', 'title', 'transcript', 'audio_asset_id', 'audio_duration_s',
-    'artwork_asset_id', 'citations',
+    'artwork_asset_id', 'citations', 'variant_overrides',
   ]);
   assertStableId(story.id, `${label}.id`);
   if (story.kind !== 'story' && story.kind !== 'cue') {
@@ -171,6 +171,33 @@ function validateStory(story: OriginalStoryV2, index: number) {
   assertFinite(story.audio_duration_s, `${label}.audio_duration_s`, 1);
   if (story.artwork_asset_id != null) {
     assertStableId(story.artwork_asset_id, `${label}.artwork_asset_id`);
+  }
+  if (story.variant_overrides != null) {
+    assertArray(story.variant_overrides, `${label}.variant_overrides`);
+    const selectionKeys = story.variant_overrides.map((override, overrideIndex) => {
+      const overrideLabel = `${label}.variant_overrides[${overrideIndex}]`;
+      assertRecord(override, overrideLabel);
+      assertAllowedKeys(override, overrideLabel, [
+        'chapter_id', 'variant_id', 'title', 'transcript', 'audio_asset_id',
+        'audio_duration_s',
+      ]);
+      assertStableId(override.chapter_id, `${overrideLabel}.chapter_id`);
+      assertStableId(override.variant_id, `${overrideLabel}.variant_id`);
+      if (override.title != null) assertText(override.title, `${overrideLabel}.title`);
+      assertText(override.transcript, `${overrideLabel}.transcript`);
+      assertStableId(override.audio_asset_id, `${overrideLabel}.audio_asset_id`);
+      assertFinite(override.audio_duration_s, `${overrideLabel}.audio_duration_s`, 1);
+      if (
+        (override.title ?? story.title) === story.title
+        && override.transcript === story.transcript
+        && override.audio_asset_id === story.audio_asset_id
+        && override.audio_duration_s === story.audio_duration_s
+      ) {
+        throw new OriginalManifestError(`${overrideLabel} must change its effective narration.`);
+      }
+      return `${override.chapter_id}:${override.variant_id}`;
+    });
+    assertUnique(selectionKeys, `${label}.variant_overrides selections`);
   }
   assertArray(story.citations, `${label}.citations`);
   story.citations.forEach((citation, citationIndex) => {
@@ -239,6 +266,25 @@ function validateStory(story: OriginalStoryV2, index: number) {
       }
     }
   });
+}
+
+function storyForSelection(
+  story: OriginalStoryV2,
+  chapterId: string,
+  variantId: string,
+) {
+  const override = story.variant_overrides?.find(
+    candidate => candidate.chapter_id === chapterId && candidate.variant_id === variantId,
+  );
+  return override
+    ? {
+      ...story,
+      title: override.title ?? story.title,
+      transcript: override.transcript,
+      audio_asset_id: override.audio_asset_id,
+      audio_duration_s: override.audio_duration_s,
+    }
+    : story;
 }
 
 function validateVariant(
@@ -345,10 +391,11 @@ function buildCompiledManifest(
     stops: [...variant.cue_refs]
       .sort((a, b) => a.sequence - b.sequence || a.story_id.localeCompare(b.story_id))
       .map(reference => {
-        const story = stories.get(reference.story_id);
-        if (!story) {
+        const sharedStory = stories.get(reference.story_id);
+        if (!sharedStory) {
           throw new OriginalManifestError(`Unknown story ${reference.story_id}.`);
         }
+        const story = storyForSelection(sharedStory, chapter.id, variant.id);
         return {
           id: story.id,
           sequence: reference.sequence,
@@ -464,15 +511,22 @@ export function validateOriginalManifestV2(input: unknown): OriginalManifestV2 {
   const storyIdSet = new Set(storyIds);
   const assetsById = new Map(manifest.assets.map(asset => [asset.id, asset]));
   manifest.stories.forEach((story, storyIndex) => {
-    const asset = assetsById.get(story.audio_asset_id);
-    if (!asset || asset.kind !== 'narration') {
-      throw new OriginalManifestError(`stories[${storyIndex}].audio_asset_id must reference a narration asset.`);
-    }
-    if (asset.mime_type !== 'audio/mpeg') {
-      throw new OriginalManifestError(
-        `stories[${storyIndex}].audio asset format must be audio/mpeg.`,
-      );
-    }
+    const narrationAssets = [
+      { id: story.audio_asset_id, label: `stories[${storyIndex}].audio_asset_id` },
+      ...(story.variant_overrides ?? []).map((override, overrideIndex) => ({
+        id: override.audio_asset_id,
+        label: `stories[${storyIndex}].variant_overrides[${overrideIndex}].audio_asset_id`,
+      })),
+    ];
+    narrationAssets.forEach(({ id, label }) => {
+      const asset = assetsById.get(id);
+      if (!asset || asset.kind !== 'narration') {
+        throw new OriginalManifestError(`${label} must reference a narration asset.`);
+      }
+      if (asset.mime_type !== 'audio/mpeg') {
+        throw new OriginalManifestError(`${label} asset format must be audio/mpeg.`);
+      }
+    });
   });
   assertArray(manifest.chapters, 'chapters');
   assertContiguousSequence(manifest.chapters, 'chapters');
@@ -483,6 +537,8 @@ export function validateOriginalManifestV2(input: unknown): OriginalManifestV2 {
   assertUnique(chapterIds, 'Chapter IDs');
   const chapterIdSet = new Set(chapterIds);
   const referencedStoryIds = new Set<string>();
+  const referencedStorySelections = new Map<string, Set<string>>();
+  const knownSelectionKeys = new Set<string>();
   const validationSelectionIds: string[] = [];
   manifest.chapters.forEach((chapter, chapterIndex) => {
     const label = `chapters[${chapterIndex}]`;
@@ -647,6 +703,8 @@ export function validateOriginalManifestV2(input: unknown): OriginalManifestV2 {
       );
     }
     chapter.variants.forEach((variant, variantIndex) => {
+      const selectionKey = `${chapter.id}:${variant.id}`;
+      knownSelectionKeys.add(selectionKey);
       validateVariant(
         chapter,
         variant,
@@ -655,6 +713,11 @@ export function validateOriginalManifestV2(input: unknown): OriginalManifestV2 {
         referencedStoryIds,
         manifest.offline_map.bounds,
       );
+      variant.cue_refs.forEach(reference => {
+        const selections = referencedStorySelections.get(reference.story_id) ?? new Set<string>();
+        selections.add(selectionKey);
+        referencedStorySelections.set(reference.story_id, selections);
+      });
       validateRoute(variant.route, `${label}.variants[${variantIndex}].route`);
       assertUnionCoversRoute(
         manifest.offline_map.bounds,
@@ -671,6 +734,18 @@ export function validateOriginalManifestV2(input: unknown): OriginalManifestV2 {
       `Every shared story must be referenced; missing: ${unreferencedStories.join(', ')}.`,
     );
   }
+  manifest.stories.forEach((story, storyIndex) => {
+    (story.variant_overrides ?? []).forEach((override, overrideIndex) => {
+      const selectionKey = `${override.chapter_id}:${override.variant_id}`;
+      const label = `stories[${storyIndex}].variant_overrides[${overrideIndex}]`;
+      if (!knownSelectionKeys.has(selectionKey)) {
+        throw new OriginalManifestError(`${label} references an unknown chapter route variant.`);
+      }
+      if (!referencedStorySelections.get(story.id)?.has(selectionKey)) {
+        throw new OriginalManifestError(`${label} is unused by that route variant.`);
+      }
+    });
+  });
   return manifest;
 }
 

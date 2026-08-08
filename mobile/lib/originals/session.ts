@@ -8,6 +8,88 @@ function unique(values: string[]) {
   return [...new Set(values.filter(Boolean))];
 }
 
+function originalPendingStopIsClosed(session: OriginalSessionV1, stopId: string) {
+  return session.completed_stop_ids.includes(stopId)
+    || session.skipped_stop_ids.includes(stopId)
+    || session.missed_stop_ids.includes(stopId);
+}
+
+/**
+ * Read the canonical narration FIFO. Persisted sessions from the one-slot
+ * runtime are migrated from `queued_stop_id` the first time they are loaded.
+ */
+export function originalPendingStopIds(session: OriginalSessionV1) {
+  // Mixed 1.0.11 writers can update only the legacy one-slot field. Always
+  // reconcile that field ahead of the canonical tail; filtering below removes
+  // a legacy head that is already current or terminal.
+  const persisted = [
+    ...(session.queued_stop_id ? [session.queued_stop_id] : []),
+    ...(Array.isArray(session.pending_stop_ids) ? session.pending_stop_ids : []),
+  ];
+  return unique(persisted).filter(stopId => (
+    stopId !== session.current_stop_id
+    && !originalPendingStopIsClosed(session, stopId)
+  ));
+}
+
+/** Keep the canonical FIFO and the legacy one-slot head in one atomic value. */
+export function withOriginalPendingStops(
+  session: OriginalSessionV1,
+  pendingStopIds: readonly string[],
+): OriginalSessionV1 {
+  const pending = unique([...pendingStopIds]).filter(stopId => (
+    stopId !== session.current_stop_id
+    && !originalPendingStopIsClosed(session, stopId)
+  ));
+  return {
+    ...session,
+    pending_stop_ids: pending,
+    queued_stop_id: pending[0] ?? null,
+  };
+}
+
+export function enqueueOriginalPendingStop(
+  session: OriginalSessionV1,
+  stopId: string,
+): OriginalSessionV1 {
+  if (
+    !stopId
+    || stopId === session.current_stop_id
+    || originalPendingStopIsClosed(session, stopId)
+  ) return withOriginalPendingStops(session, originalPendingStopIds(session));
+  return withOriginalPendingStops(session, [...originalPendingStopIds(session), stopId]);
+}
+
+export type OriginalQueuePromotionV1 = Readonly<{
+  session: OriginalSessionV1;
+  promoted_stop_id: string | null;
+}>;
+
+/** Promote exactly one FIFO head after the playing story settles. */
+export function promoteNextOriginalStop(
+  session: OriginalSessionV1,
+  now = Date.now(),
+): OriginalQueuePromotionV1 {
+  const [promotedStopId, ...remaining] = originalPendingStopIds(session);
+  if (!promotedStopId) {
+    return {
+      session: withOriginalPendingStops(session, []),
+      promoted_stop_id: null,
+    };
+  }
+  return {
+    session: withOriginalPendingStops({
+      ...session,
+      status: 'active',
+      current_stop_id: promotedStopId,
+      current_audio_position_ms: 0,
+      completed_at_ms: null,
+      updated_at_ms: now,
+    }, remaining),
+    promoted_stop_id: promotedStopId,
+  };
+}
+
 export function createOriginalSession(
   manifest: OriginalManifestV1,
   ownerScope: OriginalOwnerScope = 'guest',
@@ -33,6 +115,7 @@ export function createOriginalSession(
     completed_stop_ids: [],
     skipped_stop_ids: [],
     missed_stop_ids: [],
+    pending_stop_ids: [],
     queued_stop_id: null,
     current_stop_id: null,
     current_audio_position_ms: 0,
@@ -74,7 +157,7 @@ export function normalizeOriginalSession(input: OriginalSessionV1): OriginalSess
   )) {
     throw new Error('Invalid Trailhead Original chapter selection.');
   }
-  return {
+  const normalized: OriginalSessionV1 = {
     ...input,
     ...(chapterSelection ? { chapter_selection: { ...chapterSelection } } : {}),
     triggered_stop_ids: unique(input.triggered_stop_ids ?? []),
@@ -103,6 +186,7 @@ export function normalizeOriginalSession(input: OriginalSessionV1): OriginalSess
         input.trigger_state?.reverse_candidate_last_sample_at_ms ?? null,
     },
   };
+  return withOriginalPendingStops(normalized, originalPendingStopIds(normalized));
 }
 
 export function originalStopIsTerminal(session: OriginalSessionV1, stopId: string) {
@@ -131,7 +215,7 @@ export function normalizeCompletedOriginalSession(
     session.completed_at_ms == null
     || !terminal
     || session.current_stop_id
-    || session.queued_stop_id
+    || originalPendingStopIds(session).length > 0
     || session.status === 'completed'
   ) return session;
   return {
@@ -178,16 +262,15 @@ export function skipOriginalStop(
     || skipped.includes(id)
     || session.missed_stop_ids.includes(id)
   ));
-  return {
+  return withOriginalPendingStops({
     ...session,
     status: done ? 'completed' : session.status,
     skipped_stop_ids: skipped,
     current_stop_id: session.current_stop_id === stopId ? null : session.current_stop_id,
-    queued_stop_id: session.queued_stop_id === stopId ? null : session.queued_stop_id,
     current_audio_position_ms: session.current_stop_id === stopId ? 0 : session.current_audio_position_ms,
     completed_at_ms: done ? now : session.completed_at_ms,
     updated_at_ms: now,
-  };
+  }, originalPendingStopIds(session).filter(id => id !== stopId));
 }
 
 export function startManualOriginalStop(

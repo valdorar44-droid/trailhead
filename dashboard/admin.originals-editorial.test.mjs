@@ -42,5 +42,12 @@ assert.match(renderer, /little_river_cades_cove: 'Little River & Cades Cove'/);
 assert.match(renderer, /roaring_fork: 'Roaring Fork'/);
 assert.match(renderer, /packet\.chapter_ids/);
 assert.match(renderer, /Smokies source-locked scripts/);
+assert.match(renderer, /function editorialVariantLabel/);
+assert.match(renderer, /selected\.variant_overrides/);
+assert.match(renderer, /DIRECTION VERSIONS/);
+assert.match(renderer, /override\.transcript_sha256/);
+assert.match(renderer, /Wears Valley to Chilhowee Lake/);
+assert.match(renderer, /Cherokee to Sugarlands/);
+assert.doesNotMatch(renderer, /esc\(override\.variant_id\)/, 'raw direction identifiers must not render');
 
 console.log('Originals Studio source-locked editorial tests passed.');

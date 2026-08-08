@@ -12,11 +12,13 @@ from dashboard.server import (
     OriginalNarrationProfileV1,
 )
 from db import store
+from db import original_manifest_v2 as manifest_v2_module
 from db.original_manifest_v2 import (
     OriginalManifestV2Error,
     compile_original_manifest_v2_selection,
     normalize_original_manifest_v2,
 )
+from db.originals_cultural_review import OriginalCulturalReviewError
 from db.originals_operational import (
     OriginalOperationalReadinessError,
     load_operational_candidate,
@@ -149,6 +151,43 @@ def _test_profile() -> dict:
     }
 
 
+def _v2_with_variant_override() -> dict:
+    payload = _v2_payload()
+    chapter = payload["manifest"]["chapters"][0]
+    reverse = copy.deepcopy(chapter["variants"][0])
+    reverse.update({"id": "westbound", "sequence": 2, "title": "Westbound"})
+    reverse["route"]["geometry"]["coordinates"] = list(reversed(
+        reverse["route"]["geometry"]["coordinates"],
+    ))
+    reverse["cue_refs"] = list(reversed(reverse["cue_refs"]))
+    for sequence, cue in enumerate(reverse["cue_refs"], start=1):
+        cue["sequence"] = sequence
+    chapter["variants"].append(reverse)
+    chapter["validation_selection"]["required_variant_ids"] = [
+        "eastbound", "westbound",
+    ]
+    base_asset = next(
+        asset for asset in payload["manifest"]["assets"]
+        if asset["id"] == payload["manifest"]["stories"][0]["audio_asset_id"]
+    )
+    alternate_asset = copy.deepcopy(base_asset)
+    alternate_asset.update({
+        "id": "narration-directional-westbound",
+        "path": "placeholder://smokies/audio/narration-directional-westbound.mp3",
+        "sha256": "f" * 64,
+    })
+    payload["manifest"]["assets"].append(alternate_asset)
+    payload["manifest"]["stories"][0]["variant_overrides"] = [{
+        "chapter_id": "foothills_parkway",
+        "variant_id": "westbound",
+        "title": "Westbound opening",
+        "transcript": "A reviewed westbound transcript follows the same sourced claim set.",
+        "audio_asset_id": alternate_asset["id"],
+        "audio_duration_s": 31.0,
+    }]
+    return payload
+
+
 def _test_route_evidence(manifest: dict) -> tuple[dict, dict]:
     variants = []
     for chapter in manifest["chapters"]:
@@ -265,6 +304,135 @@ def test_v2_draft_normalizes_and_compiles_deterministically_to_v1():
     assert [stop["id"] for stop in compiled["stops"]] == [
         stop["id"] for stop in payload["manifest"]["stories"]
     ]
+
+
+def test_v2_directional_override_compiles_only_for_its_exact_selection():
+    payload = _v2_with_variant_override()
+    parsed = AuthoredOriginalDraftRequest.model_validate(payload)
+    normalized, _ = store._normalize_original_manifest(
+        payload["pack_id"],
+        payload["title"],
+        parsed.manifest.model_dump(mode="json", exclude_none=True),
+    )
+    east = compile_original_manifest_v2_selection(
+        normalized,
+        chapter_id="foothills_parkway",
+        variant_id="eastbound",
+        normalize_v1=store._normalize_original_manifest_v1,
+    )["manifest"]
+    west = compile_original_manifest_v2_selection(
+        normalized,
+        chapter_id="foothills_parkway",
+        variant_id="westbound",
+        normalize_v1=store._normalize_original_manifest_v1,
+    )["manifest"]
+    story_id = payload["manifest"]["stories"][0]["id"]
+    east_stop = next(stop for stop in east["stops"] if stop["id"] == story_id)
+    west_stop = next(stop for stop in west["stops"] if stop["id"] == story_id)
+    assert east_stop["audio_asset_id"] != "narration-directional-westbound"
+    assert west_stop["title"] == "Westbound opening"
+    assert west_stop["transcript"].startswith("A reviewed westbound transcript")
+    assert west_stop["audio_asset_id"] == "narration-directional-westbound"
+    assert west_stop["audio_duration_s"] == 31.0
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (lambda override: override.update({"variant_id": "missing"}), "unknown chapter route variant"),
+        (lambda override: override.update({"chapter_id": "missing"}), "unknown chapter route variant"),
+        (lambda override: override.update({"audio_asset_id": "missing"}), "must reference a narration asset"),
+    ],
+)
+def test_v2_directional_override_rejects_unknown_selection_or_asset(mutation, message):
+    payload = _v2_with_variant_override()
+    mutation(payload["manifest"]["stories"][0]["variant_overrides"][0])
+    with pytest.raises(OriginalManifestV2Error, match=message):
+        normalize_original_manifest_v2(
+            payload["manifest"],
+            pack_id=payload["pack_id"],
+            title=payload["title"],
+            version=None,
+            normalize_v1=store._normalize_original_manifest_v1,
+        )
+
+
+def test_v2_directional_override_rejects_duplicate_and_unused_selection():
+    payload = _v2_with_variant_override()
+    override = payload["manifest"]["stories"][0]["variant_overrides"][0]
+    payload["manifest"]["stories"][0]["variant_overrides"].append(copy.deepcopy(override))
+    with pytest.raises(OriginalManifestV2Error, match="override selections must be unique"):
+        normalize_original_manifest_v2(
+            payload["manifest"],
+            pack_id=payload["pack_id"],
+            title=payload["title"],
+            version=None,
+            normalize_v1=store._normalize_original_manifest_v1,
+        )
+
+    payload = _v2_with_variant_override()
+    story = payload["manifest"]["stories"][0]
+    story["variant_overrides"][0].update({
+        "title": story["title"],
+        "transcript": story["transcript"],
+        "audio_asset_id": story["audio_asset_id"],
+        "audio_duration_s": story["audio_duration_s"],
+    })
+    with pytest.raises(OriginalManifestV2Error, match="must change its effective narration"):
+        normalize_original_manifest_v2(
+            payload["manifest"],
+            pack_id=payload["pack_id"],
+            title=payload["title"],
+            version=None,
+            normalize_v1=store._normalize_original_manifest_v1,
+        )
+
+    payload = _v2_with_variant_override()
+    payload["manifest"]["chapters"][0]["variants"][1]["cue_refs"] = [
+        cue for cue in payload["manifest"]["chapters"][0]["variants"][1]["cue_refs"]
+        if cue["story_id"] != payload["manifest"]["stories"][0]["id"]
+    ]
+    for sequence, cue in enumerate(
+        payload["manifest"]["chapters"][0]["variants"][1]["cue_refs"], start=1,
+    ):
+        cue["sequence"] = sequence
+    with pytest.raises(OriginalManifestV2Error, match="unused by that route variant"):
+        normalize_original_manifest_v2(
+            payload["manifest"],
+            pack_id=payload["pack_id"],
+            title=payload["title"],
+            version=None,
+            normalize_v1=store._normalize_original_manifest_v1,
+        )
+
+
+def test_v2_directional_override_rechecks_exact_cultural_transcript_hash(monkeypatch):
+    payload = _v2_with_variant_override()
+    override = payload["manifest"]["stories"][0]["variant_overrides"][0]
+    rejected_hash = manifest_v2_module.hashlib.sha256(
+        override["transcript"].encode("utf-8")
+    ).hexdigest()
+    observed_hashes: list[str] = []
+
+    def approval_gate(**kwargs):
+        observed_hashes.append(kwargs["transcript_sha256"])
+        if kwargs["transcript_sha256"] == rejected_hash:
+            raise OriginalCulturalReviewError("Directional script was not culturally approved")
+
+    monkeypatch.setattr(
+        manifest_v2_module,
+        "validate_cultural_claim_approval",
+        approval_gate,
+    )
+    with pytest.raises(OriginalManifestV2Error, match="not culturally approved"):
+        normalize_original_manifest_v2(
+            payload["manifest"],
+            pack_id=payload["pack_id"],
+            title=payload["title"],
+            version=None,
+            normalize_v1=store._normalize_original_manifest_v1,
+        )
+    assert rejected_hash in observed_hashes
 
 
 def test_v2_preview_redacts_transcripts_and_narration_provider():

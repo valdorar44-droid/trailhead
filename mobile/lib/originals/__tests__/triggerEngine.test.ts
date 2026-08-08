@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict';
 import { validateOriginalManifest } from '../manifest';
-import { completeOriginalStop, createOriginalSession, normalizeOriginalSession } from '../session';
+import {
+  completeOriginalStop,
+  createOriginalSession,
+  normalizeOriginalSession,
+  originalPendingStopIds,
+  promoteNextOriginalStop,
+} from '../session';
 import { evaluateOriginalLocation } from '../triggerEngine';
 import type { OriginalLocationSample, OriginalSessionV1 } from '../types';
 import { originalManifest } from './fixtures';
@@ -90,11 +96,103 @@ session = result.session;
 result = evaluateOriginalLocation(manifest, session, sample(0.0108, 13_100));
 session = result.session;
 assert.equal(session.queued_stop_id, 'story-2', 'one overlapping cue is queued');
+assert.deepEqual(session.pending_stop_ids, ['story-2']);
 assert(result.events.some(event => event.type === 'stop_queued'));
 
 result = evaluateOriginalLocation(manifest, session, sample(0.0162, 17_000));
-assert.equal(result.session.queued_stop_id, 'story-2', 'a full queue prevents another cue from arming');
-assert(!result.session.triggered_stop_ids.includes('story-3'));
+session = result.session;
+result = evaluateOriginalLocation(manifest, session, sample(0.0162, 20_100));
+session = result.session;
+assert.deepEqual(
+  originalPendingStopIds(session),
+  ['story-2', 'story-3'],
+  'eligible cues append to one durable FIFO while narration is playing',
+);
+assert.equal(session.queued_stop_id, 'story-2', 'the legacy queue field mirrors the FIFO head');
+assert(result.events.some(event => event.type === 'stop_queued' && event.stop_id === 'story-3'));
+assert.equal(result.decision.code, 'queued');
+
+const restartedQueue = normalizeOriginalSession(
+  JSON.parse(JSON.stringify(session)) as OriginalSessionV1,
+);
+assert.deepEqual(
+  restartedQueue.pending_stop_ids,
+  ['story-2', 'story-3'],
+  'FIFO order survives a persisted process restart',
+);
+const firstSettled = completeOriginalStop(
+  restartedQueue,
+  'story-1',
+  manifest.stops.map(stop => stop.id),
+  21_000,
+);
+const firstPromotion = promoteNextOriginalStop(firstSettled, 21_000);
+assert.equal(firstPromotion.promoted_stop_id, 'story-2');
+assert.equal(firstPromotion.session.current_stop_id, 'story-2');
+assert.deepEqual(firstPromotion.session.pending_stop_ids, ['story-3']);
+assert.equal(firstPromotion.session.queued_stop_id, 'story-3');
+const secondSettled = completeOriginalStop(
+  firstPromotion.session,
+  'story-2',
+  manifest.stops.map(stop => stop.id),
+  22_000,
+);
+const secondPromotion = promoteNextOriginalStop(secondSettled, 22_000);
+assert.equal(secondPromotion.promoted_stop_id, 'story-3');
+assert.equal(secondPromotion.session.current_stop_id, 'story-3');
+assert.deepEqual(secondPromotion.session.pending_stop_ids, []);
+assert.equal(secondPromotion.session.queued_stop_id, null);
+
+const legacyQueuedSession = { ...createOriginalSession(manifest), status: 'active' as const };
+delete legacyQueuedSession.pending_stop_ids;
+legacyQueuedSession.current_stop_id = 'story-1';
+legacyQueuedSession.queued_stop_id = 'story-2';
+legacyQueuedSession.triggered_stop_ids = ['story-1', 'story-2'];
+const migratedLegacyQueue = normalizeOriginalSession(legacyQueuedSession);
+assert.deepEqual(migratedLegacyQueue.pending_stop_ids, ['story-2']);
+assert.equal(migratedLegacyQueue.queued_stop_id, 'story-2');
+
+const mixedEmptyQueue = normalizeOriginalSession({
+  ...createOriginalSession(manifest),
+  status: 'active',
+  current_stop_id: 'story-1',
+  triggered_stop_ids: ['story-1', 'story-2'],
+  pending_stop_ids: [],
+  queued_stop_id: 'story-2',
+});
+assert.deepEqual(
+  mixedEmptyQueue.pending_stop_ids,
+  ['story-2'],
+  'a legacy writer can restore its head when a newer empty FIFO is stale',
+);
+
+const mixedConflictingQueue = normalizeOriginalSession({
+  ...createOriginalSession(manifest),
+  status: 'active',
+  current_stop_id: 'story-1',
+  triggered_stop_ids: ['story-1', 'story-2', 'story-3'],
+  pending_stop_ids: ['story-3', 'story-2'],
+  queued_stop_id: 'story-2',
+});
+assert.deepEqual(
+  mixedConflictingQueue.pending_stop_ids,
+  ['story-2', 'story-3'],
+  'the legacy head is reconciled before a conflicting canonical tail',
+);
+assert.equal(mixedConflictingQueue.queued_stop_id, 'story-2');
+
+const mixedStaleHead = normalizeOriginalSession({
+  ...mixedConflictingQueue,
+  completed_stop_ids: ['story-2'],
+  pending_stop_ids: ['story-3'],
+  queued_stop_id: 'story-2',
+});
+assert.deepEqual(
+  mixedStaleHead.pending_stop_ids,
+  ['story-3'],
+  'a completed legacy head is discarded without losing the canonical tail',
+);
+assert.equal(mixedStaleHead.queued_stop_id, 'story-3');
 
 const poor = evaluateOriginalLocation(manifest, { ...createOriginalSession(manifest), status: 'active' }, sample(0.0045, 1_000, { accuracy_m: 150 }));
 assert.equal(poor.session.tracking_state, 'poor_accuracy');

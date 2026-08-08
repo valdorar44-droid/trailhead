@@ -1,7 +1,12 @@
 import { distanceBetweenLngLatMeters } from '../routeProjection';
 import { orderedOriginalStops } from './manifest';
 import { angularDifferenceDegrees, projectPointToOriginalRoute } from './routeProjection';
-import { originalStopIsTerminal } from './session';
+import {
+  enqueueOriginalPendingStop,
+  originalPendingStopIds,
+  originalStopIsTerminal,
+  withOriginalPendingStops,
+} from './session';
 import type {
   OriginalLocationSample,
   OriginalManifestV1,
@@ -46,10 +51,11 @@ export function remainingOriginalTriggerStops(
   manifest: OriginalManifestV1,
   session: OriginalSessionV1,
 ) {
+  const pending = new Set(originalPendingStopIds(session));
   return orderedOriginalStops(manifest).filter(stop => (
     !originalStopIsTerminal(session, stop.id)
     && stop.id !== session.current_stop_id
-    && stop.id !== session.queued_stop_id
+    && !pending.has(stop.id)
   ));
 }
 
@@ -189,7 +195,6 @@ type TriggerDecisionDetails = {
   gate?: StopLocationGate | null;
   wait?: TriggerWaitDiagnostic | null;
   missed_stop_ids?: readonly string[];
-  queue?: NonNullable<OriginalTriggerDecisionDiagnostic['queue']> | null;
 };
 
 function triggerDecisionMessage(
@@ -207,7 +212,6 @@ function triggerDecisionMessage(
     case 'poor_accuracy': return 'GPS accuracy does not meet the trigger requirement.';
     case 'route_unavailable': return 'The authored route cannot be projected from this location.';
     case 'off_route': return 'Location is too far from the authored route.';
-    case 'queue_full': return 'One story is already queued; another cannot overlap it.';
     case 'no_remaining_stops': return 'No incomplete story is available to arm right now.';
     case 'complete': return 'All stories in this Original are complete.';
     case 'before_window': return `${title} is ahead of its route-progress window.`;
@@ -276,7 +280,6 @@ export function evaluateOriginalLocation(
         radius: gate?.radius ?? null,
         bearing: gate?.bearing ?? null,
         wait: details.wait ?? null,
-        queue: details.queue ?? null,
       },
     };
   };
@@ -480,29 +483,6 @@ export function evaluateOriginalLocation(
     };
   }
 
-  if (session.queued_stop_id) {
-    const queuedStopId = session.queued_stop_id;
-    const followingCandidate = remainingOriginalTriggerStops(manifest, session)[0] ?? null;
-    const followingGate = followingCandidate
-      ? applyOppositeRouteDirectionGate(
-          evaluateStopLocation(followingCandidate, sample, routeProgress),
-          sample,
-          projection.segment_bearing_deg,
-          oppositeRouteDirection,
-        )
-      : null;
-    return finish('queue_full', routeProgress, projection.distance_from_route_m, {
-      stop: followingCandidate,
-      stop_id: queuedStopId,
-      gate: followingGate,
-      queue: {
-        queued_stop_id: queuedStopId,
-        following_stop_id: followingCandidate?.id ?? null,
-        following_stop_eligible: followingGate?.code == null && followingCandidate != null,
-      },
-    });
-  }
-
   const candidate = remainingOriginalTriggerStops(manifest, session)[0];
   if (!candidate) {
     const terminalCount = new Set([
@@ -576,14 +556,16 @@ export function evaluateOriginalLocation(
   }
 
   const queue = Boolean(session.current_stop_id);
-  session = {
+  const updatedSession: OriginalSessionV1 = {
     ...session,
     triggered_stop_ids: addUnique(session.triggered_stop_ids, [candidate.id]),
     current_stop_id: queue ? session.current_stop_id : candidate.id,
-    queued_stop_id: queue ? candidate.id : session.queued_stop_id,
     current_audio_position_ms: queue ? session.current_audio_position_ms : 0,
     trigger_state: resetCandidate(true),
   };
+  session = queue
+    ? enqueueOriginalPendingStop(updatedSession, candidate.id)
+    : withOriginalPendingStops(updatedSession, originalPendingStopIds(session));
   events.push({ type: queue ? 'stop_queued' : 'stop_triggered', stop_id: candidate.id });
   return finish(queue ? 'queued' : 'triggered', routeProgress, projection.distance_from_route_m, {
     stop: candidate,

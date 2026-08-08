@@ -817,7 +817,6 @@ function triggerDecisionTitle(decision: OriginalTriggerDecisionDiagnostic | null
     poor_accuracy: 'BLOCKED · GPS ACCURACY',
     route_unavailable: 'BLOCKED · ROUTE UNAVAILABLE',
     off_route: 'BLOCKED · OFF ROUTE',
-    queue_full: 'WAITING · STORY QUEUE FULL',
     before_window: 'WAITING · BEFORE CUE WINDOW',
     after_window: 'BLOCKED · PAST CUE WINDOW',
     outside_radius: 'BLOCKED · OUTSIDE RADIUS',

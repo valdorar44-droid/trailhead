@@ -49,6 +49,13 @@ def test_dossier_has_the_approved_story_and_cue_counts():
     assert sum(entry["kind"] == "cue" for entry in dossier["entries"]) == 32
 
 
+def test_bidirectional_source_locked_titles_are_direction_neutral():
+    entries = {entry["id"]: entry for entry in _normalized()["entries"]}
+    assert entries["mc_story_01"]["title"] == "Sugarlands and the watershed"
+    assert entries["mc_story_16"]["title"] == "The Oconaluftee valley"
+    assert entries["fp_cue_02"]["title"] == "A long view"
+
+
 def test_every_route_context_is_backed_by_an_existing_chapter_anchor():
     route_spec = json.loads(ROUTES_PATH.read_text(encoding="utf-8"))
     anchors: dict[str, list[set[str]]] = defaultdict(list)

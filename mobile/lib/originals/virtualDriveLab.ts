@@ -1,5 +1,6 @@
 import { distanceBetweenLngLatMeters, type LngLat } from '../routeProjection';
 import { originalRouteSegmentBearingDegrees } from './routeProjection';
+import { originalPendingStopIds } from './session';
 import type {
   OriginalLocationSample,
   OriginalManifestV1,
@@ -248,6 +249,7 @@ export function originalVirtualDriveCueStatuses(
   const completed = new Set(session.completed_stop_ids);
   const skipped = new Set(session.skipped_stop_ids);
   const missed = new Set(session.missed_stop_ids);
+  const queued = new Set(originalPendingStopIds(session));
   return [...manifest.stops]
     .sort((a, b) => a.sequence - b.sequence)
     .map(stop => {
@@ -261,7 +263,7 @@ export function originalVirtualDriveCueStatuses(
       else if (skipped.has(stop.id)) status = 'skipped';
       else if (missed.has(stop.id)) status = 'missed';
       else if (session.current_stop_id === stop.id) status = 'playing';
-      else if (session.queued_stop_id === stop.id) status = 'queued';
+      else if (queued.has(stop.id)) status = 'queued';
       else if (
         state.progress_m >= effectiveStartM
         && state.progress_m <= stop.trigger.route_progress_end_m

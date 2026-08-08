@@ -8,6 +8,7 @@ from db.originals_editorial import (
     SMOKIES_CADES_COVE_EDITORIAL_PATH,
     SMOKIES_MOUNTAIN_CROSSING_EDITORIAL_PATH,
     SMOKIES_ROARING_FORK_EDITORIAL_PATH,
+    SMOKIES_ROUTE_VARIANTS_PATH,
     editorial_transcript_sha256,
     editorial_word_count,
     load_smokies_editorial_packet,
@@ -27,6 +28,8 @@ def test_smokies_editorial_packets_are_complete_and_long_form():
     assert packet["summary"]["chapter_count"] == 4
     assert packet["summary"]["story_count"] == 43
     assert packet["summary"]["cue_count"] == 31
+    assert packet["summary"]["variant_override_count"] == 8
+    assert packet["summary"]["direction_reviewed_chapter_count"] == 2
     assert packet["summary"]["estimated_duration_s"] >= 145 * 60
     expected_foothills_ids = {
         *(f"fp_story_{index:02d}" for index in range(1, 7)),
@@ -62,6 +65,15 @@ def test_smokies_editorial_packets_are_complete_and_long_form():
         assert entry["transcript_sha256"] == editorial_transcript_sha256(entry["transcript"])
         assert entry["word_count"] == editorial_word_count(entry["transcript"])
         assert entry["sources"]
+        assert set(entry["effective_transcript_sha256_by_variant"])
+        for override in entry.get("variant_overrides", []):
+            assert override["transcript_sha256"] == editorial_transcript_sha256(
+                override["transcript"]
+            )
+            assert (
+                entry["effective_transcript_sha256_by_variant"][override["variant_id"]]
+                == override["transcript_sha256"]
+            )
         if entry["kind"] == "story":
             assert 450 <= entry["word_count"] <= 725
             assert entry["estimated_duration_s"] >= 180
@@ -83,6 +95,133 @@ def test_mountain_crossing_packet_keeps_cultural_entries_blocked():
         dossier,
         dossier_file_sha256=packet["dossier_sha256"],
     ) == []
+
+
+def test_bidirectional_chapters_have_complete_review_and_exact_reverse_overrides():
+    packet = load_smokies_editorial_packet()
+    entries = {entry["id"]: entry for entry in packet["entries"]}
+    expected = {
+        ("fp_cue_01", "foothills_parkway", "east_to_west"),
+        ("fp_cue_05", "foothills_parkway", "east_to_west"),
+        ("fp_cue_07", "foothills_parkway", "east_to_west"),
+        ("mc_cue_01", "mountain_crossing", "nc_to_tn"),
+        ("mc_cue_02", "mountain_crossing", "nc_to_tn"),
+        ("mc_cue_04", "mountain_crossing", "nc_to_tn"),
+        ("mc_cue_08", "mountain_crossing", "nc_to_tn"),
+        ("mc_cue_09", "mountain_crossing", "nc_to_tn"),
+    }
+    actual = {
+        (entry["id"], override["chapter_id"], override["variant_id"])
+        for entry in packet["entries"]
+        for override in entry.get("variant_overrides", [])
+    }
+    assert actual == expected
+    assert all(entries[entry_id]["kind"] == "cue" for entry_id, _, _ in actual)
+    chapters = {chapter["chapter_id"]: chapter for chapter in packet["chapters"]}
+    assert chapters["foothills_parkway"]["direction_review"]["reviewed_variant_ids"] == [
+        "west_to_east",
+        "east_to_west",
+    ]
+    assert chapters["mountain_crossing"]["direction_review"]["reviewed_variant_ids"] == [
+        "tn_to_nc",
+        "nc_to_tn",
+    ]
+    assert chapters["foothills_parkway"]["variant_override_count"] == 3
+    assert chapters["mountain_crossing"]["variant_override_count"] == 5
+
+
+def test_bidirectional_long_stories_use_one_direction_neutral_transcript():
+    packet = load_smokies_editorial_packet()
+    entries = {entry["id"]: entry for entry in packet["entries"]}
+    neutralized_ids = {
+        "fp_story_01",
+        "fp_story_03",
+        "mc_story_01",
+        "mc_story_03",
+        "mc_story_04",
+        "mc_story_05",
+        "mc_story_16",
+    }
+    assert all(not entries[entry_id].get("variant_overrides") for entry_id in neutralized_ids)
+    assert entries["mc_story_01"]["effective_title_by_variant"] == {
+        "tn_to_nc": "Sugarlands and the watershed",
+        "nc_to_tn": "Sugarlands and the watershed",
+    }
+    assert entries["mc_story_16"]["effective_title_by_variant"] == {
+        "tn_to_nc": "The Oconaluftee valley",
+        "nc_to_tn": "The Oconaluftee valley",
+    }
+    assert entries["fp_cue_02"]["effective_title_by_variant"] == {
+        "west_to_east": "A long view",
+        "east_to_west": "A long view",
+    }
+    combined = " ".join(entries[entry_id]["transcript"] for entry_id in neutralized_ids)
+    for stale_wording in (
+        "As the next opening appears",
+        "Watch the road ahead as it leaves solid ground",
+        "For now, the crossing begins here",
+        "Water appears everywhere on this climb",
+        "The road keeps climbing",
+        "The high ridge ahead supports a different combination from the cove behind",
+        "not simply the end of a scenic drive",
+    ):
+        assert stale_wording not in combined
+
+
+def test_variant_overrides_reject_unknown_duplicate_unused_and_incomplete_review():
+    packet, dossier = _raw()
+    route_variants = json.loads(SMOKIES_ROUTE_VARIANTS_PATH.read_text(encoding="utf-8"))
+    cue = next(entry for entry in packet["entries"] if entry["id"] == "fp_cue_01")
+
+    unknown = deepcopy(packet)
+    next(entry for entry in unknown["entries"] if entry["id"] == "fp_cue_01")[
+        "variant_overrides"
+    ][0]["variant_id"] = "sideways"
+    issues = validate_smokies_editorial_packet(
+        unknown,
+        dossier,
+        dossier_file_sha256=packet["dossier_sha256"],
+        route_variants=route_variants,
+    )
+    assert any("variant_id is unknown" in issue for issue in issues)
+
+    duplicate = deepcopy(packet)
+    duplicate_cue = next(
+        entry for entry in duplicate["entries"] if entry["id"] == "fp_cue_01"
+    )
+    duplicate_cue["variant_overrides"].append(
+        deepcopy(duplicate_cue["variant_overrides"][0])
+    )
+    issues = validate_smokies_editorial_packet(
+        duplicate,
+        dossier,
+        dossier_file_sha256=packet["dossier_sha256"],
+        route_variants=route_variants,
+    )
+    assert any("duplicate variant overrides" in issue for issue in issues)
+
+    unused = deepcopy(packet)
+    unused_override = next(
+        entry for entry in unused["entries"] if entry["id"] == "fp_cue_01"
+    )["variant_overrides"][0]
+    unused_override["variant_id"] = "west_to_east"
+    issues = validate_smokies_editorial_packet(
+        unused,
+        dossier,
+        dossier_file_sha256=packet["dossier_sha256"],
+        route_variants=route_variants,
+    )
+    assert any("targets the base route variant" in issue for issue in issues)
+
+    incomplete = deepcopy(packet)
+    incomplete["direction_review"]["reviewed_entry_ids"].remove(cue["id"])
+    issues = validate_smokies_editorial_packet(
+        incomplete,
+        dossier,
+        dossier_file_sha256=packet["dossier_sha256"],
+        route_variants=route_variants,
+    )
+    assert any("cover every authored direction-sensitive entry" in issue for issue in issues)
 
 
 def test_cades_cove_packet_keeps_cultural_entry_blocked():
@@ -171,3 +310,4 @@ def test_editorial_paths_stay_inside_repository():
     root = Path(__file__).resolve().parents[1]
     assert SMOKIES_EDITORIAL_PATH.is_relative_to(root)
     assert SMOKIES_DOSSIER_PATH.is_relative_to(root)
+    assert SMOKIES_ROUTE_VARIANTS_PATH.is_relative_to(root)

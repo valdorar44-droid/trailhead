@@ -172,6 +172,20 @@ export type OriginalStorySourceV2 = {
   cultural_pronunciation_bundle_sha256?: string;
 };
 
+/**
+ * Alternate narration for one existing chapter/route selection. The canonical
+ * story identity and citations stay shared; only direction-dependent consumer
+ * copy and its immutable narration asset change.
+ */
+export type OriginalStoryVariantOverrideV2 = {
+  chapter_id: string;
+  variant_id: string;
+  title?: string;
+  transcript: string;
+  audio_asset_id: string;
+  audio_duration_s: number;
+};
+
 /** Shared narration content. Route-specific placement lives on cue_refs. */
 export type OriginalStoryV2 = {
   id: string;
@@ -182,6 +196,7 @@ export type OriginalStoryV2 = {
   audio_duration_s: number;
   artwork_asset_id?: string;
   citations: OriginalStorySourceV2[];
+  variant_overrides?: OriginalStoryVariantOverrideV2[];
 };
 
 export type OriginalCueReferenceV2 = {
@@ -576,6 +591,13 @@ export type OriginalSessionV1 = {
   completed_stop_ids: string[];
   skipped_stop_ids: string[];
   missed_stop_ids: string[];
+  /**
+   * Durable FIFO for triggered narration waiting behind the current story.
+   * Optional so persisted V1 sessions written before the FIFO upgrade remain
+   * readable; normalization always materializes it.
+   */
+  pending_stop_ids?: string[];
+  /** Legacy mirror of the first pending stop for older 1.0.11 clients. */
   queued_stop_id: string | null;
   current_stop_id: string | null;
   current_audio_position_ms: number;
@@ -618,7 +640,6 @@ export type OriginalTriggerDecisionCode =
   | 'poor_accuracy'
   | 'route_unavailable'
   | 'off_route'
-  | 'queue_full'
   | 'no_remaining_stops'
   | 'complete'
   | 'before_window'
@@ -674,11 +695,6 @@ export type OriginalTriggerDecisionDiagnostic = Readonly<{
     required_sample_count: number;
     elapsed_ms: number;
     required_elapsed_ms: number;
-  }> | null;
-  queue: Readonly<{
-    queued_stop_id: string;
-    following_stop_id: string | null;
-    following_stop_eligible: boolean;
   }> | null;
 }>;
 

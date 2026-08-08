@@ -6,7 +6,12 @@ import {
   originalRouteSegmentBearingDegrees,
   projectPointToOriginalRoute,
 } from './routeProjection';
-import { completeOriginalStop, createOriginalSession } from './session';
+import {
+  completeOriginalStop,
+  createOriginalSession,
+  originalPendingStopIds,
+  promoteNextOriginalStop,
+} from './session';
 import { ORIGINAL_TRIGGER_DEFAULTS, evaluateOriginalLocation } from './triggerEngine';
 import type {
   OriginalLocationSample,
@@ -18,8 +23,10 @@ import type {
 } from './types';
 
 export const ORIGINAL_ROUTE_VALIDATION_SCHEMA_VERSION = 1 as const;
-export const ORIGINAL_ROUTE_VALIDATION_ENGINE_VERSION = 'original-trigger-v2' as const;
+export const ORIGINAL_ROUTE_VALIDATION_ENGINE_VERSION = 'original-trigger-v3' as const;
 export const ORIGINAL_ROUTE_DISCONTINUITY_M = 2_000;
+export const ORIGINAL_ROUTE_MAX_ROUTE_END_AUDIO_BACKLOG_S = 240;
+export const ORIGINAL_ROUTE_MAX_TRIGGER_TO_PLAY_LATENCY_S = 180;
 const MAX_AMBIGUOUS_ROUTE_POSITION_SEPARATION_M = ORIGINAL_ROUTE_MAX_HEADING_RECOVERY_SEPARATION_M;
 
 export const ORIGINAL_ROUTE_VALIDATION_SCENARIO_IDS = [
@@ -108,11 +115,14 @@ type ScenarioHarness = {
   decisions: Partial<Record<OriginalTriggerDecisionCode, number>>;
   trigger_counts: Map<string, number>;
   queue_counts: Map<string, number>;
+  trigger_timestamps_ms: Map<string, number>;
+  play_latencies_s: Map<string, number>;
   trigger_order: string[];
   audio_end_ms: number | null;
-  queued_playback_stop_ids: Set<string>;
-  queued_following_pairs: Set<string>;
   maximum_queue_depth: number;
+  route_end_queue_depth: number;
+  route_end_backlog_audio_s: number;
+  drained_queue_count: number;
   audio_overlap_count: number;
   projection_regressions: number;
   minimum_authored_trace_progress_m: number | null;
@@ -435,11 +445,14 @@ function createHarness(manifest: OriginalManifestV1): ScenarioHarness {
     decisions: {},
     trigger_counts: new Map(),
     queue_counts: new Map(),
+    trigger_timestamps_ms: new Map(),
+    play_latencies_s: new Map(),
     trigger_order: [],
     audio_end_ms: null,
-    queued_playback_stop_ids: new Set(),
-    queued_following_pairs: new Set(),
     maximum_queue_depth: 0,
+    route_end_queue_depth: 0,
+    route_end_backlog_audio_s: 0,
+    drained_queue_count: 0,
     audio_overlap_count: 0,
     projection_regressions: 0,
     minimum_authored_trace_progress_m: null,
@@ -456,6 +469,13 @@ function stopById(harness: ScenarioHarness, stopId: string) {
 function startAudio(harness: ScenarioHarness, stopId: string, timestampMs: number) {
   const stop = stopById(harness, stopId);
   if (!stop) return;
+  const triggeredAt = harness.trigger_timestamps_ms.get(stopId);
+  if (triggeredAt != null && !harness.play_latencies_s.has(stopId)) {
+    harness.play_latencies_s.set(
+      stopId,
+      Number((Math.max(0, timestampMs - triggeredAt) / 1_000).toFixed(3)),
+    );
+  }
   if (harness.audio_end_ms != null && harness.audio_end_ms > timestampMs) {
     harness.audio_overlap_count += 1;
   }
@@ -474,25 +494,48 @@ function completeCurrentAudio(harness: ScenarioHarness, timestampMs: number) {
     harness.manifest.stops.map(stop => stop.id),
     timestampMs,
   );
-  const queued = next.queued_stop_id;
-  harness.queued_playback_stop_ids.delete(current);
-  if (queued) {
-    next = {
-      ...next,
-      status: 'active',
-      current_stop_id: queued,
-      queued_stop_id: null,
-      current_audio_position_ms: 0,
-      completed_at_ms: null,
-      updated_at_ms: timestampMs,
-    };
-  }
+  const promotion = promoteNextOriginalStop(next, timestampMs);
+  next = promotion.session;
+  const queued = promotion.promoted_stop_id;
   harness.session = next;
   harness.audio_end_ms = null;
   if (queued) {
-    harness.queued_playback_stop_ids.add(queued);
+    harness.drained_queue_count += 1;
     startAudio(harness, queued, timestampMs);
   }
+}
+
+function pendingAudioSeconds(harness: ScenarioHarness) {
+  return originalPendingStopIds(harness.session).reduce((total, stopId) => (
+    total + Math.max(1, stopById(harness, stopId)?.audio_duration_s ?? 0)
+  ), 0);
+}
+
+function captureRouteEndBacklog(harness: ScenarioHarness) {
+  harness.route_end_queue_depth = originalPendingStopIds(harness.session).length;
+  const currentRemainingS = harness.audio_end_ms == null
+    ? 0
+    : Math.max(0, harness.audio_end_ms - harness.timestamp_ms) / 1_000;
+  harness.route_end_backlog_audio_s = Number(
+    (currentRemainingS + pendingAudioSeconds(harness)).toFixed(3),
+  );
+}
+
+function maximumTriggerToPlayLatencySeconds(harness: ScenarioHarness) {
+  return Math.max(0, ...harness.play_latencies_s.values());
+}
+
+function triggerOrderIsAuthored(harness: ScenarioHarness) {
+  const sequenceById = new Map(
+    orderedOriginalStops(harness.manifest).map((stop, index) => [stop.id, index]),
+  );
+  let previous = -1;
+  return harness.trigger_order.every(stopId => {
+    const sequence = sequenceById.get(stopId);
+    if (sequence == null || sequence <= previous) return false;
+    previous = sequence;
+    return true;
+  });
 }
 
 function advanceAudio(harness: ScenarioHarness, timestampMs: number) {
@@ -510,10 +553,6 @@ function advanceAudio(harness: ScenarioHarness, timestampMs: number) {
 
 function processSample(harness: ScenarioHarness, sample: OriginalLocationSample) {
   advanceAudio(harness, sample.timestamp_ms);
-  const queuedPlaybackStopId = harness.session.current_stop_id != null
-    && harness.queued_playback_stop_ids.has(harness.session.current_stop_id)
-    ? harness.session.current_stop_id
-    : null;
   const priorProgress = harness.session.last_projected_route_progress_m;
   const evaluation = evaluateOriginalLocation(harness.manifest, harness.session, sample);
   harness.sample_count += 1;
@@ -539,36 +578,23 @@ function processSample(harness: ScenarioHarness, sample: OriginalLocationSample)
     harness.projection_regressions += 1;
   }
   evaluation.events.forEach(event => {
-    if (
-      queuedPlaybackStopId
-      && (
-        event.type === 'stop_armed'
-        || event.type === 'stop_triggered'
-        || event.type === 'stop_queued'
-      )
-      && event.stop_id !== queuedPlaybackStopId
-    ) {
-      harness.queued_following_pairs.add(`${queuedPlaybackStopId}:${event.stop_id}`);
-    }
     if (event.type === 'stop_triggered' || event.type === 'stop_queued') {
       harness.trigger_counts.set(event.stop_id, (harness.trigger_counts.get(event.stop_id) ?? 0) + 1);
+      if (!harness.trigger_timestamps_ms.has(event.stop_id)) {
+        harness.trigger_timestamps_ms.set(event.stop_id, sample.timestamp_ms);
+      }
       harness.trigger_order.push(event.stop_id);
     }
     if (event.type === 'stop_queued') {
       harness.queue_counts.set(event.stop_id, (harness.queue_counts.get(event.stop_id) ?? 0) + 1);
     }
   });
-  if (
-    evaluation.decision.queue?.following_stop_eligible
-    && evaluation.decision.queue.following_stop_id
-  ) {
-    harness.queued_following_pairs.add(
-      `${evaluation.decision.queue.queued_stop_id}:${evaluation.decision.queue.following_stop_id}`,
-    );
-  }
   const triggered = evaluation.events.find(event => event.type === 'stop_triggered');
   if (triggered?.type === 'stop_triggered') startAudio(harness, triggered.stop_id, sample.timestamp_ms);
-  harness.maximum_queue_depth = Math.max(harness.maximum_queue_depth, harness.session.queued_stop_id ? 1 : 0);
+  harness.maximum_queue_depth = Math.max(
+    harness.maximum_queue_depth,
+    originalPendingStopIds(harness.session).length,
+  );
   return evaluation;
 }
 
@@ -658,6 +684,7 @@ function driveTrace(harness: ScenarioHarness, route: RouteMeasure, options: Trac
       });
     }
   }
+  if (!reverse && endProgress === distance) captureRouteEndBacklog(harness);
 }
 
 function finishHarness(harness: ScenarioHarness, route: RouteMeasure) {
@@ -721,11 +748,17 @@ function commonIssues(
   if (options.expected_order && harness.trigger_order.join('|') !== options.expected_order.join('|')) {
     issues.push('Stories did not trigger exactly once in authored order.');
   }
-  if (harness.maximum_queue_depth > 1) issues.push('More than one story entered the narration queue.');
   if (harness.audio_overlap_count > 0) issues.push('Narration playback overlapped.');
-  if (harness.queued_following_pairs.size > 0) {
-    issues.push('A following cue became eligible before queued narration finished.');
+  if (harness.route_end_backlog_audio_s > ORIGINAL_ROUTE_MAX_ROUTE_END_AUDIO_BACKLOG_S) {
+    issues.push('Route-end narration backlog exceeds the publication limit.');
   }
+  if (maximumTriggerToPlayLatencySeconds(harness) > ORIGINAL_ROUTE_MAX_TRIGGER_TO_PLAY_LATENCY_S) {
+    issues.push('Narration trigger-to-play latency exceeds the publication limit.');
+  }
+  if (originalPendingStopIds(harness.session).length > 0) {
+    issues.push('The narration queue did not drain completely.');
+  }
+  if (harness.session.current_stop_id) issues.push('A narration story remained active after queue drain.');
   if (harness.session.status !== 'completed') issues.push(`Run ended ${harness.session.status}, not completed.`);
   return issues;
 }
@@ -748,9 +781,18 @@ function scenarioReport(
       completed_count: harness.session.completed_stop_ids.length,
       missed_count: harness.session.missed_stop_ids.length,
       maximum_queue_depth: harness.maximum_queue_depth,
+      route_end_queue_depth: harness.route_end_queue_depth,
+      route_end_backlog_audio_s: harness.route_end_backlog_audio_s,
+      route_end_backlog_limit_s: ORIGINAL_ROUTE_MAX_ROUTE_END_AUDIO_BACKLOG_S,
+      drained_queue_count: harness.drained_queue_count,
+      final_queue_depth: originalPendingStopIds(harness.session).length,
+      maximum_trigger_to_play_latency_s: maximumTriggerToPlayLatencySeconds(harness),
+      trigger_to_play_latency_limit_s: ORIGINAL_ROUTE_MAX_TRIGGER_TO_PLAY_LATENCY_S,
+      trigger_to_play_over_limit_count: [...harness.play_latencies_s.values()].filter(
+        value => value > ORIGINAL_ROUTE_MAX_TRIGGER_TO_PLAY_LATENCY_S,
+      ).length,
+      trigger_order_is_authored: triggerOrderIsAuthored(harness),
       audio_overlap_count: harness.audio_overlap_count,
-      following_cue_during_queued_playback_count:
-        harness.queued_following_pairs.size,
       projection_regressions: harness.projection_regressions,
       authored_trace_span_m: Math.max(
         0,
@@ -949,7 +991,14 @@ function syntheticQueueControl(manifest: OriginalManifestV1) {
   const template = orderedOriginalStops(manifest)[0];
   const origin = cleanCoordinates(manifest)[0];
   if (!template || !origin) {
-    return { passed: false, queue_exercised: false, queued_story_id: null as string | null };
+    return {
+      passed: false,
+      queue_exercised: false,
+      queued_story_id: null as string | null,
+      maximum_queue_depth: 0,
+      drained_queue_count: 0,
+      final_queue_depth: 0,
+    };
   }
   const distanceM = 2_000;
   const endpoint = offsetCoordinate(origin, distanceM, 0);
@@ -959,7 +1008,7 @@ function syntheticQueueControl(manifest: OriginalManifestV1) {
     east: Math.max(origin[0], endpoint[0]) + 0.001,
     west: Math.min(origin[0], endpoint[0]) - 0.001,
   };
-  const stopProgresses = [400, 700, 1_300] as const;
+  const stopProgresses = [400, 700, 1_000, 1_300] as const;
   const controlManifest: OriginalManifestV1 = {
     ...JSON.parse(JSON.stringify(manifest)) as OriginalManifestV1,
     route: {
@@ -978,7 +1027,7 @@ function syntheticQueueControl(manifest: OriginalManifestV1) {
         const coordinate = offsetCoordinate(origin, progress, 0);
         return { lat: coordinate[1], lng: coordinate[0] };
       })(),
-      audio_duration_s: index === 0 ? 30 : 5,
+      audio_duration_s: index === 0 ? 120 : 5,
       trigger: {
         ...template.trigger,
         enter_radius_m: 100,
@@ -1006,11 +1055,17 @@ function syntheticQueueControl(manifest: OriginalManifestV1) {
   if (traceSpanM < distanceM * 0.99) {
     issues.push('The synthetic queue control did not cover its complete route.');
   }
-  const queueExercised = (harness.queue_counts.get(queuedStoryId) ?? 0) === 1;
+  const finalQueueDepth = originalPendingStopIds(harness.session).length;
+  const queueExercised = (harness.queue_counts.get(queuedStoryId) ?? 0) === 1
+    && harness.maximum_queue_depth >= 2
+    && harness.drained_queue_count >= 2;
   return {
-    passed: queueExercised && issues.length === 0,
+    passed: queueExercised && finalQueueDepth === 0 && issues.length === 0,
     queue_exercised: queueExercised,
     queued_story_id: queueExercised ? queuedStoryId : null,
+    maximum_queue_depth: harness.maximum_queue_depth,
+    drained_queue_count: harness.drained_queue_count,
+    final_queue_depth: finalQueueDepth,
   };
 }
 
@@ -1032,8 +1087,10 @@ function overlappingQueueScenario(manifest: OriginalManifestV1, route: RouteMeas
     queue_exercised: queueControl.queue_exercised,
     queued_story_id: queueControl.queued_story_id,
     synthetic_queue_control_passed: queueControl.passed,
+    synthetic_maximum_queue_depth: queueControl.maximum_queue_depth,
+    synthetic_drained_queue_count: queueControl.drained_queue_count,
+    synthetic_final_queue_depth: queueControl.final_queue_depth,
     actual_queue_count: [...harness.queue_counts.values()].reduce((total, value) => total + value, 0),
-    queue_spacing_violation_count: harness.queued_following_pairs.size,
   });
 }
 

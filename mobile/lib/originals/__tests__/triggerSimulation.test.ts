@@ -182,6 +182,21 @@ const cueStatuses = originalVirtualDriveCueStatuses(
 );
 assert.equal(cueStatuses[0].status, 'playing');
 assert.equal(cueStatuses[1].status, 'ahead');
+const fifoCueStatuses = originalVirtualDriveCueStatuses(
+  manifest,
+  {
+    ...continuousSecondEvaluation.session,
+    triggered_stop_ids: manifest.stops.map(stop => stop.id),
+    pending_stop_ids: ['story-2', 'story-3'],
+    queued_stop_id: 'story-2',
+  },
+  continuousSecond.state,
+);
+assert.deepEqual(
+  fifoCueStatuses.map(cue => cue.status),
+  ['playing', 'queued', 'queued'],
+  'the validation lab marks every canonical FIFO entry as queued',
+);
 assert.equal(
   nextOriginalVirtualDriveCueProgress(
     manifest,

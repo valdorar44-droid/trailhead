@@ -200,7 +200,19 @@ def _profile(value: object, *, required: bool) -> dict | None:
 def _compile(manifest: dict, chapter: dict, variant: dict, stories: dict[str, dict]) -> dict:
     stops = []
     for cue_index, cue in enumerate(variant["cue_refs"]):
-        story = stories[cue["story_id"]]
+        shared_story = stories[cue["story_id"]]
+        override = next((
+            item for item in shared_story.get("variant_overrides", [])
+            if item["chapter_id"] == chapter["id"] and item["variant_id"] == variant["id"]
+        ), None)
+        story = copy.deepcopy(shared_story)
+        if override is not None:
+            story.update({
+                "title": override.get("title", shared_story["title"]),
+                "transcript": override["transcript"],
+                "audio_asset_id": override["audio_asset_id"],
+                "audio_duration_s": override["audio_duration_s"],
+            })
         citations = copy.deepcopy(story["citations"])
         if cue_index == 0:
             # V1 publication validation expects operational provenance alongside
@@ -300,7 +312,7 @@ def normalize_original_manifest_v2(
         story = copy.deepcopy(_object(item, "Original V2 story"))
         _forbid_keys(story, {
             "id", "kind", "title", "transcript", "audio_asset_id",
-            "audio_duration_s", "artwork_asset_id", "citations",
+            "audio_duration_s", "artwork_asset_id", "citations", "variant_overrides",
         }, "Original V2 story")
         story["id"] = _stable_id(story.get("id"), "Original V2 story id")
         if story.get("kind") not in {"story", "cue"}:
@@ -318,6 +330,77 @@ def normalize_original_manifest_v2(
             story["artwork_asset_id"] = _stable_id(story["artwork_asset_id"], f"Original V2 story {story['id']} artwork")
             if not assets_by_id.get(story["artwork_asset_id"], {}).get("kind") == "image":
                 raise OriginalManifestV2Error(f"Original V2 story {story['id']} must reference an image asset")
+        overrides: list[dict] = []
+        for raw_override in _items(
+            story.get("variant_overrides") or [],
+            f"Original V2 story {story['id']} variant overrides",
+            20,
+            required=False,
+        ):
+            override = copy.deepcopy(_object(
+                raw_override,
+                f"Original V2 story {story['id']} variant override",
+            ))
+            _forbid_keys(override, {
+                "chapter_id", "variant_id", "title", "transcript",
+                "audio_asset_id", "audio_duration_s",
+            }, f"Original V2 story {story['id']} variant override")
+            override["chapter_id"] = _stable_id(
+                override.get("chapter_id"),
+                f"Original V2 story {story['id']} override chapter",
+            )
+            override["variant_id"] = _stable_id(
+                override.get("variant_id"),
+                f"Original V2 story {story['id']} override variant",
+            )
+            if override.get("title") is not None:
+                override["title"] = _text(
+                    override["title"],
+                    f"Original V2 story {story['id']} override title",
+                    200,
+                )
+            override["transcript"] = _text(
+                override.get("transcript"),
+                f"Original V2 story {story['id']} override transcript",
+                20_000,
+            )
+            override["audio_asset_id"] = _stable_id(
+                override.get("audio_asset_id"),
+                f"Original V2 story {story['id']} override narration",
+            )
+            override_duration = override.get("audio_duration_s")
+            if (
+                isinstance(override_duration, bool)
+                or not isinstance(override_duration, (int, float))
+                or not 0 < float(override_duration) <= 3600
+            ):
+                raise OriginalManifestV2Error(
+                    f"Original V2 story {story['id']} override duration is invalid"
+                )
+            override["audio_duration_s"] = float(override_duration)
+            if not assets_by_id.get(override["audio_asset_id"], {}).get("kind") == "narration":
+                raise OriginalManifestV2Error(
+                    f"Original V2 story {story['id']} override must reference a narration asset"
+                )
+            if (
+                override.get("title", story["title"]) == story["title"]
+                and override["transcript"] == story["transcript"]
+                and override["audio_asset_id"] == story["audio_asset_id"]
+                and override["audio_duration_s"] == story["audio_duration_s"]
+            ):
+                raise OriginalManifestV2Error(
+                    f"Original V2 story {story['id']} override must change its effective narration"
+                )
+            overrides.append(override)
+        overrides.sort(key=lambda item: (item["chapter_id"], item["variant_id"]))
+        _unique(
+            [f"{item['chapter_id']}:{item['variant_id']}" for item in overrides],
+            f"Original V2 story {story['id']} override selections",
+        )
+        if overrides:
+            story["variant_overrides"] = overrides
+        else:
+            story.pop("variant_overrides", None)
         citations = _items(story.get("citations"), f"Original V2 story {story['id']} citations", 50)
         story_claim_ids: list[str] = []
         for citation in citations:
@@ -409,6 +492,23 @@ def normalize_original_manifest_v2(
                         "cultural_pronunciation_bundle_sha256"
                     ),
                 )
+                for override in overrides:
+                    validate_cultural_claim_approval(
+                        product_id=cultural_product_id,
+                        story_id=story["id"],
+                        transcript_sha256=hashlib.sha256(
+                            override["transcript"].encode("utf-8")
+                        ).hexdigest(),
+                        claim_ids=claim_ids,
+                        approval_record_id=citation.get("cultural_approval_record_id"),
+                        approval_record_sha256=citation.get(
+                            "cultural_approval_record_sha256"
+                        ),
+                        approved_at=citation.get("cultural_approved_at"),
+                        pronunciation_bundle_sha256=citation.get(
+                            "cultural_pronunciation_bundle_sha256"
+                        ),
+                    )
             except OriginalCulturalReviewError as exc:
                 raise OriginalManifestV2Error(str(exc)) from exc
         try:
@@ -583,6 +683,31 @@ def normalize_original_manifest_v2(
         )
     if set(stories_by_id) != referenced:
         raise OriginalManifestV2Error("Every Original V2 story must be referenced by at least one variant")
+    known_selections = {
+        f"{chapter['id']}:{variant['id']}"
+        for chapter in chapters
+        for variant in chapter["variants"]
+    }
+    story_selections = {
+        story_id: {
+            f"{chapter['id']}:{variant['id']}"
+            for chapter in chapters
+            for variant in chapter["variants"]
+            if any(cue["story_id"] == story_id for cue in variant["cue_refs"])
+        }
+        for story_id in stories_by_id
+    }
+    for story in stories:
+        for override in story.get("variant_overrides", []):
+            selection = f"{override['chapter_id']}:{override['variant_id']}"
+            if selection not in known_selections:
+                raise OriginalManifestV2Error(
+                    f"Original V2 story {story['id']} override references an unknown chapter route variant"
+                )
+            if selection not in story_selections[story["id"]]:
+                raise OriginalManifestV2Error(
+                    f"Original V2 story {story['id']} override is unused by that route variant"
+                )
     review = copy.deepcopy(_object(raw.get("review"), "Original V2 review"))
     _forbid_keys(review, {
         "editorial_status", "field_drive_completed_at", "source_review_completed_at",
@@ -626,7 +751,14 @@ def normalize_original_manifest_v2(
     if narration_profile is not None:
         expected_mime = narration_profile["mobile_delivery"]["mime_type"]
         for story in stories:
-            if assets_by_id[story["audio_asset_id"]].get("mime_type") != expected_mime:
+            narration_ids = [story["audio_asset_id"]] + [
+                override["audio_asset_id"]
+                for override in story.get("variant_overrides", [])
+            ]
+            if any(
+                assets_by_id[asset_id].get("mime_type") != expected_mime
+                for asset_id in narration_ids
+            ):
                 raise OriginalManifestV2Error(
                     f"Original V2 story {story['id']} narration format does not match its profile"
                 )

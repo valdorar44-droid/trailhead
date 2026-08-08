@@ -2,11 +2,19 @@
   "schema_version": 1,
   "product_id": "great_smoky_mountains_ridges_rivers_living_memory",
   "title": "Great Smoky Mountains: Ridges, Rivers & Living Memory",
-  "dossier_sha256": "4f81200308052c3f3fba227434d5372a8a0fd5504354839448e13e2b69338011",
+  "dossier_sha256": "bc1bdbd18a79d7b5e0417d17d149044b97ccc485c068712423f25efec67ab561",
   "editorial_status": "draft_review_required",
   "locale": "en-US",
   "narration_rate_wpm": 145,
   "chapter_id": "foothills_parkway",
+  "direction_review": {
+    "base_variant_id": "west_to_east",
+    "reviewed_variant_ids": ["west_to_east", "east_to_west"],
+    "reviewed_entry_ids": [
+      "fp_story_01", "fp_story_02", "fp_story_03", "fp_story_04", "fp_story_05", "fp_story_06",
+      "fp_cue_01", "fp_cue_02", "fp_cue_03", "fp_cue_04", "fp_cue_05", "fp_cue_06", "fp_cue_07"
+    ]
+  },
   "entries": [
     {
       "id": "fp_story_01",
@@ -17,7 +25,7 @@
       "claim_ids": ["fp_scenic_corridor"],
       "source_ids": ["nps_grsm_foothills"],
       "script_status": "draft_review_required",
-      "transcript": "Look beyond the guardrail and the road seems to float along the lower ridges. The high wall of the Smokies holds the horizon, while folds of wooded country fall away toward the Tennessee Valley. That view is not a lucky side effect of getting from one town to another. It is the reason this road exists.\n\nCongress authorized Foothills Parkway in 1944 as a scenic parkway along the Tennessee side of Great Smoky Mountains National Park. The plan called for a long corridor following the foothills rather than cutting straight across them. From here, the main range stays in view for mile after mile. The road repeatedly turns toward an overlook, slips back into the trees, and then opens another window across the mountains.\n\nA parkway is a particular kind of road. Its job is not simply to shorten a trip. It shapes the trip itself. Curves, grades, overlooks, and the land beside the pavement are treated as one experience. Here, the destination is not only at the end of the road. It is present in every opening between the trees and in the changing relationship between the lower ridges and the main range beyond them.\n\nThat rhythm matters. A long, uninterrupted panorama can become background, but the parkway makes the forest act like a curtain. Enclosed stretches quiet the view. Then a turn opens the landscape again, and the distance feels newly discovered. Overlooks give the eye time to stop moving even when the journey continues. The road does not need a sign at every curve to interpret the mountains; its alignment performs much of that work. Even the pauses between views are part of that rhythm.\n\nThe full authorized corridor stretches for seventy-two miles, yet it was never completed as one continuous highway. Portions opened at different times, and unfinished sections remain part of its story. That interrupted history makes the finished pavement feel less like an ordinary state route and more like a sequence of carefully placed balconies. Each completed section reveals a different relationship between the foothills and the national park beyond them.\n\nNotice the layers in the view. The near slopes have individual trees and folds you can follow with your eye. Farther away, details merge into blue and gray bands. The highest ridges form the park's distant edge. The road keeps rearranging those layers as it turns, making the mountains seem to advance, retreat, and overlap.\n\nThat was the central promise of Foothills Parkway: not a shortcut through the Smokies, but a road built to help people see them. As the next opening appears, watch how the pavement aims your attention outward. The engineered curve beneath you and the broad landscape beyond it are parts of the same design."
+      "transcript": "Look beyond the guardrail and the road seems to float along the lower ridges. The high wall of the Smokies holds the horizon, while folds of wooded country fall away toward the Tennessee Valley. That view is not a lucky side effect of getting from one town to another. It is the reason this road exists.\n\nCongress authorized Foothills Parkway in 1944 as a scenic parkway along the Tennessee side of Great Smoky Mountains National Park. The plan called for a long corridor following the foothills rather than cutting straight across them. From here, the main range stays in view for mile after mile. The road repeatedly turns toward an overlook, slips back into the trees, and then opens another window across the mountains.\n\nA parkway is a particular kind of road. Its job is not simply to shorten a trip. It shapes the trip itself. Curves, grades, overlooks, and the land beside the pavement are treated as one experience. Here, the destination is not only at the end of the road. It is present in every opening between the trees and in the changing relationship between the lower ridges and the main range beyond them.\n\nThat rhythm matters. A long, uninterrupted panorama can become background, but the parkway makes the forest act like a curtain. Enclosed stretches quiet the view. Then a turn opens the landscape again, and the distance feels newly discovered. Overlooks give the eye time to stop moving even when the journey continues. The road does not need a sign at every curve to interpret the mountains; its alignment performs much of that work. Even the pauses between views are part of that rhythm.\n\nThe full authorized corridor stretches for seventy-two miles, yet it was never completed as one continuous highway. Portions opened at different times, and unfinished sections remain part of its story. That interrupted history makes the finished pavement feel less like an ordinary state route and more like a sequence of carefully placed balconies. Each completed section reveals a different relationship between the foothills and the national park beyond them.\n\nNotice the layers in the view. The near slopes have individual trees and folds you can follow with your eye. Farther away, details merge into blue and gray bands. The highest ridges form the park's distant edge. The road keeps rearranging those layers as it turns, making the mountains seem to advance, retreat, and overlap.\n\nThat was the central promise of Foothills Parkway: not a shortcut through the Smokies, but a road built to help people see them. Whenever the landscape opens, watch how the pavement aims your attention outward. The engineered curve beneath you and the broad landscape beyond it are parts of the same design."
     },
     {
       "id": "fp_story_02",
@@ -39,7 +47,7 @@
       "claim_ids": ["fp_missing_link"],
       "source_ids": ["nps_grsm_missing_link_bridge"],
       "script_status": "draft_review_required",
-      "transcript": "Watch the road ahead as it leaves solid ground and sweeps across the slope. For a moment, the parkway is no longer resting on the mountain. It is being carried through open air. The bridge curves rather than crossing in a straight line, and the tall supports below it disappear into steep wooded ravines.\n\nThis is part of the section long known as the Missing Link, a short but exceptionally difficult gap between Walland and Wears Valley. Construction had advanced from both directions, yet broken terrain kept the two sides apart. The distance on a map was modest. The engineering problem was not.\n\nOne of the key structures is Bridge Number Two. The National Park Service described it as an eight-hundred-foot elevated roadway forming a serpentine curve. Four piers, some reaching as high as one hundred feet, support the bridge as it crosses two ravines on the south slope of Chilhowee Mountain. When the construction contract was announced in 2009, this was the longest single bridge required to complete the gap.\n\nThe curve is the important part to notice. A straight bridge could connect two points, but this road also had to follow the parkway's alignment and sit within a scenic mountain landscape. The structure bends with the route while lifting it above ground that would have been difficult to cut, fill, and stabilize. Instead of forcing the ravines to become a roadbed, the bridge spans them.\n\nThat solution demanded a different view of the landscape. The slopes below are not empty space. They carry water, soil, trees, and the shape of the mountain itself. Piers concentrate the bridge's support at selected points, leaving much of the ground between them open. From the roadway, most of that work is easy to miss. You feel a gentle curve and see a broad view. Underneath, loads move from the deck into the piers and down to carefully engineered foundations.\n\nConstruction itself unfolded in stages. A major bridge could advance while other structures and approaches were being designed or built from the opposite side. The contract for Bridge Number Two formed one part of a wider effort extending east from Walland and west from Wears Valley. The visible structure was a milestone, not the entire solution.\n\nThat is worth remembering as the roadway carries you across the ravines today. The completed experience compresses years of separate decisions into a few quiet seconds. Design, piers, deck, approaches, and pavement now read as one curve because each part was made to meet the next.\n\nAs the tires return to ground, look back at how quietly the bridge does its job. It crosses two ravines, holds a long curve high on the slope, and preserves the experience of a road moving with the mountain. The biggest engineering on Foothills Parkway is often the part designed to feel almost effortless from the passenger seat."
+      "transcript": "Watch as the road leaves solid ground and sweeps across the slope. For a moment, the parkway is no longer resting on the mountain. It is being carried through open air. The bridge curves rather than crossing in a straight line, and the tall supports below it disappear into steep wooded ravines.\n\nThis is part of the section long known as the Missing Link, a short but exceptionally difficult gap between Walland and Wears Valley. Construction had advanced from both directions, yet broken terrain kept the two sides apart. The distance on a map was modest. The engineering problem was not.\n\nOne of the key structures is Bridge Number Two. The National Park Service described it as an eight-hundred-foot elevated roadway forming a serpentine curve. Four piers, some reaching as high as one hundred feet, support the bridge as it crosses two ravines on the south slope of Chilhowee Mountain. When the construction contract was announced in 2009, this was the longest single bridge required to complete the gap.\n\nThe curve is the important part to notice. A straight bridge could connect two points, but this road also had to follow the parkway's alignment and sit within a scenic mountain landscape. The structure bends with the route while lifting it above ground that would have been difficult to cut, fill, and stabilize. Instead of forcing the ravines to become a roadbed, the bridge spans them.\n\nThat solution demanded a different view of the landscape. The slopes below are not empty space. They carry water, soil, trees, and the shape of the mountain itself. Piers concentrate the bridge's support at selected points, leaving much of the ground between them open. From the roadway, most of that work is easy to miss. You feel a gentle curve and see a broad view. Underneath, loads move from the deck into the piers and down to carefully engineered foundations.\n\nConstruction itself unfolded in stages. A major bridge could advance while other structures and approaches were being designed or built from the opposite side. The contract for Bridge Number Two formed one part of a wider effort extending east from Walland and west from Wears Valley. The visible structure was a milestone, not the entire solution.\n\nThat is worth remembering as the roadway carries you across the ravines today. The completed experience compresses years of separate decisions into a few quiet seconds. Design, piers, deck, approaches, and pavement now read as one curve because each part was made to meet the next.\n\nAs the tires return to ground, notice how quietly the bridge does its job. It crosses two ravines, holds a long curve high on the slope, and preserves the experience of a road moving with the mountain. The biggest engineering on Foothills Parkway is often the part designed to feel almost effortless from the passenger seat."
     },
     {
       "id": "fp_story_04",
@@ -83,14 +91,21 @@
       "claim_ids": ["fp_scenic_corridor"],
       "source_ids": ["nps_grsm_foothills"],
       "script_status": "draft_review_required",
-      "transcript": "You are entering Foothills Parkway, a scenic corridor authorized along the Tennessee side of the Smokies. This chapter follows the ridge road and its overlooks rather than crossing the national park. Let the ordinary navigation handle each turn. The stories ahead will stay with the view: the road's long construction, the mountains beneath it, the forest across them, and the air between each ridge."
+      "transcript": "You are entering Foothills Parkway at Chilhowee Lake, traveling east toward Wears Valley. This chapter stays on the Tennessee side of the Smokies and follows the ridge road rather than crossing the national park. Let ordinary navigation handle each turn. The stories ahead stay with the view: the parkway's long construction, the mountains beneath it, the forest across them, and the air between each ridge.",
+      "variant_overrides": [
+        {
+          "chapter_id": "foothills_parkway",
+          "variant_id": "east_to_west",
+          "transcript": "You are entering Foothills Parkway at Wears Valley, traveling west toward Chilhowee Lake. This chapter stays on the Tennessee side of the Smokies and follows the ridge road rather than crossing the national park. Let ordinary navigation handle each turn. The stories ahead stay with the view: the parkway's long construction, the mountains beneath it, the forest across them, and the air between each ridge."
+        }
+      ]
     },
     {
       "id": "fp_cue_02",
       "chapter_id": "foothills_parkway",
       "kind": "cue",
       "sequence": 2,
-      "title": "First long view",
+      "title": "A long view",
       "claim_ids": ["fp_geologic_view"],
       "source_ids": ["nps_grsm_geology"],
       "script_status": "draft_review_required",
@@ -116,7 +131,7 @@
       "claim_ids": ["fp_forest_mosaic"],
       "source_ids": ["nps_grsm_statistics", "nps_grsm_vegetation"],
       "script_status": "draft_review_required",
-      "transcript": "The broad green view is not one uniform forest. Elevation and the direction each slope faces help organize different plant communities across the mountains. Compare a bright exposed slope with a shaded hollow, or a low ridge with the high country beyond it. Changes in color and canopy texture are clues to the forest mosaic described in the next feature."
+      "transcript": "The broad green view is not one uniform forest. Elevation and the direction each slope faces help organize different plant communities across the mountains. Compare a bright exposed slope with a shaded hollow, or a low ridge with the high country beyond it. Changes in color and canopy texture are clues to the forest mosaic described in the forest feature."
     },
     {
       "id": "fp_cue_05",
@@ -127,7 +142,14 @@
       "claim_ids": ["fp_long_build"],
       "source_ids": ["nps_grsm_foothills", "nps_grsm_foothills_history"],
       "script_status": "draft_review_required",
-      "transcript": "This part of the parkway belongs to a road built in separated pieces across many decades. The corridor was authorized in 1944, but difficult terrain, changing plans, and uneven funding kept it from becoming one continuous highway. Around Walland and Wears Valley, completed sections once approached a stubborn gap from opposite directions. The road ahead carries that construction history in its bridges."
+      "transcript": "This part of the parkway belongs to a road built in separated pieces across many decades. The corridor was authorized in 1944, but difficult terrain, changing plans, and uneven funding kept it from becoming one continuous highway. Around Walland and Wears Valley, completed sections once approached a stubborn gap from opposite directions. The road ahead carries that construction history in its bridges.",
+      "variant_overrides": [
+        {
+          "chapter_id": "foothills_parkway",
+          "variant_id": "east_to_west",
+          "transcript": "This part of the parkway belongs to a road built in separated pieces across many decades. The corridor was authorized in 1944, but difficult terrain, changing plans, and uneven funding kept it from becoming one continuous highway. Around Walland and Wears Valley, completed sections once approached a stubborn gap from opposite directions. The bridges you just crossed carry that construction history."
+        }
+      ]
     },
     {
       "id": "fp_cue_06",
@@ -149,7 +171,15 @@
       "claim_ids": ["fp_scenic_corridor"],
       "source_ids": ["nps_grsm_foothills"],
       "script_status": "draft_review_required",
-      "transcript": "The scenic section is descending toward Wears Valley and the ordinary road network. This chapter ends here, but the parkway's idea remains visible behind you: a road designed to reveal the Smokies rather than merely pass them. Trailhead will return to regular navigation after the final cue. Current closures and route availability are checked separately whenever you start this chapter."
+      "transcript": "The scenic section is descending toward Wears Valley and the ordinary road network. This chapter ends here, but the parkway's idea remains visible behind you: a road designed to reveal the Smokies rather than merely pass them. Trailhead will return to regular navigation after the final cue. Current closures and route availability are checked separately whenever you start this chapter.",
+      "variant_overrides": [
+        {
+          "chapter_id": "foothills_parkway",
+          "variant_id": "east_to_west",
+          "title": "Chilhowee Lake end",
+          "transcript": "The scenic section is nearing Chilhowee Lake and the ordinary road network. This chapter ends here, but the parkway's idea remains visible behind you: a road designed to reveal the Smokies rather than merely pass them. Trailhead will return to regular navigation after this cue. Current closures and route availability are checked separately whenever you start the chapter."
+        }
+      ]
     }
   ]
 }

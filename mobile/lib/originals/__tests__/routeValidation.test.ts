@@ -3,12 +3,16 @@ import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import {
   canonicalOriginalRouteGeometry,
+  ORIGINAL_ROUTE_MAX_ROUTE_END_AUDIO_BACKLOG_S,
+  ORIGINAL_ROUTE_MAX_TRIGGER_TO_PLAY_LATENCY_S,
   ORIGINAL_ROUTE_VALIDATION_SCENARIO_IDS,
   runOriginalRouteValidation,
 } from '../routeValidation';
 import { originalManifest } from './fixtures';
 
 const manifest = originalManifest();
+assert.equal(ORIGINAL_ROUTE_MAX_ROUTE_END_AUDIO_BACKLOG_S, 240);
+assert.equal(ORIGINAL_ROUTE_MAX_TRIGGER_TO_PLAY_LATENCY_S, 180);
 manifest.stops = manifest.stops.map(stop => ({ ...stop, audio_duration_s: 5 }));
 manifest.route.geometry.coordinates = [[0, 0], [0.01, 0], [0.02, 0]];
 
@@ -41,35 +45,58 @@ assert.equal(report.scenarios.find(scenario => scenario.id === 'reverse_travel')
 assert(Number(report.scenarios.find(scenario => scenario.id === 'delayed_out_of_order_fixes')?.metrics.stale_fix_decisions ?? 0) > 0);
 assert.equal(report.scenarios.find(scenario => scenario.id === 'overlapping_audio_queue')?.metrics.queue_exercised, true);
 
-const unsafeQueueSpacingManifest = JSON.parse(JSON.stringify(manifest)) as typeof manifest;
-unsafeQueueSpacingManifest.stops[0].audio_duration_s = 72;
-unsafeQueueSpacingManifest.stops[1].audio_duration_s = 8;
-const unsafeQueueSpacingReport = runOriginalRouteValidation(unsafeQueueSpacingManifest, {
-  scenario_ids: ['overlapping_audio_queue'],
+const longFormQueueManifest = JSON.parse(JSON.stringify(manifest)) as typeof manifest;
+longFormQueueManifest.stops[0].audio_duration_s = 180;
+longFormQueueManifest.stops[1].audio_duration_s = 90;
+longFormQueueManifest.stops[2].audio_duration_s = 60;
+const longFormQueueReport = runOriginalRouteValidation(longFormQueueManifest, {
+  scenario_ids: [
+    'baseline_slow_15mph',
+    'baseline_cruise_36mph',
+    'baseline_highway_65mph',
+    'restart_duplicate_prevention',
+    'overlapping_audio_queue',
+  ],
 });
-assert.equal(unsafeQueueSpacingReport.passed, false);
-assert(
-  Number(
-    unsafeQueueSpacingReport.scenarios[0].metrics.queue_spacing_violation_count,
-  ) > 0,
-  'eligibility is detected when the following cue arms, even if queued narration ends before its trigger fix',
+assert.equal(
+  longFormQueueReport.passed,
+  false,
+  'ordered FIFO drain cannot certify narration that arrives too late for the visible route context',
 );
+assert(longFormQueueReport.scenarios.every(scenario => scenario.metrics.audio_overlap_count === 0));
+assert(longFormQueueReport.scenarios.every(scenario => scenario.metrics.final_queue_depth === 0));
+assert(longFormQueueReport.scenarios.every(scenario => Number(scenario.metrics.drained_queue_count) >= 2));
+assert(longFormQueueReport.scenarios.every(scenario => scenario.metrics.trigger_order_is_authored === true));
+assert(longFormQueueReport.scenarios.every(scenario => (
+  scenario.stops.every(stop => stop.trigger_count === 1 && stop.completed)
+)));
+assert(longFormQueueReport.scenarios.some(scenario => scenario.issues.some(issue => (
+  /publication limit/.test(issue)
+))));
+const highSpeedLongForm = longFormQueueReport.scenarios.find(
+  scenario => scenario.id === 'baseline_highway_65mph',
+)!;
+assert(Number(highSpeedLongForm.metrics.maximum_queue_depth) >= 2);
+assert(Number(highSpeedLongForm.metrics.route_end_queue_depth) >= 1);
 assert(
-  unsafeQueueSpacingReport.scenarios[0].issues.some(issue => (
-    /before queued narration finished/.test(issue)
-  )),
+  Number(highSpeedLongForm.metrics.route_end_backlog_audio_s)
+    > Number(highSpeedLongForm.metrics.route_end_backlog_limit_s),
 );
-
-const queueFullEligibilityManifest = JSON.parse(JSON.stringify(manifest)) as typeof manifest;
-queueFullEligibilityManifest.stops[0].audio_duration_s = 90;
-queueFullEligibilityManifest.stops[1].audio_duration_s = 1;
-const queueFullEligibilityReport = runOriginalRouteValidation(queueFullEligibilityManifest, {
-  scenario_ids: ['overlapping_audio_queue'],
-});
-assert.equal(queueFullEligibilityReport.passed, false);
+const cruiseLongForm = longFormQueueReport.scenarios.find(
+  scenario => scenario.id === 'baseline_cruise_36mph',
+)!;
 assert(
-  Number(queueFullEligibilityReport.scenarios[0].metrics.queue_spacing_violation_count) > 0,
-  'queue-full diagnostics expose a following cue while the prior story is still queued',
+  Number(cruiseLongForm.metrics.maximum_trigger_to_play_latency_s)
+    > Number(cruiseLongForm.metrics.trigger_to_play_latency_limit_s),
+);
+const restartLongForm = longFormQueueReport.scenarios.find(
+  scenario => scenario.id === 'restart_duplicate_prevention',
+)!;
+assert.equal(restartLongForm.metrics.stale_fix_decisions, 1);
+assert.deepEqual(
+  restartLongForm.stops.map(stop => stop.trigger_count),
+  [1, 1, 1],
+  'a persisted FIFO restart never duplicates a cue',
 );
 
 const expectedGeometryHash = createHash('sha256')

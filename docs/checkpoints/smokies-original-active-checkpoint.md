@@ -1,15 +1,15 @@
 # Great Smoky Mountains Original — Active Checkpoint
 
-Last updated: 2026-08-08 (S3F public-record cultural scope packet complete)
+Last updated: 2026-08-08 (S3H capability-gated long-form playback complete)
 
 ## Resume protocol
 
 Read this file before continuing the Great Smoky Mountains Original. Do not repeat the competitor, Moab pipeline, entitlement, or cleanup audits unless new evidence invalidates them.
 
-1. Run `git status --short --branch` in `/home/sean/.openclaw/workspace/trailhead`.
-2. Confirm HEAD and protected-file hashes below before editing.
+1. Run `git status --short --branch` in `/home/sean/.openclaw/worktrees/trailhead-smokies-s2`.
+2. Separately verify the protected dirty files and hashes in `/home/sean/.openclaw/workspace/trailhead`.
 3. Preserve `.cursor/`, `dashboard/explore_serving_index_v2.json`, and `docs/app-store-copy.md`; do not stage them.
-4. Continue from **Next exact action**. Do not buy, record, extract, transcribe, or imitate a competitor audio tour.
+4. Continue from the latest **Next exact action** at the end of this document. Do not buy, record, extract, transcribe, or imitate a competitor audio tour.
 
 ## Baseline and cleanup evidence
 
@@ -1150,3 +1150,79 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 - Noah Ogle research, S3G delivery classification/timing analysis, S0-S3F provenance/cultural/editorial work, or FIFO migration.
 - Broad Map, Explore, Layers, Memory, NPS, Android Auto, Offline, Originals lifecycle, or store work.
 - Paid narration, media ingestion, deployment, OTA, native builds, or public release.
+
+## S3H capability-gated long-form playback completion
+
+- Completed: 2026-08-08.
+- Branch: `feat/smokies-original-s2`.
+- Worktree: `/home/sean/.openclaw/worktrees/trailhead-smokies-s2`.
+- Original S3H baseline: `8f93a549ff244d317039bc533b9db39b75112c0d`.
+- S3H baseline checkpoint: `fb268d82bdece96150361acd8fba87a3f5f8faef`.
+- Accepted implementation commit: `28c3f5aec9eeead2d9c74e5a254dec389bbd96c0`.
+- Lineage: `02788a90` -> `7c2d31b7` -> `8ee4d8be` -> `8f93a549` -> `fb268d82` -> `28c3f5ae`.
+
+### Protected state
+
+- Main-checkout Explore serving index: `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
+- Main-checkout App Store copy: `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+- `.cursor/` remains untracked and protected.
+- None of the protected files were staged or modified in the S3H worktree.
+
+### Completed contract and behavior
+
+- Added capability-gated `OriginalManifestV3` without changing published Moab V1 or strict V2 semantics.
+- Contract: `originals_long_form_delivery_v1`.
+- Required capabilities: `originals_capacity_scheduler_v1`, `originals_manifest_v3`, and `originals_selectable_v1`.
+- Clients missing those capabilities cannot discover or parse V3. Direct V3 access fails closed before entitlement mutation, credit use, download, or playback.
+- Hard autoplay cues remain in the V1-shaped runtime manifest. Capacity, parked, and completion stories stay in the selectable sidecar and never enter the hard FIFO or hard-route progress.
+- Hard cues preempt optional stories. Capacity admission requires immutable audio duration, fresh adequate GPS, two-fix dwell, exact scene bounds, and the unchanged 30-second reserve.
+- Parked stories require explicit user confirmation. No speed-derived parked state or parking promise was added.
+- Optional playback, Ogle's ordered two-part parked experience, replay, exact Now Playing identity, durable restore, completion fallback, and truthful player/detail actions are implemented and covered.
+- End Tour disables the independent headless runtime before asynchronous audio work and cannot restart through delayed foreground or headless work.
+- Catalog, detail, owned, restore, acquisition, readiness, asset, and admin-preview paths enforce the capability gate before V3 parsing.
+- V3 publication validation requires exact route evidence, narration and audio hashes, real probed durations, generator provenance, commercial-license evidence, artwork, citations, current dependency hashes, and exact per-selection trusted evidence.
+- Only `great_smoky_mountains_ridges_rivers_living_memory / roaring_fork / one_way` is registered. Every other chapter or variant fails closed until it receives its own checked delivery evidence.
+
+### Verification and immutable evidence
+
+- Roaring Fork preflight SHA-256: `4ea71987b8a52dfd9acf2b97b3ec8eb00c6e565d4697560df89c63478c8b1d42`.
+- Cross-language delivery fixture SHA-256: `58016df4ffbd67fc9ff4ef2b9c2ad90dc61a79b981f59b79d91bf1814ecbac41`.
+- Delivery-semantics SHA-256: `dca96c14e161c9fe35c2398f27be8d64fd8e35b02716b338dd5c3fbfde35da59`.
+- Delivery-readiness artifact SHA-256: `7801841f488b387611254c24830716ceb72166986f73992fe6395137c6526a53`.
+- Readiness status: `ready_for_real_audio_validation`; `authoring_estimates_accepted=false`; `real_audio_required=true`.
+- Gates remain 240 seconds route-end tail, 180 seconds trigger-to-play latency, a 30-second capacity reserve, and 15/36/65/75 mph fixtures.
+- Root verification: 198 focused backend tests plus 10 subtests passed. Existing FastAPI deprecation warnings were the only warnings.
+- Mobile verification: Manifest V3, long-form scheduler, headless controller, End Tour race, and Owned Originals UI tests passed; whole-mobile TypeScript passed.
+- Python compilation, deterministic readiness `--check`, both affected Originals Studio JavaScript tests, and `git diff --check` passed.
+- Independent final read-only audit: safe to commit, with no remaining P0/P1.
+- No build IDs or OTA update IDs exist for this packet.
+- No native change, deployment, OTA, public-stage change, media ingestion, narration generation, or Cartesia credit spend occurred.
+
+### Remaining intentional blockers
+
+- Smokies V3 production audio has not been generated, so trusted real-audio publication reports do not exist yet.
+- Mountain Crossing, Cades Cove, and Foothills Parkway lack registered long-form delivery evidence.
+- Public release remains blocked pending an immutable EBCI CIRB scope determination or approval for the exact factual scope.
+- Before any OTA, this work must be merged or cherry-picked onto the current 1.0.11 release line and pass native fingerprint and runtime-compatibility checks. This isolated worktree's release configuration is stale and must not publish directly.
+- No public catalog or runtime activation occurred.
+
+### Next exact action after S3H
+
+1. Confirm the Cartesia account's training opt-out, current balance, overage rate, commercial terms, and the independent 225,000-credit / $15-before-tax renderer caps.
+2. Lock three reviewed audition scripts and their permitted pronunciations.
+3. Generate only three representative auditions: scenic/natural history, human history, and a permitted pronunciation-heavy sample.
+4. Produce one archival WAV per audition and local 64/96/128 kbps encodes from the same master.
+5. Run real-duration validation and Android/iPhone listening review before any batch narration.
+6. Keep culturally gated pronunciation or interpretation out of TTS until immutable review evidence exists.
+
+### Do not repeat after S3H
+
+- S0-S3G provenance, entitlement, route construction, source dossiers, cultural-policy research, completed scripts, Noah Ogle location work, or the 13-entry Roaring Fork delivery classification.
+- The 15/36/65/75 authoring-estimate analysis while its checked sources and geometry remain unchanged.
+- Broad Map, Explore, Layers, Memory, NPS, Android Auto, Offline, Originals lifecycle, or store work.
+- Moab provenance export or temporary Railway-key setup without evidence that immutable publication changed.
+- Paid batch narration, deployment, OTA, native builds, or public release before the explicit remaining gates.
+
+## Task-owned background processes at S3H completion
+
+- None. No Metro, Gradle, Maestro, pytest, Cartesia renderer, EAS, Railway, or cleanup task remains running.

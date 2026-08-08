@@ -501,3 +501,51 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 - S0/S1/S2 provenance, routes, source dossiers, media-rights research, or Moab inventory.
 - Envato downloads, EBCI outreach, Cherokee interpretation/pronunciation, or paid narration.
 - Broad app, Map, Explore, Layers, Originals lifecycle, Android Auto, memory, or store-screenshot tests.
+
+## S3A Foothills editorial and Studio V2 completion
+
+- Completed: 2026-08-07.
+- Baseline checkpoint commit: `f9b3a2e3701bb404e6f047a74f320957ad159277`.
+- Accepted implementation commit: `f640c226a2de25ab6af2de25e292c3009c3e76a3`.
+- Added the first source-locked editorial artifact at `originals/smokies/editorial_scripts_v1.json`:
+  - Artifact SHA-256: `cef28e80ac91018f18cccdbdab53321db81e454f2a6f2b1dee305068f877e33b`.
+  - Six Foothills Parkway feature stories and seven short road cues.
+  - 3,257 total words and 1,346 seconds estimated at 145 words per minute (about 22 minutes 26 seconds).
+  - Feature stories range from 453 to 490 words and approximately 3:07 to 3:23 each.
+  - Short cues range from 59 to 64 words and approximately 24 to 26 seconds each.
+- Every entry is bound to its exact dossier ID, chapter, kind, sequence, claim IDs, and reviewed NPS source IDs. The loader derives immutable normalized transcript hashes, word counts, duration estimates, source records, and the artifact hash.
+- Validation fails closed for dossier hash drift, mismatched claims/sources, blocked cultural entries, duplicate IDs, undersized or oversized scripts, provider labels, external-app instructions, generic safety filler, and unsupported certainty.
+- The existing Originals Studio now includes an administrator-only source-locked editorial review panel with:
+  - Long-story and short-cue separation.
+  - Word and estimated-duration labels.
+  - Visible-scene and editorial-purpose context.
+  - Full transcript reading.
+  - Reviewed source links and short hash evidence.
+- The panel reads through `GET /api/admin/originals-editorial/smokies`, protected by the existing administrator requirement. It does not create a second ownership, manifest, playback, or narration system.
+- Source audit corrections made before acceptance:
+  - Removed facts that were supported only by an unregistered supplemental NPS page.
+  - Kept current closures and route availability outside immutable narration.
+  - Replaced a seasonal forest inference with facts from the reviewed vegetation source.
+  - Kept air-quality interpretation within the reviewed NPS air-quality source.
+- Verification:
+  - 104 focused backend tests passed across editorial, Studio, source dossiers, cultural review, Manifest V2, route evidence, and operational readiness.
+  - Both Studio JavaScript contract tests passed and the complete inline admin JavaScript parsed successfully.
+  - Python compilation, source-copy scan, deterministic loader/hash checks, protected-file hashes, and `git diff --check` passed.
+- Protected main-worktree hashes remain unchanged:
+  - Explore serving index: `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
+  - App Store copy: `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+- No Cartesia request, credit spend, audio, media ingestion, EBCI outreach, deployment, OTA, native build, or public-stage change occurred.
+- Task-owned background processes at completion: none.
+
+### Next exact action after S3A
+
+1. Review the six Foothills feature scripts and seven cues in the Originals Studio.
+2. Apply one bounded editorial revision pass if requested.
+3. After acceptance, draft the non-gated Mountain Crossing entries while keeping `mc_story_15` and `mc_cue_07` blocked.
+4. Do not generate a Cartesia audition until the script batch is accepted and the provider terms, training opt-out, account balance, overage price, and hard caps are confirmed.
+
+### Do not repeat after S3A
+
+- Foothills NPS source research, S0/S1/S2 work, media-rights inventory, or route reconstruction unless a source or script claim changes.
+- Broad app crawls or completed Originals lifecycle testing.
+- EBCI outreach, Cherokee interpretation/pronunciation, media ingestion, or paid narration before their explicit gates.

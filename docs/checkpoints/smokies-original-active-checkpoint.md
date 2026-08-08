@@ -469,3 +469,35 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 - EBCI page or contact re-verification unless a letter bounces or the EBCI site structure changes.
 - S2/S2B/S2C dossier, route evidence, current-road reader, and vehicle-binding work.
 - Any Cherokee interpretation, pronunciation, narration, or outreach send before the corresponding gate approval.
+
+## S3A Foothills editorial and Studio V2 baseline
+
+- Started: 2026-08-07.
+- Branch: `feat/smokies-original-s2`.
+- Baseline HEAD: `e7f70a4c8fd5de8f47cd8e13aae2925ed4e46887`.
+- Worktree: `/home/sean/.openclaw/worktrees/trailhead-smokies-s2`; clean at start.
+- Protected main-worktree hashes remain unchanged:
+  - Explore serving index: `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
+  - App Store copy: `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+- Other-agent reconciliation is complete: S2C route/readiness hardening and S2D media-rights/EBCI outreach preparation are accepted at `e7f70a4c`. They will not be repeated.
+- Scope is the first bounded S3 editorial packet:
+  - Add proper Manifest V2 story/chapter editing to the existing Originals Studio instead of creating another authoring system.
+  - Draft and source-lock the six non-gated Foothills Parkway feature stories and seven short cues.
+  - Feature stories target approximately 3–5 minutes each and must read as complete scene-led narratives, not one-minute fact summaries.
+  - Keep operational facts outside immutable narration, and keep all EBCI-gated entries blocked.
+  - Add deterministic word-count, claim/source, cultural-gate, copy-quality, and Studio rendering checks.
+- Current official NPS pages for Foothills Parkway, the Missing Link, geology, vegetation, and air quality were rechecked before drafting. No broad 28-source refresh was performed.
+- No Cartesia request, credit spend, narration audio, media ingestion, external outreach, deployment, OTA, native build, or public-stage change is included.
+- Task-owned background processes at start: none.
+
+### Next exact action after this baseline
+
+1. Implement the Studio V2 story/chapter presentation and source-locked editorial artifact.
+2. Draft the Foothills Parkway feature stories and cues, then run focused editorial and Studio tests.
+3. Stop for script review before any Cartesia audition or the next chapter batch.
+
+### Do not repeat during S3A
+
+- S0/S1/S2 provenance, routes, source dossiers, media-rights research, or Moab inventory.
+- Envato downloads, EBCI outreach, Cherokee interpretation/pronunciation, or paid narration.
+- Broad app, Map, Explore, Layers, Originals lifecycle, Android Auto, memory, or store-screenshot tests.

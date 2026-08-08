@@ -815,3 +815,35 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 - S0/S1/S2 provenance, route construction, media-rights inventory, Moab validation, or completed app lifecycle testing.
 - Broad app crawls, paid narration, deployment, public release, or store work.
 - Cultural interpretation, pronunciation, or blocked scripts before compensated EBCI participation and approval.
+
+## S3E directional adaptation and trigger-spacing baseline
+
+- Started: 2026-08-07.
+- Branch: `feat/smokies-original-s2`.
+- Baseline HEAD: `5e7ece92ef4d3393af5268b833dc364519bfeb89`.
+- Worktree: `/home/sean/.openclaw/worktrees/trailhead-smokies-s2`; clean at start.
+- Protected main-worktree state remains unchanged:
+  - Explore serving index: `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
+  - App Store copy: `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+  - `.cursor/` remains untracked and protected in the main worktree.
+- Scope is limited to direction-specific transition/cue adaptations for Mountain Crossing and Foothills Parkway plus route-progress trigger spacing and deterministic queue-drain evidence.
+- Mountain Crossing and Foothills Parkway remain the only bidirectional chapters. Little River/Cades Cove and Roaring Fork preserve their accepted one-way sequence and transcript library.
+- Geometric projection and trigger comparisons use the checked official route evidence in-process. No Mapbox request, route regeneration, temporary-use geometry persistence, or API credit spend is included.
+- Roaring Fork validation must cover clustered entrance, upper-corridor, Thousand Drips, and exit anchors at 15, 36, and 65 mph, including jitter, poor accuracy, rejoin, restart, and complete queue drainage.
+- This packet does not rewrite accepted first drafts, draft blocked cultural entries, create pronunciations, generate narration, spend Cartesia credits, ingest media, deploy, publish an OTA, change native code, or change a public stage.
+- Task-owned background processes at start: none.
+
+### Next exact action after this baseline
+
+1. Inventory every dossier entry marked for directional adaptation and the exact permanent route variants it binds to.
+2. Extend the existing source-locked editorial/runtime compilation contract rather than creating duplicate stories or another player.
+3. Add route-progress trigger-spacing and queue-drain fixtures for the clustered Roaring Fork anchors.
+4. Run focused editorial, route, trigger, Studio, privacy/copy, and deterministic-hash checks.
+5. Stop for review before any cultural drafting, narration audition, media ingestion, deployment, or public release.
+
+### Do not repeat during S3E
+
+- First-draft writing or broad source research for the four accepted chapters.
+- S0/S1/S2 provenance, entitlement, route construction, media-rights, Moab inventory, or app lifecycle work.
+- Broad Map, Explore, Layers, Memory, NPS, Android Auto, Offline, or store-screenshot tests.
+- Cartesia generation, EBCI interpretation/pronunciation, Envato work, deployment, OTA, or native builds.

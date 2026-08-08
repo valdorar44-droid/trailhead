@@ -1,10 +1,546 @@
 {
   "authoring_only": true,
+  "capacity_admission_input": [
+    {
+      "admission_rule": {
+        "duration_basis_required_for_publication": "immutable_audio_asset",
+        "finish_guard_before_next_hard_window_s": 30,
+        "may_queue_behind_capacity": false,
+        "may_wait_for_active_hard_auto": true,
+        "start_must_remain_inside_own_window": true
+      },
+      "audio_duration_s": null,
+      "authoring_estimated_duration_s": 191.6,
+      "fallback_mode": "completion_deeper",
+      "id": "rf_story_01",
+      "next_hard_auto": {
+        "id": "rf_cue_04",
+        "window_start_m": 2407.5
+      },
+      "projected_progress_m": 123.0,
+      "stable_order": 4,
+      "trigger_window": {
+        "end_m": 303.0,
+        "start_m": 0.0
+      }
+    },
+    {
+      "admission_rule": {
+        "duration_basis_required_for_publication": "immutable_audio_asset",
+        "finish_guard_before_next_hard_window_s": 30,
+        "may_queue_behind_capacity": false,
+        "may_wait_for_active_hard_auto": true,
+        "start_must_remain_inside_own_window": true
+      },
+      "audio_duration_s": null,
+      "authoring_estimated_duration_s": 197.8,
+      "fallback_mode": "completion_deeper",
+      "id": "rf_story_02",
+      "next_hard_auto": {
+        "id": "rf_cue_05",
+        "window_start_m": 7393.0
+      },
+      "projected_progress_m": 3947.3,
+      "stable_order": 7,
+      "trigger_window": {
+        "end_m": 4127.3,
+        "start_m": 3767.3
+      }
+    },
+    {
+      "admission_rule": {
+        "duration_basis_required_for_publication": "immutable_audio_asset",
+        "finish_guard_before_next_hard_window_s": 30,
+        "may_queue_behind_capacity": false,
+        "may_wait_for_active_hard_auto": true,
+        "start_must_remain_inside_own_window": true
+      },
+      "audio_duration_s": null,
+      "authoring_estimated_duration_s": 187.9,
+      "fallback_mode": "completion_deeper",
+      "id": "rf_story_04",
+      "next_hard_auto": {
+        "id": "rf_cue_05",
+        "window_start_m": 7393.0
+      },
+      "projected_progress_m": 4697.3,
+      "stable_order": 8,
+      "trigger_window": {
+        "end_m": 4877.3,
+        "start_m": 4517.3
+      }
+    },
+    {
+      "admission_rule": {
+        "duration_basis_required_for_publication": "immutable_audio_asset",
+        "finish_guard_before_next_hard_window_s": 30,
+        "may_queue_behind_capacity": false,
+        "may_wait_for_active_hard_auto": true,
+        "start_must_remain_inside_own_window": true
+      },
+      "audio_duration_s": null,
+      "authoring_estimated_duration_s": 197.8,
+      "fallback_mode": "completion_deeper",
+      "id": "rf_story_05",
+      "next_hard_auto": {
+        "id": "rf_cue_05",
+        "window_start_m": 7393.0
+      },
+      "projected_progress_m": 5612.6,
+      "stable_order": 9,
+      "trigger_window": {
+        "end_m": 5792.6,
+        "start_m": 5432.6
+      }
+    }
+  ],
   "chapter_id": "roaring_fork",
+  "delivery_capacity_metrics_v1": {
+    "duration_basis": "editorial_word_count_at_declared_narration_rate",
+    "narration_rate_wpm": 145.0,
+    "publication_gate_status": "blocked_pending_consumer_runtime_real_audio_and_validator_report",
+    "real_audio_durations_used": false,
+    "scenarios": [
+      {
+        "admitted_capacity_ids": [
+          "rf_story_01",
+          "rf_story_02",
+          "rf_story_05"
+        ],
+        "capacity_hard_auto_guard_s": 30,
+        "estimated_admitted_audio_s": 704.4,
+        "estimated_audio_tail_after_route_end_s": 0.0,
+        "estimated_context_limits_exceeded": false,
+        "estimated_maximum_pending_depth": 1,
+        "estimated_maximum_trigger_to_play_latency_s": 14.8,
+        "metric_status": "authoring_estimate_only_not_a_publication_gate",
+        "rejected_capacity": [
+          {
+            "id": "rf_story_04",
+            "reason": "capacity_story_active"
+          }
+        ],
+        "route_end_audio_backlog_limit_s": 240,
+        "route_travel_s": 1276.8,
+        "scheduled": [
+          {
+            "estimated_arrival_s": 7.9,
+            "estimated_finish_s": 33.1,
+            "estimated_start_s": 7.9,
+            "id": "rf_cue_01",
+            "mode": "hard_auto"
+          },
+          {
+            "estimated_arrival_s": 18.3,
+            "estimated_finish_s": 224.7,
+            "estimated_start_s": 33.1,
+            "id": "rf_story_01",
+            "mode": "capacity_deeper"
+          },
+          {
+            "estimated_arrival_s": 385.9,
+            "estimated_finish_s": 409.1,
+            "estimated_start_s": 385.9,
+            "id": "rf_cue_04",
+            "mode": "hard_auto"
+          },
+          {
+            "estimated_arrival_s": 521.5,
+            "estimated_finish_s": 544.3,
+            "estimated_start_s": 521.5,
+            "id": "rf_cue_03",
+            "mode": "hard_auto"
+          },
+          {
+            "estimated_arrival_s": 588.7,
+            "estimated_finish_s": 786.5,
+            "estimated_start_s": 588.7,
+            "id": "rf_story_02",
+            "mode": "capacity_deeper"
+          },
+          {
+            "estimated_arrival_s": 837.0,
+            "estimated_finish_s": 1034.8,
+            "estimated_start_s": 837.0,
+            "id": "rf_story_05",
+            "mode": "capacity_deeper"
+          },
+          {
+            "estimated_arrival_s": 1129.4,
+            "estimated_finish_s": 1152.2,
+            "estimated_start_s": 1129.4,
+            "id": "rf_cue_05",
+            "mode": "hard_auto"
+          },
+          {
+            "estimated_arrival_s": 1235.5,
+            "estimated_finish_s": 1258.7,
+            "estimated_start_s": 1235.5,
+            "id": "rf_cue_06",
+            "mode": "hard_auto"
+          }
+        ],
+        "speed_mph": 15,
+        "trigger_to_play_latency_limit_s": 180
+      },
+      {
+        "admitted_capacity_ids": [],
+        "capacity_hard_auto_guard_s": 30,
+        "estimated_admitted_audio_s": 117.2,
+        "estimated_audio_tail_after_route_end_s": 6.0,
+        "estimated_context_limits_exceeded": false,
+        "estimated_maximum_pending_depth": 0,
+        "estimated_maximum_trigger_to_play_latency_s": 0.0,
+        "metric_status": "authoring_estimate_only_not_a_publication_gate",
+        "rejected_capacity": [
+          {
+            "id": "rf_story_01",
+            "reason": "own_context_window_expired"
+          },
+          {
+            "id": "rf_story_02",
+            "reason": "next_hard_auto_guard_not_met"
+          },
+          {
+            "id": "rf_story_04",
+            "reason": "next_hard_auto_guard_not_met"
+          },
+          {
+            "id": "rf_story_05",
+            "reason": "next_hard_auto_guard_not_met"
+          }
+        ],
+        "route_end_audio_backlog_limit_s": 240,
+        "route_travel_s": 532.0,
+        "scheduled": [
+          {
+            "estimated_arrival_s": 3.3,
+            "estimated_finish_s": 28.5,
+            "estimated_start_s": 3.3,
+            "id": "rf_cue_01",
+            "mode": "hard_auto"
+          },
+          {
+            "estimated_arrival_s": 160.8,
+            "estimated_finish_s": 184.0,
+            "estimated_start_s": 160.8,
+            "id": "rf_cue_04",
+            "mode": "hard_auto"
+          },
+          {
+            "estimated_arrival_s": 217.3,
+            "estimated_finish_s": 240.1,
+            "estimated_start_s": 217.3,
+            "id": "rf_cue_03",
+            "mode": "hard_auto"
+          },
+          {
+            "estimated_arrival_s": 470.6,
+            "estimated_finish_s": 493.4,
+            "estimated_start_s": 470.6,
+            "id": "rf_cue_05",
+            "mode": "hard_auto"
+          },
+          {
+            "estimated_arrival_s": 514.8,
+            "estimated_finish_s": 538.0,
+            "estimated_start_s": 514.8,
+            "id": "rf_cue_06",
+            "mode": "hard_auto"
+          }
+        ],
+        "speed_mph": 36,
+        "trigger_to_play_latency_limit_s": 180
+      },
+      {
+        "admitted_capacity_ids": [],
+        "capacity_hard_auto_guard_s": 30,
+        "estimated_admitted_audio_s": 117.2,
+        "estimated_audio_tail_after_route_end_s": 13.7,
+        "estimated_context_limits_exceeded": false,
+        "estimated_maximum_pending_depth": 0,
+        "estimated_maximum_trigger_to_play_latency_s": 0.0,
+        "metric_status": "authoring_estimate_only_not_a_publication_gate",
+        "rejected_capacity": [
+          {
+            "id": "rf_story_01",
+            "reason": "own_context_window_expired"
+          },
+          {
+            "id": "rf_story_02",
+            "reason": "own_context_window_expired"
+          },
+          {
+            "id": "rf_story_04",
+            "reason": "next_hard_auto_guard_not_met"
+          },
+          {
+            "id": "rf_story_05",
+            "reason": "next_hard_auto_guard_not_met"
+          }
+        ],
+        "route_end_audio_backlog_limit_s": 240,
+        "route_travel_s": 294.6,
+        "scheduled": [
+          {
+            "estimated_arrival_s": 1.8,
+            "estimated_finish_s": 27.0,
+            "estimated_start_s": 1.8,
+            "id": "rf_cue_01",
+            "mode": "hard_auto"
+          },
+          {
+            "estimated_arrival_s": 89.0,
+            "estimated_finish_s": 112.2,
+            "estimated_start_s": 89.0,
+            "id": "rf_cue_04",
+            "mode": "hard_auto"
+          },
+          {
+            "estimated_arrival_s": 120.4,
+            "estimated_finish_s": 143.2,
+            "estimated_start_s": 120.4,
+            "id": "rf_cue_03",
+            "mode": "hard_auto"
+          },
+          {
+            "estimated_arrival_s": 260.6,
+            "estimated_finish_s": 283.4,
+            "estimated_start_s": 260.6,
+            "id": "rf_cue_05",
+            "mode": "hard_auto"
+          },
+          {
+            "estimated_arrival_s": 285.1,
+            "estimated_finish_s": 308.3,
+            "estimated_start_s": 285.1,
+            "id": "rf_cue_06",
+            "mode": "hard_auto"
+          }
+        ],
+        "speed_mph": 65,
+        "trigger_to_play_latency_limit_s": 180
+      },
+      {
+        "admitted_capacity_ids": [],
+        "capacity_hard_auto_guard_s": 30,
+        "estimated_admitted_audio_s": 117.2,
+        "estimated_audio_tail_after_route_end_s": 16.5,
+        "estimated_context_limits_exceeded": false,
+        "estimated_maximum_pending_depth": 1,
+        "estimated_maximum_trigger_to_play_latency_s": 1.6,
+        "metric_status": "authoring_estimate_only_not_a_publication_gate",
+        "rejected_capacity": [
+          {
+            "id": "rf_story_01",
+            "reason": "own_context_window_expired"
+          },
+          {
+            "id": "rf_story_02",
+            "reason": "own_context_window_expired"
+          },
+          {
+            "id": "rf_story_04",
+            "reason": "next_hard_auto_guard_not_met"
+          },
+          {
+            "id": "rf_story_05",
+            "reason": "next_hard_auto_guard_not_met"
+          }
+        ],
+        "route_end_audio_backlog_limit_s": 240,
+        "route_travel_s": 255.4,
+        "scheduled": [
+          {
+            "estimated_arrival_s": 1.6,
+            "estimated_finish_s": 26.8,
+            "estimated_start_s": 1.6,
+            "id": "rf_cue_01",
+            "mode": "hard_auto"
+          },
+          {
+            "estimated_arrival_s": 77.2,
+            "estimated_finish_s": 100.4,
+            "estimated_start_s": 77.2,
+            "id": "rf_cue_04",
+            "mode": "hard_auto"
+          },
+          {
+            "estimated_arrival_s": 104.3,
+            "estimated_finish_s": 127.1,
+            "estimated_start_s": 104.3,
+            "id": "rf_cue_03",
+            "mode": "hard_auto"
+          },
+          {
+            "estimated_arrival_s": 225.9,
+            "estimated_finish_s": 248.7,
+            "estimated_start_s": 225.9,
+            "id": "rf_cue_05",
+            "mode": "hard_auto"
+          },
+          {
+            "estimated_arrival_s": 247.1,
+            "estimated_finish_s": 271.9,
+            "estimated_start_s": 248.7,
+            "id": "rf_cue_06",
+            "mode": "hard_auto"
+          }
+        ],
+        "speed_mph": 75,
+        "trigger_to_play_latency_limit_s": 180
+      }
+    ]
+  },
+  "delivery_summary": {
+    "accounted_exactly_once": true,
+    "counts_by_mode": {
+      "capacity_deeper": 4,
+      "completion_deeper": 1,
+      "hard_auto": 5,
+      "stopped_deeper": 3
+    },
+    "entry_count": 13,
+    "entry_ids_by_mode": {
+      "capacity_deeper": [
+        "rf_story_01",
+        "rf_story_02",
+        "rf_story_04",
+        "rf_story_05"
+      ],
+      "completion_deeper": [
+        "rf_story_07"
+      ],
+      "hard_auto": [
+        "rf_cue_01",
+        "rf_cue_04",
+        "rf_cue_03",
+        "rf_cue_05",
+        "rf_cue_06"
+      ],
+      "stopped_deeper": [
+        "rf_cue_02",
+        "rf_story_03",
+        "rf_story_06"
+      ]
+    },
+    "ogle_prelude_entry_ids": [
+      "rf_cue_02",
+      "rf_story_03"
+    ],
+    "ogle_prelude_user_facing_entry_count": 1
+  },
   "entries": [
     {
       "anchor": {
+        "authoring_offset_m": null,
+        "binding_status": "off_route_before_start",
+        "checked_progress_m": null,
+        "id": "noah_bud_ogle_cabin",
+        "lateral_distance_to_route_m": 889.5,
+        "maximum_reviewed_offset_m": null,
+        "nearest_route_coordinate": {
+          "lat": 35.678543,
+          "lng": -83.481398
+        },
+        "nearest_route_progress_m": 0.0,
+        "official_coordinate": {
+          "lat": 35.682841,
+          "lng": -83.489714
+        },
+        "official_source_id": "nps_grsm_noah_bud_ogle_location_2026",
+        "official_source_record_sha256": "53c8a797b69aacce153f160bbc4c6fa2c68b3795b924a51743db072fb45f7748"
+      },
+      "audio_duration_s": null,
+      "audio_duration_status": "awaiting_immutable_rendered_asset",
+      "authoring_estimated_duration_s": 24.8,
+      "delivery": {
+        "availability": "before_route_user_confirmed_parked",
+        "experience_group_id": "ogle_prelude",
+        "mode": "stopped_deeper",
+        "motion_inference_allowed": false,
+        "parking_availability": "not_checked",
+        "parking_promise": false,
+        "requires_user_confirmed_parked": true
+      },
+      "editorial_sequence": 2,
+      "id": "rf_cue_02",
+      "kind": "cue",
+      "opening_audit": {
+        "anchor_evidence": "official_nps_off_route_coordinate",
+        "binding": "ogle_farmstead",
+        "scope": "exact_scene"
+      },
+      "placement_class": "off_route_stopped_vehicle_prelude",
+      "placement_status": "resolved_off_route_stopped_vehicle",
+      "projected_coordinate": {
+        "lat": 35.682841,
+        "lng": -83.489714
+      },
+      "projected_progress_m": null,
+      "route_context": "roaring_fork_entrance",
+      "stable_order": 1,
+      "title": "Ogle farmstead",
+      "transcript_word_count": 60,
+      "trigger": null
+    },
+    {
+      "anchor": {
+        "authoring_offset_m": null,
+        "binding_status": "off_route_before_start",
+        "checked_progress_m": null,
+        "id": "noah_bud_ogle_cabin",
+        "lateral_distance_to_route_m": 889.5,
+        "maximum_reviewed_offset_m": null,
+        "nearest_route_coordinate": {
+          "lat": 35.678543,
+          "lng": -83.481398
+        },
+        "nearest_route_progress_m": 0.0,
+        "official_coordinate": {
+          "lat": 35.682841,
+          "lng": -83.489714
+        },
+        "official_source_id": "nps_grsm_noah_bud_ogle_location_2026",
+        "official_source_record_sha256": "53c8a797b69aacce153f160bbc4c6fa2c68b3795b924a51743db072fb45f7748"
+      },
+      "audio_duration_s": null,
+      "audio_duration_status": "awaiting_immutable_rendered_asset",
+      "authoring_estimated_duration_s": 190.8,
+      "delivery": {
+        "availability": "before_route_user_confirmed_parked",
+        "experience_group_id": "ogle_prelude",
+        "mode": "stopped_deeper",
+        "motion_inference_allowed": false,
+        "parking_availability": "not_checked",
+        "parking_promise": false,
+        "requires_user_confirmed_parked": true
+      },
+      "editorial_sequence": 2,
+      "id": "rf_story_03",
+      "kind": "story",
+      "opening_audit": {
+        "anchor_evidence": "official_nps_off_route_coordinate",
+        "binding": "ogle_farmstead",
+        "scope": "exact_scene"
+      },
+      "placement_class": "off_route_stopped_vehicle_prelude",
+      "placement_status": "resolved_off_route_stopped_vehicle",
+      "projected_coordinate": {
+        "lat": 35.682841,
+        "lng": -83.489714
+      },
+      "projected_progress_m": null,
+      "route_context": "roaring_fork_entrance",
+      "stable_order": 2,
+      "title": "The Ogle farm at the edge of town",
+      "transcript_word_count": 461,
+      "trigger": null
+    },
+    {
+      "anchor": {
         "authoring_offset_m": 40.0,
+        "binding_status": "checked_on_route",
         "checked_progress_m": 13.0,
         "id": "roaring_fork_entrance",
         "maximum_reviewed_offset_m": 150.0
@@ -12,6 +548,12 @@
       "audio_duration_s": null,
       "audio_duration_status": "awaiting_immutable_rendered_asset",
       "authoring_estimated_duration_s": 25.2,
+      "delivery": {
+        "mode": "hard_auto",
+        "optional_content_may_delay": false,
+        "priority": "must_play",
+        "queue_policy": "durable_fifo_among_hard_auto"
+      },
       "editorial_sequence": 1,
       "id": "rf_cue_01",
       "kind": "cue",
@@ -28,7 +570,7 @@
       },
       "projected_progress_m": 53.0,
       "route_context": "roaring_fork_entrance",
-      "stable_order": 1,
+      "stable_order": 3,
       "title": "One way from here",
       "transcript_word_count": 61,
       "trigger": {
@@ -44,6 +586,7 @@
     {
       "anchor": {
         "authoring_offset_m": 110.0,
+        "binding_status": "checked_on_route",
         "checked_progress_m": 13.0,
         "id": "roaring_fork_entrance",
         "maximum_reviewed_offset_m": 200.0
@@ -51,6 +594,14 @@
       "audio_duration_s": null,
       "audio_duration_status": "awaiting_immutable_rendered_asset",
       "authoring_estimated_duration_s": 191.6,
+      "delivery": {
+        "admission_policy_id": "capacity_before_next_hard_v1",
+        "fallback_mode": "completion_deeper",
+        "guard_before_next_hard_auto_window_s": 30,
+        "may_queue_behind_capacity": false,
+        "may_wait_for_active_hard_auto": true,
+        "mode": "capacity_deeper"
+      },
       "editorial_sequence": 1,
       "id": "rf_story_01",
       "kind": "story",
@@ -67,7 +618,7 @@
       },
       "projected_progress_m": 123.0,
       "route_context": "roaring_fork_entrance",
-      "stable_order": 2,
+      "stable_order": 4,
       "title": "A road that asks you to slow down",
       "transcript_word_count": 463,
       "trigger": {
@@ -82,85 +633,8 @@
     },
     {
       "anchor": {
-        "authoring_offset_m": 190.0,
-        "checked_progress_m": 13.0,
-        "id": "roaring_fork_entrance",
-        "maximum_reviewed_offset_m": 250.0
-      },
-      "audio_duration_s": null,
-      "audio_duration_status": "awaiting_immutable_rendered_asset",
-      "authoring_estimated_duration_s": 24.8,
-      "editorial_sequence": 2,
-      "id": "rf_cue_02",
-      "kind": "cue",
-      "opening_audit": {
-        "anchor_evidence": "proxy_route_context_only",
-        "binding": "ogle_farmstead",
-        "scope": "exact_scene"
-      },
-      "placement_class": "exact_scene_proxy_blocked",
-      "placement_status": "blocked_missing_exact_landmark",
-      "projected_coordinate": {
-        "lat": 35.6777566,
-        "lng": -83.4794212
-      },
-      "projected_progress_m": 203.0,
-      "route_context": "roaring_fork_entrance",
-      "stable_order": 3,
-      "title": "Ogle farmstead",
-      "transcript_word_count": 60,
-      "trigger": {
-        "approach_bearing_deg": 128.5,
-        "bearing_tolerance_deg": 70.0,
-        "enter_radius_m": 160.0,
-        "exit_radius_m": 260.0,
-        "lead_time_s": 0,
-        "route_progress_end_m": 383.0,
-        "route_progress_start_m": 23.0
-      }
-    },
-    {
-      "anchor": {
-        "authoring_offset_m": 270.0,
-        "checked_progress_m": 13.0,
-        "id": "roaring_fork_entrance",
-        "maximum_reviewed_offset_m": 300.0
-      },
-      "audio_duration_s": null,
-      "audio_duration_status": "awaiting_immutable_rendered_asset",
-      "authoring_estimated_duration_s": 190.8,
-      "editorial_sequence": 2,
-      "id": "rf_story_03",
-      "kind": "story",
-      "opening_audit": {
-        "anchor_evidence": "proxy_route_context_only",
-        "binding": "ogle_farmstead",
-        "scope": "exact_scene"
-      },
-      "placement_class": "exact_scene_proxy_blocked",
-      "placement_status": "blocked_missing_exact_landmark",
-      "projected_coordinate": {
-        "lat": 35.6774298,
-        "lng": -83.478667
-      },
-      "projected_progress_m": 283.0,
-      "route_context": "roaring_fork_entrance",
-      "stable_order": 4,
-      "title": "The Ogle farm at the edge of town",
-      "transcript_word_count": 461,
-      "trigger": {
-        "approach_bearing_deg": 85.3,
-        "bearing_tolerance_deg": 70.0,
-        "enter_radius_m": 160.0,
-        "exit_radius_m": 260.0,
-        "lead_time_s": 0,
-        "route_progress_end_m": 463.0,
-        "route_progress_start_m": 103.0
-      }
-    },
-    {
-      "anchor": {
         "authoring_offset_m": -100.0,
+        "binding_status": "checked_on_route",
         "checked_progress_m": 2687.5,
         "id": "grotto_falls_parking",
         "maximum_reviewed_offset_m": 200.0
@@ -168,6 +642,12 @@
       "audio_duration_s": null,
       "audio_duration_status": "awaiting_immutable_rendered_asset",
       "authoring_estimated_duration_s": 23.2,
+      "delivery": {
+        "mode": "hard_auto",
+        "optional_content_may_delay": false,
+        "priority": "must_play",
+        "queue_policy": "durable_fifo_among_hard_auto"
+      },
       "editorial_sequence": 3,
       "id": "rf_cue_04",
       "kind": "cue",
@@ -200,6 +680,7 @@
     {
       "anchor": {
         "authoring_offset_m": -800.0,
+        "binding_status": "checked_on_route",
         "checked_progress_m": 4297.3,
         "id": "roaring_fork_upper",
         "maximum_reviewed_offset_m": 1000.0
@@ -207,6 +688,12 @@
       "audio_duration_s": null,
       "audio_duration_status": "awaiting_immutable_rendered_asset",
       "authoring_estimated_duration_s": 22.8,
+      "delivery": {
+        "mode": "hard_auto",
+        "optional_content_may_delay": false,
+        "priority": "must_play",
+        "queue_policy": "durable_fifo_among_hard_auto"
+      },
       "editorial_sequence": 4,
       "id": "rf_cue_03",
       "kind": "cue",
@@ -239,6 +726,7 @@
     {
       "anchor": {
         "authoring_offset_m": -350.0,
+        "binding_status": "checked_on_route",
         "checked_progress_m": 4297.3,
         "id": "roaring_fork_upper",
         "maximum_reviewed_offset_m": 1000.0
@@ -246,6 +734,14 @@
       "audio_duration_s": null,
       "audio_duration_status": "awaiting_immutable_rendered_asset",
       "authoring_estimated_duration_s": 197.8,
+      "delivery": {
+        "admission_policy_id": "capacity_before_next_hard_v1",
+        "fallback_mode": "completion_deeper",
+        "guard_before_next_hard_auto_window_s": 30,
+        "may_queue_behind_capacity": false,
+        "may_wait_for_active_hard_auto": true,
+        "mode": "capacity_deeper"
+      },
       "editorial_sequence": 3,
       "id": "rf_story_02",
       "kind": "story",
@@ -278,6 +774,7 @@
     {
       "anchor": {
         "authoring_offset_m": 400.0,
+        "binding_status": "checked_on_route",
         "checked_progress_m": 4297.3,
         "id": "roaring_fork_upper",
         "maximum_reviewed_offset_m": 800.0
@@ -285,6 +782,14 @@
       "audio_duration_s": null,
       "audio_duration_status": "awaiting_immutable_rendered_asset",
       "authoring_estimated_duration_s": 187.9,
+      "delivery": {
+        "admission_policy_id": "capacity_before_next_hard_v1",
+        "fallback_mode": "completion_deeper",
+        "guard_before_next_hard_auto_window_s": 30,
+        "may_queue_behind_capacity": false,
+        "may_wait_for_active_hard_auto": true,
+        "mode": "capacity_deeper"
+      },
       "editorial_sequence": 4,
       "id": "rf_story_04",
       "kind": "story",
@@ -317,6 +822,7 @@
     {
       "anchor": {
         "authoring_offset_m": 250.0,
+        "binding_status": "checked_on_route",
         "checked_progress_m": 5362.6,
         "id": "roaring_fork_mid",
         "maximum_reviewed_offset_m": 800.0
@@ -324,6 +830,14 @@
       "audio_duration_s": null,
       "audio_duration_status": "awaiting_immutable_rendered_asset",
       "authoring_estimated_duration_s": 197.8,
+      "delivery": {
+        "admission_policy_id": "capacity_before_next_hard_v1",
+        "fallback_mode": "completion_deeper",
+        "guard_before_next_hard_auto_window_s": 30,
+        "may_queue_behind_capacity": false,
+        "may_wait_for_active_hard_auto": true,
+        "mode": "capacity_deeper"
+      },
       "editorial_sequence": 5,
       "id": "rf_story_05",
       "kind": "story",
@@ -356,6 +870,7 @@
     {
       "anchor": {
         "authoring_offset_m": -220.0,
+        "binding_status": "checked_on_route",
         "checked_progress_m": 7793.0,
         "id": "thousand_drips",
         "maximum_reviewed_offset_m": 250.0
@@ -363,6 +878,12 @@
       "audio_duration_s": null,
       "audio_duration_status": "awaiting_immutable_rendered_asset",
       "authoring_estimated_duration_s": 22.8,
+      "delivery": {
+        "mode": "hard_auto",
+        "optional_content_may_delay": false,
+        "priority": "must_play",
+        "queue_policy": "durable_fifo_among_hard_auto"
+      },
       "editorial_sequence": 5,
       "id": "rf_cue_05",
       "kind": "cue",
@@ -395,6 +916,7 @@
     {
       "anchor": {
         "authoring_offset_m": -60.0,
+        "binding_status": "checked_on_route",
         "checked_progress_m": 7793.0,
         "id": "thousand_drips",
         "maximum_reviewed_offset_m": 250.0
@@ -402,6 +924,15 @@
       "audio_duration_s": null,
       "audio_duration_status": "awaiting_immutable_rendered_asset",
       "authoring_estimated_duration_s": 187.0,
+      "delivery": {
+        "availability": "at_landmark_user_confirmed_parked",
+        "experience_group_id": "thousand_drips_deeper_story",
+        "mode": "stopped_deeper",
+        "motion_inference_allowed": false,
+        "parking_availability": "not_checked",
+        "parking_promise": false,
+        "requires_user_confirmed_parked": true
+      },
       "editorial_sequence": 6,
       "id": "rf_story_06",
       "kind": "story",
@@ -421,19 +952,12 @@
       "stable_order": 11,
       "title": "Water falling through resistant rock",
       "transcript_word_count": 452,
-      "trigger": {
-        "approach_bearing_deg": 304.8,
-        "bearing_tolerance_deg": 70.0,
-        "enter_radius_m": 160.0,
-        "exit_radius_m": 260.0,
-        "lead_time_s": 0,
-        "route_progress_end_m": 7913.0,
-        "route_progress_start_m": 7553.0
-      }
+      "trigger": null
     },
     {
       "anchor": {
         "authoring_offset_m": -300.0,
+        "binding_status": "checked_on_route",
         "checked_progress_m": 8204.6,
         "id": "roaring_fork_exit",
         "maximum_reviewed_offset_m": 400.0
@@ -441,6 +965,11 @@
       "audio_duration_s": null,
       "audio_duration_status": "awaiting_immutable_rendered_asset",
       "authoring_estimated_duration_s": 187.0,
+      "delivery": {
+        "availability": "after_route_completion",
+        "mode": "completion_deeper",
+        "requires_route_completion": true
+      },
       "editorial_sequence": 7,
       "id": "rf_story_07",
       "kind": "story",
@@ -460,19 +989,12 @@
       "stable_order": 12,
       "title": "Reading two landscapes at once",
       "transcript_word_count": 452,
-      "trigger": {
-        "approach_bearing_deg": 335.2,
-        "bearing_tolerance_deg": 70.0,
-        "enter_radius_m": 160.0,
-        "exit_radius_m": 260.0,
-        "lead_time_s": 0,
-        "route_progress_end_m": 8084.6,
-        "route_progress_start_m": 7724.6
-      }
+      "trigger": null
     },
     {
       "anchor": {
         "authoring_offset_m": 80.0,
+        "binding_status": "checked_on_route",
         "checked_progress_m": 8204.6,
         "id": "roaring_fork_exit",
         "maximum_reviewed_offset_m": 150.0
@@ -480,6 +1002,12 @@
       "audio_duration_s": null,
       "audio_duration_status": "awaiting_immutable_rendered_asset",
       "authoring_estimated_duration_s": 23.2,
+      "delivery": {
+        "mode": "hard_auto",
+        "optional_content_may_delay": false,
+        "priority": "must_play",
+        "queue_policy": "durable_fifo_among_hard_auto"
+      },
       "editorial_sequence": 6,
       "id": "rf_cue_06",
       "kind": "cue",
@@ -510,80 +1038,13 @@
       }
     }
   ],
-  "fifo_capacity_metrics_v3": {
-    "duration_basis": "editorial_word_count_at_declared_narration_rate",
-    "narration_rate_wpm": 145.0,
-    "publication_gate_status": "blocked_pending_real_audio_and_validator_report",
-    "real_audio_durations_used": false,
-    "scenarios": [
-      {
-        "estimated_audio_tail_after_route_end_s": 315.4,
-        "estimated_context_limits_exceeded": true,
-        "estimated_maximum_pending_depth": 2,
-        "estimated_maximum_trigger_to_play_latency_s": 333.5,
-        "estimated_total_audio_s": 1481.9,
-        "legacy_one_pending_slot_would_overflow": true,
-        "metric_status": "authoring_estimate_only_not_a_publication_gate",
-        "route_end_audio_backlog_limit_s": 240,
-        "route_travel_s": 1276.8,
-        "speed_mph": 15,
-        "trigger_to_play_latency_limit_s": 180
-      },
-      {
-        "estimated_audio_tail_after_route_end_s": 953.2,
-        "estimated_context_limits_exceeded": true,
-        "estimated_maximum_pending_depth": 6,
-        "estimated_maximum_trigger_to_play_latency_s": 947.2,
-        "estimated_total_audio_s": 1481.9,
-        "legacy_one_pending_slot_would_overflow": true,
-        "metric_status": "authoring_estimate_only_not_a_publication_gate",
-        "route_end_audio_backlog_limit_s": 240,
-        "route_travel_s": 532.0,
-        "speed_mph": 36,
-        "trigger_to_play_latency_limit_s": 180
-      },
-      {
-        "estimated_audio_tail_after_route_end_s": 1189.1,
-        "estimated_context_limits_exceeded": true,
-        "estimated_maximum_pending_depth": 9,
-        "estimated_maximum_trigger_to_play_latency_s": 1175.4,
-        "estimated_total_audio_s": 1481.9,
-        "legacy_one_pending_slot_would_overflow": true,
-        "metric_status": "authoring_estimate_only_not_a_publication_gate",
-        "route_end_audio_backlog_limit_s": 240,
-        "route_travel_s": 294.6,
-        "speed_mph": 65,
-        "trigger_to_play_latency_limit_s": 180
-      },
-      {
-        "estimated_audio_tail_after_route_end_s": 1228.1,
-        "estimated_context_limits_exceeded": true,
-        "estimated_maximum_pending_depth": 9,
-        "estimated_maximum_trigger_to_play_latency_s": 1213.2,
-        "estimated_total_audio_s": 1481.9,
-        "legacy_one_pending_slot_would_overflow": true,
-        "metric_status": "authoring_estimate_only_not_a_publication_gate",
-        "route_end_audio_backlog_limit_s": 240,
-        "route_travel_s": 255.4,
-        "speed_mph": 75,
-        "trigger_to_play_latency_limit_s": 180
-      }
-    ]
-  },
-  "fifo_validation_input": [
+  "hard_auto_fifo_input": [
     {
       "audio_duration_s": null,
       "authoring_estimated_duration_s": 25.2,
-      "distance_to_next_trigger_m": 70.0,
       "id": "rf_cue_01",
       "projected_progress_m": 53.0,
-      "stable_order": 1,
-      "travel_time_to_next_trigger_s": {
-        "15_mph": 10.4,
-        "36_mph": 4.3,
-        "65_mph": 2.4,
-        "75_mph": 2.1
-      },
+      "stable_order": 3,
       "trigger_window": {
         "end_m": 233.0,
         "start_m": 0.0
@@ -591,71 +1052,10 @@
     },
     {
       "audio_duration_s": null,
-      "authoring_estimated_duration_s": 191.6,
-      "distance_to_next_trigger_m": 80.0,
-      "id": "rf_story_01",
-      "projected_progress_m": 123.0,
-      "stable_order": 2,
-      "travel_time_to_next_trigger_s": {
-        "15_mph": 11.9,
-        "36_mph": 5.0,
-        "65_mph": 2.8,
-        "75_mph": 2.4
-      },
-      "trigger_window": {
-        "end_m": 303.0,
-        "start_m": 0.0
-      }
-    },
-    {
-      "audio_duration_s": null,
-      "authoring_estimated_duration_s": 24.8,
-      "distance_to_next_trigger_m": 80.0,
-      "id": "rf_cue_02",
-      "projected_progress_m": 203.0,
-      "stable_order": 3,
-      "travel_time_to_next_trigger_s": {
-        "15_mph": 11.9,
-        "36_mph": 5.0,
-        "65_mph": 2.8,
-        "75_mph": 2.4
-      },
-      "trigger_window": {
-        "end_m": 383.0,
-        "start_m": 23.0
-      }
-    },
-    {
-      "audio_duration_s": null,
-      "authoring_estimated_duration_s": 190.8,
-      "distance_to_next_trigger_m": 2304.5,
-      "id": "rf_story_03",
-      "projected_progress_m": 283.0,
-      "stable_order": 4,
-      "travel_time_to_next_trigger_s": {
-        "15_mph": 343.7,
-        "36_mph": 143.2,
-        "65_mph": 79.3,
-        "75_mph": 68.7
-      },
-      "trigger_window": {
-        "end_m": 463.0,
-        "start_m": 103.0
-      }
-    },
-    {
-      "audio_duration_s": null,
       "authoring_estimated_duration_s": 23.2,
-      "distance_to_next_trigger_m": 909.8,
       "id": "rf_cue_04",
       "projected_progress_m": 2587.5,
       "stable_order": 5,
-      "travel_time_to_next_trigger_s": {
-        "15_mph": 135.7,
-        "36_mph": 56.5,
-        "65_mph": 31.3,
-        "75_mph": 27.1
-      },
       "trigger_window": {
         "end_m": 2767.5,
         "start_m": 2407.5
@@ -664,16 +1064,9 @@
     {
       "audio_duration_s": null,
       "authoring_estimated_duration_s": 22.8,
-      "distance_to_next_trigger_m": 450.0,
       "id": "rf_cue_03",
       "projected_progress_m": 3497.3,
       "stable_order": 6,
-      "travel_time_to_next_trigger_s": {
-        "15_mph": 67.1,
-        "36_mph": 28.0,
-        "65_mph": 15.5,
-        "75_mph": 13.4
-      },
       "trigger_window": {
         "end_m": 3677.3,
         "start_m": 3317.3
@@ -681,71 +1074,10 @@
     },
     {
       "audio_duration_s": null,
-      "authoring_estimated_duration_s": 197.8,
-      "distance_to_next_trigger_m": 750.0,
-      "id": "rf_story_02",
-      "projected_progress_m": 3947.3,
-      "stable_order": 7,
-      "travel_time_to_next_trigger_s": {
-        "15_mph": 111.8,
-        "36_mph": 46.6,
-        "65_mph": 25.8,
-        "75_mph": 22.4
-      },
-      "trigger_window": {
-        "end_m": 4127.3,
-        "start_m": 3767.3
-      }
-    },
-    {
-      "audio_duration_s": null,
-      "authoring_estimated_duration_s": 187.9,
-      "distance_to_next_trigger_m": 915.3,
-      "id": "rf_story_04",
-      "projected_progress_m": 4697.3,
-      "stable_order": 8,
-      "travel_time_to_next_trigger_s": {
-        "15_mph": 136.5,
-        "36_mph": 56.9,
-        "65_mph": 31.5,
-        "75_mph": 27.3
-      },
-      "trigger_window": {
-        "end_m": 4877.3,
-        "start_m": 4517.3
-      }
-    },
-    {
-      "audio_duration_s": null,
-      "authoring_estimated_duration_s": 197.8,
-      "distance_to_next_trigger_m": 1960.4,
-      "id": "rf_story_05",
-      "projected_progress_m": 5612.6,
-      "stable_order": 9,
-      "travel_time_to_next_trigger_s": {
-        "15_mph": 292.4,
-        "36_mph": 121.8,
-        "65_mph": 67.5,
-        "75_mph": 58.5
-      },
-      "trigger_window": {
-        "end_m": 5792.6,
-        "start_m": 5432.6
-      }
-    },
-    {
-      "audio_duration_s": null,
       "authoring_estimated_duration_s": 22.8,
-      "distance_to_next_trigger_m": 160.0,
       "id": "rf_cue_05",
       "projected_progress_m": 7573.0,
       "stable_order": 10,
-      "travel_time_to_next_trigger_s": {
-        "15_mph": 23.9,
-        "36_mph": 9.9,
-        "65_mph": 5.5,
-        "75_mph": 4.8
-      },
       "trigger_window": {
         "end_m": 7753.0,
         "start_m": 7393.0
@@ -753,48 +1085,10 @@
     },
     {
       "audio_duration_s": null,
-      "authoring_estimated_duration_s": 187.0,
-      "distance_to_next_trigger_m": 171.6,
-      "id": "rf_story_06",
-      "projected_progress_m": 7733.0,
-      "stable_order": 11,
-      "travel_time_to_next_trigger_s": {
-        "15_mph": 25.6,
-        "36_mph": 10.7,
-        "65_mph": 5.9,
-        "75_mph": 5.1
-      },
-      "trigger_window": {
-        "end_m": 7913.0,
-        "start_m": 7553.0
-      }
-    },
-    {
-      "audio_duration_s": null,
-      "authoring_estimated_duration_s": 187.0,
-      "distance_to_next_trigger_m": 380.0,
-      "id": "rf_story_07",
-      "projected_progress_m": 7904.6,
-      "stable_order": 12,
-      "travel_time_to_next_trigger_s": {
-        "15_mph": 56.7,
-        "36_mph": 23.6,
-        "65_mph": 13.1,
-        "75_mph": 11.3
-      },
-      "trigger_window": {
-        "end_m": 8084.6,
-        "start_m": 7724.6
-      }
-    },
-    {
-      "audio_duration_s": null,
       "authoring_estimated_duration_s": 23.2,
-      "distance_to_next_trigger_m": null,
       "id": "rf_cue_06",
       "projected_progress_m": 8284.6,
       "stable_order": 13,
-      "travel_time_to_next_trigger_s": null,
       "trigger_window": {
         "end_m": 8464.6,
         "start_m": 8104.6
@@ -808,71 +1102,123 @@
     "geometry_sha256": "d66f76d6053000244d7e15c8be0494f48d79544e0ceaf79428c51e458e964668",
     "official_route_evidence_path": "originals/smokies/official_route_evidence_v1.json",
     "official_route_evidence_sha256": "d946ffaf8f21ad97399b6dedfb5cbe9483fce0787653b389d7075d933f398c60",
+    "ogle_official_source_record_sha256": "53c8a797b69aacce153f160bbc4c6fa2c68b3795b924a51743db072fb45f7748",
+    "ogle_source_hash_basis": "canonical_sorted_compact_source_record",
     "source_dossier_path": "originals/smokies/source_dossiers_v1.json",
     "source_dossier_sha256": "8eb22ca5110f0f9a4287b8f184624348c2a2ca2dbc36e27ef59fc022057ce18f"
   },
   "kind": "trailhead_original_trigger_placement_preflight",
+  "landmark_evidence": {
+    "noah_bud_ogle_cabin": {
+      "approach_road_binding": {
+        "geometry_id": "5d3060eb-5127-44ca-9df2-e2462b07124c",
+        "lateral_distance_m": 33.8,
+        "projected_coordinate": [
+          -83.4893771,
+          35.6829739
+        ]
+      },
+      "binding_status": "off_route_before_start",
+      "parking_reference": {
+        "distance_to_route_entrance_m": 1647.9,
+        "feature_id": "578bbb63-1274-4d28-9839-c4285c03004c",
+        "geometry_id": "3a785367-ca9b-4451-b9f1-10cabf58b624",
+        "parking_availability": "not_checked",
+        "parking_promise": false
+      },
+      "route_binding": {
+        "lateral_distance_m": 889.5,
+        "nearest_route_coordinate": [
+          -83.481398,
+          35.678543
+        ],
+        "nearest_route_progress_m": 0.0
+      },
+      "source_hash_basis": "canonical_sorted_compact_source_record",
+      "source_record": {
+        "accuracy_note": "NPS publishes the coordinate but does not state survey accuracy.",
+        "authority": "official",
+        "coordinates": [
+          -83.489714,
+          35.682841
+        ],
+        "id": "nps_grsm_noah_bud_ogle_location_2026",
+        "publisher": "National Park Service",
+        "reviewed_at": "2026-08-08",
+        "rights_status": "reference_only",
+        "role": "landmark",
+        "source_accuracy_m": null,
+        "title": "2026 Superintendent's Compendium",
+        "url": "https://home.nps.gov/grsm/learn/management/compendium.htm"
+      },
+      "source_record_sha256": "53c8a797b69aacce153f160bbc4c6fa2c68b3795b924a51743db072fb45f7748"
+    }
+  },
+  "non_moving_delivery_input": [
+    {
+      "audio_duration_s": null,
+      "authoring_estimated_duration_s": 24.8,
+      "availability": "before_route_user_confirmed_parked",
+      "experience_group_id": "ogle_prelude",
+      "id": "rf_cue_02",
+      "mode": "stopped_deeper",
+      "parking_availability": "not_checked",
+      "requires_user_confirmed_parked": true,
+      "stable_order": 1
+    },
+    {
+      "audio_duration_s": null,
+      "authoring_estimated_duration_s": 190.8,
+      "availability": "before_route_user_confirmed_parked",
+      "experience_group_id": "ogle_prelude",
+      "id": "rf_story_03",
+      "mode": "stopped_deeper",
+      "parking_availability": "not_checked",
+      "requires_user_confirmed_parked": true,
+      "stable_order": 2
+    },
+    {
+      "audio_duration_s": null,
+      "authoring_estimated_duration_s": 187.0,
+      "availability": "at_landmark_user_confirmed_parked",
+      "experience_group_id": "thousand_drips_deeper_story",
+      "id": "rf_story_06",
+      "mode": "stopped_deeper",
+      "parking_availability": "not_checked",
+      "requires_user_confirmed_parked": true,
+      "stable_order": 11
+    },
+    {
+      "audio_duration_s": null,
+      "authoring_estimated_duration_s": 187.0,
+      "availability": "after_route_completion",
+      "experience_group_id": null,
+      "id": "rf_story_07",
+      "mode": "completion_deeper",
+      "parking_availability": null,
+      "requires_user_confirmed_parked": false,
+      "stable_order": 12
+    }
+  ],
   "placement_feasibility": {
-    "all_exact_scene_landmarks_evidence_backed": false,
+    "all_entries_classified_exactly_once": true,
+    "all_exact_scene_landmarks_evidence_backed": true,
     "all_proposed_offsets_within_reviewed_context_windows": true,
     "blockers": [
       {
-        "anchor_id": "roaring_fork_entrance",
-        "code": "exact_scene_landmark_missing_from_checked_route_evidence",
-        "entry_ids": [
-          "rf_cue_02",
-          "rf_story_03"
-        ],
-        "proxy_anchor_id": "roaring_fork_entrance",
-        "resolution": "add_checked_ogle_landmark_or_move_entries_to_explicit_stop_mode"
+        "code": "consumer_delivery_runtime_missing",
+        "resolution": "implement_and_capability_gate_schema_v2_delivery_modes"
       },
       {
-        "anchor_id": "roaring_fork_entrance",
-        "authoring_estimated_audio_s": 432.4,
-        "code": "exact_scene_cluster_requires_real_duration_proof_or_editorial_resolution",
-        "entry_count": 4,
-        "entry_ids": [
-          "rf_cue_01",
-          "rf_story_01",
-          "rf_cue_02",
-          "rf_story_03"
-        ],
-        "resolution": "bind_real_audio_durations_then_consolidate_move_to_stop_mode_or_revalidate",
-        "trigger_span_m": 230.0,
-        "trigger_span_travel_s_at_15_mph": 34.3
-      },
-      {
-        "anchor_id": "roaring_fork_exit",
-        "authoring_estimated_audio_s": 210.2,
-        "code": "exact_scene_cluster_requires_real_duration_proof_or_editorial_resolution",
-        "entry_count": 2,
-        "entry_ids": [
-          "rf_story_07",
-          "rf_cue_06"
-        ],
-        "resolution": "bind_real_audio_durations_then_consolidate_move_to_stop_mode_or_revalidate",
-        "trigger_span_m": 380.0,
-        "trigger_span_travel_s_at_15_mph": 56.7
-      },
-      {
-        "anchor_id": "thousand_drips",
-        "authoring_estimated_audio_s": 209.8,
-        "code": "exact_scene_cluster_requires_real_duration_proof_or_editorial_resolution",
-        "entry_count": 2,
-        "entry_ids": [
-          "rf_cue_05",
-          "rf_story_06"
-        ],
-        "resolution": "bind_real_audio_durations_then_consolidate_move_to_stop_mode_or_revalidate",
-        "trigger_span_m": 160.0,
-        "trigger_span_travel_s_at_15_mph": 23.9
+        "code": "immutable_audio_durations_missing",
+        "resolution": "bind_rendered_asset_durations_and_run_fifo_publication_suite"
       }
     ],
     "corridor_entries_absorb_only_non_scene_spacing": true,
-    "status": "blocked"
+    "status": "authoring_design_resolved_runtime_blocked"
   },
   "product_id": "great_smoky_mountains_ridges_rivers_living_memory",
-  "publication_status": "blocked_pending_exact_scene_resolution_real_audio_durations_and_fifo_validation",
+  "publication_status": "blocked_pending_consumer_delivery_runtime_real_audio_durations_and_fifo_validation",
   "route": {
     "coordinate_count": 1175,
     "direction": "one_way",
@@ -884,13 +1230,22 @@
   "route_id": "roaring-fork-one-way",
   "runtime_capacity": {
     "authoring_word_counts_are_not_audio_durations": true,
+    "capacity_hard_auto_guard_s": 30,
+    "consumer_delivery_modes_supported": false,
     "contract_observation": "one_active_plus_durable_fifo",
     "current_playback_slots": 1,
-    "fifo_validation_status": "blocked_pending_real_audio_durations",
+    "delivery_runtime_status": "blocked_missing_consumer_delivery_runtime",
+    "fifo_validation_status": "blocked_pending_consumer_runtime_and_real_audio_durations",
     "gates_weakened": false,
     "pending_queue_capacity": "bounded_by_manifest_entry_count",
     "pending_queue_model": "durable_ordered_fifo",
     "real_audio_duration_status": "unavailable_until_assets_are_rendered",
+    "required_consumer_capabilities": [
+      "hard_auto_priority_over_optional",
+      "capacity_admission_with_next_hard_window_guard",
+      "stopped_deeper_explicit_user_selection",
+      "completion_deeper_library"
+    ],
     "route_end_audio_backlog_limit_s": 240,
     "source_revision": "88e6a945b9aad9df5022b7a1710ea5be5873dd26",
     "source_sha256_by_path": {
@@ -904,6 +1259,6 @@
     "validation_engine_version": "original-trigger-v3",
     "validation_suite_version": "originals_virtual_route_v3"
   },
-  "schema_version": 1,
+  "schema_version": 2,
   "variant_id": "one_way"
 }

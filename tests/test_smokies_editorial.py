@@ -1,4 +1,5 @@
 from copy import deepcopy
+from hashlib import sha256
 from pathlib import Path
 import json
 
@@ -8,11 +9,13 @@ from db.originals_editorial import (
     SMOKIES_CADES_COVE_EDITORIAL_PATH,
     SMOKIES_MOUNTAIN_CROSSING_EDITORIAL_PATH,
     SMOKIES_ROARING_FORK_EDITORIAL_PATH,
+    SMOKIES_ROARING_FORK_TRIGGER_PREFLIGHT_PATH,
     SMOKIES_ROUTE_VARIANTS_PATH,
     editorial_transcript_sha256,
     editorial_word_count,
     load_smokies_editorial_packet,
     validate_smokies_editorial_packet,
+    validate_smokies_roaring_fork_delivery_plan,
 )
 
 
@@ -297,6 +300,213 @@ def test_roaring_fork_packet_contains_all_source_cleared_entries():
         dossier,
         dossier_file_sha256=packet["dossier_sha256"],
     ) == []
+
+
+def test_roaring_fork_delivery_plan_is_source_bound_and_visible_to_studio():
+    packet = load_smokies_editorial_packet()
+    entries = {
+        entry["id"]: entry
+        for entry in packet["entries"]
+        if entry["chapter_id"] == "roaring_fork"
+    }
+    expected_modes = {
+        "rf_cue_01": "hard_auto",
+        "rf_cue_03": "hard_auto",
+        "rf_cue_04": "hard_auto",
+        "rf_cue_05": "hard_auto",
+        "rf_cue_06": "hard_auto",
+        "rf_story_01": "capacity_deeper",
+        "rf_story_02": "capacity_deeper",
+        "rf_story_04": "capacity_deeper",
+        "rf_story_05": "capacity_deeper",
+        "rf_cue_02": "stopped_deeper",
+        "rf_story_03": "stopped_deeper",
+        "rf_story_06": "stopped_deeper",
+        "rf_story_07": "completion_deeper",
+    }
+    assert {
+        entry_id: entry["delivery_mode"] for entry_id, entry in entries.items()
+    } == expected_modes
+    assert {entry["delivery_mode_label"] for entry in entries.values()} == {
+        "AUTO CUE",
+        "DEEPER STORY",
+        "PLAY WHEN PARKED",
+        "AFTER ROUTE",
+    }
+
+    delivery_plan = packet["roaring_fork_delivery_plan"]
+    assert delivery_plan["schema_version"] == 2
+    assert delivery_plan["chapter_id"] == "roaring_fork"
+    assert delivery_plan["duration_basis"] == "authoring_estimate_only"
+    assert delivery_plan["source_bindings_verified"] is True
+    assert delivery_plan["hard_auto"]["count"] == 5
+    assert delivery_plan["hard_auto"]["estimated_duration_s"] > 0
+    assert delivery_plan["selectable"]["count"] == 8
+    assert (
+        delivery_plan["selectable"]["estimated_duration_s"]
+        > delivery_plan["hard_auto"]["estimated_duration_s"]
+    )
+    assert len(delivery_plan["artifact_sha256"]) == 64
+    assert delivery_plan["publication_status"].startswith("blocked_")
+
+
+def test_roaring_fork_delivery_plan_fails_closed_on_source_or_mode_drift():
+    plan = json.loads(
+        SMOKIES_ROARING_FORK_TRIGGER_PREFLIGHT_PATH.read_text(encoding="utf-8")
+    )
+    editorial = json.loads(
+        SMOKIES_ROARING_FORK_EDITORIAL_PATH.read_text(encoding="utf-8")
+    )
+    editorial_digest = sha256(
+        SMOKIES_ROARING_FORK_EDITORIAL_PATH.read_bytes()
+    ).hexdigest()
+    assert validate_smokies_roaring_fork_delivery_plan(
+        plan,
+        editorial,
+        editorial_file_sha256=editorial_digest,
+    ) == []
+
+    drifted_hash = deepcopy(plan)
+    drifted_hash["input_bindings"]["editorial_packet_sha256"] = "0" * 64
+    assert any(
+        "editorial_packet_sha256" in issue
+        for issue in validate_smokies_roaring_fork_delivery_plan(
+            drifted_hash,
+            editorial,
+            editorial_file_sha256=editorial_digest,
+        )
+    )
+
+    drifted_route_evidence = deepcopy(plan)
+    drifted_route_evidence["input_bindings"][
+        "official_route_evidence_sha256"
+    ] = "f" * 64
+    assert any(
+        "official_route_evidence_sha256" in issue
+        for issue in validate_smokies_roaring_fork_delivery_plan(
+            drifted_route_evidence,
+            editorial,
+            editorial_file_sha256=editorial_digest,
+        )
+    )
+
+    drifted_mode = deepcopy(plan)
+    drifted_mode["entries"][0]["delivery"]["mode"] = "drive_and_hope"
+    issues = validate_smokies_roaring_fork_delivery_plan(
+        drifted_mode,
+        editorial,
+        editorial_file_sha256=editorial_digest,
+    )
+    assert any("delivery.mode is unsupported" in issue for issue in issues)
+    assert any("counts_by_mode" in issue for issue in issues)
+
+
+def test_roaring_fork_delivery_plan_rejects_self_consistent_policy_tampering():
+    plan = json.loads(
+        SMOKIES_ROARING_FORK_TRIGGER_PREFLIGHT_PATH.read_text(encoding="utf-8")
+    )
+    editorial = json.loads(
+        SMOKIES_ROARING_FORK_EDITORIAL_PATH.read_text(encoding="utf-8")
+    )
+    editorial_digest = sha256(
+        SMOKIES_ROARING_FORK_EDITORIAL_PATH.read_bytes()
+    ).hexdigest()
+
+    tampered = deepcopy(plan)
+    story = next(entry for entry in tampered["entries"] if entry["id"] == "rf_story_06")
+    story["delivery"] = {
+        "mode": "hard_auto",
+        "optional_content_may_delay": False,
+        "priority": "must_play",
+        "queue_policy": "durable_fifo_among_hard_auto",
+    }
+    summary = tampered["delivery_summary"]
+    summary["counts_by_mode"]["stopped_deeper"] -= 1
+    summary["counts_by_mode"]["hard_auto"] += 1
+    summary["entry_ids_by_mode"]["stopped_deeper"].remove("rf_story_06")
+    summary["entry_ids_by_mode"]["hard_auto"].insert(-1, "rf_story_06")
+    issues = validate_smokies_roaring_fork_delivery_plan(
+        tampered,
+        editorial,
+        editorial_file_sha256=editorial_digest,
+    )
+    assert any("immutable entry-to-mode classification drifted" in issue for issue in issues)
+    assert any("rf_story_06.delivery safety contract drifted" in issue for issue in issues)
+
+    reordered = deepcopy(plan)
+    reordered["entries"][0], reordered["entries"][1] = (
+        reordered["entries"][1],
+        reordered["entries"][0],
+    )
+    issues = validate_smokies_roaring_fork_delivery_plan(
+        reordered,
+        editorial,
+        editorial_file_sha256=editorial_digest,
+    )
+    assert any("delivery entry order" in issue for issue in issues)
+
+    delivery_mutations = (
+        ("rf_cue_01", "optional_content_may_delay", True),
+        ("rf_story_01", "guard_before_next_hard_auto_window_s", 29),
+        ("rf_story_06", "parking_promise", True),
+        ("rf_story_07", "requires_route_completion", False),
+    )
+    for entry_id, field, value in delivery_mutations:
+        drifted = deepcopy(plan)
+        next(entry for entry in drifted["entries"] if entry["id"] == entry_id)[
+            "delivery"
+        ][field] = value
+        issues = validate_smokies_roaring_fork_delivery_plan(
+            drifted,
+            editorial,
+            editorial_file_sha256=editorial_digest,
+        )
+        assert any(f"{entry_id}.delivery safety contract drifted" in issue for issue in issues)
+
+
+def test_roaring_fork_delivery_plan_keeps_publication_and_timing_gates_closed():
+    plan = json.loads(
+        SMOKIES_ROARING_FORK_TRIGGER_PREFLIGHT_PATH.read_text(encoding="utf-8")
+    )
+    editorial = json.loads(
+        SMOKIES_ROARING_FORK_EDITORIAL_PATH.read_text(encoding="utf-8")
+    )
+    editorial_digest = sha256(
+        SMOKIES_ROARING_FORK_EDITORIAL_PATH.read_bytes()
+    ).hexdigest()
+
+    gate_mutations = (
+        (("publication_status",), "ready"),
+        (("runtime_capacity", "consumer_delivery_modes_supported"), True),
+        (("runtime_capacity", "delivery_runtime_status"), "ready"),
+        (("runtime_capacity", "gates_weakened"), True),
+        (("runtime_capacity", "route_end_audio_backlog_limit_s"), 241),
+        (("runtime_capacity", "trigger_to_play_latency_limit_s"), 181),
+        (("delivery_capacity_metrics_v1", "real_audio_durations_used"), True),
+        (("placement_feasibility", "status"), "ready"),
+    )
+    for path, value in gate_mutations:
+        drifted = deepcopy(plan)
+        target = drifted
+        for key in path[:-1]:
+            target = target[key]
+        target[path[-1]] = value
+        assert validate_smokies_roaring_fork_delivery_plan(
+            drifted,
+            editorial,
+            editorial_file_sha256=editorial_digest,
+        ), path
+
+    drifted_scenario = deepcopy(plan)
+    scenario = drifted_scenario["delivery_capacity_metrics_v1"]["scenarios"][0]
+    scenario["route_end_audio_backlog_limit_s"] = 241
+    scenario["trigger_to_play_latency_limit_s"] = 181
+    issues = validate_smokies_roaring_fork_delivery_plan(
+        drifted_scenario,
+        editorial,
+        editorial_file_sha256=editorial_digest,
+    )
+    assert any("15 mph thresholds drifted" in issue for issue in issues)
 
 
 def test_editorial_packet_rejects_cultural_and_source_drift():

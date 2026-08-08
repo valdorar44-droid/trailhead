@@ -309,6 +309,9 @@ td.name{color:var(--text);font-weight:600;}
 .originals-editorial-item.active{box-shadow:inset 3px 0 0 var(--orange);}
 .originals-editorial-item-title{font-size:12px;font-weight:800;line-height:1.4;}
 .originals-editorial-item-meta{color:var(--text3);font:9px/1.5 var(--mono);margin-top:4px;}
+.originals-editorial-mode{display:inline-block;margin-top:7px;padding:3px 6px;border:1px solid var(--orange);border-radius:5px;color:var(--orange);font:900 9px/1.2 var(--mono);letter-spacing:.45px;}
+.originals-editorial-delivery-summary{margin-top:8px;color:var(--text2);font:10px/1.55 var(--mono);}
+.originals-editorial-delivery-note{margin-top:10px;padding:9px 10px;border-left:3px solid var(--orange);background:var(--s2);color:var(--text2);font-size:11px;line-height:1.5;}
 .originals-editorial-detail{min-width:0;border:1px solid var(--border);border-radius:12px;background:var(--s3);padding:16px;}
 .originals-editorial-kicker{color:var(--orange);font:900 10px/1.4 var(--mono);letter-spacing:.6px;}
 .originals-editorial-title{font-size:22px;font-weight:900;line-height:1.15;margin-top:6px;}
@@ -2650,6 +2653,22 @@ function editorialVariantLabel(chapterId, variantId) {
   return labels[`${String(chapterId || '')}:${String(variantId || '')}`] || 'Alternate direction';
 }
 
+function editorialDeliveryModeLabel(mode) {
+  const labels = {
+    hard_auto: 'AUTO CUE',
+    capacity_deeper: 'DEEPER STORY',
+    stopped_deeper: 'PLAY WHEN PARKED',
+    completion_deeper: 'AFTER ROUTE',
+  };
+  return labels[String(mode || '')] || '';
+}
+
+function editorialDeliveryModeContext(item) {
+  if (String(item && item.delivery_mode || '') !== 'stopped_deeper') return '';
+  if (String(item && item.delivery_parking_availability || '') !== 'not_checked') return '';
+  return 'Requires a user-confirmed parked state. Parking availability is not checked.';
+}
+
 function renderSmokiesEditorialPacket() {
   const host = document.getElementById('smokies-editorial-content');
   const summary = document.getElementById('smokies-editorial-summary');
@@ -2668,6 +2687,15 @@ function renderSmokiesEditorialPacket() {
   const selected = entries.find(item => item.id === selectedSmokiesEditorialId);
   const metrics = packet.summary || {};
   summary.textContent = `${Number(metrics.chapter_count || 0)} CHAPTERS · ${Number(metrics.story_count || 0)} LONG STORIES · ${Number(metrics.cue_count || 0)} SHORT CUES · ${Number(metrics.word_count || 0).toLocaleString()} WORDS · ${editorialDurationLabel(metrics.estimated_duration_s)} ESTIMATED · REVIEW REQUIRED`;
+  const deliveryPlan = packet.roaring_fork_delivery_plan || null;
+  if (deliveryPlan && deliveryPlan.duration_basis === 'authoring_estimate_only') {
+    const hardAuto = deliveryPlan.hard_auto || {};
+    const selectable = deliveryPlan.selectable || {};
+    const deliverySummary = document.createElement('div');
+    deliverySummary.className = 'originals-editorial-delivery-summary';
+    deliverySummary.textContent = `ROARING FORK AUTHORING ONLY · ${Number(hardAuto.count || 0)} AUTO CUES / ${editorialDurationLabel(hardAuto.estimated_duration_s)} · ${Number(selectable.count || 0)} SELECTABLE / ${editorialDurationLabel(selectable.estimated_duration_s)} · PUBLICATION BLOCKED`;
+    summary.appendChild(deliverySummary);
+  }
   if (!selected) {
     host.className = 'originals-empty';
     host.textContent = 'This editorial packet has no reviewable entries.';
@@ -2676,16 +2704,20 @@ function renderSmokiesEditorialPacket() {
   host.className = 'originals-editorial-layout';
   const sources = Array.isArray(selected.sources) ? selected.sources : [];
   const variantOverrides = Array.isArray(selected.variant_overrides) ? selected.variant_overrides : [];
+  const selectedDeliveryLabel = editorialDeliveryModeLabel(selected.delivery_mode);
+  const selectedDeliveryContext = editorialDeliveryModeContext(selected);
   host.innerHTML = `<div class="originals-editorial-list" role="list" aria-label="Smokies source-locked scripts">
     ${entries.map(item => `<button type="button" class="originals-editorial-item${item.id === selected.id ? ' active' : ''}" onclick="selectSmokiesEditorialEntryEncoded('${encodeURIComponent(item.id)}')" aria-current="${item.id === selected.id ? 'true' : 'false'}">
       <span class="originals-editorial-item-title">${esc(item.title || item.id)}</span>
       <span class="originals-editorial-item-meta">${esc(editorialChapterLabel(item.chapter_id).toUpperCase())} · ${esc(String(item.kind || '').toUpperCase())} ${Number(item.sequence || 0)} · ${Number(item.word_count || 0)} WORDS · ${esc(editorialDurationLabel(item.estimated_duration_s))}${Array.isArray(item.variant_overrides) && item.variant_overrides.length ? ` · ${item.variant_overrides.length} DIRECTION VERSION${item.variant_overrides.length === 1 ? '' : 'S'}` : ''}</span>
+      ${editorialDeliveryModeLabel(item.delivery_mode) ? `<span class="originals-editorial-mode">${esc(editorialDeliveryModeLabel(item.delivery_mode))}</span>` : ''}
     </button>`).join('')}
   </div>
   <article class="originals-editorial-detail" aria-live="polite">
-    <div class="originals-editorial-kicker">${esc(editorialChapterLabel(selected.chapter_id).toUpperCase())} · ${esc(String(selected.kind || '').toUpperCase())} ${Number(selected.sequence || 0)} · DRAFT REVIEW REQUIRED</div>
+    <div class="originals-editorial-kicker">${esc(editorialChapterLabel(selected.chapter_id).toUpperCase())} · ${esc(String(selected.kind || '').toUpperCase())} ${Number(selected.sequence || 0)}${selectedDeliveryLabel ? ` · ${esc(selectedDeliveryLabel)}` : ''} · DRAFT REVIEW REQUIRED</div>
     <h3 class="originals-editorial-title">${esc(selected.title || selected.id)}</h3>
     <div class="originals-editorial-scene"><strong>Visible scene:</strong> ${esc(selected.visible_scene || '')}<br><strong>Editorial purpose:</strong> ${esc(selected.purpose || '')}</div>
+    ${selectedDeliveryContext ? `<div class="originals-editorial-delivery-note"><strong>Authoring delivery:</strong> ${esc(selectedDeliveryContext)}</div>` : ''}
     <div class="originals-editorial-transcript">${esc(selected.transcript || '')}</div>
     ${variantOverrides.length ? `<section class="originals-editorial-variants" aria-label="Direction versions"><div class="section-label">DIRECTION VERSIONS</div>${variantOverrides.map(override => `<div class="originals-editorial-variant"><div class="originals-editorial-variant-title">${esc(editorialVariantLabel(override.chapter_id, override.variant_id))} · ${esc(override.title || selected.title || selected.id)}</div><div class="originals-editorial-variant-meta">${Number(override.word_count || 0)} WORDS · ${esc(editorialDurationLabel(override.estimated_duration_s))} · TRANSCRIPT ${esc(String(override.transcript_sha256 || '').slice(0, 12))}</div><div class="originals-editorial-variant-copy">${esc(override.transcript || '')}</div></div>`).join('')}</section>` : ''}
     <div class="originals-editorial-sources"><div class="section-label">REVIEWED SOURCES</div>${sources.map(source => `<a class="originals-editorial-source" href="${esc(source.url || '#')}" target="_blank" rel="noopener noreferrer">${esc(source.publisher || '')} · ${esc(source.title || source.id || '')}</a>`).join('')}</div>

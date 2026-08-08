@@ -1,14 +1,24 @@
 import assert from 'node:assert/strict';
 import { createOriginalAccessStore } from '../accessStore';
+import { originalLocalAccessIsCurrent } from '../accessPolicy';
 import type { OriginalAudioAdapter, OriginalAudioPlaybackState } from '../audioAdapter';
 import { originalAudioCoordinator } from '../audioCoordinator';
 import { createOriginalBundleStore } from '../bundleStore';
 import { createOriginalHeadlessController } from '../headlessController';
-import { compileOriginalManifestV2 } from '../manifestV2';
+import { compileOriginalManifestV2, resolveOriginalManifestPlaybackForSession } from '../manifestV2';
+import { compileOriginalManifestV3 } from '../manifestV3';
+import { createOriginalLongFormSession } from '../longFormScheduler';
 import { createOriginalSession } from '../session';
 import { createOriginalSessionStore } from '../sessionStore';
 import type { OriginalAuthenticatedAcquisition, OriginalGuestAcquisition, OriginalSummary } from '../types';
-import { AUDIO_ONE, AUDIO_THREE, AUDIO_TWO, originalManifest, originalManifestV2 } from './fixtures';
+import {
+  AUDIO_ONE,
+  AUDIO_THREE,
+  AUDIO_TWO,
+  originalManifest,
+  originalManifestV2,
+  originalManifestV3,
+} from './fixtures';
 import { createMemoryOriginalFileAdapter } from './memoryFileAdapter';
 
 function deferred<T>() {
@@ -26,6 +36,12 @@ async function main() {
       'https://assets.test/one.mp3': AUDIO_ONE,
       'https://assets.test/two.mp3': AUDIO_TWO,
       'https://assets.test/three.mp3': AUDIO_THREE,
+      'https://assets.test/story-4.mp3': Buffer.from('audio for story-4'),
+      'https://assets.test/story-5.mp3': Buffer.from('audio for story-5'),
+      'https://assets.test/story-6.mp3': Buffer.from('audio for story-6'),
+      'https://api.gettrailhead.app/story-4.mp3': Buffer.from('audio for story-4'),
+      'https://api.gettrailhead.app/story-5.mp3': Buffer.from('audio for story-5'),
+      'https://api.gettrailhead.app/story-6.mp3': Buffer.from('audio for story-6'),
     },
   });
   const bundles = createOriginalBundleStore(files, undefined, {
@@ -82,7 +98,11 @@ async function main() {
     async load(_uri, options) {
       stateListener = options?.onState;
       userPauseListener = options?.onUserPause;
-      audioState = { ...audioState, loaded: true };
+      audioState = {
+        ...audioState,
+        loaded: true,
+        position_ms: Math.max(0, options?.positionMs ?? 0),
+      };
       stateListener?.(audioState);
     },
     async play() {
@@ -196,21 +216,25 @@ async function main() {
     started_at_ms: 10_000,
   };
   await sessions.setActive(raceSession);
-  const assetEntered = deferred<void>();
-  const assetGate = deferred<void>();
-  const racingBundles = {
-    ...bundles,
-    async assetUri(...args: Parameters<typeof bundles.assetUri>) {
-      assetEntered.resolve();
-      await assetGate.promise;
-      return bundles.assetUri(...args);
+  const audioStateEntered = deferred<void>();
+  const audioStateGate = deferred<void>();
+  let delayAudioState = true;
+  const racingAudio = {
+    ...audio,
+    async getState() {
+      if (delayAudioState) {
+        audioStateEntered.resolve();
+        await audioStateGate.promise;
+        delayAudioState = false;
+      }
+      return audio.getState();
     },
   };
   let raceTrackingStopped = 0;
   const racingController = createOriginalHeadlessController({
-    audio,
+    audio: racingAudio,
     access,
-    bundles: racingBundles,
+    bundles,
     sessions,
   });
   const playCountBeforeRace = playCount;
@@ -218,7 +242,7 @@ async function main() {
     { lat: 0, lng: 0.0045, accuracy_m: 10, heading_deg: 90, speed_mps: 10, timestamp_ms: 11_000 },
     { lat: 0, lng: 0.0045, accuracy_m: 10, heading_deg: 90, speed_mps: 10, timestamp_ms: 14_100 },
   ], async () => { raceTrackingStopped += 1; });
-  await assetEntered.promise;
+  await audioStateEntered.promise;
   const inFlight = await sessions.loadActive();
   assert.ok(inFlight);
   await sessions.save({ ...inFlight, status: 'stopped', updated_at_ms: 15_000 });
@@ -230,11 +254,11 @@ async function main() {
   ], async () => { restartTrackingCalls += 1; });
   assert.equal(deliveryDuringStop, true, 'a final cold GPS delivery is consumed while End tour is draining');
   assert.equal(restartTrackingCalls, 0, 'a rejected delivery cannot replace the native stop callback');
-  assetGate.resolve();
+  audioStateGate.resolve();
   const [raceHandled] = await Promise.all([raceProcess, stopRace]);
   assert.equal(raceHandled, true, 'a cancelled cold cue consumes its fixes so they cannot reach the next tour');
   assert.equal(await sessions.loadActive(), null, 'the cold task cannot recreate the active pointer after End tour');
-  assert.equal(playCount, playCountBeforeRace, 'narration cannot start after End tour wins the asset-load race');
+  assert.equal(playCount, playCountBeforeRace, 'narration cannot start after End tour wins a delayed audio-state race');
   assert.ok(raceTrackingStopped >= 1, 'ending the tour stops the cold native tracking callback');
   let postStopTrackingCalls = 0;
   const postStopDelivery = await racingController.process([
@@ -322,6 +346,218 @@ async function main() {
   ], async () => { expiredTrackingStopped += 1; }), true);
   assert.equal(playCount, playsBeforeExpired, 'expired Explorer access cannot resume narration cold');
   assert.equal(expiredTrackingStopped, 1, 'expired access stops the native location task');
+  await expiredController.stop();
+
+  const v3Manifest = originalManifestV3(2);
+  const v3Compiled = compileOriginalManifestV3(v3Manifest, {
+    chapter_id: 'mountain-crossing',
+    variant_id: 'eastbound',
+  });
+  const v3OwnerScope = 'account:v3' as const;
+  await access.recordEntitlement({
+    entitlement: {
+      pack_id: v3Manifest.pack_id,
+      version: v3Manifest.version,
+      access_type: 'permanent',
+      access_active: true,
+      permanent: true,
+    },
+    pack: { ...summary, version: 2 },
+    trip: {},
+    already_owned: false,
+    replayed: false,
+    credit_balance: 900,
+  }, 'v3');
+  await bundles.download(v3Manifest, { ownerScope: v3OwnerScope });
+  const v3AccessList = await access.list(v3OwnerScope);
+  const v3Access = {
+    ...access,
+    get: async (..._args: Parameters<typeof access.get>) => v3AccessList[0] ?? null,
+  };
+  assert.equal(v3AccessList.length, 1);
+  assert.equal(
+    (await v3Access.get(v3OwnerScope, v3Manifest.pack_id, v3Manifest.version))?.owner_scope,
+    v3OwnerScope,
+  );
+  assert.equal(
+    originalLocalAccessIsCurrent(v3AccessList[0], undefined, { manifestId: v3Manifest.manifest_id }),
+    true,
+  );
+  assert(await bundles.get(v3OwnerScope, v3Manifest.pack_id, v3Manifest.version));
+  assert.equal(
+    (await bundles.loadManifest(v3OwnerScope, v3Manifest.pack_id, v3Manifest.version, false))?.schema_version,
+    3,
+  );
+  const parkedItem = v3Compiled.selectable.items.find(item => (
+    item.delivery.mode === 'stopped_deeper'
+    && item.delivery.availability === 'before_route_user_confirmed_parked'
+  ));
+  const capacityItem = v3Compiled.selectable.items.find(item => (
+    item.delivery.mode === 'capacity_deeper'
+  ));
+  assert(parkedItem && capacityItem);
+  const explicitLongForm = {
+    ...createOriginalLongFormSession(v3Compiled.selectable, 40_000),
+    current_item_id: parkedItem.id,
+    current_audio_position_ms: 27_000,
+    current_selection_origin: 'user_explicit' as const,
+  };
+  await sessions.setActive({
+    ...createOriginalSession(
+      v3Compiled.manifest,
+      v3OwnerScope,
+      40_000,
+      { schema_version: 1, ...v3Compiled.selection },
+    ),
+    status: 'active',
+    started_at_ms: 40_000,
+    long_form: explicitLongForm,
+  });
+  const persistedV3 = await sessions.loadActive();
+  assert.equal(persistedV3?.owner_scope, v3OwnerScope);
+  assert.equal(persistedV3?.status, 'active');
+  assert.equal(persistedV3?.user_paused, false);
+  assert.equal(persistedV3?.long_form?.current_item_id, parkedItem.id);
+  assert.equal(persistedV3?.long_form?.current_selection_origin, 'user_explicit');
+  assert.equal(persistedV3?.chapter_selection?.delivery_contract_sha256, v3Compiled.selection.delivery_contract_sha256);
+  assert(persistedV3);
+  assert.equal(
+    resolveOriginalManifestPlaybackForSession(v3Manifest, persistedV3).source_schema_version,
+    3,
+  );
+  await audio.unload();
+  const v3Controller = createOriginalHeadlessController({ audio, access: v3Access, bundles, sessions });
+  const playsBeforeV3 = playCount;
+  let v3TrackingStopped = 0;
+  assert.equal(await v3Controller.process([
+    { lat: 0, lng: 0.0045, accuracy_m: 10, heading_deg: 90, speed_mps: 10, timestamp_ms: 41_000 },
+    { lat: 0, lng: 0.0045, accuracy_m: 10, heading_deg: 90, speed_mps: 10, timestamp_ms: 44_100 },
+  ], async () => { v3TrackingStopped += 1; }), true);
+  assert.equal(v3TrackingStopped, 0, 'a valid V3 session remains active during cold recovery');
+  const preemptedV3 = await sessions.loadActive();
+  assert.equal(playCount, playsBeforeV3 + 2, 'cold recovery resumes the explicit story, then a hard cue preempts it');
+  assert.equal(preemptedV3?.current_stop_id, 'story-1');
+  assert.equal(preemptedV3?.long_form?.current_item_id, null);
+  assert.equal(preemptedV3?.long_form?.deferred_item_id, parkedItem.id);
+  assert.equal(preemptedV3?.long_form?.deferred_audio_position_ms, 27_000);
+  assert.deepEqual(preemptedV3?.completed_stop_ids, []);
+  assert.deepEqual(preemptedV3?.pending_stop_ids, []);
+  stateListener?.({ ...audioState, did_finish: true });
+  await v3Controller.flush();
+  const resumedV3 = await sessions.loadActive();
+  assert.equal(resumedV3?.long_form?.current_item_id, parkedItem.id);
+  assert.equal(resumedV3?.long_form?.current_audio_position_ms, 27_000);
+  assert.equal(playCount, playsBeforeV3 + 3, 'the exact explicit story position resumes after the hard cue');
+  assert.deepEqual(resumedV3?.completed_stop_ids, ['story-1']);
+  await v3Controller.stop();
+
+  assert(resumedV3);
+  await sessions.setActive({ ...resumedV3, status: 'stopped', updated_at_ms: 50_000 });
+  await audio.unload();
+  const stoppedV3Controller = createOriginalHeadlessController({ audio, access: v3Access, bundles, sessions });
+  const playsBeforeStoppedV3 = playCount;
+  let stoppedV3Tracking = 0;
+  assert.equal(await stoppedV3Controller.process([], async () => { stoppedV3Tracking += 1; }), true);
+  assert.equal(playCount, playsBeforeStoppedV3, 'End Tour cannot restart a retained explicit story');
+  assert.equal(stoppedV3Tracking, 1);
+  await stoppedV3Controller.stop();
+
+  await sessions.setActive({
+    ...resumedV3,
+    status: 'active',
+    current_stop_id: null,
+    pending_stop_ids: [],
+    queued_stop_id: null,
+    long_form: {
+      ...createOriginalLongFormSession(v3Compiled.selectable, 60_000),
+      current_item_id: capacityItem.id,
+      current_audio_position_ms: 12_000,
+      current_selection_origin: 'capacity_auto',
+    },
+  });
+  await audio.unload();
+  const capacityV3Controller = createOriginalHeadlessController({ audio, access: v3Access, bundles, sessions });
+  const playsBeforeCapacityV3 = playCount;
+  assert.equal(await capacityV3Controller.process([], async () => {}), true);
+  assert.equal(playCount, playsBeforeCapacityV3, 'headless recovery never initiates an automatic deeper story');
+  await capacityV3Controller.stop();
+
+  await sessions.setActive({
+    ...createOriginalSession(
+      v3Compiled.manifest,
+      v3OwnerScope,
+      70_000,
+      { schema_version: 1, ...v3Compiled.selection },
+    ),
+    status: 'active',
+    started_at_ms: 70_000,
+    long_form: {
+      ...createOriginalLongFormSession(v3Compiled.selectable, 70_000),
+      completed_item_ids: [parkedItem.id],
+      current_item_id: parkedItem.id,
+      current_audio_position_ms: 18_500,
+      current_selection_origin: 'user_explicit',
+    },
+  });
+  const persistedCompletedReplay = await sessions.loadActive();
+  assert.equal(persistedCompletedReplay?.long_form?.current_item_id, parkedItem.id);
+  assert.equal(persistedCompletedReplay?.long_form?.current_audio_position_ms, 18_500);
+  await audio.unload();
+  const completedReplayController = createOriginalHeadlessController({
+    audio,
+    access: v3Access,
+    bundles,
+    sessions,
+  });
+  const playsBeforeCompletedReplay = playCount;
+  assert.equal(await completedReplayController.process([], async () => {}), true);
+  assert.equal(
+    playCount,
+    playsBeforeCompletedReplay + 1,
+    'force-stop recovery resumes an explicitly replayed completed story',
+  );
+  assert.equal((await sessions.loadActive())?.long_form?.current_audio_position_ms, 18_500);
+  await completedReplayController.stop();
+
+  await sessions.setActive({
+    ...createOriginalSession(
+      v3Compiled.manifest,
+      v3OwnerScope,
+      80_000,
+      { schema_version: 1, ...v3Compiled.selection },
+    ),
+    status: 'active',
+    started_at_ms: 80_000,
+    current_stop_id: v3Compiled.manifest.stops[0].id,
+    current_audio_position_ms: 3_500,
+    long_form: {
+      ...createOriginalLongFormSession(v3Compiled.selectable, 80_000),
+      completed_item_ids: [parkedItem.id],
+      deferred_item_id: parkedItem.id,
+      deferred_audio_position_ms: 19_750,
+      deferred_selection_origin: 'user_explicit',
+    },
+  });
+  const persistedDeferredReplay = await sessions.loadActive();
+  assert.equal(persistedDeferredReplay?.long_form?.deferred_item_id, parkedItem.id);
+  assert.equal(persistedDeferredReplay?.long_form?.deferred_audio_position_ms, 19_750);
+  await audio.unload();
+  const deferredReplayController = createOriginalHeadlessController({
+    audio,
+    access: v3Access,
+    bundles,
+    sessions,
+  });
+  const playsBeforeDeferredReplay = playCount;
+  assert.equal(await deferredReplayController.process([], async () => {}), true);
+  assert.equal(playCount, playsBeforeDeferredReplay + 1, 'guaranteed narration resumes first');
+  stateListener?.({ ...audioState, did_finish: true });
+  await deferredReplayController.flush();
+  const resumedDeferredReplay = await sessions.loadActive();
+  assert.equal(resumedDeferredReplay?.long_form?.current_item_id, parkedItem.id);
+  assert.equal(resumedDeferredReplay?.long_form?.current_audio_position_ms, 19_750);
+  assert.equal(playCount, playsBeforeDeferredReplay + 2, 'completed story replay resumes exactly after the cue');
+  await deferredReplayController.stop();
 
   console.log('Originals cold/headless controller tests passed.');
 }

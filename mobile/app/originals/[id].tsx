@@ -38,6 +38,7 @@ import {
   getOriginalBundleState,
   getOriginalDetail,
   originalPermanentUnlockOffer,
+  originalStoryLibraryPresentation,
   selectOriginalUiChapter,
 } from '@/components/originals/originalsUiService';
 import type { OriginalUiBundleState, OriginalUiDetail } from '@/components/originals/types';
@@ -342,10 +343,10 @@ export default function OriginalDetailScreen() {
       const manifest = await originalBundleStore.loadManifest(requestScope, detail.id, detail.version);
       if (!requestIsCurrent()) throw new Error('Your account changed. Start again.');
       if (!manifest) throw new Error('Download and verify this Original before starting.');
-      const selection = detail.manifestSchemaVersion === 2
+      const selection = detail.manifestSchemaVersion !== 1
         ? { chapter_id: selectedChapterId, variant_id: selectedVariantId }
         : undefined;
-      if (manifest.schema_version === 2 && selection) {
+      if (manifest.schema_version !== 1 && selection) {
         if (!requestToken || requestUserId == null) {
           reviewVehicle();
           return;
@@ -398,7 +399,7 @@ export default function OriginalDetailScreen() {
     const scope = `account:${String(user.id)}` as OriginalOwnerScope;
     const manifest = await originalBundleStore.loadManifest(scope, detail.id, detail.version);
     if (!manifest) throw new Error('Download and verify this Original before opening the trigger test.');
-    const selection = detail.manifestSchemaVersion === 2
+    const selection = detail.manifestSchemaVersion !== 1
       ? { chapter_id: selectedChapterId, variant_id: selectedVariantId }
       : undefined;
     await originalsAdminRuntime.startSimulation(manifest, selection);
@@ -489,8 +490,8 @@ export default function OriginalDetailScreen() {
       pathname: '/originals/preview',
       params: {
         id: detail.id,
-        chapter: detail.manifestSchemaVersion === 2 ? selectedChapterId : undefined,
-        variant: detail.manifestSchemaVersion === 2 ? selectedVariantId : undefined,
+        chapter: detail.manifestSchemaVersion !== 1 ? selectedChapterId : undefined,
+        variant: detail.manifestSchemaVersion !== 1 ? selectedVariantId : undefined,
       },
     } as any)
     : !owned
@@ -515,6 +516,49 @@ export default function OriginalDetailScreen() {
     values.findIndex(candidate => candidate.chapterId === selection.chapterId) === index
   ));
   const activeVariants = chapterSelections.filter(selection => selection.chapterId === selectedChapterId);
+  const activeStorySelection = Boolean(
+    !adminPreview
+    && originalsRuntime.selectablePlan
+    && originalsRuntime.session
+    && originalsRuntime.session.status !== 'stopped'
+    && originalsRuntime.session.pack_id === detail.id
+    && originalsRuntime.session.version === detail.version
+    && originalsRuntime.session.chapter_selection?.chapter_id === selectedChapterId
+    && originalsRuntime.session.chapter_selection.variant_id === selectedVariantId,
+  );
+  const routeCompleted = activeStorySelection
+    && originalsRuntime.session?.status === 'completed'
+    && originalsRuntime.session.completed_at_ms != null;
+  const playStoryFromLibrary = (story: OriginalUiDetail['stories'][number]) => {
+    const presentation = originalStoryLibraryPresentation(story, {
+      adminPreview,
+      hasActiveSelection: activeStorySelection,
+      routeCompleted,
+    });
+    if (!presentation.actionable) return;
+    const play = async () => {
+      try {
+        await originalsRuntime.playLongFormItem(story.id, {
+          userConfirmedParked: story.availability === 'while_parked',
+        });
+        router.replace(originalStartDestination(detail.id, detail.version) as any);
+      } catch (storyError: any) {
+        Alert.alert('Story unavailable', storyError?.message || 'This story could not be played.');
+      }
+    };
+    if (story.availability === 'while_parked') {
+      Alert.alert(
+        'Play when parked',
+        'Only play this story when you are safely parked.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: "I'm parked", onPress: () => void play() },
+        ],
+      );
+      return;
+    }
+    void play();
+  };
 
   return (
     <View testID="original.detail.screen" style={[styles.screen, { backgroundColor: C.bg }] }>
@@ -666,18 +710,34 @@ export default function OriginalDetailScreen() {
           <View style={styles.section}>
             <Text style={[styles.sectionTitle, { color: C.text }]}>Along the way</Text>
             <View style={[styles.storyList, { borderTopColor: C.border }] }>
-              {detail.stories.slice(0, 12).map((story, index) => (
-                <View key={story.id} style={[styles.storyRow, { borderBottomColor: C.border }] }>
+              {detail.stories.slice(0, 12).map((story, index) => {
+                const presentation = originalStoryLibraryPresentation(story, {
+                  adminPreview,
+                  hasActiveSelection: activeStorySelection,
+                  routeCompleted,
+                });
+                return (
+                <TouchableOpacity
+                  key={story.id}
+                  accessibilityRole={presentation.actionable ? 'button' : 'text'}
+                  accessibilityLabel={`${story.title}. ${story.durationLabel}. ${presentation.label}`}
+                  accessibilityState={{ disabled: !presentation.actionable }}
+                  activeOpacity={0.76}
+                  disabled={!presentation.actionable}
+                  onPress={() => playStoryFromLibrary(story)}
+                  style={[styles.storyRow, { borderBottomColor: C.border }]}
+                >
                   <View style={[styles.storySequence, { backgroundColor: index === 0 ? C.orange : C.s2, borderColor: index === 0 ? C.orange : C.border }] }>
                     <Text style={[styles.storySequenceText, { color: index === 0 ? '#FFFFFF' : C.text2 }]}>{story.sequence}</Text>
                   </View>
                   <View style={styles.storyCopy}>
                     <Text style={[styles.storyTitle, { color: C.text }]}>{story.title}</Text>
-                    <Text style={[styles.storyMeta, { color: C.text3 }]}>{story.durationLabel} · {adminPreview ? 'unpublished trigger cue' : 'plays automatically on route'}</Text>
+                    <Text style={[styles.storyMeta, { color: presentation.actionable ? C.orange : C.text3 }]}>{story.durationLabel} · {presentation.label}</Text>
                   </View>
-                  <Ionicons name="headset-outline" size={17} color={C.text3} />
-                </View>
-              ))}
+                  <Ionicons name={presentation.actionable ? 'play' : 'headset-outline'} size={17} color={presentation.actionable ? C.orange : C.text3} />
+                </TouchableOpacity>
+                );
+              })}
             </View>
           </View>
 
@@ -844,7 +904,7 @@ function ReadinessModal({
             <AssetRow icon="map-outline" label="Fixed route and offline map region" ready={ready} />
             <AssetRow
               icon="headset-outline"
-              label={detail.manifestSchemaVersion === 2
+              label={detail.manifestSchemaVersion !== 1
                 ? `${detail.storyCount} full stories · ${detail.cueCount ?? 0} shorter cues`
                 : `${detail.storyCount} narrations and transcripts`}
               ready={ready}

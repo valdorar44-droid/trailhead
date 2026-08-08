@@ -34,6 +34,11 @@ export type OriginalUiStory = {
   skipped?: boolean;
   missed?: boolean;
   replayable?: boolean;
+  /** True when any member represented by this row is the active narration. */
+  playing?: boolean;
+  /** Optional long-form story; kept separate from guaranteed driving cues. */
+  optional?: boolean;
+  availability?: 'during_drive' | 'while_parked' | 'after_route';
 };
 
 export type OriginalUiSummary = {
@@ -88,7 +93,7 @@ export type OriginalUiChapterSelection = {
 };
 
 export type OriginalUiDetail = OriginalUiSummary & {
-  manifestSchemaVersion: 1 | 2;
+  manifestSchemaVersion: 1 | 2 | 3;
   overview: string;
   routeLabel: string;
   route?: OriginalRouteV1;

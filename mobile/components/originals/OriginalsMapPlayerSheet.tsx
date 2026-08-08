@@ -15,7 +15,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/lib/design';
 import { useOriginalsRuntime, type OriginalRouteV1 } from '@/lib/originals';
 import { useStore } from '@/lib/store';
-import { manifestStories, originalSessionToUi } from './originalsUiService';
+import {
+  manifestStories,
+  originalStoryLibraryPresentation,
+  originalSessionToUi,
+  selectableManifestItemStory,
+  selectableManifestStories,
+} from './originalsUiService';
 import OriginalFeedbackSheet from './OriginalFeedbackSheet';
 import type { OriginalUiStory } from './types';
 
@@ -43,7 +49,7 @@ function sessionStatusCopy(status: ReturnType<typeof originalSessionToUi>['statu
 }
 
 function storyStateLabel(story: OriginalUiStory, currentStopId: string | null, nextStopId: string | null) {
-  if (story.id === currentStopId) return 'Playing';
+  if (story.id === currentStopId || story.playing) return 'Playing';
   if (story.completed) return 'Heard';
   if (story.skipped) return 'Skipped';
   if (story.missed) return 'Missed';
@@ -109,8 +115,11 @@ export default function OriginalsMapPlayerSheet({
 
   const stories = useMemo(() => {
     if (!scopeMatches || !session || !manifest) return [];
-    return manifestStories(manifest, session);
-  }, [manifest, scopeMatches, session]);
+    return [
+      ...manifestStories(manifest, session),
+      ...selectableManifestStories(runtime.selectablePlan, session),
+    ].sort((left, right) => left.sequence - right.sequence || left.id.localeCompare(right.id));
+  }, [manifest, runtime.selectablePlan, scopeMatches, session]);
 
   const runAction = useCallback(async (name: string, action: AsyncAction, onSuccess?: () => void) => {
     if (busyAction) return;
@@ -126,12 +135,45 @@ export default function OriginalsMapPlayerSheet({
     }
   }, [busyAction]);
 
+  const playStoryFromLibrary = useCallback((storyId: string) => {
+    const story = stories.find(item => item.id === storyId);
+    if (!story) return;
+    const play = () => runAction(
+      `story:${story.id}`,
+      () => story.optional
+        ? runtime.playLongFormItem(story.id, {
+          userConfirmedParked: story.availability === 'while_parked',
+        })
+        : runtime.replayStory(story.id),
+      () => setStoriesVisible(false),
+    );
+    if (story.optional && story.availability === 'while_parked') {
+      Alert.alert(
+        'Play when parked',
+        'Only play this story when you are safely parked.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: "I'm parked", onPress: () => void play() },
+        ],
+      );
+      return;
+    }
+    void play();
+  }, [runAction, runtime, stories]);
+
   if (!scopeMatches || !session || !manifest || !uiSession || runtime.simulation) return null;
 
-  const isCompleted = session.status === 'completed';
+  const currentOptionalStory = session.long_form?.current_item_id
+    ? selectableManifestItemStory(
+      runtime.selectablePlan,
+      session.long_form.current_item_id,
+      session,
+    )
+    : null;
+  const isCompleted = session.status === 'completed' && !currentOptionalStory;
   const isPaused = session.status === 'paused' || uiSession.userPaused || runtime.state === 'paused';
   const shouldResume = isPaused || session.status === 'ready';
-  const currentStory = uiSession.currentStory;
+  const currentStory = currentOptionalStory || uiSession.currentStory;
   const nextStory = uiSession.nextStory;
   const displayStory = currentStory || nextStory;
   const completedCount = session.completed_stop_ids.length;
@@ -142,9 +184,14 @@ export default function OriginalsMapPlayerSheet({
     ...session.skipped_stop_ids,
     ...session.missed_stop_ids,
   ]).size;
-  const audioPositionMs = runtime.audioPlaybackState?.position_ms ?? session.current_audio_position_ms;
+  const audioPositionMs = runtime.audioPlaybackState?.position_ms
+    ?? (currentOptionalStory
+      ? session.long_form?.current_audio_position_ms ?? 0
+      : session.current_audio_position_ms);
   const audioDurationMs = runtime.audioPlaybackState?.duration_ms
-    ?? (manifest.stops.find(stop => stop.id === session.current_stop_id)?.audio_duration_s ?? 0) * 1_000;
+    ?? (currentOptionalStory
+      ? runtime.selectablePlan?.items.find(item => item.id === currentOptionalStory.id)?.audio_duration_s ?? 0
+      : manifest.stops.find(stop => stop.id === session.current_stop_id)?.audio_duration_s ?? 0) * 1_000;
   const panelExpanded = sessionKey === uiSessionKey ? expanded : session.status !== 'paused';
   const panelBottom = bottomOffset == null ? Math.max(insets.bottom, 10) : Math.max(0, bottomOffset);
 
@@ -370,13 +417,15 @@ export default function OriginalsMapPlayerSheet({
                       ? <ActivityIndicator size="small" color="#FFFFFF" />
                       : <Ionicons name={shouldResume ? 'play' : 'pause'} size={29} color="#FFFFFF" />}
                   </TouchableOpacity>
-                  <TransportButton
-                    testID="originals.player.skip"
-                    icon="play-forward"
-                    label="Skip"
-                    disabled={!currentStory || Boolean(busyAction)}
-                    onPress={() => void runAction('skip', runtime.skipCurrentStory)}
-                  />
+                  {!currentOptionalStory ? (
+                    <TransportButton
+                      testID="originals.player.skip"
+                      icon="play-forward"
+                      label="Skip"
+                      disabled={!currentStory || Boolean(busyAction)}
+                      onPress={() => void runAction('skip', runtime.skipCurrentStory)}
+                    />
+                  ) : <View style={styles.transportButton} />}
                 </View>
               </>
             )}
@@ -406,11 +455,12 @@ export default function OriginalsMapPlayerSheet({
         visible={storiesVisible}
         title={manifest.title}
         stories={stories}
-        currentStopId={session.current_stop_id}
+        currentStopId={currentStory?.id ?? null}
         nextStopId={nextStory?.id ?? null}
+        routeCompleted={session.status === 'completed'}
         busy={Boolean(busyAction)}
         onClose={() => setStoriesVisible(false)}
-        onReplay={storyId => void runAction(`story:${storyId}`, () => runtime.replayStory(storyId), () => setStoriesVisible(false))}
+        onReplay={playStoryFromLibrary}
       />
       <OriginalFeedbackSheet
         visible={feedbackVisible}
@@ -499,6 +549,7 @@ function StoryListModal({
   stories,
   currentStopId,
   nextStopId,
+  routeCompleted,
   busy,
   onClose,
   onReplay,
@@ -508,6 +559,7 @@ function StoryListModal({
   stories: OriginalUiStory[];
   currentStopId: string | null;
   nextStopId: string | null;
+  routeCompleted: boolean;
   busy: boolean;
   onClose: () => void;
   onReplay: (storyId: string) => void;
@@ -530,7 +582,15 @@ function StoryListModal({
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.storyList}>
             {stories.map(story => {
               const status = storyStateLabel(story, currentStopId, nextStopId);
-              const replayable = Boolean(story.replayable && story.id !== currentStopId);
+              const presentation = originalStoryLibraryPresentation(story, {
+                hasActiveSelection: true,
+                routeCompleted,
+              });
+              const replayable = Boolean(
+                status !== 'Playing'
+                && (story.optional ? presentation.actionable : story.replayable),
+              );
+              const availability = story.optional ? presentation.label : status;
               return (
                 <View key={story.id} style={[styles.storyRow, { borderColor: C.border }] }>
                   <View style={[styles.storyRowNumber, { borderColor: C.orange + '55' }] }>
@@ -538,7 +598,7 @@ function StoryListModal({
                   </View>
                   <View style={styles.storyRowCopy}>
                     <Text style={[styles.storyRowTitle, { color: C.text }]}>{story.title}</Text>
-                    <Text style={[styles.storyRowMeta, { color: status === 'Playing' || status === 'Up next' ? C.orange : C.text3 }]}>{status} · {story.durationLabel}</Text>
+                    <Text style={[styles.storyRowMeta, { color: availability === 'Playing' || availability === 'Up next' ? C.orange : C.text3 }]}>{availability} · {story.durationLabel}</Text>
                   </View>
                   {replayable ? (
                     <TouchableOpacity

@@ -27,7 +27,20 @@ const stubs: Record<string, string> = {
   '@/lib/originals': `
     export const ORIGINALS_ANALYTICS_EVENTS = { downloadResult: 'originals_download_result' };
     export const ORIGINAL_EXPLORER_ACCESS_REQUIRED = 'An active Explorer membership is required to play this Original.';
+    export function originalSelectablePlaybackGroupItems(plan, itemId) {
+      const item = plan.items.find(value => value.id === itemId);
+      if (!item) return [];
+      const groupId = item.delivery?.mode === 'stopped_deeper'
+        ? item.delivery.experience_group_id
+        : null;
+      return (groupId
+        ? plan.items.filter(candidate => candidate.delivery?.mode === 'stopped_deeper'
+          && candidate.delivery.experience_group_id === groupId)
+        : [item]
+      ).sort((left, right) => left.sequence - right.sequence || left.id.localeCompare(right.id));
+    }
     export function compileOriginalManifestV2Selections(...args) { return globalThis.__ownedOriginalsCompileSelections(...args); }
+    export function compileOriginalManifestV3Selections(...args) { return globalThis.__ownedOriginalsCompileSelections(...args); }
     export function originalLocalAccessIsCurrent(access, nowSeconds = Math.floor(Date.now() / 1000), options = {}) {
       if (!access) return false;
       if (access.access_type === 'guest_free' || access.access_type === 'entitled' || access.access_type === 'permanent') return true;
@@ -635,6 +648,123 @@ async function main() {
   } as any, 'mountain-crossing', 'eastbound');
   assert.equal(selectedV2.storyCount, 45, 'the STORIES metric counts full stories only');
   assert.equal(selectedV2.cueCount, 32, 'shorter cues remain separately labelled');
+
+  const groupDelivery = {
+    mode: 'stopped_deeper',
+    availability: 'before_route_user_confirmed_parked',
+    experience_group_id: 'ogle-prelude',
+    requires_user_confirmed_parked: true,
+    motion_inference_allowed: false,
+    parking_availability: 'not_checked',
+    parking_promise: false,
+  };
+  const selectablePlan = {
+    schema_version: 1,
+    contract_id: 'smokies:mountain-crossing:eastbound',
+    delivery_contract_sha256: 'a'.repeat(64),
+    items: [{
+      id: 'rf-cue-02',
+      sequence: 1,
+      title: 'Ogle Place prelude',
+      transcript: 'First.',
+      audio_asset_id: 'asset-a',
+      audio_duration_s: 30,
+      delivery: groupDelivery,
+    }, {
+      id: 'rf-story-03',
+      sequence: 2,
+      title: 'Ogle Place',
+      transcript: 'Second.',
+      audio_asset_id: 'asset-b',
+      audio_duration_s: 60,
+      delivery: groupDelivery,
+    }],
+  } as any;
+  const initialGroup = service.selectableManifestStories(selectablePlan, null);
+  assert.equal(initialGroup.length, 1, 'one confirmation group renders as one library row');
+  assert.equal(initialGroup[0].durationLabel, '2 min', 'group duration covers every ordered member');
+  assert.equal(initialGroup[0].completed, false);
+  const midGroup = service.selectableManifestStories(selectablePlan, {
+    long_form: {
+      completed_item_ids: ['rf-cue-02'],
+      current_item_id: 'rf-story-03',
+      deferred_item_id: null,
+    },
+  } as any);
+  assert.equal(midGroup[0].playing, true);
+  assert.equal(midGroup[0].completed, false, 'a group is incomplete until every member finishes');
+  const exactSecondMember = service.selectableManifestItemStory(
+    selectablePlan,
+    'rf-story-03',
+    {
+      long_form: {
+        completed_item_ids: ['rf-cue-02'],
+        current_item_id: 'rf-story-03',
+        deferred_item_id: null,
+      },
+    } as any,
+  );
+  assert.equal(exactSecondMember?.title, 'Ogle Place');
+  assert.equal(exactSecondMember?.transcript, 'Second.');
+  assert.equal(exactSecondMember?.durationLabel, '1 min');
+  assert.equal(exactSecondMember?.playing, true, 'Now Playing follows the exact second group member');
+  const completeGroup = service.selectableManifestStories(selectablePlan, {
+    long_form: {
+      completed_item_ids: ['rf-cue-02', 'rf-story-03'],
+      current_item_id: null,
+      deferred_item_id: null,
+    },
+  } as any);
+  assert.equal(completeGroup[0].completed, true);
+  assert.equal(completeGroup[0].replayable, true);
+
+  assert.deepEqual(service.originalStoryLibraryPresentation({ optional: false }, {}), {
+    label: 'Plays automatically on route',
+    action: 'none',
+    actionable: false,
+  });
+  assert.deepEqual(service.originalStoryLibraryPresentation({
+    optional: true,
+    availability: 'while_parked',
+  }, { hasActiveSelection: true }), {
+    label: 'Deeper story · play when parked',
+    action: 'play_parked',
+    actionable: true,
+  });
+  assert.equal(service.originalStoryLibraryPresentation({
+    optional: true,
+    completed: true,
+    availability: 'during_drive',
+  }, { hasActiveSelection: true, routeCompleted: false }).actionable, false);
+  assert.equal(service.originalStoryLibraryPresentation({
+    optional: true,
+    completed: true,
+    availability: 'during_drive',
+  }, { hasActiveSelection: true, routeCompleted: true }).actionable, true);
+  assert.equal(service.originalStoryLibraryPresentation({
+    optional: true,
+    playing: true,
+    availability: 'while_parked',
+  }, { hasActiveSelection: true }).actionable, false);
+
+  assert.equal(service.originalRouteProgressForStories([{
+    id: 'hard-story',
+    sequence: 1,
+    title: 'Hard story',
+    transcript: '',
+    durationLabel: '1 min',
+  }, {
+    id: 'deeper-story',
+    sequence: 2,
+    title: 'Deeper story',
+    transcript: '',
+    durationLabel: '5 min',
+    optional: true,
+  }], {
+    completed_stop_ids: ['hard-story'],
+    skipped_stop_ids: [],
+    missed_stop_ids: [],
+  } as any), 1, 'selectable stories never dilute guaranteed route progress');
 
   console.log('Owned Originals UI service tests passed.');
 }

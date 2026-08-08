@@ -240,7 +240,9 @@ from db.store import (
     FeaturedOriginalUnavailableError, MonthlyOriginalClaimUsedError,
     ExplorerOriginalClaimRequiredError, ExplorerOriginalAccessRequiredError,
     MonthlyTripPackClaimUsedError, ExplorerTripPackClaimRequiredError,
-    OriginalManifestAccessError,
+    OriginalManifestAccessError, OriginalConsumerUpdateRequiredError,
+    ORIGINALS_LONG_FORM_CONSUMER_CONTRACT,
+    ORIGINALS_LONG_FORM_REQUIRED_CAPABILITIES,
     OriginalFeedbackTokenError, OriginalFeedbackConflictError,
     OriginalFeedbackRateLimitError,
     save_authored_trip_pack_draft, get_authored_trip_pack_admin,
@@ -598,6 +600,81 @@ async def originals_preview_token_context(request: Request, call_next):
         return await call_next(request)
     finally:
         _originals_preview_token_context.reset(marker)
+
+
+ORIGINALS_CONSUMER_CONTRACT_HEADER = "X-Trailhead-Originals-Consumer-Contract"
+ORIGINALS_CAPABILITIES_HEADER = "X-Trailhead-Originals-Capabilities"
+
+
+def _originals_consumer_profile_values(
+    contract_value: str | None,
+    capabilities_value: str | None,
+) -> dict:
+    """Recognize only the complete JS-owned long-form consumer contract.
+
+    App version, native runtime, authentication, and preview authorization are
+    intentionally not inputs. A native binary can run old embedded JS or a new
+    OTA, and the same account can be active on both generations.
+    """
+
+    contract = str(contract_value or "").strip()
+    raw_capabilities = str(capabilities_value or "")
+    capabilities = tuple(
+        value.strip() for value in raw_capabilities.split(",") if value.strip()
+    )
+    if (
+        contract != ORIGINALS_LONG_FORM_CONSUMER_CONTRACT
+        or capabilities != ORIGINALS_LONG_FORM_REQUIRED_CAPABILITIES
+    ):
+        return {"consumer_contract": None, "consumer_capabilities": ()}
+    return {
+        "consumer_contract": contract,
+        "consumer_capabilities": capabilities,
+    }
+
+
+OriginalsConsumerContractHeader = Annotated[
+    str | None,
+    Header(alias=ORIGINALS_CONSUMER_CONTRACT_HEADER),
+]
+OriginalsCapabilitiesHeader = Annotated[
+    str | None,
+    Header(alias=ORIGINALS_CAPABILITIES_HEADER),
+]
+
+
+def _append_vary_header(response: Response, *header_names: str) -> None:
+    existing = [
+        value.strip() for value in str(response.headers.get("Vary") or "").split(",")
+        if value.strip()
+    ]
+    seen = {value.lower() for value in existing}
+    for header_name in header_names:
+        if header_name.lower() not in seen:
+            existing.append(header_name)
+            seen.add(header_name.lower())
+    response.headers["Vary"] = ", ".join(existing)
+
+
+@app.middleware("http")
+async def originals_consumer_response_policy(request: Request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+    if (
+        path.startswith("/api/originals")
+        or path.startswith("/api/original-assets")
+        or (
+            path.startswith("/api/admin/originals/")
+            and path.endswith("/device-preview/manifest")
+        )
+    ):
+        _append_vary_header(
+            response,
+            ORIGINALS_CONSUMER_CONTRACT_HEADER,
+            ORIGINALS_CAPABILITIES_HEADER,
+        )
+        response.headers["Cache-Control"] = "private, no-store"
+    return response
 if EXPLORE_ASSETS.exists():
     app.mount("/assets/explore", StaticFiles(directory=str(EXPLORE_ASSETS)), name="explore-assets")
 if (WEB_DIST / "_astro").exists():
@@ -12712,6 +12789,102 @@ class OriginalRouteVariantV2(BaseModel):
     cue_refs: list[OriginalCueReferenceV2] = Field(min_length=1, max_length=250)
 
 
+class OriginalCapacityDeliveryV3(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    mode: Literal["capacity_deeper"] = "capacity_deeper"
+    admission_policy_id: Literal["capacity_before_next_hard_v1"]
+    next_hard_auto_story_id: str = Field(min_length=1, max_length=240)
+    guard_before_next_hard_auto_window_s: Literal[30]
+    fallback_mode: Literal["completion_deeper"]
+    may_queue_behind_capacity: Literal[False]
+    may_wait_for_active_hard_auto: Literal[True]
+
+
+class OriginalStoppedDeliveryV3(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    mode: Literal["stopped_deeper"] = "stopped_deeper"
+    availability: Literal[
+        "before_route_user_confirmed_parked",
+        "at_landmark_user_confirmed_parked",
+    ]
+    experience_group_id: Optional[str] = Field(default=None, max_length=240)
+    requires_user_confirmed_parked: Literal[True]
+    motion_inference_allowed: Literal[False]
+    parking_availability: Literal["not_checked"]
+    parking_promise: Literal[False]
+    availability_radius_m: Optional[float] = Field(default=None, ge=50, le=1000)
+
+    @model_validator(mode="after")
+    def radius_matches_stopped_availability(self):
+        if (
+            self.availability == "at_landmark_user_confirmed_parked"
+            and self.availability_radius_m is None
+        ):
+            raise ValueError("landmark stopped delivery requires availability_radius_m")
+        if (
+            self.availability == "before_route_user_confirmed_parked"
+            and self.availability_radius_m is not None
+        ):
+            raise ValueError("before-route stopped delivery cannot set availability_radius_m")
+        return self
+
+
+class OriginalCompletionDeliveryV3(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    mode: Literal["completion_deeper"] = "completion_deeper"
+    availability: Literal["after_route_completion"]
+    requires_route_completion: Literal[True]
+
+
+OriginalSelectableDeliveryV3 = Annotated[
+    OriginalCapacityDeliveryV3
+    | OriginalStoppedDeliveryV3
+    | OriginalCompletionDeliveryV3,
+    Field(discriminator="mode"),
+]
+
+
+class OriginalSelectableReferenceV3(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    story_id: str = Field(min_length=1, max_length=240)
+    sequence: int = Field(ge=1)
+    coordinates: Optional[OriginalCoordinatesV1] = None
+    explore_place_id: Optional[str] = Field(default=None, max_length=240)
+    trigger: Optional[OriginalTriggerV1] = None
+    delivery: OriginalSelectableDeliveryV3
+
+    @model_validator(mode="after")
+    def delivery_has_only_its_safe_location_fields(self):
+        if isinstance(self.delivery, OriginalCapacityDeliveryV3):
+            if self.coordinates is None or self.trigger is None:
+                raise ValueError("capacity delivery requires coordinates and trigger")
+        elif self.trigger is not None:
+            raise ValueError("stopped and completion delivery cannot include a trigger")
+        if (
+            isinstance(self.delivery, OriginalStoppedDeliveryV3)
+            and self.delivery.availability == "at_landmark_user_confirmed_parked"
+            and self.coordinates is None
+        ):
+            raise ValueError("landmark stopped delivery requires coordinates")
+        return self
+
+
+class OriginalRouteVariantV3(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    id: str = Field(min_length=1, max_length=240)
+    sequence: int = Field(ge=1)
+    title: str = Field(min_length=1, max_length=200)
+    route: OriginalRouteV1
+    cue_refs: list[OriginalCueReferenceV2] = Field(min_length=1, max_length=250)
+    selectable_refs: list[OriginalSelectableReferenceV3] = Field(max_length=250)
+    delivery_contract_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
 class OriginalOperationalSourceV2(OriginalCitationV1):
     role: Literal["operational"]
     authority: Literal["official", "authoritative"]
@@ -12830,8 +13003,68 @@ class OriginalManifestV2(BaseModel):
     narration_profile: Optional[OriginalNarrationProfileV1] = None
 
 
+class OriginalConsumerContractV1(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    schema_version: Literal[1] = 1
+    contract_id: Literal["originals_long_form_delivery_v1"]
+    required_capabilities: list[Literal[
+        "originals_capacity_scheduler_v1",
+        "originals_manifest_v3",
+        "originals_selectable_v1",
+    ]] = Field(min_length=3, max_length=3)
+
+    @model_validator(mode="after")
+    def capabilities_match_canonical_order(self):
+        if self.required_capabilities != list(
+            ORIGINALS_LONG_FORM_REQUIRED_CAPABILITIES
+        ):
+            raise ValueError("required_capabilities must match the canonical sorted set")
+        return self
+
+
+class OriginalChapterV3(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    id: str = Field(min_length=1, max_length=240)
+    sequence: int = Field(ge=1)
+    title: str = Field(min_length=1, max_length=200)
+    summary: str = Field(min_length=1, max_length=2000)
+    default_variant_id: str = Field(min_length=1, max_length=240)
+    safety: OriginalSafetyV1
+    access: OriginalAccessV1
+    season: OriginalSeasonV1
+    operational_sources: list[OriginalOperationalSourceV2] = Field(
+        min_length=1, max_length=100,
+    )
+    operational_readiness: OriginalOperationalReadinessV2
+    validation_selection: OriginalChapterValidationSelectionV2
+    variants: list[OriginalRouteVariantV3] = Field(min_length=1, max_length=10)
+
+
+class OriginalManifestV3(BaseModel):
+    """Strict long-form authoring shape; immutable identity remains server-owned."""
+
+    model_config = {"extra": "forbid", "strict": True}
+
+    schema_version: Literal[3] = 3
+    manifest_id: Optional[str] = Field(default=None, max_length=400)
+    pack_id: Optional[str] = Field(default=None, max_length=240)
+    version: Optional[int] = Field(default=None, ge=1)
+    locale: str = Field(default="en-US", min_length=2, max_length=20)
+    title: str = Field(min_length=1, max_length=200)
+    consumer_contract: OriginalConsumerContractV1
+    stories: list[OriginalStoryV2] = Field(min_length=1, max_length=250)
+    chapters: list[OriginalChapterV3] = Field(min_length=1, max_length=20)
+    assets: list[OriginalAssetV1] = Field(default_factory=list, max_length=500)
+    offline_map: OriginalOfflineMapV1
+    review: OriginalReviewV1
+    route_evidence: Optional[OriginalRouteEvidenceBindingV1] = None
+    narration_profile: Optional[OriginalNarrationProfileV1] = None
+
+
 OriginalManifestDraft = Annotated[
-    OriginalManifestV1 | OriginalManifestV2,
+    OriginalManifestV1 | OriginalManifestV2 | OriginalManifestV3,
     Field(discriminator="schema_version"),
 ]
 
@@ -14380,6 +14613,13 @@ async def create_account_trip(body: AccountTripRequest, user: dict = Depends(_cu
 
 
 def _raise_account_store_error(exc: Exception) -> None:
+    if isinstance(exc, OriginalConsumerUpdateRequiredError):
+        raise HTTPException(426, {
+            "code": "original_consumer_update_required",
+            "message": "Update Trailhead to use this Original.",
+            "required_contract": ORIGINALS_LONG_FORM_CONSUMER_CONTRACT,
+            "required_capabilities": list(ORIGINALS_LONG_FORM_REQUIRED_CAPABILITIES),
+        })
     if isinstance(exc, PublicationSourceNoteNotFoundError):
         raise HTTPException(404, {
             "code": "publication_source_not_found",
@@ -15154,12 +15394,18 @@ async def api_admin_original_device_preview_manifest(
     chapter_id: str | None = Query(default=None),
     variant_id: str | None = Query(default=None),
     admin: dict = Depends(_require_admin),
+    consumer_contract: OriginalsConsumerContractHeader = None,
+    consumer_capabilities: OriginalsCapabilitiesHeader = None,
 ):
+    consumer = _originals_consumer_profile_values(
+        consumer_contract, consumer_capabilities,
+    )
     try:
         manifest = get_authored_original_device_preview_manifest(
             pack_id,
             chapter_id=chapter_id,
             variant_id=variant_id,
+            **consumer,
         )
     except Exception as exc:
         _raise_account_store_error(exc)
@@ -15328,11 +15574,17 @@ async def api_original_asset_content(
     asset_id: str,
     sha256: str,
     user: dict | None = Depends(_optional_user),
+    consumer_contract: OriginalsConsumerContractHeader = None,
+    consumer_capabilities: OriginalsCapabilitiesHeader = None,
 ):
     _require_originals_feature(user)
+    consumer = _originals_consumer_profile_values(
+        consumer_contract, consumer_capabilities,
+    )
     try:
         asset = get_published_original_asset_record(
             pack_id, asset_id, sha256, user_id=user["id"] if user else None,
+            **consumer,
         )
     except Exception as exc:
         _raise_account_store_error(exc)
@@ -15518,22 +15770,37 @@ async def api_public_originals(
     cursor: str = "",
     coverage_region: str = "",
     user: dict | None = Depends(_optional_user),
+    consumer_contract: OriginalsConsumerContractHeader = None,
+    consumer_capabilities: OriginalsCapabilitiesHeader = None,
 ):
     _require_originals_feature(user)
+    consumer = _originals_consumer_profile_values(
+        consumer_contract, consumer_capabilities,
+    )
     try:
         return list_published_originals(
             limit=limit,
             cursor=cursor or None,
             coverage_region=coverage_region or None,
+            **consumer,
         )
     except Exception as exc:
         _raise_account_store_error(exc)
 
 
 @app.get("/api/originals/featured/current")
-async def api_featured_original(user: dict | None = Depends(_optional_user)):
+async def api_featured_original(
+    user: dict | None = Depends(_optional_user),
+    consumer_contract: OriginalsConsumerContractHeader = None,
+    consumer_capabilities: OriginalsCapabilitiesHeader = None,
+):
     _require_originals_feature(user)
-    original = get_featured_original()
+    try:
+        original = get_featured_original(**_originals_consumer_profile_values(
+            consumer_contract, consumer_capabilities,
+        ))
+    except Exception as exc:
+        _raise_account_store_error(exc)
     if not original:
         raise HTTPException(404, "Featured Trailhead Original not found")
     return original
@@ -15543,24 +15810,54 @@ async def api_featured_original(user: dict | None = Depends(_optional_user)):
 async def api_claim_featured_original(
     idempotency_key: str = Header(..., alias="Idempotency-Key"),
     user: dict = Depends(_current_user),
+    consumer_contract: OriginalsConsumerContractHeader = None,
+    consumer_capabilities: OriginalsCapabilitiesHeader = None,
 ):
     _require_originals_feature(user)
     try:
-        return claim_featured_authored_original(user["id"], idempotency_key)
+        return claim_featured_authored_original(
+            user["id"], idempotency_key, **_originals_consumer_profile_values(
+                consumer_contract, consumer_capabilities,
+            ),
+        )
     except Exception as exc:
         _raise_account_store_error(exc)
 
 
 @app.get("/api/originals/owned")
-async def api_owned_originals(user: dict = Depends(_current_user)):
+async def api_owned_originals(
+    user: dict = Depends(_current_user),
+    consumer_contract: OriginalsConsumerContractHeader = None,
+    consumer_capabilities: OriginalsCapabilitiesHeader = None,
+):
     _require_originals_feature(user)
-    return {"items": list_owned_authored_originals(user["id"])}
+    try:
+        items = list_owned_authored_originals(
+            user["id"], **_originals_consumer_profile_values(
+                consumer_contract, consumer_capabilities,
+            ),
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
+    return {"items": items}
 
 
 @app.post("/api/originals/restore")
-async def api_restore_originals(user: dict = Depends(_current_user)):
+async def api_restore_originals(
+    user: dict = Depends(_current_user),
+    consumer_contract: OriginalsConsumerContractHeader = None,
+    consumer_capabilities: OriginalsCapabilitiesHeader = None,
+):
     _require_originals_feature(user)
-    return {"items": restore_owned_authored_originals(user["id"])}
+    try:
+        items = restore_owned_authored_originals(
+            user["id"], **_originals_consumer_profile_values(
+                consumer_contract, consumer_capabilities,
+            ),
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
+    return {"items": items}
 
 
 @app.get(
@@ -15595,13 +15892,19 @@ async def api_original_manifest(
     pack_id: str,
     version: int,
     user: dict | None = Depends(_optional_user),
+    consumer_contract: OriginalsConsumerContractHeader = None,
+    consumer_capabilities: OriginalsCapabilitiesHeader = None,
 ):
     _require_originals_feature(user)
+    consumer = _originals_consumer_profile_values(
+        consumer_contract, consumer_capabilities,
+    )
     try:
         manifest = get_published_original_manifest(
             pack_id,
             version,
             user_id=user["id"] if user else None,
+            **consumer,
         )
     except Exception as exc:
         _raise_account_store_error(exc)
@@ -15616,11 +15919,23 @@ async def api_original_start_readiness(
     version: int,
     body: OriginalStartReadinessRequestV1,
     user: dict | None = Depends(_optional_user),
+    consumer_contract: OriginalsConsumerContractHeader = None,
+    consumer_capabilities: OriginalsCapabilitiesHeader = None,
 ):
     """Fail-closed operational check used immediately before Start Tour."""
 
     _require_originals_feature(user)
+    consumer = _originals_consumer_profile_values(
+        consumer_contract, consumer_capabilities,
+    )
     try:
+        if not get_published_original_version(
+            pack_id,
+            version,
+            include_preview=False,
+            **consumer,
+        ):
+            raise ValueError("Published Original manifest was not found")
         effective_now = datetime.now(timezone.utc)
         observation = await asyncio.to_thread(
             _trusted_original_road_observation,
@@ -15641,6 +15956,7 @@ async def api_original_start_readiness(
             planned_stop_minutes=body.planned_stop_minutes,
             now=effective_now,
             observation=observation,
+            **consumer,
         )
     except Exception as exc:
         _raise_account_store_error(exc)
@@ -15650,9 +15966,18 @@ async def api_original_start_readiness(
 async def api_public_original(
     pack_id: str,
     user: dict | None = Depends(_optional_user),
+    consumer_contract: OriginalsConsumerContractHeader = None,
+    consumer_capabilities: OriginalsCapabilitiesHeader = None,
 ):
     _require_originals_feature(user)
-    original = get_published_original(pack_id)
+    try:
+        original = get_published_original(
+            pack_id, **_originals_consumer_profile_values(
+                consumer_contract, consumer_capabilities,
+            ),
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
     if not original:
         raise HTTPException(404, "Trailhead Original not found")
     return original
@@ -15665,13 +15990,20 @@ async def api_acquire_original(
     user: dict | None = Depends(_optional_user),
     version: Optional[int] = None,
     access_mode: Literal["explorer", "permanent"] = "permanent",
+    consumer_contract: OriginalsConsumerContractHeader = None,
+    consumer_capabilities: OriginalsCapabilitiesHeader = None,
 ):
     _require_originals_feature(user)
+    consumer = _originals_consumer_profile_values(
+        consumer_contract, consumer_capabilities,
+    )
     try:
         original = (
-            get_published_original_version(pack_id, version, include_preview=False)
+            get_published_original_version(
+                pack_id, version, include_preview=False, **consumer,
+            )
             if version is not None
-            else get_published_original(pack_id, include_preview=False)
+            else get_published_original(pack_id, include_preview=False, **consumer)
         )
     except Exception as exc:
         _raise_account_store_error(exc)
@@ -15701,6 +16033,7 @@ async def api_acquire_original(
         return acquire_authored_original(
             user["id"], original["id"], idempotency_key,
             version=original["version"], access_mode=access_mode,
+            **consumer,
         )
     except Exception as exc:
         _raise_account_store_error(exc)

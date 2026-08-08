@@ -36,6 +36,7 @@ function selectionDigest(
     selection.validation_selection_id,
     selection.chapter_id,
     selection.variant_id,
+    selection.delivery_contract_sha256 ?? '',
   ].join('\u0000');
   return [0x811c9dc5, 0x9e3779b9, 0x85ebca6b, 0xc2b2ae35]
     .map(seed => hash32(identity, seed))
@@ -49,7 +50,7 @@ function sessionKey(
 ) {
   const base = `${encodeURIComponent(packId)}@${version}`;
   return chapterSelection
-    ? `v2~${selectionDigest(packId, version, chapterSelection)}`
+    ? `${chapterSelection.delivery_contract_sha256 ? 'v3' : 'v2'}~${selectionDigest(packId, version, chapterSelection)}`
     : base;
 }
 
@@ -79,6 +80,22 @@ function mergedGuestSession(
   const mergedProgress = guestProgress == null && accountProgress == null
     ? null
     : Math.max(guestProgress ?? 0, accountProgress ?? 0);
+  const guestLongForm = guest.long_form;
+  const accountLongForm = account.long_form;
+  if (
+    guestLongForm
+    && accountLongForm
+    && guestLongForm.delivery_contract_sha256 !== accountLongForm.delivery_contract_sha256
+  ) throw new Error('Original long-form progress cannot be merged across delivery contracts.');
+  const longForm = guestLongForm || accountLongForm
+    ? {
+      ...(newer.long_form ?? guestLongForm ?? accountLongForm)!,
+      completed_item_ids: union(
+        guestLongForm?.completed_item_ids ?? [],
+        accountLongForm?.completed_item_ids ?? [],
+      ),
+    }
+    : undefined;
   return normalizeOriginalSession({
     ...newer,
     session_id: account.session_id,
@@ -87,6 +104,7 @@ function mergedGuestSession(
     completed_stop_ids: union(guest.completed_stop_ids, account.completed_stop_ids),
     skipped_stop_ids: union(guest.skipped_stop_ids, account.skipped_stop_ids),
     missed_stop_ids: union(guest.missed_stop_ids, account.missed_stop_ids),
+    ...(longForm ? { long_form: longForm } : {}),
     last_projected_route_progress_m: mergedProgress,
     updated_at_ms: Date.now(),
   });
@@ -220,7 +238,14 @@ export function createOriginalSessionStore(
         if (
           !current
           || current.session_id !== expectedSessionId
-          || current.status !== 'active'
+          || (
+            current.status !== 'active'
+            && !(
+              current.long_form?.current_item_id
+              && current.long_form.current_selection_origin === 'user_explicit'
+              && (current.status === 'ready' || current.status === 'completed')
+            )
+          )
           || current.user_paused
         ) return null;
 

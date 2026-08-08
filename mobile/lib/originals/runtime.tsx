@@ -52,8 +52,24 @@ import {
 import { validateOriginalManifest } from './manifest';
 import {
   resolveOriginalManifestForPlayback,
-  resolveOriginalManifestForSession,
+  resolveOriginalManifestPlaybackForSession,
 } from './manifestV2';
+import {
+  completeOriginalLongFormItem,
+  createOriginalLongFormSession,
+  ensureOriginalLongFormSession,
+  evaluateOriginalLongFormCapacity,
+  originalLongFormBeforeRouteContextIsActive,
+  originalLongFormCapacityLocationIsAccepted,
+  originalLongFormHeadlessResumeAction,
+  originalLongFormLandmarkFixIsEligible,
+  preemptOriginalLongFormForHardCue,
+  replayOriginalLongFormItem,
+  resumeDeferredOriginalLongFormAfterHardCue,
+  selectOriginalLongFormItem,
+  updateOriginalLongFormAudioPosition,
+  withOriginalLongFormSession,
+} from './longFormScheduler';
 import { stopHeadlessOriginalRuntime } from './headlessRuntime';
 import { originalOwnerScopeForAccount, originalRestoreScopeIsCurrent } from './ownership';
 import { getOriginalPreviewToken } from './previewAccess';
@@ -85,6 +101,7 @@ import type {
   OriginalManifest,
   OriginalManifestV1,
   OriginalOwnerScope,
+  OriginalSelectablePlaybackPlanV1,
   OriginalSessionV1,
   OriginalTriggerEvaluation,
 } from './types';
@@ -123,6 +140,7 @@ export type OriginalsRuntimeValue = {
   state: OriginalsRuntimeState;
   session: OriginalSessionV1 | null;
   manifest: OriginalManifestV1 | null;
+  selectablePlan: OriginalSelectablePlaybackPlanV1 | null;
   bundle: OriginalBundleRecord | null;
   downloadProgress: OriginalBundleProgress | null;
   error: string | null;
@@ -148,6 +166,10 @@ export type OriginalsRuntimeValue = {
   stopTour: () => Promise<void>;
   skipCurrentStory: () => Promise<void>;
   replayStory: (stopId: string) => Promise<void>;
+  playLongFormItem: (
+    itemId: string,
+    options: { userConfirmedParked?: boolean },
+  ) => Promise<void>;
   seekStory: (positionMs: number) => Promise<void>;
   setMuted: (muted: boolean) => Promise<void>;
   acquireOriginal: (
@@ -210,6 +232,7 @@ export function OriginalsRuntimeProvider({
   const [state, setState] = useState<OriginalsRuntimeState>('idle');
   const [session, setSession] = useState<OriginalSessionV1 | null>(null);
   const [manifest, setManifest] = useState<OriginalManifestV1 | null>(null);
+  const [selectablePlan, setSelectablePlan] = useState<OriginalSelectablePlaybackPlanV1 | null>(null);
   const [bundle, setBundle] = useState<OriginalBundleRecord | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<OriginalBundleProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -220,6 +243,8 @@ export function OriginalsRuntimeProvider({
 
   const sessionRef = useRef<OriginalSessionV1 | null>(null);
   const manifestRef = useRef<OriginalManifestV1 | null>(null);
+  const selectablePlanRef = useRef<OriginalSelectablePlaybackPlanV1 | null>(null);
+  const lastLocationSampleRef = useRef<OriginalLocationSample | null>(null);
   const bundleRef = useRef<OriginalBundleRecord | null>(null);
   const stopLocationRef = useRef<(() => Promise<void>) | null>(null);
   const audioLeaseRef = useRef<OriginalAudioFocusLease | null>(null);
@@ -311,7 +336,10 @@ export function OriginalsRuntimeProvider({
     if (!active) return;
     if (audioState.loaded && Math.abs(audioState.position_ms - lastPositionPersistRef.current) >= 5_000) {
       lastPositionPersistRef.current = audioState.position_ms;
-      const next = { ...active, current_audio_position_ms: audioState.position_ms, updated_at_ms: Date.now() };
+      const plan = selectablePlanRef.current;
+      const next = active.long_form?.current_item_id && plan
+        ? updateOriginalLongFormAudioPosition(active, plan, audioState.position_ms)
+        : { ...active, current_audio_position_ms: audioState.position_ms, updated_at_ms: Date.now() };
       void publishSession(next).catch(() => {});
     }
     if (audioState.did_finish && !finishingAudioRef.current) {
@@ -330,16 +358,21 @@ export function OriginalsRuntimeProvider({
 
   const persistExactAudioPosition = useCallback(async () => {
     const active = sessionRef.current;
-    if (!active?.current_stop_id) return active;
+    if (!active) return null;
+    const hasOptionalAudio = Boolean(active.long_form?.current_item_id && selectablePlanRef.current);
+    if (!active.current_stop_id && !hasOptionalAudio) return active;
     const audioState = await dependencies.audio.getState();
     if (!audioState.loaded) return active;
     const positionMs = Math.max(0, audioState.position_ms);
     lastPositionPersistRef.current = positionMs;
-    return publishSession({
-      ...active,
-      current_audio_position_ms: positionMs,
-      updated_at_ms: Date.now(),
-    });
+    const plan = selectablePlanRef.current;
+    return publishSession(hasOptionalAudio && plan
+      ? updateOriginalLongFormAudioPosition(active, plan, positionMs)
+      : {
+        ...active,
+        current_audio_position_ms: positionMs,
+        updated_at_ms: Date.now(),
+      });
   }, [dependencies.audio, publishSession]);
 
   const acquireOriginalAudioFocus = useCallback(async () => {
@@ -362,13 +395,14 @@ export function OriginalsRuntimeProvider({
 
   const playStop = useCallback(async (stopId: string, positionMs = 0) => {
     const activeManifest = manifestRef.current;
-    const activeSession = sessionRef.current;
+    let activeSession = sessionRef.current;
     if (!activeManifest || !activeSession) throw new Error('No Trailhead Original is active.');
+    const sessionId = activeSession.session_id;
     const generation = trackingGenerationRef.current;
     const operationIsCurrent = () => (
       !stoppingRef.current
       && generation === trackingGenerationRef.current
-      && sessionRef.current?.session_id === activeSession.session_id
+      && sessionRef.current?.session_id === sessionId
       && manifestRef.current?.manifest_id === activeManifest.manifest_id
     );
     if (!operationIsCurrent()) return;
@@ -399,6 +433,22 @@ export function OriginalsRuntimeProvider({
       ).catch(() => null)
       : null;
     if (!operationIsCurrent()) return;
+
+    const activePlan = selectablePlanRef.current;
+    const latestSession = sessionRef.current;
+    if (activePlan && latestSession?.long_form?.current_item_id) {
+      const audioState = await dependencies.audio.getState().catch(() => null);
+      await dependencies.audio.stop().catch(() => {});
+      await dependencies.audio.unload().catch(() => {});
+      await releaseAudio();
+      if (!operationIsCurrent()) return;
+      activeSession = await publishSession(preemptOriginalLongFormForHardCue(
+        latestSession,
+        activePlan,
+        audioState?.loaded ? audioState.position_ms : latestSession.long_form.current_audio_position_ms,
+      ));
+      if (!operationIsCurrent()) return;
+    }
 
     // Persist the trigger/current cue before audio begins. A process restart can
     // resume it, and the trigger engine will never fire the same cue twice.
@@ -436,6 +486,7 @@ export function OriginalsRuntimeProvider({
       if (originalAudioCoordinator.activeOwner() === 'trailhead-originals') {
         await dependencies.audio.play();
       }
+      if (mountedRef.current) setState('tracking');
     } catch (error) {
       await dependencies.audio.unload().catch(() => {});
       await releaseAudio();
@@ -446,9 +497,130 @@ export function OriginalsRuntimeProvider({
     }
   }, [acquireOriginalAudioFocus, dependencies.audio, dependencies.bundles, handleAudioState, publishSession, releaseAudio, requireCurrentAccess]);
 
+  const playOptionalItem = useCallback(async (itemId: string, positionMs = 0) => {
+    const activeManifest = manifestRef.current;
+    const activePlan = selectablePlanRef.current;
+    const activeSession = sessionRef.current;
+    if (!activeManifest || !activePlan || !activeSession) {
+      throw new Error('No Trailhead Original story is active.');
+    }
+    const item = activePlan.items.find(value => value.id === itemId);
+    if (!item || activeSession.long_form?.current_item_id !== item.id) {
+      throw new Error('This story is not selected for playback.');
+    }
+    if (activeSession.current_stop_id) {
+      throw new Error('The driving story must finish before this story can play.');
+    }
+    const generation = trackingGenerationRef.current;
+    const operationIsCurrent = () => (
+      !stoppingRef.current
+      && generation === trackingGenerationRef.current
+      && sessionRef.current?.session_id === activeSession.session_id
+      && sessionRef.current?.long_form?.current_item_id === item.id
+      && selectablePlanRef.current?.delivery_contract_sha256 === activePlan.delivery_contract_sha256
+    );
+    const ownerScope = await requireCurrentAccess(
+      activeManifest.pack_id,
+      activeManifest.version,
+      activeSession.owner_scope,
+      simulationRef.current,
+      activeManifest.manifest_id,
+    );
+    if (!operationIsCurrent()) return;
+    const localUri = await dependencies.bundles.assetUri(
+      ownerScope,
+      activeManifest.pack_id,
+      activeManifest.version,
+      item.audio_asset_id,
+    );
+    if (!operationIsCurrent()) return;
+    if (!localUri) throw new Error('Download this Original before playing its stories.');
+    const artworkUri = item.artwork_asset_id
+      ? await dependencies.bundles.assetUri(
+        ownerScope,
+        activeManifest.pack_id,
+        activeManifest.version,
+        item.artwork_asset_id,
+      ).catch(() => null)
+      : null;
+    if (!operationIsCurrent()) return;
+    const persisted = await publishSession(updateOriginalLongFormAudioPosition(
+      activeSession,
+      activePlan,
+      positionMs,
+    ));
+    if (!operationIsCurrent()) return;
+    lastPositionPersistRef.current = persisted.long_form?.current_audio_position_ms ?? 0;
+    await acquireOriginalAudioFocus();
+    if (!operationIsCurrent()) {
+      await releaseAudio();
+      return;
+    }
+    try {
+      await dependencies.audio.load(localUri, {
+        positionMs: persisted.long_form?.current_audio_position_ms ?? 0,
+        metadata: {
+          title: item.title,
+          artist: 'Trailhead Originals',
+          albumTitle: activeManifest.title,
+          ...(artworkUri ? { artworkUrl: artworkUri } : {}),
+        },
+        onState: handleAudioState,
+        onUserPause: value => handleExternalUserPauseRef.current(value),
+        onUserPlay: value => handleExternalUserPlayRef.current(value),
+      });
+      if (!operationIsCurrent()) {
+        await dependencies.audio.unload().catch(() => {});
+        await releaseAudio();
+        return;
+      }
+      if (originalAudioCoordinator.activeOwner() === 'trailhead-originals') {
+        await dependencies.audio.play();
+      }
+      if (mountedRef.current) setState('tracking');
+    } catch (caught) {
+      await dependencies.audio.unload().catch(() => {});
+      await releaseAudio();
+      if (originalAudioCoordinator.activeOwner() == null) {
+        await dependencies.audio.releaseSession().catch(() => {});
+      }
+      throw caught;
+    }
+  }, [acquireOriginalAudioFocus, dependencies.audio, dependencies.bundles, handleAudioState, publishSession, releaseAudio, requireCurrentAccess]);
+
   const handleAudioFinished = useCallback(async () => {
     const activeManifest = manifestRef.current;
     const activeSession = sessionRef.current;
+    const activePlan = selectablePlanRef.current;
+    const completedOptionalId = activeSession?.long_form?.current_item_id;
+    if (activeManifest && activeSession && activePlan && completedOptionalId) {
+      const generation = trackingGenerationRef.current;
+      await dependencies.audio.unload();
+      await releaseAudio();
+      if (
+        stoppingRef.current
+        || generation !== trackingGenerationRef.current
+        || sessionRef.current?.session_id !== activeSession.session_id
+      ) return;
+      const next = completeOriginalLongFormItem(
+        activeSession,
+        activePlan,
+        completedOptionalId,
+      );
+      await publishSession(next);
+      const nextGroupItemId = next.long_form?.current_item_id;
+      if (nextGroupItemId) {
+        await playOptionalItem(nextGroupItemId, 0);
+        return;
+      }
+      if (originalAudioCoordinator.activeOwner() == null) {
+        await dependencies.audio.releaseSession().catch(() => {});
+      }
+      if (mountedRef.current) {
+        setState(next.status === 'completed' ? 'completed' : 'tracking');
+      }
+      return;
+    }
     const completedStopId = activeSession?.current_stop_id;
     if (!activeManifest || !activeSession || !completedStopId) return;
     const generation = trackingGenerationRef.current;
@@ -468,6 +640,10 @@ export function OriginalsRuntimeProvider({
     const promotion = promoteNextOriginalStop(next);
     next = promotion.session;
     const queued = promotion.promoted_stop_id;
+    const deferred = !queued && activePlan
+      ? resumeDeferredOriginalLongFormAfterHardCue(next, activePlan)
+      : { session: next, action: null };
+    next = deferred.session;
     await publishSession(next);
     if (
       stoppingRef.current
@@ -482,8 +658,12 @@ export function OriginalsRuntimeProvider({
         outcome: 'completed',
       });
     }
-    if (!queued && originalAudioCoordinator.activeOwner() == null) {
+    if (!queued && !deferred.action && originalAudioCoordinator.activeOwner() == null) {
       await dependencies.audio.releaseSession().catch(() => {});
+    }
+    if (deferred.action) {
+      await playOptionalItem(deferred.action.item_id, deferred.action.position_ms);
+      return;
     }
     if (next.status === 'completed') {
       await stopLocation();
@@ -495,12 +675,12 @@ export function OriginalsRuntimeProvider({
       return;
     }
     if (queued) await playStop(queued);
-  }, [dependencies.audio, playStop, publishSession, releaseAudio, stopLocation]);
+  }, [dependencies.audio, playOptionalItem, playStop, publishSession, releaseAudio, stopLocation]);
   handleAudioFinishedRef.current = handleAudioFinished;
 
   const handleExternalUserPause = useCallback(async (audioState: OriginalAudioPlaybackState) => {
     const active = sessionRef.current;
-    if (!active?.current_stop_id || active.user_paused) return;
+    if ((!active?.current_stop_id && !active?.long_form?.current_item_id) || active.user_paused) return;
     trackingGenerationRef.current += 1;
     const generation = trackingGenerationRef.current;
     await stopLocation();
@@ -514,7 +694,15 @@ export function OriginalsRuntimeProvider({
       ...active,
       status: 'paused',
       user_paused: true,
-      current_audio_position_ms: Math.max(0, audioState.position_ms),
+      ...(active.long_form?.current_item_id && selectablePlanRef.current
+        ? {
+          long_form: updateOriginalLongFormAudioPosition(
+            active,
+            selectablePlanRef.current,
+            audioState.position_ms,
+          ).long_form,
+        }
+        : { current_audio_position_ms: Math.max(0, audioState.position_ms) }),
       updated_at_ms: Date.now(),
     });
     if (
@@ -537,9 +725,42 @@ export function OriginalsRuntimeProvider({
       if (!activeManifest || !activeSession) return;
       const evaluation = evaluateOriginalLocation(activeManifest, activeSession, sample);
       if (stoppingRef.current || generation !== trackingGenerationRef.current) return;
+      const previousAcceptedTimestamp = activeSession.last_location_timestamp_ms;
+      const acceptedForTransientUse = evaluation.decision.code !== 'stale_fix'
+        && (previousAcceptedTimestamp == null || sample.timestamp_ms > previousAcceptedTimestamp)
+        && evaluation.session.last_location_timestamp_ms === sample.timestamp_ms;
+      if (
+        acceptedForTransientUse
+        && (
+          !lastLocationSampleRef.current
+          || sample.timestamp_ms > lastLocationSampleRef.current.timestamp_ms
+        )
+      ) lastLocationSampleRef.current = sample;
       lastTriggerEvaluationRef.current = evaluation;
       if (mountedRef.current) setLastTriggerEvaluation(evaluation);
-      await publishSession(evaluation.session);
+      const trigger = evaluation.events.find(event => event.type === 'stop_triggered');
+      const activePlan = selectablePlanRef.current;
+      const capacityLocationAccepted = originalLongFormCapacityLocationIsAccepted(
+        activeSession,
+        sample,
+        evaluation,
+      );
+      const capacity = !trigger
+        && activePlan
+        && !simulationRef.current
+        && capacityLocationAccepted
+        ? evaluateOriginalLongFormCapacity(
+          activePlan,
+          activeManifest,
+          evaluation.session,
+          sample,
+          {
+            projected_progress_m: evaluation.projected_route_progress_m,
+            distance_from_route_m: evaluation.distance_from_route_m,
+          },
+        )
+        : null;
+      await publishSession(capacity?.session ?? evaluation.session);
       if (stoppingRef.current || generation !== trackingGenerationRef.current) return;
       for (const event of evaluation.events) {
         if (event.type === 'stops_missed') {
@@ -554,13 +775,31 @@ export function OriginalsRuntimeProvider({
           });
         }
       }
-      const trigger = evaluation.events.find(event => event.type === 'stop_triggered');
       if (trigger?.type === 'stop_triggered') {
         try {
           await playStop(trigger.stop_id);
         } catch (caught) {
           if (stoppingRef.current || generation !== trackingGenerationRef.current) return;
           await stopLocation();
+          const failed = sessionRef.current;
+          if (failed) {
+            await publishSession({
+              ...failed,
+              status: 'paused',
+              user_paused: true,
+              updated_at_ms: Date.now(),
+            }).catch(() => {});
+          }
+          if (mountedRef.current) {
+            setError(caught instanceof Error ? caught.message : 'Narration could not start.');
+            setState('error');
+          }
+        }
+      } else if (capacity?.action) {
+        try {
+          await playOptionalItem(capacity.action.item_id, capacity.action.position_ms);
+        } catch (caught) {
+          if (stoppingRef.current || generation !== trackingGenerationRef.current) return;
           const failed = sessionRef.current;
           if (failed) {
             await publishSession({
@@ -584,7 +823,7 @@ export function OriginalsRuntimeProvider({
     const result = sampleTailRef.current.then(operation, operation);
     sampleTailRef.current = result.catch(() => undefined);
     return result;
-  }, [playStop, publishSession, stopLocation]);
+  }, [playOptionalItem, playStop, publishSession, stopLocation]);
 
   const startLocation = useCallback(async (operationIsCurrent?: () => boolean) => {
     await stopLocation();
@@ -611,7 +850,7 @@ export function OriginalsRuntimeProvider({
     const active = sessionRef.current;
     const activeManifest = manifestRef.current;
     if (
-      !active?.current_stop_id
+      (!active?.current_stop_id && !active?.long_form?.current_item_id)
       || !active.user_paused
       || !activeManifest
       || stoppingRef.current
@@ -624,6 +863,7 @@ export function OriginalsRuntimeProvider({
       && generation === trackingGenerationRef.current
       && sessionRef.current?.session_id === active.session_id
       && sessionRef.current?.current_stop_id === active.current_stop_id
+      && sessionRef.current?.long_form?.current_item_id === active.long_form?.current_item_id
       && manifestRef.current?.manifest_id === activeManifest.manifest_id
     );
     await publishSession({
@@ -717,7 +957,7 @@ export function OriginalsRuntimeProvider({
         );
       requireActiveActivation();
       const now = Date.now();
-      const active = {
+      let active: OriginalSessionV1 = {
         ...(existing ?? createOriginalSession(cleanManifest, ownerScope, now, resolved.selection)),
         status: 'active' as const,
         user_paused: false,
@@ -726,6 +966,12 @@ export function OriginalsRuntimeProvider({
         completed_at_ms: restart ? null : existing?.completed_at_ms ?? null,
         updated_at_ms: now,
       };
+      if (resolved.source_schema_version === 3) {
+        active = withOriginalLongFormSession(
+          active,
+          ensureOriginalLongFormSession(active, resolved.selectable, now),
+        );
+      }
       await stopLocation();
       requireActiveActivation();
       await dependencies.audio.stop().catch(() => {});
@@ -737,9 +983,14 @@ export function OriginalsRuntimeProvider({
       simulationRef.current = simulate;
       lastTriggerEvaluationRef.current = null;
       manifestRef.current = cleanManifest;
+      selectablePlanRef.current = resolved.source_schema_version === 3
+        ? resolved.selectable
+        : null;
+      lastLocationSampleRef.current = null;
       bundleRef.current = installed;
       if (mountedRef.current) {
         setManifest(cleanManifest);
+        setSelectablePlan(selectablePlanRef.current);
         setBundle(installed);
         setError(null);
         setSimulation(simulate);
@@ -758,6 +1009,12 @@ export function OriginalsRuntimeProvider({
       if (active.current_stop_id) {
         await playStop(active.current_stop_id, active.current_audio_position_ms);
         requireActiveActivation();
+      } else if (resolved.source_schema_version === 3) {
+        const explicitResume = originalLongFormHeadlessResumeAction(active, resolved.selectable);
+        if (explicitResume) {
+          await playOptionalItem(explicitResume.item_id, explicitResume.position_ms);
+          requireActiveActivation();
+        }
       }
       return sessionRef.current ?? active;
     } catch (caught) {
@@ -788,7 +1045,7 @@ export function OriginalsRuntimeProvider({
       }
       throw caught;
     }
-  }, [dependencies.audio, dependencies.bundles, dependencies.sessions, playStop, publishSession, releaseAudio, requireCurrentAccess, startLocation, stopLocation]);
+  }, [dependencies.audio, dependencies.bundles, dependencies.sessions, playOptionalItem, playStop, publishSession, releaseAudio, requireCurrentAccess, startLocation, stopLocation]);
 
   const downloadOriginal = useCallback(async (
     manifestInput: OriginalManifest,
@@ -947,9 +1204,12 @@ export function OriginalsRuntimeProvider({
       }
       throw new Error(message);
     }
+    const resumingCompletedStory = Boolean(
+      active.long_form?.current_item_id && active.completed_at_ms != null,
+    );
     const next = await publishSession({
       ...active,
-      status: 'active',
+      status: resumingCompletedStory ? 'completed' : 'active',
       user_paused: false,
       updated_at_ms: Date.now(),
     });
@@ -966,7 +1226,7 @@ export function OriginalsRuntimeProvider({
     }
     const audioState = await dependencies.audio.getState();
     if (!operationIsCurrent()) return;
-    if (next.current_stop_id) {
+    if (next.current_stop_id || next.long_form?.current_item_id) {
       if (audioState.loaded) {
         await acquireOriginalAudioFocus();
         if (!operationIsCurrent()) {
@@ -976,11 +1236,16 @@ export function OriginalsRuntimeProvider({
         if (originalAudioCoordinator.activeOwner() === 'trailhead-originals') {
           await dependencies.audio.play();
         }
-      } else {
+      } else if (next.current_stop_id) {
         await playStop(next.current_stop_id, next.current_audio_position_ms);
+      } else if (next.long_form?.current_item_id) {
+        await playOptionalItem(
+          next.long_form.current_item_id,
+          next.long_form.current_audio_position_ms,
+        );
       }
     }
-  }, [acquireOriginalAudioFocus, dependencies.audio, dependencies.bundles, playStop, publishSession, releaseAudio, requireCurrentAccess, startLocation, stopLocation]);
+  }, [acquireOriginalAudioFocus, dependencies.audio, dependencies.bundles, playOptionalItem, playStop, publishSession, releaseAudio, requireCurrentAccess, startLocation, stopLocation]);
 
   const stopTour = useCallback(() => {
     const inFlight = stopTourPromiseRef.current;
@@ -992,18 +1257,19 @@ export function OriginalsRuntimeProvider({
     const sessionAtStop = sessionRef.current;
     stoppingRef.current = true;
     trackingGenerationRef.current += 1;
+    // Disable the independent cold runtime synchronously, before reading
+    // foreground audio state or awaiting any teardown work. Its generation
+    // gate must win every End Tour race, including a slow native getState().
+    const headlessStop = stopHeadlessOriginalRuntime().catch(() => {});
 
     const operation = (async () => {
       try {
         let exactAudioPositionMs = sessionAtStop?.current_audio_position_ms ?? 0;
-        if (sessionAtStop?.current_stop_id) {
+        if (sessionAtStop?.current_stop_id || sessionAtStop?.long_form?.current_item_id) {
           const audioState = await dependencies.audio.getState().catch(() => null);
           if (audioState?.loaded) exactAudioPositionMs = Math.max(0, audioState.position_ms);
         }
 
-        // Start cancelling the cold runtime before stopping native deliveries.
-        // Its stopping gate consumes (rather than queues) any final callback.
-        const headlessStop = stopHeadlessOriginalRuntime().catch(() => {});
         await stopLocation().catch(() => {});
         await dependencies.location.stopActive().catch(() => {});
         let persistenceError: unknown = null;
@@ -1011,14 +1277,23 @@ export function OriginalsRuntimeProvider({
         if (!wasSimulation) {
           if (active) {
             try {
-              await dependencies.sessions.save({
+              const stopped = {
                 ...active,
                 status: 'stopped',
                 current_audio_position_ms: active.current_stop_id
                   ? exactAudioPositionMs
                   : active.current_audio_position_ms,
                 updated_at_ms: Date.now(),
-              });
+              } satisfies OriginalSessionV1;
+              await dependencies.sessions.save(
+                active.long_form?.current_item_id && selectablePlanRef.current
+                  ? updateOriginalLongFormAudioPosition(
+                    stopped,
+                    selectablePlanRef.current,
+                    exactAudioPositionMs,
+                  )
+                  : stopped,
+              );
             } catch (error) {
               persistenceError = error;
             }
@@ -1055,12 +1330,15 @@ export function OriginalsRuntimeProvider({
         lastTriggerEvaluationRef.current = null;
         sessionRef.current = null;
         manifestRef.current = null;
+        selectablePlanRef.current = null;
+        lastLocationSampleRef.current = null;
         bundleRef.current = null;
         finishingAudioRef.current = false;
         lastPositionPersistRef.current = 0;
         if (mountedRef.current) {
           setSession(null);
           setManifest(null);
+          setSelectablePlan(null);
           setBundle(null);
           setSimulation(false);
           setLastTriggerEvaluation(null);
@@ -1173,6 +1451,49 @@ export function OriginalsRuntimeProvider({
     if (mountedRef.current) setLastTriggerEvaluation(null);
   }, []);
 
+  const playLongFormItem = useCallback(async (
+    itemId: string,
+    options: { userConfirmedParked?: boolean },
+  ) => {
+    const active = sessionRef.current;
+    const plan = selectablePlanRef.current;
+    if (!active || !plan || stoppingRef.current) {
+      throw new Error('No Trailhead Original story is ready.');
+    }
+    const item = plan.items.find(value => value.id === itemId);
+    if (!item) throw new Error('This story is not part of the selected route.');
+    const latestSample = lastLocationSampleRef.current;
+    const withinLandmarkRadius = originalLongFormLandmarkFixIsEligible(
+      item,
+      latestSample,
+      Date.now(),
+    );
+    const eligibility = {
+      user_confirmed_parked: options.userConfirmedParked === true,
+      before_route_context_active: originalLongFormBeforeRouteContextIsActive(active),
+      within_landmark_radius: withinLandmarkRadius,
+      route_completed: active.status === 'completed'
+        && active.completed_at_ms != null,
+    };
+    const result = active.long_form?.completed_item_ids.includes(itemId)
+      ? replayOriginalLongFormItem(plan, active, itemId, eligibility)
+      : selectOriginalLongFormItem(plan, active, itemId, eligibility);
+    if (!result.ok) {
+      const messages: Record<typeof result.code, string> = {
+        already_complete: 'This story is already complete.',
+        audio_busy: 'Finish the playing story before starting another one.',
+        not_available_here: 'This story is not available from the current stop.',
+        not_complete: 'This story has not finished yet.',
+        parked_confirmation_required: 'Confirm that you are parked before playing this story.',
+        route_completion_required: 'This story becomes available after the route is complete.',
+        unknown_item: 'This story is not part of the selected route.',
+      };
+      throw new Error(messages[result.code]);
+    }
+    await publishSession(result.session);
+    await playOptionalItem(item.id, 0);
+  }, [playOptionalItem, publishSession]);
+
   const replayStory = useCallback(async (stopId: string) => {
     const active = sessionRef.current;
     const activeManifest = manifestRef.current;
@@ -1241,11 +1562,14 @@ export function OriginalsRuntimeProvider({
       || generation !== trackingGenerationRef.current
       || sessionRef.current?.session_id !== active.session_id
     ) return;
-    await publishSession({
-      ...active,
-      current_audio_position_ms: Math.max(0, positionMs),
-      updated_at_ms: Date.now(),
-    });
+    const plan = selectablePlanRef.current;
+    await publishSession(active.long_form?.current_item_id && plan
+      ? updateOriginalLongFormAudioPosition(active, plan, positionMs)
+      : {
+        ...active,
+        current_audio_position_ms: Math.max(0, positionMs),
+        updated_at_ms: Date.now(),
+      });
   }, [dependencies.audio, publishSession]);
 
   const setMuted = useCallback(async (nextMuted: boolean) => {
@@ -1449,14 +1773,24 @@ export function OriginalsRuntimeProvider({
     ]);
     if (!storedManifest || !restoredBundle || !mountedRef.current || !scopeIsStillCurrent()) return null;
     let restoredManifest: OriginalManifestV1;
+    let restoredSelectablePlan: OriginalSelectablePlaybackPlanV1 | null = null;
+    let restoredSession = active;
     try {
-      restoredManifest = resolveOriginalManifestForSession(storedManifest, active);
+      const playback = resolveOriginalManifestPlaybackForSession(storedManifest, active);
+      restoredManifest = playback.manifest;
+      if (playback.source_schema_version === 3) {
+        restoredSelectablePlan = playback.selectable;
+        restoredSession = withOriginalLongFormSession(
+          active,
+          ensureOriginalLongFormSession(active, playback.selectable),
+        );
+      }
     } catch {
       return null;
     }
     if (!verified) {
       const corrupt = {
-        ...active,
+        ...restoredSession,
         status: 'paused' as const,
         download_state: 'corrupt' as const,
         updated_at_ms: Date.now(),
@@ -1464,9 +1798,11 @@ export function OriginalsRuntimeProvider({
       if (!scopeIsStillCurrent()) return null;
       sessionRef.current = corrupt;
       manifestRef.current = restoredManifest;
+      selectablePlanRef.current = restoredSelectablePlan;
       bundleRef.current = restoredBundle;
       setSession(corrupt);
       setManifest(restoredManifest);
+      setSelectablePlan(restoredSelectablePlan);
       setBundle(restoredBundle);
       setError('This offline download is incomplete or corrupt. Download it again before resuming.');
       setState('error');
@@ -1474,10 +1810,10 @@ export function OriginalsRuntimeProvider({
       return corrupt;
     }
     const normalizedActive = normalizeCompletedOriginalSession(
-      active,
+      restoredSession,
       restoredManifest.stops.map(stop => stop.id),
     );
-    let resumable = { ...normalizedActive, download_state: 'ready' as const };
+    let resumable: OriginalSessionV1 = { ...normalizedActive, download_state: 'ready' };
     if (normalizedActive.status === 'active') {
       // A cold TaskManager runtime may still own native location/audio when the
       // foreground app is opened. Quiesce both adapters and persist the exact
@@ -1487,7 +1823,7 @@ export function OriginalsRuntimeProvider({
       await dependencies.audio.pause().catch(() => {});
       await dependencies.audio.unload().catch(() => {});
       await originalAudioCoordinator.release('trailhead-originals').catch(() => {});
-      resumable = {
+      const paused: OriginalSessionV1 = {
         ...resumable,
         status: 'paused',
         user_paused: false,
@@ -1496,13 +1832,25 @@ export function OriginalsRuntimeProvider({
           : normalizedActive.current_audio_position_ms,
         updated_at_ms: Date.now(),
       };
+      resumable = normalizedActive.long_form?.current_item_id
+        && restoredSelectablePlan
+        && audioState?.loaded
+        ? updateOriginalLongFormAudioPosition(
+          paused,
+          restoredSelectablePlan,
+          audioState.position_ms,
+        )
+        : paused;
     }
     if (!scopeIsStillCurrent()) return null;
     sessionRef.current = resumable;
     manifestRef.current = restoredManifest;
+    selectablePlanRef.current = restoredSelectablePlan;
+    lastLocationSampleRef.current = null;
     bundleRef.current = restoredBundle;
     setSession(resumable);
     setManifest(restoredManifest);
+    setSelectablePlan(restoredSelectablePlan);
     setBundle(restoredBundle);
     setState(resumable.status === 'completed' ? 'completed' : 'ready');
     if (resumable !== active) await dependencies.sessions.setActive(resumable);
@@ -1607,6 +1955,7 @@ export function OriginalsRuntimeProvider({
     state,
     session,
     manifest,
+    selectablePlan,
     bundle,
     downloadProgress,
     error,
@@ -1623,6 +1972,7 @@ export function OriginalsRuntimeProvider({
     stopTour,
     skipCurrentStory,
     replayStory,
+    playLongFormItem,
     seekStory,
     setMuted,
     acquireOriginal,
@@ -1642,10 +1992,12 @@ export function OriginalsRuntimeProvider({
     audioPlaybackState,
     lastTriggerEvaluation,
     manifest,
+    selectablePlan,
     migrateGuestToAccount,
     muted,
     simulation,
     pauseTour,
+    playLongFormItem,
     replayStory,
     resumeTour,
     seekStory,

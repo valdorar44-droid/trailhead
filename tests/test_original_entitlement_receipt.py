@@ -50,7 +50,12 @@ class _EntitlementDb:
         raise AssertionError(f"Unexpected query: {query}")
 
 
-def _entitlement_row(*, expires_at: int, acquisition_type: str = "explorer_included"):
+def _entitlement_row(
+    *,
+    expires_at: int,
+    acquisition_type: str = "explorer_included",
+    manifest_schema_version: int = 2,
+):
     return {
         "id": "entitlement-test-smokies",
         "user_id": 42,
@@ -72,7 +77,7 @@ def _entitlement_row(*, expires_at: int, acquisition_type: str = "explorer_inclu
         "validation_metadata": "{}",
         "template_json": "{}",
         "original_manifest_json": json.dumps({
-            "schema_version": 2,
+            "schema_version": manifest_schema_version,
             "manifest_id": "smokies-original:1:published",
         }),
         "published_at": int(time.time()),
@@ -154,6 +159,42 @@ def test_v2_explorer_result_requires_receipt_and_fails_safe_when_unconfigured():
     assert unsigned["entitlement"]["access_receipt"] is None
     assert unsigned["entitlement"]["access_owner_binding"] is None
     assert unsigned["pack"]["id"] == "smokies-original"
+
+
+def test_explorer_receipt_binds_the_actual_v2_or_v3_manifest_schema():
+    expires_at = int(time.time()) + 30 * 86_400
+    with patch.dict("os.environ", TEST_ENV, clear=False):
+        v2 = store._trip_pack_entitlement_result(
+            _EntitlementDb(expires_at),
+            _entitlement_row(expires_at=expires_at, manifest_schema_version=2),
+            already_owned=True,
+        )
+        v3 = store._trip_pack_entitlement_result(
+            _EntitlementDb(expires_at),
+            _entitlement_row(expires_at=expires_at, manifest_schema_version=3),
+            already_owned=True,
+        )
+    assert v2["entitlement"]["access_receipt"]["payload"]["manifest_schema_version"] == 2
+    assert v3["entitlement"]["access_receipt"]["payload"]["manifest_schema_version"] == 3
+    assert v2["entitlement"]["access_receipt_required"] is True
+    assert v3["entitlement"]["access_receipt_required"] is True
+
+
+def test_receipt_issuer_rejects_non_consumer_manifest_schemas():
+    issued_at = 2_000_000_000
+    for schema_version in (1, 4, True):
+        with pytest.raises(OriginalEntitlementReceiptError, match="must be 2 or 3"):
+            issue_original_entitlement_receipt(
+                user_id=42,
+                entitlement_id="entitlement-test-smokies",
+                pack_id="smokies-original",
+                version=1,
+                manifest_id="smokies-original:1:published",
+                manifest_schema_version=schema_version,
+                access_expires_at=issued_at + 30 * 86_400,
+                issued_at=issued_at,
+                environ=TEST_ENV,
+            )
 
 
 def test_permanent_access_remains_receipt_independent():

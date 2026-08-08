@@ -151,11 +151,12 @@ def issue_original_entitlement_receipt(
     pack_id: str,
     version: int,
     manifest_id: str,
+    manifest_schema_version: int = 2,
     access_expires_at: int,
     issued_at: int | None = None,
     environ: Mapping[str, str] | None = None,
 ) -> dict | None:
-    """Issue an integrity-bound V2 Explorer receipt, or None when unconfigured.
+    """Issue an integrity-bound V2/V3 Explorer receipt, or None when unconfigured.
 
     Missing signing configuration intentionally does not delete or rewrite an
     entitlement. New clients see ``access_receipt_required`` and keep the
@@ -178,6 +179,13 @@ def issue_original_entitlement_receipt(
         raise OriginalEntitlementReceiptError("Original entitlement identity is incomplete")
     if isinstance(version, bool) or int(version) < 1:
         raise OriginalEntitlementReceiptError("Original entitlement version is invalid")
+    if (
+        isinstance(manifest_schema_version, bool)
+        or manifest_schema_version not in {2, 3}
+    ):
+        raise OriginalEntitlementReceiptError(
+            "Original entitlement manifest schema version must be 2 or 3"
+        )
     payload = {
         "schema_version": ORIGINAL_ENTITLEMENT_RECEIPT_SCHEMA_VERSION,
         "issuer": ORIGINAL_ENTITLEMENT_RECEIPT_ISSUER,
@@ -187,7 +195,7 @@ def issue_original_entitlement_receipt(
         "pack_id": normalized_pack_id,
         "version": int(version),
         "manifest_id": normalized_manifest_id,
-        "manifest_schema_version": 2,
+        "manifest_schema_version": int(manifest_schema_version),
         "access_type": "explorer_subscription",
         "issued_at": now,
         "access_expires_at": expires_at,

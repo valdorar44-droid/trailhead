@@ -1,11 +1,98 @@
 import type {
   OriginalManifestV1,
+  OriginalLongFormSessionV1,
   OriginalOwnerScope,
   OriginalSessionV1,
 } from './types';
 
 function unique(values: string[]) {
   return [...new Set(values.filter(Boolean))];
+}
+
+function normalizePersistedLongFormSession(
+  input: OriginalLongFormSessionV1 | null | undefined,
+): OriginalLongFormSessionV1 | undefined {
+  if (input == null) return undefined;
+  if (
+    input.schema_version !== 1
+    || typeof input.delivery_contract_sha256 !== 'string'
+    || !/^[a-f0-9]{64}$/i.test(input.delivery_contract_sha256)
+  ) throw new Error('Invalid Trailhead Original long-form session.');
+  const completed = unique(Array.isArray(input.completed_item_ids) ? input.completed_item_ids : []);
+  const origin = (value: unknown) => (
+    value === 'capacity_auto' || value === 'user_explicit' ? value : null
+  );
+  const currentOrigin = origin(input.current_selection_origin);
+  const deferredOrigin = origin(input.deferred_selection_origin);
+  const currentItemId = typeof input.current_item_id === 'string' && input.current_item_id.trim()
+    && (
+      !completed.includes(input.current_item_id)
+      || currentOrigin === 'user_explicit'
+    )
+    ? input.current_item_id
+    : null;
+  const deferredItemId = typeof input.deferred_item_id === 'string'
+    && input.deferred_item_id.trim()
+    && input.deferred_item_id !== currentItemId
+    && (
+      !completed.includes(input.deferred_item_id)
+      || deferredOrigin === 'user_explicit'
+    )
+    ? input.deferred_item_id
+    : null;
+  const replayingCompletedGroup = Boolean(
+    (
+      currentItemId
+      && completed.includes(currentItemId)
+      && currentOrigin === 'user_explicit'
+    )
+    || (
+      deferredItemId
+      && completed.includes(deferredItemId)
+      && deferredOrigin === 'user_explicit'
+    ),
+  );
+  const pendingGroupItemIds = unique(
+    Array.isArray(input.pending_group_item_ids) ? input.pending_group_item_ids : [],
+  ).filter(itemId => (
+    itemId !== currentItemId
+    && itemId !== deferredItemId
+    && (replayingCompletedGroup || !completed.includes(itemId))
+  ));
+  const candidate = input.capacity_candidate;
+  const normalizedCandidate = candidate
+    && typeof candidate.item_id === 'string'
+    && candidate.item_id.trim()
+    && Number.isFinite(candidate.entered_at_ms)
+    && Number.isFinite(candidate.last_fix_at_ms)
+    && Number.isFinite(candidate.reliable_fix_count)
+    ? {
+      item_id: candidate.item_id,
+      entered_at_ms: Number(candidate.entered_at_ms),
+      last_fix_at_ms: Number(candidate.last_fix_at_ms),
+      reliable_fix_count: Math.max(1, Math.floor(candidate.reliable_fix_count)),
+    }
+    : null;
+  return {
+    schema_version: 1,
+    delivery_contract_sha256: input.delivery_contract_sha256.toLowerCase(),
+    completed_item_ids: completed,
+    current_item_id: currentItemId,
+    current_audio_position_ms: currentItemId
+      ? Math.max(0, Number(input.current_audio_position_ms) || 0)
+      : 0,
+    current_selection_origin: currentItemId ? currentOrigin : null,
+    pending_group_item_ids: pendingGroupItemIds,
+    deferred_item_id: deferredItemId,
+    deferred_audio_position_ms: deferredItemId
+      ? Math.max(0, Number(input.deferred_audio_position_ms) || 0)
+      : 0,
+    deferred_selection_origin: deferredItemId ? deferredOrigin : null,
+    capacity_candidate: normalizedCandidate,
+    updated_at_ms: Number.isFinite(input.updated_at_ms)
+      ? Number(input.updated_at_ms)
+      : Date.now(),
+  };
 }
 
 function originalPendingStopIsClosed(session: OriginalSessionV1, stopId: string) {
@@ -154,12 +241,25 @@ export function normalizeOriginalSession(input: OriginalSessionV1): OriginalSess
     || !chapterSelection.chapter_id.trim()
     || typeof chapterSelection.variant_id !== 'string'
     || !chapterSelection.variant_id.trim()
+    || (chapterSelection.delivery_contract_sha256 != null
+      && !/^[a-f0-9]{64}$/i.test(chapterSelection.delivery_contract_sha256))
   )) {
     throw new Error('Invalid Trailhead Original chapter selection.');
   }
+  const normalizedChapterSelection = chapterSelection ? {
+    ...chapterSelection,
+    ...(chapterSelection.delivery_contract_sha256
+      ? { delivery_contract_sha256: chapterSelection.delivery_contract_sha256.toLowerCase() }
+      : {}),
+  } : undefined;
   const normalized: OriginalSessionV1 = {
     ...input,
-    ...(chapterSelection ? { chapter_selection: { ...chapterSelection } } : {}),
+    ...(normalizedChapterSelection
+      ? { chapter_selection: normalizedChapterSelection }
+      : {}),
+    ...(input.long_form
+      ? { long_form: normalizePersistedLongFormSession(input.long_form) }
+      : {}),
     triggered_stop_ids: unique(input.triggered_stop_ids ?? []),
     completed_stop_ids: unique(input.completed_stop_ids ?? []),
     skipped_stop_ids: unique(input.skipped_stop_ids ?? []),

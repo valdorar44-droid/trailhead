@@ -703,11 +703,20 @@ def test_v2_device_preview_compiles_selected_variant_to_hash_bound_v1():
 def test_admin_v2_device_preview_endpoint_forwards_selection(monkeypatch):
     captured = {}
 
-    def fake_preview(pack_id, *, chapter_id=None, variant_id=None):
+    def fake_preview(
+        pack_id,
+        *,
+        chapter_id=None,
+        variant_id=None,
+        consumer_contract=None,
+        consumer_capabilities=None,
+    ):
         captured.update({
             "pack_id": pack_id,
             "chapter_id": chapter_id,
             "variant_id": variant_id,
+            "consumer_contract": consumer_contract,
+            "consumer_capabilities": consumer_capabilities,
         })
         return {"schema_version": 1, "manifest_id": "test_preview"}
 
@@ -734,6 +743,8 @@ def test_admin_v2_device_preview_endpoint_forwards_selection(monkeypatch):
         "pack_id": "smokies",
         "chapter_id": "foothills_parkway",
         "variant_id": "eastbound",
+        "consumer_contract": None,
+        "consumer_capabilities": (),
     }
 
 

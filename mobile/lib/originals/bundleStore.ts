@@ -5,6 +5,7 @@ import {
   writeOriginalTextAtomically,
   type OriginalFileAdapter,
 } from './fileAdapter';
+import { originalConsumerCapabilityHeaders } from './clientCapabilities';
 import { validateOriginalConsumerManifest } from './manifestV2';
 import type { OriginalOfflineMapAdapter } from './mapAdapter';
 import type { OriginalAssetV1, OriginalManifest, OriginalOwnerScope } from './types';
@@ -20,7 +21,7 @@ export type OriginalBundleRecord = {
   version: number;
   manifest_id: string;
   /** Absent on existing V1 bundle records. */
-  manifest_schema_version?: 1 | 2;
+  manifest_schema_version?: 1 | 2 | 3;
   manifest_sha256: string;
   directory_uri: string;
   manifest_uri: string;
@@ -104,7 +105,7 @@ function fileExtension(asset: OriginalAssetV1) {
   return byMime[asset.mime_type.toLowerCase()] ?? '.bin';
 }
 
-function assetRequest(path: string, headers: Record<string, string>) {
+export function originalAssetRequest(path: string, headers: Record<string, string>) {
   const base = (process.env.EXPO_PUBLIC_API_URL?.trim() || 'https://api.gettrailhead.app').replace(/\/+$/, '');
   const api = new URL(`${base}/`);
   const absolute = /^https?:\/\//i.test(path)
@@ -133,7 +134,9 @@ function assetRequest(path: string, headers: Record<string, string>) {
     url: absolute.toString(),
     // Account and preview credentials are valid only for the Trailhead API.
     // Approved CDN URLs must be public or independently signed.
-    headers: absolute.origin === api.origin ? headers : {},
+    headers: absolute.origin === api.origin
+      ? { ...headers, ...originalConsumerCapabilityHeaders() }
+      : {},
   };
 }
 
@@ -297,7 +300,7 @@ export function createOriginalBundleStore(
             const fileName = `${safePart(asset.id)}${fileExtension(asset)}`;
             const stagedUri = joinOriginalPath(stagingDirectory, 'assets', fileName);
             const finalUri = joinOriginalPath(finalDirectory, 'assets', fileName);
-            const request = assetRequest(asset.path, headers);
+            const request = originalAssetRequest(asset.path, headers);
             await files.download(request.url, stagedUri, {
               headers: request.headers,
               signal: options.signal,

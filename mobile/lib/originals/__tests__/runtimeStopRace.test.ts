@@ -4,7 +4,10 @@ import path from 'node:path';
 import { build, type Plugin } from 'esbuild';
 import React from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
-import { originalManifest, originalManifestV2 } from './fixtures';
+import { compileOriginalManifestV3 } from '../manifestV3';
+import { createOriginalLongFormSession } from '../longFormScheduler';
+import { createOriginalSession } from '../session';
+import { originalManifest, originalManifestV2, originalManifestV3 } from './fixtures';
 
 type Runtime = import('../runtime').OriginalsRuntimeValue;
 type AdminRuntime = import('../runtime').OriginalsAdminRuntimeValue;
@@ -186,10 +189,13 @@ async function main() {
   let audioStopCount = 0;
   let audioUnloadCount = 0;
   let audioReleaseSessionCount = 0;
+  const audioSeekPositions: number[] = [];
   let audioStateListener: ((state: typeof audioState) => void) | undefined;
   let audioUserPauseListener: ((state: typeof audioState) => void | Promise<void>) | undefined;
   let audioUserPlayListener: ((state: typeof audioState) => void | Promise<void>) | undefined;
   let audioLoadMetadata: Record<string, unknown> | undefined;
+  let audioLoadPositionMs: number | undefined;
+  let audioGetStateOverride: (() => Promise<typeof audioState>) | null = null;
   let failNextSessionSave = false;
   let locationCallback: ((sample: Record<string, unknown>) => Promise<void> | void) | null = null;
   let activeStoredSession: Record<string, any> | null = null;
@@ -297,12 +303,14 @@ async function main() {
     audio: {
       capabilities: { backgroundPlayback: true, lockScreenControls: true },
       async load(_uri: string, options?: {
+        positionMs?: number;
         metadata?: Record<string, unknown>;
         onState?: (state: typeof audioState) => void;
         onUserPause?: (state: typeof audioState) => void | Promise<void>;
         onUserPlay?: (state: typeof audioState) => void | Promise<void>;
       }) {
         audioLoadMetadata = options?.metadata;
+        audioLoadPositionMs = options?.positionMs;
         audioStateListener = options?.onState;
         audioUserPauseListener = options?.onUserPause;
         audioUserPlayListener = options?.onUserPlay;
@@ -311,7 +319,7 @@ async function main() {
       },
       async play() { playCount += 1; audioState.playing = true; },
       async pause() {},
-      async seek() {},
+      async seek(positionMs: number) { audioSeekPositions.push(positionMs); audioState.position_ms = positionMs; },
       async setVolume() {},
       async stop() {
         audioStopCount += 1;
@@ -328,7 +336,9 @@ async function main() {
         audioUserPlayListener = undefined;
       },
       async releaseSession() { audioReleaseSessionCount += 1; audioState.loaded = false; audioState.playing = false; },
-      async getState() { return audioState; },
+      async getState() {
+        return audioGetStateOverride ? audioGetStateOverride() : audioState;
+      },
     },
   };
 
@@ -602,6 +612,111 @@ async function main() {
   assert.equal(startedV2Session?.chapter_selection?.chapter_id, 'mountain-crossing');
   assert.equal(startedV2Session?.chapter_selection?.variant_id, 'westbound');
   assert.equal(runtime!.manifest?.route.direction, 'reverse', 'foreground start compiles the selected V2 route');
+  await act(async () => { await runtime!.stopTour(); });
+
+  const v3Manifest = originalManifestV3();
+  const v3Compiled = compileOriginalManifestV3(v3Manifest, {
+    chapter_id: 'mountain-crossing',
+    variant_id: 'eastbound',
+  });
+  const parkedStory = v3Compiled.selectable.items.find(item => (
+    item.delivery.mode === 'stopped_deeper'
+    && item.delivery.availability === 'before_route_user_confirmed_parked'
+  ));
+  const landmarkStory = v3Compiled.selectable.items.find(item => (
+    item.delivery.mode === 'stopped_deeper'
+    && item.delivery.availability === 'at_landmark_user_confirmed_parked'
+  ));
+  assert(parkedStory && landmarkStory);
+  const persistedExplicit = {
+    ...createOriginalSession(
+      v3Compiled.manifest,
+      'account:driver',
+      61_000,
+      { schema_version: 1, ...v3Compiled.selection },
+    ),
+    status: 'ready' as const,
+    started_at_ms: 61_000,
+    long_form: {
+      ...createOriginalLongFormSession(v3Compiled.selectable, 61_000),
+      current_item_id: parkedStory.id,
+      current_audio_position_ms: 23_456,
+      current_selection_origin: 'user_explicit' as const,
+    },
+  };
+  storedSessions = [persistedExplicit];
+  bundleOverride = async () => ({
+    ...bundle,
+    owner_scope: 'account:driver',
+    pack_id: v3Manifest.pack_id,
+    version: v3Manifest.version,
+    manifest_id: v3Manifest.manifest_id,
+    manifest_schema_version: 3,
+  });
+  const playsBeforeV3ForegroundResume = playCount;
+  await act(async () => {
+    await runtime!.startTour(v3Manifest, {
+      chapter_id: 'mountain-crossing',
+      variant_id: 'eastbound',
+    });
+  });
+  assert.equal(playCount, playsBeforeV3ForegroundResume + 1);
+  assert.equal(audioLoadPositionMs, 23_456, 'foreground Resume restores the exact selected-story position');
+  assert.equal((runtime as unknown as Runtime).session?.long_form?.current_item_id, parkedStory.id);
+  const slowForegroundAudio = deferred<typeof audioState>();
+  audioGetStateOverride = () => slowForegroundAudio.promise;
+  const headlessStopsBeforeSlowAudio = globals.__originalsRuntimeHeadlessStopCount ?? 0;
+  const delayedForegroundStop = runtime!.stopTour();
+  assert.equal(
+    globals.__originalsRuntimeHeadlessStopCount,
+    headlessStopsBeforeSlowAudio + 1,
+    'End Tour disables the cold runtime before a slow foreground audio-state read settles',
+  );
+  await Promise.resolve();
+  assert.equal(
+    (runtime as unknown as Runtime).session?.long_form?.current_item_id,
+    parkedStory.id,
+    'the foreground stop remains in flight while native audio state is delayed',
+  );
+  slowForegroundAudio.resolve(audioState);
+  await act(async () => { await delayedForegroundStop; });
+  audioGetStateOverride = null;
+
+  const staleLandmarkNow = Date.now();
+  storedSessions = [{
+    ...createOriginalSession(
+      v3Compiled.manifest,
+      'account:driver',
+      staleLandmarkNow - 3_000,
+      { schema_version: 1, ...v3Compiled.selection },
+    ),
+    status: 'ready' as const,
+    started_at_ms: staleLandmarkNow - 3_000,
+    last_location_timestamp_ms: staleLandmarkNow - 1_000,
+    long_form: createOriginalLongFormSession(v3Compiled.selectable, staleLandmarkNow - 3_000),
+  }];
+  await act(async () => {
+    await runtime!.startTour(v3Manifest, {
+      chapter_id: 'mountain-crossing',
+      variant_id: 'eastbound',
+    });
+  });
+  assert(locationCallback);
+  await act(async () => {
+    await locationCallback!({
+      lat: landmarkStory.coordinates?.lat,
+      lng: landmarkStory.coordinates?.lng,
+      accuracy_m: 5,
+      heading_deg: 0,
+      speed_mps: 0,
+      timestamp_ms: staleLandmarkNow - 2_000,
+    });
+  });
+  await assert.rejects(
+    () => runtime!.playLongFormItem(landmarkStory.id, { userConfirmedParked: true }),
+    /not available from the current stop/i,
+    'a delayed fix rejected by the hard engine cannot authorize a landmark story after restore',
+  );
   await act(async () => { await runtime!.stopTour(); });
   accessOverride = null;
   bundleOverride = null;

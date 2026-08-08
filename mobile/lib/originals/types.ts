@@ -286,8 +286,126 @@ export type OriginalManifestV2 = {
   review: OriginalManifestV1['review'];
 };
 
-/** Consumer manifests remain one immutable V1 or V2 pack/version payload. */
-export type OriginalManifest = OriginalManifestV1 | OriginalManifestV2;
+export type OriginalConsumerContractV1 = {
+  schema_version: 1;
+  contract_id: 'originals_long_form_delivery_v1';
+  required_capabilities: [
+    'originals_capacity_scheduler_v1',
+    'originals_manifest_v3',
+    'originals_selectable_v1',
+  ];
+};
+
+export type OriginalCapacityDeliveryV1 = {
+  mode: 'capacity_deeper';
+  admission_policy_id: 'capacity_before_next_hard_v1';
+  next_hard_auto_story_id: string;
+  guard_before_next_hard_auto_window_s: 30;
+  fallback_mode: 'completion_deeper';
+  may_queue_behind_capacity: false;
+  may_wait_for_active_hard_auto: true;
+};
+
+export type OriginalStoppedDeliveryV1 = {
+  mode: 'stopped_deeper';
+  availability:
+    | 'before_route_user_confirmed_parked'
+    | 'at_landmark_user_confirmed_parked';
+  experience_group_id?: string;
+  requires_user_confirmed_parked: true;
+  motion_inference_allowed: false;
+  parking_availability: 'not_checked';
+  parking_promise: false;
+  /** Required only for an on-route landmark selection. */
+  availability_radius_m?: number;
+};
+
+export type OriginalCompletionDeliveryV1 = {
+  mode: 'completion_deeper';
+  availability: 'after_route_completion';
+  requires_route_completion: true;
+};
+
+export type OriginalCapacityReferenceV3 = {
+  story_id: string;
+  sequence: number;
+  coordinates: { lat: number; lng: number };
+  explore_place_id?: string;
+  trigger: OriginalTriggerV1;
+  delivery: OriginalCapacityDeliveryV1;
+};
+
+export type OriginalStoppedReferenceV3 = {
+  story_id: string;
+  sequence: number;
+  coordinates?: { lat: number; lng: number };
+  explore_place_id?: string;
+  delivery: OriginalStoppedDeliveryV1;
+};
+
+export type OriginalCompletionReferenceV3 = {
+  story_id: string;
+  sequence: number;
+  coordinates?: { lat: number; lng: number };
+  explore_place_id?: string;
+  delivery: OriginalCompletionDeliveryV1;
+};
+
+export type OriginalSelectableReferenceV3 =
+  | OriginalCapacityReferenceV3
+  | OriginalStoppedReferenceV3
+  | OriginalCompletionReferenceV3;
+
+export type OriginalRouteVariantV3 = {
+  id: string;
+  sequence: number;
+  title: string;
+  route: OriginalRouteV1;
+  /** Guaranteed autoplay only. These compile into the legacy hard-cue FIFO. */
+  cue_refs: OriginalCueReferenceV2[];
+  /** Optional long-form content. These never compile into the hard-cue FIFO. */
+  selectable_refs: OriginalSelectableReferenceV3[];
+  delivery_contract_sha256: string;
+};
+
+export type OriginalChapterV3 = Omit<OriginalChapterV2, 'variants'> & {
+  variants: OriginalRouteVariantV3[];
+};
+
+export type OriginalManifestV3 = Omit<OriginalManifestV2, 'schema_version' | 'chapters'> & {
+  schema_version: 3;
+  consumer_contract: OriginalConsumerContractV1;
+  chapters: OriginalChapterV3[];
+};
+
+/** Consumer manifests remain one immutable V1, V2, or capability-gated V3 payload. */
+export type OriginalManifest = OriginalManifestV1 | OriginalManifestV2 | OriginalManifestV3;
+
+export type OriginalSelectablePlaybackItemV1 = {
+  id: string;
+  kind: OriginalStoryKindV2;
+  sequence: number;
+  title: string;
+  transcript: string;
+  audio_asset_id: string;
+  audio_duration_s: number;
+  artwork_asset_id?: string;
+  citations: OriginalStorySourceV2[];
+  coordinates?: { lat: number; lng: number };
+  explore_place_id?: string;
+  trigger?: OriginalTriggerV1;
+  delivery:
+    | OriginalCapacityDeliveryV1
+    | OriginalStoppedDeliveryV1
+    | OriginalCompletionDeliveryV1;
+};
+
+export type OriginalSelectablePlaybackPlanV1 = {
+  schema_version: 1;
+  contract_id: 'originals_long_form_delivery_v1';
+  delivery_contract_sha256: string;
+  items: OriginalSelectablePlaybackItemV1[];
+};
 
 export type OriginalChapterSelectionV2 = {
   chapter_id: string;
@@ -326,6 +444,18 @@ export type OriginalCompiledChapterManifestV2 = {
   manifest: OriginalManifestV1;
 };
 
+export type OriginalCompiledChapterManifestV3 = {
+  selection: {
+    validation_selection_id: string;
+    chapter_id: string;
+    variant_id: string;
+    delivery_contract_sha256: string;
+  };
+  /** Legacy-compatible hard cues only. */
+  manifest: OriginalManifestV1;
+  selectable: OriginalSelectablePlaybackPlanV1;
+};
+
 export type OriginalManifestPreviewStopV1 = Pick<
   OriginalStopV1,
   'id' | 'sequence' | 'title' | 'coordinates'
@@ -357,6 +487,13 @@ export type OriginalManifestPreviewVariantV2 = {
   cue_count: number;
 };
 
+export type OriginalManifestPreviewVariantV3 = OriginalManifestPreviewVariantV2 & {
+  /** Hard autoplay references only. */
+  hard_auto_count: number;
+  /** Capacity, parked, and completion selections combined. */
+  selectable_count: number;
+};
+
 export type OriginalManifestPreviewChapterV2 = {
   id: string;
   sequence: number;
@@ -381,7 +518,22 @@ export type OriginalManifestPreviewV2 = {
   offline_map?: Partial<OriginalOfflineMapV1>;
 };
 
-export type OriginalManifestPreview = OriginalManifestPreviewV1 | OriginalManifestPreviewV2;
+/** V3 keeps routes and narration redacted while exposing delivery-mode totals. */
+export type OriginalManifestPreviewV3 = Omit<
+  OriginalManifestPreviewV2,
+  'schema_version' | 'chapters'
+> & {
+  schema_version: 3;
+  consumer_contract: OriginalConsumerContractV1;
+  chapters: Array<Omit<OriginalManifestPreviewChapterV2, 'variants'> & {
+    variants: OriginalManifestPreviewVariantV3[];
+  }>;
+};
+
+export type OriginalManifestPreview =
+  | OriginalManifestPreviewV1
+  | OriginalManifestPreviewV2
+  | OriginalManifestPreviewV3;
 
 export type OriginalSummary = {
   id: string;
@@ -420,7 +572,7 @@ export type OriginalEntitlementReceiptPayloadV1 = {
   pack_id: string;
   version: number;
   manifest_id: string;
-  manifest_schema_version: 2;
+  manifest_schema_version: 2 | 3;
   access_type: 'explorer_subscription';
   issued_at: number;
   access_expires_at: number;
@@ -470,6 +622,8 @@ export type OriginalEntitlement = {
   access_receipt_required?: boolean;
   /** Exact immutable manifest bound by the temporary-access receipt. */
   manifest_id?: string;
+  /** Server-owned expected schema for the signed temporary-access receipt. */
+  manifest_schema_version?: 2 | 3;
   /** Keyed server binding from this authenticated entitlement response. */
   access_owner_binding?: string | null;
   /** Short offline receipt deadline, independently capped before subscription expiry. */
@@ -522,6 +676,8 @@ export type OriginalLocalAccessV1 = {
   access_receipt_required?: boolean;
   /** Exact immutable manifest verified by the signed temporary-access receipt. */
   manifest_id?: string;
+  /** Exact schema expected in the signed receipt; absent legacy records mean V2. */
+  manifest_schema_version?: 2 | 3;
   /** Keyed server binding; the client never derives it from the account id. */
   access_owner_binding?: string | null;
   /** Short offline deadline from the signed receipt. */
@@ -566,6 +722,35 @@ export type OriginalTriggerRuntimeStateV1 = {
   reverse_candidate_last_sample_at_ms?: number | null;
 };
 
+export type OriginalLongFormSelectionOriginV1 = 'capacity_auto' | 'user_explicit';
+
+export type OriginalLongFormCapacityCandidateV1 = {
+  item_id: string;
+  entered_at_ms: number;
+  last_fix_at_ms: number;
+  reliable_fix_count: number;
+};
+
+/**
+ * Durable state for optional long-form narration. Location, speed, route
+ * geometry, and parking evidence are intentionally never persisted here.
+ */
+export type OriginalLongFormSessionV1 = {
+  schema_version: 1;
+  delivery_contract_sha256: string;
+  completed_item_ids: string[];
+  current_item_id: string | null;
+  current_audio_position_ms: number;
+  current_selection_origin: OriginalLongFormSelectionOriginV1 | null;
+  /** Remaining entries in one explicitly confirmed experience group. */
+  pending_group_item_ids: string[];
+  deferred_item_id: string | null;
+  deferred_audio_position_ms: number;
+  deferred_selection_origin: OriginalLongFormSelectionOriginV1 | null;
+  capacity_candidate: OriginalLongFormCapacityCandidateV1 | null;
+  updated_at_ms: number;
+};
+
 export type OriginalSessionV1 = {
   schema_version: 1;
   session_id: string;
@@ -581,6 +766,8 @@ export type OriginalSessionV1 = {
     validation_selection_id: string;
     chapter_id: string;
     variant_id: string;
+    /** Required for V3; absent on existing V2 chapter sessions. */
+    delivery_contract_sha256?: string;
   };
   owner_scope: OriginalOwnerScope;
   status: OriginalSessionStatus;
@@ -610,6 +797,8 @@ export type OriginalSessionV1 = {
   manual_replay_return_status?: OriginalSessionStatus | null;
   manual_replay_stop_id?: string | null;
   trigger_state: OriginalTriggerRuntimeStateV1;
+  /** Optional V3 narration never enters the hard trigger FIFO or outcome sets. */
+  long_form?: OriginalLongFormSessionV1;
   started_at_ms: number | null;
   updated_at_ms: number;
   completed_at_ms: number | null;

@@ -91,6 +91,27 @@ assert.deepEqual(
   'V1 retains its selection-free device preview',
 );
 
+const v3Preview = helpers.originalDevicePreviewOptions({
+  schema_version: 3,
+  chapters: [{
+    id: 'foothills_parkway', sequence: 1, title: 'Foothills Parkway',
+    default_variant_id: 'eastbound',
+    variants: [{
+      id: 'eastbound', sequence: 1, title: 'Eastbound', direction: 'eastbound',
+      distance_m: 25000, duration_s: 2700, story_count: 6, cue_count: 7,
+    }],
+  }],
+});
+assert.equal(v3Preview.schemaVersion, 3);
+const v3Selection = helpers.resolveOriginalDevicePreviewSelection(
+  v3Preview,
+  'foothills_parkway',
+  'eastbound',
+);
+assert.equal(v3Selection.valid, true);
+assert.equal(v3Selection.chapter.id, 'foothills_parkway');
+assert.equal(v3Selection.variant.id, 'eastbound');
+
 const generateStart = scripts.indexOf('async function generateOriginalPreviewLink()');
 const generateEnd = scripts.indexOf('\nasync function copyOriginalPreviewLink()', generateStart);
 assert.ok(generateStart >= 0 && generateEnd > generateStart, 'could not isolate preview-link handler');
@@ -98,6 +119,11 @@ const generateHandler = scripts.slice(generateStart, generateEnd);
 assert.match(generateHandler, /trailhead:\/\/originals\/preview\?\$\{query\.toString\(\)\}/);
 assert.match(generateHandler, /chapter:\s*previewSelection\.chapter\.id/);
 assert.match(generateHandler, /variant:\s*previewSelection\.variant\.id/);
+assert.match(
+  generateHandler,
+  /previewSelection\.schemaVersion === 2 \|\| previewSelection\.schemaVersion === 3/,
+  'V2 and V3 must both generate chapter-and-route preview links',
+);
 assert.match(
   generateHandler,
   /trailhead:\/\/originals\/\$\{encodeURIComponent\(selectedOriginalId\)\}\?originals_preview_token=/,

@@ -18,7 +18,14 @@ import {
 } from '../session';
 import { createOriginalSessionStore } from '../sessionStore';
 import type { OriginalAuthenticatedAcquisition, OriginalGuestAcquisition, OriginalSummary } from '../types';
-import { AUDIO_ONE, AUDIO_THREE, AUDIO_TWO, originalManifest, originalManifestV2 } from './fixtures';
+import {
+  AUDIO_ONE,
+  AUDIO_THREE,
+  AUDIO_TWO,
+  originalManifest,
+  originalManifestV2,
+  originalManifestV3,
+} from './fixtures';
 import { createMemoryOriginalFileAdapter } from './memoryFileAdapter';
 
 async function main() {
@@ -39,6 +46,9 @@ async function main() {
       'https://assets.test/one.mp3': AUDIO_ONE,
       'https://assets.test/two.mp3': AUDIO_TWO,
       'https://assets.test/three.mp3': AUDIO_THREE,
+      'https://api.gettrailhead.app/story-4.mp3': Buffer.from('audio for story-4'),
+      'https://api.gettrailhead.app/story-5.mp3': Buffer.from('audio for story-5'),
+      'https://api.gettrailhead.app/story-6.mp3': Buffer.from('audio for story-6'),
     },
   });
   const assetRequests: Array<{ url: string; headers?: Record<string, string> }> = [];
@@ -144,6 +154,33 @@ async function main() {
     loadedUnion && loadedUnion.schema_version === 2 ? loadedUnion.chapters[0].variants.length : 0,
     2,
     'one verified bundle contains every selectable route variant',
+  );
+  const longFormManifest = originalManifestV3();
+  const longFormBundle = await bundles.download(longFormManifest, { ownerScope: 'guest' });
+  assert.equal(longFormBundle.manifest_schema_version, 3);
+  assert.equal(await bundles.verify(
+    'guest',
+    longFormManifest.pack_id,
+    longFormManifest.version,
+  ), true);
+  const loadedLongForm = await bundles.loadManifest(
+    'guest',
+    longFormManifest.pack_id,
+    longFormManifest.version,
+  );
+  assert.equal(loadedLongForm?.schema_version, 3, 'the offline bundle retains the raw V3 union manifest');
+  assert.equal(
+    loadedLongForm?.schema_version === 3
+      ? loadedLongForm.chapters[0].variants[0].selectable_refs.length
+      : 0,
+    4,
+    'one verified V3 bundle contains the selectable long-form union',
+  );
+  const directAssetRequest = assetRequests.find(request => request.url.endsWith('/story-4.mp3'));
+  assert.equal(
+    directAssetRequest?.headers?.['X-Trailhead-Originals-Consumer-Contract'],
+    'originals_long_form_delivery_v1',
+    'direct V3 API asset downloads carry the fixed consumer contract',
   );
   const revisedUnion = {
     ...originalManifestV2(),

@@ -49,6 +49,7 @@ function signedReceipt(options: {
   ownerBinding?: string;
   entitlementId?: string;
   manifestId?: string;
+  manifestSchemaVersion?: 2 | 3;
   issuedAt?: number;
   accessExpiresAt?: number;
   receiptExpiresAt?: number;
@@ -63,7 +64,7 @@ function signedReceipt(options: {
     pack_id: 'smokies-original',
     version: 1,
     manifest_id: options.manifestId ?? MANIFEST_ID,
-    manifest_schema_version: 2,
+    manifest_schema_version: options.manifestSchemaVersion ?? 2,
     access_type: 'explorer_subscription',
     issued_at: issuedAt,
     access_expires_at: options.accessExpiresAt ?? issuedAt + 30 * 86_400,
@@ -101,7 +102,7 @@ const pack: OriginalSummary = {
 
 function acquisition(
   receipt: OriginalEntitlementReceiptV1 | null,
-  options: { permanent?: boolean } = {},
+  options: { permanent?: boolean; manifestSchemaVersion?: 2 | 3 } = {},
 ): OriginalAuthenticatedAcquisition {
   const permanent = options.permanent === true;
   return {
@@ -116,6 +117,9 @@ function acquisition(
       access_expires_at: permanent ? null : receipt?.payload.access_expires_at ?? null,
       access_receipt_required: permanent ? false : true,
       manifest_id: permanent ? undefined : MANIFEST_ID,
+      manifest_schema_version: permanent
+        ? undefined
+        : options.manifestSchemaVersion ?? 2,
       access_owner_binding: permanent ? undefined : OWNER_BINDING,
       access_receipt_expires_at: permanent ? undefined : receipt?.payload.receipt_expires_at ?? null,
       access_receipt: permanent ? null : receipt,
@@ -137,6 +141,7 @@ async function main() {
     packId: pack.id,
     version: pack.version,
     manifestId: MANIFEST_ID,
+    manifestSchemaVersion: 2 as const,
   };
   const online = evaluateOriginalEntitlementReceipt(receipt, expected, {
     nowSeconds: 1_999_000_000,
@@ -152,6 +157,23 @@ async function main() {
     monotonicAnchorTimeS: 2_000_000_000,
     active: true,
   });
+
+  const v3Receipt = signedReceipt({ manifestSchemaVersion: 3 });
+  assert.equal(evaluateOriginalEntitlementReceipt(v3Receipt, {
+    ...expected,
+    manifestSchemaVersion: 3,
+  }, {
+    nowSeconds: 1_999_000_000,
+    monotonicNowMs: 10_000,
+    allowSignedRefresh: true,
+    publicKeys: keys,
+  }).status, 'valid', 'a V3 receipt is accepted only with an exact V3 manifest context');
+  assert.equal(evaluateOriginalEntitlementReceipt(v3Receipt, expected, {
+    nowSeconds: 1_999_000_000,
+    monotonicNowMs: 10_000,
+    allowSignedRefresh: true,
+    publicKeys: keys,
+  }).status, 'identity_mismatch', 'a signed V3 receipt cannot unlock a V2 manifest context');
 
   const frozenWall = evaluateOriginalEntitlementReceipt(receipt, expected, {
     nowSeconds: 2_000_000_000,
@@ -244,6 +266,27 @@ async function main() {
       manifestId: 'smokies-original:2:published',
     }), false, 'local playback is bound to the installed immutable manifest');
     const claimedAt = active.claimed_at_ms;
+
+    const v3StoreReceipt = signedReceipt({
+      manifestSchemaVersion: 3,
+      issuedAt: now,
+      accessExpiresAt: now + 30 * 86_400,
+      receiptExpiresAt: now + 3_600,
+    });
+    const v3Store = createOriginalAccessStore(createMemoryOriginalFileAdapter());
+    const v3Active = await v3Store.recordEntitlement(acquisition(v3StoreReceipt, {
+      manifestSchemaVersion: 3,
+    }), 43);
+    assert.equal(v3Active.access_receipt_status, 'valid');
+    assert.equal(v3Active.manifest_schema_version, 3);
+    const v3Mismatched = await v3Store.recordEntitlement(acquisition(v3StoreReceipt, {
+      manifestSchemaVersion: 2,
+    }), 43);
+    assert.equal(
+      v3Mismatched.access_receipt_status,
+      'identity_mismatch',
+      'the store verifies V3 against the independently supplied manifest schema',
+    );
 
     const locked = await store.recordEntitlement(acquisition(null), 42);
     assert.equal(locked.access_receipt_status, 'missing');

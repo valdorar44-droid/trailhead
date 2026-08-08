@@ -51,6 +51,7 @@ function refreshTrustedExplorerAccess(
     packId: record.pack_id,
     version: record.version,
     manifestId: record.manifest_id,
+    manifestSchemaVersion: record.manifest_schema_version ?? 2,
   }, {
     previousTrustedTimeFloorS: record.trusted_time_floor_s,
     previousReceiptExpiresAtS: record.access_receipt_expires_at,
@@ -155,6 +156,9 @@ export function createOriginalAccessStore(
           manifest_id: explorerSubscription
             ? acquisition.entitlement.manifest_id
             : undefined,
+          manifest_schema_version: explorerSubscription
+            ? acquisition.entitlement.manifest_schema_version ?? 2
+            : undefined,
           access_owner_binding: explorerSubscription
             ? acquisition.entitlement.access_owner_binding
             : undefined,
@@ -175,7 +179,7 @@ export function createOriginalAccessStore(
             : undefined,
           entitlement_id: acquisition.entitlement.id,
           acquisition_type: acquisition.entitlement.acquisition_type,
-          // Temporary V2 access is validated above against a signed server
+          // Temporary V2/V3 access is validated above against a signed server
           // receipt. The local floor advances but never extends its expiry.
           pack_summary: acquisition.pack,
           claimed_at_ms: existing?.claimed_at_ms ?? now,

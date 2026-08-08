@@ -1,5 +1,12 @@
 import { createHash } from 'node:crypto';
-import type { OriginalManifestV1, OriginalManifestV2, OriginalStopV1 } from '../types';
+import { originalManifestV3DeliveryContractSha256 } from '../manifestV3';
+import type {
+  OriginalManifestV1,
+  OriginalManifestV2,
+  OriginalManifestV3,
+  OriginalStopV1,
+  OriginalStoryV2,
+} from '../types';
 
 export const AUDIO_ONE = Buffer.from('story one audio');
 export const AUDIO_TWO = Buffer.from('story two audio');
@@ -167,4 +174,136 @@ export function originalManifestV2(version = 1): OriginalManifestV2 {
     offline_map: { ...legacy.offline_map, bounds: { ...legacy.offline_map.bounds }, region_id: `smokies-union:${version}` },
     review: { editorial_status: 'approved', source_review_completed_at: '2026-08-01' },
   };
+}
+
+function extraV3Story(id: string, duration: number): OriginalStoryV2 {
+  return {
+    id,
+    kind: 'story',
+    title: `Story ${id}`,
+    transcript: `Reviewed long-form transcript for ${id}.`,
+    audio_asset_id: `audio-${id}`,
+    audio_duration_s: duration,
+    citations: [{
+      title: 'Official source',
+      url: `https://example.gov/source/${id}`,
+      publisher: 'National Park Service',
+      role: 'story',
+      authority: 'official',
+      reviewed_at: '2026-08-01',
+      rights_status: 'reference_only',
+      affected_claims: [`${id}-claim`],
+    }],
+  };
+}
+
+export function originalManifestV3(version = 1): OriginalManifestV3 {
+  const base = originalManifestV2(version);
+  const chapter = base.chapters[0];
+  const sourceVariant = chapter.variants[0];
+  base.stories[0].kind = 'cue';
+  base.stories[2].kind = 'cue';
+  base.stories.push(
+    extraV3Story('story-4', 180),
+    extraV3Story('story-5', 195),
+    extraV3Story('story-6', 210),
+  );
+  ['story-4', 'story-5', 'story-6'].forEach((id, index) => {
+    const body = Buffer.from(`audio for ${id}`);
+    base.assets.push({
+      id: `audio-${id}`,
+      kind: 'narration',
+      path: `${id}.mp3`,
+      mime_type: 'audio/mpeg',
+      bytes: body.byteLength,
+      sha256: sha256(body),
+    });
+  });
+  const [first, capacity, last] = sourceVariant.cue_refs;
+  const manifest: OriginalManifestV3 = {
+    ...base,
+    schema_version: 3,
+    consumer_contract: {
+      schema_version: 1,
+      contract_id: 'originals_long_form_delivery_v1',
+      required_capabilities: [
+        'originals_capacity_scheduler_v1',
+        'originals_manifest_v3',
+        'originals_selectable_v1',
+      ],
+    },
+    chapters: [{
+      ...chapter,
+      validation_selection: {
+        ...chapter.validation_selection,
+        required_variant_ids: ['eastbound'],
+      },
+      variants: [{
+        ...sourceVariant,
+        cue_refs: [
+          { ...first, sequence: 2 },
+          { ...last, sequence: 4 },
+        ],
+        selectable_refs: [
+          {
+            story_id: 'story-4',
+            sequence: 1,
+            delivery: {
+              mode: 'stopped_deeper',
+              availability: 'before_route_user_confirmed_parked',
+              experience_group_id: 'pre_route_story',
+              requires_user_confirmed_parked: true,
+              motion_inference_allowed: false,
+              parking_availability: 'not_checked',
+              parking_promise: false,
+            },
+          },
+          {
+            ...capacity,
+            sequence: 3,
+            delivery: {
+              mode: 'capacity_deeper',
+              admission_policy_id: 'capacity_before_next_hard_v1',
+              next_hard_auto_story_id: last.story_id,
+              guard_before_next_hard_auto_window_s: 30,
+              fallback_mode: 'completion_deeper',
+              may_queue_behind_capacity: false,
+              may_wait_for_active_hard_auto: true,
+            },
+          },
+          {
+            story_id: 'story-5',
+            sequence: 5,
+            coordinates: { lat: 0, lng: 0.018 },
+            delivery: {
+              mode: 'stopped_deeper',
+              availability: 'at_landmark_user_confirmed_parked',
+              experience_group_id: 'landmark_story',
+              requires_user_confirmed_parked: true,
+              motion_inference_allowed: false,
+              parking_availability: 'not_checked',
+              parking_promise: false,
+              availability_radius_m: 250,
+            },
+          },
+          {
+            story_id: 'story-6',
+            sequence: 6,
+            delivery: {
+              mode: 'completion_deeper',
+              availability: 'after_route_completion',
+              requires_route_completion: true,
+            },
+          },
+        ],
+        delivery_contract_sha256: '0'.repeat(64),
+      }],
+    }],
+  };
+  const variant = manifest.chapters[0].variants[0];
+  variant.delivery_contract_sha256 = originalManifestV3DeliveryContractSha256(manifest, {
+    chapter_id: manifest.chapters[0].id,
+    variant_id: variant.id,
+  });
+  return manifest;
 }

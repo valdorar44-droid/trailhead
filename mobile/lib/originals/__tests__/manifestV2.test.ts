@@ -5,6 +5,7 @@ import {
   compileOriginalManifestV2Selections,
   listOriginalChapterSelections,
   resolveOriginalManifestForPlayback,
+  resolveOriginalManifestPlaybackForSession,
   resolveOriginalManifestForSession,
   validateOriginalConsumerManifest,
   validateOriginalManifestPreview,
@@ -356,6 +357,12 @@ assert.equal(
   'reverse',
   'restore recompiles the exact persisted route selection',
 );
+const restoredPlayback = resolveOriginalManifestPlaybackForSession(manifest, {
+  chapter_selection: resolvedPlayback.selection,
+});
+assert.equal(restoredPlayback.source_schema_version, 2);
+assert.equal(restoredPlayback.manifest.route.direction, 'reverse');
+assert.deepEqual(restoredPlayback.selection, resolvedPlayback.selection);
 assert.throws(
   () => resolveOriginalManifestForSession(manifest, {
     chapter_selection: {

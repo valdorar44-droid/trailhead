@@ -6,6 +6,15 @@ import { originalManifestV2 } from './fixtures';
 
 type OriginalsApiModule = typeof import('../api');
 
+const consumerContractHeader = 'X-Trailhead-Originals-Consumer-Contract';
+const capabilitiesHeader = 'X-Trailhead-Originals-Capabilities';
+const expectedConsumerContract = 'originals_long_form_delivery_v1';
+const expectedCapabilities = [
+  'originals_capacity_scheduler_v1',
+  'originals_manifest_v3',
+  'originals_selectable_v1',
+].join(',');
+
 const stubs: Record<string, string> = {
   '../apiBase': `export const TRAILHEAD_API_BASE = 'https://trailhead.test';`,
   '../storage': `
@@ -87,6 +96,8 @@ async function main() {
       authToken: 'account-a-token',
     });
     assert.equal(requests[0]?.headers.Authorization, 'Bearer account-a-token');
+    assert.equal(requests[0]?.headers[consumerContractHeader], expectedConsumerContract);
+    assert.equal(requests[0]?.headers[capabilitiesHeader], expectedCapabilities);
     assert.equal(
       requests[0]?.url,
       'https://trailhead.test/api/originals/moab/acquire?version=1&access_mode=explorer',
@@ -132,6 +143,19 @@ async function main() {
     assert.equal(requests[6]?.headers.Authorization, 'Bearer captured-account-token');
     assert.equal(requests[6]?.headers['X-Trailhead-Originals-Preview'], 'short-lived-preview');
     assert.equal(globals.__originalsStorageReads, 1, 'a pinned account probe never rereads auth storage');
+
+    for (const request of requests) {
+      assert.equal(
+        request.headers[consumerContractHeader],
+        expectedConsumerContract,
+        'every Originals request declares the executable consumer contract',
+      );
+      assert.equal(
+        request.headers[capabilitiesHeader],
+        expectedCapabilities,
+        'every Originals request declares the exact sorted capability set',
+      );
+    }
 
     const manifest = originalManifestV2();
     const publicPreview = {

@@ -1,4 +1,10 @@
 import { OriginalManifestError, validateOriginalManifest } from './manifest';
+import {
+  compileOriginalManifestV3,
+  listOriginalChapterSelectionsV3,
+  validateOriginalConsumerContractV1,
+  validateOriginalManifestV3,
+} from './manifestV3';
 import type {
   OriginalCompiledChapterManifestV2,
   OriginalChapterSelectionItemV2,
@@ -10,6 +16,7 @@ import type {
   OriginalManifestPreview,
   OriginalManifestPreviewV1,
   OriginalManifestPreviewV2,
+  OriginalManifestPreviewV3,
   OriginalManifestV2,
   OriginalRouteV1,
   OriginalRouteVariantV2,
@@ -793,6 +800,10 @@ function compileSelectionFromValidatedManifest(
 export function listOriginalChapterSelections(
   input: unknown,
 ): OriginalChapterSelectionItemV2[] {
+  const schemaVersion = input && typeof input === 'object'
+    ? Number((input as { schema_version?: unknown }).schema_version)
+    : 0;
+  if (schemaVersion === 3) return listOriginalChapterSelectionsV3(input);
   return listSelectionsFromValidatedManifest(validateOriginalManifestV2(input));
 }
 
@@ -822,6 +833,7 @@ export function validateOriginalConsumerManifest(input: unknown): OriginalManife
     : 0;
   if (schemaVersion === 1) return validateOriginalManifest(input);
   if (schemaVersion === 2) return validateOriginalManifestV2(input);
+  if (schemaVersion === 3) return validateOriginalManifestV3(input);
   throw new OriginalManifestError('Unsupported Originals manifest schema.');
 }
 
@@ -862,14 +874,18 @@ export function validateOriginalManifestPreview(input: unknown): OriginalManifes
     assertRecord(preview.season, 'manifest_preview.season');
     return preview;
   }
-  if (input.schema_version !== 2) {
+  if (input.schema_version !== 2 && input.schema_version !== 3) {
     throw new OriginalManifestError('Unsupported Originals manifest preview schema.');
   }
   assertAllowedKeys(input, 'manifest_preview', [
     'schema_version', 'manifest_id', 'pack_id', 'version', 'locale', 'title',
     'chapters', 'offline_map',
+    ...(input.schema_version === 3 ? ['consumer_contract'] : []),
   ]);
-  const preview = input as unknown as OriginalManifestPreviewV2;
+  if (input.schema_version === 3) {
+    validateOriginalConsumerContractV1(input.consumer_contract);
+  }
+  const preview = input as unknown as OriginalManifestPreviewV2 | OriginalManifestPreviewV3;
   if (preview.offline_map != null) {
     assertRecord(preview.offline_map, 'manifest_preview.offline_map');
     assertAllowedKeys(preview.offline_map, 'manifest_preview.offline_map', [
@@ -903,6 +919,7 @@ export function validateOriginalManifestPreview(input: unknown): OriginalManifes
       assertAllowedKeys(variant, variantLabel, [
         'id', 'sequence', 'title', 'direction', 'distance_m', 'duration_s',
         'story_count', 'cue_count',
+        ...(input.schema_version === 3 ? ['hard_auto_count', 'selectable_count'] : []),
       ]);
       assertStableId(variant.id, `${variantLabel}.id`);
       variantIds.push(variant.id);
@@ -915,6 +932,30 @@ export function validateOriginalManifestPreview(input: unknown): OriginalManifes
       }
       if (!Number.isInteger(variant.cue_count) || variant.cue_count < 0) {
         throw new OriginalManifestError(`${variantLabel}.cue_count must be a non-negative integer.`);
+      }
+      if (input.schema_version === 3) {
+        const v3Variant = variant as typeof variant & {
+          hard_auto_count?: number;
+          selectable_count?: number;
+        };
+        if (!Number.isInteger(v3Variant.hard_auto_count) || Number(v3Variant.hard_auto_count) < 1) {
+          throw new OriginalManifestError(
+            `${variantLabel}.hard_auto_count must be a positive integer.`,
+          );
+        }
+        if (!Number.isInteger(v3Variant.selectable_count) || Number(v3Variant.selectable_count) < 0) {
+          throw new OriginalManifestError(
+            `${variantLabel}.selectable_count must be a non-negative integer.`,
+          );
+        }
+        if (
+          Number(v3Variant.hard_auto_count) + Number(v3Variant.selectable_count)
+          !== variant.story_count + variant.cue_count
+        ) {
+          throw new OriginalManifestError(
+            `${variantLabel} delivery counts must match the total story and cue count.`,
+          );
+        }
       }
     });
     assertUnique(variantIds, `${label} variant IDs`);
@@ -940,6 +981,18 @@ export function resolveOriginalManifestForPlayback(
   if (!selection?.chapter_id || !selection.variant_id) {
     throw new OriginalManifestError('Choose a chapter and direction before starting this Original.');
   }
+  if (manifest.schema_version === 3) {
+    const compiled = compileOriginalManifestV3(manifest, selection);
+    return {
+      source_schema_version: 3 as const,
+      manifest: compiled.manifest,
+      selection: {
+        schema_version: 1 as const,
+        ...compiled.selection,
+      },
+      selectable: compiled.selectable,
+    };
+  }
   const compiled = compileOriginalManifestV2(manifest, selection);
   return {
     source_schema_version: 2 as const,
@@ -951,7 +1004,12 @@ export function resolveOriginalManifestForPlayback(
   };
 }
 
-export function resolveOriginalManifestForSession(
+/**
+ * Restore the complete playback contract for a persisted session. V3 callers
+ * need the selectable sidecar as well as the legacy hard-cue manifest; keeping
+ * that sidecar out of the hard FIFO is the central long-form delivery rule.
+ */
+export function resolveOriginalManifestPlaybackForSession(
   input: unknown,
   session: Pick<OriginalSessionV1, 'chapter_selection'>,
 ) {
@@ -960,18 +1018,63 @@ export function resolveOriginalManifestForSession(
     if (session.chapter_selection) {
       throw new OriginalManifestError('The saved chapter does not match this V1 Original.');
     }
-    return manifest;
+    return { source_schema_version: 1 as const, manifest, selection: undefined };
   }
   const selection = session.chapter_selection;
   if (!selection) {
     throw new OriginalManifestError('The saved Original is missing its chapter selection.');
   }
+  if (manifest.schema_version === 3) {
+    const compiled = compileOriginalManifestV3(manifest, {
+      chapter_id: selection.chapter_id,
+      variant_id: selection.variant_id,
+    });
+    const persistedHash = (selection as typeof selection & {
+      delivery_contract_sha256?: string;
+    }).delivery_contract_sha256;
+    if (
+      !persistedHash
+      || persistedHash !== compiled.selection.delivery_contract_sha256
+    ) {
+      throw new OriginalManifestError(
+        'The saved long-form delivery identity no longer matches this Original.',
+      );
+    }
+    if (compiled.selection.validation_selection_id !== selection.validation_selection_id) {
+      throw new OriginalManifestError('The saved chapter validation identity no longer matches this Original.');
+    }
+    return {
+      source_schema_version: 3 as const,
+      manifest: compiled.manifest,
+      selection: {
+        schema_version: 1 as const,
+        ...compiled.selection,
+      },
+      selectable: compiled.selectable,
+    };
+  }
   const compiled = compileOriginalManifestV2(manifest, {
     chapter_id: selection.chapter_id,
     variant_id: selection.variant_id,
   });
+  /* The existing headless trigger engine consumes only the hard V1 route. */
   if (compiled.selection.validation_selection_id !== selection.validation_selection_id) {
     throw new OriginalManifestError('The saved chapter validation identity no longer matches this Original.');
   }
-  return compiled.manifest;
+  return {
+    source_schema_version: 2 as const,
+    manifest: compiled.manifest,
+    selection: {
+      schema_version: 1 as const,
+      ...compiled.selection,
+    },
+  };
+}
+
+/** Legacy hard-cue-only wrapper retained for existing trigger-engine callers. */
+export function resolveOriginalManifestForSession(
+  input: unknown,
+  session: Pick<OriginalSessionV1, 'chapter_selection'>,
+) {
+  return resolveOriginalManifestPlaybackForSession(input, session).manifest;
 }

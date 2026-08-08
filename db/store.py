@@ -8,9 +8,13 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from config.settings import settings
 from db.originals_validation import (
     OriginalValidationRunnerError,
+    normalize_original_long_form_validation_output,
     normalize_original_validation_output,
+    original_long_form_audio_binding,
     original_route_geometry_sha256,
+    run_originals_long_form_validation_cli,
     run_originals_validation_cli,
+    trusted_originals_long_form_validator_source_sha256,
     trusted_originals_validator_source_sha256,
     validate_original_route_network,
 )
@@ -19,6 +23,12 @@ from db.original_manifest_v2 import (
     normalize_original_manifest_v2,
     original_manifest_v2_operational_bindings,
     original_manifest_v2_preview,
+)
+from db.original_manifest_v3 import (
+    ORIGINAL_LONG_FORM_CONTRACT_ID,
+    ORIGINAL_LONG_FORM_REQUIRED_CAPABILITIES,
+    compile_original_manifest_v3_selection,
+    normalize_original_manifest_v3,
 )
 from db.originals_operational import (
     OriginalOperationalReadinessError,
@@ -11361,6 +11371,77 @@ class OriginalManifestAccessError(PermissionError):
     pass
 
 
+ORIGINALS_LONG_FORM_CONSUMER_CONTRACT = ORIGINAL_LONG_FORM_CONTRACT_ID
+ORIGINALS_LONG_FORM_REQUIRED_CAPABILITIES = tuple(
+    ORIGINAL_LONG_FORM_REQUIRED_CAPABILITIES
+)
+
+
+class OriginalConsumerUpdateRequiredError(PermissionError):
+    """An immutable Original requires a newer, explicitly capable consumer."""
+
+    required_contract = ORIGINALS_LONG_FORM_CONSUMER_CONTRACT
+    required_capabilities = ORIGINALS_LONG_FORM_REQUIRED_CAPABILITIES
+
+
+def _original_consumer_supports_manifest(
+    manifest: object,
+    *,
+    consumer_contract: str | None = None,
+    consumer_capabilities: object = None,
+) -> bool:
+    """Keep V1/V2 compatible and fail closed for V3 or unknown schemas.
+
+    Authentication, app version, and native runtime are deliberately absent:
+    one account and one native runtime can each run both old embedded JS and a
+    newer OTA. Only the JS-owned, per-request contract proves parser/runtime
+    support for long-form delivery.
+    """
+
+    decoded = _decode_pack_json(manifest, {})
+    if not isinstance(decoded, dict):
+        return False
+    schema_version = decoded.get("schema_version")
+    if schema_version in {1, 2}:
+        return True
+    if schema_version != 3:
+        return False
+    declared = decoded.get("consumer_contract")
+    expected = {
+        "schema_version": 1,
+        "contract_id": ORIGINALS_LONG_FORM_CONSUMER_CONTRACT,
+        "required_capabilities": list(ORIGINALS_LONG_FORM_REQUIRED_CAPABILITIES),
+    }
+    if declared != expected:
+        return False
+    supplied_capabilities = tuple(
+        str(value).strip()
+        for value in (consumer_capabilities or ())
+        if str(value).strip()
+    )
+    return bool(
+        str(consumer_contract or "").strip()
+        == ORIGINALS_LONG_FORM_CONSUMER_CONTRACT
+        and supplied_capabilities == ORIGINALS_LONG_FORM_REQUIRED_CAPABILITIES
+    )
+
+
+def _require_original_consumer_manifest(
+    manifest: object,
+    *,
+    consumer_contract: str | None = None,
+    consumer_capabilities: object = None,
+) -> None:
+    if not _original_consumer_supports_manifest(
+        manifest,
+        consumer_contract=consumer_contract,
+        consumer_capabilities=consumer_capabilities,
+    ):
+        raise OriginalConsumerUpdateRequiredError(
+            "Update Trailhead to use this Original"
+        )
+
+
 class OriginalFeedbackTokenError(PermissionError):
     pass
 
@@ -12581,8 +12662,9 @@ def _normalize_original_manifest(
     publishing: bool = False,
     verified_assets: dict[str, dict] | None = None,
     validated_selections: set[str] | None = None,
+    validated_delivery_contracts: set[str] | None = None,
 ) -> tuple[dict, str]:
-    """Keep V1 unchanged while accepting a fail-closed V2 authoring draft."""
+    """Dispatch immutable Original manifests through their strict schema gate."""
     schema_version = manifest.get("schema_version") if isinstance(manifest, dict) else None
     if schema_version == 1:
         return _normalize_original_manifest_v1(
@@ -12604,7 +12686,19 @@ def _normalize_original_manifest(
             verified_assets=verified_assets,
             validated_selections=validated_selections,
         )
-    raise ValueError("Original manifest schema_version must be 1 or 2")
+    if schema_version == 3:
+        return normalize_original_manifest_v3(
+            manifest,
+            pack_id=pack_id,
+            title=title,
+            version=version,
+            normalize_v1=_normalize_original_manifest_v1,
+            publishing=publishing,
+            verified_assets=verified_assets,
+            validated_selections=validated_selections,
+            validated_delivery_contracts=validated_delivery_contracts,
+        )
+    raise ValueError("Original manifest schema_version must be 1, 2, or 3")
 
 
 def _validate_trip_pack_fields(
@@ -12867,12 +12961,24 @@ def _authored_original_preview_manifest_from_row(
     variant_id: str | None = None,
 ) -> dict:
     authored = _decode_pack_json(pack["draft_original_manifest_json"], None)
-    if isinstance(authored, dict) and authored.get("schema_version") == 2:
+    schema_version = (
+        authored.get("schema_version") if isinstance(authored, dict) else None
+    )
+    if schema_version in {2, 3}:
         if not chapter_id or not variant_id:
             raise ValueError(
-                "OriginalManifestV2 device preview requires explicit chapter_id and variant_id"
+                f"OriginalManifestV{schema_version} device preview requires explicit "
+                "chapter_id and variant_id"
             )
         manifest = _authored_original_validation_manifest_from_row(pack, verified_assets)
+        if schema_version == 3:
+            compile_original_manifest_v3_selection(
+                manifest,
+                chapter_id=chapter_id,
+                variant_id=variant_id,
+                normalize_v1=_normalize_original_manifest_v1,
+            )
+            return _original_manifest_for_client(manifest)
         return compile_original_manifest_v2_selection(
             manifest,
             chapter_id=chapter_id,
@@ -12887,8 +12993,10 @@ def _bind_authored_original_preview_assets(
     manifest: dict,
     verified_assets: dict[str, dict],
     pack_id: str,
+    *,
+    include_validation_audio_evidence: bool = False,
 ) -> dict:
-    """Bind immutable uploads to either V1 stops or V2 shared stories."""
+    """Bind immutable uploads to authored narrative items and private validation evidence."""
     assets_by_id = {asset["id"]: asset for asset in manifest["assets"]}
     for asset in manifest["assets"]:
         verified = verified_assets.get(asset["id"])
@@ -12915,18 +13023,52 @@ def _bind_authored_original_preview_assets(
     schema_version = int(manifest.get("schema_version") or 0)
     narrative_items = manifest.get("stops") if schema_version == 1 else manifest.get("stories")
     narrative_label = "stop" if schema_version == 1 else "story"
+    validation_assets: dict[str, dict] = {}
+    narration_profile = manifest.get("narration_profile")
+    narrative_usages: list[tuple[str, dict]] = []
     for item in narrative_items or []:
-        narration = assets_by_id.get(item["audio_asset_id"])
-        verified_narration = verified_assets.get(item["audio_asset_id"])
+        if include_validation_audio_evidence and schema_version == 3:
+            for citation in item.get("citations") or []:
+                try:
+                    reviewed_on = _date.fromisoformat(
+                        str(citation.get("reviewed_at") or "")[:10]
+                    )
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(
+                        f"Original story {item['id']} citation review date is invalid"
+                    ) from exc
+                if reviewed_on < _date.today() - _timedelta(
+                    days=ORIGINAL_SOURCE_REVIEW_MAX_AGE_DAYS
+                ):
+                    raise ValueError(
+                        f"Original story {item['id']} source review is too old to publish"
+                    )
+        narrative_usages.append((str(item["id"]), item))
+        if schema_version in {2, 3}:
+            for override in item.get("variant_overrides") or []:
+                narrative_usages.append((
+                    f"{item['id']}:{override['chapter_id']}:{override['variant_id']}",
+                    {
+                        "id": item["id"],
+                        "transcript": override["transcript"],
+                        "audio_asset_id": override["audio_asset_id"],
+                        "audio_duration_s": override["audio_duration_s"],
+                    },
+                ))
+    for usage_id, item in narrative_usages:
+        narration_id = item["audio_asset_id"]
+        narration = assets_by_id.get(narration_id)
+        verified_narration = verified_assets.get(narration_id)
+        transcript_sha256 = original_transcript_sha256(item["transcript"])
         if (
             not narration
             or narration["kind"] != "narration"
             or not verified_narration
             or verified_narration.get("transcript_sha256")
-            != original_transcript_sha256(item["transcript"])
+            != transcript_sha256
         ):
             raise ValueError(
-                f"Original {narrative_label} {item['id']} narration does not match its current transcript"
+                f"Original {narrative_label} {usage_id} narration does not match its current transcript"
             )
         media_metadata = _decode_pack_json(
             verified_narration.get("media_metadata_json"), {},
@@ -12938,14 +13080,123 @@ def _bind_authored_original_preview_assets(
             > max(0.25, verified_duration * 0.05)
         ):
             raise ValueError(
-                f"Original {narrative_label} {item['id']} narration duration does not match its verified audio"
+                f"Original {narrative_label} {usage_id} narration duration does not match its verified audio"
             )
+        if include_validation_audio_evidence and schema_version == 3:
+            generator_metadata = _decode_pack_json(
+                verified_narration.get("generator_metadata_json"), {},
+            )
+            if not isinstance(generator_metadata, dict):
+                raise ValueError(
+                    f"Original {narrative_label} {usage_id} narration generator metadata is invalid"
+                )
+            if generator_metadata:
+                provider = str(generator_metadata.get("provider") or "").strip().lower()
+                model_id = str(generator_metadata.get("model_id") or "").strip()
+                voice_id = str(generator_metadata.get("voice_id") or "").strip()
+                if provider not in {"elevenlabs", "cartesia"} or not model_id or not voice_id:
+                    raise ValueError(
+                        f"Original {narrative_label} {usage_id} narration generator is not approved"
+                    )
+                if not _original_generator_license_attestation_complete(generator_metadata):
+                    raise ValueError(
+                        f"Original {narrative_label} {usage_id} generated narration needs an explicit "
+                        "admin license attestation with terms, version, and review date"
+                    )
+                if isinstance(narration_profile, dict) and (
+                    provider != str(narration_profile.get("provider") or "").strip().lower()
+                    or model_id != str(narration_profile.get("model_snapshot") or "").strip()
+                    or voice_id != str(narration_profile.get("voice_id") or "").strip()
+                ):
+                    raise ValueError(
+                        f"Original {narrative_label} {usage_id} narration generator does not match its profile"
+                    )
+                generator_evidence = {
+                    "generated": True,
+                    "provider": provider,
+                    "model_id": model_id,
+                    "voice_id": voice_id,
+                    "commercial_license_attested": True,
+                    "metadata_sha256": _original_validation_hash(generator_metadata),
+                }
+            else:
+                if isinstance(narration_profile, dict):
+                    raise ValueError(
+                        f"Original {narrative_label} {usage_id} narration is missing generator provenance"
+                    )
+                generator_evidence = {
+                    "generated": False,
+                    "provider": None,
+                    "model_id": None,
+                    "voice_id": None,
+                    "commercial_license_attested": False,
+                    "metadata_sha256": _original_validation_hash({}),
+                }
+            asset_evidence = {
+                "asset_id": narration_id,
+                "kind": "narration",
+                "asset_sha256": narration["sha256"],
+                "asset_bytes": int(narration["bytes"]),
+                "transcript_sha256": transcript_sha256,
+                "probed_duration_ms": int(math.floor(
+                    verified_duration * 1000 + 0.5
+                )),
+                "generator": generator_evidence,
+            }
+            existing = validation_assets.get(narration_id)
+            if existing is not None and existing != asset_evidence:
+                raise ValueError(
+                    f"Original narration asset {narration_id} has conflicting verified publication evidence"
+                )
+            validation_assets[narration_id] = asset_evidence
+    if include_validation_audio_evidence and schema_version == 3:
+        for item in narrative_items or []:
+            artwork_id = item.get("artwork_asset_id")
+            if artwork_id is None:
+                raise ValueError(
+                    f"Original {narrative_label} {item['id']} needs a published artwork asset"
+                )
+            artwork = assets_by_id.get(artwork_id)
+            verified_artwork = verified_assets.get(artwork_id)
+            if (
+                not artwork
+                or artwork.get("kind") != "image"
+                or not str(artwork.get("mime_type") or "").startswith("image/")
+                or not verified_artwork
+            ):
+                raise ValueError(
+                    f"Original {narrative_label} {item['id']} artwork must be a verified image upload"
+                )
+            artwork_metadata = _decode_pack_json(
+                verified_artwork.get("media_metadata_json"), {},
+            )
+            width = int(artwork_metadata.get("width") or 0)
+            height = int(artwork_metadata.get("height") or 0)
+            if width < 320 or height < 180:
+                raise ValueError(
+                    f"Original {narrative_label} {item['id']} artwork is too small for offline playback"
+                )
+            validation_assets[artwork_id] = {
+                "asset_id": artwork_id,
+                "kind": "image",
+                "asset_sha256": artwork["sha256"],
+                "asset_bytes": int(artwork["bytes"]),
+                "width": width,
+                "height": height,
+            }
+        manifest["_validation_audio_evidence"] = {
+            "schema_version": 2,
+            "source": "server_verified_publication_metadata",
+            "assets": sorted(validation_assets.values(), key=lambda item: item["asset_id"]),
+        }
     return manifest
 
 
 def _authored_original_validation_manifest_from_row(
     pack: sqlite3.Row | dict,
     verified_assets: dict[str, dict],
+    *,
+    include_validation_audio_evidence: bool = False,
 ) -> dict:
     """Build the immutable V1 or V2 input for authoritative route validation."""
     pack_id = str(pack["id"])
@@ -12960,7 +13211,12 @@ def _authored_original_validation_manifest_from_row(
         version=preview_version,
         publishing=False,
     )
-    _bind_authored_original_preview_assets(manifest, verified_assets, pack_id)
+    _bind_authored_original_preview_assets(
+        manifest,
+        verified_assets,
+        pack_id,
+        include_validation_audio_evidence=include_validation_audio_evidence,
+    )
     manifest["manifest_id"] = (
         f"original_preview_manifest_{pack_id}_r{draft_revision}"
     )
@@ -12972,8 +13228,10 @@ def get_authored_original_device_preview_manifest(
     *,
     chapter_id: str | None = None,
     variant_id: str | None = None,
+    consumer_contract: str | None = None,
+    consumer_capabilities: object = None,
 ) -> dict | None:
-    """Build a read-only, hash-bound manifest for testing the current draft."""
+    """Build a read-only, hash-bound consumer preview for the current draft."""
     pack_id = _validate_canonical_id(pack_id, "Original id")
     db = _conn()
     try:
@@ -12984,6 +13242,11 @@ def get_authored_original_device_preview_manifest(
         ).fetchone()
         if not pack:
             return None
+        _require_original_consumer_manifest(
+            pack["draft_original_manifest_json"],
+            consumer_contract=consumer_contract,
+            consumer_capabilities=consumer_capabilities,
+        )
         verified_assets = _verified_original_asset_map_db(db, pack_id)
         return _authored_original_preview_manifest_from_row(
             pack,
@@ -13010,6 +13273,7 @@ def _get_authored_original_validation_manifest(pack_id: str) -> dict | None:
         return _authored_original_validation_manifest_from_row(
             pack,
             _verified_original_asset_map_db(db, pack_id),
+            include_validation_audio_evidence=True,
         )
     finally:
         db.close()
@@ -13022,13 +13286,45 @@ def _original_validation_hash(value: object) -> str:
 
 
 def _compiled_original_validation_selections(manifest: dict) -> list[dict]:
-    """Compile every V2 route variant while keeping the V1 path unchanged."""
-    if int(manifest.get("schema_version") or 0) == 1:
+    """Compile every required hard route while keeping V1 unchanged."""
+    schema_version = int(manifest.get("schema_version") or 0)
+    if schema_version == 1:
         return [{"key": "manifest", "selection": None, "manifest": manifest}]
-    if int(manifest.get("schema_version") or 0) != 2:
+    if schema_version not in {2, 3}:
         raise ValueError("Original validation manifest schema is unsupported")
+    compile_manifest = copy.deepcopy(manifest)
+    validation_audio_evidence = compile_manifest.pop(
+        "_validation_audio_evidence", None
+    )
+    if (
+        schema_version == 3
+        and (
+            not isinstance(validation_audio_evidence, dict)
+            or validation_audio_evidence.get("schema_version") != 2
+            or validation_audio_evidence.get("source")
+            != "server_verified_publication_metadata"
+            or not isinstance(validation_audio_evidence.get("assets"), list)
+        )
+    ):
+        raise ValueError(
+            "Original V3 validation requires server-verified narration publication evidence"
+        )
+    validation_asset_rows = (validation_audio_evidence or {}).get("assets") or []
+    validation_assets = {
+        str(asset.get("asset_id") or ""): asset
+        for asset in validation_asset_rows
+        if isinstance(asset, dict)
+    }
+    if (
+        schema_version == 3
+        and (
+            "" in validation_assets
+            or len(validation_assets) != len(validation_asset_rows)
+        )
+    ):
+        raise ValueError("Original V3 validation asset evidence identities are invalid")
     selections: list[dict] = []
-    for chapter in manifest.get("chapters") or []:
+    for chapter in compile_manifest.get("chapters") or []:
         validation = chapter.get("validation_selection") or {}
         selection_id = str(validation.get("selection_id") or "").strip()
         required_variants = set(validation.get("required_variant_ids") or [])
@@ -13036,28 +13332,140 @@ def _compiled_original_validation_selections(manifest: dict) -> list[dict]:
             variant_id = str(variant.get("id") or "").strip()
             if variant_id not in required_variants:
                 continue
-            compiled = compile_original_manifest_v2_selection(
-                manifest,
-                chapter_id=str(chapter.get("id") or ""),
-                variant_id=variant_id,
-                normalize_v1=_normalize_original_manifest_v1,
+            compiled = (
+                compile_original_manifest_v3_selection(
+                    compile_manifest,
+                    chapter_id=str(chapter.get("id") or ""),
+                    variant_id=variant_id,
+                    normalize_v1=_normalize_original_manifest_v1,
+                )
+                if schema_version == 3
+                else compile_original_manifest_v2_selection(
+                    compile_manifest,
+                    chapter_id=str(chapter.get("id") or ""),
+                    variant_id=variant_id,
+                    normalize_v1=_normalize_original_manifest_v1,
+                )
             )
             selection = compiled["selection"]
-            selections.append({
+            item = {
                 "key": f"{selection_id}:{variant_id}",
                 "selection": selection,
                 "manifest": compiled["manifest"],
-            })
+            }
+            if schema_version == 3:
+                item["delivery_contract_sha256"] = selection[
+                    "delivery_contract_sha256"
+                ]
+                evidence_items: list[dict] = []
+                for narrative in [
+                    *(compiled["manifest"].get("stops") or []),
+                    *(compiled["selectable"].get("items") or []),
+                ]:
+                    item_id = str(narrative.get("id") or "")
+                    audio_asset_id = str(narrative.get("audio_asset_id") or "")
+                    asset_evidence = validation_assets.get(audio_asset_id)
+                    if (
+                        not asset_evidence
+                        or asset_evidence.get("kind") != "narration"
+                        or asset_evidence.get("transcript_sha256")
+                        != original_transcript_sha256(narrative.get("transcript"))
+                    ):
+                        raise ValueError(
+                            f"Original V3 item {item_id} narration publication evidence is incomplete"
+                        )
+                    manifest_duration_ms = int(math.floor(
+                        float(narrative.get("audio_duration_s") or 0) * 1000 + 0.5
+                    ))
+                    probed_duration_ms = asset_evidence.get("probed_duration_ms")
+                    if (
+                        manifest_duration_ms <= 0
+                        or isinstance(probed_duration_ms, bool)
+                        or not isinstance(probed_duration_ms, int)
+                        or probed_duration_ms <= 0
+                        or abs(manifest_duration_ms - probed_duration_ms)
+                        > max(250, int(math.floor(probed_duration_ms * 0.05 + 0.5)))
+                    ):
+                        raise ValueError(
+                            f"Original V3 item {item_id} narration duration does not match its verified audio"
+                        )
+                    artwork_evidence = None
+                    artwork_asset_id = narrative.get("artwork_asset_id")
+                    if artwork_asset_id is None:
+                        raise ValueError(
+                            f"Original V3 item {item_id} artwork publication evidence is incomplete"
+                        )
+                    artwork_evidence = validation_assets.get(str(artwork_asset_id))
+                    if (
+                        not artwork_evidence
+                        or artwork_evidence.get("kind") != "image"
+                        or int(artwork_evidence.get("width") or 0) < 320
+                        or int(artwork_evidence.get("height") or 0) < 180
+                    ):
+                        raise ValueError(
+                            f"Original V3 item {item_id} artwork publication evidence is incomplete"
+                        )
+                    evidence_items.append({
+                        "item_id": item_id,
+                        "audio_asset_id": audio_asset_id,
+                        "asset_sha256": asset_evidence["asset_sha256"],
+                        "asset_bytes": asset_evidence["asset_bytes"],
+                        "transcript_sha256": asset_evidence["transcript_sha256"],
+                        "manifest_duration_ms": manifest_duration_ms,
+                        "probed_duration_ms": probed_duration_ms,
+                        "generator": copy.deepcopy(asset_evidence["generator"]),
+                        "artwork": (
+                            {
+                                "asset_id": artwork_evidence["asset_id"],
+                                "asset_sha256": artwork_evidence["asset_sha256"],
+                                "asset_bytes": artwork_evidence["asset_bytes"],
+                                "width": artwork_evidence["width"],
+                                "height": artwork_evidence["height"],
+                            }
+                            if artwork_evidence is not None else None
+                        ),
+                    })
+                item["long_form_compiled"] = {
+                    **compiled,
+                    "audio_evidence": {
+                        "schema_version": 2,
+                        "source": "server_verified_publication_metadata",
+                        "items": sorted(
+                            evidence_items,
+                            key=lambda value: str(value.get("item_id") or ""),
+                        ),
+                    },
+                }
+            selections.append(item)
     expected = sum(
         len((chapter.get("validation_selection") or {}).get("required_variant_ids") or [])
-        for chapter in manifest.get("chapters") or []
+        for chapter in compile_manifest.get("chapters") or []
     )
     if not selections or len(selections) != expected:
-        raise ValueError("Original V2 validation selection coverage is incomplete")
+        raise ValueError("Original validation selection coverage is incomplete")
     keys = [item["key"] for item in selections]
     if len(keys) != len(set(keys)):
-        raise ValueError("Original V2 validation selection keys must be unique")
+        raise ValueError("Original validation selection keys must be unique")
     return selections
+
+
+def _original_operational_bindings(manifest: dict) -> list[dict]:
+    schema_version = int(manifest.get("schema_version") or 0)
+    if schema_version == 2:
+        return original_manifest_v2_operational_bindings(manifest)
+    if schema_version != 3:
+        return []
+    return sorted(({
+        "chapter_id": str(chapter.get("id") or ""),
+        "candidate_id": str(
+            (chapter.get("operational_readiness") or {}).get("candidate_id") or ""
+        ),
+        "candidate_sha256": str(
+            (chapter.get("operational_readiness") or {}).get("candidate_sha256") or ""
+        ).lower(),
+    } for chapter in manifest.get("chapters") or []), key=lambda item: (
+        item["chapter_id"], item["candidate_id"], item["candidate_sha256"],
+    ))
 
 
 def _original_validation_material(manifest: dict, draft_revision: int) -> dict:
@@ -13071,15 +13479,30 @@ def _original_validation_material(manifest: dict, draft_revision: int) -> dict:
     manifest_sha256 = _original_validation_hash(manifest)
     assets_sha256 = _original_validation_hash(assets)
     validator_source_sha256 = trusted_originals_validator_source_sha256()
-    validation_selections = [{
-        "key": item["key"],
-        "selection": item["selection"],
-        "geometry_sha256": original_route_geometry_sha256(
-            item["manifest"]["route"]["geometry"]["coordinates"],
-        ),
-    } for item in _compiled_original_validation_selections(manifest)]
-    operational_readiness_candidates = original_manifest_v2_operational_bindings(manifest)
-    if int(manifest.get("schema_version") or 0) == 2:
+    long_form_validator_source_sha256 = (
+        trusted_originals_long_form_validator_source_sha256()
+        if int(manifest.get("schema_version") or 0) == 3
+        else None
+    )
+    validation_selections = []
+    for item in _compiled_original_validation_selections(manifest):
+        selection = {
+            "key": item["key"],
+            "selection": item["selection"],
+            "geometry_sha256": original_route_geometry_sha256(
+                item["manifest"]["route"]["geometry"]["coordinates"],
+            ),
+        }
+        if item.get("delivery_contract_sha256"):
+            selection["delivery_contract_sha256"] = item[
+                "delivery_contract_sha256"
+            ]
+            selection["audio_binding_sha256"] = original_long_form_audio_binding(
+                item["long_form_compiled"]
+            )["binding_sha256"]
+        validation_selections.append(selection)
+    operational_readiness_candidates = _original_operational_bindings(manifest)
+    if int(manifest.get("schema_version") or 0) in {2, 3}:
         for chapter in manifest.get("chapters") or []:
             # Validation may run before the review window expires, but it must
             # still bind to an exact checked-in candidate and projection.
@@ -13096,6 +13519,7 @@ def _original_validation_material(manifest: dict, draft_revision: int) -> dict:
         "suite_version": ORIGINAL_VIRTUAL_VALIDATION_SUITE_VERSION,
         "engine_version": ORIGINAL_VIRTUAL_VALIDATION_ENGINE_VERSION,
         "validator_source_sha256": validator_source_sha256,
+        "long_form_validator_source_sha256": long_form_validator_source_sha256,
         "scenario_ids": ORIGINAL_VIRTUAL_VALIDATION_REQUIRED_SCENARIOS,
         "validation_selections": validation_selections,
         "operational_readiness_candidates": operational_readiness_candidates,
@@ -13105,6 +13529,7 @@ def _original_validation_material(manifest: dict, draft_revision: int) -> dict:
         "manifest_sha256": manifest_sha256,
         "assets_sha256": assets_sha256,
         "validator_source_sha256": validator_source_sha256,
+        "long_form_validator_source_sha256": long_form_validator_source_sha256,
         "input_sha256": input_sha256,
         "validation_selections": validation_selections,
         "operational_readiness_candidates": operational_readiness_candidates,
@@ -13112,12 +13537,12 @@ def _original_validation_material(manifest: dict, draft_revision: int) -> dict:
 
 
 def _original_operational_publication_metadata(manifest: dict) -> dict | None:
-    if int(manifest.get("schema_version") or 0) != 2:
+    if int(manifest.get("schema_version") or 0) not in {2, 3}:
         return None
-    candidates = original_manifest_v2_operational_bindings(manifest)
+    candidates = _original_operational_bindings(manifest)
     if not candidates:
         raise ValueError(
-            "Original V2 publication is missing operational readiness candidates"
+            "Original publication is missing operational readiness candidates"
         )
     return {"schema_version": 1, "candidates": candidates}
 
@@ -13330,6 +13755,8 @@ def _execute_original_validation_selection(
     runner,
     route_network_validator,
     validator_source_sha256: str,
+    long_form_runner=None,
+    long_form_validator_source_sha256: str | None = None,
 ) -> dict:
     manifest = selection_item["manifest"]
     network_summary = route_network_validator(
@@ -13379,7 +13806,31 @@ def _execute_original_validation_selection(
     ):
         passed = False
         issues.append("Authored route contains implausible geometry discontinuities")
-    return {
+    delivery_validation = None
+    validated_delivery_contract = None
+    if selection_item.get("long_form_compiled") is not None:
+        if not long_form_validator_source_sha256:
+            raise OriginalValidationRunnerError(
+                "Trusted long-form validator source binding is missing"
+            )
+        raw_delivery = (long_form_runner or run_originals_long_form_validation_cli)(
+            selection_item["long_form_compiled"],
+            expected_validator_source_sha256=long_form_validator_source_sha256,
+        )
+        delivery_validation = normalize_original_long_form_validation_output(
+            raw_delivery,
+            compiled=selection_item["long_form_compiled"],
+            expected_validator_source_sha256=long_form_validator_source_sha256,
+        )
+        if delivery_validation["passed"] is not True:
+            passed = False
+            issues.append("Trusted long-form delivery validation failed")
+        else:
+            validated_delivery_contract = (
+                f"{selection_item['key']}:"
+                f"{selection_item['delivery_contract_sha256']}"
+            )
+    response = {
         "key": selection_item["key"],
         "selection": selection_item["selection"],
         "engine_version": result["engine_version"],
@@ -13388,6 +13839,10 @@ def _execute_original_validation_selection(
         "scenarios": result["scenarios"],
         "issues": issues,
     }
+    if delivery_validation is not None:
+        response["delivery_validation"] = delivery_validation
+        response["validated_delivery_contract"] = validated_delivery_contract
+    return response
 
 
 def _aggregate_original_validation_selection_results(
@@ -13418,12 +13873,22 @@ def _aggregate_original_validation_selection_results(
             item["key"] for item in selection_results if item["passed"]
         ],
     }
+    if any("validated_delivery_contract" in item for item in selection_results):
+        summary["validated_delivery_contracts"] = [
+            item["validated_delivery_contract"]
+            for item in selection_results
+            if item["passed"] and item.get("validated_delivery_contract")
+        ]
     scenarios = [{
         "selection_key": item["key"],
         "selection": item["selection"],
         "passed": item["passed"],
         "summary": item["summary"],
         "scenarios": item["scenarios"],
+        **(
+            {"delivery_validation": item["delivery_validation"]}
+            if item.get("delivery_validation") is not None else {}
+        ),
         "issues": item["issues"],
     } for item in selection_results]
     issues = [
@@ -13445,6 +13910,7 @@ def execute_authored_original_virtual_validation_run(
     report_id: str,
     *,
     runner=None,
+    long_form_runner=None,
     route_network_validator=None,
 ) -> dict:
     """Claim and execute one persisted validation run; clients cannot complete it."""
@@ -13501,13 +13967,20 @@ def execute_authored_original_virtual_validation_run(
 
         execute_network = route_network_validator or validate_original_route_network
         execute = runner or run_originals_validation_cli
+        execute_long_form = (
+            long_form_runner or run_originals_long_form_validation_cli
+        )
         selection_items = _compiled_original_validation_selections(manifest)
         if len(selection_items) == 1 and selection_items[0]["selection"] is None:
             selection_result = _execute_original_validation_selection(
                 selection_items[0],
                 runner=execute,
+                long_form_runner=execute_long_form,
                 route_network_validator=execute_network,
                 validator_source_sha256=material["validator_source_sha256"],
+                long_form_validator_source_sha256=material.get(
+                    "long_form_validator_source_sha256"
+                ),
             )
             engine_version = selection_result["engine_version"]
             passed = selection_result["passed"]
@@ -13523,13 +13996,17 @@ def execute_authored_original_virtual_validation_run(
                     selection_results.append(_execute_original_validation_selection(
                         selection_item,
                         runner=execute,
+                        long_form_runner=execute_long_form,
                         route_network_validator=execute_network,
                         validator_source_sha256=material["validator_source_sha256"],
+                        long_form_validator_source_sha256=material.get(
+                            "long_form_validator_source_sha256"
+                        ),
                     ))
                 except Exception as exc:
                     execution_errors = True
                     clean = re.sub(r"\s+", " ", str(exc or "Selection validation failed")).strip()
-                    selection_results.append({
+                    failure_result = {
                         "key": selection_item["key"],
                         "selection": selection_item["selection"],
                         "engine_version": None,
@@ -13542,7 +14019,10 @@ def execute_authored_original_virtual_validation_run(
                         },
                         "scenarios": [],
                         "issues": [clean[:1000] or "Selection validation failed"],
-                    })
+                    }
+                    if selection_item.get("long_form_compiled") is not None:
+                        failure_result["validated_delivery_contract"] = None
+                    selection_results.append(failure_result)
             aggregate = _aggregate_original_validation_selection_results(
                 selection_results,
                 execution_errors=execution_errors,
@@ -13586,6 +14066,7 @@ def start_authored_original_virtual_validation(
     admin_user_id: int,
     *,
     runner=None,
+    long_form_runner=None,
     route_network_validator=None,
 ) -> dict:
     """Synchronous compatibility wrapper used by tests and maintenance jobs."""
@@ -13593,6 +14074,7 @@ def start_authored_original_virtual_validation(
     return execute_authored_original_virtual_validation_run(
         created["id"],
         runner=runner,
+        long_form_runner=long_form_runner,
         route_network_validator=route_network_validator,
     )
 
@@ -13622,6 +14104,7 @@ def get_authored_original_virtual_validation_report(
         try:
             manifest = _authored_original_validation_manifest_from_row(
                 pack, _verified_original_asset_map_db(db, pack_id),
+                include_validation_audio_evidence=True,
             )
             material = _original_validation_material(manifest, int(pack["draft_revision"]))
         except ValueError:
@@ -13653,6 +14136,7 @@ def get_latest_authored_original_virtual_validation_report(pack_id: str) -> dict
         try:
             manifest = _authored_original_validation_manifest_from_row(
                 pack, _verified_original_asset_map_db(db, pack_id),
+                include_validation_audio_evidence=True,
             )
             material = _original_validation_material(manifest, int(pack["draft_revision"]))
         except ValueError:
@@ -14061,7 +14545,11 @@ def validate_authored_original_draft(pack_id: str) -> dict | None:
     verified_assets = _verified_original_asset_map_db(db, pack_id)
     current_validation_report = None
     try:
-        preview_manifest = _authored_original_validation_manifest_from_row(pack, verified_assets)
+        preview_manifest = _authored_original_validation_manifest_from_row(
+            pack,
+            verified_assets,
+            include_validation_audio_evidence=True,
+        )
         validation_material = _original_validation_material(
             preview_manifest, int(pack["draft_revision"]),
         )
@@ -14098,6 +14586,14 @@ def validate_authored_original_draft(pack_id: str) -> dict | None:
             set(current_validation_report["summary"].get("validated_selections") or [])
             if current_validation_report else None
         )
+        validated_delivery_contracts = (
+            set(
+                current_validation_report["summary"].get(
+                    "validated_delivery_contracts"
+                ) or []
+            )
+            if current_validation_report else None
+        )
         _normalize_original_manifest(
             pack_id,
             pack["draft_title"],
@@ -14106,6 +14602,7 @@ def validate_authored_original_draft(pack_id: str) -> dict | None:
             publishing=True,
             verified_assets=verified_assets,
             validated_selections=validated_selections,
+            validated_delivery_contracts=validated_delivery_contracts,
         )
     except ValueError as exc:
         issues.append(str(exc))
@@ -14168,7 +14665,11 @@ def publish_authored_trip_pack(
                 raise ValueError(f"Original publish content is unresolved at {unresolved_path}")
             original_manifest = _decode_pack_json(pack["draft_original_manifest_json"], None)
             verified_assets = _verified_original_asset_map_db(db, pack_id)
-            preview_manifest = _authored_original_validation_manifest_from_row(pack, verified_assets)
+            preview_manifest = _authored_original_validation_manifest_from_row(
+                pack,
+                verified_assets,
+                include_validation_audio_evidence=True,
+            )
             validation_material = _original_validation_material(
                 preview_manifest, int(pack["draft_revision"]),
             )
@@ -14196,12 +14697,23 @@ def publish_authored_trip_pack(
             )
             validated_selections = (
                 set(validation_summary.get("validated_selections") or [])
-                if preview_manifest.get("schema_version") == 2 else None
+                if preview_manifest.get("schema_version") in {2, 3} else None
+            )
+            validated_delivery_contracts = (
+                set(validation_summary.get("validated_delivery_contracts") or [])
+                if preview_manifest.get("schema_version") == 3 else None
             )
             if validated_selections is not None:
                 published_validation_metadata["virtual_validation_report"][
                     "validated_selections"
                 ] = sorted(validated_selections)
+            if validated_delivery_contracts is not None:
+                published_validation_metadata["virtual_validation_report"][
+                    "validated_delivery_contracts"
+                ] = sorted(validated_delivery_contracts)
+                published_validation_metadata["virtual_validation_report"][
+                    "long_form_validator_source_sha256"
+                ] = validation_material["long_form_validator_source_sha256"]
             operational_publication_metadata = (
                 _original_operational_publication_metadata(preview_manifest)
             )
@@ -14230,6 +14742,7 @@ def publish_authored_trip_pack(
                 publishing=True,
                 verified_assets=verified_assets,
                 validated_selections=validated_selections,
+                validated_delivery_contracts=validated_delivery_contracts,
             )
         db.execute(
             """INSERT INTO authored_trip_pack_versions
@@ -14383,6 +14896,86 @@ def _original_manifest_preview(manifest: dict | None) -> dict | None:
         return None
     if manifest.get("schema_version") == 2:
         return original_manifest_v2_preview(manifest)
+    if manifest.get("schema_version") == 3:
+        stories = {
+            item.get("id"): item
+            for item in manifest.get("stories", [])
+            if isinstance(item, dict) and item.get("id")
+        }
+        chapters = []
+        for chapter in manifest.get("chapters", []):
+            if not isinstance(chapter, dict):
+                continue
+            variants = []
+            for variant in chapter.get("variants", []):
+                if not isinstance(variant, dict):
+                    continue
+                hard_refs = [
+                    item for item in variant.get("cue_refs", [])
+                    if isinstance(item, dict)
+                ]
+                selectable_refs = [
+                    item for item in variant.get("selectable_refs", [])
+                    if isinstance(item, dict)
+                ]
+                referenced_stories = [
+                    stories.get(item.get("story_id"), {})
+                    for item in hard_refs + selectable_refs
+                ]
+                route = variant.get("route") if isinstance(variant.get("route"), dict) else {}
+                variants.append({
+                    "id": variant.get("id"),
+                    "sequence": variant.get("sequence"),
+                    "title": variant.get("title"),
+                    "direction": route.get("direction"),
+                    "distance_m": route.get("distance_m"),
+                    "duration_s": route.get("duration_s"),
+                    "story_count": sum(
+                        item.get("kind") == "story" for item in referenced_stories
+                    ),
+                    "cue_count": sum(
+                        item.get("kind") == "cue" for item in referenced_stories
+                    ),
+                    "hard_auto_count": len(hard_refs),
+                    "selectable_count": len(selectable_refs),
+                })
+            chapters.append({
+                "id": chapter.get("id"),
+                "sequence": chapter.get("sequence"),
+                "title": chapter.get("title"),
+                "summary": chapter.get("summary"),
+                "default_variant_id": chapter.get("default_variant_id"),
+                "variants": variants,
+            })
+        offline = (
+            manifest.get("offline_map")
+            if isinstance(manifest.get("offline_map"), dict)
+            else {}
+        )
+        contract = (
+            manifest.get("consumer_contract")
+            if isinstance(manifest.get("consumer_contract"), dict)
+            else {}
+        )
+        return {
+            "schema_version": 3,
+            **{
+                key: manifest[key]
+                for key in ("manifest_id", "pack_id", "version", "locale", "title")
+                if key in manifest
+            },
+            "consumer_contract": {
+                key: contract[key]
+                for key in ("schema_version", "contract_id", "required_capabilities")
+                if key in contract
+            },
+            "chapters": chapters,
+            "offline_map": {
+                key: offline[key]
+                for key in ("region_id", "bounds", "min_zoom", "max_zoom", "estimated_bytes")
+                if key in offline
+            },
+        }
     stops = []
     for raw_stop in manifest.get("stops") or []:
         if not isinstance(raw_stop, dict):
@@ -14432,35 +15025,126 @@ def list_published_originals(
     limit: int = 50,
     cursor: str | None = None,
     coverage_region: str | None = None,
+    *,
+    consumer_contract: str | None = None,
+    consumer_capabilities: object = None,
 ) -> dict:
-    page = list_published_trip_packs(
-        limit=limit,
-        cursor=cursor,
-        coverage_region=coverage_region,
-        content_kind="original_drive",
+    if not isinstance(limit, int) or limit < 1 or limit > 100:
+        raise ValueError("Limit must be between 1 and 100")
+    coverage_region = str(coverage_region or "").strip().lower() or None
+    if coverage_region and coverage_region not in TRIP_PACK_COVERAGE_REGIONS:
+        raise ValueError("Invalid trip pack coverage")
+    decoded_cursor = _decode_account_cursor(cursor)
+    sql = """SELECT p.id,COALESCE(v.slug,p.slug) AS slug,v.version,v.content_kind,
+                    v.title,v.summary,v.price_credits,v.coverage_region,
+                    v.public_metadata,v.validation_metadata,v.template_json,
+                    v.original_manifest_json,v.published_at,
+                    CASE WHEN feature.pack_id=p.id AND feature.version=v.version
+                         THEN 1 ELSE 0 END AS featured
+             FROM authored_trip_packs p
+             JOIN authored_trip_pack_versions v
+               ON v.pack_id=p.id AND v.version<=p.current_published_version
+             LEFT JOIN authored_original_features feature
+               ON feature.period_month=? AND feature.pack_id=p.id
+                  AND feature.version=v.version
+             WHERE p.status='published' AND p.content_kind='original_drive'
+               AND v.content_kind='original_drive'"""
+    params: list[object] = [_utc_month()]
+    if coverage_region:
+        sql += " AND v.coverage_region=?"
+        params.append(coverage_region)
+    sql += " ORDER BY p.id ASC,v.version DESC"
+    db = _conn()
+    rows = db.execute(sql, params).fetchall()
+    db.close()
+
+    selected_by_pack: dict[str, sqlite3.Row] = {}
+    for row in rows:
+        pack_id = str(row["id"])
+        if pack_id in selected_by_pack:
+            continue
+        if not _original_consumer_supports_manifest(
+            row["original_manifest_json"],
+            consumer_contract=consumer_contract,
+            consumer_capabilities=consumer_capabilities,
+        ):
+            continue
+        selected_by_pack[pack_id] = row
+    selected = sorted(
+        selected_by_pack.values(),
+        key=lambda row: (int(row["published_at"]), str(row["id"])),
+        reverse=True,
     )
-    # The base helper has already decoded rows, so remove the admin-only field here.
-    for item in page["items"]:
-        item.pop("validation_metadata", None)
-    return page
+    if decoded_cursor:
+        selected = [
+            row for row in selected
+            if int(row["published_at"]) < decoded_cursor[0]
+            or (
+                int(row["published_at"]) == decoded_cursor[0]
+                and str(row["id"]) < decoded_cursor[1]
+            )
+        ]
+    has_more = len(selected) > limit
+    page_rows = selected[:limit]
+    return {
+        "items": [_public_original_from_row(row) for row in page_rows],
+        "next_cursor": (
+            _encode_account_cursor(page_rows[-1]["published_at"], page_rows[-1]["id"])
+            if has_more else None
+        ),
+    }
 
 
-def get_published_original(pack_id_or_slug: str, include_preview: bool = True) -> dict | None:
+def get_published_original(
+    pack_id_or_slug: str,
+    include_preview: bool = True,
+    *,
+    consumer_contract: str | None = None,
+    consumer_capabilities: object = None,
+) -> dict | None:
     clean = str(pack_id_or_slug or "").strip()
     db = _conn()
-    row = db.execute(
-        _published_trip_pack_query("original_drive")
-        + " AND (p.id=? OR COALESCE(v.slug,p.slug)=?) LIMIT 1",
-        (_utc_month(), clean, clean),
-    ).fetchone()
+    rows = db.execute(
+        """SELECT p.id,COALESCE(v.slug,p.slug) AS slug,v.version,v.content_kind,
+                  v.title,v.summary,v.price_credits,v.coverage_region,
+                  v.public_metadata,v.validation_metadata,v.template_json,
+                  v.original_manifest_json,v.published_at,
+                  CASE WHEN feature.pack_id=p.id AND feature.version=v.version
+                       THEN 1 ELSE 0 END AS featured
+           FROM authored_trip_packs p
+           JOIN authored_trip_pack_versions v
+             ON v.pack_id=p.id AND v.version<=p.current_published_version
+           LEFT JOIN authored_original_features feature
+             ON feature.period_month=? AND feature.pack_id=p.id
+                AND feature.version=v.version
+           WHERE (p.id=? OR p.slug=? OR COALESCE(v.slug,p.slug)=?)
+             AND p.status='published' AND p.content_kind='original_drive'
+             AND v.content_kind='original_drive'
+           ORDER BY v.version DESC""",
+        (_utc_month(), clean, clean, clean),
+    ).fetchall()
     db.close()
-    return _public_original_from_row(row, include_preview=include_preview) if row else None
+    if not rows:
+        return None
+    row = next((candidate for candidate in rows if _original_consumer_supports_manifest(
+        candidate["original_manifest_json"],
+        consumer_contract=consumer_contract,
+        consumer_capabilities=consumer_capabilities,
+    )), None)
+    if row is None:
+        raise OriginalConsumerUpdateRequiredError(
+            "Update Trailhead to use this Original"
+        )
+    return _public_original_from_row(row, include_preview=include_preview)
 
 
 def get_published_original_version(
     pack_id_or_slug: str,
     version: int,
     include_preview: bool = True,
+    *,
+    consumer_contract: str | None = None,
+    consumer_capabilities: object = None,
 ) -> dict | None:
     """Return one immutable published Original version, never a newer substitute."""
     clean = str(pack_id_or_slug or "").strip()
@@ -14478,14 +15162,24 @@ def get_published_original_version(
            JOIN authored_trip_pack_versions v ON v.pack_id=p.id
            LEFT JOIN authored_original_features feature
              ON feature.period_month=? AND feature.pack_id=p.id AND feature.version=v.version
-           WHERE (p.id=? OR COALESCE(v.slug,p.slug)=?) AND v.version=?
+           WHERE (p.id=? OR p.slug=? OR COALESCE(v.slug,p.slug)=?) AND v.version=?
              AND p.status='published' AND p.content_kind='original_drive'
              AND v.content_kind='original_drive'
            LIMIT 1""",
-        (_utc_month(), clean, clean, version),
+        (_utc_month(), clean, clean, clean, version),
     ).fetchone()
     db.close()
-    return _public_original_from_row(row, include_preview=include_preview) if row else None
+    if not row:
+        return None
+    if not _original_consumer_supports_manifest(
+        row["original_manifest_json"],
+        consumer_contract=consumer_contract,
+        consumer_capabilities=consumer_capabilities,
+    ):
+        raise OriginalConsumerUpdateRequiredError(
+            "Update Trailhead to use this Original"
+        )
+    return _public_original_from_row(row, include_preview=include_preview)
 
 
 def select_featured_trip_pack(
@@ -14605,7 +15299,12 @@ def select_featured_original(
     return {"period_month": period_month, "pack_id": pack_id, "version": version, "selected_at": now}
 
 
-def get_featured_original(period_month: str | None = None) -> dict | None:
+def get_featured_original(
+    period_month: str | None = None,
+    *,
+    consumer_contract: str | None = None,
+    consumer_capabilities: object = None,
+) -> dict | None:
     month = _validate_trip_pack_month(period_month or _utc_month())
     db = _conn()
     row = db.execute(
@@ -14622,7 +15321,14 @@ def get_featured_original(period_month: str | None = None) -> dict | None:
         (month,),
     ).fetchone()
     db.close()
-    return _public_original_from_row(row) if row else None
+    if not row:
+        return None
+    _require_original_consumer_manifest(
+        row["original_manifest_json"],
+        consumer_contract=consumer_contract,
+        consumer_capabilities=consumer_capabilities,
+    )
+    return _public_original_from_row(row)
 
 
 def _clone_authored_pack_trip_db(
@@ -14732,10 +15438,21 @@ def _trip_pack_entitlement_result(
         "access_expires_at": access_expires_at,
     }
     original_manifest = _decode_pack_json(raw.get("original_manifest_json"), {})
+    raw_manifest_schema_version = (
+        original_manifest.get("schema_version")
+        if isinstance(original_manifest, dict)
+        else None
+    )
+    manifest_schema_version = (
+        raw_manifest_schema_version
+        if isinstance(raw_manifest_schema_version, int)
+        and not isinstance(raw_manifest_schema_version, bool)
+        else 0
+    )
     requires_signed_receipt = bool(
         explorer_subscription
         and isinstance(original_manifest, dict)
-        and original_manifest.get("schema_version") == 2
+        and manifest_schema_version in {2, 3}
     )
     if requires_signed_receipt:
         # Keep receipt signing separate from the entitlement and publication
@@ -14744,6 +15461,9 @@ def _trip_pack_entitlement_result(
         from db.original_entitlement_receipt import issue_original_entitlement_receipt
 
         entitlement["access_receipt_required"] = True
+        # This independently derived expected schema lets consumers verify the
+        # signed receipt without trusting the receipt payload for its own type.
+        entitlement["manifest_schema_version"] = manifest_schema_version
         entitlement["manifest_id"] = str(original_manifest.get("manifest_id") or "")
         receipt = (
             issue_original_entitlement_receipt(
@@ -14752,6 +15472,7 @@ def _trip_pack_entitlement_result(
                 pack_id=raw["pack_id"],
                 version=int(raw["version"]),
                 manifest_id=str(original_manifest.get("manifest_id") or ""),
+                manifest_schema_version=manifest_schema_version,
                 access_expires_at=int(access_expires_at),
             )
             if access_active and access_expires_at is not None
@@ -14834,6 +15555,8 @@ def _acquire_authored_trip_pack(
     required_content_kind: str = "trip_pack",
     requested_version: int | None = None,
     original_access_mode: str | None = None,
+    original_consumer_contract: str | None = None,
+    original_consumer_capabilities: object = None,
 ) -> dict:
     idempotency_key = str(idempotency_key or "").strip()
     if not _IDEMPOTENCY_KEY_RE.fullmatch(idempotency_key):
@@ -14898,6 +15621,12 @@ def _acquire_authored_trip_pack(
             ).fetchone()
             if not replay:
                 raise ValueError("Acquisition request record is incomplete")
+            if required_content_kind == "original_drive":
+                _require_original_consumer_manifest(
+                    replay["original_manifest_json"],
+                    consumer_contract=original_consumer_contract,
+                    consumer_capabilities=original_consumer_capabilities,
+                )
             replay = _restore_trip_pack_entitlement_db(db, replay, user_id, now)
             result = _trip_pack_entitlement_result(db, replay, already_owned=True)
             if (
@@ -14968,6 +15697,13 @@ def _acquire_authored_trip_pack(
                 if required_content_kind == "original_drive":
                     raise ValueError("Published Trailhead Original not found")
                 raise ValueError("Published trip pack not found")
+
+        if required_content_kind == "original_drive":
+            _require_original_consumer_manifest(
+                version_row["original_manifest_json"],
+                consumer_contract=original_consumer_contract,
+                consumer_capabilities=original_consumer_capabilities,
+            )
 
         user = db.execute(
             "SELECT credits,plan_type,plan_expires_at FROM users WHERE id=?", (user_id,),
@@ -15238,6 +15974,9 @@ def acquire_authored_original(
     idempotency_key: str,
     version: int | None = None,
     access_mode: str = "permanent",
+    *,
+    consumer_contract: str | None = None,
+    consumer_capabilities: object = None,
 ) -> dict:
     return _acquire_authored_trip_pack(
         user_id,
@@ -15246,6 +15985,8 @@ def acquire_authored_original(
         required_content_kind="original_drive",
         requested_version=version,
         original_access_mode=access_mode,
+        original_consumer_contract=consumer_contract,
+        original_consumer_capabilities=consumer_capabilities,
     )
 
 
@@ -15263,18 +16004,26 @@ def claim_featured_authored_original(
     user_id: int,
     idempotency_key: str,
     period_month: str | None = None,
+    *,
+    consumer_contract: str | None = None,
+    consumer_capabilities: object = None,
 ) -> dict:
     return _acquire_authored_trip_pack(
         user_id,
         idempotency_key,
         claim_month=period_month or _utc_month(),
         required_content_kind="original_drive",
+        original_consumer_contract=consumer_contract,
+        original_consumer_capabilities=consumer_capabilities,
     )
 
 
 def list_owned_authored_trip_packs(
     user_id: int,
     content_kind: str = "trip_pack",
+    *,
+    original_consumer_contract: str | None = None,
+    original_consumer_capabilities: object = None,
 ) -> list[dict]:
     if content_kind not in TRIP_PACK_CONTENT_KINDS:
         raise ValueError("Invalid authored content kind")
@@ -15285,6 +16034,15 @@ def list_owned_authored_trip_packs(
           " ORDER BY entitlement.acquired_at DESC,entitlement.id DESC",
         (user_id, content_kind),
     ).fetchall()
+    if content_kind == "original_drive":
+        rows = [
+            row for row in rows
+            if _original_consumer_supports_manifest(
+                row["original_manifest_json"],
+                consumer_contract=original_consumer_contract,
+                consumer_capabilities=original_consumer_capabilities,
+            )
+        ]
     results = [_trip_pack_entitlement_result(db, row, already_owned=True) for row in rows]
     db.close()
     return results
@@ -15293,6 +16051,9 @@ def list_owned_authored_trip_packs(
 def restore_owned_authored_trip_packs(
     user_id: int,
     content_kind: str = "trip_pack",
+    *,
+    original_consumer_contract: str | None = None,
+    original_consumer_capabilities: object = None,
 ) -> list[dict]:
     if content_kind not in TRIP_PACK_CONTENT_KINDS:
         raise ValueError("Invalid authored content kind")
@@ -15306,6 +16067,15 @@ def restore_owned_authored_trip_packs(
               " ORDER BY entitlement.acquired_at DESC,entitlement.id DESC",
             (user_id, content_kind),
         ).fetchall()
+        if content_kind == "original_drive":
+            rows = [
+                row for row in rows
+                if _original_consumer_supports_manifest(
+                    row["original_manifest_json"],
+                    consumer_contract=original_consumer_contract,
+                    consumer_capabilities=original_consumer_capabilities,
+                )
+            ]
         restored = [
             _restore_trip_pack_entitlement_db(db, row, user_id, now)
             for row in rows
@@ -15320,18 +16090,41 @@ def restore_owned_authored_trip_packs(
     return results
 
 
-def list_owned_authored_originals(user_id: int) -> list[dict]:
-    return list_owned_authored_trip_packs(user_id, content_kind="original_drive")
+def list_owned_authored_originals(
+    user_id: int,
+    *,
+    consumer_contract: str | None = None,
+    consumer_capabilities: object = None,
+) -> list[dict]:
+    return list_owned_authored_trip_packs(
+        user_id,
+        content_kind="original_drive",
+        original_consumer_contract=consumer_contract,
+        original_consumer_capabilities=consumer_capabilities,
+    )
 
 
-def restore_owned_authored_originals(user_id: int) -> list[dict]:
-    return restore_owned_authored_trip_packs(user_id, content_kind="original_drive")
+def restore_owned_authored_originals(
+    user_id: int,
+    *,
+    consumer_contract: str | None = None,
+    consumer_capabilities: object = None,
+) -> list[dict]:
+    return restore_owned_authored_trip_packs(
+        user_id,
+        content_kind="original_drive",
+        original_consumer_contract=consumer_contract,
+        original_consumer_capabilities=consumer_capabilities,
+    )
 
 
 def get_published_original_manifest(
     pack_id_or_slug: str,
     version: int,
     user_id: int | None = None,
+    *,
+    consumer_contract: str | None = None,
+    consumer_capabilities: object = None,
 ) -> dict | None:
     clean = str(pack_id_or_slug or "").strip()
     if not isinstance(version, int) or version < 1:
@@ -15351,6 +16144,15 @@ def get_published_original_manifest(
     if not row:
         db.close()
         return None
+    if not _original_consumer_supports_manifest(
+        row["original_manifest_json"],
+        consumer_contract=consumer_contract,
+        consumer_capabilities=consumer_capabilities,
+    ):
+        db.close()
+        raise OriginalConsumerUpdateRequiredError(
+            "Update Trailhead to use this Original"
+        )
     access = _original_access_decision_db(db, user_id, row)
     if not access["allowed"]:
         db.close()
@@ -15549,6 +16351,8 @@ def get_published_original_start_readiness(
     planned_stop_minutes: int | None = None,
     now: _datetime | None = None,
     observation: object | None = None,
+    consumer_contract: str | None = None,
+    consumer_capabilities: object = None,
 ) -> dict:
     """Evaluate the server-owned gate immediately before a consumer tour starts.
 
@@ -15562,6 +16366,8 @@ def get_published_original_start_readiness(
         pack_id_or_slug,
         version,
         user_id=user_id,
+        consumer_contract=consumer_contract,
+        consumer_capabilities=consumer_capabilities,
     )
     if manifest is None:
         raise ValueError("Published Original manifest was not found")
@@ -15577,7 +16383,7 @@ def get_published_original_start_readiness(
             "message": "This Original uses its published V1 start policy.",
             "notices": [],
         }
-    if int(manifest.get("schema_version") or 0) != 2:
+    if int(manifest.get("schema_version") or 0) not in {2, 3}:
         raise ValueError("Published Original manifest schema is unsupported")
     clean_chapter_id = str(chapter_id or "").strip()
     chapter = next((
@@ -15665,7 +16471,7 @@ def get_published_original_start_readiness(
 def _original_manifest_for_client(manifest: dict) -> dict:
     """Remove server-only provenance from an acquired consumer manifest."""
     result = copy.deepcopy(manifest)
-    if result.get("schema_version") == 2:
+    if result.get("schema_version") in {2, 3}:
         result.pop("narration_profile", None)
         result.pop("route_evidence", None)
     return result
@@ -15676,6 +16482,9 @@ def get_published_original_asset_record(
     asset_id: str,
     sha256: str,
     user_id: int | None = None,
+    *,
+    consumer_contract: str | None = None,
+    consumer_capabilities: object = None,
 ) -> dict | None:
     """Resolve an immutable uploaded asset only through an accessible manifest."""
     pack_id = _validate_canonical_id(pack_id, "Original id")
@@ -15695,6 +16504,7 @@ def get_published_original_asset_record(
         (pack_id,),
     ).fetchall()
     matched = False
+    incompatible_match = False
     authorized = False
     free_access = False
     for version_row in versions:
@@ -15707,6 +16517,13 @@ def get_published_original_asset_record(
         ), None)
         if not manifest_asset:
             continue
+        if not _original_consumer_supports_manifest(
+            manifest,
+            consumer_contract=consumer_contract,
+            consumer_capabilities=consumer_capabilities,
+        ):
+            incompatible_match = True
+            continue
         matched = True
         access = _original_access_decision_db(db, user_id, version_row)
         authorized = bool(access["allowed"])
@@ -15715,6 +16532,10 @@ def get_published_original_asset_record(
             break
     if not matched:
         db.close()
+        if incompatible_match:
+            raise OriginalConsumerUpdateRequiredError(
+                "Update Trailhead to use this Original"
+            )
         return None
     if not authorized:
         db.close()

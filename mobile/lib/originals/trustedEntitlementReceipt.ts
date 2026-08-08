@@ -33,6 +33,7 @@ type ReceiptExpectedIdentity = {
   packId: string;
   version: number;
   manifestId: string;
+  manifestSchemaVersion: 2 | 3;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -180,7 +181,8 @@ export function evaluateOriginalEntitlementReceipt(
     || payload.issuer !== 'trailhead-originals'
     || payload.audience !== 'trailhead-originals-mobile'
     || payload.access_type !== 'explorer_subscription'
-    || payload.manifest_schema_version !== 2
+    || (expected.manifestSchemaVersion !== 2 && expected.manifestSchemaVersion !== 3)
+    || payload.manifest_schema_version !== expected.manifestSchemaVersion
     || !/^[A-Za-z0-9_-]{43}$/.test(expected.ownerBinding)
     || payload.owner_binding !== expected.ownerBinding
     || payload.entitlement_id !== String(expected.entitlementId)

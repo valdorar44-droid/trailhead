@@ -2,6 +2,7 @@ import { TRAILHEAD_API_BASE } from '../apiBase';
 import { storage } from '../storage';
 import type { OriginalFeedbackPayloadV1 } from './feedbackStore';
 import { OriginalManifestError } from './manifest';
+import { originalConsumerCapabilityHeaders } from './clientCapabilities';
 import {
   validateOriginalConsumerManifest,
   validateOriginalManifestPreview,
@@ -75,6 +76,7 @@ async function originalsRequest<T>(path: string, options: RequestOptions = {}): 
     Accept: 'application/json',
     ...(options.body ? { 'Content-Type': 'application/json' } : {}),
     ...(options.headers as Record<string, string> | undefined),
+    ...originalConsumerCapabilityHeaders(),
   };
   if (token) headers.Authorization = `Bearer ${token}`;
   const previewToken = await getOriginalPreviewToken().catch(() => null);

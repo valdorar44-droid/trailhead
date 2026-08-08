@@ -3,7 +3,14 @@ import { originalLocalAccessIsCurrent } from './accessPolicy';
 import type { OriginalAudioAdapter, OriginalAudioPlaybackState } from './audioAdapter';
 import { originalAudioCoordinator, type OriginalAudioFocusLease } from './audioCoordinator';
 import type { OriginalBundleStore } from './bundleStore';
-import { resolveOriginalManifestForSession } from './manifestV2';
+import { resolveOriginalManifestPlaybackForSession } from './manifestV2';
+import {
+  completeOriginalLongFormItem,
+  originalLongFormHeadlessResumeAction,
+  preemptOriginalLongFormForHardCue,
+  resumeDeferredOriginalLongFormAfterHardCue,
+  updateOriginalLongFormAudioPosition,
+} from './longFormScheduler';
 import {
   completeOriginalStop,
   finishManualOriginalStop,
@@ -11,7 +18,12 @@ import {
 } from './session';
 import type { OriginalSessionStore } from './sessionStore';
 import { evaluateOriginalLocation } from './triggerEngine';
-import type { OriginalLocationSample, OriginalManifestV1, OriginalSessionV1 } from './types';
+import type {
+  OriginalLocationSample,
+  OriginalManifestV1,
+  OriginalSelectablePlaybackPlanV1,
+  OriginalSessionV1,
+} from './types';
 
 export type OriginalHeadlessControllerDependencies = {
   audio: OriginalAudioAdapter;
@@ -59,7 +71,16 @@ export function createOriginalHeadlessController(
 
   const exactContext = async () => {
     const session = await dependencies.sessions.loadActive();
-    if (!session || session.status !== 'active' || session.user_paused) {
+    const resumableExplicitOptional = Boolean(
+      session?.long_form?.current_item_id
+      && session.long_form.current_selection_origin === 'user_explicit'
+      && (session.status === 'active' || session.status === 'ready' || session.status === 'completed')
+    );
+    if (
+      !session
+      || (session.status !== 'active' && !resumableExplicitOptional)
+      || session.user_paused
+    ) {
       return { kind: 'inactive' as const };
     }
     const access = await dependencies.access.get(session.owner_scope, session.pack_id, session.version);
@@ -76,29 +97,43 @@ export function createOriginalHeadlessController(
     if (!bundle || !storedManifest || storedManifest.manifest_id !== session.manifest_id) {
       return { kind: 'unavailable' as const };
     }
-    let manifest: OriginalManifestV1;
+    let playback: ReturnType<typeof resolveOriginalManifestPlaybackForSession>;
     try {
-      manifest = resolveOriginalManifestForSession(storedManifest, session);
+      playback = resolveOriginalManifestPlaybackForSession(storedManifest, session);
     } catch {
       return { kind: 'unavailable' as const };
     }
-    return { kind: 'ready' as const, session, manifest };
+    return {
+      kind: 'ready' as const,
+      session,
+      manifest: playback.manifest,
+      selectable: playback.source_schema_version === 3 ? playback.selectable : null,
+    };
   };
 
   const activeSessionStillMatches = async (
     expected: OriginalSessionV1,
     operationGeneration: number,
-    stopId?: string,
+    identity?: { hard_stop_id?: string; optional_item_id?: string },
   ) => {
     if (generation !== operationGeneration) return false;
     const active = await dependencies.sessions.loadActive();
+    const optionalIdentityMatches = Boolean(
+      identity?.optional_item_id
+      && active?.long_form?.current_item_id === identity.optional_item_id
+      && active.long_form.current_selection_origin === 'user_explicit'
+      && (active.status === 'active' || active.status === 'ready' || active.status === 'completed'),
+    );
     return Boolean(
       generation === operationGeneration
       && active
       && active.session_id === expected.session_id
-      && active.status === 'active'
+      && (active.status === 'active' || optionalIdentityMatches)
       && !active.user_paused
-      && (stopId == null || active.current_stop_id === stopId),
+      && (identity?.hard_stop_id == null || active.current_stop_id === identity.hard_stop_id)
+      && (
+        identity?.optional_item_id == null || optionalIdentityMatches
+      ),
     );
   };
 
@@ -131,15 +166,53 @@ export function createOriginalHeadlessController(
     }
   });
 
+  const persistOptionalAudioState = (
+    plan: OriginalSelectablePlaybackPlanV1,
+    itemId: string,
+    state: OriginalAudioPlaybackState,
+  ) => serialized(async () => {
+    const active = await dependencies.sessions.loadActive();
+    if (!active || active.long_form?.current_item_id !== itemId) return;
+    if (Math.abs(state.position_ms - lastPositionPersisted) < 5_000) return;
+    lastPositionPersisted = state.position_ms;
+    await dependencies.sessions.setActiveIfCurrent(
+      active.session_id,
+      updateOriginalLongFormAudioPosition(active, plan, state.position_ms),
+    );
+  });
+
+  const persistOptionalUserPause = (
+    plan: OriginalSelectablePlaybackPlanV1,
+    itemId: string,
+    state: OriginalAudioPlaybackState,
+  ) => serialized(async () => {
+    const active = await dependencies.sessions.loadActive();
+    if (!active || active.long_form?.current_item_id !== itemId || active.user_paused) return;
+    const positioned = updateOriginalLongFormAudioPosition(active, plan, state.position_ms);
+    await dependencies.sessions.setActiveIfCurrent(active.session_id, {
+      ...positioned,
+      status: 'paused',
+      user_paused: true,
+      updated_at_ms: Date.now(),
+    });
+    await releaseAudio();
+    await stopTracking().catch(() => {});
+    if (originalAudioCoordinator.activeOwner() == null) {
+      await dependencies.audio.releaseSession().catch(() => {});
+    }
+  });
+
   const playStopInternal = async (
     manifest: OriginalManifestV1,
-    session: OriginalSessionV1,
+    plan: OriginalSelectablePlaybackPlanV1 | null,
+    initialSession: OriginalSessionV1,
     stopId: string,
     positionMs = 0,
     operationGeneration = generation,
   ) => {
+    let session = initialSession;
     if (generation !== operationGeneration) return false;
-    const key = `${session.owner_scope}:${session.pack_id}:${session.version}:${stopId}`;
+    const key = `hard:${session.owner_scope}:${session.pack_id}:${session.version}:${stopId}`;
     const currentAudio = await dependencies.audio.getState();
     if (generation !== operationGeneration) return false;
     if (playingKey === key && currentAudio.loaded) return;
@@ -161,6 +234,25 @@ export function createOriginalHeadlessController(
       ).catch(() => null)
       : null;
     if (!await activeSessionStillMatches(session, operationGeneration)) return false;
+    if (plan && session.long_form?.current_item_id) {
+      const optionalAudio = await dependencies.audio.getState().catch(() => null);
+      await dependencies.audio.stop().catch(() => {});
+      await dependencies.audio.unload().catch(() => {});
+      await releaseAudio();
+      const preempted = preemptOriginalLongFormForHardCue(
+        session,
+        plan,
+        optionalAudio?.loaded
+          ? optionalAudio.position_ms
+          : session.long_form.current_audio_position_ms,
+      );
+      const savedPreemption = await dependencies.sessions.setActiveIfCurrent(
+        session.session_id,
+        preempted,
+      );
+      if (!savedPreemption || generation !== operationGeneration) return false;
+      session = savedPreemption;
+    }
 
     const persisted = {
       ...session,
@@ -172,7 +264,7 @@ export function createOriginalHeadlessController(
     const saved = await dependencies.sessions.setActiveIfCurrent(session.session_id, persisted);
     if (!saved || generation !== operationGeneration) return false;
     await releaseAudio();
-    if (!await activeSessionStillMatches(saved, operationGeneration, stopId)) return false;
+    if (!await activeSessionStillMatches(saved, operationGeneration, { hard_stop_id: stopId })) return false;
     audioLease = await originalAudioCoordinator.acquire({
       owner: 'trailhead-originals',
       priority: 'originals',
@@ -201,12 +293,14 @@ export function createOriginalHeadlessController(
           ...(artworkUri ? { artworkUrl: artworkUri } : {}),
         },
         onState: state => {
-          if (state.did_finish) void serialized(() => finishStopInternal(manifest, stopId, operationGeneration));
+          if (state.did_finish) {
+            void serialized(() => finishStopInternal(manifest, plan, stopId, operationGeneration));
+          }
           else void persistAudioState(stopId, state);
         },
         onUserPause: state => persistUserPause(stopId, state),
       });
-      if (!await activeSessionStillMatches(saved, operationGeneration, stopId)) {
+      if (!await activeSessionStillMatches(saved, operationGeneration, { hard_stop_id: stopId })) {
         await dependencies.audio.unload().catch(() => {});
         await releaseAudio();
         if (originalAudioCoordinator.activeOwner() == null) {
@@ -228,8 +322,146 @@ export function createOriginalHeadlessController(
     }
   };
 
+  const playOptionalInternal = async (
+    manifest: OriginalManifestV1,
+    plan: OriginalSelectablePlaybackPlanV1,
+    session: OriginalSessionV1,
+    itemId: string,
+    positionMs = 0,
+    operationGeneration = generation,
+  ) => {
+    if (generation !== operationGeneration || session.current_stop_id) return false;
+    const item = plan.items.find(value => value.id === itemId);
+    if (!item || session.long_form?.current_item_id !== item.id) return false;
+    const key = `optional:${session.owner_scope}:${session.pack_id}:${session.version}:${itemId}`;
+    const currentAudio = await dependencies.audio.getState();
+    if (generation !== operationGeneration) return false;
+    if (playingKey === key && currentAudio.loaded) return true;
+    const localUri = await dependencies.bundles.assetUri(
+      session.owner_scope,
+      session.pack_id,
+      session.version,
+      item.audio_asset_id,
+    );
+    if (!localUri) throw new Error('The selected story is not available offline.');
+    const artworkUri = item.artwork_asset_id
+      ? await dependencies.bundles.assetUri(
+        session.owner_scope,
+        session.pack_id,
+        session.version,
+        item.artwork_asset_id,
+      ).catch(() => null)
+      : null;
+    if (!await activeSessionStillMatches(
+      session,
+      operationGeneration,
+      { optional_item_id: itemId },
+    )) return false;
+    const positioned = updateOriginalLongFormAudioPosition(session, plan, positionMs);
+    const saved = await dependencies.sessions.setActiveIfCurrent(session.session_id, positioned);
+    if (!saved || generation !== operationGeneration) return false;
+    await releaseAudio();
+    if (!await activeSessionStillMatches(
+      saved,
+      operationGeneration,
+      { optional_item_id: itemId },
+    )) return false;
+    audioLease = await originalAudioCoordinator.acquire({
+      owner: 'trailhead-originals',
+      priority: 'originals',
+      pause: async () => {
+        await dependencies.audio.pause();
+        const state = await dependencies.audio.getState();
+        await persistOptionalAudioState(plan, itemId, state);
+      },
+      resume: async () => {
+        const active = await dependencies.sessions.loadActive();
+        if (!active?.user_paused && (await dependencies.audio.getState()).loaded) {
+          await dependencies.audio.play();
+        }
+      },
+      canAutoResume: () => true,
+    });
+    playingKey = key;
+    lastPositionPersisted = positioned.long_form?.current_audio_position_ms ?? 0;
+    try {
+      await dependencies.audio.load(localUri, {
+        positionMs: positioned.long_form?.current_audio_position_ms ?? 0,
+        metadata: {
+          title: item.title,
+          artist: 'Trailhead Originals',
+          albumTitle: manifest.title,
+          ...(artworkUri ? { artworkUrl: artworkUri } : {}),
+        },
+        onState: state => {
+          if (state.did_finish) {
+            void serialized(() => finishOptionalInternal(manifest, plan, itemId, operationGeneration));
+          } else void persistOptionalAudioState(plan, itemId, state);
+        },
+        onUserPause: state => persistOptionalUserPause(plan, itemId, state),
+      });
+      if (!await activeSessionStillMatches(
+        saved,
+        operationGeneration,
+        { optional_item_id: itemId },
+      )) {
+        await dependencies.audio.unload().catch(() => {});
+        await releaseAudio();
+        return false;
+      }
+      if (originalAudioCoordinator.activeOwner() === 'trailhead-originals') {
+        await dependencies.audio.play();
+      }
+      return true;
+    } catch (caught) {
+      await dependencies.audio.unload().catch(() => {});
+      await releaseAudio();
+      if (originalAudioCoordinator.activeOwner() == null) {
+        await dependencies.audio.releaseSession().catch(() => {});
+      }
+      throw caught;
+    }
+  };
+
+  const finishOptionalInternal = async (
+    manifest: OriginalManifestV1,
+    plan: OriginalSelectablePlaybackPlanV1,
+    itemId: string,
+    operationGeneration = generation,
+  ) => {
+    if (generation !== operationGeneration) return;
+    const active = await dependencies.sessions.loadActive();
+    if (!active || active.long_form?.current_item_id !== itemId) return;
+    await dependencies.audio.unload();
+    await releaseAudio();
+    if (!await activeSessionStillMatches(
+      active,
+      operationGeneration,
+      { optional_item_id: itemId },
+    )) return;
+    const next = completeOriginalLongFormItem(active, plan, itemId);
+    const saved = await dependencies.sessions.setActiveIfCurrent(active.session_id, next);
+    if (!saved || generation !== operationGeneration) return;
+    const nextGroupItemId = saved.long_form?.current_item_id;
+    if (nextGroupItemId) {
+      await playOptionalInternal(
+        manifest,
+        plan,
+        saved,
+        nextGroupItemId,
+        0,
+        operationGeneration,
+      );
+      return;
+    }
+    if (originalAudioCoordinator.activeOwner() == null) {
+      await dependencies.audio.releaseSession().catch(() => {});
+    }
+  };
+
   const finishStopInternal = async (
     manifest: OriginalManifestV1,
+    plan: OriginalSelectablePlaybackPlanV1 | null,
     stopId: string,
     operationGeneration = generation,
   ) => {
@@ -243,14 +475,29 @@ export function createOriginalHeadlessController(
     ) return;
     await dependencies.audio.unload();
     await releaseAudio();
-    if (!await activeSessionStillMatches(active, operationGeneration, stopId)) return;
+    if (!await activeSessionStillMatches(active, operationGeneration, { hard_stop_id: stopId })) return;
     const manualReplay = finishManualOriginalStop(active, stopId);
     let next = manualReplay ?? completeOriginalStop(active, stopId, manifest.stops.map(stop => stop.id));
     const promotion = promoteNextOriginalStop(next);
     next = promotion.session;
     const queued = promotion.promoted_stop_id;
+    const deferred = !queued && plan
+      ? resumeDeferredOriginalLongFormAfterHardCue(next, plan)
+      : { session: next, action: null };
+    next = deferred.session;
     const saved = await dependencies.sessions.setActiveIfCurrent(active.session_id, next);
     if (!saved || generation !== operationGeneration) return;
+    if (deferred.action && plan) {
+      await playOptionalInternal(
+        manifest,
+        plan,
+        saved,
+        deferred.action.item_id,
+        deferred.action.position_ms,
+        operationGeneration,
+      );
+      return;
+    }
     if (next.status === 'completed' || (manualReplay && next.status !== 'active')) {
       await stopTracking().catch(() => {});
       if (originalAudioCoordinator.activeOwner() == null) {
@@ -258,7 +505,7 @@ export function createOriginalHeadlessController(
       }
       return;
     }
-    if (queued) await playStopInternal(manifest, saved, queued, 0, operationGeneration);
+    if (queued) await playStopInternal(manifest, plan, saved, queued, 0, operationGeneration);
   };
 
   const processInternal = async (samples: OriginalLocationSample[], operationGeneration: number) => {
@@ -273,11 +520,12 @@ export function createOriginalHeadlessController(
     }
     if (context.kind === 'unavailable') return false;
     let { session } = context;
-    const { manifest } = context;
+    const { manifest, selectable } = context;
     const audioState = await dependencies.audio.getState();
     if (session.current_stop_id && !audioState.loaded) {
       const resumed = await playStopInternal(
         manifest,
+        selectable,
         session,
         session.current_stop_id,
         session.current_audio_position_ms,
@@ -285,17 +533,41 @@ export function createOriginalHeadlessController(
       );
       if (resumed === false) return cancellationWon(operationGeneration);
       session = (await dependencies.sessions.loadActive()) ?? session;
+    } else if (selectable && !audioState.loaded) {
+      const resume = originalLongFormHeadlessResumeAction(session, selectable);
+      if (resume) {
+        const resumed = await playOptionalInternal(
+          manifest,
+          selectable,
+          session,
+          resume.item_id,
+          resume.position_ms,
+          operationGeneration,
+        );
+        if (resumed === false) return cancellationWon(operationGeneration);
+        session = (await dependencies.sessions.loadActive()) ?? session;
+      }
     }
     for (const sample of samples) {
       if (session.status !== 'active' || session.user_paused) break;
       const evaluation = evaluateOriginalLocation(manifest, session, sample);
+      const trigger = evaluation.events.find(event => event.type === 'stop_triggered');
+      // A cold task advances only guaranteed hard cues. Optional capacity,
+      // parked, and completion choices must first be admitted or selected by
+      // the foreground runtime; headless may only resume that explicit state.
       session = evaluation.session;
       const saved = await dependencies.sessions.setActiveIfCurrent(context.session.session_id, session);
       if (!saved || generation !== operationGeneration) return cancellationWon(operationGeneration);
       session = saved;
-      const trigger = evaluation.events.find(event => event.type === 'stop_triggered');
       if (trigger?.type === 'stop_triggered') {
-        const played = await playStopInternal(manifest, session, trigger.stop_id, 0, operationGeneration);
+        const played = await playStopInternal(
+          manifest,
+          selectable,
+          session,
+          trigger.stop_id,
+          0,
+          operationGeneration,
+        );
         if (played === false) return cancellationWon(operationGeneration);
         session = (await dependencies.sessions.loadActive()) ?? session;
       }

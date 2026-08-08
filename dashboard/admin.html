@@ -3297,7 +3297,7 @@ async function runOriginalVirtualValidation() {
 
 function originalDevicePreviewOptions(manifest) {
   const schemaVersion = Number(manifest && manifest.schema_version || 0);
-  if (schemaVersion !== 2) return { schemaVersion, chapters: [] };
+  if (schemaVersion !== 2 && schemaVersion !== 3) return { schemaVersion, chapters: [] };
   const chapters = (Array.isArray(manifest.chapters) ? manifest.chapters : [])
     .filter(chapter => chapter && typeof chapter === 'object' && String(chapter.id || '').trim())
     .map((chapter, chapterIndex) => ({
@@ -3320,25 +3320,25 @@ function originalDevicePreviewOptions(manifest) {
         .sort((left, right) => left.sequence - right.sequence || left.id.localeCompare(right.id)),
     }))
     .sort((left, right) => left.sequence - right.sequence || left.id.localeCompare(right.id));
-  return { schemaVersion: 2, chapters };
+  return { schemaVersion, chapters };
 }
 
 function resolveOriginalDevicePreviewSelection(options, chapterId = '', variantId = '') {
-  if (!options || options.schemaVersion !== 2) {
+  if (!options || (options.schemaVersion !== 2 && options.schemaVersion !== 3)) {
     return { valid: true, schemaVersion: Number(options && options.schemaVersion || 0), chapter: null, variant: null };
   }
   if (!options.chapters.length) {
-    return { valid: false, schemaVersion: 2, reason: 'This draft has no previewable chapters.' };
+    return { valid: false, schemaVersion: options.schemaVersion, reason: 'This draft has no previewable chapters.' };
   }
   const cleanChapterId = String(chapterId || '').trim();
   const chapter = cleanChapterId
     ? options.chapters.find(item => item.id === cleanChapterId)
     : options.chapters[0];
   if (!chapter) {
-    return { valid: false, schemaVersion: 2, reason: 'Choose a chapter from this saved draft.' };
+    return { valid: false, schemaVersion: options.schemaVersion, reason: 'Choose a chapter from this saved draft.' };
   }
   if (!chapter.variants.length) {
-    return { valid: false, schemaVersion: 2, chapter, reason: `${chapter.title} has no previewable routes.` };
+    return { valid: false, schemaVersion: options.schemaVersion, chapter, reason: `${chapter.title} has no previewable routes.` };
   }
   const cleanVariantId = String(variantId || '').trim();
   const fallbackVariant = chapter.variants.find(item => item.id === chapter.defaultVariantId) || chapter.variants[0];
@@ -3346,9 +3346,9 @@ function resolveOriginalDevicePreviewSelection(options, chapterId = '', variantI
     ? chapter.variants.find(item => item.id === cleanVariantId)
     : fallbackVariant;
   if (!variant) {
-    return { valid: false, schemaVersion: 2, chapter, reason: 'Choose a route from this chapter.' };
+    return { valid: false, schemaVersion: options.schemaVersion, chapter, reason: 'Choose a route from this chapter.' };
   }
-  return { valid: true, schemaVersion: 2, chapter, variant };
+  return { valid: true, schemaVersion: options.schemaVersion, chapter, variant };
 }
 
 function setOriginalPreviewSelectionStatus(selection) {
@@ -3391,7 +3391,7 @@ function renderOriginalDevicePreviewSelection(manifestOverride = null) {
     }
   }
   const options = originalDevicePreviewOptions(manifest);
-  if (options.schemaVersion !== 2) {
+  if (options.schemaVersion !== 2 && options.schemaVersion !== 3) {
     host.style.display = 'none';
     chapterSelect.innerHTML = '';
     variantSelect.innerHTML = '';
@@ -3458,7 +3458,7 @@ async function generateOriginalPreviewLink() {
     });
     if (!result || !result.token) throw new Error('Preview token was not returned');
     let link;
-    if (previewSelection.schemaVersion === 2) {
+    if (previewSelection.schemaVersion === 2 || previewSelection.schemaVersion === 3) {
       const query = new URLSearchParams({
         id: selectedOriginalId,
         chapter: previewSelection.chapter.id,
@@ -5073,7 +5073,7 @@ async function importOriginalJson(event) {
     const data = JSON.parse(await file.text());
     startNewOriginal();
     const manifest = data.manifest || data.original_manifest || (data.schema_version === 1 && data.route && data.stops ? data : null);
-    const template = data.template || (data.schema_version === 2 ? data : null);
+    const template = data.template || ([2, 3].includes(Number(data.schema_version)) ? data : null);
     const title = data.title || (manifest && manifest.title) || (template && template.title) || 'Untitled Original';
     document.getElementById('originals-title').value = title;
     document.getElementById('originals-current-title').textContent = title;

@@ -7,10 +7,12 @@ import {
   ORIGINAL_EXPLORER_ACCESS_REQUIRED,
   originalBundleStore,
   originalOwnerScopeForAccount,
+  originalSelectablePlaybackGroupItems,
   getOriginalPreviewToken,
   originalRestoreScopeIsCurrent,
   originalSessionStore,
   compileOriginalManifestV2Selections,
+  compileOriginalManifestV3Selections,
   resolveOriginalManifestForPlayback,
   originalSummaryForLocalAccess,
   trackOriginalsAnalyticsEvent,
@@ -22,9 +24,13 @@ import {
   type OriginalDetail,
   type OriginalManifestPreviewV1,
   type OriginalManifestPreviewV2,
+  type OriginalManifestPreviewV3,
   type OriginalManifest,
   type OriginalManifestV1,
   type OriginalManifestV2,
+  type OriginalManifestV3,
+  type OriginalSelectablePlaybackItemV1,
+  type OriginalSelectablePlaybackPlanV1,
   type OriginalLocalAccessV1,
   type OriginalOwnerScope,
   type OriginalSessionV1,
@@ -398,7 +404,7 @@ function compiledManifestSources(
 }
 
 function previewChapterSelections(
-  preview: OriginalManifestPreviewV2,
+  preview: OriginalManifestPreviewV2 | OriginalManifestPreviewV3,
 ): OriginalUiChapterSelection[] {
   return [...preview.chapters]
     .sort((a, b) => a.sequence - b.sequence || a.id.localeCompare(b.id))
@@ -421,12 +427,161 @@ function previewChapterSelections(
       })));
 }
 
+function optionalManifestStory(
+  item: OriginalSelectablePlaybackItemV1,
+  session?: OriginalSessionV1 | null,
+  groupedItems: OriginalSelectablePlaybackItemV1[] = [item],
+): OriginalUiStory {
+  const completedIds = new Set(session?.long_form?.completed_item_ids ?? []);
+  const completed = groupedItems.every(candidate => completedIds.has(candidate.id));
+  const playing = groupedItems.some(candidate => (
+    session?.long_form?.current_item_id === candidate.id
+    || session?.long_form?.deferred_item_id === candidate.id
+  ));
+  const availability = item.delivery.mode === 'capacity_deeper'
+    ? 'during_drive' as const
+    : item.delivery.mode === 'stopped_deeper'
+      ? 'while_parked' as const
+      : 'after_route' as const;
+  return {
+    id: item.id,
+    sequence: item.sequence,
+    title: item.title,
+    transcript: item.transcript,
+    durationLabel: formatDuration(groupedItems.reduce(
+      (total, candidate) => total + candidate.audio_duration_s,
+      0,
+    )),
+    completed,
+    replayable: completed,
+    playing,
+    optional: true,
+    availability,
+  };
+}
+
+/** Exact selectable member for Now Playing; library grouping is intentionally separate. */
+export function selectableManifestItemStory(
+  plan: OriginalSelectablePlaybackPlanV1 | null | undefined,
+  itemId: string | null | undefined,
+  session?: OriginalSessionV1 | null,
+) {
+  if (!plan || !itemId) return null;
+  const item = plan.items.find(candidate => candidate.id === itemId);
+  return item ? optionalManifestStory(item, session) : null;
+}
+
+/** One library row per selectable story or explicitly confirmed story group. */
+export function selectableManifestStories(
+  plan: OriginalSelectablePlaybackPlanV1 | null | undefined,
+  session?: OriginalSessionV1 | null,
+): OriginalUiStory[] {
+  if (!plan) return [];
+  const seenGroups = new Set<string>();
+  const stories: OriginalUiStory[] = [];
+  [...plan.items]
+    .sort((left, right) => left.sequence - right.sequence || left.id.localeCompare(right.id))
+    .forEach(item => {
+      const groupId = item.delivery.mode === 'stopped_deeper'
+        ? item.delivery.experience_group_id
+        : undefined;
+      if (groupId && seenGroups.has(groupId)) return;
+      if (groupId) seenGroups.add(groupId);
+      stories.push(optionalManifestStory(
+        item,
+        session,
+        originalSelectablePlaybackGroupItems(plan, item.id),
+      ));
+    });
+  return stories;
+}
+
+export type OriginalStoryLibraryPresentationV1 = {
+  label: string;
+  action: 'none' | 'play_parked' | 'play_after_route' | 'replay';
+  actionable: boolean;
+};
+
+/** Consumer copy and actions for one route-story library row. */
+export function originalStoryLibraryPresentation(
+  story: Pick<
+    OriginalUiStory,
+    'optional' | 'availability' | 'completed' | 'playing'
+  >,
+  options: {
+    adminPreview?: boolean;
+    hasActiveSelection?: boolean;
+    routeCompleted?: boolean;
+  } = {},
+): OriginalStoryLibraryPresentationV1 {
+  if (!story.optional) {
+    return {
+      label: options.adminPreview ? 'Unpublished trigger cue' : 'Plays automatically on route',
+      action: 'none',
+      actionable: false,
+    };
+  }
+  if (story.playing) {
+    return { label: 'Deeper story · playing', action: 'none', actionable: false };
+  }
+  if (story.completed) {
+    const replayAvailable = story.availability === 'while_parked'
+      || options.routeCompleted === true;
+    return {
+      label: replayAvailable
+        ? 'Deeper story · replay'
+        : 'Deeper story · replay after the route',
+      action: replayAvailable ? 'replay' : 'none',
+      actionable: replayAvailable && options.hasActiveSelection === true,
+    };
+  }
+  if (story.availability === 'while_parked') {
+    return {
+      label: 'Deeper story · play when parked',
+      action: 'play_parked',
+      actionable: options.hasActiveSelection === true,
+    };
+  }
+  if (options.routeCompleted) {
+    return {
+      label: 'Deeper story · ready to play',
+      action: 'play_after_route',
+      actionable: options.hasActiveSelection === true,
+    };
+  }
+  return {
+    label: story.availability === 'during_drive'
+      ? 'Deeper story · may play during the drive'
+      : 'Deeper story · available after the route',
+    action: 'none',
+    actionable: false,
+  };
+}
+
+/** Guaranteed route progress excludes separately selectable stories. */
+export function originalRouteProgressForStories(
+  stories: readonly OriginalUiStory[],
+  session?: OriginalSessionV1 | null,
+) {
+  const hardStories = stories.filter(story => !story.optional);
+  if (!hardStories.length) return 0;
+  const terminalIds = new Set(session ? [
+    ...session.completed_stop_ids,
+    ...session.skipped_stop_ids,
+    ...session.missed_stop_ids,
+  ] : []);
+  return hardStories.filter(story => terminalIds.has(story.id)).length / hardStories.length;
+}
+
 function manifestChapterSelections(
-  manifest: OriginalManifestV2,
+  manifest: OriginalManifestV2 | OriginalManifestV3,
   sessions: OriginalSessionV1[] = [],
 ): OriginalUiChapterSelection[] {
   const chapters = new Map(manifest.chapters.map(chapter => [chapter.id, chapter]));
-  return compileOriginalManifestV2Selections(manifest).map(({ selection, compiled }) => {
+  const compiledSelections = manifest.schema_version === 3
+    ? compileOriginalManifestV3Selections(manifest)
+    : compileOriginalManifestV2Selections(manifest);
+  return compiledSelections.map(({ selection, compiled }) => {
     const chapter = chapters.get(selection.chapter_id)!;
     const routeManifest = compiled.manifest;
     const matchingSession = sessions.find(session => (
@@ -440,6 +595,15 @@ function manifestChapterSelections(
       authority: source.authority,
       scope: [...source.scope],
     }));
+    const selectable = 'selectable' in compiled
+      ? compiled.selectable as OriginalSelectablePlaybackPlanV1
+      : null;
+    const stories = manifest.schema_version === 3 && selectable
+      ? [
+        ...manifestStories(routeManifest, matchingSession),
+        ...selectableManifestStories(selectable, matchingSession),
+      ].sort((left, right) => left.sequence - right.sequence || left.id.localeCompare(right.id))
+      : manifestStories(routeManifest, matchingSession);
     return {
       chapterId: selection.chapter_id,
       chapterSequence: selection.chapter_sequence,
@@ -455,7 +619,7 @@ function manifestChapterSelections(
       storyCount: selection.story_count,
       cueCount: selection.cue_count,
       route: routeManifest.route,
-      stories: manifestStories(routeManifest, matchingSession),
+      stories,
       surfaceLabel: routeManifest.access.surface,
       seasonLabel: originalSeasonLabel(routeManifest.season.recommended_months),
       safetyNotes: [
@@ -493,7 +657,7 @@ export function selectOriginalUiChapter(
   chapterId: string,
   variantId: string,
 ): OriginalUiDetail {
-  if (detail.manifestSchemaVersion !== 2) return detail;
+  if (detail.manifestSchemaVersion === 1) return detail;
   const selection = detail.chapterSelections?.find(item => (
     item.chapterId === chapterId && item.variantId === variantId
   ));
@@ -532,8 +696,8 @@ function detailToUi(
   const base = { ...summaryToUi(item, { owned, bundle, session }), accessKind };
   const meta = record(item.public_metadata);
   const preview = item.manifest_preview;
-  if (preview.schema_version === 2) {
-    const selections = downloadedManifest?.schema_version === 2
+  if (preview.schema_version === 2 || preview.schema_version === 3) {
+    const selections = downloadedManifest?.schema_version === preview.schema_version
       ? manifestChapterSelections(downloadedManifest, selectionSessions)
       : previewChapterSelections(preview);
     const selected = defaultChapterSelection(selections, session);
@@ -545,7 +709,7 @@ function detailToUi(
     );
     const initial: OriginalUiDetail = {
       ...base,
-      manifestSchemaVersion: 2,
+      manifestSchemaVersion: preview.schema_version,
       durationLabel: selected.durationLabel,
       distanceLabel: selected.distanceLabel,
       surfaceLabel: selected.surfaceLabel || base.surfaceLabel,
@@ -607,18 +771,11 @@ function cachedManifestToUi(
   selectionSessions: OriginalSessionV1[] = session ? [session] : [],
 ): OriginalUiDetail {
   const cachedMetadata = record(access.pack_summary?.public_metadata);
-  if (manifest.schema_version === 2) {
+  if (manifest.schema_version === 2 || manifest.schema_version === 3) {
     const selections = manifestChapterSelections(manifest, selectionSessions);
     const selected = defaultChapterSelection(selections, session);
     if (!selected) throw new Error('This downloaded Original has no selectable route chapter.');
     const stories = selected.stories ?? [];
-    const terminalCount = session
-      ? new Set([
-        ...session.completed_stop_ids,
-        ...session.skipped_stop_ids,
-        ...session.missed_stop_ids,
-      ]).size
-      : 0;
     const region = textValue(cachedMetadata, ['region', 'location_label'])
       || formatCoverageRegion(access.pack_summary?.coverage_region || '');
     const initial: OriginalUiDetail = {
@@ -651,9 +808,9 @@ function cachedManifestToUi(
         cachedMetadata,
         downloadedHeroArtwork(manifest, bundle),
       ),
-      progress: stories.length ? terminalCount / stories.length : 0,
+      progress: originalRouteProgressForStories(stories, session),
       downloadState: bundle ? 'ready' : 'not_downloaded',
-      manifestSchemaVersion: 2,
+      manifestSchemaVersion: manifest.schema_version,
       overview: selected.chapterSummary,
       routeLabel: `${selected.chapterTitle} · ${selected.variantTitle}`,
       route: selected.route,

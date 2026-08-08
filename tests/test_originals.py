@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import copy
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -366,6 +367,61 @@ class TrailheadOriginalsTests(unittest.TestCase):
             self.admin,
             required_content_kind="original_drive",
         )
+
+    def _replace_original_manifest_with_long_form_v3(
+        self,
+        pack_id: str,
+        version: int,
+        *,
+        draft: bool = False,
+    ) -> dict:
+        db = store._conn()
+        try:
+            if draft:
+                row = db.execute(
+                    "SELECT draft_original_manifest_json FROM authored_trip_packs WHERE id=?",
+                    (pack_id,),
+                ).fetchone()
+                column = "draft_original_manifest_json"
+                where = "id=?"
+                params = (pack_id,)
+                table = "authored_trip_packs"
+            else:
+                row = db.execute(
+                    """SELECT original_manifest_json FROM authored_trip_pack_versions
+                       WHERE pack_id=? AND version=?""",
+                    (pack_id, version),
+                ).fetchone()
+                column = "original_manifest_json"
+                where = "pack_id=? AND version=?"
+                params = (pack_id, version)
+                table = "authored_trip_pack_versions"
+            manifest = json.loads(row[column])
+            manifest["schema_version"] = 3
+            manifest["consumer_contract"] = {
+                "schema_version": 1,
+                "contract_id": store.ORIGINALS_LONG_FORM_CONSUMER_CONTRACT,
+                "required_capabilities": list(
+                    store.ORIGINALS_LONG_FORM_REQUIRED_CAPABILITIES
+                ),
+            }
+            db.execute(
+                f"UPDATE {table} SET {column}=? WHERE {where}",
+                (json.dumps(manifest, separators=(",", ":"), sort_keys=True), *params),
+            )
+            db.commit()
+            return manifest
+        finally:
+            db.close()
+
+    @staticmethod
+    def _long_form_consumer_headers() -> dict[str, str]:
+        return {
+            server.ORIGINALS_CONSUMER_CONTRACT_HEADER:
+                store.ORIGINALS_LONG_FORM_CONSUMER_CONTRACT,
+            server.ORIGINALS_CAPABILITIES_HEADER:
+                ",".join(store.ORIGINALS_LONG_FORM_REQUIRED_CAPABILITIES),
+        }
 
     def test_moab_fixture_is_strictly_typed_and_explicitly_not_publishable(self):
         fixture = _load_fixture()
@@ -1665,6 +1721,385 @@ class TrailheadOriginalsTests(unittest.TestCase):
                 asyncio.run(api_public_originals(50, "", "", None))
         self.assertEqual(gated.exception.status_code, 404)
         self.assertEqual(gated.exception.detail["code"], "feature_unavailable")
+
+    def test_long_form_consumer_catalog_uses_newest_compatible_version(self):
+        first = self._publish(
+            _ready_payload(title="Long-form compatibility v1"),
+            pack_id="original_long_form_compat",
+        )
+        revised = _ready_payload(title="Long-form compatibility v2")
+        self._save(revised, pack_id=first["id"])
+        second = store.publish_authored_trip_pack(
+            first["id"], self.admin, required_content_kind="original_drive",
+        )
+        self._replace_original_manifest_with_long_form_v3(
+            first["id"], second["version"],
+        )
+        profile = {
+            "consumer_contract": store.ORIGINALS_LONG_FORM_CONSUMER_CONTRACT,
+            "consumer_capabilities": store.ORIGINALS_LONG_FORM_REQUIRED_CAPABILITIES,
+        }
+
+        legacy_page = store.list_published_originals(limit=1)
+        capable_page = store.list_published_originals(limit=1, **profile)
+        self.assertEqual(legacy_page["items"][0]["version"], 1)
+        self.assertEqual(capable_page["items"][0]["version"], 2)
+        self.assertEqual(store.get_published_original(first["id"])["version"], 1)
+        self.assertEqual(
+            store.get_published_original(first["id"], **profile)["version"], 2,
+        )
+        with self.assertRaises(store.OriginalConsumerUpdateRequiredError):
+            store.get_published_original_version(first["id"], 2)
+        self.assertEqual(
+            store.get_published_original_version(first["id"], 2, **profile)["version"],
+            2,
+        )
+
+        older = self._publish(
+            _ready_payload(title="Older compatible Original"),
+            pack_id="original_long_form_page_old",
+        )
+        newest = self._publish(
+            _ready_payload(title="Newest long-form Original"),
+            pack_id="original_long_form_page_new",
+        )
+        self._replace_original_manifest_with_long_form_v3(
+            newest["id"], newest["version"],
+        )
+        db = store._conn()
+        db.execute(
+            "UPDATE authored_trip_pack_versions SET published_at=100 WHERE pack_id=?",
+            (older["id"],),
+        )
+        db.execute(
+            "UPDATE authored_trip_pack_versions SET published_at=200 WHERE pack_id=?",
+            (first["id"],),
+        )
+        db.execute(
+            "UPDATE authored_trip_pack_versions SET published_at=300 WHERE pack_id=?",
+            (newest["id"],),
+        )
+        db.commit()
+        db.close()
+        first_legacy_page = store.list_published_originals(limit=1)
+        second_legacy_page = store.list_published_originals(
+            limit=1, cursor=first_legacy_page["next_cursor"],
+        )
+        self.assertEqual(first_legacy_page["items"][0]["id"], first["id"])
+        self.assertEqual(second_legacy_page["items"][0]["id"], older["id"])
+        self.assertIsNone(second_legacy_page["next_cursor"])
+        self.assertEqual(
+            store.list_published_originals(limit=1, **profile)["items"][0]["id"],
+            newest["id"],
+        )
+
+        unsorted = ",".join(reversed(store.ORIGINALS_LONG_FORM_REQUIRED_CAPABILITIES))
+        self.assertEqual(
+            server._originals_consumer_profile_values(
+                store.ORIGINALS_LONG_FORM_CONSUMER_CONTRACT, unsorted,
+            ),
+            {"consumer_contract": None, "consumer_capabilities": ()},
+        )
+
+    def test_long_form_preview_is_redacted_and_counts_both_delivery_lanes(self):
+        manifest = {
+            "schema_version": 3,
+            "manifest_id": "manifest_smokies_v1",
+            "pack_id": "original_smokies",
+            "version": 1,
+            "locale": "en-US",
+            "title": "Smokies",
+            "consumer_contract": {
+                "schema_version": 1,
+                "contract_id": store.ORIGINALS_LONG_FORM_CONSUMER_CONTRACT,
+                "required_capabilities": list(
+                    store.ORIGINALS_LONG_FORM_REQUIRED_CAPABILITIES
+                ),
+            },
+            "stories": [
+                {"id": "story_auto", "kind": "story", "transcript": "private"},
+                {"id": "cue_auto", "kind": "cue", "transcript": "private"},
+                {"id": "story_select", "kind": "story", "transcript": "private"},
+            ],
+            "chapters": [{
+                "id": "mountain_crossing",
+                "sequence": 1,
+                "title": "Mountain Crossing",
+                "summary": "Across the Smokies",
+                "default_variant_id": "eastbound",
+                "variants": [{
+                    "id": "eastbound",
+                    "sequence": 1,
+                    "title": "Eastbound",
+                    "route": {
+                        "direction": "eastbound",
+                        "distance_m": 1000,
+                        "duration_s": 120,
+                        "geometry": {"coordinates": [[-83.5, 35.6]]},
+                    },
+                    "cue_refs": [
+                        {"story_id": "story_auto"},
+                        {"story_id": "cue_auto"},
+                    ],
+                    "selectable_refs": [{"story_id": "story_select"}],
+                }],
+            }],
+            "assets": [{"id": "audio_private", "path": "/private"}],
+            "narration_profile": {"provider": "private"},
+            "offline_map": {"region_id": "smokies", "estimated_bytes": 1234},
+        }
+        preview = store._original_manifest_preview(manifest)
+        variant = preview["chapters"][0]["variants"][0]
+        self.assertEqual(variant["story_count"], 2)
+        self.assertEqual(variant["cue_count"], 1)
+        self.assertEqual(variant["hard_auto_count"], 2)
+        self.assertEqual(variant["selectable_count"], 1)
+        self.assertNotIn("route", variant)
+        self.assertNotIn("stories", preview)
+        self.assertNotIn("assets", preview)
+        self.assertNotIn("narration_profile", preview)
+        self.assertNotIn("geometry", json.dumps(preview))
+
+    def test_long_form_public_routes_fail_closed_before_access_or_charge(self):
+        published = self._publish(
+            _ready_payload(price=250, title="Long-form gate"),
+            pack_id="original_long_form_gate",
+        )
+        manifest = self._replace_original_manifest_with_long_form_v3(
+            published["id"], published["version"],
+        )
+        store.add_credits(self.user, 250, "Long-form gate balance")
+        before_credits = store.get_user_by_id(self.user)["credits"]
+        with self.assertRaises(store.OriginalConsumerUpdateRequiredError):
+            store.acquire_authored_original(
+                self.user,
+                published["id"],
+                "long-form-blocked-acquire",
+                version=published["version"],
+            )
+        self.assertEqual(store.get_user_by_id(self.user)["credits"], before_credits)
+        self.assertEqual(store.list_owned_authored_originals(self.user), [])
+
+        client = TestClient(server.app)
+        auth = {"Authorization": f"Bearer {server._make_token(self.user)}"}
+        manifest_path = (
+            f"/api/originals/{published['id']}/versions/{published['version']}/manifest"
+        )
+        with patch.dict(os.environ, {"TRAILHEAD_ORIGINALS_ENABLED": "1"}):
+            blocked = client.get(manifest_path, headers=auth)
+            hidden = client.get("/api/originals", headers=auth)
+            detail = client.get(f"/api/originals/{published['id']}", headers=auth)
+            acquire = client.post(
+                f"/api/originals/{published['id']}/acquire?version={published['version']}",
+                headers={**auth, "Idempotency-Key": "long-form-blocked-api"},
+            )
+        self.assertEqual(blocked.status_code, 426)
+        self.assertEqual(
+            blocked.json()["detail"]["code"],
+            "original_consumer_update_required",
+        )
+        self.assertEqual(blocked.headers["cache-control"], "private, no-store")
+        vary = blocked.headers["vary"].lower()
+        self.assertIn(server.ORIGINALS_CONSUMER_CONTRACT_HEADER.lower(), vary)
+        self.assertIn(server.ORIGINALS_CAPABILITIES_HEADER.lower(), vary)
+        self.assertEqual(hidden.status_code, 200)
+        self.assertEqual(hidden.json()["items"], [])
+        self.assertEqual(detail.status_code, 426)
+        self.assertEqual(acquire.status_code, 426)
+        self.assertEqual(store.get_user_by_id(self.user)["credits"], before_credits)
+
+        store.select_featured_original(
+            store._utc_month(), published["id"], self.admin, published["version"],
+        )
+        with patch.dict(os.environ, {"TRAILHEAD_ORIGINALS_ENABLED": "1"}):
+            featured = client.get("/api/originals/featured/current", headers=auth)
+        self.assertEqual(featured.status_code, 426)
+
+        body = server.OriginalStartReadinessRequestV1(
+            chapter_id="mountain_crossing",
+            variant_id="eastbound",
+        )
+        with patch.object(
+            server,
+            "_trusted_original_road_observation",
+            side_effect=AssertionError("incompatible consumer reached road observation"),
+        ) as observer, patch.dict(
+            os.environ, {"TRAILHEAD_ORIGINALS_ENABLED": "1"},
+        ):
+            with self.assertRaises(HTTPException) as readiness:
+                asyncio.run(server.api_original_start_readiness(
+                    published["id"], published["version"], body, {"id": self.user},
+                ))
+        self.assertEqual(readiness.exception.status_code, 426)
+        observer.assert_not_called()
+
+        capable_headers = {**auth, **self._long_form_consumer_headers()}
+        with patch.dict(os.environ, {"TRAILHEAD_ORIGINALS_ENABLED": "1"}):
+            compatible_manifest = client.get(manifest_path, headers=capable_headers)
+        self.assertEqual(compatible_manifest.status_code, 403)
+        self.assertEqual(
+            compatible_manifest.json()["detail"]["code"], "original_access_required",
+        )
+        self.assertEqual(manifest["schema_version"], 3)
+
+    def test_long_form_asset_owned_and_admin_preview_are_capability_gated(self):
+        published = self._publish(
+            _access_policy_payload(title="Long-form asset gate"),
+            pack_id="original_long_form_asset_gate",
+        )
+        manifest = self._replace_original_manifest_with_long_form_v3(
+            published["id"], published["version"],
+        )
+        profile = {
+            "consumer_contract": store.ORIGINALS_LONG_FORM_CONSUMER_CONTRACT,
+            "consumer_capabilities": store.ORIGINALS_LONG_FORM_REQUIRED_CAPABILITIES,
+        }
+        store.set_user_plan(
+            self.user,
+            "com.trailhead.explorer.monthly.v2",
+            int(time.time()) + 30 * 86_400,
+        )
+        receipt_env = {
+            "TRAILHEAD_ORIGINALS_RECEIPT_PRIVATE_KEY": base64.urlsafe_b64encode(
+                bytes(range(1, 33)),
+            ).decode("ascii").rstrip("="),
+            "TRAILHEAD_ORIGINALS_RECEIPT_KEY_ID": "long-form-test",
+            "TRAILHEAD_ORIGINALS_RECEIPT_OWNER_BINDING_KEY": base64.urlsafe_b64encode(
+                bytes(range(33, 65)),
+            ).decode("ascii").rstrip("="),
+        }
+        with patch.dict(os.environ, receipt_env, clear=False):
+            acquired = store.acquire_authored_original(
+                self.user,
+                published["id"],
+                "long-form-capable-acquire",
+                version=published["version"],
+                access_mode="explorer",
+                **profile,
+            )
+        self.assertEqual(store.list_owned_authored_originals(self.user), [])
+        owned = store.list_owned_authored_originals(self.user, **profile)
+        self.assertEqual(len(owned), 1)
+        self.assertEqual(owned[0]["entitlement"]["manifest_schema_version"], 3)
+        self.assertEqual(acquired["entitlement"]["version"], published["version"])
+        self.assertEqual(acquired["entitlement"]["manifest_schema_version"], 3)
+        self.assertEqual(
+            acquired["entitlement"]["access_receipt"]["payload"][
+                "manifest_schema_version"
+            ],
+            3,
+        )
+
+        original_trip_id = acquired["trip"]["trip_id"]
+        db = store._conn()
+        db.execute(
+            """UPDATE trip_documents_v2 SET status='deleted',deleted_at=?
+               WHERE user_id=? AND id=?""",
+            (int(time.time()), self.user, original_trip_id),
+        )
+        db.commit()
+        db.close()
+        self.assertEqual(store.restore_owned_authored_originals(self.user), [])
+        db = store._conn()
+        self.assertEqual(db.execute(
+            "SELECT status FROM trip_documents_v2 WHERE user_id=? AND id=?",
+            (self.user, original_trip_id),
+        ).fetchone()["status"], "deleted")
+        db.close()
+        restored = store.restore_owned_authored_originals(self.user, **profile)
+        self.assertEqual(len(restored), 1)
+        self.assertEqual(restored[0]["entitlement"]["manifest_schema_version"], 3)
+        self.assertNotEqual(restored[0]["trip"]["trip_id"], original_trip_id)
+
+        asset = manifest["assets"][0]
+        with self.assertRaises(store.OriginalConsumerUpdateRequiredError):
+            store.get_published_original_asset_record(
+                published["id"], asset["id"], asset["sha256"], user_id=self.user,
+            )
+        self.assertIsNotNone(store.get_published_original_asset_record(
+            published["id"], asset["id"], asset["sha256"],
+            user_id=self.user, **profile,
+        ))
+
+        client = TestClient(server.app)
+        auth = {"Authorization": f"Bearer {server._make_token(self.user)}"}
+        asset_path = (
+            f"/api/original-assets/{published['id']}/{asset['id']}/{asset['sha256']}"
+        )
+        with patch.dict(os.environ, {"TRAILHEAD_ORIGINALS_ENABLED": "1"}):
+            blocked_asset = client.get(asset_path, headers=auth)
+            capable_asset = client.get(
+                asset_path,
+                headers={**auth, **self._long_form_consumer_headers()},
+            )
+        self.assertEqual(blocked_asset.status_code, 426)
+        self.assertEqual(capable_asset.status_code, 200)
+        self.assertEqual(capable_asset.headers["cache-control"], "private, no-store")
+
+        self._replace_original_manifest_with_long_form_v3(
+            published["id"], published["version"], draft=True,
+        )
+        with self.assertRaises(store.OriginalConsumerUpdateRequiredError):
+            store.get_authored_original_device_preview_manifest(published["id"])
+        with patch.dict(os.environ, {"TRAILHEAD_ORIGINALS_ENABLED": "1"}):
+            blocked_preview = client.get(
+                f"/api/admin/originals/{published['id']}/device-preview/manifest",
+                headers={"Authorization": f"Bearer {server._make_token(self.admin)}"},
+            )
+        self.assertEqual(blocked_preview.status_code, 426)
+
+    def test_long_form_admin_device_preview_returns_full_client_safe_v3(self):
+        authored = {
+            "schema_version": 3,
+            "consumer_contract": {
+                "schema_version": 1,
+                "contract_id": store.ORIGINALS_LONG_FORM_CONSUMER_CONTRACT,
+                "required_capabilities": list(
+                    store.ORIGINALS_LONG_FORM_REQUIRED_CAPABILITIES
+                ),
+            },
+        }
+        normalized = {
+            **authored,
+            "manifest_id": "original_preview_manifest_smokies_r1",
+            "pack_id": "original_smokies",
+            "version": 9_000_000_001,
+            "stories": [{"id": "story_1"}],
+            "chapters": [{
+                "id": "foothills_parkway",
+                "variants": [{"id": "eastbound"}],
+            }],
+            "assets": [{"id": "audio_story_1"}],
+            "narration_profile": {"provider": "private"},
+            "route_evidence": {"source": "server-only"},
+        }
+        pack = {"draft_original_manifest_json": json.dumps(authored)}
+        with (
+            patch.object(
+                store,
+                "_authored_original_validation_manifest_from_row",
+                return_value=normalized,
+            ),
+            patch.object(
+                store,
+                "compile_original_manifest_v3_selection",
+                return_value={"selection": {}, "manifest": {}, "selectable": {}},
+            ) as compile_selection,
+        ):
+            preview = store._authored_original_preview_manifest_from_row(
+                pack,
+                {},
+                chapter_id="foothills_parkway",
+                variant_id="eastbound",
+            )
+
+        compile_selection.assert_called_once()
+        self.assertEqual(preview["schema_version"], 3)
+        self.assertEqual(preview["stories"], normalized["stories"])
+        self.assertEqual(preview["chapters"], normalized["chapters"])
+        self.assertEqual(preview["assets"], normalized["assets"])
+        self.assertNotIn("narration_profile", preview)
+        self.assertNotIn("route_evidence", preview)
 
     def test_paid_guest_api_requires_sign_in_and_does_not_leak_manifest(self):
         paid = self._publish(_ready_payload(price=250))

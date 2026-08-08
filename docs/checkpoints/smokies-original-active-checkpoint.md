@@ -634,3 +634,35 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 - S0/S1/S2 provenance, routes, route evidence, media-rights work, or Moab validation.
 - Broad app crawls, completed Originals lifecycle tests, paid narration, or public release work.
 - Cultural interpretation, pronunciation, or the blocked entries before EBCI participation and approval.
+
+## S3C Little River and Cades Cove editorial baseline
+
+- Started: 2026-08-07.
+- Branch: `feat/smokies-original-s2`.
+- Baseline HEAD: `ce789c21820425bf9dd7d66f1b6c93105130f037`.
+- Worktree: `/home/sean/.openclaw/worktrees/trailhead-smokies-s2`; clean at start.
+- The user accepted the next chapter action and explicitly asked to proceed.
+- Protected main-worktree state remains unchanged:
+  - Explore serving index: `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
+  - App Store copy: `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+  - `.cursor/` remains untracked and protected in the main worktree.
+- Scope is the 13 non-cultural Little River and Cades Cove feature stories plus nine short road cues already defined in the checked source dossier.
+- `cc_story_04` remains blocked for compensated EBCI participation and cultural review. No substitute account of Cherokee history or place relationships will be drafted.
+- Feature stories continue to target approximately 3–5 minutes. Cues remain short transitions and are not counted as full stories.
+- Current road access, vehicle-free days, closures, weather, fees, and wildlife notices remain live Start Tour readiness data rather than immutable narration.
+- The chapter will use the existing chapter-aware Originals Studio and source-lock validator. No parallel Studio, manifest, player, map, ownership, entitlement, or download system will be introduced.
+- No Cartesia request, credit spend, narration audio, media ingestion, external outreach, deployment, OTA, native build, or public-stage change is included.
+- Task-owned background processes at start: none.
+
+### Next exact action after this baseline
+
+1. Recheck only the registered official NPS sources used by the Little River and Cades Cove claims.
+2. Draft and source-lock the 13 approved feature stories and nine cues.
+3. Extend the existing Studio/loader/tests for the third chapter and run focused safeguards.
+4. Stop for script review before Roaring Fork or narration generation.
+
+### Do not repeat during S3C
+
+- Foothills or Mountain Crossing research and first-draft work.
+- S0/S1/S2 provenance, routes, route evidence, media-rights inventory, Moab validation, or broad app testing.
+- EBCI outreach, Cherokee interpretation/pronunciation, Envato work, or paid narration.

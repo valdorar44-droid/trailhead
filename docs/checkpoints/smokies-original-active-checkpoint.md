@@ -549,3 +549,35 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 - Foothills NPS source research, S0/S1/S2 work, media-rights inventory, or route reconstruction unless a source or script claim changes.
 - Broad app crawls or completed Originals lifecycle testing.
 - EBCI outreach, Cherokee interpretation/pronunciation, media ingestion, or paid narration before their explicit gates.
+
+## S3B Mountain Crossing editorial baseline
+
+- Started: 2026-08-07.
+- Branch: `feat/smokies-original-s2`.
+- Baseline HEAD: `fa47fe5479d21b495aa0a78902b93daabb37661c`.
+- Worktree: `/home/sean/.openclaw/worktrees/trailhead-smokies-s2`; clean at start.
+- The user accepted the long-form direction and explicitly asked to continue. Mountain Crossing therefore proceeds as the next bounded source-locked chapter packet.
+- Protected main-worktree state remains unchanged:
+  - Explore serving index: `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
+  - App Store copy: `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+  - `.cursor/` remains untracked and protected in the main worktree.
+- Scope is the 17 non-cultural Mountain Crossing feature stories and nine non-cultural road cues already defined in the checked source dossier.
+- `mc_story_15` and `mc_cue_07` remain blocked for compensated EBCI participation and cultural review. No substitute cultural interpretation, sacred story, or pronunciation will be drafted.
+- Feature stories continue to target approximately 3–5 minutes each. Short cues remain brief scene/location transitions and are not counted as full stories.
+- Operational availability, closures, weather, parking, and route restrictions remain outside immutable narration and use the existing Start Tour readiness path.
+- The existing Originals Studio and source-lock validator will be extended for chapter-aware review; no second Studio, manifest, player, entitlement, or map system will be created.
+- No Cartesia request, credit spend, audio, media ingestion, external outreach, deployment, OTA, native build, or public-stage change is included.
+- Task-owned background processes at start: none.
+
+### Next exact action after this baseline
+
+1. Add chapter-aware source-locked editorial packets to the existing Studio.
+2. Draft the 17 approved Mountain Crossing stories and nine cues against their exact reviewed claim and source IDs.
+3. Run focused editorial, cultural-gate, Studio, Manifest V2, and route-evidence checks.
+4. Stop for script review before Cartesia narration or the next chapter batch.
+
+### Do not repeat during S3B
+
+- Foothills editorial/source research, S0/S1/S2 provenance, route construction, media-rights inventory, or Moab validation.
+- EBCI outreach, Cherokee interpretation/pronunciation, Envato work, or narration generation.
+- Broad app, Map, Explore, Layers, Originals lifecycle, Android Auto, memory, or store-screenshot testing.

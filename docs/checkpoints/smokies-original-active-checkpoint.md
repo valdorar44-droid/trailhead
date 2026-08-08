@@ -1020,3 +1020,33 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 ## Task-owned background processes at S3F completion
 
 - None. No Metro, Gradle, Maestro, pytest, Cartesia renderer, EAS, Railway, cleanup, or compaction task remains running.
+
+## S3G Roaring Fork exact-scene placement baseline
+
+- Started: 2026-08-08.
+- Branch: `feat/smokies-original-s2`.
+- Baseline HEAD: `02788a90`.
+- Worktree was clean at start.
+- Protected main-worktree state remains unchanged:
+  - Explore serving index: `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
+  - App Store copy: `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+  - `.cursor/` remains untracked and protected in the main worktree.
+- Scope is limited to the checked Roaring Fork chapter: resolve the Noah Ogle location against authoritative evidence, design honest handling for dense entrance/Thousand Drips/exit narration, rebuild the deterministic preflight, and validate the existing FIFO limits.
+- Mapbox geospatial operations are used only where road-network or geometric placement requires them. Checked NPS route and landmark evidence remains authoritative; no result may be placed merely to improve timing.
+- Existing 45 stories, 32 cues, cultural-scope contract, other chapter scripts, mobile runtime, public stages, and protected files remain unchanged unless a deterministic Roaring Fork defect proves a narrow correction is required.
+- This packet does not generate paid narration, ingest media, deploy, publish an OTA, change native code, or release the Original.
+- Task-owned background processes at start: none.
+
+### Next exact action after this baseline
+
+1. Audit the checked route geometry, route anchors, official Noah Ogle evidence, and all 13 Roaring Fork openings.
+2. Add the exact landmark only when it can be source-locked and projected onto the accepted route without rerouting the chapter.
+3. Consolidate or reclassify dense exact-scene narration honestly; do not scatter it away from visible places.
+4. Rebuild the authoring preflight and run the source-controlled backlog and trigger-latency gates at 15, 36, 65, and 75 mph.
+5. Stop before Cartesia auditions unless the placement design is deterministic and publication-safe.
+
+### Do not repeat during S3G
+
+- S0-S3F provenance, entitlement, cultural-policy, source dossiers, other chapter drafts, directional adaptation, or FIFO architecture.
+- Broad Map, Explore, Layers, Memory, NPS, Android Auto, Offline, Originals lifecycle, or store work.
+- Paid narration, media ingestion, deployment, OTA, native builds, or public-stage changes.

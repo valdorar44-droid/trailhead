@@ -1,6 +1,6 @@
 # Great Smoky Mountains Original — Active Checkpoint
 
-Last updated: 2026-08-08 (S3E directional adaptation and trigger-spacing packet complete)
+Last updated: 2026-08-08 (S3F public-record cultural scope packet complete)
 
 ## Resume protocol
 
@@ -72,14 +72,14 @@ V2 retains one pack, entitlement, version, download, player, map, trigger engine
 - Per-chapter authoritative validation compiled through the existing V1-shaped runtime input.
 - Dynamic operational readiness sourced separately from immutable narration, so seasonal closures, Cades Cove vehicle-free days, parking requirements, weather, and road restrictions can change without re-recording a story.
 
-The runtime keeps a single queued story; story timing and trigger spacing must pass the current 15/36/65 mph continuous-route scenarios for every chapter/variant.
+The runtime keeps a durable ordered pending-story FIFO with a legacy mirrored head for mixed writers. Story timing and trigger spacing must pass the current 15/36/65 mph continuous-route scenarios, the 240-second route-end backlog limit, and the 180-second trigger-to-play limit for every chapter/variant.
 
 ## Sources, rights, and cultural review
 
 - Use NPS auto-touring, seasonal-road, closure, fee, history, nature, wildlife, and Cades Cove sources as the operational and factual backbone.
 - Review every NPS asset individually. Employee-created material is often public domain, but third-party material may remain copyrighted and the NPS Arrowhead is not available for casual product use.
-- Cherokee chapters require direct Eastern Band of Cherokee Indians participation. Contact the EBCI Destination Marketing/Commerce office and ask the EBCI Cultural Institutional Review Board whether formal review applies.
-- Budget for a compensated EBCI cultural reviewer or storyteller. Do not generate sacred stories, pronunciations, or cultural interpretation from generic web summaries.
+- Narrow, directly attributed facts from current official public records may be drafted and reviewed internally. This classification is Trailhead policy, not an EBCI exemption or release approval; the Smokies publish path remains blocked until an immutable EBCI CIRB scope determination or approval is recorded.
+- Sacred or traditional interpretation, direct EBCI-member research, unpublished or restricted knowledge, culturally supplied pronunciation, and research on EBCI Tribal Lands remain fail-closed. Budget for compensated EBCI participation when any of those scopes is proposed, and require Tribal Resolution evidence before any future on-Tribal-Lands research claim can be approved.
 - Competitor pages and free demos may inform product expectations, download flow, pacing, silence, interruption, resume, and missed-cue behavior only. Never copy scripts, audio, topic sequence, narration structure, branding, or imagery.
 
 ## Audio and bundle targets
@@ -907,7 +907,7 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 
 1. Resolve the Roaring Fork exact-scene timing honestly: add a checked Noah Ogle landmark, then decide which clustered material becomes one consolidated narration, an explicit stopped-vehicle story, or a separately selectable deeper story. Do not scatter exact-scene openings down the road.
 2. Rebuild the preflight with the accepted placement design. Keep the 240-second route-end and 180-second trigger-to-play limits unchanged.
-3. Complete compensated EBCI scope/review before drafting or voicing the three culturally blocked entries.
+3. Superseded by S3F: the three fact-only public-record entries are drafted, but public release remains blocked pending an immutable EBCI CIRB scope determination; sensitive interpretation and pronunciation remain gated.
 4. After scripts, pronunciations, and placement are locked, verify Cartesia training opt-out, balance, overage rate, the 225,000-credit cap, and the $15-before-tax cap before generating the three representative auditions.
 
 ### Do not repeat after S3E
@@ -951,3 +951,72 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 - S0-S3E provenance, entitlement, route building, first-draft chapter work, directional adaptation, FIFO runtime, or broad source research.
 - Roaring Fork placement redesign or real-audio validation; its existing publication blocker remains separate.
 - Broad Map, Explore, Layers, Memory, NPS, Android Auto, Offline, or store-screenshot work.
+
+## S3F public-record cultural scope completion
+
+- Completed: 2026-08-08.
+- Branch: `feat/smokies-original-s2`.
+- Baseline checkpoint commit: `1b642b63227790d54d6ac54e73d36c9bbbff751b`.
+- Implementation commit: `f9cd42904e9450d2efe46a8e3b1f72f3b6d66bef`.
+- Protected main-worktree state remains unchanged:
+  - Explore serving index: `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
+  - App Store copy: `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+  - `.cursor/` remains untracked and protected in the main worktree.
+
+### Completed behavior and editorial scope
+
+- Replaced the former all-Cherokee-content block with a machine-readable scope contract:
+  - `public_record_factual` material must come from `published_public_record` sources and carry no cultural-review trigger.
+  - Sacred/traditional interpretation, culturally supplied pronunciation, direct EBCI-member research, unpublished/restricted knowledge, and research on EBCI Tribal Lands require immutable review evidence and remain blocked.
+  - TTS rendering of gated content remains prohibited until approval.
+- Public-record material can now be drafted, source-checked, and reviewed internally, but `OriginalManifestV2` publication fails closed until the Smokies dossier carries an immutable EBCI scope determination or approval record. The official EBCI CIRB page does not publish a blanket public-record exemption, so internal drafting is not treated as public-release permission.
+- Authored the three previously blocked entries as direct, source-attributed factual narration:
+  - `cc_story_04` — `Before the farms`.
+  - `mc_story_15` — `A living community beside the park`.
+  - `mc_cue_07` — `Name with care`.
+- Removed the unsupported phonetic pronunciation from the public-record claim. No sacred story, traditional interpretation, member-supplied knowledge, unpublished material, or on-Tribal-Lands research was added.
+- Kept both Mountain Crossing directions valid. `mc_story_14` and `mc_story_15` use direction-neutral language, and the public copy no longer claims that a correction guides every traveler.
+- Current reviewed base library:
+  - Four chapters, 45 full stories, 32 short cues, and 77 entries.
+  - 22,737 base words and 9,408 estimated seconds: about 156 minutes 48 seconds.
+  - Eight reviewed reverse-direction cue overrides.
+- Deterministic evidence:
+  - Source dossier SHA-256: `8eb22ca5110f0f9a4287b8f184624348c2a2ca2dbc36e27ef59fc022057ce18f`.
+  - Foothills/editorial scripts SHA-256: `28627001d9b3bbd129e812721064e1a0c8fc2122ec9371afa91657026b76d81e`.
+  - Mountain Crossing SHA-256: `29491ded766186ac918555bf29cafc432503ae4c1b2d3cb160185645b3e632dc`.
+  - Little River/Cades Cove SHA-256: `1fedc6db4944bab671d7cfa0bacd2dda9670133d4165e27b3fe7b63ef8728845`.
+  - Roaring Fork SHA-256: `5fe61090ae27dcfae74fd05e8ca464be6aa140c0383d5a339cc60f3096c9cc8f`.
+  - Roaring Fork preflight SHA-256: `3c075e90f2ec8a2bec59fd136eaff10628d0246882c19a362b36ca8ed73a2953`.
+
+### Verification
+
+- 165 focused Python tests plus four subtests passed across source dossiers, cultural scope, editorial, Manifest V2, Originals Studio, operational readiness, route evidence, official routes, route specifications, and Roaring Fork preflight.
+- After the final fact-bound copy refinement, the 74 directly affected editorial and Manifest V2 tests passed again.
+- Originals Studio JavaScript tests, Python compilation, deterministic dossier/preflight checks, and `git diff --check` passed.
+- An independent final read-only audit found no remaining P0/P1 in this packet.
+- No Cartesia generation, TTS credit spend, media ingestion, backend deployment, OTA, native build, or public-stage change occurred.
+
+### Remaining intentional blockers
+
+- Public release remains blocked until an immutable EBCI CIRB scope determination or approval is recorded. If CIRB says review is not required for this exact fact-only scope, model and bind that written determination explicitly rather than treating silence as permission.
+- Any future research on EBCI Tribal Lands additionally requires the applicable Tribal Resolution evidence before its claims can unlock.
+- Roaring Fork remains blocked on the separate exact-scene placement and real-audio FIFO validation recorded in S3E. The source and cultural changes did not weaken its 240-second backlog or 180-second latency limits.
+- Cartesia rendering remains blocked until the scripts and pronunciations are locked, training opt-out and account terms are confirmed, and the independent 225,000-credit / $15-before-tax caps are active.
+
+### Next exact action after S3F
+
+1. Resolve Roaring Fork's Noah Ogle landmark and dense exact-scene clusters without moving narration away from what passengers can see.
+2. Rebuild the Roaring Fork preflight, then validate it with real rendered durations against the existing FIFO limits.
+3. Send the exact fact-only cultural scope to EBCI CIRB for a written scope determination before any public release. Do not ask for a blanket endorsement or send sacred/traditional interpretation.
+4. Once placement, source, cultural, and pronunciation gates are locked, generate only the three representative Cartesia auditions before batch narration.
+
+### Do not repeat after S3F
+
+- The public-record versus gated-content policy audit, the three restored scripts, the 45/32 editorial count, or the completed direction-neutral copy work while their source hashes remain unchanged.
+- S0-S3E provenance, entitlement, route construction, first-draft chapters, directional adaptation, FIFO architecture, or broad source research.
+- Broad Map, Explore, Layers, Memory, NPS, Android Auto, Offline, Originals lifecycle, or store-screenshot crawls.
+- Paid TTS, deployment, OTA, native builds, or public release before the explicit remaining gates.
+
+## Task-owned background processes at S3F completion
+
+- None. No Metro, Gradle, Maestro, pytest, Cartesia renderer, EAS, Railway, cleanup, or compaction task remains running.

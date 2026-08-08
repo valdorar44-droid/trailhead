@@ -1263,6 +1263,7 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 
 - Completed: 2026-08-08.
 - Baseline checkpoint commit: `0b7f7ca78411`.
+- Implementation commit: `8cd6036bfdf6`.
 - No Cartesia request, credit spend, Studio upload, backend deployment, OTA, native build, or public-stage change occurred.
 - The exact internal audition set is locked in this order:
   1. `rf_story_02` — scenic and natural history.

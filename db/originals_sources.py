@@ -41,6 +41,46 @@ _MEDIA_RIGHTS_REQUIREMENTS = {
     "rights_basis",
     "sha256",
 }
+PUBLIC_RECORD_CULTURAL_SCOPE_V1 = {
+    "classification": "public_record_factual",
+    "collection_method": "published_public_record",
+}
+GATED_CULTURAL_CLASSIFICATION_V1 = "immutable_ebci_review_required"
+GATED_CULTURAL_COLLECTION_METHODS_V1 = {
+    "published_public_record",
+    "direct_ebci_member_research",
+    "fieldwork_on_ebci_tribal_land",
+    "unpublished_or_restricted_knowledge",
+}
+CULTURAL_REVIEW_TRIGGERS_V1 = {
+    "sacred_or_traditional_interpretation",
+    "direct_ebci_member_research",
+    "unpublished_or_restricted_knowledge",
+    "culturally_supplied_pronunciation",
+    "research_on_ebci_tribal_land",
+}
+CULTURAL_PROHIBITIONS_V1 = CULTURAL_REVIEW_TRIGGERS_V1 | {
+    "tts_rendering_of_gated_content",
+}
+
+
+def gated_cultural_scope_triggers_are_valid_v1(
+    collection_method: str,
+    review_triggers: set[str],
+) -> bool:
+    if not review_triggers or collection_method not in GATED_CULTURAL_COLLECTION_METHODS_V1:
+        return False
+    if collection_method == "published_public_record":
+        return bool(review_triggers.intersection({
+            "sacred_or_traditional_interpretation",
+            "culturally_supplied_pronunciation",
+        }))
+    required_trigger = {
+        "direct_ebci_member_research": "direct_ebci_member_research",
+        "fieldwork_on_ebci_tribal_land": "research_on_ebci_tribal_land",
+        "unpublished_or_restricted_knowledge": "unpublished_or_restricted_knowledge",
+    }[collection_method]
+    return required_trigger in review_triggers
 
 
 class OriginalSourceDossierError(ValueError):
@@ -170,8 +210,14 @@ def normalize_original_source_dossier(
         },
         "Original source dossier cultural_review",
     )
-    if cultural.get("status") not in {"required_before_drafting", "approved"}:
-        raise OriginalSourceDossierError("Cultural review must remain required or be explicitly approved")
+    if cultural.get("status") not in {
+        "public_record_only",
+        "required_before_drafting",
+        "approved",
+    }:
+        raise OriginalSourceDossierError(
+            "Cultural review must remain public-record-only, required, or explicitly approved"
+        )
     cultural["authority"] = _text(cultural.get("authority"), "Cultural review authority", maximum=200)
     cultural["official_review_url"] = _https_url(
         cultural.get("official_review_url"), "Cultural review official URL"
@@ -194,6 +240,10 @@ def normalize_original_source_dossier(
         for item in _list(cultural.get("prohibited_until_approved"), "Cultural review prohibited actions")
     ]
     _unique(prohibited, "Cultural review prohibited actions")
+    if set(prohibited) != CULTURAL_PROHIBITIONS_V1:
+        raise OriginalSourceDossierError(
+            "Cultural review prohibited actions do not match the fail-closed contract"
+        )
     cultural["prohibited_until_approved"] = sorted(prohibited)
     approval_fields = {
         "approval_record_id",
@@ -202,7 +252,7 @@ def normalize_original_source_dossier(
         "approved_claim_ids",
     }
     present_approval = {key for key in approval_fields if cultural.get(key) not in (None, "", [])}
-    if cultural["status"] == "required_before_drafting":
+    if cultural["status"] in {"public_record_only", "required_before_drafting"}:
         if present_approval:
             raise OriginalSourceDossierError("Pending cultural review cannot carry partial approval evidence")
     else:
@@ -257,7 +307,15 @@ def normalize_original_source_dossier(
         claim = copy.deepcopy(_object(item, "Original source dossier claim"))
         _forbid_keys(
             claim,
-            {"id", "chapter_id", "statement", "status", "cultural_gate", "source_ids"},
+            {
+                "id",
+                "chapter_id",
+                "statement",
+                "status",
+                "cultural_gate",
+                "cultural_scope",
+                "source_ids",
+            },
             "Original source dossier claim",
         )
         claim["id"] = _stable_id(claim.get("id"), "Original source dossier claim id")
@@ -274,6 +332,67 @@ def normalize_original_source_dossier(
             raise OriginalSourceDossierError(f"Claim {claim['id']} status is invalid")
         if claim.get("cultural_gate") not in {"not_required", "ebci_required"}:
             raise OriginalSourceDossierError(f"Claim {claim['id']} cultural gate is invalid")
+        scope = copy.deepcopy(
+            _object(
+                claim.get("cultural_scope"),
+                f"Claim {claim['id']} cultural scope",
+            )
+        )
+        _forbid_keys(
+            scope,
+            {"classification", "collection_method", "review_triggers"},
+            f"Claim {claim['id']} cultural scope",
+        )
+        classification = _stable_id(
+            scope.get("classification"),
+            f"Claim {claim['id']} cultural scope classification",
+        )
+        collection_method = _stable_id(
+            scope.get("collection_method"),
+            f"Claim {claim['id']} cultural scope collection method",
+        )
+        review_triggers = [
+            _stable_id(value, f"Claim {claim['id']} cultural review trigger")
+            for value in _list(
+                scope.get("review_triggers"),
+                f"Claim {claim['id']} cultural review triggers",
+                minimum=0,
+                maximum=20,
+            )
+        ]
+        _unique(review_triggers, f"Claim {claim['id']} cultural review triggers")
+        unknown_triggers = sorted(set(review_triggers) - CULTURAL_REVIEW_TRIGGERS_V1)
+        if unknown_triggers:
+            raise OriginalSourceDossierError(
+                f"Claim {claim['id']} cultural scope has unknown review triggers"
+            )
+        if claim["cultural_gate"] == "ebci_required":
+            if classification != GATED_CULTURAL_CLASSIFICATION_V1:
+                raise OriginalSourceDossierError(
+                    f"Claim {claim['id']} cultural scope does not match its gate"
+                )
+            if not gated_cultural_scope_triggers_are_valid_v1(
+                collection_method,
+                set(review_triggers),
+            ):
+                raise OriginalSourceDossierError(
+                    f"Claim {claim['id']} gated cultural scope is incomplete"
+                )
+        elif (
+            {
+                "classification": classification,
+                "collection_method": collection_method,
+            } != PUBLIC_RECORD_CULTURAL_SCOPE_V1
+            or review_triggers
+        ):
+            raise OriginalSourceDossierError(
+                f"Claim {claim['id']} public-record scope does not match its gate"
+            )
+        claim["cultural_scope"] = {
+            "classification": classification,
+            "collection_method": collection_method,
+            "review_triggers": sorted(review_triggers),
+        }
         source_ids = [_stable_id(value, f"Claim {claim['id']} source") for value in _list(claim.get("source_ids"), f"Claim {claim['id']} sources")]
         _unique(source_ids, f"Claim {claim['id']} sources")
         missing_sources = sorted(set(source_ids) - set(sources_by_id))
@@ -289,8 +408,6 @@ def normalize_original_source_dossier(
                 raise OriginalSourceDossierError(
                     f"Claim {claim['id']} must match the EBCI review state"
                 )
-            if not any(urlsplit(sources_by_id[source_id]["url"]).hostname == "www.ebci.gov" for source_id in source_ids):
-                raise OriginalSourceDossierError(f"Claim {claim['id']} lacks an official EBCI review source")
         claim["source_ids"] = sorted(source_ids)
         claims.append(claim)
     claims.sort(key=lambda item: item["id"])
@@ -299,6 +416,14 @@ def normalize_original_source_dossier(
     cultural_claim_ids = {
         item["id"] for item in claims if item["cultural_gate"] == "ebci_required"
     }
+    if cultural["status"] == "public_record_only" and cultural_claim_ids:
+        raise OriginalSourceDossierError(
+            "Public-record-only cultural review cannot contain gated claims"
+        )
+    if cultural["status"] in {"required_before_drafting", "approved"} and not cultural_claim_ids:
+        raise OriginalSourceDossierError(
+            "Cultural review status requires at least one EBCI-gated claim"
+        )
     if cultural["status"] == "approved":
         if set(cultural["approved_claim_ids"]) != cultural_claim_ids:
             raise OriginalSourceDossierError(

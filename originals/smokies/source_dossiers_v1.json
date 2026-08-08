@@ -3,6 +3,11 @@
     {
       "chapter_id": "little_river_cades_cove",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "cc_cable_mill",
       "source_ids": [
         "nps_grsm_cable_mill"
@@ -12,18 +17,29 @@
     },
     {
       "chapter_id": "little_river_cades_cove",
-      "cultural_gate": "ebci_required",
-      "id": "cc_cherokee_context",
+      "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
+      "id": "cc_cherokee_public_record",
       "source_ids": [
-        "ebci_cultural_irb",
-        "ebci_cultural_resources"
+        "nps_grsm_cades_cove",
+        "nps_grsm_cades_history",
+        "nps_grsm_cades_overlook"
       ],
-      "statement": "Any account of Cherokee presence, place names, or cultural relationships in Cades Cove requires EBCI review rather than generalized retelling.",
-      "status": "cultural_review_required"
+      "statement": "The National Park Service records that Cherokee people traveled through Cades Cove for hunting before European-American settlement, that archeologists found no evidence of a major settlement there, that some present roads follow older Cherokee-created routes, and that Cherokee people also farmed, foraged, and traded in the cove.",
+      "status": "source_verified"
     },
     {
       "chapter_id": "little_river_cades_cove",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "cc_churches",
       "source_ids": [
         "nps_grsm_cades_cove",
@@ -35,6 +51,11 @@
     {
       "chapter_id": "little_river_cades_cove",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "cc_cove_geology",
       "source_ids": [
         "nps_grsm_geology"
@@ -45,6 +66,11 @@
     {
       "chapter_id": "little_river_cades_cove",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "cc_farming",
       "source_ids": [
         "nps_grsm_cades_history"
@@ -55,6 +81,11 @@
     {
       "chapter_id": "little_river_cades_cove",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "cc_general_store",
       "source_ids": [
         "nps_grsm_general_stores"
@@ -65,6 +96,11 @@
     {
       "chapter_id": "little_river_cades_cove",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "cc_john_oliver",
       "source_ids": [
         "nps_grsm_cades_cove",
@@ -76,6 +112,11 @@
     {
       "chapter_id": "little_river_cades_cove",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "cc_little_river",
       "source_ids": [
         "nps_grsm_natural_features"
@@ -86,6 +127,11 @@
     {
       "chapter_id": "little_river_cades_cove",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "cc_logging_corridor",
       "source_ids": [
         "nps_grsm_people",
@@ -97,6 +143,11 @@
     {
       "chapter_id": "little_river_cades_cove",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "cc_loop_context",
       "source_ids": [
         "nps_grsm_cades_cove"
@@ -107,6 +158,11 @@
     {
       "chapter_id": "little_river_cades_cove",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "cc_park_acquisition",
       "source_ids": [
         "nps_grsm_cades_history",
@@ -118,6 +174,11 @@
     {
       "chapter_id": "little_river_cades_cove",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "cc_population",
       "source_ids": [
         "nps_grsm_cades_history",
@@ -129,6 +190,11 @@
     {
       "chapter_id": "little_river_cades_cove",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "cc_settlement",
       "source_ids": [
         "nps_grsm_cades_history"
@@ -139,6 +205,11 @@
     {
       "chapter_id": "little_river_cades_cove",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "cc_waterfall_landscape",
       "source_ids": [
         "nps_grsm_geology",
@@ -150,6 +221,11 @@
     {
       "chapter_id": "little_river_cades_cove",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "cc_wildlife",
       "source_ids": [
         "nps_grsm_black_bears",
@@ -161,6 +237,11 @@
     {
       "chapter_id": "foothills_parkway",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "fp_air_monitoring",
       "source_ids": [
         "nps_grsm_air_quality"
@@ -171,6 +252,11 @@
     {
       "chapter_id": "foothills_parkway",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "fp_forest_mosaic",
       "source_ids": [
         "nps_grsm_statistics",
@@ -182,6 +268,11 @@
     {
       "chapter_id": "foothills_parkway",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "fp_geologic_view",
       "source_ids": [
         "nps_grsm_geology"
@@ -192,6 +283,11 @@
     {
       "chapter_id": "foothills_parkway",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "fp_long_build",
       "source_ids": [
         "nps_grsm_foothills",
@@ -203,6 +299,11 @@
     {
       "chapter_id": "foothills_parkway",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "fp_missing_link",
       "source_ids": [
         "nps_grsm_missing_link_bridge"
@@ -213,6 +314,11 @@
     {
       "chapter_id": "foothills_parkway",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "fp_scenic_corridor",
       "source_ids": [
         "nps_grsm_foothills"
@@ -223,6 +329,11 @@
     {
       "chapter_id": "mountain_crossing",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "mc_bear_country",
       "source_ids": [
         "nps_grsm_black_bears"
@@ -233,6 +344,11 @@
     {
       "chapter_id": "mountain_crossing",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "mc_biodiversity",
       "source_ids": [
         "nps_grsm_animals",
@@ -244,6 +360,11 @@
     {
       "chapter_id": "mountain_crossing",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "mc_ccc_legacy",
       "source_ids": [
         "nps_grsm_history_culture",
@@ -255,6 +376,11 @@
     {
       "chapter_id": "mountain_crossing",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "mc_deep_geology",
       "source_ids": [
         "nps_grsm_geology"
@@ -265,6 +391,11 @@
     {
       "chapter_id": "mountain_crossing",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "mc_elk_restoration",
       "source_ids": [
         "nps_grsm_animals",
@@ -276,6 +407,11 @@
     {
       "chapter_id": "mountain_crossing",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "mc_forest_zones",
       "source_ids": [
         "nps_grsm_vegetation"
@@ -286,6 +422,11 @@
     {
       "chapter_id": "mountain_crossing",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "mc_gap_context",
       "source_ids": [
         "nps_grsm_kuwohi_area"
@@ -296,6 +437,11 @@
     {
       "chapter_id": "mountain_crossing",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "mc_gateway_watershed",
       "source_ids": [
         "nps_grsm_natural_features"
@@ -306,6 +452,11 @@
     {
       "chapter_id": "mountain_crossing",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "mc_haze_and_pollution",
       "source_ids": [
         "nps_grsm_air_quality"
@@ -316,6 +467,11 @@
     {
       "chapter_id": "mountain_crossing",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "mc_high_country",
       "source_ids": [
         "nps_grsm_nature",
@@ -326,18 +482,12 @@
     },
     {
       "chapter_id": "mountain_crossing",
-      "cultural_gate": "ebci_required",
-      "id": "mc_kuwohi_living_meaning",
-      "source_ids": [
-        "ebci_cultural_irb",
-        "ebci_cultural_resources"
-      ],
-      "statement": "Any interpretation of Kuwohi's living cultural meaning, Cherokee language, or pronunciation requires EBCI participation and approval.",
-      "status": "cultural_review_required"
-    },
-    {
-      "chapter_id": "mountain_crossing",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "mc_kuwohi_name",
       "source_ids": [
         "nps_grsm_kuwohi_restoration"
@@ -348,6 +498,28 @@
     {
       "chapter_id": "mountain_crossing",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
+      "id": "mc_kuwohi_public_record",
+      "source_ids": [
+        "nps_grsm_cherokee",
+        "nps_grsm_kuwohi_restoration",
+        "nps_grsm_oconaluftee"
+      ],
+      "statement": "The National Park Service records Kuwohi as the Cherokee name restored in 2024, translates it as mulberry place, places the peak within the traditional Cherokee homeland, describes ancestral ties, village life, hunting, trading, agriculture, forced removal, and the present-day Eastern Band community beside the park, and documents annual summit access for Cherokee schools and knowledge holders.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "mc_logging_recovery",
       "source_ids": [
         "nps_grsm_history_culture",
@@ -359,6 +531,11 @@
     {
       "chapter_id": "mountain_crossing",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "mc_mountain_farm",
       "source_ids": [
         "nps_grsm_mountain_farm",
@@ -370,6 +547,11 @@
     {
       "chapter_id": "mountain_crossing",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "mc_oconaluftee_valley",
       "source_ids": [
         "nps_grsm_oconaluftee"
@@ -380,6 +562,11 @@
     {
       "chapter_id": "mountain_crossing",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "mc_park_creation",
       "source_ids": [
         "nps_grsm_people",
@@ -391,6 +578,11 @@
     {
       "chapter_id": "mountain_crossing",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "mc_rain_and_streams",
       "source_ids": [
         "nps_grsm_natural_features",
@@ -402,6 +594,11 @@
     {
       "chapter_id": "mountain_crossing",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "mc_road_engineering",
       "source_ids": [
         "nps_grsm_newfound_gap_road"
@@ -412,6 +609,11 @@
     {
       "chapter_id": "mountain_crossing",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "mc_segregated_landscape",
       "source_ids": [
         "nps_grsm_segregation"
@@ -422,6 +624,11 @@
     {
       "chapter_id": "roaring_fork",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "rf_farm_community",
       "source_ids": [
         "nps_grsm_history_culture",
@@ -433,6 +640,11 @@
     {
       "chapter_id": "roaring_fork",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "rf_ogle_farm",
       "source_ids": [
         "nps_grsm_roaring_fork"
@@ -443,6 +655,11 @@
     {
       "chapter_id": "roaring_fork",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "rf_old_growth",
       "source_ids": [
         "nps_grsm_nature",
@@ -454,6 +671,11 @@
     {
       "chapter_id": "roaring_fork",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "rf_preservation",
       "source_ids": [
         "nps_grsm_people",
@@ -465,6 +687,11 @@
     {
       "chapter_id": "roaring_fork",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "rf_route_character",
       "source_ids": [
         "nps_grsm_roaring_fork"
@@ -475,6 +702,11 @@
     {
       "chapter_id": "roaring_fork",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "rf_stream",
       "source_ids": [
         "nps_grsm_natural_features",
@@ -486,6 +718,11 @@
     {
       "chapter_id": "roaring_fork",
       "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
       "id": "rf_waterfalls",
       "source_ids": [
         "nps_grsm_geology",
@@ -497,21 +734,19 @@
   ],
   "cultural_review": {
     "authority": "Eastern Band of Cherokee Indians Cultural Institutional Review Board",
-    "blocked_entry_ids": [
-      "cc_story_04",
-      "mc_cue_07",
-      "mc_story_15"
-    ],
+    "blocked_entry_ids": [],
     "compensation_required": true,
     "contact_path": "EBCI Cultural IRB and Tribal Cultural Resources Department; request scope determination before recruiting a compensated reviewer or storyteller.",
     "official_review_url": "https://www.ebci.gov/cultural-institutional-review-board/",
     "prohibited_until_approved": [
-      "cultural_interpretation",
-      "pronunciation_guide",
-      "script_drafting",
-      "tts_rendering"
+      "culturally_supplied_pronunciation",
+      "direct_ebci_member_research",
+      "research_on_ebci_tribal_land",
+      "sacred_or_traditional_interpretation",
+      "tts_rendering_of_gated_content",
+      "unpublished_or_restricted_knowledge"
     ],
-    "status": "required_before_drafting"
+    "status": "public_record_only"
   },
   "entries": [
     {
@@ -919,14 +1154,16 @@
     {
       "chapter_id": "little_river_cades_cove",
       "claim_ids": [
-        "cc_cherokee_context"
+        "cc_cherokee_public_record",
+        "cc_population",
+        "cc_settlement"
       ],
       "directional_adaptation": false,
       "id": "cc_story_04",
       "kind": "story",
-      "purpose": "Reserve Cherokee history and place relationships for compensated EBCI participation.",
+      "purpose": "Use the National Park Service's public record to place Cherokee travel and hunting before the later documented farming community without adding cultural interpretation.",
       "route_context": "cades_cove_entrance",
-      "script_status": "blocked_cultural_review",
+      "script_status": "outline_only",
       "sequence": 4,
       "target_words": 500,
       "title": "Before the farms",
@@ -1191,14 +1428,14 @@
     {
       "chapter_id": "mountain_crossing",
       "claim_ids": [
-        "mc_kuwohi_living_meaning"
+        "mc_kuwohi_public_record"
       ],
       "directional_adaptation": true,
       "id": "mc_cue_07",
       "kind": "cue",
-      "purpose": "Hold pronunciation and cultural explanation for EBCI-approved wording.",
+      "purpose": "Use the National Park Service's published name record without adding cultural interpretation.",
       "route_context": "kuwohi",
-      "script_status": "blocked_cultural_review",
+      "script_status": "outline_only",
       "sequence": 7,
       "target_words": 80,
       "title": "Name with care",
@@ -1480,18 +1717,18 @@
     {
       "chapter_id": "mountain_crossing",
       "claim_ids": [
-        "mc_kuwohi_living_meaning"
+        "mc_kuwohi_public_record"
       ],
       "directional_adaptation": true,
       "id": "mc_story_15",
       "kind": "story",
-      "purpose": "Reserve this entry for the scope and voice approved through compensated EBCI participation.",
+      "purpose": "Use the National Park Service's public record to connect the restored name, present-day Eastern Band community, and geography without adding cultural interpretation.",
       "route_context": "kuwohi",
-      "script_status": "blocked_cultural_review",
+      "script_status": "outline_only",
       "sequence": 15,
       "target_words": 500,
-      "title": "Cultural interpretation reserved",
-      "visible_scene": "No cultural scene description has been drafted before EBCI review."
+      "title": "A living community beside the park",
+      "visible_scene": "Kuwohi rises above the traditional Cherokee homeland and is visible from the Qualla Boundary."
     },
     {
       "chapter_id": "mountain_crossing",
@@ -1899,38 +2136,10 @@
     }
   ],
   "product_id": "great_smoky_mountains_ridges_rivers_living_memory",
-  "reviewed_at": "2026-08-05",
+  "reviewed_at": "2026-08-08",
   "schema_version": 1,
   "source_review_max_age_days": 180,
   "sources": [
-    {
-      "authority": "official",
-      "id": "ebci_cultural_irb",
-      "publisher": "Eastern Band of Cherokee Indians",
-      "reviewed_at": "2026-08-05",
-      "rights_status": "reference_only",
-      "role": "story",
-      "scope": [
-        "cultural_review",
-        "research_sovereignty"
-      ],
-      "title": "Cultural Institutional Review Board",
-      "url": "https://www.ebci.gov/cultural-institutional-review-board/"
-    },
-    {
-      "authority": "official",
-      "id": "ebci_cultural_resources",
-      "publisher": "Eastern Band of Cherokee Indians",
-      "reviewed_at": "2026-08-05",
-      "rights_status": "reference_only",
-      "role": "story",
-      "scope": [
-        "cultural_contact",
-        "cultural_practices"
-      ],
-      "title": "Enrollment and Cultural Resources Contact",
-      "url": "https://www.ebci.gov/enrollment/"
-    },
     {
       "authority": "official",
       "id": "nps_grsm_air_quality",
@@ -1994,7 +2203,7 @@
       "authority": "official",
       "id": "nps_grsm_cades_cove",
       "publisher": "National Park Service",
-      "reviewed_at": "2026-08-05",
+      "reviewed_at": "2026-08-08",
       "rights_status": "reference_only",
       "role": "story",
       "scope": [
@@ -2010,7 +2219,7 @@
       "authority": "official",
       "id": "nps_grsm_cades_history",
       "publisher": "National Park Service",
-      "reviewed_at": "2026-08-05",
+      "reviewed_at": "2026-08-08",
       "rights_status": "reference_only",
       "role": "story",
       "scope": [
@@ -2022,6 +2231,37 @@
       ],
       "title": "History of Cades Cove",
       "url": "https://www.nps.gov/grsm/learn/historyculture/cades-cove-history.htm"
+    },
+    {
+      "authority": "official",
+      "id": "nps_grsm_cades_overlook",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-08",
+      "rights_status": "reference_only",
+      "role": "story",
+      "scope": [
+        "cades_cove",
+        "cherokee",
+        "historic_routes",
+        "human_history"
+      ],
+      "title": "Cades Cove Overlook",
+      "url": "https://www.nps.gov/places/cades-cove-overlook.htm"
+    },
+    {
+      "authority": "official",
+      "id": "nps_grsm_cherokee",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-08",
+      "rights_status": "reference_only",
+      "role": "story",
+      "scope": [
+        "cherokee",
+        "homeland",
+        "park_history"
+      ],
+      "title": "Cherokee in the Smokies",
+      "url": "https://www.nps.gov/grsm/learn/historyculture/cherokee.htm"
     },
     {
       "authority": "official",
@@ -2134,7 +2374,7 @@
       "authority": "official",
       "id": "nps_grsm_kuwohi_restoration",
       "publisher": "National Park Service",
-      "reviewed_at": "2026-08-05",
+      "reviewed_at": "2026-08-08",
       "rights_status": "reference_only",
       "role": "story",
       "scope": [

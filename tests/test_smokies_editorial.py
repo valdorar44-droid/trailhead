@@ -26,8 +26,8 @@ def _raw():
 def test_smokies_editorial_packets_are_complete_and_long_form():
     packet = load_smokies_editorial_packet()
     assert packet["summary"]["chapter_count"] == 4
-    assert packet["summary"]["story_count"] == 43
-    assert packet["summary"]["cue_count"] == 31
+    assert packet["summary"]["story_count"] == 45
+    assert packet["summary"]["cue_count"] == 32
     assert packet["summary"]["variant_override_count"] == 8
     assert packet["summary"]["direction_reviewed_chapter_count"] == 2
     assert packet["summary"]["estimated_duration_s"] >= 145 * 60
@@ -36,11 +36,11 @@ def test_smokies_editorial_packets_are_complete_and_long_form():
         *(f"fp_cue_{index:02d}" for index in range(1, 8)),
     }
     expected_mountain_crossing_ids = {
-        *(f"mc_story_{index:02d}" for index in (*range(1, 15), *range(16, 19))),
-        *(f"mc_cue_{index:02d}" for index in (*range(1, 7), *range(8, 11))),
+        *(f"mc_story_{index:02d}" for index in range(1, 19)),
+        *(f"mc_cue_{index:02d}" for index in range(1, 11)),
     }
     expected_cades_cove_ids = {
-        *(f"cc_story_{index:02d}" for index in (1, 2, 3, *range(5, 15))),
+        *(f"cc_story_{index:02d}" for index in range(1, 15)),
         *(f"cc_cue_{index:02d}" for index in range(1, 10)),
     }
     expected_roaring_fork_ids = {
@@ -82,14 +82,15 @@ def test_smokies_editorial_packets_are_complete_and_long_form():
             assert entry["estimated_duration_s"] < 60
 
 
-def test_mountain_crossing_packet_keeps_cultural_entries_blocked():
+def test_mountain_crossing_packet_contains_source_locked_public_record_entries():
     packet = json.loads(
         SMOKIES_MOUNTAIN_CROSSING_EDITORIAL_PATH.read_text(encoding="utf-8")
     )
     dossier = json.loads(SMOKIES_DOSSIER_PATH.read_text(encoding="utf-8"))
     assert packet["chapter_id"] == "mountain_crossing"
-    assert "mc_story_15" not in {entry["id"] for entry in packet["entries"]}
-    assert "mc_cue_07" not in {entry["id"] for entry in packet["entries"]}
+    entries = {entry["id"]: entry for entry in packet["entries"]}
+    assert entries["mc_story_15"]["claim_ids"] == ["mc_kuwohi_public_record"]
+    assert entries["mc_cue_07"]["claim_ids"] == ["mc_kuwohi_public_record"]
     assert validate_smokies_editorial_packet(
         packet,
         dossier,
@@ -140,6 +141,8 @@ def test_bidirectional_long_stories_use_one_direction_neutral_transcript():
         "mc_story_03",
         "mc_story_04",
         "mc_story_05",
+        "mc_story_14",
+        "mc_story_15",
         "mc_story_16",
     }
     assert all(not entries[entry_id].get("variant_overrides") for entry_id in neutralized_ids)
@@ -164,6 +167,8 @@ def test_bidirectional_long_stories_use_one_direction_neutral_transcript():
         "The road keeps climbing",
         "The high ridge ahead supports a different combination from the cove behind",
         "not simply the end of a scenic drive",
+        "The sign ahead",
+        "approaches a living Cherokee community",
     ):
         assert stale_wording not in combined
 
@@ -224,16 +229,42 @@ def test_variant_overrides_reject_unknown_duplicate_unused_and_incomplete_review
     assert any("cover every authored direction-sensitive entry" in issue for issue in issues)
 
 
-def test_cades_cove_packet_keeps_cultural_entry_blocked():
+def test_cades_cove_packet_contains_source_locked_public_record_entry():
     packet = json.loads(SMOKIES_CADES_COVE_EDITORIAL_PATH.read_text(encoding="utf-8"))
     dossier = json.loads(SMOKIES_DOSSIER_PATH.read_text(encoding="utf-8"))
     assert packet["chapter_id"] == "little_river_cades_cove"
-    assert "cc_story_04" not in {entry["id"] for entry in packet["entries"]}
+    entries = {entry["id"]: entry for entry in packet["entries"]}
+    assert entries["cc_story_04"]["claim_ids"] == [
+        "cc_cherokee_public_record",
+        "cc_population",
+        "cc_settlement",
+    ]
     assert validate_smokies_editorial_packet(
         packet,
         dossier,
         dossier_file_sha256=packet["dossier_sha256"],
     ) == []
+
+
+def test_public_record_cultural_entries_do_not_narrate_editorial_process():
+    packet = load_smokies_editorial_packet()
+    entries = {entry["id"]: entry for entry in packet["entries"]}
+    combined = " ".join(
+        entries[entry_id]["transcript"].lower()
+        for entry_id in {"cc_story_04", "mc_story_14", "mc_story_15", "mc_cue_07"}
+    )
+    for forbidden in (
+        "this draft",
+        "this story is limited",
+        "trailhead will not",
+        "outside tour",
+        "requires ebci review",
+        "compensated participation",
+        "ai-generated",
+    ):
+        assert forbidden not in combined
+    assert "sacred" not in combined
+    assert "spiritual meaning" not in combined
 
 
 def test_roaring_fork_packet_contains_all_source_cleared_entries():
@@ -269,18 +300,22 @@ def test_roaring_fork_packet_contains_all_source_cleared_entries():
 
 
 def test_editorial_packet_rejects_cultural_and_source_drift():
-    packet, dossier = _raw()
+    packet = json.loads(
+        SMOKIES_MOUNTAIN_CROSSING_EDITORIAL_PATH.read_text(encoding="utf-8")
+    )
+    dossier = json.loads(SMOKIES_DOSSIER_PATH.read_text(encoding="utf-8"))
     dossier_digest = packet["dossier_sha256"]
-    cultural = deepcopy(packet)
-    cultural["entries"][0]["id"] = "mc_story_15"
-    cultural["entries"][0]["chapter_id"] = "mountain_crossing"
-    cultural["entries"][0]["sequence"] = 15
-    cultural["entries"][0]["title"] = "Cultural interpretation reserved"
-    cultural["entries"][0]["claim_ids"] = ["mc_kuwohi_living_meaning"]
-    cultural["entries"][0]["source_ids"] = ["ebci_cultural_irb", "ebci_cultural_resources"]
+    gated_dossier = deepcopy(dossier)
+    gated_dossier["cultural_review"]["blocked_entry_ids"] = [
+        "mc_cue_07",
+        "mc_story_15",
+    ]
+    for outline in gated_dossier["entries"]:
+        if outline["id"] in {"mc_story_15", "mc_cue_07"}:
+            outline["script_status"] = "blocked_cultural_review"
     issues = validate_smokies_editorial_packet(
-        cultural,
-        dossier,
+        packet,
+        gated_dossier,
         dossier_file_sha256=dossier_digest,
     )
     assert any("blocked for cultural review" in issue for issue in issues)

@@ -803,13 +803,13 @@
   ],
   "input_bindings": {
     "editorial_packet_path": "originals/smokies/editorial_roaring_fork_v1.json",
-    "editorial_packet_sha256": "d61f9e04b943fe7ff2b9a57735b1f515dff0d37f23d5a6c50dcc18fec095162c",
+    "editorial_packet_sha256": "5fe61090ae27dcfae74fd05e8ca464be6aa140c0383d5a339cc60f3096c9cc8f",
     "geometry_hash_basis": "canonical_sorted_compact_geojson",
     "geometry_sha256": "d66f76d6053000244d7e15c8be0494f48d79544e0ceaf79428c51e458e964668",
     "official_route_evidence_path": "originals/smokies/official_route_evidence_v1.json",
     "official_route_evidence_sha256": "d946ffaf8f21ad97399b6dedfb5cbe9483fce0787653b389d7075d933f398c60",
     "source_dossier_path": "originals/smokies/source_dossiers_v1.json",
-    "source_dossier_sha256": "bc1bdbd18a79d7b5e0417d17d149044b97ccc485c068712423f25efec67ab561"
+    "source_dossier_sha256": "8eb22ca5110f0f9a4287b8f184624348c2a2ca2dbc36e27ef59fc022057ce18f"
   },
   "kind": "trailhead_original_trigger_placement_preflight",
   "placement_feasibility": {

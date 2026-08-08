@@ -16,6 +16,7 @@ from db.originals_operational import (
 from db.originals_cultural_review import (
     OriginalCulturalReviewError,
     validate_cultural_claim_approval,
+    validate_cultural_publication_scope,
     validate_cultural_story_claims,
 )
 from db.originals_route_evidence import (
@@ -288,6 +289,11 @@ def normalize_original_manifest_v2(
         if isinstance(raw_route_evidence, dict)
         else pack_id
     ).strip()
+    if publishing:
+        try:
+            validate_cultural_publication_scope(cultural_product_id)
+        except OriginalCulturalReviewError as exc:
+            raise OriginalManifestV2Error(str(exc)) from exc
 
     offline_map = copy.deepcopy(_object(raw.get("offline_map"), "Original V2 offline map"))
     _forbid_keys(offline_map, {"region_id", "bounds", "min_zoom", "max_zoom", "estimated_bytes"}, "Original V2 offline map")

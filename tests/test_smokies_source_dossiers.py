@@ -3,7 +3,7 @@ from __future__ import annotations
 import copy
 import json
 from collections import Counter, defaultdict
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import pytest
@@ -97,7 +97,10 @@ def test_one_way_chapter_entries_follow_route_anchor_order():
 
 def test_source_review_is_fail_closed_when_stale():
     with pytest.raises(OriginalSourceDossierError, match="review is stale"):
-        normalize_original_source_dossier(build_dossier(), as_of=date(2027, 2, 2))
+        normalize_original_source_dossier(
+            build_dossier(),
+            as_of=AS_OF + timedelta(days=181),
+        )
 
 
 def test_unknown_fields_cannot_hide_scripts_or_private_reviewer_data():
@@ -111,23 +114,131 @@ def test_unknown_fields_cannot_hide_scripts_or_private_reviewer_data():
         normalize_original_source_dossier(payload, as_of=AS_OF)
 
 
-def test_cultural_entries_remain_blocked_until_ebci_review():
+def _gate_kuwohi_public_record(
+    payload: dict,
+    *,
+    collection_method: str = "unpublished_or_restricted_knowledge",
+    review_triggers: list[str] | None = None,
+) -> dict:
+    triggers = review_triggers or ["unpublished_or_restricted_knowledge"]
+    claim = next(
+        item for item in payload["claims"]
+        if item["id"] == "mc_kuwohi_public_record"
+    )
+    claim.update({
+        "status": "cultural_review_required",
+        "cultural_gate": "ebci_required",
+        "cultural_scope": {
+            "classification": "immutable_ebci_review_required",
+            "collection_method": collection_method,
+            "review_triggers": triggers,
+        },
+    })
+    blocked_ids = {
+        entry["id"] for entry in payload["entries"]
+        if claim["id"] in entry["claim_ids"]
+    }
+    for entry in payload["entries"]:
+        if entry["id"] in blocked_ids:
+            entry["script_status"] = "blocked_cultural_review"
+    payload["cultural_review"].update({
+        "status": "required_before_drafting",
+        "blocked_entry_ids": sorted(blocked_ids),
+    })
+    return payload
+
+
+def test_public_record_claims_are_not_gated_but_sensitive_work_remains_prohibited():
     dossier = _normalized()
     blocked = {
         entry["id"]
         for entry in dossier["entries"]
         if entry["script_status"] == "blocked_cultural_review"
     }
-    assert blocked == {"mc_story_15", "mc_cue_07", "cc_story_04"}
+    assert blocked == set()
+    assert dossier["cultural_review"]["status"] == "public_record_only"
+    assert set(dossier["cultural_review"]["prohibited_until_approved"]) == {
+        "sacred_or_traditional_interpretation",
+        "direct_ebci_member_research",
+        "unpublished_or_restricted_knowledge",
+        "culturally_supplied_pronunciation",
+        "research_on_ebci_tribal_land",
+        "tts_rendering_of_gated_content",
+    }
+    claims = {item["id"]: item for item in dossier["claims"]}
+    for claim_id in ("mc_kuwohi_public_record", "cc_cherokee_public_record"):
+        assert claims[claim_id]["cultural_gate"] == "not_required"
+        assert claims[claim_id]["cultural_scope"] == {
+            "classification": "public_record_factual",
+            "collection_method": "published_public_record",
+            "review_triggers": [],
+        }
+
+
+@pytest.mark.parametrize(("collection_method", "review_trigger"), [
+    ("published_public_record", "sacred_or_traditional_interpretation"),
+    ("direct_ebci_member_research", "direct_ebci_member_research"),
+    ("fieldwork_on_ebci_tribal_land", "research_on_ebci_tribal_land"),
+    ("unpublished_or_restricted_knowledge", "unpublished_or_restricted_knowledge"),
+])
+def test_each_gated_collection_method_requires_immutable_review(
+    collection_method,
+    review_trigger,
+):
+    payload = _gate_kuwohi_public_record(
+        build_dossier(),
+        collection_method=collection_method,
+        review_triggers=[review_trigger],
+    )
+    normalized = normalize_original_source_dossier(payload, as_of=AS_OF)[0]
+    claim = next(
+        item for item in normalized["claims"]
+        if item["id"] == "mc_kuwohi_public_record"
+    )
+    assert claim["status"] == "cultural_review_required"
+    assert set(normalized["cultural_review"]["blocked_entry_ids"]) == {
+        "mc_story_15",
+        "mc_cue_07",
+    }
+
+
+def test_cultural_scope_gate_mismatches_fail_closed():
     payload = build_dossier()
-    claim = next(item for item in payload["claims"] if item["id"] == "mc_kuwohi_living_meaning")
-    claim["status"] = "source_verified"
-    with pytest.raises(OriginalSourceDossierError, match="must match the EBCI review state"):
+    claim = next(
+        item for item in payload["claims"]
+        if item["id"] == "mc_kuwohi_public_record"
+    )
+    claim["cultural_scope"]["review_triggers"] = [
+        "sacred_or_traditional_interpretation"
+    ]
+    with pytest.raises(OriginalSourceDossierError, match="public-record scope"):
+        normalize_original_source_dossier(payload, as_of=AS_OF)
+
+    payload = _gate_kuwohi_public_record(build_dossier())
+    claim = next(
+        item for item in payload["claims"]
+        if item["id"] == "mc_kuwohi_public_record"
+    )
+    claim["cultural_scope"]["review_triggers"] = ["unregistered_trigger"]
+    with pytest.raises(OriginalSourceDossierError, match="unknown review triggers"):
+        normalize_original_source_dossier(payload, as_of=AS_OF)
+
+    payload = _gate_kuwohi_public_record(
+        build_dossier(),
+        collection_method="direct_ebci_member_research",
+        review_triggers=["unpublished_or_restricted_knowledge"],
+    )
+    with pytest.raises(OriginalSourceDossierError, match="gated cultural scope"):
+        normalize_original_source_dossier(payload, as_of=AS_OF)
+
+    payload = _gate_kuwohi_public_record(build_dossier())
+    payload["cultural_review"]["status"] = "public_record_only"
+    with pytest.raises(OriginalSourceDossierError, match="cannot contain gated claims"):
         normalize_original_source_dossier(payload, as_of=AS_OF)
 
 
 def test_immutable_ebci_approval_can_unlock_only_the_exact_reviewed_claims():
-    payload = build_dossier()
+    payload = _gate_kuwohi_public_record(build_dossier())
     cultural_claim_ids = sorted(
         claim["id"] for claim in payload["claims"] if claim["cultural_gate"] == "ebci_required"
     )
@@ -147,12 +258,14 @@ def test_immutable_ebci_approval_can_unlock_only_the_exact_reviewed_claims():
             entry["script_status"] = "outline_only"
     normalized = normalize_original_source_dossier(payload, as_of=AS_OF)[0]
     assert normalized["cultural_review"]["status"] == "approved"
-    citations = original_story_citations(payload, ["mc_kuwohi_living_meaning"], as_of=AS_OF)
+    citations = original_story_citations(payload, ["mc_kuwohi_public_record"], as_of=AS_OF)
     assert citations
     assert all(citation["cultural_approval_record_id"] == "ebci_scope_review_001" for citation in citations)
     assert all(citation["cultural_approval_record_sha256"] == "b" * 64 for citation in citations)
     assert all(citation["cultural_approved_at"] == REVIEWED_AT for citation in citations)
-    payload["cultural_review"]["approved_claim_ids"].pop()
+    payload["cultural_review"]["approved_claim_ids"] = [
+        "cc_cherokee_public_record"
+    ]
     with pytest.raises(OriginalSourceDossierError, match="cover every EBCI-gated claim exactly"):
         normalize_original_source_dossier(payload, as_of=AS_OF)
 
@@ -172,8 +285,9 @@ def test_story_citations_reuse_the_manifest_v2_contract():
     } for item in citations)
     assert all(item["role"] == "story" for item in citations)
     assert all(item["rights_status"] == "reference_only" for item in citations)
+    gated = _gate_kuwohi_public_record(build_dossier())
     with pytest.raises(OriginalSourceDossierError, match="before cultural review"):
-        original_story_citations(build_dossier(), ["mc_kuwohi_living_meaning"], as_of=AS_OF)
+        original_story_citations(gated, ["mc_kuwohi_public_record"], as_of=AS_OF)
 
 
 def test_media_rights_fail_closed_until_one_exact_asset_is_cleared():

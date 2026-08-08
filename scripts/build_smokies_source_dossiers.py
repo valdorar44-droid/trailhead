@@ -18,10 +18,19 @@ from db.originals_sources import normalize_original_source_dossier
 
 
 PRODUCT_ID = "great_smoky_mountains_ridges_rivers_living_memory"
-REVIEWED_AT = "2026-08-05"
+REVIEWED_AT = "2026-08-08"
+PRIOR_SOURCE_REVIEWED_AT = "2026-08-05"
 
 
-def _source(source_id: str, title: str, url: str, scope: list[str], publisher: str = "National Park Service") -> dict:
+def _source(
+    source_id: str,
+    title: str,
+    url: str,
+    scope: list[str],
+    publisher: str = "National Park Service",
+    *,
+    reviewed_at: str = PRIOR_SOURCE_REVIEWED_AT,
+) -> dict:
     return {
         "id": source_id,
         "title": title,
@@ -29,7 +38,7 @@ def _source(source_id: str, title: str, url: str, scope: list[str], publisher: s
         "publisher": publisher,
         "role": "story",
         "authority": "official",
-        "reviewed_at": REVIEWED_AT,
+        "reviewed_at": reviewed_at,
         "rights_status": "reference_only",
         "scope": scope,
     }
@@ -49,14 +58,14 @@ SOURCES = [
     _source("nps_grsm_timeline", "Smoky Mountain Timeline", "https://www.nps.gov/grsm/learn/historyculture/timeline.htm", ["cades_cove", "logging", "park_creation", "road_history"]),
     _source("nps_grsm_newfound_gap_road", "Newfound Gap Road Historic Corridor", "https://www.nps.gov/grsm/learn/news/newfound-gap-road-to-reopen-ahead-of-schedule-following-major-repairs.htm", ["ccc", "engineering", "newfound_gap_road"]),
     _source("nps_grsm_segregation", "Segregation at Great Smoky Mountains National Park", "https://www.nps.gov/grsm/learn/historyculture/segregation-at-great-smoky-mountains-national-park.htm", ["civil_rights", "newfound_gap"]),
-    _source("nps_grsm_kuwohi_restoration", "Kuwohi name restored to the highest peak in the Smokies", "https://www.nps.gov/grsm/learn/news/kuwohi-name-restored-to-the-highest-peak-in-the-smokies.htm", ["kuwohi", "name_restoration"]),
+    _source("nps_grsm_kuwohi_restoration", "Kuwohi name restored to the highest peak in the Smokies", "https://www.nps.gov/grsm/learn/news/kuwohi-name-restored-to-the-highest-peak-in-the-smokies.htm", ["kuwohi", "name_restoration"], reviewed_at=REVIEWED_AT),
     _source("nps_grsm_kuwohi_area", "Kuwohi & Newfound Gap Area", "https://www.nps.gov/grsm/planyourvisit/kuwohi-nfg.htm", ["kuwohi", "newfound_gap", "visitor_context"]),
-    _source("ebci_cultural_irb", "Cultural Institutional Review Board", "https://www.ebci.gov/cultural-institutional-review-board/", ["cultural_review", "research_sovereignty"], "Eastern Band of Cherokee Indians"),
-    _source("ebci_cultural_resources", "Enrollment and Cultural Resources Contact", "https://www.ebci.gov/enrollment/", ["cultural_contact", "cultural_practices"], "Eastern Band of Cherokee Indians"),
+    _source("nps_grsm_cherokee", "Cherokee in the Smokies", "https://www.nps.gov/grsm/learn/historyculture/cherokee.htm", ["cherokee", "homeland", "park_history"], reviewed_at=REVIEWED_AT),
     _source("nps_grsm_oconaluftee", "Oconaluftee Area", "https://www.nps.gov/grsm/planyourvisit/oconaluftee.htm", ["mountain_farm", "oconaluftee", "visitor_context"]),
     _source("nps_grsm_mountain_farm", "Mountain Farm Museum", "https://www.nps.gov/places/mountain-farm-museum.htm", ["historic_structures", "mountain_farm", "relocation"]),
-    _source("nps_grsm_cades_history", "History of Cades Cove", "https://www.nps.gov/grsm/learn/historyculture/cades-cove-history.htm", ["agriculture", "cades_cove", "churches", "community", "displacement"]),
-    _source("nps_grsm_cades_cove", "Cades Cove", "https://www.nps.gov/grsm/planyourvisit/cadescove.htm", ["cades_cove", "historic_structures", "loop_road", "wildlife"]),
+    _source("nps_grsm_cades_history", "History of Cades Cove", "https://www.nps.gov/grsm/learn/historyculture/cades-cove-history.htm", ["agriculture", "cades_cove", "churches", "community", "displacement"], reviewed_at=REVIEWED_AT),
+    _source("nps_grsm_cades_cove", "Cades Cove", "https://www.nps.gov/grsm/planyourvisit/cadescove.htm", ["cades_cove", "historic_structures", "loop_road", "wildlife"], reviewed_at=REVIEWED_AT),
+    _source("nps_grsm_cades_overlook", "Cades Cove Overlook", "https://www.nps.gov/places/cades-cove-overlook.htm", ["cades_cove", "cherokee", "historic_routes", "human_history"], reviewed_at=REVIEWED_AT),
     _source("nps_grsm_cable_mill", "Cable Mill Historic Area", "https://www.nps.gov/places/cable-mill-historic-area.htm", ["cable_mill", "corn_milling", "gristmill", "water_power"]),
     _source("nps_grsm_general_stores", "General Stores", "https://www.nps.gov/grsm/learn/historyculture/stores.htm", ["becky_cable", "commerce", "community"]),
     _source("nps_grsm_roaring_fork", "Roaring Fork Motor Nature Trail", "https://www.nps.gov/grsm/planyourvisit/roaringfork.htm", ["historic_farms", "old_growth", "roaring_fork", "waterfalls"]),
@@ -74,6 +83,11 @@ def _claim(claim_id: str, chapter: str, statement: str, source_ids: list[str], *
         "statement": statement,
         "status": "cultural_review_required" if cultural else "source_verified",
         "cultural_gate": "ebci_required" if cultural else "not_required",
+        "cultural_scope": {
+            "classification": "immutable_ebci_review_required" if cultural else "public_record_factual",
+            "collection_method": "unpublished_or_restricted_knowledge" if cultural else "published_public_record",
+            "review_triggers": ["unpublished_or_restricted_knowledge"] if cultural else [],
+        },
         "source_ids": source_ids,
     }
 
@@ -93,7 +107,7 @@ CLAIMS = [
     _claim("mc_gap_context", "mountain_crossing", "Newfound Gap is a high pass connecting the Tennessee and North Carolina sides of the park.", ["nps_grsm_kuwohi_area"]),
     _claim("mc_high_country", "mountain_crossing", "High-elevation habitat supports species and forest communities uncommon in the surrounding lowlands.", ["nps_grsm_nature", "nps_grsm_vegetation"]),
     _claim("mc_kuwohi_name", "mountain_crossing", "The U.S. Board on Geographic Names restored the name Kuwohi in 2024 after an EBCI-led request.", ["nps_grsm_kuwohi_restoration"]),
-    _claim("mc_kuwohi_living_meaning", "mountain_crossing", "Any interpretation of Kuwohi's living cultural meaning, Cherokee language, or pronunciation requires EBCI participation and approval.", ["ebci_cultural_irb", "ebci_cultural_resources"], cultural=True),
+    _claim("mc_kuwohi_public_record", "mountain_crossing", "The National Park Service records Kuwohi as the Cherokee name restored in 2024, translates it as mulberry place, places the peak within the traditional Cherokee homeland, describes ancestral ties, village life, hunting, trading, agriculture, forced removal, and the present-day Eastern Band community beside the park, and documents annual summit access for Cherokee schools and knowledge holders.", ["nps_grsm_kuwohi_restoration", "nps_grsm_cherokee", "nps_grsm_oconaluftee"]),
     _claim("mc_oconaluftee_valley", "mountain_crossing", "The Oconaluftee corridor presents river-valley ecology and preserved mountain-farm interpretation near the park's southern entrance.", ["nps_grsm_oconaluftee"]),
     _claim("mc_mountain_farm", "mountain_crossing", "Historic structures relocated and assembled at the Mountain Farm Museum interpret agricultural life in the region.", ["nps_grsm_mountain_farm", "nps_grsm_oconaluftee"]),
     _claim("mc_elk_restoration", "mountain_crossing", "Elk were reintroduced to the park and are now visible in some North Carolina valleys, subject to wildlife-viewing distance rules.", ["nps_grsm_elk", "nps_grsm_animals"]),
@@ -101,7 +115,7 @@ CLAIMS = [
     _claim("cc_little_river", "little_river_cades_cove", "Little River and its tributaries visibly connect rainfall, steep relief, and downstream valleys.", ["nps_grsm_natural_features"]),
     _claim("cc_logging_corridor", "little_river_cades_cove", "Logging communities and rail corridors changed the Little River landscape before park creation.", ["nps_grsm_people", "nps_grsm_timeline"]),
     _claim("cc_cove_geology", "little_river_cades_cove", "Cades Cove's broad valley reflects a different geologic setting from the surrounding ridges.", ["nps_grsm_geology"]),
-    _claim("cc_cherokee_context", "little_river_cades_cove", "Any account of Cherokee presence, place names, or cultural relationships in Cades Cove requires EBCI review rather than generalized retelling.", ["ebci_cultural_irb", "ebci_cultural_resources"], cultural=True),
+    _claim("cc_cherokee_public_record", "little_river_cades_cove", "The National Park Service records that Cherokee people traveled through Cades Cove for hunting before European-American settlement, that archeologists found no evidence of a major settlement there, that some present roads follow older Cherokee-created routes, and that Cherokee people also farmed, foraged, and traded in the cove.", ["nps_grsm_cades_history", "nps_grsm_cades_cove", "nps_grsm_cades_overlook"]),
     _claim("cc_settlement", "little_river_cades_cove", "European-American settlement began in the early nineteenth century and developed into a farming community.", ["nps_grsm_cades_history"]),
     _claim("cc_farming", "little_river_cades_cove", "Cove farms combined crops, livestock, outbuildings, and shared seasonal labor.", ["nps_grsm_cades_history"]),
     _claim("cc_churches", "little_river_cades_cove", "Churches served religious, civic, and social roles in the valley community.", ["nps_grsm_cades_history", "nps_grsm_cades_cove"]),
@@ -162,7 +176,7 @@ ENTRIES = [
     _entry("mc_story_12", "mountain_crossing", 12, "story", "The pass between two watersheds", "newfound_gap_outbound", "The road crests at Newfound Gap.", "Explain the gap as geography, route, and turning point in the drive.", ["mc_gap_context"], directional=True),
     _entry("mc_story_13", "mountain_crossing", 13, "story", "Life in the high country", "kuwohi", "Cool, wind-shaped forest surrounds the Kuwohi road.", "Connect high-elevation habitat to species and communities found far south of their broader range.", ["mc_high_country"], directional=True),
     _entry("mc_story_14", "mountain_crossing", 14, "story", "Restoring the name Kuwohi", "kuwohi", "The signed summit road and high peak dominate the view.", "Cover the official 2024 name restoration as a factual civic event.", ["mc_kuwohi_name"], directional=True),
-    _entry("mc_story_15", "mountain_crossing", 15, "story", "Cultural interpretation reserved", "kuwohi", "No cultural scene description has been drafted before EBCI review.", "Reserve this entry for the scope and voice approved through compensated EBCI participation.", ["mc_kuwohi_living_meaning"], directional=True, cultural=True, words=500),
+    _entry("mc_story_15", "mountain_crossing", 15, "story", "A living community beside the park", "kuwohi", "Kuwohi rises above the traditional Cherokee homeland and is visible from the Qualla Boundary.", "Use the National Park Service's public record to connect the restored name, present-day Eastern Band community, and geography without adding cultural interpretation.", ["mc_kuwohi_public_record"], directional=True, words=500),
     _entry("mc_story_16", "mountain_crossing", 16, "story", "The Oconaluftee valley", "oconaluftee", "The road follows forest and river into a broader valley.", "Shift from high-country ecology to the Oconaluftee river-valley landscape.", ["mc_oconaluftee_valley"], directional=True),
     _entry("mc_story_17", "mountain_crossing", 17, "story", "A farm museum made from many places", "oconaluftee", "Historic farm structures stand near the visitor center.", "Explain what the assembled buildings can—and cannot—show about regional farm life.", ["mc_mountain_farm"], directional=True),
     _entry("mc_story_18", "mountain_crossing", 18, "story", "Elk return to the valley", "oconaluftee", "Open fields near Oconaluftee may hold grazing elk.", "Tell the restoration story while keeping wildlife-viewing guidance factual and concise.", ["mc_elk_restoration", "mc_bear_country"], directional=True),
@@ -173,7 +187,7 @@ ENTRIES = [
     _entry("mc_cue_04", "mountain_crossing", 4, "cue", "Forest turning point", "newfound_gap_return", "Leaf and canopy character change with the climb.", "Mark a visible forest transition.", ["mc_forest_zones"], directional=True),
     _entry("mc_cue_05", "mountain_crossing", 5, "cue", "Newfound Gap ahead", "newfound_gap_outbound", "The crest and memorial area approach.", "Prepare the driver for the high pass and optional stop.", ["mc_gap_context"], directional=True),
     _entry("mc_cue_06", "mountain_crossing", 6, "cue", "Kuwohi turn", "kuwohi", "The summit road branches from the crossing.", "Identify the optional summit spur without making an operational-open claim.", ["mc_high_country"], directional=True),
-    _entry("mc_cue_07", "mountain_crossing", 7, "cue", "Name with care", "kuwohi", "Kuwohi signage appears along the summit approach.", "Hold pronunciation and cultural explanation for EBCI-approved wording.", ["mc_kuwohi_living_meaning"], directional=True, cultural=True),
+    _entry("mc_cue_07", "mountain_crossing", 7, "cue", "Name with care", "kuwohi", "Kuwohi signage appears along the summit approach.", "Use the National Park Service's published name record without adding cultural interpretation.", ["mc_kuwohi_public_record"], directional=True),
     _entry("mc_cue_08", "mountain_crossing", 8, "cue", "Descending forest", "newfound_gap_outbound", "High forest gives way to lower-elevation communities.", "Help passengers notice the ecological descent.", ["mc_forest_zones"], directional=True),
     _entry("mc_cue_09", "mountain_crossing", 9, "cue", "Oconaluftee approach", "oconaluftee", "The valley widens near the visitor center.", "Introduce the river valley and optional stop.", ["mc_oconaluftee_valley"], directional=True),
     _entry("mc_cue_10", "mountain_crossing", 10, "cue", "Wildlife distance", "oconaluftee", "Open fields may draw drivers' attention away from the road.", "Give one brief wildlife-distance reminder tied to the visible setting.", ["mc_elk_restoration", "mc_bear_country"], directional=True),
@@ -182,7 +196,7 @@ ENTRIES = [
     _entry("cc_story_01", "little_river_cades_cove", 1, "story", "Following Little River", "sugarlands", "The road and river travel together through a steep valley.", "Introduce water as the chapter's physical thread.", ["cc_little_river"]),
     _entry("cc_story_02", "little_river_cades_cove", 2, "story", "Rails, timber, and a changed valley", "sugarlands", "Recovered forest borders the old Little River corridor.", "Connect the drive to the region's logging economy and later recovery.", ["cc_logging_corridor"]),
     _entry("cc_story_03", "little_river_cades_cove", 3, "story", "Why the cove opens wide", "townsend_wye", "A broad valley replaces the confined river gorge.", "Explain the geologic contrast that made farming land possible here.", ["cc_cove_geology"]),
-    _entry("cc_story_04", "little_river_cades_cove", 4, "story", "Before the farms", "cades_cove_entrance", "The loop enters a valley with a longer history than its preserved cabins.", "Reserve Cherokee history and place relationships for compensated EBCI participation.", ["cc_cherokee_context"], cultural=True, words=500),
+    _entry("cc_story_04", "little_river_cades_cove", 4, "story", "Before the farms", "cades_cove_entrance", "The loop enters a valley with a longer history than its preserved cabins.", "Use the National Park Service's public record to place Cherokee travel and hunting before the later documented farming community without adding cultural interpretation.", ["cc_cherokee_public_record", "cc_population", "cc_settlement"], words=500),
     _entry("cc_story_05", "little_river_cades_cove", 5, "story", "Building a valley community", "john_oliver_place", "A log home and cleared field sit against wooded ridges.", "Place early settlement within work, family, and landscape rather than a pioneer myth.", ["cc_settlement"]),
     _entry("cc_story_06", "little_river_cades_cove", 6, "story", "The work behind a farm", "john_oliver_place", "House, fields, fences, and outbuildings form one working system.", "Describe mixed farm labor and seasonal cooperation.", ["cc_farming"]),
     _entry("cc_story_07", "little_river_cades_cove", 8, "story", "Churches and a divided community", "methodist_church", "A white church and cemetery sit beside the loop.", "Explain churches as social institutions and leave room for documented disagreement rather than nostalgia.", ["cc_churches"]),
@@ -336,13 +350,20 @@ def build_dossier() -> dict:
             "foothills_parkway": {"story": 6, "cue": 7},
         },
         "cultural_review": {
-            "status": "required_before_drafting",
+            "status": "public_record_only",
             "authority": "Eastern Band of Cherokee Indians Cultural Institutional Review Board",
             "official_review_url": "https://www.ebci.gov/cultural-institutional-review-board/",
             "contact_path": "EBCI Cultural IRB and Tribal Cultural Resources Department; request scope determination before recruiting a compensated reviewer or storyteller.",
             "compensation_required": True,
             "blocked_entry_ids": blocked,
-            "prohibited_until_approved": ["cultural_interpretation", "pronunciation_guide", "script_drafting", "tts_rendering"],
+            "prohibited_until_approved": [
+                "sacred_or_traditional_interpretation",
+                "direct_ebci_member_research",
+                "unpublished_or_restricted_knowledge",
+                "culturally_supplied_pronunciation",
+                "research_on_ebci_tribal_land",
+                "tts_rendering_of_gated_content",
+            ],
         },
         "sources": copy.deepcopy(SOURCES),
         "claims": copy.deepcopy(CLAIMS),

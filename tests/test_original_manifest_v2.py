@@ -12,6 +12,7 @@ from dashboard.server import (
     OriginalNarrationProfileV1,
 )
 from db import store
+from db import originals_cultural_review as cultural
 from db import original_manifest_v2 as manifest_v2_module
 from db.original_manifest_v2 import (
     OriginalManifestV2Error,
@@ -26,6 +27,7 @@ from db.originals_operational import (
     operational_candidate_sha256,
 )
 from db.originals_route_evidence import canonical_sha256
+from scripts.build_smokies_source_dossiers import build_dossier
 
 
 FIXTURE_PATH = (
@@ -796,15 +798,56 @@ def test_v2_cultural_approval_evidence_is_all_or_nothing():
         )
 
 
-def test_v2_blocks_ebci_claims_until_an_immutable_approval_is_registered():
+def test_v2_blocks_ebci_claims_until_an_immutable_approval_is_registered(
+    tmp_path,
+    monkeypatch,
+):
+    dossier = build_dossier()
+    claim = next(
+        item for item in dossier["claims"]
+        if item["id"] == "mc_kuwohi_public_record"
+    )
+    claim.update({
+        "status": "cultural_review_required",
+        "cultural_gate": "ebci_required",
+        "cultural_scope": {
+            "classification": "immutable_ebci_review_required",
+            "collection_method": "direct_ebci_member_research",
+            "review_triggers": ["direct_ebci_member_research"],
+        },
+    })
+    blocked_ids = {"mc_story_15", "mc_cue_07"}
+    dossier["cultural_review"].update({
+        "status": "required_before_drafting",
+        "blocked_entry_ids": sorted(blocked_ids),
+    })
+    for entry in dossier["entries"]:
+        if entry["id"] in blocked_ids:
+            entry["script_status"] = "blocked_cultural_review"
+    dossier_path = tmp_path / "gated-smokies-dossier.json"
+    dossier_path.write_text(
+        json.dumps(dossier, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(cultural, "DEFAULT_SMOKIES_SOURCE_DOSSIER", dossier_path)
+    cultural._dossier_registry.cache_clear()
+
     payload = _v2_payload()
-    citation = payload["manifest"]["stories"][0]["citations"][0]
-    citation["affected_claims"] = ["mc_kuwohi_living_meaning"]
+    payload["pack_id"] = "great_smoky_mountains_ridges_rivers_living_memory"
+    story = payload["manifest"]["stories"][0]
+    story["id"] = "mc_story_15"
+    for citation in story["citations"]:
+        citation["affected_claims"] = ["mc_kuwohi_public_record"]
+    payload["manifest"]["stories"] = [story]
+    cue = payload["manifest"]["chapters"][0]["variants"][0]["cue_refs"][0]
+    cue["story_id"] = "mc_story_15"
+    cue["sequence"] = 1
+    payload["manifest"]["chapters"][0]["variants"][0]["cue_refs"] = [cue]
+    citation = story["citations"][0]
     with pytest.raises(OriginalManifestV2Error, match="EBCI cultural review"):
         store._normalize_original_manifest(
             payload["pack_id"], payload["title"], payload["manifest"],
         )
-    payload["manifest"]["stories"][0]["id"] = "mc_story_15"
     citation.update({
         "cultural_approval_record_id": "unregistered_review",
         "cultural_approval_record_sha256": "c" * 64,
@@ -814,6 +857,22 @@ def test_v2_blocks_ebci_claims_until_an_immutable_approval_is_registered():
     with pytest.raises(OriginalManifestV2Error, match="not registered"):
         store._normalize_original_manifest(
             payload["pack_id"], payload["title"], payload["manifest"],
+        )
+    cultural._dossier_registry.cache_clear()
+
+
+def test_v2_public_record_drafting_scope_cannot_publish():
+    payload = _v2_payload()
+    payload["pack_id"] = "great_smoky_mountains_ridges_rivers_living_memory"
+    with pytest.raises(
+        OriginalManifestV2Error,
+        match="scope determination is required before this Original can be published",
+    ):
+        store._normalize_original_manifest(
+            payload["pack_id"],
+            payload["title"],
+            payload["manifest"],
+            publishing=True,
         )
 
 

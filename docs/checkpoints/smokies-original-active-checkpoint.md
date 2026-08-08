@@ -1258,3 +1258,45 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 - S0-S3H provenance, cultural-policy, route, editorial, Ogle, long-form runtime, or trusted-validator work.
 - Moab provider provenance, broad Cartesia model research, or competitor-tour research.
 - Broad app crawls, deployment, OTA, native builds, public-stage changes, or batch narration.
+
+## S4A Cartesia audition lock and renderer complete
+
+- Completed: 2026-08-08.
+- Baseline checkpoint commit: `0b7f7ca78411`.
+- No Cartesia request, credit spend, Studio upload, backend deployment, OTA, native build, or public-stage change occurred.
+- The exact internal audition set is locked in this order:
+  1. `rf_story_02` — scenic and natural history.
+  2. `rf_story_03` — human history and the stopped Noah Ogle experience.
+  3. `mc_story_02` — 681-word source-backed geology and permitted technical-pronunciation stress test.
+- All three entries remain `draft_review_required`, are source-verified public-record factual material, have `cultural_gate=not_required`, and contain no Cherokee pronunciation or custom phonetic override.
+- Generation profile is pinned to Cartesia Katie voice `f786b574-daa5-4673-aa0c-cbe3e8534c02`, model `sonic-3.5-2026-05-04`, API `2026-03-01`, English, speed `0.98`, and 44.1 kHz mono PCM 16-bit WAV masters.
+- The immutable lock binds 9,986 normalized characters, 10,007 exact payload characters, and an 11,008-credit conservative reservation including the ten-percent cushion. The packet ceiling remains 12,000 credits.
+- The new renderer is network-free by default and requires explicit `--apply`, current redacted account evidence, the immutable lock, the server-only API key, and the pinned local encoder before a provider request is possible.
+- Account evidence fails closed unless Pro commercial use, processed training opt-out, current balance, and explicit overage state are all present. Enabled overage also requires its verified rate; disabled overage requires enough evidenced balance.
+- Every request reserves conservative cost atomically before network activity. A definitive uncharged 4xx/429/5xx releases the reservation; ambiguous timeout, process termination, invalid 200 audio, and successful audio keep it reserved. Resume and rerender cannot reset the cumulative 12,000-credit or $15-before-tax caps.
+- WAV validation requires a complete RIFF container, mono PCM 16-bit at 44.1 kHz, and a broad 75–240 spoken-words-per-minute duration range. Local `imageio-ffmpeg==0.6.0` encodes 64, 96, and 128 kbps derivatives from the same verified master and records package, binary, duration, byte, and SHA-256 evidence without local executable paths or secrets.
+- Focused verification: 58 tests passed; deterministic lock `--check`, Python compilation, real pinned-encoder probe/derivative smoke test, and `git diff --check` passed.
+- Independent source/lock and renderer audits found no remaining P0/P1/P2.
+
+### S4A evidence hashes
+
+- Audition lock: `5ace6157a7a2698e912ddef8711509994028422178378c82e508ae535e56057a`.
+- Lock builder: `9cc4d1edf7aa7a1e97041deec7d46a2b16ea8c403b80f6655c2dfac2d2b6fc17`.
+- Renderer: `dd7542048b0ed107caec7265b08fc0c204e22f08fc35e405947ea788cacd0a1c`.
+- Lock tests: `5e8d56e2b6aece71579bf4a533b8aa55d6a71cfd743130914fcb3b077bfd7c84`.
+- Renderer tests: `45ac56c6b88d46c2212e14bc9fe447bd852ac23e797ccd84fd9311bc649aaa13`.
+- Expanded Mountain Crossing editorial packet: `4a7e0acf04075da914ef486b86210167ff4220b8ea901083bd4df75d8fe21c58`.
+
+### Exact next action after S4A
+
+1. Confirm in the signed-in Cartesia Playground that training opt-out is processed/enabled.
+2. Record the current remaining credit balance and whether overage is disabled or enabled; if enabled, record the displayed rate.
+3. Create the redacted current account-evidence snapshot under ignored output storage.
+4. Run one `--apply` invocation for only the three locked auditions through the Railway-held server key.
+5. Verify masters, duration plausibility, encoder derivatives, hashes, and ledger totals, then stop for Android/iPhone blind listening review.
+
+### Do not repeat after S4A
+
+- Script selection, geology expansion, source/cultural audit, Cartesia model/voice research, renderer architecture, cap edge-case audit, or local encoder selection while their checked hashes remain unchanged.
+- Do not call the existing Originals Studio Cartesia endpoint for these auditions; it lacks this lock, cap, ledger, and archival-master contract.
+- Do not generate any fourth sample, batch narration, culturally gated pronunciation, production asset, deployment, OTA, or public release during the audition review packet.

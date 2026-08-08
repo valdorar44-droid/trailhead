@@ -1,0 +1,148 @@
+{
+  "aggregate": {
+    "normalized_character_count": 9986,
+    "payload_character_count": 10007,
+    "projected_credits_before_contingency": 9986,
+    "projected_credits_with_contingency": 10985,
+    "reserved_credit_ceiling": 11008
+  },
+  "auditions": [
+    {
+      "chapter_id": "roaring_fork",
+      "claim_ids": [
+        "rf_stream"
+      ],
+      "cultural_gate": "not_required",
+      "entry_id": "rf_story_02",
+      "normalized_character_count": 2844,
+      "order": 1,
+      "payload_character_count": 2850,
+      "reserved_credit_ceiling": 3135,
+      "role": "scenic_natural_history",
+      "script_status": "draft_review_required",
+      "source_file": "originals/smokies/editorial_roaring_fork_v1.json",
+      "source_gate": "source_verified",
+      "source_ids": [
+        "nps_grsm_natural_features",
+        "nps_grsm_roaring_fork"
+      ],
+      "transcript_sha256": "2e6d73a5e4ce18bc80441d04e5e4ecca4a2144360024f68d3d67bcafac25ca8c",
+      "word_count": 476
+    },
+    {
+      "chapter_id": "roaring_fork",
+      "claim_ids": [
+        "rf_ogle_farm"
+      ],
+      "cultural_gate": "not_required",
+      "entry_id": "rf_story_03",
+      "normalized_character_count": 2732,
+      "order": 2,
+      "payload_character_count": 2738,
+      "reserved_credit_ceiling": 3012,
+      "role": "human_history",
+      "script_status": "draft_review_required",
+      "source_file": "originals/smokies/editorial_roaring_fork_v1.json",
+      "source_gate": "source_verified",
+      "source_ids": [
+        "nps_grsm_roaring_fork"
+      ],
+      "transcript_sha256": "2dcb129294894980c17b231f92a36ed04f137da272e6ad20a2aaa567e1a0c643",
+      "word_count": 461
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "claim_ids": [
+        "mc_deep_geology"
+      ],
+      "cultural_gate": "not_required",
+      "entry_id": "mc_story_02",
+      "normalized_character_count": 4410,
+      "order": 3,
+      "payload_character_count": 4419,
+      "reserved_credit_ceiling": 4861,
+      "role": "technical_pronunciation",
+      "script_status": "draft_review_required",
+      "source_file": "originals/smokies/editorial_mountain_crossing_v1.json",
+      "source_gate": "source_verified",
+      "source_ids": [
+        "nps_grsm_geology"
+      ],
+      "transcript_sha256": "f8eeeaeab269dec793b3769ce10882cc4f62880053ce73371b16e0b0af8ee693",
+      "word_count": 681
+    }
+  ],
+  "authorization": {
+    "full_pack_render_approved": false,
+    "public_release_approved": false,
+    "scope": "three_internal_auditions_only"
+  },
+  "budget": {
+    "contingency_percent": 10,
+    "credits_per_normalized_character": 1,
+    "renderer_credit_cap": 12000
+  },
+  "cultural_gate": {
+    "public_release_approval_implied": false,
+    "status": "passed_for_selected_non_cultural_auditions"
+  },
+  "generation_profile": {
+    "api_version": "2026-03-01",
+    "generation_config": {
+      "speed": 0.98,
+      "volume": 1.0
+    },
+    "language": "en",
+    "model_snapshot": "sonic-3.5-2026-05-04",
+    "output": {
+      "channels": 1,
+      "container": "wav",
+      "encoding": "pcm_s16le",
+      "sample_rate_hz": 44100
+    },
+    "provider": "cartesia",
+    "voice_id": "f786b574-daa5-4673-aa0c-cbe3e8534c02",
+    "voice_name": "Katie"
+  },
+  "lock_id": "great_smoky_mountains_cartesia_audition_lock_v1",
+  "lock_status": "internal_audition_only",
+  "packet_script_status": "draft_review_required",
+  "product_id": "great_smoky_mountains_ridges_rivers_living_memory",
+  "pronunciation_policy": {
+    "custom_phonetic_overrides": [],
+    "mode": "model_default_reviewed_terms",
+    "reviewed_technical_non_cultural_terms": [
+      "Appalachian",
+      "calcium carbonate",
+      "Ocoee Supergroup",
+      "sedimentary",
+      "metasandstone",
+      "quartzite",
+      "shale",
+      "slate",
+      "tectonic",
+      "Pangaea",
+      "Great Smoky Fault"
+    ]
+  },
+  "schema_version": 1,
+  "source_files": [
+    {
+      "path": "originals/smokies/editorial_mountain_crossing_v1.json",
+      "sha256": "4a7e0acf04075da914ef486b86210167ff4220b8ea901083bd4df75d8fe21c58"
+    },
+    {
+      "path": "originals/smokies/editorial_roaring_fork_v1.json",
+      "sha256": "5fe61090ae27dcfae74fd05e8ca464be6aa140c0383d5a339cc60f3096c9cc8f"
+    },
+    {
+      "path": "originals/smokies/source_dossiers_v1.json",
+      "sha256": "8eb22ca5110f0f9a4287b8f184624348c2a2ca2dbc36e27ef59fc022057ce18f"
+    }
+  ],
+  "source_gate": {
+    "dossier_file": "originals/smokies/source_dossiers_v1.json",
+    "dossier_sha256": "8eb22ca5110f0f9a4287b8f184624348c2a2ca2dbc36e27ef59fc022057ce18f",
+    "status": "passed"
+  }
+}

@@ -581,3 +581,56 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 - Foothills editorial/source research, S0/S1/S2 provenance, route construction, media-rights inventory, or Moab validation.
 - EBCI outreach, Cherokee interpretation/pronunciation, Envato work, or narration generation.
 - Broad app, Map, Explore, Layers, Originals lifecycle, Android Auto, memory, or store-screenshot testing.
+
+## S3B Mountain Crossing editorial and chapter-aware Studio completion
+
+- Completed: 2026-08-07.
+- Baseline checkpoint commit: `2f36a2e3`.
+- Accepted implementation commit: `8bca4c4c1854801e0b188527dec3c558214d2d2b`.
+- Added `originals/smokies/editorial_mountain_crossing_v1.json`:
+  - Artifact SHA-256: `d030bcd884d1ccfe4774eea1e83a7c7075f7aa691f14b00a24af28c076760f4d`.
+  - Seventeen non-cultural feature stories and nine short road cues.
+  - 8,421 words and 3,484 estimated seconds at 145 words per minute: about 58 minutes 4 seconds.
+  - Feature stories range from 450 to 493 words and approximately 3:06 to 3:24 each.
+  - Short cues range from 57 to 66 words and approximately 24 to 27 seconds each.
+- `mc_story_15` and `mc_cue_07` remain absent and fail-closed for compensated EBCI participation and cultural review. The factual public record of the 2024 Kuwohi name restoration is covered without adding pronunciation, sacred tradition, or substitute cultural interpretation.
+- Source-lock corrections applied during audit:
+  - The biodiversity count uses the registered Nature source rather than a newer unbound statistics value.
+  - CCC exclusion history remains in the separately sourced segregation story instead of leaking into the stonework entry.
+  - An unbound park-creation lease detail and an unbound logging-timeline date were removed.
+  - The haze story stays within the reviewed NPS air-quality distinction rather than adding an unregistered atmospheric explanation.
+- The existing Originals Studio is now chapter-aware:
+  - One administrator-only source-locked review surface covers both Foothills Parkway and Mountain Crossing.
+  - Chapter names appear in the list and transcript review context.
+  - Per-chapter hashes and counts are preserved while the endpoint returns one combined product review packet.
+  - No second Studio, manifest, player, map, ownership, download, or entitlement system was introduced.
+- Current combined reviewed draft library:
+  - Two chapters, 23 full stories, and 16 short cues.
+  - 11,678 words and 4,830 estimated seconds: about 80 minutes 30 seconds.
+  - Combined editorial artifact SHA-256: `116b0f9b7c7c3da97011af268c36c81281b675e0829c227928c4447108d9231c`.
+- Verification:
+  - 135 focused backend tests plus four subtests passed across editorial, Studio, source dossiers, cultural review, Manifest V2, route evidence, operational readiness, and official route fixtures.
+  - Originals Studio JavaScript parsed and its chapter-aware contract test passed.
+  - Python compilation, JSON parsing, source/copy scan, deterministic loader/hash checks, protected-file hashes, and `git diff --check` passed.
+  - No open P0/P1 defect was found in this packet.
+- Protected main-worktree hashes remain unchanged:
+  - Explore serving index: `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
+  - App Store copy: `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+  - `.cursor/` remains untracked and protected in the main worktree.
+- No Cartesia request, credit spend, narration audio, media ingestion, EBCI outreach, deployment, OTA, native build, or public-stage change occurred.
+- Task-owned background processes at completion: none.
+
+### Next exact action after S3B
+
+1. Review the Mountain Crossing chapter in the existing Originals Studio and apply one bounded editorial revision pass if requested.
+2. After acceptance, begin the non-cultural Little River and Cades Cove stories and cues while keeping `cc_story_04` blocked.
+3. Author direction-specific transition/cue adaptations before final chapter compilation; no audio asset is locked until both route directions read naturally.
+4. Continue to keep current closures, vehicle-free days, fees, weather, and restrictions in live Start Tour readiness rather than immutable narration.
+5. Do not generate a Cartesia audition until the reviewed scripts and pronunciations are locked and the provider terms, training opt-out, balance, overage rate, 225,000-credit cap, and $15-before-tax cap are confirmed.
+
+### Do not repeat after S3B
+
+- Mountain Crossing or Foothills source research and first-draft writing unless a reviewer identifies a specific claim or editorial issue.
+- S0/S1/S2 provenance, routes, route evidence, media-rights work, or Moab validation.
+- Broad app crawls, completed Originals lifecycle tests, paid narration, or public release work.
+- Cultural interpretation, pronunciation, or the blocked entries before EBCI participation and approval.

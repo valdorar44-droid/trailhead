@@ -73,6 +73,7 @@ from dashboard.marine_chart_provider import (
 )
 from dashboard.hydro_provider import LOCAL_HYDRO_DIR, HYDRO_DIR, hydro_profile, read_hydro_manifest
 from dashboard.water_routing_provider import route_with_water_graph, water_graph_manifest
+from db.originals_editorial import load_smokies_editorial_packet
 from dashboard.search_v2 import (
     SearchBoundsV2,
     SearchCenterV2,
@@ -14943,6 +14944,15 @@ def _persist_original_asset_bytes(
 @app.get("/api/admin/originals")
 async def api_admin_originals(admin: dict = Depends(_require_admin)):
     return {"items": list_authored_trip_packs_admin("original_drive")}
+
+
+@app.get("/api/admin/originals-editorial/smokies")
+async def api_admin_smokies_editorial(admin: dict = Depends(_require_admin)):
+    """Return the checked, source-locked Smokies editorial packet for Studio review."""
+    try:
+        return load_smokies_editorial_packet()
+    except Exception as exc:
+        _raise_account_store_error(exc)
 
 
 @app.post("/api/admin/originals/preview-token", status_code=201)

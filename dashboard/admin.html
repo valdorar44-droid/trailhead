@@ -302,9 +302,24 @@ td.name{color:var(--text);font-weight:600;}
 .originals-version-meta{color:var(--text3);font:10px var(--mono);}
 .originals-version-diff{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px;}
 .originals-version-chip{border:1px solid var(--border);border-radius:999px;padding:6px 9px;color:var(--text2);font:10px var(--mono);}
+.originals-editorial-layout{display:grid;grid-template-columns:minmax(250px,330px) minmax(0,1fr);gap:12px;margin-top:12px;}
+.originals-editorial-list{display:flex;flex-direction:column;gap:7px;max-height:560px;overflow:auto;}
+.originals-editorial-item{width:100%;min-height:58px;text-align:left;border:1px solid var(--border);border-radius:10px;background:var(--s3);padding:10px;color:var(--text);cursor:pointer;}
+.originals-editorial-item:hover,.originals-editorial-item.active{border-color:var(--orange);}
+.originals-editorial-item.active{box-shadow:inset 3px 0 0 var(--orange);}
+.originals-editorial-item-title{font-size:12px;font-weight:800;line-height:1.4;}
+.originals-editorial-item-meta{color:var(--text3);font:9px/1.5 var(--mono);margin-top:4px;}
+.originals-editorial-detail{min-width:0;border:1px solid var(--border);border-radius:12px;background:var(--s3);padding:16px;}
+.originals-editorial-kicker{color:var(--orange);font:900 10px/1.4 var(--mono);letter-spacing:.6px;}
+.originals-editorial-title{font-size:22px;font-weight:900;line-height:1.15;margin-top:6px;}
+.originals-editorial-scene{color:var(--text2);font-size:12px;line-height:1.55;margin-top:10px;padding:10px;border-left:3px solid var(--orange);background:var(--s2);}
+.originals-editorial-transcript{color:var(--text);font-size:14px;line-height:1.75;white-space:pre-wrap;margin-top:16px;}
+.originals-editorial-sources{display:flex;flex-direction:column;gap:7px;margin-top:18px;padding-top:14px;border-top:1px solid var(--border);}
+.originals-editorial-source{color:var(--orange);font-size:11px;line-height:1.45;text-decoration:none;overflow-wrap:anywhere;}
+.originals-editorial-source:hover{text-decoration:underline;}
 .originals-empty{color:var(--text3);font-size:12px;padding:18px;text-align:center;border:1px dashed var(--border);border-radius:10px;}
 @media(max-width:1050px){.originals-shell{grid-template-columns:1fr}.originals-sidebar{position:static;max-height:none}.originals-json-grid,.originals-preview-grid{grid-template-columns:1fr}.originals-metrics{grid-template-columns:repeat(3,1fr)}}
-@media(max-width:720px){.originals-form,.originals-review-grid{grid-template-columns:1fr}.originals-stop-editor{grid-template-columns:1fr 1fr}.originals-metrics,.originals-lab-summary{grid-template-columns:1fr 1fr}.originals-preview-link,.originals-license-grid{grid-template-columns:1fr}.originals-lab-state{flex-direction:column}.originals-lab-meta{text-align:left}}
+@media(max-width:720px){.originals-form,.originals-review-grid,.originals-editorial-layout{grid-template-columns:1fr}.originals-stop-editor{grid-template-columns:1fr 1fr}.originals-metrics,.originals-lab-summary{grid-template-columns:1fr 1fr}.originals-preview-link,.originals-license-grid{grid-template-columns:1fr}.originals-lab-state{flex-direction:column}.originals-lab-meta{text-align:left}.originals-editorial-list{max-height:280px}}
 
 /* Trail review */
 @font-face{font-family:'Barlow Condensed';src:url('/app/assets/app/fonts/BarlowCondensed-Bold.f599739e94768bec57f6899c422a5119.ttf') format('truetype');font-weight:700;font-display:swap;}
@@ -898,6 +913,17 @@ td.name{color:var(--text);font-weight:600;}
           </aside>
 
           <section class="originals-editor">
+            <div class="card" id="smokies-editorial-card">
+              <div class="originals-topline">
+                <div>
+                  <div class="section-label">SMOKIES EDITORIAL · SOURCE LOCKED</div>
+                  <div style="color:var(--text2);font-size:11px;line-height:1.5;margin-top:6px;">Review long-form feature stories and short road cues before narration is created.</div>
+                </div>
+                <button class="btn btn-primary btn-sm" id="smokies-editorial-load" type="button" onclick="loadSmokiesEditorialPacket()">Load Foothills draft</button>
+              </div>
+              <div id="smokies-editorial-summary" class="originals-sensitive-note">No editorial packet loaded.</div>
+              <div id="smokies-editorial-content" class="originals-empty" style="margin-top:12px;">Load the checked packet to review its scripts and sources.</div>
+            </div>
             <div id="originals-editor-empty" class="card originals-empty">Select an Original or create a draft.</div>
             <div id="originals-editor" style="display:none;flex-direction:column;gap:14px;">
               <div class="originals-topline">
@@ -1274,6 +1300,8 @@ let selectedOriginalId = null;
 let selectedOriginal = null;
 let selectedOriginalStopIndex = 0;
 let selectedOriginalCitationIndex = 0;
+let smokiesEditorialPacket = null;
+let selectedSmokiesEditorialId = null;
 let originalValidation = null;
 let originalPreviewTimer = null;
 let originalSimulationAnnouncementTimer = null;
@@ -2592,6 +2620,85 @@ async function saveAudioGuideStory() {
 // ── Utility ───────────────────────────────────────────────────────────────────
 
 // Originals Studio
+
+function editorialDurationLabel(seconds) {
+  const total = Math.max(0, Math.round(Number(seconds) || 0));
+  const minutes = Math.floor(total / 60);
+  return `${minutes}:${String(total % 60).padStart(2, '0')}`;
+}
+
+function renderSmokiesEditorialPacket() {
+  const host = document.getElementById('smokies-editorial-content');
+  const summary = document.getElementById('smokies-editorial-summary');
+  const packet = smokiesEditorialPacket;
+  if (!host || !summary || !packet || !Array.isArray(packet.entries)) return;
+  const entries = packet.entries.slice().sort((left, right) => {
+    if (left.kind !== right.kind) return left.kind === 'story' ? -1 : 1;
+    return Number(left.sequence || 0) - Number(right.sequence || 0) || String(left.id).localeCompare(String(right.id));
+  });
+  if (!entries.some(item => item.id === selectedSmokiesEditorialId)) {
+    selectedSmokiesEditorialId = entries[0] && entries[0].id || null;
+  }
+  const selected = entries.find(item => item.id === selectedSmokiesEditorialId);
+  const metrics = packet.summary || {};
+  summary.textContent = `${Number(metrics.story_count || 0)} LONG STORIES · ${Number(metrics.cue_count || 0)} SHORT CUES · ${Number(metrics.word_count || 0).toLocaleString()} WORDS · ${editorialDurationLabel(metrics.estimated_duration_s)} ESTIMATED · REVIEW REQUIRED`;
+  if (!selected) {
+    host.className = 'originals-empty';
+    host.textContent = 'This editorial packet has no reviewable entries.';
+    return;
+  }
+  host.className = 'originals-editorial-layout';
+  const sources = Array.isArray(selected.sources) ? selected.sources : [];
+  host.innerHTML = `<div class="originals-editorial-list" role="list" aria-label="Foothills Parkway scripts">
+    ${entries.map(item => `<button type="button" class="originals-editorial-item${item.id === selected.id ? ' active' : ''}" onclick="selectSmokiesEditorialEntryEncoded('${encodeURIComponent(item.id)}')" aria-current="${item.id === selected.id ? 'true' : 'false'}">
+      <span class="originals-editorial-item-title">${esc(item.title || item.id)}</span>
+      <span class="originals-editorial-item-meta">${esc(String(item.kind || '').toUpperCase())} ${Number(item.sequence || 0)} · ${Number(item.word_count || 0)} WORDS · ${esc(editorialDurationLabel(item.estimated_duration_s))}</span>
+    </button>`).join('')}
+  </div>
+  <article class="originals-editorial-detail" aria-live="polite">
+    <div class="originals-editorial-kicker">${esc(String(selected.kind || '').toUpperCase())} ${Number(selected.sequence || 0)} · DRAFT REVIEW REQUIRED</div>
+    <h3 class="originals-editorial-title">${esc(selected.title || selected.id)}</h3>
+    <div class="originals-editorial-scene"><strong>Visible scene:</strong> ${esc(selected.visible_scene || '')}<br><strong>Editorial purpose:</strong> ${esc(selected.purpose || '')}</div>
+    <div class="originals-editorial-transcript">${esc(selected.transcript || '')}</div>
+    <div class="originals-editorial-sources"><div class="section-label">REVIEWED SOURCES</div>${sources.map(source => `<a class="originals-editorial-source" href="${esc(source.url || '#')}" target="_blank" rel="noopener noreferrer">${esc(source.publisher || '')} · ${esc(source.title || source.id || '')}</a>`).join('')}</div>
+    <div class="originals-sensitive-note">TRANSCRIPT ${esc(String(selected.transcript_sha256 || '').slice(0, 12))} · DOSSIER ${esc(String(packet.dossier_sha256 || '').slice(0, 12))} · NO AUDIO GENERATED</div>
+  </article>`;
+}
+
+function selectSmokiesEditorialEntryEncoded(value) {
+  selectedSmokiesEditorialId = decodeURIComponent(value);
+  renderSmokiesEditorialPacket();
+}
+
+async function loadSmokiesEditorialPacket() {
+  const button = document.getElementById('smokies-editorial-load');
+  const host = document.getElementById('smokies-editorial-content');
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Checking packet…';
+  }
+  if (host) {
+    host.className = 'originals-empty';
+    host.textContent = 'Checking scripts, claims, and reviewed sources…';
+  }
+  try {
+    smokiesEditorialPacket = await api('/api/admin/originals-editorial/smokies');
+    selectedSmokiesEditorialId = null;
+    renderSmokiesEditorialPacket();
+    toast('Foothills editorial packet loaded', 'originals-ok');
+  } catch(e) {
+    if (host) {
+      host.className = 'originals-empty';
+      host.textContent = 'Editorial packet unavailable: ' + e.message;
+    }
+    toast('Smokies editorial: ' + e.message, 'err');
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = 'Reload Foothills draft';
+    }
+  }
+}
 
 function originalStarterTemplate(title = 'Untitled Original') {
   return {

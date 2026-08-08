@@ -718,3 +718,35 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 - S0/S1/S2 provenance, routes, route evidence, media-rights inventory, Moab validation, or completed app lifecycle testing.
 - Broad app crawls, paid narration, deployment, public release, or store work.
 - Cultural interpretation, pronunciation, or blocked entries before compensated EBCI participation and approval.
+
+## S3D Roaring Fork editorial baseline
+
+- Started: 2026-08-07.
+- Branch: `feat/smokies-original-s2`.
+- Baseline HEAD: `299f78b8cc6991ae30915a2d14ffec8cdc46c0ee`.
+- Worktree: `/home/sean/.openclaw/worktrees/trailhead-smokies-s2`; clean at start.
+- The user accepted the next exact action and explicitly asked to proceed.
+- Protected main-worktree state remains unchanged:
+  - Explore serving index: `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
+  - App Store copy: `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+  - `.cursor/` remains untracked and protected in the main worktree.
+- Scope is the six non-cultural Roaring Fork feature stories and six short road cues already defined in the checked source dossier.
+- `rf_story_03` remains blocked for compensated EBCI participation and cultural review. No substitute Cherokee history, place relationship, sacred tradition, or pronunciation will be drafted.
+- Feature stories continue to target approximately 3–5 minutes. Cues remain short scene/location transitions and are not counted as full stories.
+- Current one-way/seasonal access, vehicle restrictions, closures, weather, trail conditions, wildlife notices, and congestion remain live Start Tour readiness data rather than immutable narration.
+- The chapter will use the existing chapter-aware Originals Studio and source-lock validator. No parallel Studio, manifest, player, map, ownership, entitlement, or download system will be introduced.
+- No Cartesia request, credit spend, narration audio, media ingestion, external outreach, deployment, OTA, native build, or public-stage change is included.
+- Task-owned background processes at start: none.
+
+### Next exact action after this baseline
+
+1. Recheck only the registered official NPS sources used by the Roaring Fork claims.
+2. Draft and source-lock the six approved feature stories and six cues.
+3. Extend the existing Studio/loader/tests for the fourth chapter and run focused safeguards.
+4. Stop for script review before directional adaptation, final compilation, or narration generation.
+
+### Do not repeat during S3D
+
+- Foothills, Mountain Crossing, or Cades Cove research and first-draft work.
+- S0/S1/S2 provenance, routes, route evidence, media-rights inventory, Moab validation, or broad app testing.
+- EBCI outreach, Cherokee interpretation/pronunciation, Envato work, or paid narration.

@@ -1050,3 +1050,73 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 - S0-S3F provenance, entitlement, cultural-policy, source dossiers, other chapter drafts, directional adaptation, or FIFO architecture.
 - Broad Map, Explore, Layers, Memory, NPS, Android Auto, Offline, Originals lifecycle, or store work.
 - Paid narration, media ingestion, deployment, OTA, native builds, or public-stage changes.
+
+## S3G Roaring Fork exact-scene placement completion
+
+- Completed: 2026-08-08.
+- Branch: `feat/smokies-original-s2`.
+- Baseline checkpoint commit: `7c2d31b7`.
+- Implementation commit and exact pre-checkpoint HEAD: `8ee4d8bece1e9b1be97ff026cdffde94fee4f1b3`.
+- Protected main-worktree state remains unchanged:
+  - Explore serving index: `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
+  - App Store copy: `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+  - `.cursor/` remains untracked and protected in the main worktree.
+
+### Exact landmark and delivery decision
+
+- Replaced the false Noah “Bud” Ogle entrance proxies with the official NPS coordinate `[-83.489714, 35.682841]` from the 2026 Superintendent's Compendium.
+- The checked point is before the accepted Roaring Fork motor-trail route: nearest accepted-route progress `0.0 m`, lateral distance `889.5 m`, and nearest route coordinate `[-83.481398, 35.678543]`.
+- Preserved the accepted `8,561.4 m` route and its geometry hash. The chapter was not rerouted to force Ogle into an autoplay trigger.
+- Ogle is now one source-bound, user-confirmed parked prelude containing `rf_cue_02` followed by `rf_story_03`. Parking availability remains `not_checked`; Trailhead makes no parking promise and never infers parked state from speed alone.
+- Every one of the 13 Roaring Fork entries is accounted for exactly once:
+  - Five `hard_auto` cues: `rf_cue_01`, `rf_cue_04`, `rf_cue_03`, `rf_cue_05`, and `rf_cue_06`.
+  - Four `capacity_deeper` stories: `rf_story_01`, `rf_story_02`, `rf_story_04`, and `rf_story_05`, each falling back to after-route availability when it cannot finish safely before the next hard cue.
+  - Three `stopped_deeper` entries: the two-entry Ogle prelude and `rf_story_06` at Thousand Drips. Both contexts require explicit user-confirmed parked state and make no parking promise.
+  - One `completion_deeper` story: `rf_story_07`.
+- Hard cues can never wait behind optional material. Capacity admission requires the immutable audio duration, a start inside the story's reviewed scene, and a 30-second reserve before the next hard-cue window.
+
+### Timing and Studio evidence
+
+- Authoring-estimate simulations, not publication evidence:
+  - 15 mph admits `rf_story_01`, `rf_story_02`, and `rf_story_05`; estimated route-end tail `0.0 s`, maximum trigger-to-play latency `14.8 s`, and maximum pending depth `1`.
+  - 36 mph admits no capacity story; tail `6.0 s` and latency `0.0 s`.
+  - 65 mph admits no capacity story; tail `13.7 s` and latency `0.0 s`.
+  - 75 mph admits no capacity story; tail `16.5 s`, latency `1.6 s`, and maximum pending depth `1`.
+- The source-controlled limits remain unchanged at `240 s` route-end audio backlog and `180 s` trigger-to-play latency. The preflight records `gates_weakened=false` and exposes no threshold override.
+- Originals Studio now source/hash-binds the checked preflight and labels entries `AUTO CUE`, `DEEPER STORY`, `PLAY WHEN PARKED`, or `AFTER ROUTE`.
+- Studio shows five guaranteed cues / `1:57` and eight selectable/deeper entries / `22:45`, explicitly as authoring estimates with publication blocked and parking availability not checked.
+- A final independent audit found and closed one P1: a self-consistent edit could initially relabel a parked story as autoplay. The validator now locks the exact 13-entry order, entry-to-mode map, complete per-mode safety objects, blocked runtime/publication states, and the `240/180/30` timing limits.
+
+### Verification and immutable evidence
+
+- Broad focused verification before the final tamper guard: 131 Python tests plus four subtests passed across Roaring Fork preflight, editorial, source dossiers, Manifest V2, cultural review, and official routes.
+- After the single evidence-backed correction, 26 directly affected Python tests passed. The independent re-audit passed 29 focused tests and reproduced that parked-to-autoplay tampering is rejected.
+- Originals Studio JavaScript tests, Python compilation, deterministic dossier/preflight checks, and `git diff --check` passed.
+- No remaining P0/P1 was found. Only the seven intentional S3G files were committed.
+- Evidence hashes:
+  - Preflight artifact: `4ea71987b8a52dfd9acf2b97b3ec8eb00c6e565d4697560df89c63478c8b1d42`.
+  - Preflight builder: `cc70d55f7307de7bf519168abea0f8418b87032d185041111ae2edca47fe7b3c`.
+  - Preflight tests: `e5d2644b1b739e6e49581a537dd31ee5366fd0660413fe4c63c9891c87e63d57`.
+  - Editorial/Studio loader: `596c8dcdb337423253e2fd2e2c77ff259b23d190a2ee3088ef20d1220ed1e57c`.
+  - Studio HTML: `03f81ffb85e8a622c4ea716ec948d3e5b5c62e76c6f8b7ab3781ec8a85c211f9`.
+  - Studio JavaScript test: `c2d1fc868c6e976d544cce85bd1302becec71cad4ef8aab2490403d880f64adc`.
+  - Editorial tests: `3d2adb2e5b1e4229367197e54619d41f47273c8f25dae8d3aad0aa0451ff9520`.
+- No Cartesia credits were spent. No narration, media, backend deployment, OTA, native build, or public-stage change occurred.
+
+### Remaining intentional blockers and next exact action
+
+- Current strict Manifest V2 consumers cannot safely represent optional/deeper stories: existing `cue_refs` become autoplay stops. Do not add these fields to the current V2 contract and call it backward-compatible.
+- S3H must add a capability/min-runtime-gated consumer contract for autoplay versus selectable content, a capacity scheduler that preserves hard-cue priority, and player/library UI for parked and after-route stories. The new contract must keep older 1.0.11 clients from parsing or autoplaying the Smokies pack.
+- Bind the S3H runtime/source hashes into the checked preflight and run the existing virtual-drive publication validator using immutable rendered durations.
+- Only after S3H is green should the three representative Cartesia auditions be generated under the existing 225,000-credit and $15-before-tax caps.
+- Public release remains separately blocked pending immutable EBCI CIRB scope determination or approval for the exact fact-only cultural scope.
+
+### Do not repeat after S3G
+
+- Noah Ogle web/location research, route projection, the 13-entry mode decision, or the 15/36/65/75 authoring-estimate analysis while their source and geometry hashes remain unchanged.
+- S0-S3F provenance, entitlement, cultural-policy, source dossiers, chapter writing, directional adaptation, or FIFO migration.
+- Broad app crawls, Map/Explore/Layers/Memory/NPS/Android Auto/Offline work, paid narration, deployment, OTA, native builds, or public release.
+
+## Task-owned background processes at S3G completion
+
+- None. No Metro, Gradle, Maestro, pytest, Cartesia renderer, EAS, Railway, or cleanup task remains running.

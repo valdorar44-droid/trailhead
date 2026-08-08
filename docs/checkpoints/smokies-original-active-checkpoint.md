@@ -920,3 +920,34 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 ## Task-owned background processes at S3E completion
 
 - None. The temporary ignored `mobile/node_modules` verification symlink was removed. No Metro, Gradle, Maestro, pytest, TTS renderer, EAS, Railway, cleanup, or compaction task remains running.
+
+## S3F public-record cultural scope baseline
+
+- Started: 2026-08-08.
+- Branch: `feat/smokies-original-s2`.
+- Baseline HEAD: `8e193ba0bcee81d5136123cf9c15e1b3712626de`.
+- Worktree was clean before this checkpoint.
+- Protected main-worktree state remains unchanged:
+  - Explore serving index: `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
+  - App Store copy: `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+  - `.cursor/` remains untracked and protected in the main worktree.
+- Official-policy correction: the EBCI Cultural Institutional Review Board explicitly covers research involving EBCI people, Tribal Lands, language, and cultural materials, and requires approval for research on EBCI Tribal Lands. Its public guidance does not state that every narrow factual use of already-published official records requires prior approval.
+- Trailhead will therefore distinguish source-attributed public-record facts from review-triggering cultural work. Public-record narration may proceed only within the exact published facts. Sacred or traditional interpretation, direct EBCI-member research, unpublished or restricted knowledge, research on EBCI Tribal Lands, and culturally supplied or otherwise unsupported pronunciation remain fail-closed.
+- This boundary is Trailhead's conservative editorial classification, not an EBCI determination. A CIRB scope inquiry remains recommended before public release of the cultural chapter.
+- S3F scope is limited to the three previously blocked entries: `cc_story_04`, `mc_story_15`, and `mc_cue_07`; the source/dossier gate; deterministic compiler bindings; focused tests; and checkpoint evidence.
+- This packet does not perform interviews or fieldwork, write sacred/traditional interpretation, use unpublished knowledge, generate Cartesia audio, ingest media, deploy, publish an OTA, change native code, or change a public stage.
+- Task-owned background processes at start: none.
+
+### Next exact action after this baseline
+
+1. Replace the overbroad all-Cherokee-content block with an explicit public-record factual classification and fixed cultural-review triggers.
+2. Author the three entries from current official public records only, without unsupported pronunciation or cultural synthesis.
+3. Rebuild the source dossier, editorial bindings, and Roaring Fork preflight deterministically.
+4. Run focused source, cultural-gate, editorial, Studio, manifest, privacy/copy, and hash checks once.
+5. Stop before narration generation, deployment, OTA, or public release.
+
+### Do not repeat during S3F
+
+- S0-S3E provenance, entitlement, route building, first-draft chapter work, directional adaptation, FIFO runtime, or broad source research.
+- Roaring Fork placement redesign or real-audio validation; its existing publication blocker remains separate.
+- Broad Map, Explore, Layers, Memory, NPS, Android Auto, Offline, or store-screenshot work.

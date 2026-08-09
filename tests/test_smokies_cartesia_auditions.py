@@ -351,6 +351,59 @@ class SmokiesCartesiaAuditionTests(unittest.TestCase):
             )
         self.assertEqual(rerender_transport.calls, [])
 
+    def test_provider_recovery_is_single_entry_ledger_bound_and_capped(self):
+        ledger = renderer._new_ledger(renderer.load_locked_packet(renderer.DEFAULT_LOCK), NOW)
+        first = renderer.load_locked_packet(renderer.DEFAULT_LOCK).scripts[0]
+        ledger["credits_committed_total"] = first.billing_ceiling_credits
+        ledger["entries"][first.entry_id] = {
+            "entry_id": first.entry_id,
+            "request_fingerprint": (
+                renderer.KNOWN_STREAMING_HEADER_INCIDENT_FINGERPRINT
+            ),
+            "transcript_sha256": first.transcript_sha256,
+            "payload_character_count": first.raw_character_count,
+            "normalized_character_count": first.normalized_character_count,
+            "reserved_credit_ceiling": first.billing_ceiling_credits,
+            "state": "invalid_audio",
+            "attempts": [{
+                "number": 1,
+                "state": "invalid_audio",
+                "at": NOW.isoformat().replace("+00:00", "Z"),
+                "http_status": 200,
+            }],
+        }
+        renderer._atomic_json(self.output / "ledger.json", ledger)
+
+        with self.assertRaisesRegex(renderer.AuditionError, "cumulative_credit_cap"):
+            self.apply(FakeTransport([]), rerender_ids=[first.entry_id])
+
+        result = renderer.run_renderer(
+            lock_path=renderer.DEFAULT_LOCK,
+            output_directory=self.output,
+            account_evidence_path=self.evidence,
+            apply=False,
+            rerender_ids=[first.entry_id],
+            approve_provider_recovery=True,
+            repository=renderer.REPOSITORY,
+            now=NOW,
+        )
+        self.assertTrue(result["limits"]["provider_recovery_authorized"])
+        self.assertEqual(
+            result["limits"]["provider_recovery_credit_cap"], 15_000
+        )
+
+        with self.assertRaisesRegex(renderer.AuditionError, "recovery_not_eligible"):
+            renderer.run_renderer(
+                lock_path=renderer.DEFAULT_LOCK,
+                output_directory=self.output,
+                account_evidence_path=self.evidence,
+                apply=False,
+                rerender_ids=[first.entry_id, "rf_story_03"],
+                approve_provider_recovery=True,
+                repository=renderer.REPOSITORY,
+                now=NOW,
+            )
+
     def test_definitive_client_error_is_not_retried_or_charged(self):
         transport = FakeTransport([response(400)])
         with self.assertRaisesRegex(renderer.AuditionError, "provider_rejected"):
@@ -369,6 +422,23 @@ class SmokiesCartesiaAuditionTests(unittest.TestCase):
         resumed = self.apply(resume_transport)
         self.assertEqual(resumed["credits_projected_this_run"], 0)
         self.assertEqual(resume_transport.calls, [])
+
+        # A previously authorized recovery may leave the historical ledger
+        # above the ordinary packet cap. A verified zero-network resume must
+        # remain available because it cannot increase exposure.
+        ledger_path = self.output / "ledger.json"
+        ledger = json.loads(ledger_path.read_text())
+        ledger["credits_committed_total"] = 14_143
+        renderer._atomic_json(ledger_path, ledger)
+        audit_only = renderer.run_renderer(
+            lock_path=renderer.DEFAULT_LOCK,
+            output_directory=self.output,
+            account_evidence_path=self.evidence,
+            apply=False,
+            repository=renderer.REPOSITORY,
+            now=NOW,
+        )
+        self.assertEqual(audit_only["credits_projected_this_run"], 0)
 
         rerender_transport = FakeTransport([response(200, valid)])
         with self.assertRaisesRegex(renderer.AuditionError, "cumulative_credit_cap"):
@@ -443,6 +513,34 @@ class SmokiesCartesiaAuditionTests(unittest.TestCase):
                 now=NOW,
             )
 
+    def test_exact_completed_streaming_recovery_fingerprints_migrate_without_network(self):
+        self.apply(FakeTransport([response(200, wav_bytes())] * 3))
+        ledger_path = self.output / "ledger.json"
+        ledger = json.loads(ledger_path.read_text())
+        for entry_id, fingerprint in (
+            renderer.KNOWN_COMPLETED_STREAMING_RECOVERY_FINGERPRINTS.items()
+        ):
+            ledger["entries"][entry_id]["request_fingerprint"] = fingerprint
+        ledger["credits_committed_total"] = 14_143
+        renderer._atomic_json(ledger_path, ledger)
+
+        transport = FakeTransport([])
+        result = renderer.run_renderer(
+            lock_path=renderer.DEFAULT_LOCK,
+            output_directory=self.output,
+            account_evidence_path=self.evidence,
+            apply=True,
+            repository=renderer.REPOSITORY,
+            transport=transport,
+            encoder=FAKE_ENCODER,
+            encoder_runner=fake_encode,
+            duration_validator=lambda _script, _probe: None,
+            now=NOW,
+            api_key="test-provider-secret",
+        )
+        self.assertEqual(result["credits_projected_this_run"], 0)
+        self.assertEqual(transport.calls, [])
+
     def test_wav_validation_is_strict_riff_mono_pcm_s16le_44100(self):
         probe = renderer.probe_wav_bytes(wav_bytes())
         self.assertEqual(probe.channels, 1)
@@ -456,6 +554,25 @@ class SmokiesCartesiaAuditionTests(unittest.TestCase):
             renderer.probe_wav_bytes(wav_bytes(channels=2))
         with self.assertRaisesRegex(renderer.AuditionError, "profile_mismatch"):
             renderer.probe_wav_bytes(wav_bytes(sample_rate=48_000))
+
+    def test_streamed_wav_unknown_lengths_are_canonicalized_fail_closed(self):
+        canonical = wav_bytes(frames=4_410)
+        streamed = bytearray(canonical)
+        streamed[4:8] = (0xFFFFFFFF).to_bytes(4, "little")
+        data_offset = streamed.index(b"data")
+        streamed[data_offset + 4 : data_offset + 8] = (0xFFFFFFFF).to_bytes(
+            4, "little"
+        )
+
+        repaired, changed = renderer.canonicalize_streamed_wav(bytes(streamed))
+        self.assertTrue(changed)
+        self.assertEqual(repaired, canonical)
+        self.assertEqual(renderer.probe_wav_bytes(repaired).duration_s, 0.1)
+
+        malformed = bytearray(canonical)
+        malformed[4:8] = (123).to_bytes(4, "little")
+        with self.assertRaisesRegex(renderer.AuditionError, "wav_invalid"):
+            renderer.canonicalize_streamed_wav(bytes(malformed))
 
     def test_structurally_valid_truncated_story_audio_never_completes(self):
         short_but_valid = wav_bytes()

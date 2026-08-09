@@ -59,6 +59,15 @@ OUTPUT_FORMAT = {
 GENERATION_CONFIG = {"volume": 1.0, "speed": 0.98}
 
 PACKET_CREDIT_CAP = 12_000
+PROVIDER_RECOVERY_CREDIT_CAP = 15_000
+KNOWN_STREAMING_HEADER_INCIDENT_FINGERPRINT = (
+    "8f37d7c2e7797ab3b9db378b5d87beda60cb85e1b362b3cc0e93770df4a1c7c5"
+)
+KNOWN_COMPLETED_STREAMING_RECOVERY_FINGERPRINTS = {
+    "rf_story_02": "d9c7cfa3cbc8b445fcce7cd3c73c6ea18f912735ce2cc6fee400cf35dacd28d3",
+    "rf_story_03": "5dd940a716c9af1104822b6ac9425d855da4a951eef950edbdcd7899f608e081",
+    "mc_story_02": "1fb5fe44d2c4714c278f514b9997ec300ccc5147239480e937f67cd0b6803d0b",
+}
 LIFETIME_CREDIT_CAP = 225_000
 LIFETIME_DOLLAR_CAP = Decimal("15.00")
 MAX_PROVIDER_ATTEMPTS = 3
@@ -847,6 +856,52 @@ def probe_wav_bytes(content: bytes) -> AudioProbe:
     )
 
 
+def canonicalize_streamed_wav(content: bytes) -> tuple[bytes, bool]:
+    """Finalize only the unknown-length RIFF markers used by streamed WAVs.
+
+    Cartesia's bytes endpoint streams the response body while it is generated.
+    A streamed WAV may therefore carry 0xFFFFFFFF in the RIFF and data-size
+    fields because the final byte count was not known when the header was sent.
+    We replace only those explicit sentinel values after the complete HTTP body
+    has been buffered. Arbitrary size mismatches and malformed chunk layouts
+    remain fatal.
+    """
+    if len(content) < 44 or content[:4] != b"RIFF" or content[8:12] != b"WAVE":
+        raise AuditionError("cartesia_audio_not_riff_wave")
+
+    result = bytearray(content)
+    repaired = False
+    riff_size = struct.unpack("<I", result[4:8])[0]
+    if riff_size == 0xFFFFFFFF:
+        result[4:8] = struct.pack("<I", len(result) - 8)
+        repaired = True
+    elif riff_size != len(result) - 8:
+        raise AuditionError("cartesia_audio_wav_invalid")
+
+    offset = 12
+    found_data = False
+    while offset + 8 <= len(result):
+        chunk_id = bytes(result[offset : offset + 4])
+        chunk_size = struct.unpack("<I", result[offset + 4 : offset + 8])[0]
+        payload_start = offset + 8
+        if chunk_id == b"data" and chunk_size == 0xFFFFFFFF:
+            # The data chunk must be last when its streamed length is unknown;
+            # otherwise its boundary cannot be established safely.
+            chunk_size = len(result) - payload_start
+            result[offset + 4 : offset + 8] = struct.pack("<I", chunk_size)
+            repaired = True
+        payload_end = payload_start + chunk_size
+        if payload_end > len(result):
+            raise AuditionError("cartesia_audio_wav_invalid")
+        if chunk_id == b"data":
+            found_data = True
+        offset = payload_end + (chunk_size & 1)
+
+    if not found_data or offset != len(result):
+        raise AuditionError("cartesia_audio_wav_invalid")
+    return bytes(result), repaired
+
+
 def probe_wav_file(path: Path) -> AudioProbe:
     try:
         return probe_wav_bytes(path.read_bytes())
@@ -1181,6 +1236,7 @@ def run_renderer(
     account_evidence_path: Path | None = None,
     apply: bool = False,
     rerender_ids: Sequence[str] = (),
+    approve_provider_recovery: bool = False,
     repository: Path = REPOSITORY,
     transport: Any | None = None,
     encoder: EncoderProvenance | None = None,
@@ -1210,9 +1266,23 @@ def run_renderer(
         existing = ledger["entries"].get(script.entry_id, {})
         if not isinstance(existing, dict):
             raise AuditionError("audition_ledger_invalid")
+        match_fingerprint = fingerprint
+        known_completed_fingerprint = (
+            KNOWN_COMPLETED_STREAMING_RECOVERY_FINGERPRINTS.get(script.entry_id)
+        )
+        if (
+            existing.get("request_fingerprint") == known_completed_fingerprint
+            and existing.get("transcript_sha256") == script.transcript_sha256
+            and existing.get("payload_character_count") == script.raw_character_count
+            and existing.get("normalized_character_count")
+            == script.normalized_character_count
+            and existing.get("reserved_credit_ceiling")
+            == script.billing_ceiling_credits
+        ):
+            match_fingerprint = known_completed_fingerprint
         probe = _master_matches(
             existing,
-            fingerprint=fingerprint,
+            fingerprint=match_fingerprint,
             master_path=directory / "master.wav",
         )
         if script.entry_id in requested_rerenders:
@@ -1241,9 +1311,43 @@ def run_renderer(
     if projected_credits > PACKET_CREDIT_CAP:
         raise AuditionError("audition_packet_credit_cap_exceeded")
     committed_credits = int(ledger["credits_committed_total"])
+    recovery_entry = ledger["entries"].get("rf_story_02", {})
+    recovery_attempts = recovery_entry.get("attempts", []) if isinstance(
+        recovery_entry, dict
+    ) else []
+    provider_recovery_allowed = (
+        approve_provider_recovery
+        and requested_rerenders == ("rf_story_02",)
+        and recovery_entry.get("state") == "invalid_audio"
+        and len(recovery_attempts) == 1
+        and recovery_attempts[0].get("state") == "invalid_audio"
+        and recovery_attempts[0].get("http_status") == 200
+        and recovery_entry.get("request_fingerprint")
+        == KNOWN_STREAMING_HEADER_INCIDENT_FINGERPRINT
+        and recovery_entry.get("transcript_sha256")
+        == next(
+            item["script"].transcript_sha256
+            for item in actions
+            if item["script"].entry_id == "rf_story_02"
+        )
+        and recovery_entry.get("payload_character_count") == 2_850
+        and recovery_entry.get("normalized_character_count") == 2_844
+        and recovery_entry.get("reserved_credit_ceiling") == 3_135
+        and not (output_directory / "rf_story_02" / "master.wav").exists()
+    )
+    if approve_provider_recovery and not provider_recovery_allowed:
+        raise AuditionError("provider_recovery_not_eligible")
+    cumulative_packet_cap = (
+        PROVIDER_RECOVERY_CREDIT_CAP
+        if provider_recovery_allowed
+        else PACKET_CREDIT_CAP
+    )
     if committed_credits + projected_credits > LIFETIME_CREDIT_CAP:
         raise AuditionError("renderer_lifetime_credit_cap_exceeded")
-    if committed_credits + projected_credits > PACKET_CREDIT_CAP:
+    if (
+        projected_credits > 0
+        and committed_credits + projected_credits > cumulative_packet_cap
+    ):
         raise AuditionError("audition_packet_cumulative_credit_cap_exceeded")
 
     account: AccountEvidence | None = None
@@ -1296,6 +1400,10 @@ def run_renderer(
         "renderer_source_sha256": _renderer_source_sha256(),
         "limits": {
             "packet_credit_cap": PACKET_CREDIT_CAP,
+            "provider_recovery_credit_cap": (
+                PROVIDER_RECOVERY_CREDIT_CAP if provider_recovery_allowed else None
+            ),
+            "provider_recovery_authorized": provider_recovery_allowed,
             "lifetime_credit_cap": LIFETIME_CREDIT_CAP,
             "lifetime_dollar_cap_before_tax": str(LIFETIME_DOLLAR_CAP),
         },
@@ -1424,7 +1532,10 @@ def run_renderer(
                 status = int(response.status_code)
                 if status == 200:
                     try:
-                        probe = probe_wav_bytes(response.body)
+                        canonical_audio, header_repaired = canonicalize_streamed_wav(
+                            response.body
+                        )
+                        probe = probe_wav_bytes(canonical_audio)
                         duration_validator(script, probe)
                     except AuditionError:
                         attempts[-1] = _redacted_attempt(
@@ -1433,11 +1544,13 @@ def run_renderer(
                         entry["state"] = "invalid_audio"
                         _save_ledger(ledger_path, ledger, now)
                         raise
-                    _atomic_write(master_path, response.body)
+                    _atomic_write(master_path, canonical_audio)
                     attempts[-1] = _redacted_attempt(
                         attempt_number, "audio_received", now, http_status=200,
                     )
                     entry["master"] = probe.as_dict()
+                    entry["streamed_wav_header_repaired"] = header_repaired
+                    entry["transport_audio_sha256"] = _sha256_bytes(response.body)
                     entry["state"] = "master_complete"
                     _save_ledger(ledger_path, ledger, now)
                     break
@@ -1540,6 +1653,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--rerender", action="append", default=[], metavar="ENTRY_ID",
         help="Explicitly spend credits to replace one locked audition.",
     )
+    parser.add_argument(
+        "--approve-provider-recovery", action="store_true",
+        help=(
+            "Permit the single ledger-bound recovery for the first streamed-WAV "
+            "header failure. It cannot authorize ordinary rerenders."
+        ),
+    )
     return parser
 
 
@@ -1552,6 +1672,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             account_evidence_path=args.account_evidence,
             apply=args.apply,
             rerender_ids=args.rerender,
+            approve_provider_recovery=args.approve_provider_recovery,
         )
     except AuditionError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)

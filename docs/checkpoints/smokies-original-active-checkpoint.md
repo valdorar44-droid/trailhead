@@ -1301,3 +1301,40 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 - Script selection, geology expansion, source/cultural audit, Cartesia model/voice research, renderer architecture, cap edge-case audit, or local encoder selection while their checked hashes remain unchanged.
 - Do not call the existing Originals Studio Cartesia endpoint for these auditions; it lacks this lock, cap, ledger, and archival-master contract.
 - Do not generate any fourth sample, batch narration, culturally gated pronunciation, production asset, deployment, OTA, or public release during the audition review packet.
+
+## S4B Cartesia auditions generated and verified
+
+- Completed: 2026-08-08.
+- Account gate verified in the signed-in Cartesia Playground before generation:
+  - Pro remains active with commercial-use permission.
+  - Model-training contribution is disabled and the setting was saved.
+  - The user enabled overages, but the available credit balance covered this packet; no paid overage was required.
+- The first `rf_story_02` request returned HTTP 200 and consumed 2,844 account credits, but its streamed WAV used an unknown-length RIFF header marker. The renderer failed closed, retained the conservative 3,135-credit ledger reservation, and made no automatic retry.
+- Cartesia documents `/tts/bytes` as a streamed response. The renderer now canonicalizes only the explicit `0xFFFFFFFF` RIFF/data length sentinel after the complete body is buffered, then performs the unchanged strict PCM profile, frame completeness, and 75-240 WPM duration checks. Arbitrary mismatches remain rejected.
+- The user explicitly approved completing the packet after the failed provider response. A fixed-code recovery gate permits only the exact recorded `rf_story_02` incident, transcript hash, character counts, and one HTTP-200 invalid-audio attempt. It raises the cumulative recovery ceiling to 15,000 credits for this incident only; the 225,000-credit and $15-before-tax lifetime gates remain unchanged.
+- One recovery invocation completed the exact three locked auditions. Final account balance was 106,731 credits, matching 12,830 normalized characters consumed from the pre-generation 119,561 balance. The conservative ledger total is 14,143 credits because it retains the ten-percent per-request ceilings and the first failed response.
+- All three provider responses required only the documented streamed-header finalization and then passed strict WAV validation:
+  - `rf_story_02`: 152.00 seconds; WAV SHA-256 `68f9e9e3539a1e547c41fc6adf02524d42780f69a006a982af6729b4b881f5f6`.
+  - `rf_story_03`: 144.64 seconds; WAV SHA-256 `caf157e485d6354d2070f0b561682f4ced2d75410abc51d6eead660398dbf30a`.
+  - `mc_story_02`: 242.56 seconds; WAV SHA-256 `6f809b231b1bbcc548c4d33f47f2a290fb3ec3acc0633aa7ac047fb67555b8a6`.
+- Each master has locally encoded 64, 96, and 128 kbps derivatives plus redacted provenance. No audio, account screenshot, ledger, API key, invoice data, or billing identity is committed.
+- Automated audio inspection found consistent mean volume near -21.8 dB, peaks between -3.7 and -3.1 dB, and no silence interval longer than two seconds at the -50 dB threshold.
+- A network-free resume check reports zero projected credits and verifies all master hashes, frame counts, transcripts, and derivatives.
+- Renderer SHA-256 after the streamed-WAV/recovery fix: `061a48c99efa22044a3b7a2db366e6cb337d5d36ecdaf190ee4614a9fa87731e`.
+- Renderer-test SHA-256: `95411dfedabfd77ccb938b08bf11f825afb6273954abb252c8fad2142edbc7e7`.
+- Final focused source, editorial, lock, and renderer verification: 61 tests passed; the lock rebuilt deterministically, Python compilation passed, and `git diff --check` passed.
+- No Studio upload, backend deployment, OTA, native build, catalog activation, batch narration, or public release occurred.
+
+### Exact next action after S4B
+
+1. Listen to the three 96 kbps auditions on Android and iPhone, comparing pacing, warmth, pronunciation, fatigue, and whether the 2.5-4 minute story length feels right.
+2. Use the existing 64/96/128 encodes to choose one delivery bitrate without regenerating narration.
+3. Record accept/revise decisions by exact transcript and audio hash.
+4. If revisions are required, change only the affected locked script and rerender only that asset under a new reviewed lock and cost calculation.
+5. Do not begin batch narration until these auditions are accepted and the remaining chapter-specific delivery/cultural publication gates are satisfied.
+
+### Do not repeat after S4B
+
+- Do not regenerate these auditions merely to compare compression, volume, or devices; all three bitrates derive from the same verified masters.
+- Do not rerun the provider recovery or loosen the normal 12,000-credit packet cap.
+- Do not upload to Studio, publish, deploy, or generate culturally gated material during listening review.

@@ -1480,3 +1480,49 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 
 - Do not regenerate the thirteen Roaring Fork files, recreate the deleted key, rerun narrator comparison, or reinterpret the internal characterization as publication approval while hashes remain unchanged.
 - Do not narrate another chapter, upload to Studio, deploy, publish, build native binaries, or send culturally scoped material before the exact next packet is approved.
+
+## S4E Android standalone chapter listening preparation
+
+- Completed: 2026-08-09.
+- Branch: `feat/smokies-original-s2`.
+- Source HEAD: `d1a59636c654c3c419a8cb1fad9c5a80a428b1bc`.
+- This was a device-evidence packet only. It changed no production code, manifest, backend data, OTA, native binary, provider state, narration master, or public-release state.
+- Protected worktree files remained unchanged:
+  - `dashboard/explore_serving_index_v2.json`: `c0726d8166ab7d110f437ff4e6acde7aa09702354f053103e3f6630a0129b869`.
+  - `docs/app-store-copy.md`: `126af147b650c2f1077fb73036d26f34f940422c07a3193bade047c73b5c225a`.
+  - `.cursor/` was not touched.
+- The connected Android review device was a Samsung `SM-A326U1` on Android 13. It had approximately 29.3 GiB free on shared storage after transfer.
+- Only the thirteen accepted Roaring Fork MP3 masters and one local playlist were copied to `Music/Trailhead Smokies/Roaring Fork - James`. No ledger, account evidence, provider key, source dossier, route geometry, or private manifest was transferred.
+- The thirteen device files contain 26,184,875 bytes. A canonical `filename|bytes|sha256` manifest calculated independently from the ignored local masters and the device copy matched exactly on all thirteen rows: `c6c9000d144d211cf8055916439f745fcb98e686903ebd7ed8bddf861b738585`.
+- Android MediaStore indexed all thirteen files and the playlist. Playlist membership was verified in exact `play_order` 1 through 13:
+  1. `01-rf_cue_02.mp3`
+  2. `02-rf_story_03.mp3`
+  3. `03-rf_cue_01.mp3`
+  4. `04-rf_story_01.mp3`
+  5. `05-rf_cue_04.mp3`
+  6. `06-rf_cue_03.mp3`
+  7. `07-rf_story_02.mp3`
+  8. `08-rf_story_04.mp3`
+  9. `09-rf_story_05.mp3`
+  10. `10-rf_cue_05.mp3`
+  11. `11-rf_story_06.mp3`
+  12. `12-rf_story_07.mp3`
+  13. `13-rf_cue_06.mp3`
+- Samsung My Files was set to `Name` / `Ascending`, and both the first and final visible list segments were checked. The device was left at the top of that ordered list for the user's listening review.
+- Direct playback of a short cue and a long story succeeded through Android's installed YouTube Music audio-preview activity with the expected media type and active media audio focus.
+- The installed one-file audio-preview activity abandoned playback after returning Home and did not expose a normal playlist queue or durable media session. This is recorded only as a limitation of the standalone review player. It is not a Trailhead runtime defect and does not satisfy background, lock-screen, interruption, queue, or resume acceptance for the future private Manifest V3 flow.
+- Trailhead in-app device acceptance remains deliberately untested because the complete private Manifest V3, verified server uploads, licensed artwork, and publication-grade evidence are still absent. No claim was inferred from standalone playback.
+- Task-owned background processes after completion: none.
+
+### Exact next action after S4E
+
+1. The user listens to the ordered Android files, beginning with the Noah Ogle pair `01` then `02`, and records accept/revise decisions for pacing, pronunciation, cue clarity, transitions, and fatigue.
+2. Bind any revision request to the exact transcript and audio SHA-256. Do not regenerate an accepted file; create a new reviewed lock only for a changed asset.
+3. If the Android listening verdict is acceptable, copy the identical thirteen hashes to iPhone for the shared subjective spot check.
+4. Only after audio acceptance should the next implementation packet ingest licensed artwork, assemble the complete private Manifest V3 and verified uploads, and run actual Trailhead background, lock-screen, interruption, queue, and resume acceptance.
+
+### Do not repeat after S4E
+
+- Do not recopy, rehash, rescan, or reorder this Samsung packet while the thirteen master hashes and device folder remain unchanged.
+- Do not treat YouTube Music audio-preview behavior as Trailhead runtime evidence.
+- Do not upload, publish, deploy, create a new provider key, regenerate narration, or begin another chapter during listening review.

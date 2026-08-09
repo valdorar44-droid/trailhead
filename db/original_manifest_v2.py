@@ -8,6 +8,7 @@ import json
 import re
 from collections.abc import Callable
 from datetime import date, datetime, timezone
+from urllib.parse import urlsplit
 
 from db.originals_operational import (
     OriginalOperationalReadinessError,
@@ -47,6 +48,13 @@ def _forbid_keys(value: dict, allowed: set[str], label: str) -> None:
         raise OriginalManifestV2Error(
             f"{label} contains unsupported fields: {', '.join(extra)}"
         )
+
+
+def _matches_exact(value: dict, expected: dict) -> bool:
+    return set(value) == set(expected) and all(
+        type(value[key]) is type(expected[key]) and value[key] == expected[key]
+        for key in expected
+    )
 
 
 def _items(value: object, label: str, maximum: int, *, required: bool = True) -> list:
@@ -94,6 +102,20 @@ def _attestation_time(value: object, label: str) -> str:
     return clean
 
 
+def _https_url(value: object, label: str, *, allowed_hosts: set[str]) -> str:
+    clean = _text(value, label, 2_000)
+    parsed = urlsplit(clean)
+    if (
+        parsed.scheme != "https"
+        or parsed.hostname not in allowed_hosts
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.fragment
+    ):
+        raise OriginalManifestV2Error(f"{label} must be an approved HTTPS URL")
+    return clean
+
+
 def _sequence(value: object, label: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
         raise OriginalManifestV2Error(f"{label} must be a positive integer")
@@ -134,19 +156,175 @@ def _bounds_contains(bounds: dict[str, float], lng: object, lat: object, label: 
         raise OriginalManifestV2Error(f"{label} is outside the union offline map")
 
 
+def _profile_v2(profile: dict) -> dict:
+    """Normalize the accepted provider-native ElevenLabs MP3 contract.
+
+    V2 is intentionally narrow. It records the bytes ElevenLabs returned as
+    both the immutable source/master and mobile delivery. It must never imply
+    that a lossy MP3 is a WAV/lossless master or that a Creator account has
+    zero-retention processing.
+    """
+    _forbid_keys(profile, {
+        "schema_version", "provider", "voice_id", "model_snapshot", "api_version",
+        "language", "generation", "archival_master", "mobile_delivery",
+        "commercial_license", "training_contribution", "provider_data_retention",
+    }, "Original V2 narration_profile")
+    if profile.get("provider") != "elevenlabs":
+        raise OriginalManifestV2Error(
+            "Original narration profile V2 supports only the accepted ElevenLabs path"
+        )
+    profile["voice_id"] = _text(
+        profile.get("voice_id"), "Original narration profile voice_id", 240,
+    )
+    profile["api_version"] = _text(
+        profile.get("api_version"), "Original narration profile api_version", 240,
+    )
+    profile["language"] = _text(
+        profile.get("language"), "Original narration profile language", 40,
+    )
+    profile["model_snapshot"] = _text(
+        profile.get("model_snapshot"), "Original narration profile model_snapshot", 240,
+    )
+    if profile["model_snapshot"] != "eleven_multilingual_v2":
+        raise OriginalManifestV2Error(
+            "Original narration profile V2 must pin eleven_multilingual_v2"
+        )
+    if profile["api_version"] != "elevenlabs_text_to_speech_v1":
+        raise OriginalManifestV2Error(
+            "Original narration profile V2 must pin the ElevenLabs text-to-speech v1 API contract"
+        )
+    if profile["language"] != "en":
+        raise OriginalManifestV2Error(
+            "Original narration profile V2 currently supports the reviewed English path only"
+        )
+
+    generation = _object(profile.get("generation"), "Original narration generation profile")
+    archive = _object(profile.get("archival_master"), "Original narration archive profile")
+    delivery = _object(profile.get("mobile_delivery"), "Original narration delivery profile")
+    _forbid_keys(generation, {
+        "output_format", "mime_type", "sample_rate_hz", "bitrate_kbps", "channels",
+        "provider_native", "lossless",
+    }, "Original narration generation profile")
+    _forbid_keys(archive, {
+        "mime_type", "sample_rate_hz", "bitrate_kbps", "channels",
+        "provider_native", "immutable", "lossless",
+    }, "Original narration archive profile")
+    _forbid_keys(delivery, {
+        "mime_type", "sample_rate_hz", "bitrate_kbps", "channels", "lossless",
+        "transcoded", "byte_identical_to_archival_master",
+    }, "Original narration delivery profile")
+    expected_generation = {
+        "output_format": "mp3_44100_128",
+        "mime_type": "audio/mpeg",
+        "sample_rate_hz": 44_100,
+        "bitrate_kbps": 128,
+        "channels": 1,
+        "provider_native": True,
+        "lossless": False,
+    }
+    expected_archive = {
+        "mime_type": "audio/mpeg",
+        "sample_rate_hz": 44_100,
+        "bitrate_kbps": 128,
+        "channels": 1,
+        "provider_native": True,
+        "immutable": True,
+        "lossless": False,
+    }
+    expected_delivery = {
+        "mime_type": "audio/mpeg",
+        "sample_rate_hz": 44_100,
+        "bitrate_kbps": 128,
+        "channels": 1,
+        "lossless": False,
+        "transcoded": False,
+        "byte_identical_to_archival_master": True,
+    }
+    for row, expected, label in (
+        (generation, expected_generation, "generation"),
+        (archive, expected_archive, "archival master"),
+        (delivery, expected_delivery, "mobile delivery"),
+    ):
+        if not _matches_exact(row, expected):
+            raise OriginalManifestV2Error(
+                f"Original narration profile V2 {label} must match provider-native mp3_44100_128"
+            )
+
+    commercial = _object(
+        profile.get("commercial_license"), "Original narration commercial license",
+    )
+    _forbid_keys(commercial, {
+        "status", "plan", "commercial_use_allowed", "terms_id", "terms_url",
+        "terms_version", "reviewed_at", "verified_at",
+    }, "Original narration commercial license")
+    if (
+        commercial.get("status") != "verified"
+        or commercial.get("plan") != "creator"
+        or commercial.get("commercial_use_allowed") is not True
+    ):
+        raise OriginalManifestV2Error(
+            "Original ElevenLabs Creator narration needs verified commercial-use terms"
+        )
+    commercial["terms_id"] = _text(
+        commercial.get("terms_id"), "Original narration license terms_id", 240,
+    )
+    commercial["terms_url"] = _https_url(
+        commercial.get("terms_url"),
+        "Original narration license terms_url",
+        allowed_hosts={"elevenlabs.io", "www.elevenlabs.io"},
+    )
+    commercial["terms_version"] = _text(
+        commercial.get("terms_version"), "Original narration license terms_version", 240,
+    )
+    commercial["reviewed_at"] = _review_date(
+        commercial.get("reviewed_at"), "Original narration license reviewed_at",
+    )
+    commercial["verified_at"] = _attestation_time(
+        commercial.get("verified_at"), "Original narration license verified_at",
+    )
+
+    training = _object(
+        profile.get("training_contribution"), "Original narration training contribution",
+    )
+    _forbid_keys(training, {"status", "confirmed_at"}, "Original narration training contribution")
+    if training.get("status") != "disabled":
+        raise OriginalManifestV2Error(
+            "Original ElevenLabs training contribution must be disabled"
+        )
+    training["confirmed_at"] = _attestation_time(
+        training.get("confirmed_at"), "Original narration training contribution confirmed_at",
+    )
+
+    retention = _object(
+        profile.get("provider_data_retention"), "Original narration provider data retention",
+    )
+    _forbid_keys(retention, {"status", "zero_retention", "confirmed_at"}, "Original narration provider data retention")
+    if retention.get("status") != "provider_standard" or retention.get("zero_retention") is not False:
+        raise OriginalManifestV2Error(
+            "Original ElevenLabs Creator narration must record standard provider retention and zero_retention false"
+        )
+    retention["confirmed_at"] = _attestation_time(
+        retention.get("confirmed_at"), "Original narration provider retention confirmed_at",
+    )
+    return profile
+
+
 def _profile(value: object, *, required: bool) -> dict | None:
     if value is None:
         if required:
             raise OriginalManifestV2Error("Original V2 narration_profile is required before publishing")
         return None
     profile = copy.deepcopy(_object(value, "Original V2 narration_profile"))
+    schema_version = profile.get("schema_version")
+    if schema_version == 2:
+        return _profile_v2(profile)
     _forbid_keys(profile, {
         "schema_version", "provider", "voice_id", "model_snapshot", "api_version",
         "language", "generation", "archival_master", "mobile_delivery",
         "commercial_license", "training_opt_out",
     }, "Original V2 narration_profile")
-    if profile.get("schema_version") != 1:
-        raise OriginalManifestV2Error("Original narration profile schema_version must be 1")
+    if schema_version != 1:
+        raise OriginalManifestV2Error("Original narration profile schema_version must be 1 or 2")
     if profile.get("provider") not in {"cartesia", "elevenlabs"}:
         raise OriginalManifestV2Error("Original narration profile provider is unsupported")
     for key in ("voice_id", "model_snapshot", "api_version", "language"):
@@ -196,6 +374,85 @@ def _profile(value: object, *, required: bool) -> dict | None:
         opt_out.get("confirmed_at"), "Original narration opt-out confirmed_at",
     )
     return profile
+
+
+def _verified_metadata(value: object, label: str) -> dict:
+    if isinstance(value, dict):
+        return copy.deepcopy(value)
+    if isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError as exc:
+            raise OriginalManifestV2Error(f"{label} is invalid") from exc
+        if isinstance(decoded, dict):
+            return decoded
+    raise OriginalManifestV2Error(f"{label} is invalid")
+
+
+def validate_original_narration_profile_asset(
+    profile: dict,
+    verified_asset: object,
+    *,
+    label: str,
+) -> None:
+    """Bind V2 profile claims to independently probed immutable upload data."""
+    if profile.get("schema_version") != 2:
+        return
+    verified = _object(verified_asset, f"{label} verified asset")
+    if verified.get("kind") != "narration" or verified.get("mime_type") != "audio/mpeg":
+        raise OriginalManifestV2Error(
+            f"{label} must be a verified audio/mpeg narration upload"
+        )
+    media = _verified_metadata(verified.get("media_metadata_json"), f"{label} media metadata")
+    expected_media = {
+        "format": "mp3",
+        "sample_rate_hz": 44_100,
+        "bitrate_kbps": 128,
+        "channels": 1,
+    }
+    if not all(
+        type(media.get(key)) is type(value) and media.get(key) == value
+        for key, value in expected_media.items()
+    ):
+        raise OriginalManifestV2Error(
+            f"{label} verified bytes do not match provider-native mp3_44100_128"
+        )
+
+    generator = _verified_metadata(
+        verified.get("generator_metadata_json"), f"{label} generator metadata",
+    )
+    expected_generator = {
+        "provider": profile["provider"],
+        "model_id": profile["model_snapshot"],
+        "voice_id": profile["voice_id"],
+        "output_format": "mp3_44100_128",
+        "provider_native_master": True,
+        "lossless_master_claimed": False,
+        "transcoded": False,
+    }
+    if not all(
+        type(generator.get(key)) is type(value) and generator.get(key) == value
+        for key, value in expected_generator.items()
+    ):
+        raise OriginalManifestV2Error(
+            f"{label} generator provenance does not match narration profile V2"
+        )
+    zero_retention = generator.get("zero_retention")
+    if zero_retention is not None and zero_retention is not False:
+        raise OriginalManifestV2Error(
+            f"{label} generator provenance cannot claim zero retention"
+        )
+    if generator.get("license_status") != "attested":
+        raise OriginalManifestV2Error(f"{label} commercial license is not attested")
+    attestation = _object(
+        generator.get("license_attestation"), f"{label} commercial license attestation",
+    )
+    commercial = profile["commercial_license"]
+    for key in ("terms_id", "terms_url", "terms_version", "reviewed_at"):
+        if attestation.get(key) != commercial.get(key):
+            raise OriginalManifestV2Error(
+                f"{label} commercial terms do not match narration profile V2"
+            )
 
 
 def _compile(manifest: dict, chapter: dict, variant: dict, stories: dict[str, dict]) -> dict:
@@ -756,17 +1013,26 @@ def normalize_original_manifest_v2(
     narration_profile = _profile(raw.get("narration_profile"), required=publishing)
     if narration_profile is not None:
         expected_mime = narration_profile["mobile_delivery"]["mime_type"]
+        narration_asset_ids: set[str] = set()
         for story in stories:
             narration_ids = [story["audio_asset_id"]] + [
                 override["audio_asset_id"]
                 for override in story.get("variant_overrides", [])
             ]
+            narration_asset_ids.update(narration_ids)
             if any(
                 assets_by_id[asset_id].get("mime_type") != expected_mime
                 for asset_id in narration_ids
             ):
                 raise OriginalManifestV2Error(
                     f"Original V2 story {story['id']} narration format does not match its profile"
+                )
+        if publishing and narration_profile.get("schema_version") == 2:
+            for asset_id in sorted(narration_asset_ids):
+                validate_original_narration_profile_asset(
+                    narration_profile,
+                    (verified_assets or {}).get(asset_id),
+                    label=f"Original narration asset {asset_id}",
                 )
         result["narration_profile"] = narration_profile
     if version is not None:

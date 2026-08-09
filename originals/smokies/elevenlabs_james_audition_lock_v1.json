@@ -90,7 +90,7 @@
   "comparison_source_lock": {
     "path": "originals/smokies/cartesia_audition_lock_v1.json",
     "relationship": "same_exact_three_transcripts_provider_comparison_only",
-    "sha256": "5ace6157a7a2698e912ddef8711509994028422178378c82e508ae535e56057a"
+    "sha256": "e5a88b906c1c8db634399fe9685bec60b3d819a8d7690994b3ff9533b5be0472"
   },
   "cultural_gate": {
     "public_release_approval_implied": false,
@@ -147,7 +147,7 @@
   "source_files": [
     {
       "path": "originals/smokies/cartesia_audition_lock_v1.json",
-      "sha256": "5ace6157a7a2698e912ddef8711509994028422178378c82e508ae535e56057a"
+      "sha256": "e5a88b906c1c8db634399fe9685bec60b3d819a8d7690994b3ff9533b5be0472"
     },
     {
       "path": "originals/smokies/editorial_mountain_crossing_v1.json",
@@ -155,7 +155,7 @@
     },
     {
       "path": "originals/smokies/editorial_roaring_fork_v1.json",
-      "sha256": "5fe61090ae27dcfae74fd05e8ca464be6aa140c0383d5a339cc60f3096c9cc8f"
+      "sha256": "c3d1622d7f5109fb4632cb74af340f97a3477cd061c326f5e55055e6b074d0e2"
     },
     {
       "path": "originals/smokies/source_dossiers_v1.json",

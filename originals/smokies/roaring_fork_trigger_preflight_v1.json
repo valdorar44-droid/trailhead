@@ -10,7 +10,7 @@
         "start_must_remain_inside_own_window": true
       },
       "audio_duration_s": null,
-      "authoring_estimated_duration_s": 191.6,
+      "authoring_estimated_duration_s": 192.0,
       "fallback_mode": "completion_deeper",
       "id": "rf_story_01",
       "next_hard_auto": {
@@ -79,7 +79,7 @@
         "start_must_remain_inside_own_window": true
       },
       "audio_duration_s": null,
-      "authoring_estimated_duration_s": 197.8,
+      "authoring_estimated_duration_s": 199.9,
       "fallback_mode": "completion_deeper",
       "id": "rf_story_05",
       "next_hard_auto": {
@@ -108,7 +108,7 @@
           "rf_story_05"
         ],
         "capacity_hard_auto_guard_s": 30,
-        "estimated_admitted_audio_s": 704.4,
+        "estimated_admitted_audio_s": 708.5,
         "estimated_audio_tail_after_route_end_s": 0.0,
         "estimated_context_limits_exceeded": false,
         "estimated_maximum_pending_depth": 1,
@@ -132,14 +132,14 @@
           },
           {
             "estimated_arrival_s": 18.3,
-            "estimated_finish_s": 224.7,
+            "estimated_finish_s": 225.1,
             "estimated_start_s": 33.1,
             "id": "rf_story_01",
             "mode": "capacity_deeper"
           },
           {
             "estimated_arrival_s": 385.9,
-            "estimated_finish_s": 409.1,
+            "estimated_finish_s": 410.7,
             "estimated_start_s": 385.9,
             "id": "rf_cue_04",
             "mode": "hard_auto"
@@ -160,7 +160,7 @@
           },
           {
             "estimated_arrival_s": 837.0,
-            "estimated_finish_s": 1034.8,
+            "estimated_finish_s": 1036.9,
             "estimated_start_s": 837.0,
             "id": "rf_story_05",
             "mode": "capacity_deeper"
@@ -186,7 +186,7 @@
       {
         "admitted_capacity_ids": [],
         "capacity_hard_auto_guard_s": 30,
-        "estimated_admitted_audio_s": 117.2,
+        "estimated_admitted_audio_s": 118.8,
         "estimated_audio_tail_after_route_end_s": 6.0,
         "estimated_context_limits_exceeded": false,
         "estimated_maximum_pending_depth": 0,
@@ -222,7 +222,7 @@
           },
           {
             "estimated_arrival_s": 160.8,
-            "estimated_finish_s": 184.0,
+            "estimated_finish_s": 185.6,
             "estimated_start_s": 160.8,
             "id": "rf_cue_04",
             "mode": "hard_auto"
@@ -255,7 +255,7 @@
       {
         "admitted_capacity_ids": [],
         "capacity_hard_auto_guard_s": 30,
-        "estimated_admitted_audio_s": 117.2,
+        "estimated_admitted_audio_s": 118.8,
         "estimated_audio_tail_after_route_end_s": 13.7,
         "estimated_context_limits_exceeded": false,
         "estimated_maximum_pending_depth": 0,
@@ -291,7 +291,7 @@
           },
           {
             "estimated_arrival_s": 89.0,
-            "estimated_finish_s": 112.2,
+            "estimated_finish_s": 113.8,
             "estimated_start_s": 89.0,
             "id": "rf_cue_04",
             "mode": "hard_auto"
@@ -324,7 +324,7 @@
       {
         "admitted_capacity_ids": [],
         "capacity_hard_auto_guard_s": 30,
-        "estimated_admitted_audio_s": 117.2,
+        "estimated_admitted_audio_s": 118.8,
         "estimated_audio_tail_after_route_end_s": 16.5,
         "estimated_context_limits_exceeded": false,
         "estimated_maximum_pending_depth": 1,
@@ -360,7 +360,7 @@
           },
           {
             "estimated_arrival_s": 77.2,
-            "estimated_finish_s": 100.4,
+            "estimated_finish_s": 102.0,
             "estimated_start_s": 77.2,
             "id": "rf_cue_04",
             "mode": "hard_auto"
@@ -593,7 +593,7 @@
       },
       "audio_duration_s": null,
       "audio_duration_status": "awaiting_immutable_rendered_asset",
-      "authoring_estimated_duration_s": 191.6,
+      "authoring_estimated_duration_s": 192.0,
       "delivery": {
         "admission_policy_id": "capacity_before_next_hard_v1",
         "fallback_mode": "completion_deeper",
@@ -620,7 +620,7 @@
       "route_context": "roaring_fork_entrance",
       "stable_order": 4,
       "title": "A road that asks you to slow down",
-      "transcript_word_count": 463,
+      "transcript_word_count": 464,
       "trigger": {
         "approach_bearing_deg": 114.8,
         "bearing_tolerance_deg": 70.0,
@@ -641,7 +641,7 @@
       },
       "audio_duration_s": null,
       "audio_duration_status": "awaiting_immutable_rendered_asset",
-      "authoring_estimated_duration_s": 23.2,
+      "authoring_estimated_duration_s": 24.8,
       "delivery": {
         "mode": "hard_auto",
         "optional_content_may_delay": false,
@@ -666,7 +666,7 @@
       "route_context": "grotto_falls_parking",
       "stable_order": 5,
       "title": "Grotto Falls trail access",
-      "transcript_word_count": 56,
+      "transcript_word_count": 60,
       "trigger": {
         "approach_bearing_deg": 96.8,
         "bearing_tolerance_deg": 70.0,
@@ -829,7 +829,7 @@
       },
       "audio_duration_s": null,
       "audio_duration_status": "awaiting_immutable_rendered_asset",
-      "authoring_estimated_duration_s": 197.8,
+      "authoring_estimated_duration_s": 199.9,
       "delivery": {
         "admission_policy_id": "capacity_before_next_hard_v1",
         "fallback_mode": "completion_deeper",
@@ -856,7 +856,7 @@
       "route_context": "roaring_fork_mid",
       "stable_order": 9,
       "title": "Homes, mills, and neighbors",
-      "transcript_word_count": 478,
+      "transcript_word_count": 483,
       "trigger": {
         "approach_bearing_deg": 23.1,
         "bearing_tolerance_deg": 70.0,
@@ -964,7 +964,7 @@
       },
       "audio_duration_s": null,
       "audio_duration_status": "awaiting_immutable_rendered_asset",
-      "authoring_estimated_duration_s": 187.0,
+      "authoring_estimated_duration_s": 189.1,
       "delivery": {
         "availability": "after_route_completion",
         "mode": "completion_deeper",
@@ -988,7 +988,7 @@
       "route_context": "roaring_fork_exit",
       "stable_order": 12,
       "title": "Reading two landscapes at once",
-      "transcript_word_count": 452,
+      "transcript_word_count": 457,
       "trigger": null
     },
     {
@@ -1052,7 +1052,7 @@
     },
     {
       "audio_duration_s": null,
-      "authoring_estimated_duration_s": 23.2,
+      "authoring_estimated_duration_s": 24.8,
       "id": "rf_cue_04",
       "projected_progress_m": 2587.5,
       "stable_order": 5,
@@ -1097,7 +1097,7 @@
   ],
   "input_bindings": {
     "editorial_packet_path": "originals/smokies/editorial_roaring_fork_v1.json",
-    "editorial_packet_sha256": "5fe61090ae27dcfae74fd05e8ca464be6aa140c0383d5a339cc60f3096c9cc8f",
+    "editorial_packet_sha256": "c3d1622d7f5109fb4632cb74af340f97a3477cd061c326f5e55055e6b074d0e2",
     "geometry_hash_basis": "canonical_sorted_compact_geojson",
     "geometry_sha256": "d66f76d6053000244d7e15c8be0494f48d79544e0ceaf79428c51e458e964668",
     "official_route_evidence_path": "originals/smokies/official_route_evidence_v1.json",
@@ -1190,7 +1190,7 @@
     },
     {
       "audio_duration_s": null,
-      "authoring_estimated_duration_s": 187.0,
+      "authoring_estimated_duration_s": 189.1,
       "availability": "after_route_completion",
       "experience_group_id": null,
       "id": "rf_story_07",

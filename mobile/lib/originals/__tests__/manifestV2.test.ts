@@ -264,9 +264,12 @@ assert.throws(
   'public V2 previews reject nested route geometry instead of silently retaining it',
 );
 assert.throws(
-  () => validateOriginalManifestPreview({ ...publicPreview, narration_profile: { provider: 'cartesia' } }),
+  () => validateOriginalManifestPreview({
+    ...publicPreview,
+    narration_profile: { schema_version: 2, provider: 'elevenlabs' },
+  }),
   /unsupported fields: narration_profile/,
-  'public previews reject internal provider metadata',
+  'public previews reject internal provider-native narration metadata',
 );
 
 assert.deepEqual(listOriginalChapterSelections(manifest).map(selection => ({
@@ -391,7 +394,10 @@ assertInvalid(candidate => {
 }, /Story IDs must be unique/);
 
 assertInvalid(candidate => {
-  (candidate as unknown as Record<string, unknown>).narration_profile = { provider: 'cartesia' };
+  (candidate as unknown as Record<string, unknown>).narration_profile = {
+    schema_version: 2,
+    provider: 'elevenlabs',
+  };
 }, /unsupported fields: narration_profile/);
 
 assertInvalid(candidate => {

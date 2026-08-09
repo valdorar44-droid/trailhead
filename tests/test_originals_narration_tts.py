@@ -262,6 +262,8 @@ class OriginalMp3AssetTests(unittest.TestCase):
 
         self.assertEqual(metadata["format"], "mp3")
         self.assertEqual(metadata["sample_rate_hz"], 44100)
+        self.assertEqual(metadata["bitrate_kbps"], 128)
+        self.assertEqual(metadata["channels"], 2)
         self.assertGreater(metadata["duration_s"], 0.05)
 
 

@@ -12727,6 +12727,106 @@ class OriginalNarrationProfileV1(BaseModel):
     training_opt_out: OriginalNarrationTrainingOptOutV1
 
 
+class OriginalNarrationGenerationV2(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    output_format: Literal["mp3_44100_128"]
+    mime_type: Literal["audio/mpeg"]
+    sample_rate_hz: Literal[44100]
+    bitrate_kbps: Literal[128]
+    channels: Literal[1]
+    provider_native: Literal[True]
+    lossless: Literal[False]
+
+
+class OriginalNarrationArchiveV2(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    mime_type: Literal["audio/mpeg"]
+    sample_rate_hz: Literal[44100]
+    bitrate_kbps: Literal[128]
+    channels: Literal[1]
+    provider_native: Literal[True]
+    immutable: Literal[True]
+    lossless: Literal[False]
+
+
+class OriginalNarrationDeliveryV2(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    mime_type: Literal["audio/mpeg"]
+    sample_rate_hz: Literal[44100]
+    bitrate_kbps: Literal[128]
+    channels: Literal[1]
+    lossless: Literal[False]
+    transcoded: Literal[False]
+    byte_identical_to_archival_master: Literal[True]
+
+
+class OriginalNarrationCommercialLicenseV2(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    status: Literal["verified"]
+    plan: Literal["creator"]
+    commercial_use_allowed: Literal[True]
+    terms_id: str = Field(min_length=1, max_length=240)
+    terms_url: str = Field(
+        min_length=1,
+        max_length=2000,
+        pattern=r"^https://(?:www\.)?elevenlabs\.io(?:/|$)",
+    )
+    terms_version: str = Field(min_length=1, max_length=240)
+    reviewed_at: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}$")
+    verified_at: str = Field(
+        max_length=40,
+        pattern=r"^\d{4}-\d{2}-\d{2}T.+(?:Z|[+-]\d{2}:\d{2})$",
+    )
+
+
+class OriginalNarrationTrainingContributionV2(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    status: Literal["disabled"]
+    confirmed_at: str = Field(
+        max_length=40,
+        pattern=r"^\d{4}-\d{2}-\d{2}T.+(?:Z|[+-]\d{2}:\d{2})$",
+    )
+
+
+class OriginalNarrationProviderDataRetentionV2(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    status: Literal["provider_standard"]
+    zero_retention: Literal[False]
+    confirmed_at: str = Field(
+        max_length=40,
+        pattern=r"^\d{4}-\d{2}-\d{2}T.+(?:Z|[+-]\d{2}:\d{2})$",
+    )
+
+
+class OriginalNarrationProfileV2(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    schema_version: Literal[2]
+    provider: Literal["elevenlabs"]
+    voice_id: str = Field(min_length=1, max_length=240)
+    model_snapshot: Literal["eleven_multilingual_v2"]
+    api_version: Literal["elevenlabs_text_to_speech_v1"]
+    language: Literal["en"]
+    generation: OriginalNarrationGenerationV2
+    archival_master: OriginalNarrationArchiveV2
+    mobile_delivery: OriginalNarrationDeliveryV2
+    commercial_license: OriginalNarrationCommercialLicenseV2
+    training_contribution: OriginalNarrationTrainingContributionV2
+    provider_data_retention: OriginalNarrationProviderDataRetentionV2
+
+
+OriginalNarrationProfile = Annotated[
+    OriginalNarrationProfileV1 | OriginalNarrationProfileV2,
+    Field(discriminator="schema_version"),
+]
+
+
 class OriginalStorySourceV2(BaseModel):
     model_config = {"extra": "forbid", "strict": True}
 
@@ -13000,7 +13100,7 @@ class OriginalManifestV2(BaseModel):
     review: OriginalReviewV1
     route_evidence: Optional[OriginalRouteEvidenceBindingV1] = None
     # Optional for route/editorial drafts; mandatory at the publication gate.
-    narration_profile: Optional[OriginalNarrationProfileV1] = None
+    narration_profile: Optional[OriginalNarrationProfile] = None
 
 
 class OriginalConsumerContractV1(BaseModel):
@@ -13060,7 +13160,7 @@ class OriginalManifestV3(BaseModel):
     offline_map: OriginalOfflineMapV1
     review: OriginalReviewV1
     route_evidence: Optional[OriginalRouteEvidenceBindingV1] = None
-    narration_profile: Optional[OriginalNarrationProfileV1] = None
+    narration_profile: Optional[OriginalNarrationProfile] = None
 
 
 OriginalManifestDraft = Annotated[

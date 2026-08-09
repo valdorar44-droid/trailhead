@@ -11570,7 +11570,9 @@ def _probe_original_mp3(data: bytes) -> dict:
     sample_rates = (44100, 48000, 32000)
     frames = 0
     duration_s = 0.0
-    sample_rate = 0
+    sample_rates_seen: set[int] = set()
+    bitrates_seen: set[int] = set()
+    channels_seen: set[int] = set()
     while offset + 4 <= len(data):
         if data[offset:offset + 3] == b"TAG" and len(data) - offset == 128:
             offset = len(data)
@@ -11594,6 +11596,7 @@ def _probe_original_mp3(data: bytes) -> dict:
             sample_rate //= 2
         elif version_bits == 0:
             sample_rate //= 4
+        channels = 1 if ((header >> 6) & 0x3) == 3 else 2
         frame_length = int(
             ((144000 if mpeg1 else 72000) * bitrate_kbps) / sample_rate + padding
         )
@@ -11601,11 +11604,20 @@ def _probe_original_mp3(data: bytes) -> dict:
             break
         duration_s += (1152 if mpeg1 else 576) / sample_rate
         frames += 1
+        sample_rates_seen.add(sample_rate)
+        bitrates_seen.add(bitrate_kbps)
+        channels_seen.add(channels)
         offset += frame_length
     trailing = data[offset:]
     if frames < 2 or duration_s < 0.05 or (trailing and any(byte != 0 for byte in trailing)):
         raise ValueError("Original narration is not a decodable MP3 stream")
-    return {"format": "mp3", "duration_s": round(duration_s, 3), "sample_rate_hz": sample_rate}
+    return {
+        "format": "mp3",
+        "duration_s": round(duration_s, 3),
+        "sample_rate_hz": next(iter(sample_rates_seen)) if len(sample_rates_seen) == 1 else None,
+        "bitrate_kbps": next(iter(bitrates_seen)) if len(bitrates_seen) == 1 else None,
+        "channels": next(iter(channels_seen)) if len(channels_seen) == 1 else None,
+    }
 
 
 def _probe_original_png(data: bytes) -> dict:

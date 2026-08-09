@@ -18,6 +18,7 @@ from typing import Any
 from db.original_manifest_v2 import (
     OriginalManifestV2Error,
     normalize_original_manifest_v2,
+    validate_original_narration_profile_asset,
 )
 from db.original_manifest_v2 import (
     _compile as _compile_v2,
@@ -882,11 +883,32 @@ def normalize_original_manifest_v3(
             raise OriginalManifestV3Error(
                 "OriginalManifestV3 publication requires trusted long-form validation for every delivery contract hash"
             )
-        _validate_selectable_publication_parity(result, verified_assets)
         if not isinstance(result.get("narration_profile"), dict):
             raise OriginalManifestV3Error(
                 "Original V3 narration_profile is required before publishing"
             )
+        if result["narration_profile"].get("schema_version") == 2:
+            narration_asset_ids = {
+                str(asset_id)
+                for story in result["stories"]
+                for asset_id in (
+                    [story["audio_asset_id"]]
+                    + [
+                        override["audio_asset_id"]
+                        for override in story.get("variant_overrides", [])
+                    ]
+                )
+            }
+            try:
+                for asset_id in sorted(narration_asset_ids):
+                    validate_original_narration_profile_asset(
+                        result["narration_profile"],
+                        (verified_assets or {}).get(asset_id),
+                        label=f"Original V3 narration asset {asset_id}",
+                    )
+            except OriginalManifestV2Error as exc:
+                raise OriginalManifestV3Error(str(exc)) from exc
+        _validate_selectable_publication_parity(result, verified_assets)
         binding = result.get("route_evidence")
         if not isinstance(binding, dict):
             raise OriginalManifestV3Error(

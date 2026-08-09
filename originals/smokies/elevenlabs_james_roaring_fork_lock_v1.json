@@ -1,0 +1,533 @@
+{
+  "aggregate": {
+    "all_normalized_character_count": 21913,
+    "all_payload_character_count": 21961,
+    "entry_count": 13,
+    "generate_count": 11,
+    "generated_normalized_character_count": 16337,
+    "generated_payload_character_count": 16373,
+    "generated_reserved_character_ceiling": 18016,
+    "reuse_count": 2
+  },
+  "authorization": {
+    "other_chapters_approved": false,
+    "public_release_approved": false,
+    "scope": "roaring_fork_internal_narration_only",
+    "studio_upload_approved": false,
+    "user_selected_narrator": true
+  },
+  "budget": {
+    "api_key_credit_quota": 20000,
+    "billing_unit": "provider_credits",
+    "contingency_percent": 10,
+    "dollar_cap_usd": "2.00",
+    "generated_normalized_character_count": 16337,
+    "generated_payload_character_count": 16373,
+    "max_assumed_usd_per_1000_characters": "0.10",
+    "renderer_character_cap": 18100,
+    "renderer_headroom_credits": 84,
+    "rerender_budget": 0,
+    "reserved_character_ceiling": 18016
+  },
+  "chapter_id": "roaring_fork",
+  "cultural_gate": {
+    "blocked_entry_ids": [],
+    "ebci_public_release_gate_unchanged": true,
+    "status": "passed_for_roaring_fork_public_record_factual_scope"
+  },
+  "delivery_evidence": {
+    "preflight_sha256": "b7b8412e07cdef5706d814550491f8c28bfadb05d3fbef38369ec7006c3b67f3",
+    "readiness_sha256": "4a0fc760fd07790785b820af06bac4e5a10e8337ad3f6257a10a3c50464c9b67",
+    "real_audio_validation_required": true,
+    "speed_fixtures_mph": [
+      15,
+      36,
+      65,
+      75
+    ],
+    "status": "ready_for_real_audio_validation"
+  },
+  "editorial_gate": {
+    "accepted_copy_changes_require_new_lock": true,
+    "lock_scope": "exact_hash_bound_internal_candidate",
+    "source_status": "draft_review_required"
+  },
+  "entries": [
+    {
+      "claim_ids": [
+        "rf_ogle_farm"
+      ],
+      "cultural_gate": "not_required",
+      "cultural_scope": [
+        "public_record_factual"
+      ],
+      "delivery_mode": "stopped_deeper",
+      "editorial_sequence": 2,
+      "entry_id": "rf_cue_02",
+      "generation_disposition": "generate",
+      "kind": "cue",
+      "normalized_character_count": 378,
+      "normalized_transcript_sha256": "a1df0f2a86a3321a742bbcbdfb4b0e7246891231688459bf75c5bc9cc9a1b14e",
+      "payload_character_count": 378,
+      "raw_transcript_sha256": "a1df0f2a86a3321a742bbcbdfb4b0e7246891231688459bf75c5bc9cc9a1b14e",
+      "reserved_character_ceiling": 416,
+      "script_status": "draft_review_required",
+      "source_gate": "source_verified",
+      "source_ids": [
+        "nps_grsm_roaring_fork"
+      ],
+      "stable_order": 1,
+      "title": "Ogle farmstead",
+      "word_count": 59
+    },
+    {
+      "accepted_audio": {
+        "accepted_audition_ledger_sha256": "15764fe7edc13df78614faecfaae5c3006fb0369735da4e683d378d216ba4465",
+        "audio_bytes": 3184893,
+        "audio_sha256": "ca7ea9e8cd997ee1cf90cc0b4112f17cb8815754b6a2ccfdc0e1112e3696b1a7",
+        "audition_lock_sha256": "0da10ecfbcd6c3cdeb12244cece562333e89c4d879d768ded0806ea4cc6fbef3",
+        "character_cost": 1506,
+        "duration_s": 199.053061,
+        "normalized_transcript_sha256": "ea2f289c0add40d43d6b03a37c78eba193a1ea95197891cf042484641b6db4ee",
+        "raw_transcript_sha256": "2dcb129294894980c17b231f92a36ed04f137da272e6ad20a2aaa567e1a0c643",
+        "source_file": "02-rf_story_03.mp3"
+      },
+      "claim_ids": [
+        "rf_ogle_farm"
+      ],
+      "cultural_gate": "not_required",
+      "cultural_scope": [
+        "public_record_factual"
+      ],
+      "delivery_mode": "stopped_deeper",
+      "editorial_sequence": 2,
+      "entry_id": "rf_story_03",
+      "generation_disposition": "reuse",
+      "kind": "story",
+      "normalized_character_count": 2732,
+      "normalized_transcript_sha256": "ea2f289c0add40d43d6b03a37c78eba193a1ea95197891cf042484641b6db4ee",
+      "payload_character_count": 2738,
+      "raw_transcript_sha256": "2dcb129294894980c17b231f92a36ed04f137da272e6ad20a2aaa567e1a0c643",
+      "script_status": "draft_review_required",
+      "source_gate": "source_verified",
+      "source_ids": [
+        "nps_grsm_roaring_fork"
+      ],
+      "stable_order": 2,
+      "title": "The Ogle farm at the edge of town",
+      "word_count": 461
+    },
+    {
+      "claim_ids": [
+        "rf_route_character"
+      ],
+      "cultural_gate": "not_required",
+      "cultural_scope": [
+        "public_record_factual"
+      ],
+      "delivery_mode": "hard_auto",
+      "editorial_sequence": 1,
+      "entry_id": "rf_cue_01",
+      "generation_disposition": "generate",
+      "kind": "cue",
+      "normalized_character_count": 346,
+      "normalized_transcript_sha256": "9a17af0de5e3e4bef3608f67b744ca0b0e9e2944b1c35836e6766a1669da96f8",
+      "payload_character_count": 346,
+      "raw_transcript_sha256": "9a17af0de5e3e4bef3608f67b744ca0b0e9e2944b1c35836e6766a1669da96f8",
+      "reserved_character_ceiling": 381,
+      "script_status": "draft_review_required",
+      "source_gate": "source_verified",
+      "source_ids": [
+        "nps_grsm_roaring_fork"
+      ],
+      "stable_order": 3,
+      "title": "One way from here",
+      "word_count": 61
+    },
+    {
+      "claim_ids": [
+        "rf_route_character"
+      ],
+      "cultural_gate": "not_required",
+      "cultural_scope": [
+        "public_record_factual"
+      ],
+      "delivery_mode": "capacity_deeper",
+      "editorial_sequence": 1,
+      "entry_id": "rf_story_01",
+      "generation_disposition": "generate",
+      "kind": "story",
+      "normalized_character_count": 2769,
+      "normalized_transcript_sha256": "7c87b0bc2473af708bfc4aa4eb9072bd65638bd46a91c3298f09784704fe5b25",
+      "payload_character_count": 2775,
+      "raw_transcript_sha256": "6a66d13aa9b9260ce13ccbc9b05eb6022a2f424c967d978f80794bd5eeaa26bd",
+      "reserved_character_ceiling": 3053,
+      "script_status": "draft_review_required",
+      "source_gate": "source_verified",
+      "source_ids": [
+        "nps_grsm_roaring_fork"
+      ],
+      "stable_order": 4,
+      "title": "A road that asks you to slow down",
+      "word_count": 464
+    },
+    {
+      "claim_ids": [
+        "rf_waterfalls"
+      ],
+      "cultural_gate": "not_required",
+      "cultural_scope": [
+        "public_record_factual"
+      ],
+      "delivery_mode": "hard_auto",
+      "editorial_sequence": 3,
+      "entry_id": "rf_cue_04",
+      "generation_disposition": "generate",
+      "kind": "cue",
+      "normalized_character_count": 338,
+      "normalized_transcript_sha256": "7e92a4ba270eb31d5a1f1bb5df7e21c7e1e8e0dd46530588f77fb08f0863a9e4",
+      "payload_character_count": 338,
+      "raw_transcript_sha256": "7e92a4ba270eb31d5a1f1bb5df7e21c7e1e8e0dd46530588f77fb08f0863a9e4",
+      "reserved_character_ceiling": 372,
+      "script_status": "draft_review_required",
+      "source_gate": "source_verified",
+      "source_ids": [
+        "nps_grsm_geology",
+        "nps_grsm_roaring_fork"
+      ],
+      "stable_order": 5,
+      "title": "Grotto Falls trail access",
+      "word_count": 60
+    },
+    {
+      "claim_ids": [
+        "rf_stream"
+      ],
+      "cultural_gate": "not_required",
+      "cultural_scope": [
+        "public_record_factual"
+      ],
+      "delivery_mode": "hard_auto",
+      "editorial_sequence": 4,
+      "entry_id": "rf_cue_03",
+      "generation_disposition": "generate",
+      "kind": "cue",
+      "normalized_character_count": 325,
+      "normalized_transcript_sha256": "0e762b9f2e8923e9676d85cfe4aa99df11a499c73c45f713cb09bec548a1ed6d",
+      "payload_character_count": 325,
+      "raw_transcript_sha256": "0e762b9f2e8923e9676d85cfe4aa99df11a499c73c45f713cb09bec548a1ed6d",
+      "reserved_character_ceiling": 358,
+      "script_status": "draft_review_required",
+      "source_gate": "source_verified",
+      "source_ids": [
+        "nps_grsm_natural_features",
+        "nps_grsm_roaring_fork"
+      ],
+      "stable_order": 6,
+      "title": "Water beside the road",
+      "word_count": 55
+    },
+    {
+      "accepted_audio": {
+        "accepted_audition_ledger_sha256": "15764fe7edc13df78614faecfaae5c3006fb0369735da4e683d378d216ba4465",
+        "audio_bytes": 3441937,
+        "audio_sha256": "a0f70a05d89f2318b3f99b8580bfdb93d5e626cc696dca9614c5bf3bc078006e",
+        "audition_lock_sha256": "0da10ecfbcd6c3cdeb12244cece562333e89c4d879d768ded0806ea4cc6fbef3",
+        "character_cost": 1568,
+        "duration_s": 215.118367,
+        "normalized_transcript_sha256": "17d83952de9e51202906f8c985ed16cd086ed8c40b134c39af77303b5be56286",
+        "raw_transcript_sha256": "2e6d73a5e4ce18bc80441d04e5e4ecca4a2144360024f68d3d67bcafac25ca8c",
+        "source_file": "01-rf_story_02.mp3"
+      },
+      "claim_ids": [
+        "rf_stream"
+      ],
+      "cultural_gate": "not_required",
+      "cultural_scope": [
+        "public_record_factual"
+      ],
+      "delivery_mode": "capacity_deeper",
+      "editorial_sequence": 3,
+      "entry_id": "rf_story_02",
+      "generation_disposition": "reuse",
+      "kind": "story",
+      "normalized_character_count": 2844,
+      "normalized_transcript_sha256": "17d83952de9e51202906f8c985ed16cd086ed8c40b134c39af77303b5be56286",
+      "payload_character_count": 2850,
+      "raw_transcript_sha256": "2e6d73a5e4ce18bc80441d04e5e4ecca4a2144360024f68d3d67bcafac25ca8c",
+      "script_status": "draft_review_required",
+      "source_gate": "source_verified",
+      "source_ids": [
+        "nps_grsm_natural_features",
+        "nps_grsm_roaring_fork"
+      ],
+      "stable_order": 7,
+      "title": "The stream behind the name",
+      "word_count": 476
+    },
+    {
+      "claim_ids": [
+        "rf_old_growth"
+      ],
+      "cultural_gate": "not_required",
+      "cultural_scope": [
+        "public_record_factual"
+      ],
+      "delivery_mode": "capacity_deeper",
+      "editorial_sequence": 4,
+      "entry_id": "rf_story_04",
+      "generation_disposition": "generate",
+      "kind": "story",
+      "normalized_character_count": 2751,
+      "normalized_transcript_sha256": "c0db70f79506f4cf53d39f09cf68d6c7f433ec452ca471166dd6bd1f882f1333",
+      "payload_character_count": 2758,
+      "raw_transcript_sha256": "26bd50546bd71edd35ee888a683a7fdd41db813500be69f93320d89460717eb9",
+      "reserved_character_ceiling": 3034,
+      "script_status": "draft_review_required",
+      "source_gate": "source_verified",
+      "source_ids": [
+        "nps_grsm_nature",
+        "nps_grsm_roaring_fork"
+      ],
+      "stable_order": 8,
+      "title": "Old trees and a wet forest",
+      "word_count": 454
+    },
+    {
+      "claim_ids": [
+        "rf_farm_community"
+      ],
+      "cultural_gate": "not_required",
+      "cultural_scope": [
+        "public_record_factual"
+      ],
+      "delivery_mode": "capacity_deeper",
+      "editorial_sequence": 5,
+      "entry_id": "rf_story_05",
+      "generation_disposition": "generate",
+      "kind": "story",
+      "normalized_character_count": 3004,
+      "normalized_transcript_sha256": "c013620ce36c7cc775fe874d790119f0ab5142e8d25ca0cb092f623328c97bf8",
+      "payload_character_count": 3011,
+      "raw_transcript_sha256": "043bca0d2fcd9a298493c61e4a958b6e3a2648f408d67f03f584c6c1220dce6b",
+      "reserved_character_ceiling": 3313,
+      "script_status": "draft_review_required",
+      "source_gate": "source_verified",
+      "source_ids": [
+        "nps_grsm_history_culture",
+        "nps_grsm_roaring_fork"
+      ],
+      "stable_order": 9,
+      "title": "Homes, mills, and neighbors",
+      "word_count": 483
+    },
+    {
+      "claim_ids": [
+        "rf_waterfalls"
+      ],
+      "cultural_gate": "not_required",
+      "cultural_scope": [
+        "public_record_factual"
+      ],
+      "delivery_mode": "hard_auto",
+      "editorial_sequence": 5,
+      "entry_id": "rf_cue_05",
+      "generation_disposition": "generate",
+      "kind": "cue",
+      "normalized_character_count": 345,
+      "normalized_transcript_sha256": "5f455c885dab0608002c6157e65e362ca9c1181215cec6087986651cb3139175",
+      "payload_character_count": 345,
+      "raw_transcript_sha256": "5f455c885dab0608002c6157e65e362ca9c1181215cec6087986651cb3139175",
+      "reserved_character_ceiling": 380,
+      "script_status": "draft_review_required",
+      "source_gate": "source_verified",
+      "source_ids": [
+        "nps_grsm_geology",
+        "nps_grsm_roaring_fork"
+      ],
+      "stable_order": 10,
+      "title": "Thousand Drips",
+      "word_count": 55
+    },
+    {
+      "claim_ids": [
+        "rf_waterfalls"
+      ],
+      "cultural_gate": "not_required",
+      "cultural_scope": [
+        "public_record_factual"
+      ],
+      "delivery_mode": "stopped_deeper",
+      "editorial_sequence": 6,
+      "entry_id": "rf_story_06",
+      "generation_disposition": "generate",
+      "kind": "story",
+      "normalized_character_count": 2812,
+      "normalized_transcript_sha256": "3f22d2c4740897471ef3ac6f1dc93742b97e3533c5a4aa5e369bdf7b158195e8",
+      "payload_character_count": 2820,
+      "raw_transcript_sha256": "5c2abeb49d36a032db46cb1df30b67428840cfae1338dacab561638ba4b7de3d",
+      "reserved_character_ceiling": 3103,
+      "script_status": "draft_review_required",
+      "source_gate": "source_verified",
+      "source_ids": [
+        "nps_grsm_geology",
+        "nps_grsm_roaring_fork"
+      ],
+      "stable_order": 11,
+      "title": "Water falling through resistant rock",
+      "word_count": 452
+    },
+    {
+      "claim_ids": [
+        "rf_preservation"
+      ],
+      "cultural_gate": "not_required",
+      "cultural_scope": [
+        "public_record_factual"
+      ],
+      "delivery_mode": "completion_deeper",
+      "editorial_sequence": 7,
+      "entry_id": "rf_story_07",
+      "generation_disposition": "generate",
+      "kind": "story",
+      "normalized_character_count": 2926,
+      "normalized_transcript_sha256": "d602e1e6db83a48dc745af3dd28148305adf875b5805e8f4ac7c5777b673ec8d",
+      "payload_character_count": 2934,
+      "raw_transcript_sha256": "062106081d4fe17dab7df2aab9a7b96bffe6a644dae71f1584b71500944d5baa",
+      "reserved_character_ceiling": 3228,
+      "script_status": "draft_review_required",
+      "source_gate": "source_verified",
+      "source_ids": [
+        "nps_grsm_people",
+        "nps_grsm_roaring_fork"
+      ],
+      "stable_order": 12,
+      "title": "Reading two landscapes at once",
+      "word_count": 457
+    },
+    {
+      "claim_ids": [
+        "rf_route_character"
+      ],
+      "cultural_gate": "not_required",
+      "cultural_scope": [
+        "public_record_factual"
+      ],
+      "delivery_mode": "hard_auto",
+      "editorial_sequence": 6,
+      "entry_id": "rf_cue_06",
+      "generation_disposition": "generate",
+      "kind": "cue",
+      "normalized_character_count": 343,
+      "normalized_transcript_sha256": "e47c874b322f55c48224a2ed3fb056846b9ac7306c927c8cb42f3b46e2cd20d4",
+      "payload_character_count": 343,
+      "raw_transcript_sha256": "e47c874b322f55c48224a2ed3fb056846b9ac7306c927c8cb42f3b46e2cd20d4",
+      "reserved_character_ceiling": 378,
+      "script_status": "draft_review_required",
+      "source_gate": "source_verified",
+      "source_ids": [
+        "nps_grsm_roaring_fork"
+      ],
+      "stable_order": 13,
+      "title": "Leaving the motor trail",
+      "word_count": 56
+    }
+  ],
+  "generation_profile": {
+    "api_contract": "elevenlabs_text_to_speech_v1",
+    "language_code": "en",
+    "model_id": "eleven_multilingual_v2",
+    "output": {
+      "bitrate_kbps": 128,
+      "channels": 1,
+      "container": "mp3",
+      "format_id": "mp3_44100_128",
+      "lossless_or_wav_claimed": false,
+      "mime_type": "audio/mpeg",
+      "provider_native_lossy_source": true,
+      "sample_rate_hz": 44100,
+      "transcoding_for_delivery": false
+    },
+    "provider": "elevenlabs",
+    "provider_retention": {
+      "mode": "standard_logging",
+      "model_training_contribution_required": false,
+      "zero_retention_claimed": false
+    },
+    "voice_id": "EkK5I93UQWFDigLMpZcX",
+    "voice_metadata_contract": {
+      "custom_credit_multiplier": "not_reported_or_one",
+      "removal_state": "none",
+      "resolved_and_original_voice_id": "EkK5I93UQWFDigLMpZcX",
+      "sharing_status": "copied",
+      "voice_library_rate": "1",
+      "withdrawal_notice_period": "730"
+    },
+    "voice_name": "James - Husky, Engaging and Bold",
+    "voice_settings": {
+      "similarity_boost": 0.5,
+      "speed": 1.0,
+      "stability": 0.5,
+      "style": 0.1,
+      "use_speaker_boost": true
+    },
+    "voice_settings_source": "provider_preflight_exact_match_required"
+  },
+  "lock_id": "great_smoky_mountains_james_roaring_fork_lock_v1",
+  "lock_status": "internal_production_candidate",
+  "narrator_acceptance": {
+    "accepted_audio_bindings": {
+      "rf_story_02": {
+        "audio_sha256": "a0f70a05d89f2318b3f99b8580bfdb93d5e626cc696dca9614c5bf3bc078006e",
+        "normalized_transcript_sha256": "17d83952de9e51202906f8c985ed16cd086ed8c40b134c39af77303b5be56286",
+        "raw_transcript_sha256": "2e6d73a5e4ce18bc80441d04e5e4ecca4a2144360024f68d3d67bcafac25ca8c"
+      },
+      "rf_story_03": {
+        "audio_sha256": "ca7ea9e8cd997ee1cf90cc0b4112f17cb8815754b6a2ccfdc0e1112e3696b1a7",
+        "normalized_transcript_sha256": "ea2f289c0add40d43d6b03a37c78eba193a1ea95197891cf042484641b6db4ee",
+        "raw_transcript_sha256": "2dcb129294894980c17b231f92a36ed04f137da272e6ad20a2aaa567e1a0c643"
+      }
+    },
+    "accepted_audio_entry_ids": [
+      "rf_story_02",
+      "rf_story_03"
+    ],
+    "accepted_audition_ledger_sha256": "15764fe7edc13df78614faecfaae5c3006fb0369735da4e683d378d216ba4465",
+    "accepted_preflight": {
+      "custom_credit_multiplier": "not_reported",
+      "voice_library_rate": "1",
+      "voice_metadata_sha256": "9873d1cf64317bdf61dbdcfb23c103b812c4d275b677d62e6113e7a73f61a1e7",
+      "voice_settings_sha256": "679f3e4ded90633b2d7a3060de485f79e276ac9eb7621263c8cd66e28204b0e4",
+      "withdrawal_notice_period": "730"
+    },
+    "audition_lock_sha256": "0da10ecfbcd6c3cdeb12244cece562333e89c4d879d768ded0806ea4cc6fbef3",
+    "decision": "james_selected_continue",
+    "decision_phrase_sha256": "12d14009c78ec63909734c7a9db3d9e7aae3ace3047a0e13117323dcf2b1e6c8",
+    "source": "direct_user_decision_in_codex_task"
+  },
+  "product_id": "great_smoky_mountains_ridges_rivers_living_memory",
+  "schema_version": 1,
+  "source_files": [
+    {
+      "path": "originals/smokies/editorial_roaring_fork_v1.json",
+      "sha256": "c3d1622d7f5109fb4632cb74af340f97a3477cd061c326f5e55055e6b074d0e2"
+    },
+    {
+      "path": "originals/smokies/elevenlabs_james_audition_lock_v1.json",
+      "sha256": "0da10ecfbcd6c3cdeb12244cece562333e89c4d879d768ded0806ea4cc6fbef3"
+    },
+    {
+      "path": "originals/smokies/roaring_fork_delivery_readiness_v1.json",
+      "sha256": "4a0fc760fd07790785b820af06bac4e5a10e8337ad3f6257a10a3c50464c9b67"
+    },
+    {
+      "path": "originals/smokies/roaring_fork_trigger_preflight_v1.json",
+      "sha256": "b7b8412e07cdef5706d814550491f8c28bfadb05d3fbef38369ec7006c3b67f3"
+    },
+    {
+      "path": "originals/smokies/source_dossiers_v1.json",
+      "sha256": "8eb22ca5110f0f9a4287b8f184624348c2a2ca2dbc36e27ef59fc022057ce18f"
+    }
+  ],
+  "variant_id": "one_way"
+}

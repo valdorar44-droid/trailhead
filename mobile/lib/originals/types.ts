@@ -146,6 +146,70 @@ export type OriginalNarrationProfileV1 = Readonly<{
   }>;
 }>;
 
+/**
+ * Server-only reproduction metadata for ElevenLabs Creator audio whose
+ * immutable provider-native MP3 bytes are also the delivery bytes. It is
+ * intentionally stripped from every consumer manifest.
+ */
+export type OriginalNarrationProfileV2 = Readonly<{
+  schema_version: 2;
+  provider: 'elevenlabs';
+  voice_id: string;
+  model_snapshot: 'eleven_multilingual_v2';
+  api_version: 'elevenlabs_text_to_speech_v1';
+  language: 'en';
+  generation: Readonly<{
+    output_format: 'mp3_44100_128';
+    mime_type: 'audio/mpeg';
+    sample_rate_hz: 44100;
+    bitrate_kbps: 128;
+    channels: 1;
+    provider_native: true;
+    lossless: false;
+  }>;
+  archival_master: Readonly<{
+    mime_type: 'audio/mpeg';
+    sample_rate_hz: 44100;
+    bitrate_kbps: 128;
+    channels: 1;
+    provider_native: true;
+    immutable: true;
+    lossless: false;
+  }>;
+  mobile_delivery: Readonly<{
+    mime_type: 'audio/mpeg';
+    sample_rate_hz: 44100;
+    bitrate_kbps: 128;
+    channels: 1;
+    lossless: false;
+    transcoded: false;
+    byte_identical_to_archival_master: true;
+  }>;
+  commercial_license: Readonly<{
+    status: 'verified';
+    plan: 'creator';
+    commercial_use_allowed: true;
+    terms_id: string;
+    terms_url: string;
+    terms_version: string;
+    reviewed_at: string;
+    verified_at: string;
+  }>;
+  training_contribution: Readonly<{
+    status: 'disabled';
+    confirmed_at: string;
+  }>;
+  provider_data_retention: Readonly<{
+    status: 'provider_standard';
+    zero_retention: false;
+    confirmed_at: string;
+  }>;
+}>;
+
+export type OriginalNarrationProfile =
+  | OriginalNarrationProfileV1
+  | OriginalNarrationProfileV2;
+
 export type OriginalStoryKindV2 = 'story' | 'cue';
 
 export type OriginalStorySourceRightsV2 =

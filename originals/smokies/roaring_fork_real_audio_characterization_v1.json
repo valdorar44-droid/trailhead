@@ -1,0 +1,486 @@
+{
+  "chapter_id": "roaring_fork",
+  "characterization_id": "smokies_roaring_fork_james_real_audio_v1",
+  "delivery_inventory": {
+    "counts_by_mode": {
+      "capacity_deeper": 4,
+      "completion_deeper": 1,
+      "hard_auto": 5,
+      "stopped_deeper": 3
+    },
+    "entry_count": 13,
+    "entry_ids_by_mode": {
+      "capacity_deeper": [
+        "rf_story_01",
+        "rf_story_02",
+        "rf_story_04",
+        "rf_story_05"
+      ],
+      "completion_deeper": [
+        "rf_story_07"
+      ],
+      "hard_auto": [
+        "rf_cue_01",
+        "rf_cue_04",
+        "rf_cue_03",
+        "rf_cue_05",
+        "rf_cue_06"
+      ],
+      "stopped_deeper": [
+        "rf_cue_02",
+        "rf_story_03",
+        "rf_story_06"
+      ]
+    },
+    "ogle_prelude": {
+      "entry_ids_in_delivery_order": [
+        "rf_cue_02",
+        "rf_story_03"
+      ],
+      "experience_group_id": "ogle_prelude",
+      "requires_user_confirmed_parked": true
+    }
+  },
+  "kind": "original_internal_real_audio_characterization",
+  "limitations": [
+    "ignored_audio_and_ledger_are_not_public_artifacts",
+    "provider_renderer_sidecars_are_not_publication_generator_metadata",
+    "no_artwork_or_complete_v3_manifest_is_bound",
+    "no_trusted_server_publication_validator_was_run"
+  ],
+  "product_id": "great_smoky_mountains_ridges_rivers_living_memory",
+  "release_gate": {
+    "characterization_must_not_be_used_as_publication_validation": true,
+    "missing_publication_evidence": [
+      "artwork_evidence",
+      "full_original_manifest_v3_publication_evidence"
+    ],
+    "public_release": false,
+    "publication_status": "blocked_missing_publication_evidence",
+    "trusted_publication_validation": false,
+    "validated_delivery_contracts": []
+  },
+  "renderer_evidence": {
+    "asset_count": 13,
+    "asset_evidence_sha256": "72039a7a3a06094588461355c2262a739a2945e4224a040275fd19c81ccc3bf0",
+    "assets": [
+      {
+        "audio_bytes": 428452,
+        "audio_sha256": "6c99af44807f3fb78435f04da91ecc234e2c2e8f682df44ed943173a48bff107",
+        "bitrate_kbps": 128,
+        "channels": 1,
+        "container": "mp3",
+        "delivery_mode": "stopped_deeper",
+        "entry_id": "rf_cue_02",
+        "generation_disposition": "generate",
+        "kind": "cue",
+        "master_file": "01-rf_cue_02.mp3",
+        "normalized_transcript_sha256": "a1df0f2a86a3321a742bbcbdfb4b0e7246891231688459bf75c5bc9cc9a1b14e",
+        "probed_duration_ms": 26776,
+        "probed_duration_s": 26.77551,
+        "provider_generated": true,
+        "provider_native_lossy_source": true,
+        "raw_transcript_sha256": "a1df0f2a86a3321a742bbcbdfb4b0e7246891231688459bf75c5bc9cc9a1b14e",
+        "sample_rate_hz": 44100,
+        "stable_order": 1,
+        "words_per_minute": 132.210366
+      },
+      {
+        "audio_bytes": 3184893,
+        "audio_sha256": "ca7ea9e8cd997ee1cf90cc0b4112f17cb8815754b6a2ccfdc0e1112e3696b1a7",
+        "bitrate_kbps": 128,
+        "channels": 1,
+        "container": "mp3",
+        "delivery_mode": "stopped_deeper",
+        "entry_id": "rf_story_03",
+        "generation_disposition": "reuse",
+        "kind": "story",
+        "master_file": "02-rf_story_03.mp3",
+        "normalized_transcript_sha256": "ea2f289c0add40d43d6b03a37c78eba193a1ea95197891cf042484641b6db4ee",
+        "probed_duration_ms": 199053,
+        "probed_duration_s": 199.053061,
+        "provider_generated": true,
+        "provider_native_lossy_source": true,
+        "raw_transcript_sha256": "2dcb129294894980c17b231f92a36ed04f137da272e6ad20a2aaa567e1a0c643",
+        "sample_rate_hz": 44100,
+        "stable_order": 2,
+        "words_per_minute": 138.957923
+      },
+      {
+        "audio_bytes": 419257,
+        "audio_sha256": "d3e0796c436e4ffedb748bc08007f0661cea683eda3204df48b3639f70658bed",
+        "bitrate_kbps": 128,
+        "channels": 1,
+        "container": "mp3",
+        "delivery_mode": "hard_auto",
+        "entry_id": "rf_cue_01",
+        "generation_disposition": "generate",
+        "kind": "cue",
+        "master_file": "03-rf_cue_01.mp3",
+        "normalized_transcript_sha256": "9a17af0de5e3e4bef3608f67b744ca0b0e9e2944b1c35836e6766a1669da96f8",
+        "probed_duration_ms": 26201,
+        "probed_duration_s": 26.200816,
+        "provider_generated": true,
+        "provider_native_lossy_source": true,
+        "raw_transcript_sha256": "9a17af0de5e3e4bef3608f67b744ca0b0e9e2944b1c35836e6766a1669da96f8",
+        "sample_rate_hz": 44100,
+        "stable_order": 3,
+        "words_per_minute": 139.690304
+      },
+      {
+        "audio_bytes": 3322401,
+        "audio_sha256": "b9f0a21bd1afbfff8a1472e367502d50d931e339214e9cc5da01b7ba12e3e73c",
+        "bitrate_kbps": 128,
+        "channels": 1,
+        "container": "mp3",
+        "delivery_mode": "capacity_deeper",
+        "entry_id": "rf_story_01",
+        "generation_disposition": "generate",
+        "kind": "story",
+        "master_file": "04-rf_story_01.mp3",
+        "normalized_transcript_sha256": "7c87b0bc2473af708bfc4aa4eb9072bd65638bd46a91c3298f09784704fe5b25",
+        "probed_duration_ms": 207647,
+        "probed_duration_s": 207.647347,
+        "provider_generated": true,
+        "provider_native_lossy_source": true,
+        "raw_transcript_sha256": "6a66d13aa9b9260ce13ccbc9b05eb6022a2f424c967d978f80794bd5eeaa26bd",
+        "sample_rate_hz": 44100,
+        "stable_order": 4,
+        "words_per_minute": 134.073468
+      },
+      {
+        "audio_bytes": 365758,
+        "audio_sha256": "673941fe546cd1801e27d6dc9789c30ade0fc2dbe52050944cfa67a7974156c3",
+        "bitrate_kbps": 128,
+        "channels": 1,
+        "container": "mp3",
+        "delivery_mode": "hard_auto",
+        "entry_id": "rf_cue_04",
+        "generation_disposition": "generate",
+        "kind": "cue",
+        "master_file": "05-rf_cue_04.mp3",
+        "normalized_transcript_sha256": "7e92a4ba270eb31d5a1f1bb5df7e21c7e1e8e0dd46530588f77fb08f0863a9e4",
+        "probed_duration_ms": 22857,
+        "probed_duration_s": 22.857143,
+        "provider_generated": true,
+        "provider_native_lossy_source": true,
+        "raw_transcript_sha256": "7e92a4ba270eb31d5a1f1bb5df7e21c7e1e8e0dd46530588f77fb08f0863a9e4",
+        "sample_rate_hz": 44100,
+        "stable_order": 5,
+        "words_per_minute": 157.5
+      },
+      {
+        "audio_bytes": 378715,
+        "audio_sha256": "97236ccc1148d8f73d6cb20dc5447c9155bdcb4e825fbcae452007af5d12ae6c",
+        "bitrate_kbps": 128,
+        "channels": 1,
+        "container": "mp3",
+        "delivery_mode": "hard_auto",
+        "entry_id": "rf_cue_03",
+        "generation_disposition": "generate",
+        "kind": "cue",
+        "master_file": "06-rf_cue_03.mp3",
+        "normalized_transcript_sha256": "0e762b9f2e8923e9676d85cfe4aa99df11a499c73c45f713cb09bec548a1ed6d",
+        "probed_duration_ms": 23667,
+        "probed_duration_s": 23.666939,
+        "provider_generated": true,
+        "provider_native_lossy_source": true,
+        "raw_transcript_sha256": "0e762b9f2e8923e9676d85cfe4aa99df11a499c73c45f713cb09bec548a1ed6d",
+        "sample_rate_hz": 44100,
+        "stable_order": 6,
+        "words_per_minute": 139.435017
+      },
+      {
+        "audio_bytes": 3441937,
+        "audio_sha256": "a0f70a05d89f2318b3f99b8580bfdb93d5e626cc696dca9614c5bf3bc078006e",
+        "bitrate_kbps": 128,
+        "channels": 1,
+        "container": "mp3",
+        "delivery_mode": "capacity_deeper",
+        "entry_id": "rf_story_02",
+        "generation_disposition": "reuse",
+        "kind": "story",
+        "master_file": "07-rf_story_02.mp3",
+        "normalized_transcript_sha256": "17d83952de9e51202906f8c985ed16cd086ed8c40b134c39af77303b5be56286",
+        "probed_duration_ms": 215118,
+        "probed_duration_s": 215.118367,
+        "provider_generated": true,
+        "provider_native_lossy_source": true,
+        "raw_transcript_sha256": "2e6d73a5e4ce18bc80441d04e5e4ecca4a2144360024f68d3d67bcafac25ca8c",
+        "sample_rate_hz": 44100,
+        "stable_order": 7,
+        "words_per_minute": 132.764117
+      },
+      {
+        "audio_bytes": 3255528,
+        "audio_sha256": "89b8d5bb8c56e2ec15ce2e6ad82cdf298555edce4906bf2c51dcb1b91b26f4e4",
+        "bitrate_kbps": 128,
+        "channels": 1,
+        "container": "mp3",
+        "delivery_mode": "capacity_deeper",
+        "entry_id": "rf_story_04",
+        "generation_disposition": "generate",
+        "kind": "story",
+        "master_file": "08-rf_story_04.mp3",
+        "normalized_transcript_sha256": "c0db70f79506f4cf53d39f09cf68d6c7f433ec452ca471166dd6bd1f882f1333",
+        "probed_duration_ms": 203468,
+        "probed_duration_s": 203.467755,
+        "provider_generated": true,
+        "provider_native_lossy_source": true,
+        "raw_transcript_sha256": "26bd50546bd71edd35ee888a683a7fdd41db813500be69f93320d89460717eb9",
+        "sample_rate_hz": 44100,
+        "stable_order": 8,
+        "words_per_minute": 133.878707
+      },
+      {
+        "audio_bytes": 3520096,
+        "audio_sha256": "879442f4087fb7d3fc9bf37f972eb750c17bfe33cd914a3aa9eea91c46985258",
+        "bitrate_kbps": 128,
+        "channels": 1,
+        "container": "mp3",
+        "delivery_mode": "capacity_deeper",
+        "entry_id": "rf_story_05",
+        "generation_disposition": "generate",
+        "kind": "story",
+        "master_file": "09-rf_story_05.mp3",
+        "normalized_transcript_sha256": "c013620ce36c7cc775fe874d790119f0ab5142e8d25ca0cb092f623328c97bf8",
+        "probed_duration_ms": 220003,
+        "probed_duration_s": 220.003265,
+        "provider_generated": true,
+        "provider_native_lossy_source": true,
+        "raw_transcript_sha256": "043bca0d2fcd9a298493c61e4a958b6e3a2648f408d67f03f584c6c1220dce6b",
+        "sample_rate_hz": 44100,
+        "stable_order": 9,
+        "words_per_minute": 131.725318
+      },
+      {
+        "audio_bytes": 436393,
+        "audio_sha256": "a179f23a534976308e4fbfc20f45a428fe7f4e1bc1fd798be84e5e94cae67f1a",
+        "bitrate_kbps": 128,
+        "channels": 1,
+        "container": "mp3",
+        "delivery_mode": "hard_auto",
+        "entry_id": "rf_cue_05",
+        "generation_disposition": "generate",
+        "kind": "cue",
+        "master_file": "10-rf_cue_05.mp3",
+        "normalized_transcript_sha256": "5f455c885dab0608002c6157e65e362ca9c1181215cec6087986651cb3139175",
+        "probed_duration_ms": 27272,
+        "probed_duration_s": 27.271837,
+        "provider_generated": true,
+        "provider_native_lossy_source": true,
+        "raw_transcript_sha256": "5f455c885dab0608002c6157e65e362ca9c1181215cec6087986651cb3139175",
+        "sample_rate_hz": 44100,
+        "stable_order": 10,
+        "words_per_minute": 121.003951
+      },
+      {
+        "audio_bytes": 3515498,
+        "audio_sha256": "3bf8872d360e8e1850e7699171ec53944ca8da6f128b14d94bfd7a4613f0f4f6",
+        "bitrate_kbps": 128,
+        "channels": 1,
+        "container": "mp3",
+        "delivery_mode": "stopped_deeper",
+        "entry_id": "rf_story_06",
+        "generation_disposition": "generate",
+        "kind": "story",
+        "master_file": "11-rf_story_06.mp3",
+        "normalized_transcript_sha256": "3f22d2c4740897471ef3ac6f1dc93742b97e3533c5a4aa5e369bdf7b158195e8",
+        "probed_duration_ms": 219716,
+        "probed_duration_s": 219.715918,
+        "provider_generated": true,
+        "provider_native_lossy_source": true,
+        "raw_transcript_sha256": "5c2abeb49d36a032db46cb1df30b67428840cfae1338dacab561638ba4b7de3d",
+        "sample_rate_hz": 44100,
+        "stable_order": 11,
+        "words_per_minute": 123.432113
+      },
+      {
+        "audio_bytes": 3511319,
+        "audio_sha256": "2af7d496eb6aef7b58f585a382ec1deba301a83878c824df5b572dec6009340d",
+        "bitrate_kbps": 128,
+        "channels": 1,
+        "container": "mp3",
+        "delivery_mode": "completion_deeper",
+        "entry_id": "rf_story_07",
+        "generation_disposition": "generate",
+        "kind": "story",
+        "master_file": "12-rf_story_07.mp3",
+        "normalized_transcript_sha256": "d602e1e6db83a48dc745af3dd28148305adf875b5805e8f4ac7c5777b673ec8d",
+        "probed_duration_ms": 219455,
+        "probed_duration_s": 219.454694,
+        "provider_generated": true,
+        "provider_native_lossy_source": true,
+        "raw_transcript_sha256": "062106081d4fe17dab7df2aab9a7b96bffe6a644dae71f1584b71500944d5baa",
+        "sample_rate_hz": 44100,
+        "stable_order": 12,
+        "words_per_minute": 124.946063
+      },
+      {
+        "audio_bytes": 404628,
+        "audio_sha256": "0afae81566cf0a1ce1b220dfbe7c87b12d48235f7b3ec4149f5b9fba61a1539b",
+        "bitrate_kbps": 128,
+        "channels": 1,
+        "container": "mp3",
+        "delivery_mode": "hard_auto",
+        "entry_id": "rf_cue_06",
+        "generation_disposition": "generate",
+        "kind": "cue",
+        "master_file": "13-rf_cue_06.mp3",
+        "normalized_transcript_sha256": "e47c874b322f55c48224a2ed3fb056846b9ac7306c927c8cb42f3b46e2cd20d4",
+        "probed_duration_ms": 25287,
+        "probed_duration_s": 25.286531,
+        "provider_generated": true,
+        "provider_native_lossy_source": true,
+        "raw_transcript_sha256": "e47c874b322f55c48224a2ed3fb056846b9ac7306c927c8cb42f3b46e2cd20d4",
+        "sample_rate_hz": 44100,
+        "stable_order": 13,
+        "words_per_minute": 132.877066
+      }
+    ],
+    "model_id": "eleven_multilingual_v2",
+    "output_format_id": "mp3_44100_128",
+    "provider": "elevenlabs",
+    "render_ledger": {
+      "byte_count": 17921,
+      "item_count": 13,
+      "lock_sha256": "4f8b2d9df467de6af3d5622dac10caae7c165d924e36449de30d507812ba7e3b",
+      "path": "output/smokies-original/elevenlabs-james-roaring-fork-v1/render-ledger.json",
+      "schema_version": 1,
+      "sha256": "15537c5af0d351d4eb4102139bd6b1a0452075963e305242d1394a59e3db5804"
+    },
+    "total_audio_bytes": 26184875,
+    "total_probed_duration_ms": 1636520,
+    "total_probed_duration_s": 1636.519183,
+    "tracking_policy": "ignored_local_output",
+    "voice_id": "EkK5I93UQWFDigLMpZcX"
+  },
+  "route_binding": {
+    "chapter_id": "roaring_fork",
+    "coordinate_count": 1175,
+    "distance_m": 8561.4,
+    "geometry_sha256": "d66f76d6053000244d7e15c8be0494f48d79544e0ceaf79428c51e458e964668",
+    "route_id": "roaring-fork-one-way",
+    "status": "official_geometry_candidate",
+    "variant_id": "one_way"
+  },
+  "schema_version": 1,
+  "source_bindings": {
+    "delivery_readiness": {
+      "byte_count": 16734,
+      "deterministic_check": "exact_builder_match",
+      "path": "originals/smokies/roaring_fork_delivery_readiness_v1.json",
+      "sha256": "4a0fc760fd07790785b820af06bac4e5a10e8337ad3f6257a10a3c50464c9b67"
+    },
+    "editorial_packet": {
+      "byte_count": 26805,
+      "path": "originals/smokies/editorial_roaring_fork_v1.json",
+      "sha256": "c3d1622d7f5109fb4632cb74af340f97a3477cd061c326f5e55055e6b074d0e2"
+    },
+    "mobile_timing_semantics_sha256_by_path": {
+      "mobile/lib/originals/longFormScheduler.ts": "061708316537df55fb7d04b854795bcfa7f49a473ce53daa809a29bd6ab61913",
+      "mobile/lib/originals/routeProjection.ts": "09b532035e26ecdf782611ecd50d6d539a29dbbc91d3ec60bc7e194ef8513748",
+      "mobile/lib/routeProjection.ts": "0efd76e9eb5924fae3d7938a1190c1bbb6a7cec0c152b833b06119a0276b358f",
+      "mobile/scripts/validate-original-long-form.ts": "70cc648a154eed81e43e2836635476ab371f75020fe1658da95e829a3e20fd69"
+    },
+    "official_route_evidence": {
+      "byte_count": 2762475,
+      "path": "originals/smokies/official_route_evidence_v1.json",
+      "sha256": "d946ffaf8f21ad97399b6dedfb5cbe9483fce0787653b389d7075d933f398c60"
+    },
+    "production_narration_lock": {
+      "byte_count": 19132,
+      "deterministic_check": "exact_builder_match",
+      "path": "originals/smokies/elevenlabs_james_roaring_fork_lock_v1.json",
+      "sha256": "4f8b2d9df467de6af3d5622dac10caae7c165d924e36449de30d507812ba7e3b"
+    },
+    "s3g_trigger_preflight": {
+      "byte_count": 41551,
+      "deterministic_check": "exact_builder_match",
+      "path": "originals/smokies/roaring_fork_trigger_preflight_v1.json",
+      "sha256": "b7b8412e07cdef5706d814550491f8c28bfadb05d3fbef38369ec7006c3b67f3"
+    },
+    "source_dossier": {
+      "byte_count": 85708,
+      "path": "originals/smokies/source_dossiers_v1.json",
+      "sha256": "8eb22ca5110f0f9a4287b8f184624348c2a2ca2dbc36e27ef59fc022057ce18f"
+    },
+    "typescript_timing_bridge": {
+      "byte_count": 2263,
+      "path": "mobile/scripts/compute-original-long-form-delivery-metrics-bridge.ts",
+      "sha256": "a6fd2bcd4f1551f82b94010f757cb56d69a56c867f4b5ae49d7add78e0f9a5a0"
+    }
+  },
+  "status": "internal_characterization_only",
+  "timing_characterization": {
+    "compiled_input_sha256": "08719837a4a5aaf721b1e3735eaec9599b69394218b74ddb1bf56c090d7d9a1c",
+    "execution": "existing_typescript_computeOriginalLongFormDeliveryMetrics",
+    "result": {
+      "duration_basis": "server_probed_immutable_audio",
+      "schema_version": 1,
+      "speed_fixtures": [
+        {
+          "admitted_capacity_ids": [
+            "rf_story_02",
+            "rf_story_05"
+          ],
+          "maximum_trigger_to_play_latency_s": 3.1,
+          "rejected_capacity_ids": [
+            "rf_story_01",
+            "rf_story_04"
+          ],
+          "route_end_backlog_audio_s": 0,
+          "route_travel_s": 1276.753758,
+          "speed_mph": 15,
+          "within_limits": true
+        },
+        {
+          "admitted_capacity_ids": [],
+          "maximum_trigger_to_play_latency_s": 0,
+          "rejected_capacity_ids": [
+            "rf_story_01",
+            "rf_story_02",
+            "rf_story_04",
+            "rf_story_05"
+          ],
+          "route_end_backlog_audio_s": 8.086852,
+          "route_travel_s": 531.980733,
+          "speed_mph": 36,
+          "within_limits": true
+        },
+        {
+          "admitted_capacity_ids": [],
+          "maximum_trigger_to_play_latency_s": 2.782518,
+          "rejected_capacity_ids": [
+            "rf_story_01",
+            "rf_story_02",
+            "rf_story_04",
+            "rf_story_05"
+          ],
+          "route_end_backlog_audio_s": 18.543283,
+          "route_travel_s": 294.635483,
+          "speed_mph": 65,
+          "within_limits": true
+        },
+        {
+          "admitted_capacity_ids": [],
+          "maximum_trigger_to_play_latency_s": 6.047783,
+          "rejected_capacity_ids": [
+            "rf_story_01",
+            "rf_story_02",
+            "rf_story_04",
+            "rf_story_05"
+          ],
+          "route_end_backlog_audio_s": 23.078712,
+          "route_travel_s": 255.350752,
+          "speed_mph": 75,
+          "within_limits": true
+        }
+      ],
+      "valid": true
+    },
+    "result_sha256": "6038b587c8a57fe0cf0aa2780db04e6589b98b4516f4225841bb05a6f0ed0bf0",
+    "scope": "internal_real_audio_timing_characterization"
+  },
+  "variant_id": "one_way"
+}

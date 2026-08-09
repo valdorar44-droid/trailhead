@@ -1338,3 +1338,49 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 - Do not regenerate these auditions merely to compare compression, volume, or devices; all three bitrates derive from the same verified masters.
 - Do not rerun the provider recovery or loosen the normal 12,000-credit packet cap.
 - Do not upload to Studio, publish, deploy, or generate culturally gated material during listening review.
+
+## S4C ElevenLabs James comparison auditions generated and verified
+
+- Completed: 2026-08-08.
+- Branch: `feat/smokies-original-s2`.
+- Baseline HEAD: `628c9ae4fc2c3dd680e233ba7ae8aa1d5a911b13`.
+- Protected main-checkout state remained unchanged:
+  - Explore serving index: `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
+  - App Store copy: `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+  - `.cursor/` remained untracked and protected.
+- James `EkK5I93UQWFDigLMpZcX` is a new user-selected comparison narrator. It is not recorded as Moab voice continuity; immutable published Moab provenance remains voice `JBFqnCBsd6RMkjVDRZzb` on `eleven_multilingual_v2`.
+- The exact Cartesia comparison transcripts were locked in the same order and retained their source, authorization, and cultural boundaries:
+  1. `rf_story_02` — scenic and natural history.
+  2. `rf_story_03` — human history and the stopped Noah Ogle experience.
+  3. `mc_story_02` — the 681-word source-backed geology sample.
+- The generation profile is pinned to `eleven_multilingual_v2`, native `mp3_44100_128`, English, and James's authenticated saved settings: stability `0.5`, similarity boost `0.5`, style `0.1`, speaker boost enabled, and speed `1.0`.
+- Creator plan and commercial use were verified. Model-training contribution was disabled and saved before generation.
+- A dedicated one-day key was limited to 12,000 credits and only Text to Speech, Voices Read, and User access. Auto-disable-if-leaked remained enabled. Both temporary audition keys were deleted after output verification; no key was written to disk or committed.
+- The first controlled attempt stopped before TTS because the lock's initial settings did not match James's authenticated saved settings. It created no ledger or audio and consumed no narration credits. The exact settings were then source-locked, independently audited, and the same single packet was rerun.
+- One successful invocation rendered all three locked scripts with no retry:
+  - `rf_story_02`: 215.118367 seconds; 3,441,937 bytes; 1,568 provider-reported credits; MP3 SHA-256 `a0f70a05d89f2318b3f99b8580bfdb93d5e626cc696dca9614c5bf3bc078006e`.
+  - `rf_story_03`: 199.053061 seconds; 3,184,893 bytes; 1,506 provider-reported credits; MP3 SHA-256 `ca7ea9e8cd997ee1cf90cc0b4112f17cb8815754b6a2ccfdc0e1112e3696b1a7`.
+  - `mc_story_02`: 324.623673 seconds; 5,194,022 bytes; 2,430 provider-reported credits; MP3 SHA-256 `00fa4d04a1b7469f2be65ffd6438b7275cabdc3825e2277b7a8924b7f314af45`.
+- Provider-reported total use was 5,504 of 131,000 included Creator credits. No overage was required.
+- Every output independently verified as mono 44.1 kHz / 128 kbps MP3. Mean volume was between -23.9 and -23.6 dB, peaks were between -3.8 and -3.5 dB, and no silence interval longer than two seconds appeared at the -50 dB threshold.
+- The immutable James lock SHA-256 is `3e4158c0af16527756c299137ec7fb9c02b33362931300c47d5c0096d57b5f25`; the completed ledger SHA-256 is `15764fe7edc13df78614faecfaae5c3006fb0369735da4e683d378d216ba4465`.
+- Friendly listening copies are in `C:\Users\User\Downloads\Trailhead Smokies Auditions - James`. Cartesia comparison copies remain in `C:\Users\User\Downloads\Trailhead Smokies Auditions`.
+- Audio, ledgers, account evidence, API keys, account identity, and billing details remain ignored output and are not committed.
+- Verification: 45 focused ElevenLabs/Cartesia tests passed; deterministic lock `--check`, ruff, Python compilation, strict 44.1 kHz/128 kbps response validation, independent audio inspection, and `git diff --check` passed. Independent final audit found no remaining P0/P1.
+- No Studio upload, backend deployment, OTA, native build, catalog activation, batch narration, or public release occurred.
+- Task-owned background processes after completion: none.
+
+### Exact next action after S4C
+
+1. Listen to the three James files beside the same three Cartesia files on Android and iPhone.
+2. Compare warmth, pacing, pronunciation, listener fatigue, and whether roughly 3:19-5:25 feels appropriate for full stories.
+3. Record one provider/voice decision and accept or revise each exact audio hash.
+4. If a script or voice setting changes, create a new immutable lock and rerender only the affected asset under a new reviewed cost calculation.
+5. Do not begin batch narration until the narrator is accepted and the remaining chapter-specific delivery and cultural publication gates are satisfied.
+
+### Do not repeat after S4C
+
+- Do not regenerate James or Cartesia merely to compare files already available locally.
+- Do not recreate either deleted audition key unless an accepted, source-locked revision requires a new provider call.
+- Do not alter immutable Moab narration provenance to claim James was its published voice.
+- Do not upload to Studio, batch-generate, deploy, publish, or generate culturally gated material during narrator review.

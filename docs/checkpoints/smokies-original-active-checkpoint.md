@@ -1418,3 +1418,65 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 - S0-S4C provenance, source, cultural-policy, route, delivery-classification, narrator comparison, or accepted-audition generation.
 - Do not regenerate `rf_story_02` or `rf_story_03`, create a fake WAV, weaken the 12,000-key style of provider quota control, or reuse a deleted API key.
 - Do not narrate the three culturally relevant public-record entries or begin another chapter.
+
+## S4D Roaring Fork narration generated and internally characterized
+
+- Completed: 2026-08-09.
+- Branch: `feat/smokies-original-s2`.
+- Pre-change HEAD: `df667cd1fde557a3bd1f28775cf0d1aa6e70b611`.
+- Accepted implementation commit: `93200772f7f423c570dcaa040b615ec092fee330`.
+- Protected files match that HEAD and were not edited or staged:
+  - `dashboard/explore_serving_index_v2.json`: `c0726d8166ab7d110f437ff4e6acde7aa09702354f053103e3f6630a0129b869`.
+  - `docs/app-store-copy.md`: `126af147b650c2f1077fb73036d26f34f940422c07a3193bade047c73b5c225a`.
+  - `.cursor/` was not touched.
+- Added additive `OriginalNarrationProfileV2` support for the accepted ElevenLabs Creator contract. It records provider-native mono `mp3_44100_128` as the immutable lossy source and byte-identical delivery asset; it does not claim a WAV or lossless master. V1, Moab, Cartesia, signed-access, and public-profile redaction behavior remain compatible.
+- Six bounded, source-backed Roaring Fork copy corrections were completed before narration. The accepted `rf_story_02` and `rf_story_03` transcripts and audio hashes did not change. Roaring Fork still contains no culturally scoped entry; `cc_story_04`, `mc_story_15`, and `mc_cue_07` remain outside narration and public release pending written EBCI scope determination.
+- The immutable production lock covers all thirteen Roaring Fork entries in delivery order, with five hard-auto cues, four capacity-deeper stories, three stopped-deeper entries, and one completion-deeper story. The Noah Ogle stopped experience remains ordered `rf_cue_02` then `rf_story_03` and never enters the moving-drive FIFO.
+- `rf_story_02` and `rf_story_03` were copied from their exact accepted S4C MP3 hashes and verified; the renderer could not send them to the provider. The other five stories and six cues were generated once with James `EkK5I93UQWFDigLMpZcX`, `eleven_multilingual_v2`, the accepted saved settings, and native mono 44.1 kHz / 128 kbps MP3 output.
+- The dedicated key was limited to one day, 20,000 credits, Text to Speech, Voices Read, and subscription read; auto-disable-if-leaked remained enabled. After output and account reconciliation, the key was permanently deleted, its API-key row disappeared, and browser clipboard plus the in-memory secret were cleared.
+- Provider use reconciled exactly: account usage moved from 5,504 to 14,510 of 131,000 included Creator credits, matching the renderer ledger's 9,006-credit total. No retry, duplicate generation, or paid overage occurred.
+- The ignored local chapter contains thirteen verified masters totaling 26,184,875 bytes and 1,636.519183 seconds (27 minutes 16.5 seconds). Every master was re-probed against the immutable ledger for SHA-256, bytes, duration, mono channel count, 44.1 kHz sample rate, 128 kbps frame rate, transcript identity, and 75-240 WPM plausibility.
+- A separate internal real-audio characterization invokes the app's existing TypeScript `computeOriginalLongFormDeliveryMetrics` function through a network-free bridge over the full 1,175-point official route geometry. It records exact input hash `08719837a4a5aaf721b1e3735eaec9599b69394218b74ddb1bf56c090d7d9a1c` and result hash `6038b587c8a57fe0cf0aa2780db04e6589b98b4516f4225841bb05a6f0ed0bf0`.
+- Exact real-audio timing results:
+  - 15 mph: zero route-end tail, 3.1-second maximum latency; admits `rf_story_02` and `rf_story_05`.
+  - 36 mph: 8.086852-second route-end tail and zero maximum latency; all capacity stories remain selectable rather than auto-playing.
+  - 65 mph: 18.543283-second route-end tail and 2.782518-second maximum latency; all capacity stories remain selectable.
+  - 75 mph: 23.078712-second route-end tail and 6.047783-second maximum latency; all capacity stories remain selectable.
+  - All fixtures remain below the unchanged 240-second route-tail and 180-second trigger-latency limits. This is an internal characterization only, not a trusted publication report.
+- Public release remains fail-closed. `public_release=false`, `trusted_publication_validation=false`, and `validated_delivery_contracts=[]` remain explicit because accepted artwork, a complete publication-grade Manifest V3, verified server uploads, final citations, generator/license attestations, and chapter-specific publication evidence are not yet assembled.
+- Independent final audit found no P0/P1 and no new P2. The known fail-closed operational P2 remains: a hard renderer process death can leave the exclusive apply sentinel requiring documented manual removal. It prevents duplicate generation or billing and does not weaken the packet.
+- Task-owned background processes after completion: none.
+
+### S4D evidence hashes
+
+- Production narration lock: `4f8b2d9df467de6af3d5622dac10caae7c165d924e36449de30d507812ba7e3b`.
+- Renderer: `1c508a5286e9d23955a5552ebcfc11830ab84ae41d65d7f670f097f3f9fe9ca5`.
+- Roaring Fork editorial packet: `c3d1622d7f5109fb4632cb74af340f97a3477cd061c326f5e55055e6b074d0e2`.
+- S3G trigger preflight: `b7b8412e07cdef5706d814550491f8c28bfadb05d3fbef38369ec7006c3b67f3`.
+- S3H delivery readiness: `4a0fc760fd07790785b820af06bac4e5a10e8337ad3f6257a10a3c50464c9b67`.
+- Internal real-audio characterization: `f34b7aa8df6c5270f7b93f98a5bb720cf9c95df7fc1751eaeb1c6b6899529d1b`.
+- TypeScript timing bridge: `a6fd2bcd4f1551f82b94010f757cb56d69a56c867f4b5ae49d7add78e0f9a5a0`.
+- Characterization builder: `0cd16a5759de3b89b1c6e899a3f98877e0bbd7e01ce8862008d538e3e15285af`.
+- Characterization tests: `79fbb6ffacc3c3200ea35317d68626a04f5ac572a38ef6c4ebb1b4d92ddc0ee1`.
+- Ignored render ledger: `15537c5af0d351d4eb4102139bd6b1a0452075963e305242d1394a59e3db5804`.
+- Ignored redacted account source/evidence: `90d963e93f4089acb228e717773ce2504f51c59fe3f4bae11d1dda586e8b31dd` / `66abe3286df521222a936a7b260198352bc22a3c87d1485d172c1e03ca1715f4`.
+
+### S4D verification
+
+- Production lock, historical James lock, historical Cartesia lock, S3G preflight, and internal real-audio characterization deterministic checks passed.
+- Strong characterization check re-probed all thirteen ignored masters and executed the actual TypeScript timing path.
+- Focused S4D/preflight suite: 48 passed; exact characterization suite: 9 passed; Profile V2 and compatibility audit suite: 139 tests plus 7 subtests passed.
+- Mobile `OriginalManifestV2` contract/compiler test and full TypeScript typecheck passed.
+- Python compilation, secret scan, ignored-output check, protected-file comparison, and whitespace/diff checks passed.
+
+### Exact next action after S4D
+
+1. Listen through the ordered thirteen-file Roaring Fork chapter on Android and iPhone, checking pacing, transitions, Ogle group continuity, cue clarity, fatigue, interruptions, and resume behavior.
+2. Record accept/revise decisions by exact transcript and audio SHA-256. Rerender only a changed asset under a new reviewed lock; do not regenerate accepted files for compression or volume comparison.
+3. After audio acceptance, select and ingest licensed story artwork, assemble the complete private Manifest V3 and verified upload/license evidence, then run the trusted server publication validator.
+4. Keep public release blocked until artwork, citations, operational readiness, full V3 evidence, device acceptance, and all cultural gates are complete.
+
+### Do not repeat after S4D
+
+- Do not regenerate the thirteen Roaring Fork files, recreate the deleted key, rerun narrator comparison, or reinterpret the internal characterization as publication approval while hashes remain unchanged.
+- Do not narrate another chapter, upload to Studio, deploy, publish, build native binaries, or send culturally scoped material before the exact next packet is approved.

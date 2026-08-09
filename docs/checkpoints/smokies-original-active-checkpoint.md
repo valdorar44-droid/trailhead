@@ -1385,3 +1385,36 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 - Do not recreate either deleted audition key unless an accepted, source-locked revision requires a new provider call.
 - Do not alter immutable Moab narration provenance to claim James was its published voice.
 - Do not upload to Studio, batch-generate, deploy, publish, or generate culturally gated material during narrator review.
+
+## S4D Roaring Fork production narration baseline
+
+- Started: 2026-08-08.
+- Branch: `feat/smokies-original-s2`.
+- Baseline HEAD: `602dfee3799174d2042b79370141fd42c5dbf1d5`.
+- Worktree was clean at start.
+- Protected main-checkout state remains unchanged:
+  - Explore serving index: `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`.
+  - App Store copy: `aaad7e9ced46e5931bda0c50a82cc66c331bcee5dd5ea8c8a24641e617a24a86`.
+  - `.cursor/` remains untracked and protected.
+- The user accepted James `EkK5I93UQWFDigLMpZcX` after listening to the exact S4C auditions. The accepted provider/model/settings remain `eleven_multilingual_v2`, native mono `mp3_44100_128`, stability `0.5`, similarity boost `0.5`, style `0.1`, speaker boost enabled, and speed `1.0`.
+- The accepted `rf_story_02` and `rf_story_03` audio hashes are immutable inputs to this packet and must be reused without regeneration.
+- Because the accepted Creator output is provider-native MP3, S4D treats that exact provider response as the immutable source master and delivery source. It does not claim a lossless WAV master and does not transcode MP3 to a misleading archival WAV.
+- Scope is only Roaring Fork's seven stories and six cues. The five unrendered stories and six unrendered cues may be generated only after exact transcript, source, cultural, voice, cost, and delivery locks pass.
+- Roaring Fork contains no culturally scoped entry. `cc_story_04`, `mc_story_15`, and `mc_cue_07` remain outside this packet and outside narration generation pending written EBCI CIRB scope determination.
+- This packet may build a resumable, capped production lock/renderer, bind the two accepted assets, generate only the eleven missing assets, and run real-duration 15/36/65/75 mph validation.
+- No other chapter, Studio upload, backend deployment, OTA, native build, catalog activation, public release, or culturally gated narration is included.
+
+### Exact next action for S4D
+
+1. Perform one bounded final source/copy review of the thirteen Roaring Fork scripts and lock their exact transcript hashes.
+2. Bind `rf_story_02` and `rf_story_03` to their accepted MP3 hashes, durations, and provider evidence.
+3. Calculate an independent conservative character/key/cost ceiling for only the eleven missing assets.
+4. Implement and independently audit a dry-run-first resumable renderer that cannot regenerate the accepted assets.
+5. Generate and verify the eleven missing assets once, then run the trusted real-duration delivery validator across all thirteen entries.
+6. Stop for Android/iPhone chapter listening review before any other chapter or public action.
+
+### Do not repeat during S4D
+
+- S0-S4C provenance, source, cultural-policy, route, delivery-classification, narrator comparison, or accepted-audition generation.
+- Do not regenerate `rf_story_02` or `rf_story_03`, create a fake WAV, weaken the 12,000-key style of provider quota control, or reuse a deleted API key.
+- Do not narrate the three culturally relevant public-record entries or begin another chapter.

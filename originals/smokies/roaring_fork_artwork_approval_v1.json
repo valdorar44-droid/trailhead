@@ -1,0 +1,320 @@
+{
+  "approval": {
+    "approved_at": "2026-08-10T05:27:35Z",
+    "approved_by": "project_owner",
+    "decision": "approve_all",
+    "decision_text": "approve all",
+    "scope": "all_seven_candidates_in_bound_review_packet",
+    "source_task_id": "019fe9fb-cafa-75d3-b663-1e5051731cd5"
+  },
+  "approval_gate": {
+    "gps_device_exif_stripped_derivatives_complete": false,
+    "immutable_originals_mirrored": true,
+    "ingestion_allowed": false,
+    "licensed_derivatives_complete": false,
+    "next_action": "build_separately_hashed_orientation_normalized_gps_device_exif_stripped_derivatives",
+    "orientation_normalized_derivatives_complete": false,
+    "original_downloads_complete": true,
+    "original_hashes_complete": true,
+    "private_manifest_v3_artwork_binding_complete": false,
+    "public_release": false,
+    "user_visual_approval": true,
+    "verified_upload_evidence_complete": false
+  },
+  "chapter_id": "roaring_fork",
+  "originals": [
+    {
+      "candidate_id": "rf_art_road",
+      "claim_limit": "generic_roaring_fork_road_scene_no_exact_stop_or_exit_claim",
+      "creator": "Sarah Stierch (Missvain)",
+      "display_dimensions": {
+        "height": 5712,
+        "width": 4284
+      },
+      "download_url": "https://upload.wikimedia.org/wikipedia/commons/3/36/Roaring_Fork_Motor_Nature_Trail_-_March_2024_-_Sarah_Stierch_04.jpg",
+      "encoded_dimensions": {
+        "height": 4284,
+        "width": 5712
+      },
+      "exact_credit": "Roaring Fork Motor Nature Trail, Sarah Stierch (Missvain), CC BY 4.0, via Wikimedia Commons",
+      "exif_orientation": 6,
+      "filename": "01-rf_art_road.jpg",
+      "format": "JPEG",
+      "gps_exif_present": true,
+      "ingestion_allowed": false,
+      "license_name": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "mime": "image/jpeg",
+      "original_bytes": 9641592,
+      "original_immutable": true,
+      "original_sha1": "e369769ac496c9393d3bd15d2dcd42bc733a294c",
+      "original_sha256": "380afe027eb24100d61136e0da16b1f301184aa3d11c144bfdbf937e40945673",
+      "review_dimensions": {
+        "height": 5712,
+        "width": 4284
+      },
+      "source_identity_check": "wikimedia_source_sha1_and_bytes_match",
+      "source_page_url": "https://commons.wikimedia.org/wiki/File:Roaring_Fork_Motor_Nature_Trail_-_March_2024_-_Sarah_Stierch_04.jpg",
+      "stable_order": 1,
+      "status": "visually_approved_original_verified_derivative_pending",
+      "user_visual_approval": true,
+      "windows_mirror_path": "C:\\Users\\User\\Documents\\Codex\\evidence\\trailhead\\roaring-fork-artwork-v1\\originals\\01-rf_art_road.jpg",
+      "wsl_evidence_path": "/home/sean/.openclaw/evidence/roaring-fork-artwork-v1/originals/01-rf_art_road.jpg"
+    },
+    {
+      "candidate_id": "rf_art_stream",
+      "claim_limit": "generic_roaring_fork_stream_scene_no_named_feature_claim",
+      "creator": "Sarah Stierch (Missvain)",
+      "display_dimensions": {
+        "height": 4284,
+        "width": 5712
+      },
+      "download_url": "https://upload.wikimedia.org/wikipedia/commons/7/72/Roaring_Fork_Motor_Nature_Trail_-_March_2024_-_Sarah_Stierch_03.jpg",
+      "encoded_dimensions": {
+        "height": 4284,
+        "width": 5712
+      },
+      "exact_credit": "Roaring Fork Motor Nature Trail, Sarah Stierch (Missvain), CC BY 4.0, via Wikimedia Commons",
+      "exif_orientation": 1,
+      "filename": "02-rf_art_stream.jpg",
+      "format": "JPEG",
+      "gps_exif_present": true,
+      "ingestion_allowed": false,
+      "license_name": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "mime": "image/jpeg",
+      "original_bytes": 9146001,
+      "original_immutable": true,
+      "original_sha1": "bd05ad3d8a9f8b9fdc7e2323bc2015a4e9ace7aa",
+      "original_sha256": "48c1fad720524dc4835b712f058294c91f4d2505455d799f996b0070909d8b9d",
+      "review_dimensions": {
+        "height": 4284,
+        "width": 5712
+      },
+      "source_identity_check": "wikimedia_source_sha1_and_bytes_match",
+      "source_page_url": "https://commons.wikimedia.org/wiki/File:Roaring_Fork_Motor_Nature_Trail_-_March_2024_-_Sarah_Stierch_03.jpg",
+      "stable_order": 2,
+      "status": "visually_approved_original_verified_derivative_pending",
+      "user_visual_approval": true,
+      "windows_mirror_path": "C:\\Users\\User\\Documents\\Codex\\evidence\\trailhead\\roaring-fork-artwork-v1\\originals\\02-rf_art_stream.jpg",
+      "wsl_evidence_path": "/home/sean/.openclaw/evidence/roaring-fork-artwork-v1/originals/02-rf_art_stream.jpg"
+    },
+    {
+      "candidate_id": "rf_art_forest",
+      "claim_limit": "generic_roaring_fork_forest_scene_no_old_growth_claim",
+      "creator": "Sarah Stierch (Missvain)",
+      "display_dimensions": {
+        "height": 4032,
+        "width": 3024
+      },
+      "download_url": "https://upload.wikimedia.org/wikipedia/commons/3/36/Roaring_Fork_Motor_Nature_Trail_-_March_2024_-_Sarah_Stierch_05.jpg",
+      "encoded_dimensions": {
+        "height": 3024,
+        "width": 4032
+      },
+      "exact_credit": "Roaring Fork Motor Nature Trail, Sarah Stierch (Missvain), CC BY 4.0, via Wikimedia Commons",
+      "exif_orientation": 6,
+      "filename": "03-rf_art_forest.jpg",
+      "format": "JPEG",
+      "gps_exif_present": true,
+      "ingestion_allowed": false,
+      "license_name": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "mime": "image/jpeg",
+      "original_bytes": 5401179,
+      "original_immutable": true,
+      "original_sha1": "5034c6662ecc3f6d8333b2a4623a1d640b7630a3",
+      "original_sha256": "6820eae86fceb5b4bcd9d24e8becae581f51dd8f2ffd2d5301a990a7803045e6",
+      "review_dimensions": {
+        "height": 4032,
+        "width": 3024
+      },
+      "source_identity_check": "wikimedia_source_sha1_and_bytes_match",
+      "source_page_url": "https://commons.wikimedia.org/wiki/File:Roaring_Fork_Motor_Nature_Trail_-_March_2024_-_Sarah_Stierch_05.jpg",
+      "stable_order": 3,
+      "status": "visually_approved_original_verified_derivative_pending",
+      "user_visual_approval": true,
+      "windows_mirror_path": "C:\\Users\\User\\Documents\\Codex\\evidence\\trailhead\\roaring-fork-artwork-v1\\originals\\03-rf_art_forest.jpg",
+      "wsl_evidence_path": "/home/sean/.openclaw/evidence/roaring-fork-artwork-v1/originals/03-rf_art_forest.jpg"
+    },
+    {
+      "candidate_id": "rf_art_ogle",
+      "claim_limit": "exact_ogle_cabin_no_claim_that_frame_shows_entire_farmstead",
+      "creator": "Sarah Stierch (Missvain)",
+      "display_dimensions": {
+        "height": 3024,
+        "width": 4032
+      },
+      "download_url": "https://upload.wikimedia.org/wikipedia/commons/4/4e/Noah_%22Bud%22_Ogle_Cabin_-_October_2023_-_Sarah_Stierch.jpg",
+      "encoded_dimensions": {
+        "height": 3024,
+        "width": 4032
+      },
+      "exact_credit": "Noah 'Bud' Ogle Cabin, October 2023, Sarah Stierch (Missvain), CC BY 4.0, via Wikimedia Commons",
+      "exif_orientation": 1,
+      "filename": "04-rf_art_ogle.jpg",
+      "format": "JPEG",
+      "gps_exif_present": true,
+      "ingestion_allowed": false,
+      "license_name": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "mime": "image/jpeg",
+      "original_bytes": 5281216,
+      "original_immutable": true,
+      "original_sha1": "a14a4f0c7a06b64eb93f79d38311bfbf0f955c6e",
+      "original_sha256": "a828bf6c6d7f2650268f67b39669b1958f80c34dd845705f60423d8a0dfea551",
+      "review_dimensions": {
+        "height": 3024,
+        "width": 4032
+      },
+      "source_identity_check": "prior_project_sha256_and_bytes_match",
+      "source_page_url": "https://commons.wikimedia.org/wiki/File:Noah_%22Bud%22_Ogle_Cabin_-_October_2023_-_Sarah_Stierch.jpg",
+      "stable_order": 4,
+      "status": "visually_approved_original_verified_derivative_pending",
+      "user_visual_approval": true,
+      "windows_mirror_path": "C:\\Users\\User\\Documents\\Codex\\evidence\\trailhead\\roaring-fork-artwork-v1\\originals\\04-rf_art_ogle.jpg",
+      "wsl_evidence_path": "/home/sean/.openclaw/evidence/roaring-fork-artwork-v1/originals/04-rf_art_ogle.jpg"
+    },
+    {
+      "candidate_id": "rf_art_historic_cabin",
+      "claim_limit": "generic_roaring_fork_cabin_no_structure_name_or_mill_claim",
+      "creator": "Carol M. Highsmith",
+      "display_dimensions": {
+        "height": 5611,
+        "width": 8416
+      },
+      "download_url": "https://tile.loc.gov/storage-services/master/pnp/highsm/68300/68373u.tif",
+      "encoded_dimensions": {
+        "height": 5611,
+        "width": 8416
+      },
+      "exact_credit": "Carol M. Highsmith's America Project in the Carol M. Highsmith Archive, Library of Congress, Prints and Photographs Division, LC-DIG-highsm-68373",
+      "exif_orientation": 1,
+      "filename": "05-rf_art_historic_cabin.tif",
+      "format": "TIFF",
+      "gps_exif_present": true,
+      "ingestion_allowed": false,
+      "license_name": "Public domain; no known restrictions on publication",
+      "license_url": "https://www.loc.gov/pictures/collection/highsm/",
+      "mime": "image/tiff",
+      "original_bytes": 141728100,
+      "original_immutable": true,
+      "original_sha1": "9e5992f0f6a370bda203f9918b45d4c029123a16",
+      "original_sha256": "8f1b8513bb9b36ba8c9d24df0d4c68d59b068ae619660716045c415e9497e3f3",
+      "review_dimensions": {
+        "height": 683,
+        "width": 1024
+      },
+      "source_identity_check": "loc_master_filename_and_bytes_match",
+      "source_page_url": "https://www.loc.gov/pictures/item/2021756594/",
+      "stable_order": 5,
+      "status": "visually_approved_original_verified_derivative_pending",
+      "user_visual_approval": true,
+      "windows_mirror_path": "C:\\Users\\User\\Documents\\Codex\\evidence\\trailhead\\roaring-fork-artwork-v1\\originals\\05-rf_art_historic_cabin.tif",
+      "wsl_evidence_path": "/home/sean/.openclaw/evidence/roaring-fork-artwork-v1/originals/05-rf_art_historic_cabin.tif"
+    },
+    {
+      "candidate_id": "rf_art_grotto_falls",
+      "claim_limit": "destination_illustration_only_falls_not_visible_from_road_no_parking_or_access_availability_claim",
+      "creator": "National Park Service source; photographer not supplied",
+      "display_dimensions": {
+        "height": 1470,
+        "width": 2182
+      },
+      "download_url": "https://www.nps.gov/npgallery/GetAsset/287a5ad1-1dd8-b71c-07f1-bd1b3dcc532d",
+      "encoded_dimensions": {
+        "height": 1470,
+        "width": 2182
+      },
+      "exact_credit": "Grotto Falls, Great Smoky Mountains National Park, National Park Service; no claim to original U.S. Government work",
+      "exif_orientation": null,
+      "filename": "06-rf_art_grotto_falls.jpg",
+      "format": "JPEG",
+      "gps_exif_present": false,
+      "ingestion_allowed": false,
+      "license_name": "Public domain; NPS NPGallery constraint",
+      "license_url": "https://www.nps.gov/aboutus/disclaimer.htm",
+      "mime": "image/jpeg",
+      "original_bytes": 1760245,
+      "original_immutable": true,
+      "original_sha1": "1aed514adffd762c73b0eb21cf4f124f98a476d5",
+      "original_sha256": "43905360fb3bce9db8d657f921e8df65705378f1d89343cca2393ff91da54338",
+      "review_dimensions": {
+        "height": 1470,
+        "width": 2182
+      },
+      "source_identity_check": "nps_asset_id_bytes_and_dimensions_match",
+      "source_page_url": "https://www.nps.gov/media/photo/gallery-item.htm?gid=28FBB4C4-1DD8-B71C-07DAE9A6F3C26A2A&id=287A5AD1-1DD8-B71C-07F1BD1B3DCC532D",
+      "stable_order": 6,
+      "status": "visually_approved_original_verified_derivative_pending",
+      "user_visual_approval": true,
+      "windows_mirror_path": "C:\\Users\\User\\Documents\\Codex\\evidence\\trailhead\\roaring-fork-artwork-v1\\originals\\06-rf_art_grotto_falls.jpg",
+      "wsl_evidence_path": "/home/sean/.openclaw/evidence/roaring-fork-artwork-v1/originals/06-rf_art_grotto_falls.jpg"
+    },
+    {
+      "candidate_id": "rf_art_thousand_drips",
+      "claim_limit": "exact_named_feature_no_present_flow_or_parking_promise",
+      "creator": "National Park Service source; photographer not supplied",
+      "display_dimensions": {
+        "height": 2180,
+        "width": 1489
+      },
+      "download_url": "https://www.nps.gov/npgallery/GetAsset/29186a3a-1dd8-b71c-0713-93aab0680f34",
+      "encoded_dimensions": {
+        "height": 2180,
+        "width": 1489
+      },
+      "exact_credit": "Place of 1,000 Drips, Great Smoky Mountains National Park, National Park Service; no claim to original U.S. Government work",
+      "exif_orientation": null,
+      "filename": "07-rf_art_thousand_drips.jpg",
+      "format": "JPEG",
+      "gps_exif_present": false,
+      "ingestion_allowed": false,
+      "license_name": "Public domain; NPS NPGallery constraint",
+      "license_url": "https://www.nps.gov/aboutus/disclaimer.htm",
+      "mime": "image/jpeg",
+      "original_bytes": 1799456,
+      "original_immutable": true,
+      "original_sha1": "208b2a8d40d46aa9ea19f620dbac728ba35ca302",
+      "original_sha256": "ff2004dcdd090fa272c0adfada26e4028d8db2244aaffc52b68be65bc42f93ab",
+      "review_dimensions": {
+        "height": 2180,
+        "width": 1489
+      },
+      "source_identity_check": "nps_asset_id_bytes_and_dimensions_match",
+      "source_page_url": "https://www.nps.gov/media/photo/gallery-item.htm?gid=28FBB4C4-1DD8-B71C-07DAE9A6F3C26A2A&id=29186a3a-1dd8-b71c-0713-93aab0680f34",
+      "stable_order": 7,
+      "status": "visually_approved_original_verified_derivative_pending",
+      "user_visual_approval": true,
+      "windows_mirror_path": "C:\\Users\\User\\Documents\\Codex\\evidence\\trailhead\\roaring-fork-artwork-v1\\originals\\07-rf_art_thousand_drips.jpg",
+      "wsl_evidence_path": "/home/sean/.openclaw/evidence/roaring-fork-artwork-v1/originals/07-rf_art_thousand_drips.jpg"
+    }
+  ],
+  "overlay_id": "smokies_roaring_fork_artwork_approval_20260810_v1",
+  "product_id": "great_smoky_mountains_ridges_rivers_living_memory",
+  "recorded_at": "2026-08-10T05:27:35Z",
+  "schema_version": 1,
+  "source_bindings": [
+    {
+      "byte_count": 17269,
+      "path": "originals/smokies/roaring_fork_artwork_review_v1.json",
+      "sha256": "3030dfdf993b8b33cb116263ba9902dfe9e36c637f4ff7a37b11f878f0f082d4"
+    },
+    {
+      "byte_count": 85708,
+      "path": "originals/smokies/source_dossiers_v1.json",
+      "sha256": "8eb22ca5110f0f9a4287b8f184624348c2a2ca2dbc36e27ef59fc022057ce18f"
+    }
+  ],
+  "status": "approved_originals_verified_derivatives_pending",
+  "summary": {
+    "approved_candidate_count": 7,
+    "downloaded_after_approval_count": 6,
+    "gps_exif_original_count": 5,
+    "immutable_original_count": 7,
+    "mirrored_original_count": 7,
+    "reused_prior_verified_original_count": 1,
+    "total_original_bytes": 174757789
+  },
+  "variant_id": "one_way"
+}

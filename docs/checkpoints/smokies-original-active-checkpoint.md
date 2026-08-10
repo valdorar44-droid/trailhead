@@ -1609,3 +1609,39 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 - Do not reconsider the rejected HAER vista as stream artwork or weaken its identity failure because its license is usable.
 - Do not download, crop, transcode, ingest, upload, or mark any proposed artwork approved before the explicit visual decision.
 - Do not edit the source dossier, regenerate accepted narration, call the narration endpoint, publish a version, expose public assets, or begin another chapter during this review gate.
+
+## S4H Roaring Fork approved-original identity closeout
+
+- Completed: 2026-08-10.
+- Branch: `feat/smokies-original-s2`.
+- Baseline/source HEAD: `32b372ac8be167363a96cf37560a45484bc9a92f`.
+- The project owner explicitly approved all seven candidates from the S4G contact set in continuation task `019fe9fb-cafa-75d3-b663-1e5051731cd5`. The final decision was `approve all` and superseded the earlier candidate-2 revision placeholder.
+- This stage downloaded and hashed exact approved originals only. It did not generate a derivative, alter app code, bind Manifest V3, upload, deploy, publish, regenerate narration, edit culturally gated material, or expose a public asset.
+- Protected files remain unchanged:
+  - `dashboard/explore_serving_index_v2.json`: `c0726d8166ab7d110f437ff4e6acde7aa09702354f053103e3f6630a0129b869`.
+  - `docs/app-store-copy.md`: `126af147b650c2f1077fb73036d26f34f940422c07a3193bade047c73b5c225a`.
+  - `.cursor/` was not touched.
+- The immutable original set is stored outside the repository at `/home/sean/.openclaw/evidence/roaring-fork-artwork-v1/originals/` and mirrored at `C:\Users\User\Documents\Codex\evidence\trailhead\roaring-fork-artwork-v1\originals\`.
+- Both evidence roots contain exactly seven files totaling 174,757,789 bytes. Every WSL and Windows copy matches the overlay's per-file SHA-256.
+- Six deferred originals were downloaded after approval. The existing Ogle original was reused only after its 5,281,216-byte identity and `a828bf6c6d7f2650268f67b39669b1958f80c34dd845705f60423d8a0dfea551` SHA-256 were revalidated.
+- The three new Commons downloads match their recorded provider byte counts and SHA-1 values. The NPS originals match their exact asset byte counts and dimensions. The Library of Congress candidate is the exact 141,728,100-byte `68373u.tif` provider master, not the review JPEG; it validates as an 8416x5611 TIFF.
+- Source EXIF remains untouched in immutable originals. Five originals contain GPS EXIF, and the road and forest JPEGs carry orientation value 6. No original was normalized or sanitized in place.
+- A separate deterministic approval overlay binds the unchanged S4G review packet and unchanged source dossier while keeping ingestion and release fail-closed:
+  - `originals/smokies/roaring_fork_artwork_approval_v1.json`: `c67111d87bd0bc2aae2cf1b8d763030de2852a1620d61fb38413f54ce54b995f`.
+  - `scripts/build_smokies_roaring_fork_artwork_approval.py`: `2937cccd6625518220ea3c3cb20fd2c0d3c7909997b9394a9c9771fcbff7be8f`.
+  - `tests/test_smokies_roaring_fork_artwork_approval.py`: `bc0e1a69d53bbc4bfe4d4cbb54ac94991a4336bec4a0d52fdc546fc6fef67fe7`.
+- The overlay records `user_visual_approval=true`, `original_downloads_complete=true`, and `original_hashes_complete=true`; it retains `ingestion_allowed=false`, `private_manifest_v3_artwork_binding_complete=false`, and `public_release=false`.
+- Verification: both deterministic builders passed `--check`; the approval builder verified both evidence roots; Python compilation, whitespace validation, and eleven focused review/approval assertions passed. The system Python did not include the pytest runner, so the plain assertion functions were executed directly without fixtures.
+
+### Exact next action after S4H
+
+1. Preserve these seven original byte identities unchanged.
+2. Create separately hashed PNG derivatives that normalize orientation and remove GPS/device EXIF while retaining the exact attribution and change notices.
+3. Review the derivative contact set before any importer, upload, Manifest V3 binding, authenticated device preview, or trusted validation work.
+4. Keep public release fail-closed until the complete source, cultural, operational, artwork, runtime, and device gates pass.
+
+### Do not repeat after S4H
+
+- Do not redownload or replace an original while its recorded byte count and SHA-256 remain unchanged.
+- Do not edit `source_dossiers_v1.json`, the accepted narration masters, or the immutable S4G review packet.
+- Do not upload, bind, deploy, publish, call the narration endpoint, or begin another chapter during the original-identity closeout.

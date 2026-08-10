@@ -1526,3 +1526,36 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 - Do not recopy, rehash, rescan, or reorder this Samsung packet while the thirteen master hashes and device folder remain unchanged.
 - Do not treat YouTube Music audio-preview behavior as Trailhead runtime evidence.
 - Do not upload, publish, deploy, create a new provider key, regenerate narration, or begin another chapter during listening review.
+
+## S4F iPhone standalone chapter identity closeout
+
+- Completed: 2026-08-09.
+- Branch: `feat/smokies-original-s2`.
+- Baseline/source HEAD: `11e935f18c219593c540495c0ead2e00cfbaa214`.
+- This remains a device-evidence packet only. It changes no narration master, app code, manifest, backend data, OTA, native binary, provider state, catalog stage, or public-release state.
+- Protected files remained unchanged:
+  - `dashboard/explore_serving_index_v2.json`: `c0726d8166ab7d110f437ff4e6acde7aa09702354f053103e3f6630a0129b869`.
+  - `docs/app-store-copy.md`: `126af147b650c2f1077fb73036d26f34f940422c07a3193bade047c73b5c225a`.
+  - `.cursor/` was not touched.
+- The user reported that the accepted ElevenLabs James chapter sounded good and passed the bounded standalone Android audio checks. That subjective Android result remains tied to the unchanged thirteen-file source manifest and is not Trailhead in-app runtime acceptance.
+- The connected Apple review device was an iPhone 15 Pro Max on iOS 26.5.2, with 247.96 GB available in Apple Devices at the start of transfer.
+- Transfer used Apple Devices 1.1540.23042.0, Files, and the existing Video Saver File Sharing container. No ledger, account evidence, API key, private manifest, route geometry, or source dossier was transferred.
+- The final File Sharing container contained only the same thirteen accepted Roaring Fork MP3 masters in numbered order. Two temporary zero-byte picker placeholders were removed or replaced before Apple Devices displayed the final thirteen with nonzero sizes and current timestamps.
+- The source set and iPhone-visible set contain thirteen files totaling 26,184,875 bytes and 1,636.519183 seconds. The pre-transfer canonical `filename|bytes|sha256` manifest remains `c6c9000d144d211cf8055916439f745fcb98e686903ebd7ed8bddf861b738585`.
+- Strong round-trip verification exported all thirteen iPhone File Sharing copies back to Windows. Every returned filename, byte count, and per-file SHA-256 matched its source exactly; mismatch count was zero and returned bytes were exactly 26,184,875.
+- The round-trip comparison's independently calculated lowercase `filename|bytes|sha256` aggregate was identical on both sides: `05d7cb54d0f6963fba1afb0bc3aa25e571fc4e99810a8d5937b1309505e46f6c`. This aggregate uses a different canonicalization from the pre-transfer device-manifest digest above and does not replace it.
+- The user accepted the ElevenLabs narration quality after the existing listening checks and elected to proceed without a redundant iPhone listening pass. The round-trip proved the iPhone copies were byte-identical; it did not add subjective or playback evidence. No asset revision or rerender was requested.
+- Video Saver decoding, seeking, pause/resume, pacing, clarity, and fatigue were not separately asserted on iPhone. This closeout proves copied-asset identity only. It does not certify Video Saver playback behavior or Trailhead Manifest V3 queueing, background playback, lock-screen controls, interruptions, resume behavior, or route triggering.
+- Task-owned background processes after transfer and round-trip verification: none.
+
+### Exact next action after S4F
+
+1. Keep all thirteen narration assets immutable and begin the separate licensed-artwork plus private Manifest V3/verified-upload packet.
+2. Test actual Trailhead runtime behavior only after the private V3, verified uploads, artwork, and publication-grade evidence exist.
+3. Keep public release fail-closed until the complete source, cultural, operational, artwork, runtime, and device gates pass.
+
+### Do not repeat after S4F
+
+- Do not repeat standalone listening, copying, hashing, reordering, or regeneration while the thirteen hashes remain unchanged.
+- Do not interpret this File Sharing identity check as an OTA, native-build, deployment, or Trailhead runtime acceptance.
+- Do not upload to Studio, publish, begin another chapter, or narrate culturally gated material during this bounded listening closeout.

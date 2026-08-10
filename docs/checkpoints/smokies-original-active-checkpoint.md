@@ -1874,3 +1874,46 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 - Do not rerun the S4L byte import, transfer source archives, replace narration assets, or rewrite the immutable import receipt while its identities remain unchanged.
 - Do not infer or prefill legal evidence from tests, public page dates, timezone, account screenshots, or this checkpoint. Only the real signed-in administrator review may create production attestations.
 - Do not update long-form source hashes merely to make tests green, and do not preview, run trusted validation, publish, regenerate narration, begin another chapter, or touch Cherokee/EBCI or other culturally gated material from this checkpoint.
+
+## S4O Roaring Fork administrator license-attestation completion
+
+- Completed: 2026-08-10.
+- Release branch: `release/smokies-s4m-production-20260810`.
+- Baseline/source HEAD: `4da49586d93f2c5eb04a5e94f2707d91877bbb43`.
+- After the S4N deployment, the project owner authorized the signed-in administrator step with `please proceed` and then personally confirmed that the applicable primary agreement was non-EEA with `Non-EEA, confirmed.` No residence or contract choice was inferred from timezone, server location, tests, account screenshots, or provider metadata.
+- The signed-in production administrator used the deployed Manifest V3-compatible Trailhead Admin panel against the existing private Roaring Fork draft at revision 1. No narration or artwork asset was replaced, uploaded, regenerated, transcoded, resized, or recompressed during this stage.
+- The administrator supplied the same exact reviewed terms fields for each of the thirteen accepted narration assets:
+  - terms identifier: `elevenlabs_terms_of_service_non_eea_2026-03-31`;
+  - primary terms URL: `https://elevenlabs.io/terms-of-use`;
+  - displayed terms version: `31 March 2026`;
+  - actual review date: `2026-08-10`.
+- Each of the thirteen requests independently bound draft revision 1 and the exact current narration SHA-256. The server rechecked the current row and stored bytes, supplied the authenticated administrator identity and attestation time, and returned the immutable evidence record. The exact completed set is:
+  - `rf_audio_cue_01`: `d3e0796c436e4ffedb748bc08007f0661cea683eda3204df48b3639f70658bed`;
+  - `rf_audio_cue_02`: `6c99af44807f3fb78435f04da91ecc234e2c2e8f682df44ed943173a48bff107`;
+  - `rf_audio_cue_03`: `97236ccc1148d8f73d6cb20dc5447c9155bdcb4e825fbcae452007af5d12ae6c`;
+  - `rf_audio_cue_04`: `673941fe546cd1801e27d6dc9789c30ade0fc2dbe52050944cfa67a7974156c3`;
+  - `rf_audio_cue_05`: `a179f23a534976308e4fbfc20f45a428fe7f4e1bc1fd798be84e5e94cae67f1a`;
+  - `rf_audio_cue_06`: `0afae81566cf0a1ce1b220dfbe7c87b12d48235f7b3ec4149f5b9fba61a1539b`;
+  - `rf_audio_story_01`: `b9f0a21bd1afbfff8a1472e367502d50d931e339214e9cc5da01b7ba12e3e73c`;
+  - `rf_audio_story_02`: `a0f70a05d89f2318b3f99b8580bfdb93d5e626cc696dca9614c5bf3bc078006e`;
+  - `rf_audio_story_03`: `ca7ea9e8cd997ee1cf90cc0b4112f17cb8815754b6a2ccfdc0e1112e3696b1a7`;
+  - `rf_audio_story_04`: `89b8d5bb8c56e2ec15ce2e6ad82cdf298555edce4906bf2c51dcb1b91b26f4e4`;
+  - `rf_audio_story_05`: `879442f4087fb7d3fc9bf37f972eb750c17bfe33cd914a3aa9eea91c46985258`;
+  - `rf_audio_story_06`: `3bf8872d360e8e1850e7699171ec53944ca8da6f128b14d94bfd7a4613f0f4f6`;
+  - `rf_audio_story_07`: `2af7d496eb6aef7b58f585a382ec1deba301a83878c824df5b572dec6009340d`.
+- Final live read-only verification found exactly thirteen panel entries, every entry labeled `RECORDED`, and the exact overall state `COMPLETE · 13/13 EXACT`. Selecting each entry displayed exactly one server record bound to its expected SHA-256, terms identifier, terms version, and review date. The successful per-asset write/readback flow also verified each submitted primary terms URL exactly, and all thirteen requests were issued against saved draft revision 1.
+- The completed Trailhead Admin page was left open for the project owner. The panel explicitly limits this action to narration-license evidence; it does not approve preview or publication.
+- Other than this checkpoint entry, no application source, manifest, narration profile, preview token, device preview, trusted validation, readiness record, published version, imported media byte, deployment, narration generation, other chapter, or Cherokee/EBCI or other culturally gated material was changed during this stage.
+- Gate state is now `admin_license_attestation_complete=true`. `configured_private_byte_import_complete=true` remains unchanged. `verified_private_upload_complete`, `authenticated_device_preview_complete`, `trusted_publication_validation_complete`, and `public_release` remain false.
+
+### Exact next action after S4O
+
+1. Separately review and authorize construction of the narration profile from the exact thirteen server-owned attestation records and the already-bound James generator provenance.
+2. Re-evaluate `verified_private_upload_complete` only after the profile matches every current narration digest and exact license record.
+3. Stop again before authenticated device preview, trusted validation/readiness regeneration, or publication; each remains a separate authorization and evidence gate.
+
+### Do not repeat after S4O
+
+- Do not repeat the thirteen administrator attestations while these exact current narration digests and evidence records remain unchanged; exact retries are no-ops and different terms require the separate replacement flow.
+- Do not rerun the S4L byte import, replace or regenerate narration, rewrite the immutable import receipt, or infer a later terms review from this completed record.
+- Do not build a narration profile, preview, run trusted validation, publish, begin another chapter, or touch Cherokee/EBCI or other culturally gated material without the separately authorized next gate.

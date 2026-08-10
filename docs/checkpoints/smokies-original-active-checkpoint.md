@@ -1645,3 +1645,48 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 - Do not redownload or replace an original while its recorded byte count and SHA-256 remain unchanged.
 - Do not edit `source_dossiers_v1.json`, the accepted narration masters, or the immutable S4G review packet.
 - Do not upload, bind, deploy, publish, call the narration endpoint, or begin another chapter during the original-identity closeout.
+
+## S4I Roaring Fork sanitized-derivative review gate
+
+- Completed to the derivative visual-review gate: 2026-08-10.
+- Branch: `feat/smokies-original-s2`.
+- Baseline/source HEAD: `43659fd11d5852d727358f0448af38fc60af71ef`.
+- This stage generated and verified identity-preserving derivatives only. It did not ingest, upload, bind Manifest V3, alter app code or backend data, deploy, publish, regenerate narration, edit culturally gated material, or expose a public asset.
+- Protected files remain unchanged:
+  - `dashboard/explore_serving_index_v2.json`: `c0726d8166ab7d110f437ff4e6acde7aa09702354f053103e3f6630a0129b869`.
+  - `docs/app-store-copy.md`: `126af147b650c2f1077fb73036d26f34f940422c07a3193bade047c73b5c225a`.
+  - `.cursor/` was not touched.
+- The derivative set is stored outside the repository at `/home/sean/.openclaw/evidence/roaring-fork-artwork-v1/derivatives/` and mirrored at `C:\Users\User\Documents\Codex\evidence\trailhead\roaring-fork-artwork-v1\derivatives\`.
+- Both evidence roots contain exactly seven PNG files totaling 213,587,790 bytes. The mirrored copies match by filename, byte count, SHA-256, decoded RGB pixel SHA-256, and dimensions:
+  1. `01-rf_art_road.png`: 43,139,412 bytes; `5442a2ee936f0c3a3e54c81a4be0550c2599465494214f5567d2bd1daf481086`.
+  2. `02-rf_art_stream.png`: 42,092,795 bytes; `ff2671b29b7a0d2818f4a75c12b092e2640adf0306c9a645f7ed61c765e3d8f5`.
+  3. `03-rf_art_forest.png`: 22,742,999 bytes; `b2aeb6ec1d315a2f19bd7871343a5e7ef7b083e61107d6157b2b0a3926a4d266`.
+  4. `04-rf_art_ogle.png`: 22,151,291 bytes; `a300ccc802b810b8af3fbd14a1a487413a2c569ae5afe836d07fa1f2da1201b4`.
+  5. `05-rf_art_historic_cabin.png`: 73,289,752 bytes; `5ab0ead6c1a826743a883dcba01664aba93848de1e04a5b4a1d3a95b5252ac67`.
+  6. `06-rf_art_grotto_falls.png`: 5,016,837 bytes; `bf186d2fd61196ca7ec6196af2668200a1de43f140f5c574642e256a0452682a`.
+  7. `07-rf_art_thousand_drips.png`: 5,154,704 bytes; `479650107bf76599950bd05734221e69fcc74066d248b52fce21b5ca19f478b0`.
+- Every derivative preserves the complete source frame with no crop or resize, applies recorded EXIF orientation, writes 8-bit RGB PNG, and contains only `IHDR`, `IDAT`, and `IEND` chunks. EXIF, GPS, device, text, timestamp, ICC, and other ancillary metadata are absent.
+- The road and forest derivatives apply the recorded orientation-6 clockwise rotation. The four Display P3 sources and the Adobe RGB Library of Congress source were converted to sRGB with LittleCMS perceptual intent; the two untagged NPS RGB sources retain their sample values under the explicit sRGB assumption.
+- Generation used Pillow 12.3.0, LittleCMS 2.19, zlib 1.3, and libjpeg-turbo 3.1.4.1. The exact runtime contract is recorded so later library drift fails closed.
+- Exact creator credit, license link, claim limit, and a complete change note are carried into every derivative record. The four CC BY 4.0 records explicitly disclose orientation, color, format, and metadata changes; the Library of Congress and NPS claim limitations remain intact.
+- A separate deterministic derivative overlay binds the immutable approved-original overlay and remains fail-closed:
+  - `originals/smokies/roaring_fork_artwork_derivatives_v1.json`: `3287ba42f4d06a7733787659c8092feae89026a5194a60b9eeb342f57a98a305`.
+  - `scripts/build_smokies_roaring_fork_artwork_derivatives.py`: `af28bad01d7e2a81de959704219b3c49c5e5d1e8d1d5358c1e3c40fefd5a4946`.
+  - `tests/test_smokies_roaring_fork_artwork_derivatives.py`: `2b762b25c308baf3bf8764ed7d049b401ced7ac9af8b6371ad12650a730af982`.
+- The overlay records completed orientation, metadata, hash, license, and mirror gates while retaining `derivative_user_visual_approval=false`, `ingestion_allowed=false`, `private_manifest_v3_artwork_binding_complete=false`, and `public_release=false`.
+- Verification: staged and promoted copies passed independent pixel reconstruction and PNG CRC/chunk audits; the deterministic builder passed `--check`; Python compilation and whitespace validation passed; and nine focused derivative assertions passed without pytest fixtures.
+- All seven derivatives were visually inspected for gross orientation, framing, decoding, and color failures. This technical inspection is not project-owner visual approval.
+
+### Exact next action after S4I
+
+1. Present the seven sanitized derivatives as a review-only contact set with exact attribution and mapping context.
+2. Obtain explicit approve or revise decisions for every derivative.
+3. If revisions are requested, preserve the approved originals and create new separately hashed derivative evidence; do not overwrite accepted evidence silently.
+4. Keep importer, upload, private Manifest V3 binding, authenticated device preview, trusted validation, and public release blocked until the derivative visual decision is recorded.
+
+### Do not repeat after S4I
+
+- Do not redownload, replace, normalize, or sanitize any immutable original while its recorded identity remains unchanged.
+- Do not regenerate these derivatives merely for compression or metadata comparison while their hashes and conversion runtime remain unchanged.
+- Do not edit the source dossier, immutable artwork review, accepted narration masters, or culturally gated materials.
+- Do not ingest, upload, bind, deploy, publish, call the narration endpoint, or begin another chapter during this derivative review gate.

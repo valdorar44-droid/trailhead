@@ -1,0 +1,86 @@
+{
+  "authorization": {
+    "authenticated_device_preview": false,
+    "culturally_gated_material": false,
+    "deployment": false,
+    "exact_asset_ingestion_after_preflight": true,
+    "isolated_validation": true,
+    "narration_generation": false,
+    "private_draft_importer_implementation": true,
+    "private_manifest_v3_assembly": true,
+    "publication": false,
+    "trusted_publication_validation": false
+  },
+  "authorization_id": "smokies_roaring_fork_private_ingestion_20260810_v1",
+  "chapter_id": "roaring_fork",
+  "decision": {
+    "authorized_by": "project_owner",
+    "authorized_on": "2026-08-10",
+    "decision_text": "continue",
+    "scope": "bounded_admin_only_private_manifest_v3_and_verified_upload_evidence",
+    "source_task_id": "019fe9fb-cafa-75d3-b663-1e5051731cd5"
+  },
+  "product_id": "great_smoky_mountains_ridges_rivers_living_memory",
+  "public_release": false,
+  "required_live_authority": {
+    "configured_private_asset_target": false,
+    "configured_private_database_target": false,
+    "fresh_admin_generator_license_attestation": false,
+    "may_not_be_fabricated": true,
+    "real_admin_user_id": false
+  },
+  "schema_version": 1,
+  "source_bindings": [
+    {
+      "bytes": 14276,
+      "path": "originals/smokies/roaring_fork_artwork_derivative_approval_v1.json",
+      "sha256": "e13c39785e90190e0dfb4db5c60c709568b68d3ecbd76910ab00799a721b951a"
+    },
+    {
+      "bytes": 22622,
+      "path": "originals/smokies/roaring_fork_artwork_derivatives_v1.json",
+      "sha256": "3287ba42f4d06a7733787659c8092feae89026a5194a60b9eeb342f57a98a305"
+    },
+    {
+      "bytes": 17269,
+      "path": "originals/smokies/roaring_fork_artwork_review_v1.json",
+      "sha256": "3030dfdf993b8b33cb116263ba9902dfe9e36c637f4ff7a37b11f878f0f082d4"
+    },
+    {
+      "bytes": 18883,
+      "path": "originals/smokies/roaring_fork_real_audio_characterization_v1.json",
+      "sha256": "f34b7aa8df6c5270f7b93f98a5bb720cf9c95df7fc1751eaeb1c6b6899529d1b"
+    },
+    {
+      "bytes": 16734,
+      "path": "originals/smokies/roaring_fork_delivery_readiness_v1.json",
+      "sha256": "4a0fc760fd07790785b820af06bac4e5a10e8337ad3f6257a10a3c50464c9b67"
+    },
+    {
+      "bytes": 26805,
+      "path": "originals/smokies/editorial_roaring_fork_v1.json",
+      "sha256": "c3d1622d7f5109fb4632cb74af340f97a3477cd061c326f5e55055e6b074d0e2"
+    },
+    {
+      "bytes": 19132,
+      "path": "originals/smokies/elevenlabs_james_roaring_fork_lock_v1.json",
+      "sha256": "4f8b2d9df467de6af3d5622dac10caae7c165d924e36449de30d507812ba7e3b"
+    },
+    {
+      "bytes": 2762475,
+      "path": "originals/smokies/official_route_evidence_v1.json",
+      "sha256": "d946ffaf8f21ad97399b6dedfb5cbe9483fce0787653b389d7075d933f398c60"
+    },
+    {
+      "bytes": 85708,
+      "path": "originals/smokies/source_dossiers_v1.json",
+      "sha256": "8eb22ca5110f0f9a4287b8f184624348c2a2ca2dbc36e27ef59fc022057ce18f"
+    },
+    {
+      "bytes": 41551,
+      "path": "originals/smokies/roaring_fork_trigger_preflight_v1.json",
+      "sha256": "b7b8412e07cdef5706d814550491f8c28bfadb05d3fbef38369ec7006c3b67f3"
+    }
+  ],
+  "variant_id": "one_way"
+}

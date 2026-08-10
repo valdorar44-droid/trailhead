@@ -1,0 +1,112 @@
+{
+  "assets": {
+    "artwork": 7,
+    "bytes": 239772665,
+    "narration": 13,
+    "total": 20,
+    "verified_sha256": [
+      {
+        "asset_id": "rf_audio_cue_02",
+        "sha256": "6c99af44807f3fb78435f04da91ecc234e2c2e8f682df44ed943173a48bff107"
+      },
+      {
+        "asset_id": "rf_audio_story_03",
+        "sha256": "ca7ea9e8cd997ee1cf90cc0b4112f17cb8815754b6a2ccfdc0e1112e3696b1a7"
+      },
+      {
+        "asset_id": "rf_audio_cue_01",
+        "sha256": "d3e0796c436e4ffedb748bc08007f0661cea683eda3204df48b3639f70658bed"
+      },
+      {
+        "asset_id": "rf_audio_story_01",
+        "sha256": "b9f0a21bd1afbfff8a1472e367502d50d931e339214e9cc5da01b7ba12e3e73c"
+      },
+      {
+        "asset_id": "rf_audio_cue_04",
+        "sha256": "673941fe546cd1801e27d6dc9789c30ade0fc2dbe52050944cfa67a7974156c3"
+      },
+      {
+        "asset_id": "rf_audio_cue_03",
+        "sha256": "97236ccc1148d8f73d6cb20dc5447c9155bdcb4e825fbcae452007af5d12ae6c"
+      },
+      {
+        "asset_id": "rf_audio_story_02",
+        "sha256": "a0f70a05d89f2318b3f99b8580bfdb93d5e626cc696dca9614c5bf3bc078006e"
+      },
+      {
+        "asset_id": "rf_audio_story_04",
+        "sha256": "89b8d5bb8c56e2ec15ce2e6ad82cdf298555edce4906bf2c51dcb1b91b26f4e4"
+      },
+      {
+        "asset_id": "rf_audio_story_05",
+        "sha256": "879442f4087fb7d3fc9bf37f972eb750c17bfe33cd914a3aa9eea91c46985258"
+      },
+      {
+        "asset_id": "rf_audio_cue_05",
+        "sha256": "a179f23a534976308e4fbfc20f45a428fe7f4e1bc1fd798be84e5e94cae67f1a"
+      },
+      {
+        "asset_id": "rf_audio_story_06",
+        "sha256": "3bf8872d360e8e1850e7699171ec53944ca8da6f128b14d94bfd7a4613f0f4f6"
+      },
+      {
+        "asset_id": "rf_audio_story_07",
+        "sha256": "2af7d496eb6aef7b58f585a382ec1deba301a83878c824df5b572dec6009340d"
+      },
+      {
+        "asset_id": "rf_audio_cue_06",
+        "sha256": "0afae81566cf0a1ce1b220dfbe7c87b12d48235f7b3ec4149f5b9fba61a1539b"
+      },
+      {
+        "asset_id": "rf_art_road",
+        "sha256": "5442a2ee936f0c3a3e54c81a4be0550c2599465494214f5567d2bd1daf481086"
+      },
+      {
+        "asset_id": "rf_art_stream",
+        "sha256": "ff2671b29b7a0d2818f4a75c12b092e2640adf0306c9a645f7ed61c765e3d8f5"
+      },
+      {
+        "asset_id": "rf_art_forest",
+        "sha256": "b2aeb6ec1d315a2f19bd7871343a5e7ef7b083e61107d6157b2b0a3926a4d266"
+      },
+      {
+        "asset_id": "rf_art_ogle",
+        "sha256": "a300ccc802b810b8af3fbd14a1a487413a2c569ae5afe836d07fa1f2da1201b4"
+      },
+      {
+        "asset_id": "rf_art_historic_cabin",
+        "sha256": "5ab0ead6c1a826743a883dcba01664aba93848de1e04a5b4a1d3a95b5252ac67"
+      },
+      {
+        "asset_id": "rf_art_grotto_falls",
+        "sha256": "bf186d2fd61196ca7ec6196af2668200a1de43f140f5c574642e256a0452682a"
+      },
+      {
+        "asset_id": "rf_art_thousand_drips",
+        "sha256": "479650107bf76599950bd05734221e69fcc74066d248b52fce21b5ca19f478b0"
+      }
+    ]
+  },
+  "delivery_contract_sha256": "9081a647a7df0e59df4bb40506ba9bfa96c750536fb715ee31b3e9ee68ee20d6",
+  "gates": {
+    "authenticated_device_preview_complete": false,
+    "private_upload_complete": false,
+    "public_release": false,
+    "trusted_publication_validation_complete": false
+  },
+  "manifest_canonical_sha256": "2fb77582811e28ef963f3018a8990a96612cfedee69f3b2329a73b87ac99d33a",
+  "packet_id": "smokies_roaring_fork_private_import_20260810_v1",
+  "packet_sha256": "15d3a10b3a387cd23e1271e2d07428772d8f60e4568cbd417ef292d627252c1f",
+  "protected_files": {
+    "dashboard/explore_serving_index_v2.json": "c0726d8166ab7d110f437ff4e6acde7aa09702354f053103e3f6630a0129b869",
+    "docs/app-store-copy.md": "126af147b650c2f1077fb73036d26f34f940422c07a3193bade047c73b5c225a"
+  },
+  "remaining_live_requirements": [
+    "explicit configured private database, asset root, and target id",
+    "real target admin user id",
+    "authenticated server-owned generator-license attestation after byte import"
+  ],
+  "schema_version": 1,
+  "status": "dry_run_verified",
+  "writes_performed": false
+}

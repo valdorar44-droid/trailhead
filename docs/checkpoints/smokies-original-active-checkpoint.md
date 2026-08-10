@@ -1723,3 +1723,42 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 - Do not repeat derivative visual review, regeneration, copying, or hashing while the approved hashes and evidence roots remain unchanged.
 - Do not mutate the immutable derivative record to embed approval; use the separate bound overlay.
 - Do not ingest, upload, bind Manifest V3, deploy, publish, regenerate narration, call the narration endpoint, begin another chapter, or touch culturally gated material without a separately authorized packet.
+
+## S4K Roaring Fork private Manifest V3 and importer preflight
+
+- Completed: 2026-08-10.
+- Branch: `feat/smokies-original-s2`.
+- Baseline/source HEAD: `03ec400a23ec0bf62e7651740a0a75d8c9b3bd9c`.
+- The project owner authorized the bounded next stage in continuation task `019fe9fb-cafa-75d3-b663-1e5051731cd5` with the decision `continue` after approving all seven derivatives.
+- This stage created a deterministic one-chapter, one-variant private Manifest V3 packet for `roaring_fork/one_way`. It did not change a live database or asset store, upload or expose an asset, issue a preview token, run trusted validation, deploy, publish, regenerate narration, call a narration provider, begin another chapter, or touch culturally gated material.
+- Immutable stage outputs:
+  - `originals/smokies/roaring_fork_private_ingestion_authorization_v1.json`: `b7198d072604abb6a914378a6759b78f79526781e405f581191e7ec81429582f`.
+  - `originals/smokies/roaring_fork_private_manifest_v3.json`: `7e9cab7e0325c6124a2605c83867929780f575e5814c7fdc634c091a9c351467`; canonical manifest SHA-256 `2fb77582811e28ef963f3018a8990a96612cfedee69f3b2329a73b87ac99d33a`.
+  - `originals/smokies/roaring_fork_private_import_packet_v1.json`: `15d3a10b3a387cd23e1271e2d07428772d8f60e4568cbd417ef292d627252c1f`.
+  - `originals/smokies/roaring_fork_private_import_preflight_v1.json`: `c090b5cbc1dc283c1bb95fcad3262f781f99aca3e1df40a13f102eea28b232b9`.
+  - `scripts/build_smokies_roaring_fork_private_packet.py`: `e9dfaae6813c3e1740339890f1904a95fbaa77792fa50cb4c338471f9adb938b`.
+  - `scripts/import_smokies_roaring_fork_private.py`: `072ebf038097c7d63695d4b04f7447ce90b30159a841f8dcfcf7af8058b006e3`.
+- The packet binds exactly thirteen accepted provider-native narration MP3s and seven approved PNG derivatives, totaling 239,772,665 bytes, with no missing, additional, duplicate, transcoded, resized, or recompressed media. It preserves the accepted delivery order and delivery-contract SHA-256 `9081a647a7df0e59df4bb40506ba9bfa96c750536fb715ee31b3e9ee68ee20d6`.
+- The purpose-built importer validates the 73,289,752-byte historic-cabin derivative without weakening the ordinary 64 MiB upload limit. It verifies exact hashes, byte counts, MP3 probes, PNG CRC/chunk policy, dimensions, decoded-pixel hashes, attribution, and source bindings before any target mutation.
+- Apply mode is dry-run-first and fail-closed. It requires the command target to match explicit `TRAILHEAD_DB_PATH`, `TRAILHEAD_ORIGINALS_ASSET_DIR`, and `TRAILHEAD_PRIVATE_IMPORT_TARGET_ID` configuration plus a real admin row. It rejects stale schemas, different drafts or assets, unsafe report destinations, evidence collisions, and protected-file drift before staging.
+- Filesystem and database mutation are protected by a cross-process lock, same-volume staging, a recovery journal, one SQLite transaction, reference-aware cleanup, exact-replay idempotency, and post-import byte/database verification. No success report is made visible before every rollback-triggering step completes; an uncertain final report-directory sync keeps the matching import committed for exact replay instead of creating a report/rollback contradiction.
+- Narration generator provenance is stored with `license_status=unverified`. The importer has no attestation input and cannot manufacture `license_attestation` or a narration profile. A real signed-in admin must later use the authenticated server-owned attestation endpoint; that separate action supplies reviewed terms while the server owns the attestation time and admin identity.
+- Verification: the deterministic builder and exact local-evidence check passed; the dry-run revalidated all twenty source assets and both protected files; Python compilation, Ruff, and whitespace validation passed; eighteen importer/packet tests passed with external evidence, including first apply, exact replay, rollback, stale-journal recovery, concurrent exclusion, target/schema rejection, evidence/report collision rejection, and finalization failures; the broader focused suite passed eighty assertions with fifteen existing deprecation warnings.
+- Protected files remain unchanged:
+  - `dashboard/explore_serving_index_v2.json`: `c0726d8166ab7d110f437ff4e6acde7aa09702354f053103e3f6630a0129b869`.
+  - `docs/app-store-copy.md`: `126af147b650c2f1077fb73036d26f34f940422c07a3193bade047c73b5c225a`.
+- Live private byte import remains false because no configured target identity or real target admin context is available in this workspace. Admin narration-license attestation, authenticated device preview, trusted publication validation, deployment, and public release all remain false.
+
+### Exact next action after S4K
+
+1. Identify and bind the intended private target through the three explicit environment settings and a real admin user; do not substitute an isolated fixture or guessed path.
+2. Re-run the exact dry-run, then invoke the bounded importer once against that configured target and preserve its verified transaction report.
+3. After byte import, have the signed-in target admin review the exact ElevenLabs terms/version/date and call the server-owned license-attestation endpoint for all thirteen narration records. Do not infer or fabricate that evidence.
+4. Stop again before authenticated device preview, trusted validation, deployment, or publication; each remains a separate authorization and evidence gate.
+
+### Do not repeat after S4K
+
+- Do not rebuild the packet, re-probe media, or rerun the disposable transaction while the recorded inputs, target requirements, and implementation hashes remain unchanged.
+- Do not resize or recompress the historic-cabin derivative to fit the ordinary upload route, weaken that route's limit, or overwrite any approved derivative.
+- Do not add an attested narration profile from account screenshots or caller-authored JSON; only the authenticated server-owned admin flow may create the attestation.
+- Do not run device preview, trusted publication validation, deploy, publish, regenerate narration, begin another chapter, or touch Cherokee/EBCI or other culturally gated material from this checkpoint.

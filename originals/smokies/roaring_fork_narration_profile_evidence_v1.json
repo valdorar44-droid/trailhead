@@ -1,0 +1,281 @@
+{
+  "accepted_generator_contract": {
+    "api_version": "elevenlabs_text_to_speech_v1",
+    "bitrate_kbps": 128,
+    "channels": 1,
+    "commercial_use_observed": true,
+    "creator_plan_observed": true,
+    "language": "en",
+    "lossless_master_claimed": false,
+    "mime_type": "audio/mpeg",
+    "model_id": "eleven_multilingual_v2",
+    "output_format": "mp3_44100_128",
+    "provider": "elevenlabs",
+    "provider_native_master": true,
+    "sample_rate_hz": 44100,
+    "standard_provider_logging_acknowledged": true,
+    "training_contribution_observed": false,
+    "transcoded": false,
+    "voice_id": "EkK5I93UQWFDigLMpZcX",
+    "voice_name": "James - Husky, Engaging and Bold",
+    "voice_settings": {
+      "similarity_boost": 0.5,
+      "speed": 1.0,
+      "stability": 0.5,
+      "style": 0.1,
+      "use_speaker_boost": true
+    },
+    "zero_retention_claimed": false
+  },
+  "attestation_summary": {
+    "asset_membership_complete": true,
+    "attestation_set_canonical_sha256": "465665e7313d661bb1ce6dcc79b3b41e0d89a5385fed204656fab29c126c5003",
+    "common_terms_exact": true,
+    "count": 13,
+    "earliest_attested_at": "2026-08-10T20:05:07Z",
+    "latest_attested_at": "2026-08-10T20:19:19Z",
+    "profile_verified_at": "2026-08-10T20:19:19Z",
+    "profile_verified_at_rule": "maximum_server_owned_attested_at"
+  },
+  "attestations": [
+    {
+      "asset_id": "rf_audio_cue_01",
+      "attested_at": "2026-08-10T20:05:07Z",
+      "entry_id": "rf_cue_01",
+      "narration_sha256": "d3e0796c436e4ffedb748bc08007f0661cea683eda3204df48b3639f70658bed",
+      "redacted_attestation_sha256": "a0f5392e8c7560a1b5ac0b13d816ee15a8be4da95694db998e4afb50d10374bc",
+      "stable_order": 3
+    },
+    {
+      "asset_id": "rf_audio_cue_02",
+      "attested_at": "2026-08-10T20:17:48Z",
+      "entry_id": "rf_cue_02",
+      "narration_sha256": "6c99af44807f3fb78435f04da91ecc234e2c2e8f682df44ed943173a48bff107",
+      "redacted_attestation_sha256": "f344958ca29f23b5e111bf1e4fb2481990b1590dc14240bf6620536294168417",
+      "stable_order": 1
+    },
+    {
+      "asset_id": "rf_audio_cue_03",
+      "attested_at": "2026-08-10T20:18:18Z",
+      "entry_id": "rf_cue_03",
+      "narration_sha256": "97236ccc1148d8f73d6cb20dc5447c9155bdcb4e825fbcae452007af5d12ae6c",
+      "redacted_attestation_sha256": "821fe4ee3432bfb43e3af1e12ecc81a9a03ba0db4eb6f35976c9fa80b93d4a54",
+      "stable_order": 6
+    },
+    {
+      "asset_id": "rf_audio_cue_04",
+      "attested_at": "2026-08-10T20:18:39Z",
+      "entry_id": "rf_cue_04",
+      "narration_sha256": "673941fe546cd1801e27d6dc9789c30ade0fc2dbe52050944cfa67a7974156c3",
+      "redacted_attestation_sha256": "91188a9774f0ba971b85d566e272bd7d5ab3884c71b348ea32afbd3eb1398ea7",
+      "stable_order": 5
+    },
+    {
+      "asset_id": "rf_audio_cue_05",
+      "attested_at": "2026-08-10T20:18:42Z",
+      "entry_id": "rf_cue_05",
+      "narration_sha256": "a179f23a534976308e4fbfc20f45a428fe7f4e1bc1fd798be84e5e94cae67f1a",
+      "redacted_attestation_sha256": "3caa0508058348e56aef03add50b306e19a9b50db33e66b3ee40dc2317970cf5",
+      "stable_order": 10
+    },
+    {
+      "asset_id": "rf_audio_cue_06",
+      "attested_at": "2026-08-10T20:18:46Z",
+      "entry_id": "rf_cue_06",
+      "narration_sha256": "0afae81566cf0a1ce1b220dfbe7c87b12d48235f7b3ec4149f5b9fba61a1539b",
+      "redacted_attestation_sha256": "99dff8d6030a15b6dcbc2a76fb9340b7e897cdc4ba152bcfaf00440e726417ab",
+      "stable_order": 13
+    },
+    {
+      "asset_id": "rf_audio_story_01",
+      "attested_at": "2026-08-10T20:18:55Z",
+      "entry_id": "rf_story_01",
+      "narration_sha256": "b9f0a21bd1afbfff8a1472e367502d50d931e339214e9cc5da01b7ba12e3e73c",
+      "redacted_attestation_sha256": "4884d8ceeb45c1fb2bd2176156c70e4e3997e90d8dfd962a42e4134bf134c04d",
+      "stable_order": 4
+    },
+    {
+      "asset_id": "rf_audio_story_02",
+      "attested_at": "2026-08-10T20:18:58Z",
+      "entry_id": "rf_story_02",
+      "narration_sha256": "a0f70a05d89f2318b3f99b8580bfdb93d5e626cc696dca9614c5bf3bc078006e",
+      "redacted_attestation_sha256": "79b2980932238165633799a5316ec7350e1ac4799f425aac594ab44d9d9a08d6",
+      "stable_order": 7
+    },
+    {
+      "asset_id": "rf_audio_story_03",
+      "attested_at": "2026-08-10T20:19:02Z",
+      "entry_id": "rf_story_03",
+      "narration_sha256": "ca7ea9e8cd997ee1cf90cc0b4112f17cb8815754b6a2ccfdc0e1112e3696b1a7",
+      "redacted_attestation_sha256": "2c790ddd96eefb5506e2581708c586e8e52b7739a0bfcd78528dd171bd543873",
+      "stable_order": 2
+    },
+    {
+      "asset_id": "rf_audio_story_04",
+      "attested_at": "2026-08-10T20:19:09Z",
+      "entry_id": "rf_story_04",
+      "narration_sha256": "89b8d5bb8c56e2ec15ce2e6ad82cdf298555edce4906bf2c51dcb1b91b26f4e4",
+      "redacted_attestation_sha256": "f3d4efac55feb567e139b5d6a2c45f06aa4153faea508019dcfec3f5283ec8c4",
+      "stable_order": 8
+    },
+    {
+      "asset_id": "rf_audio_story_05",
+      "attested_at": "2026-08-10T20:19:12Z",
+      "entry_id": "rf_story_05",
+      "narration_sha256": "879442f4087fb7d3fc9bf37f972eb750c17bfe33cd914a3aa9eea91c46985258",
+      "redacted_attestation_sha256": "80da4836688ffa46b55b37f86d5bcd612b3734b263ce2a59d8b08f80b8ac78a0",
+      "stable_order": 9
+    },
+    {
+      "asset_id": "rf_audio_story_06",
+      "attested_at": "2026-08-10T20:19:14Z",
+      "entry_id": "rf_story_06",
+      "narration_sha256": "3bf8872d360e8e1850e7699171ec53944ca8da6f128b14d94bfd7a4613f0f4f6",
+      "redacted_attestation_sha256": "68af5680f4372cd73e486ff5437390b62e22a08313dcad60b4df7a3a16743cc8",
+      "stable_order": 11
+    },
+    {
+      "asset_id": "rf_audio_story_07",
+      "attested_at": "2026-08-10T20:19:19Z",
+      "entry_id": "rf_story_07",
+      "narration_sha256": "2af7d496eb6aef7b58f585a382ec1deba301a83878c824df5b572dec6009340d",
+      "redacted_attestation_sha256": "01b61768d7afb52d91ce6f8364f650c7ec769a7387fbce7c02419b56b6191904",
+      "stable_order": 12
+    }
+  ],
+  "common_license_terms": {
+    "reviewed_at": "2026-08-10",
+    "terms_id": "elevenlabs_terms_of_service_non_eea_2026-03-31",
+    "terms_url": "https://elevenlabs.io/terms-of-use",
+    "terms_version": "31 March 2026"
+  },
+  "evidence_id": "smokies_roaring_fork_narration_profile_evidence_20260810_v1",
+  "gates_before_and_after_evidence_build": {
+    "authenticated_device_preview_complete": false,
+    "deterministic_narration_profile_evidence_complete": true,
+    "live_draft_validation_metadata_admin_license_attestation_complete": false,
+    "public_release": false,
+    "server_owned_attestation_evidence_complete": true,
+    "trusted_publication_validation_complete": false,
+    "verified_private_upload_complete": false
+  },
+  "historical_state_preserved": {
+    "live_draft_profile_written": false,
+    "live_draft_revision_changed": false,
+    "private_import_packet_rewritten": false,
+    "private_import_receipt_rewritten": false,
+    "private_manifest_v3_rewritten": false
+  },
+  "limitations": [
+    "live_readback_is_a_redacted_point_in_time_observation_not_a_network_query_by_this_builder",
+    "administrator_identity_is_counted_but_not_exposed",
+    "profile_is_not_attached_to_the_live_draft",
+    "voice_name_and_voice_settings_are_bound_in_this_evidence_overlay_but_are_not_fields_in_profile_v2",
+    "historical_packet_receipt_and_manifest_gate_values_remain_unchanged",
+    "no_preview_trusted_validation_readiness_regeneration_or_publication_was_performed"
+  ],
+  "live_readback": {
+    "admin_identity_count": 1,
+    "admin_identity_redacted": true,
+    "current_asset_count": 20,
+    "current_narration_count": 13,
+    "license_attestation_count": 13,
+    "manifest_probe_ensure_ascii_sha256": "14523eab8c50c976b0bfc5598851d6c3c639b6541a7f81a7944f1e297ba17f81",
+    "observed_at": "2026-08-10T20:37:52Z",
+    "private_import_receipt_sha256": "8890c1e1431654a03feb1aa4ee4376ab50504e9841b4d8a06f0a3c003b0ebefd",
+    "production_mutation_performed": false,
+    "published_version_count": 0,
+    "receipt_exact_asset_count": 20,
+    "rehashed_exact_narration_count": 13,
+    "single_admin_identity_confirmed": true,
+    "store_base_manifest_canonical_sha256": "2fb77582811e28ef963f3018a8990a96612cfedee69f3b2329a73b87ac99d33a",
+    "target": {
+      "current_published_version": null,
+      "draft_revision": 1,
+      "narration_profile_present": false,
+      "pack_id": "great_smoky_mountains_ridges_rivers_living_memory",
+      "status": "draft"
+    },
+    "validation_report_count": 0
+  },
+  "next_action": "separately_review_and_authorize_a_revision_checked_profile_only_live_draft_attachment_then_read_back_every_identity",
+  "private_provider_evidence_bindings": {
+    "accepted_audition_ledger_sha256": "15764fe7edc13df78614faecfaae5c3006fb0369735da4e683d378d216ba4465",
+    "access_token_present": false,
+    "account_browser_source_sha256": "90d963e93f4089acb228e717773ce2504f51c59fe3f4bae11d1dda586e8b31dd",
+    "account_claims_source_binding": "provider_account_claims_redacted",
+    "account_claims_tracking": "tracked_redacted_immutable_derivation",
+    "account_evidence_observed_at": "2026-08-09T04:55:00Z",
+    "account_private_source_byte_count": 885,
+    "account_private_source_sha256": "66abe3286df521222a936a7b260198352bc22a3c87d1485d172c1e03ca1715f4",
+    "account_status": "active",
+    "administrator_identity_present": false,
+    "chapter_render_ledger_sha256": "15537c5af0d351d4eb4102139bd6b1a0452075963e305242d1394a59e3db5804",
+    "commercial_use": true,
+    "model_training_contribution": false,
+    "omitted_field_groups": [
+      "available_credit_balance",
+      "overage_and_billing_controls",
+      "api_key_policy"
+    ],
+    "output_format_id": "mp3_44100_128",
+    "plan": "creator",
+    "provider": "elevenlabs",
+    "source": "authenticated_browser",
+    "standard_logging_acknowledged": true,
+    "zero_retention": false
+  },
+  "profile_artifact": {
+    "byte_count": 1451,
+    "canonical_sha256": "f79b386031ca0faf6e07332e53ea037f957eb7d9871c4bbf05d5b0aff09c2af5",
+    "normalized_manifest_with_profile_byte_count": 76474,
+    "normalized_manifest_with_profile_canonical_sha256": "14d83293ba3b09aad00998668311447b5224f5172e641d35163de2865e3c9eb8",
+    "path": "originals/smokies/roaring_fork_narration_profile_v2.json",
+    "profile_schema": "OriginalNarrationProfileV2",
+    "server_pydantic_validated": true,
+    "sha256": "10fd4f5f04cbfbc411a1e7c31061700d17752af61e1501a4b7b4652c0d2ee377",
+    "source_manifest_mutated": false,
+    "v3_normalization_validated_on_copy": true
+  },
+  "recorded_at": "2026-08-10T20:37:52Z",
+  "schema_version": 1,
+  "scope": {
+    "chapter_id": "roaring_fork",
+    "private_evidence_only": true,
+    "product_id": "great_smoky_mountains_ridges_rivers_living_memory",
+    "variant_id": "one_way"
+  },
+  "source_bindings": {
+    "private_import_packet": {
+      "byte_count": 123112,
+      "path": "originals/smokies/roaring_fork_private_import_packet_v1.json",
+      "sha256": "15d3a10b3a387cd23e1271e2d07428772d8f60e4568cbd417ef292d627252c1f"
+    },
+    "private_import_receipt": {
+      "byte_count": 5307,
+      "path": "originals/smokies/roaring_fork_private_import_receipt_v1.json",
+      "sha256": "8890c1e1431654a03feb1aa4ee4376ab50504e9841b4d8a06f0a3c003b0ebefd"
+    },
+    "private_manifest_v3": {
+      "byte_count": 171413,
+      "path": "originals/smokies/roaring_fork_private_manifest_v3.json",
+      "sha256": "7e9cab7e0325c6124a2605c83867929780f575e5814c7fdc634c091a9c351467"
+    },
+    "production_narration_lock": {
+      "byte_count": 19132,
+      "path": "originals/smokies/elevenlabs_james_roaring_fork_lock_v1.json",
+      "sha256": "4f8b2d9df467de6af3d5622dac10caae7c165d924e36449de30d507812ba7e3b"
+    },
+    "provider_account_claims_redacted": {
+      "byte_count": 706,
+      "path": "originals/smokies/elevenlabs_james_account_claims_redacted_v1.json",
+      "sha256": "a25244c99f5a23db859579b59318155a243418f24ad8b5e0e93f268757bdacc1"
+    },
+    "real_audio_characterization": {
+      "byte_count": 18883,
+      "path": "originals/smokies/roaring_fork_real_audio_characterization_v1.json",
+      "sha256": "f34b7aa8df6c5270f7b93f98a5bb720cf9c95df7fc1751eaeb1c6b6899529d1b"
+    }
+  },
+  "status": "deterministic_profile_evidence_ready_live_write_not_authorized"
+}

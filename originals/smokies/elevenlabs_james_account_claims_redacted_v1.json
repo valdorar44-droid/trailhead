@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "provider": "elevenlabs",
+  "source": "authenticated_browser",
+  "observed_at": "2026-08-09T04:55:00Z",
+  "plan": "creator",
+  "account_status": "active",
+  "commercial_use": true,
+  "model_training_contribution": false,
+  "standard_logging_acknowledged": true,
+  "output_format_id": "mp3_44100_128",
+  "zero_retention": false,
+  "private_source": {
+    "byte_count": 885,
+    "sha256": "66abe3286df521222a936a7b260198352bc22a3c87d1485d172c1e03ca1715f4",
+    "browser_source_sha256": "90d963e93f4089acb228e717773ce2504f51c59fe3f4bae11d1dda586e8b31dd"
+  },
+  "omitted_field_groups": [
+    "available_credit_balance",
+    "overage_and_billing_controls",
+    "api_key_policy"
+  ]
+}

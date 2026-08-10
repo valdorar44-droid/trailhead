@@ -1,0 +1,54 @@
+{
+  "api_version": "elevenlabs_text_to_speech_v1",
+  "archival_master": {
+    "bitrate_kbps": 128,
+    "channels": 1,
+    "immutable": true,
+    "lossless": false,
+    "mime_type": "audio/mpeg",
+    "provider_native": true,
+    "sample_rate_hz": 44100
+  },
+  "commercial_license": {
+    "commercial_use_allowed": true,
+    "plan": "creator",
+    "reviewed_at": "2026-08-10",
+    "status": "verified",
+    "terms_id": "elevenlabs_terms_of_service_non_eea_2026-03-31",
+    "terms_url": "https://elevenlabs.io/terms-of-use",
+    "terms_version": "31 March 2026",
+    "verified_at": "2026-08-10T20:19:19Z"
+  },
+  "generation": {
+    "bitrate_kbps": 128,
+    "channels": 1,
+    "lossless": false,
+    "mime_type": "audio/mpeg",
+    "output_format": "mp3_44100_128",
+    "provider_native": true,
+    "sample_rate_hz": 44100
+  },
+  "language": "en",
+  "mobile_delivery": {
+    "bitrate_kbps": 128,
+    "byte_identical_to_archival_master": true,
+    "channels": 1,
+    "lossless": false,
+    "mime_type": "audio/mpeg",
+    "sample_rate_hz": 44100,
+    "transcoded": false
+  },
+  "model_snapshot": "eleven_multilingual_v2",
+  "provider": "elevenlabs",
+  "provider_data_retention": {
+    "confirmed_at": "2026-08-09T04:55:00Z",
+    "status": "provider_standard",
+    "zero_retention": false
+  },
+  "schema_version": 2,
+  "training_contribution": {
+    "confirmed_at": "2026-08-09T04:55:00Z",
+    "status": "disabled"
+  },
+  "voice_id": "EkK5I93UQWFDigLMpZcX"
+}

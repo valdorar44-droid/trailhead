@@ -23,6 +23,7 @@ from db.original_manifest_v2 import (
     normalize_original_manifest_v2,
     original_manifest_v2_operational_bindings,
     original_manifest_v2_preview,
+    validate_original_narration_profile_asset,
 )
 from db.original_manifest_v3 import (
     ORIGINAL_LONG_FORM_CONTRACT_ID,
@@ -12372,6 +12373,13 @@ class OriginalLicenseAttestationConflictError(ValueError):
         super().__init__("Original narration already has different or incomplete license evidence")
 
 
+class OriginalNarrationProfileConflictError(ValueError):
+    def __init__(self, pack_id: str, reason: str):
+        self.pack_id = str(pack_id)
+        self.reason = str(reason)
+        super().__init__(f"Original narration profile cannot be applied: {self.reason}")
+
+
 def _original_asset_mime_allowed(kind: str, mime_type: str) -> bool:
     if kind == "narration":
         return mime_type in {"audio/wav", "audio/mpeg"}
@@ -12678,11 +12686,23 @@ def save_authored_original_asset_record(
     try:
         db.execute("BEGIN IMMEDIATE")
         pack = db.execute(
-            "SELECT 1 FROM authored_trip_packs WHERE id=? AND content_kind='original_drive'",
+            """SELECT draft_original_manifest_json FROM authored_trip_packs
+               WHERE id=? AND content_kind='original_drive'""",
             (pack_id,),
         ).fetchone()
         if not pack:
             raise ValueError("Trailhead Original not found")
+        pack_manifest = _decode_pack_json(
+            pack["draft_original_manifest_json"], None,
+        )
+        if (
+            isinstance(pack_manifest, dict)
+            and pack_manifest.get("narration_profile") is not None
+        ):
+            raise OriginalNarrationProfileConflictError(
+                pack_id,
+                "profiled drafts must use the dedicated profile revert before asset writes",
+            )
         existing = db.execute(
             """SELECT * FROM authored_original_assets
                WHERE pack_id=? AND asset_id=? AND sha256=?""",
@@ -13005,6 +13025,1058 @@ def _verified_original_asset_map_db(db: sqlite3.Connection, pack_id: str) -> dic
             continue
         verified[raw["asset_id"]] = raw
     return verified
+
+
+def _validate_original_narration_profile_account_evidence(
+    pack_id: str,
+    narration_profile: dict,
+) -> None:
+    """Require immutable account-evidence times to be canonical past UTC instants."""
+    for section, label in (
+        ("training_contribution", "training contribution"),
+        ("provider_data_retention", "provider retention"),
+    ):
+        evidence = narration_profile.get(section)
+        raw = evidence.get("confirmed_at") if isinstance(evidence, dict) else None
+        if not isinstance(raw, str):
+            raise OriginalNarrationProfileConflictError(
+                pack_id, f"{label} confirmed_at is missing",
+            )
+        try:
+            parsed = _datetime.fromisoformat(
+                raw[:-1] + "+00:00" if raw.endswith("Z") else raw
+            )
+        except ValueError as exc:
+            raise OriginalNarrationProfileConflictError(
+                pack_id, f"{label} confirmed_at is invalid",
+            ) from exc
+        if parsed.tzinfo is None:
+            raise OriginalNarrationProfileConflictError(
+                pack_id, f"{label} confirmed_at must include a timezone",
+            )
+        parsed_utc = parsed.astimezone(_timezone.utc)
+        canonical = parsed_utc.isoformat(timespec="seconds").replace("+00:00", "Z")
+        if raw != canonical:
+            raise OriginalNarrationProfileConflictError(
+                pack_id, f"{label} confirmed_at must be canonical UTC",
+            )
+        if parsed_utc > _datetime.now(_timezone.utc):
+            raise OriginalNarrationProfileConflictError(
+                pack_id, f"{label} confirmed_at cannot be in the future",
+            )
+
+
+def original_redacted_license_attestation_sha256(attestation: object) -> str:
+    """Hash exact server evidence without exposing its low-entropy admin id."""
+    if not isinstance(attestation, dict):
+        raise ValueError("Original license attestation must be an object")
+    redacted = copy.deepcopy(attestation)
+    redacted.pop("attested_by_admin_user_id", None)
+    return _original_validation_hash(redacted)
+
+
+def _validate_original_profile_all_assets_locked(
+    db: sqlite3.Connection,
+    pack_id: str,
+    normalized_base: dict,
+    expected_asset_sha256: dict[str, str],
+) -> None:
+    """CAS-bind every current private asset and force-rehash its immutable bytes."""
+    rows = db.execute(
+        """SELECT * FROM authored_original_assets
+           WHERE pack_id=? AND is_current=1 ORDER BY asset_id""",
+        (pack_id,),
+    ).fetchall()
+    current_by_id = {str(row["asset_id"]): dict(row) for row in rows}
+    manifest_by_id = {
+        str(asset["id"]): asset
+        for asset in normalized_base.get("assets", [])
+        if isinstance(asset, dict)
+    }
+    if (
+        set(current_by_id) != set(expected_asset_sha256)
+        or set(manifest_by_id) != set(expected_asset_sha256)
+    ):
+        raise OriginalNarrationProfileConflictError(
+            pack_id, "the complete private asset membership changed",
+        )
+    for asset_id in sorted(expected_asset_sha256):
+        row = current_by_id[asset_id]
+        if row["sha256"] != expected_asset_sha256[asset_id]:
+            raise OriginalNarrationProfileConflictError(
+                pack_id, f"the current asset sha256 changed for {asset_id}",
+            )
+        manifest_asset = manifest_by_id[asset_id]
+        expected_tuple = {
+            "kind": row["kind"],
+            "mime_type": row["mime_type"],
+            "bytes": int(row["byte_count"]),
+            "sha256": row["sha256"],
+        }
+        if any(manifest_asset.get(key) != value for key, value in expected_tuple.items()):
+            raise OriginalNarrationProfileConflictError(
+                pack_id, f"manifest asset tuple changed for {asset_id}",
+            )
+        if not _original_asset_file_verified(row, force_hash=True):
+            raise OriginalNarrationProfileConflictError(
+                pack_id, f"private asset byte integrity changed for {asset_id}",
+            )
+
+
+def _validate_original_narration_profile_bindings_locked(
+    db: sqlite3.Connection,
+    pack_id: str,
+    normalized_base: dict,
+    normalized_profile: dict,
+    expected_narration_sha256: dict[str, str],
+) -> list[dict]:
+    """Revalidate the complete profile binding while the caller owns a write lock."""
+    narration_rows = db.execute(
+        """SELECT * FROM authored_original_assets
+           WHERE pack_id=? AND kind='narration' AND is_current=1
+           ORDER BY asset_id""",
+        (pack_id,),
+    ).fetchall()
+    current_by_id = {str(row["asset_id"]): dict(row) for row in narration_rows}
+    if set(current_by_id) != set(expected_narration_sha256):
+        raise OriginalNarrationProfileConflictError(
+            pack_id, "the current narration asset membership changed",
+        )
+    for asset_id in sorted(expected_narration_sha256):
+        if str(current_by_id[asset_id]["sha256"]) != expected_narration_sha256[asset_id]:
+            raise OriginalNarrationProfileConflictError(
+                pack_id, f"the current narration sha256 changed for {asset_id}",
+            )
+
+    manifest_narration = {
+        str(asset["id"]): asset
+        for asset in normalized_base.get("assets", [])
+        if isinstance(asset, dict) and asset.get("kind") == "narration"
+    }
+    if set(manifest_narration) != set(expected_narration_sha256):
+        raise OriginalNarrationProfileConflictError(
+            pack_id, "the V3 manifest narration membership changed",
+        )
+
+    usages: dict[str, list[tuple[str, dict]]] = {}
+    for story in normalized_base.get("stories", []):
+        story_id = str(story.get("id") or "")
+        usages.setdefault(str(story.get("audio_asset_id") or ""), []).append(
+            (story_id, story)
+        )
+        for override in story.get("variant_overrides", []):
+            usage_id = f"{story_id}:{override.get('chapter_id')}:{override.get('variant_id')}"
+            usages.setdefault(str(override.get("audio_asset_id") or ""), []).append(
+                (usage_id, override)
+            )
+    if set(usages) != set(expected_narration_sha256) or any(
+        not items for items in usages.values()
+    ):
+        raise OriginalNarrationProfileConflictError(
+            pack_id, "every V3 narration asset must bind a reviewed story usage",
+        )
+
+    common_terms: tuple[str, str, str, str] | None = None
+    attesting_admin_id: int | None = None
+    latest_attested_at: tuple[_datetime, str] | None = None
+    bindings: list[dict] = []
+    for asset_id in sorted(expected_narration_sha256):
+        row = current_by_id[asset_id]
+        manifest_asset = manifest_narration[asset_id]
+        manifest_tuple = {
+            "kind": row["kind"],
+            "mime_type": row["mime_type"],
+            "bytes": int(row["byte_count"]),
+            "sha256": row["sha256"],
+        }
+        if any(manifest_asset.get(key) != value for key, value in manifest_tuple.items()):
+            raise OriginalNarrationProfileConflictError(
+                pack_id, f"manifest narration tuple changed for {asset_id}",
+            )
+        if not _original_asset_file_verified(row, force_hash=True):
+            raise OriginalNarrationProfileConflictError(
+                pack_id, f"narration byte integrity changed for {asset_id}",
+            )
+
+        media_metadata = _decode_pack_json(row.get("media_metadata_json"), {})
+        verified_duration = float(
+            (media_metadata.get("duration_s") or 0)
+            if isinstance(media_metadata, dict)
+            else 0
+        )
+        transcript_sha256 = str(row.get("transcript_sha256") or "")
+        for usage_id, usage in usages[asset_id]:
+            if transcript_sha256 != original_transcript_sha256(usage.get("transcript")):
+                raise OriginalNarrationProfileConflictError(
+                    pack_id, f"reviewed transcript binding changed for {usage_id}",
+                )
+            usage_duration = usage.get("audio_duration_s")
+            if (
+                isinstance(usage_duration, bool)
+                or not isinstance(usage_duration, (int, float))
+                or verified_duration <= 0
+                or abs(float(usage_duration) - verified_duration)
+                > max(0.25, verified_duration * 0.05)
+            ):
+                raise OriginalNarrationProfileConflictError(
+                    pack_id, f"verified narration duration changed for {usage_id}",
+                )
+
+        validate_original_narration_profile_asset(
+            normalized_profile,
+            row,
+            label=f"Original V3 narration asset {asset_id}",
+        )
+        generator_metadata = _decode_pack_json(row.get("generator_metadata_json"), {})
+        if not _original_generator_license_attestation_complete(generator_metadata):
+            raise OriginalNarrationProfileConflictError(
+                pack_id, f"license attestation is incomplete for {asset_id}",
+            )
+        attestation = generator_metadata["license_attestation"]
+        redacted_license_attestation_sha256 = (
+            original_redacted_license_attestation_sha256(attestation)
+        )
+        terms = tuple(
+            str(attestation.get(key) or "")
+            for key in ("terms_id", "terms_url", "terms_version", "reviewed_at")
+        )
+        if common_terms is None:
+            common_terms = terms
+        elif terms != common_terms:
+            raise OriginalNarrationProfileConflictError(
+                pack_id, "all narration assets must share identical license terms",
+            )
+        row_admin_id = attestation.get("attested_by_admin_user_id")
+        if attesting_admin_id is None:
+            attesting_admin_id = int(row_admin_id)
+        elif row_admin_id != attesting_admin_id:
+            raise OriginalNarrationProfileConflictError(
+                pack_id, "all narration assets must share one attesting admin",
+            )
+        attested_raw = str(attestation.get("attested_at") or "")
+        try:
+            attested = _datetime.fromisoformat(
+                attested_raw[:-1] + "+00:00" if attested_raw.endswith("Z") else attested_raw
+            )
+        except ValueError as exc:
+            raise OriginalNarrationProfileConflictError(
+                pack_id, f"server attestation timestamp is invalid for {asset_id}",
+            ) from exc
+        if attested.tzinfo is None:
+            raise OriginalNarrationProfileConflictError(
+                pack_id, f"server attestation timestamp is invalid for {asset_id}",
+            )
+        attested_utc = attested.astimezone(_timezone.utc)
+        if attested_utc > _datetime.now(_timezone.utc):
+            raise OriginalNarrationProfileConflictError(
+                pack_id, f"server attestation timestamp is in the future for {asset_id}",
+            )
+        canonical_attested_at = attested_utc.isoformat(
+            timespec="seconds"
+        ).replace("+00:00", "Z")
+        if canonical_attested_at != attested_raw:
+            raise OriginalNarrationProfileConflictError(
+                pack_id, f"server attestation timestamp is not canonical for {asset_id}",
+            )
+        if latest_attested_at is None or attested_utc > latest_attested_at[0]:
+            latest_attested_at = (attested_utc, canonical_attested_at)
+        bindings.append({
+            "asset_id": asset_id,
+            "sha256": row["sha256"],
+            "transcript_sha256": transcript_sha256,
+            "audio_duration_s": verified_duration,
+            "usage_ids": [usage_id for usage_id, _ in usages[asset_id]],
+            "terms_id": terms[0],
+            "terms_url": terms[1],
+            "terms_version": terms[2],
+            "reviewed_at": terms[3],
+            "attested_at": canonical_attested_at,
+            "redacted_license_attestation_sha256": (
+                redacted_license_attestation_sha256
+            ),
+        })
+
+    if common_terms is None or latest_attested_at is None or attesting_admin_id is None:
+        raise OriginalNarrationProfileConflictError(
+            pack_id, "the narration license bindings are incomplete",
+        )
+    commercial = normalized_profile["commercial_license"]
+    if common_terms != tuple(
+        commercial[key]
+        for key in ("terms_id", "terms_url", "terms_version", "reviewed_at")
+    ):
+        raise OriginalNarrationProfileConflictError(
+            pack_id, "narration profile commercial terms do not match the attestations",
+        )
+    if commercial["verified_at"] != latest_attested_at[1]:
+        raise OriginalNarrationProfileConflictError(
+            pack_id, "commercial verified_at must equal the latest server attestation",
+        )
+    attesting_admin = db.execute(
+        "SELECT is_admin FROM users WHERE id=?", (attesting_admin_id,),
+    ).fetchone()
+    if not attesting_admin or not bool(attesting_admin["is_admin"]):
+        raise OriginalNarrationProfileConflictError(
+            pack_id, "the common attesting admin is no longer an admin",
+        )
+    return bindings
+
+
+def apply_authored_original_narration_profile_v2(
+    pack_id: str,
+    *,
+    expected_draft_revision: int,
+    expected_base_manifest_sha256: str,
+    expected_validation_metadata_sha256: str,
+    expected_asset_sha256: dict[str, str],
+    expected_redacted_license_attestation_sha256: dict[str, str],
+    narration_profile: dict,
+    admin_user_id: int,
+) -> dict:
+    """CAS-bind one strict V2 narration profile to an existing V3 draft.
+
+    This path intentionally changes only the profile, the two validation flags,
+    and the draft audit/revision fields. Every narration byte, transcript,
+    duration, provenance record, and server-owned license attestation is
+    revalidated while the write lock is held.
+    """
+    pack_id = _validate_canonical_id(pack_id, "Original id")
+    if (
+        isinstance(expected_draft_revision, bool)
+        or not isinstance(expected_draft_revision, int)
+        or expected_draft_revision < 1
+    ):
+        raise ValueError("Original expected draft revision must be a positive integer")
+    if (
+        not isinstance(expected_base_manifest_sha256, str)
+        or not re.fullmatch(r"[a-f0-9]{64}", expected_base_manifest_sha256)
+    ):
+        raise ValueError("Original base manifest sha256 is invalid")
+    if (
+        not isinstance(expected_validation_metadata_sha256, str)
+        or not re.fullmatch(r"[a-f0-9]{64}", expected_validation_metadata_sha256)
+    ):
+        raise ValueError("Original validation metadata sha256 is invalid")
+    if not isinstance(expected_asset_sha256, dict):
+        raise ValueError("Original asset sha256 bindings must be an object")
+    clean_expected_assets: dict[str, str] = {}
+    for asset_id, sha256 in expected_asset_sha256.items():
+        if not isinstance(asset_id, str):
+            raise ValueError("Original asset ids must be strings")
+        clean_asset_id = _validate_canonical_id(asset_id, "Original asset id")
+        if clean_asset_id != asset_id:
+            raise ValueError("Original asset ids must be canonical")
+        if not isinstance(sha256, str) or not re.fullmatch(r"[a-f0-9]{64}", sha256):
+            raise ValueError(f"Original asset {asset_id} sha256 is invalid")
+        clean_expected_assets[asset_id] = sha256
+    if not clean_expected_assets:
+        raise ValueError("Original narration profile requires asset sha256 bindings")
+    if not isinstance(expected_redacted_license_attestation_sha256, dict):
+        raise ValueError(
+            "Original redacted license attestation sha256 bindings must be an object"
+        )
+    clean_expected_attestations: dict[str, str] = {}
+    for asset_id, sha256 in expected_redacted_license_attestation_sha256.items():
+        if not isinstance(asset_id, str):
+            raise ValueError("Original license attestation asset ids must be strings")
+        clean_asset_id = _validate_canonical_id(
+            asset_id, "Original license attestation asset id",
+        )
+        if clean_asset_id != asset_id:
+            raise ValueError("Original license attestation asset ids must be canonical")
+        if not isinstance(sha256, str) or not re.fullmatch(r"[a-f0-9]{64}", sha256):
+            raise ValueError(
+                f"Original narration {asset_id} license attestation sha256 is invalid"
+            )
+        clean_expected_attestations[asset_id] = sha256
+    if not isinstance(narration_profile, dict):
+        raise ValueError("Original narration profile must be an object")
+
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        admin = db.execute(
+            "SELECT is_admin FROM users WHERE id=?", (admin_user_id,),
+        ).fetchone()
+        if not admin or not bool(admin["is_admin"]):
+            raise PermissionError("Original narration profile application requires an admin")
+
+        pack = db.execute(
+            """SELECT id,draft_title,draft_original_manifest_json,
+                      draft_validation_metadata,draft_revision
+               FROM authored_trip_packs
+               WHERE id=? AND content_kind='original_drive'""",
+            (pack_id,),
+        ).fetchone()
+        if not pack:
+            raise ValueError("Trailhead Original not found")
+        current_revision = int(pack["draft_revision"])
+        current_manifest = _decode_pack_json(
+            pack["draft_original_manifest_json"], None,
+        )
+        if not isinstance(current_manifest, dict) or current_manifest.get("schema_version") != 3:
+            raise ValueError("Original narration profile requires an existing V3 draft manifest")
+
+        raw_existing_profile = current_manifest.get("narration_profile")
+        base_manifest = copy.deepcopy(current_manifest)
+        base_manifest.pop("narration_profile", None)
+        normalized_base, _ = _normalize_original_manifest(
+            pack_id,
+            pack["draft_title"],
+            base_manifest,
+            publishing=False,
+        )
+        base_manifest_sha256 = _original_validation_hash(normalized_base)
+        if base_manifest_sha256 != expected_base_manifest_sha256:
+            raise OriginalNarrationProfileConflictError(
+                pack_id, "the profile-absent base manifest hash changed",
+            )
+
+        _validate_original_narration_profile_account_evidence(
+            pack_id, narration_profile,
+        )
+        candidate_input = copy.deepcopy(normalized_base)
+        candidate_input["narration_profile"] = copy.deepcopy(narration_profile)
+        normalized_candidate, candidate_manifest_json = _normalize_original_manifest(
+            pack_id,
+            pack["draft_title"],
+            candidate_input,
+            publishing=False,
+        )
+        normalized_profile = normalized_candidate.get("narration_profile")
+        if (
+            not isinstance(normalized_profile, dict)
+            or normalized_profile.get("schema_version") != 2
+            or narration_profile != normalized_profile
+        ):
+            raise ValueError(
+                "Original narration profile must be a canonical schema_version 2 object"
+            )
+        profile_sha256 = _original_validation_hash(normalized_profile)
+        candidate_manifest_sha256 = _original_validation_hash(normalized_candidate)
+
+        validation_metadata = _decode_pack_json(
+            pack["draft_validation_metadata"], {},
+        )
+        if not isinstance(validation_metadata, dict):
+            raise ValueError("Original draft validation metadata is invalid")
+        before_validation_metadata = copy.deepcopy(validation_metadata)
+        before_validation_metadata_sha256 = _original_validation_hash(
+            before_validation_metadata
+        )
+        if before_validation_metadata_sha256 != expected_validation_metadata_sha256:
+            raise OriginalNarrationProfileConflictError(
+                pack_id, "the draft validation metadata hash changed",
+            )
+        downstream_flags = (
+            "authenticated_device_preview_complete",
+            "trusted_publication_validation_complete",
+            "public_release",
+        )
+        if any(validation_metadata.get(key) is True for key in downstream_flags):
+            raise OriginalNarrationProfileConflictError(
+                pack_id, "downstream validation is already asserted for this draft",
+            )
+        narration_ids = {
+            str(asset["id"])
+            for asset in normalized_base.get("assets", [])
+            if isinstance(asset, dict) and asset.get("kind") == "narration"
+        }
+        if (
+            not narration_ids
+            or set(clean_expected_attestations) != narration_ids
+            or not narration_ids.issubset(clean_expected_assets)
+        ):
+            raise OriginalNarrationProfileConflictError(
+                pack_id,
+                "license attestation bindings must match manifest narration membership",
+            )
+        clean_expected = {
+            asset_id: clean_expected_assets[asset_id]
+            for asset_id in narration_ids
+        }
+        _validate_original_profile_all_assets_locked(
+            db,
+            pack_id,
+            normalized_base,
+            clean_expected_assets,
+        )
+        profile_present = raw_existing_profile is not None
+        replayed = False
+        if profile_present:
+            try:
+                normalized_current, _ = _normalize_original_manifest(
+                    pack_id,
+                    pack["draft_title"],
+                    current_manifest,
+                    publishing=False,
+                )
+            except ValueError as exc:
+                raise OriginalNarrationProfileConflictError(
+                    pack_id, "the existing narration profile is invalid",
+                ) from exc
+            if (
+                raw_existing_profile != normalized_profile
+                or normalized_current != normalized_candidate
+            ):
+                raise OriginalNarrationProfileConflictError(
+                    pack_id, "a different narration profile is already present",
+                )
+            if (
+                validation_metadata.get("admin_license_attestation_complete") is not True
+                or validation_metadata.get("verified_private_upload_complete") is not True
+            ):
+                raise OriginalNarrationProfileConflictError(
+                    pack_id, "the existing profile has incomplete validation flags",
+                )
+            if expected_draft_revision not in {current_revision, current_revision - 1}:
+                raise RevisionConflictError(current_revision)
+            replayed = True
+            before_manifest_sha256 = _original_validation_hash(normalized_current)
+        else:
+            if (
+                validation_metadata.get("admin_license_attestation_complete") is True
+                or validation_metadata.get("verified_private_upload_complete") is True
+            ):
+                raise OriginalNarrationProfileConflictError(
+                    pack_id, "profile validation flags are already asserted without a profile",
+                )
+            if current_revision != expected_draft_revision:
+                raise RevisionConflictError(current_revision)
+            before_manifest_sha256 = base_manifest_sha256
+
+        narration_rows = db.execute(
+            """SELECT * FROM authored_original_assets
+               WHERE pack_id=? AND kind='narration' AND is_current=1
+               ORDER BY asset_id""",
+            (pack_id,),
+        ).fetchall()
+        current_by_id = {str(row["asset_id"]): dict(row) for row in narration_rows}
+        if set(current_by_id) != set(clean_expected):
+            raise OriginalNarrationProfileConflictError(
+                pack_id, "the current narration asset membership changed",
+            )
+        for asset_id in sorted(clean_expected):
+            current_sha256 = str(current_by_id[asset_id]["sha256"])
+            if current_sha256 != clean_expected[asset_id]:
+                raise OriginalNarrationProfileConflictError(
+                    pack_id, f"the current narration sha256 changed for {asset_id}",
+                )
+
+        manifest_narration = {
+            str(asset["id"]): asset
+            for asset in normalized_base.get("assets", [])
+            if isinstance(asset, dict) and asset.get("kind") == "narration"
+        }
+        if set(manifest_narration) != set(clean_expected):
+            raise OriginalNarrationProfileConflictError(
+                pack_id, "the V3 manifest narration membership changed",
+            )
+
+        usages: dict[str, list[tuple[str, dict]]] = {}
+        for story in normalized_base.get("stories", []):
+            story_id = str(story.get("id") or "")
+            usages.setdefault(str(story.get("audio_asset_id") or ""), []).append(
+                (story_id, story)
+            )
+            for override in story.get("variant_overrides", []):
+                usage_id = (
+                    f"{story_id}:{override.get('chapter_id')}:{override.get('variant_id')}"
+                )
+                usages.setdefault(str(override.get("audio_asset_id") or ""), []).append(
+                    (usage_id, override)
+                )
+        if set(usages) != set(clean_expected) or any(not items for items in usages.values()):
+            raise OriginalNarrationProfileConflictError(
+                pack_id, "every V3 narration asset must bind a reviewed story usage",
+            )
+
+        common_terms: tuple[str, str, str, str] | None = None
+        attesting_admin_id: int | None = None
+        latest_attested_at: tuple[_datetime, str] | None = None
+        bindings: list[dict] = []
+        for asset_id in sorted(clean_expected):
+            row = current_by_id[asset_id]
+            manifest_asset = manifest_narration[asset_id]
+            expected_tuple = {
+                "kind": row["kind"],
+                "mime_type": row["mime_type"],
+                "bytes": int(row["byte_count"]),
+                "sha256": row["sha256"],
+            }
+            if any(manifest_asset.get(key) != value for key, value in expected_tuple.items()):
+                raise OriginalNarrationProfileConflictError(
+                    pack_id, f"manifest narration tuple changed for {asset_id}",
+                )
+            if not _original_asset_file_verified(row, force_hash=True):
+                raise OriginalNarrationProfileConflictError(
+                    pack_id, f"narration byte integrity changed for {asset_id}",
+                )
+
+            media_metadata = _decode_pack_json(row.get("media_metadata_json"), {})
+            verified_duration = float(
+                (media_metadata.get("duration_s") or 0)
+                if isinstance(media_metadata, dict)
+                else 0
+            )
+            transcript_sha256 = str(row.get("transcript_sha256") or "")
+            for usage_id, usage in usages[asset_id]:
+                usage_transcript_sha256 = original_transcript_sha256(
+                    usage.get("transcript")
+                )
+                if transcript_sha256 != usage_transcript_sha256:
+                    raise OriginalNarrationProfileConflictError(
+                        pack_id, f"reviewed transcript binding changed for {usage_id}",
+                    )
+                usage_duration = usage.get("audio_duration_s")
+                if (
+                    isinstance(usage_duration, bool)
+                    or not isinstance(usage_duration, (int, float))
+                    or verified_duration <= 0
+                    or abs(float(usage_duration) - verified_duration)
+                    > max(0.25, verified_duration * 0.05)
+                ):
+                    raise OriginalNarrationProfileConflictError(
+                        pack_id, f"verified narration duration changed for {usage_id}",
+                    )
+
+            validate_original_narration_profile_asset(
+                normalized_profile,
+                row,
+                label=f"Original V3 narration asset {asset_id}",
+            )
+            generator_metadata = _decode_pack_json(
+                row.get("generator_metadata_json"), {},
+            )
+            if not _original_generator_license_attestation_complete(generator_metadata):
+                raise OriginalNarrationProfileConflictError(
+                    pack_id, f"license attestation is incomplete for {asset_id}",
+                )
+            attestation = generator_metadata["license_attestation"]
+            redacted_license_attestation_sha256 = (
+                original_redacted_license_attestation_sha256(attestation)
+            )
+            if (
+                redacted_license_attestation_sha256
+                != clean_expected_attestations[asset_id]
+            ):
+                raise OriginalNarrationProfileConflictError(
+                    pack_id, f"license attestation hash changed for {asset_id}",
+                )
+            terms = tuple(
+                str(attestation.get(key) or "")
+                for key in ("terms_id", "terms_url", "terms_version", "reviewed_at")
+            )
+            if common_terms is None:
+                common_terms = terms
+            elif terms != common_terms:
+                raise OriginalNarrationProfileConflictError(
+                    pack_id, "all narration assets must share identical license terms",
+                )
+            row_admin_id = attestation.get("attested_by_admin_user_id")
+            if attesting_admin_id is None:
+                attesting_admin_id = int(row_admin_id)
+            elif row_admin_id != attesting_admin_id:
+                raise OriginalNarrationProfileConflictError(
+                    pack_id, "all narration assets must share one attesting admin",
+                )
+            attested_raw = str(attestation.get("attested_at") or "")
+            try:
+                attested = _datetime.fromisoformat(
+                    attested_raw[:-1] + "+00:00" if attested_raw.endswith("Z") else attested_raw
+                )
+            except ValueError as exc:
+                raise OriginalNarrationProfileConflictError(
+                    pack_id, f"server attestation timestamp is invalid for {asset_id}",
+                ) from exc
+            if attested.tzinfo is None:
+                raise OriginalNarrationProfileConflictError(
+                    pack_id, f"server attestation timestamp is invalid for {asset_id}",
+                )
+            attested_utc = attested.astimezone(_timezone.utc)
+            if attested_utc > _datetime.now(_timezone.utc):
+                raise OriginalNarrationProfileConflictError(
+                    pack_id, f"server attestation timestamp is in the future for {asset_id}",
+                )
+            canonical_attested_at = attested_utc.isoformat(
+                timespec="seconds"
+            ).replace("+00:00", "Z")
+            if canonical_attested_at != attested_raw:
+                raise OriginalNarrationProfileConflictError(
+                    pack_id, f"server attestation timestamp is not canonical for {asset_id}",
+                )
+            if latest_attested_at is None or attested_utc > latest_attested_at[0]:
+                latest_attested_at = (attested_utc, canonical_attested_at)
+            bindings.append({
+                "asset_id": asset_id,
+                "sha256": row["sha256"],
+                "transcript_sha256": transcript_sha256,
+                "audio_duration_s": verified_duration,
+                "usage_ids": [usage_id for usage_id, _ in usages[asset_id]],
+                "terms_id": terms[0],
+                "terms_url": terms[1],
+                "terms_version": terms[2],
+                "reviewed_at": terms[3],
+                "attested_at": canonical_attested_at,
+                "redacted_license_attestation_sha256": (
+                    redacted_license_attestation_sha256
+                ),
+            })
+
+        if common_terms is None or latest_attested_at is None or attesting_admin_id is None:
+            raise OriginalNarrationProfileConflictError(
+                pack_id, "the narration license bindings are incomplete",
+            )
+        commercial = normalized_profile["commercial_license"]
+        if common_terms != tuple(
+            commercial[key]
+            for key in ("terms_id", "terms_url", "terms_version", "reviewed_at")
+        ):
+            raise OriginalNarrationProfileConflictError(
+                pack_id, "narration profile commercial terms do not match the attestations",
+            )
+        if commercial["verified_at"] != latest_attested_at[1]:
+            raise OriginalNarrationProfileConflictError(
+                pack_id, "commercial verified_at must equal the latest server attestation",
+            )
+        attesting_admin = db.execute(
+            "SELECT is_admin FROM users WHERE id=?", (attesting_admin_id,),
+        ).fetchone()
+        if not attesting_admin or not bool(attesting_admin["is_admin"]):
+            raise OriginalNarrationProfileConflictError(
+                pack_id, "the common attesting admin is no longer an admin",
+            )
+
+        if replayed:
+            after_revision = current_revision
+            after_manifest_sha256 = before_manifest_sha256
+            after_validation_metadata = copy.deepcopy(validation_metadata)
+        else:
+            updated_validation = copy.deepcopy(validation_metadata)
+            updated_validation["admin_license_attestation_complete"] = True
+            updated_validation["verified_private_upload_complete"] = True
+            _, validation_json = _json_object(
+                updated_validation, "Trip pack validation metadata", 256 * 1024,
+            )
+            updated = db.execute(
+                """UPDATE authored_trip_packs
+                   SET draft_original_manifest_json=?,draft_validation_metadata=?,
+                       draft_revision=draft_revision+1,updated_by=?,updated_at=?
+                   WHERE id=? AND draft_revision=?""",
+                (
+                    candidate_manifest_json,
+                    validation_json,
+                    admin_user_id,
+                    int(time.time()),
+                    pack_id,
+                    current_revision,
+                ),
+            )
+            if updated.rowcount != 1:
+                refreshed = db.execute(
+                    "SELECT draft_revision FROM authored_trip_packs WHERE id=?", (pack_id,),
+                ).fetchone()
+                raise RevisionConflictError(
+                    int(refreshed["draft_revision"]) if refreshed else current_revision
+                )
+            after_revision = current_revision + 1
+            after_manifest_sha256 = candidate_manifest_sha256
+            after_validation_metadata = updated_validation
+        after_validation_metadata_sha256 = _original_validation_hash(
+            after_validation_metadata
+        )
+        rollback_validation_metadata = (
+            None if replayed else copy.deepcopy(before_validation_metadata)
+        )
+        rollback_validation_metadata_sha256 = (
+            None
+            if replayed
+            else before_validation_metadata_sha256
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+    return {
+        "pack_id": pack_id,
+        "before_draft_revision": current_revision,
+        "after_draft_revision": after_revision,
+        "profile_sha256": profile_sha256,
+        "base_manifest_sha256": base_manifest_sha256,
+        "before_manifest_sha256": before_manifest_sha256,
+        "after_manifest_sha256": after_manifest_sha256,
+        "before_validation_metadata": before_validation_metadata,
+        "before_validation_metadata_sha256": before_validation_metadata_sha256,
+        "after_validation_metadata": after_validation_metadata,
+        "after_validation_metadata_sha256": after_validation_metadata_sha256,
+        "rollback_validation_metadata": rollback_validation_metadata,
+        "rollback_validation_metadata_sha256": rollback_validation_metadata_sha256,
+        "bindings": bindings,
+        "single_attesting_admin": True,
+        "replayed": replayed,
+    }
+
+
+def revert_authored_original_narration_profile_v2(
+    pack_id: str,
+    *,
+    expected_draft_revision: int,
+    expected_profile_sha256: str,
+    expected_applied_manifest_sha256: str,
+    expected_base_manifest_sha256: str,
+    expected_narration_sha256: dict[str, str],
+    narration_profile: dict,
+    restore_validation_metadata: dict,
+    admin_user_id: int,
+) -> dict:
+    """CAS-remove one exact profile and restore its exact pre-apply validation state."""
+    pack_id = _validate_canonical_id(pack_id, "Original id")
+    if (
+        isinstance(expected_draft_revision, bool)
+        or not isinstance(expected_draft_revision, int)
+        or expected_draft_revision < 1
+    ):
+        raise ValueError("Original expected draft revision must be a positive integer")
+    for value, label in (
+        (expected_profile_sha256, "profile"),
+        (expected_applied_manifest_sha256, "applied manifest"),
+        (expected_base_manifest_sha256, "base manifest"),
+    ):
+        if not isinstance(value, str) or not re.fullmatch(r"[a-f0-9]{64}", value):
+            raise ValueError(f"Original {label} sha256 is invalid")
+    if not isinstance(expected_narration_sha256, dict):
+        raise ValueError("Original narration sha256 bindings must be an object")
+    clean_expected: dict[str, str] = {}
+    for asset_id, sha256 in expected_narration_sha256.items():
+        if not isinstance(asset_id, str):
+            raise ValueError("Original narration asset ids must be strings")
+        clean_asset_id = _validate_canonical_id(asset_id, "Original narration asset id")
+        if clean_asset_id != asset_id:
+            raise ValueError("Original narration asset ids must be canonical")
+        if not isinstance(sha256, str) or not re.fullmatch(r"[a-f0-9]{64}", sha256):
+            raise ValueError(f"Original narration {asset_id} sha256 is invalid")
+        clean_expected[asset_id] = sha256
+    if not clean_expected:
+        raise ValueError("Original narration profile requires sha256 bindings")
+    if not isinstance(narration_profile, dict):
+        raise ValueError("Original narration profile must be an object")
+    if not isinstance(restore_validation_metadata, dict):
+        raise ValueError("Original restored validation metadata must be an object")
+    restored_validation, restored_validation_json = _json_object(
+        restore_validation_metadata,
+        "Trip pack validation metadata",
+        256 * 1024,
+    )
+    if (
+        restored_validation.get("admin_license_attestation_complete") is True
+        or restored_validation.get("verified_private_upload_complete") is True
+    ):
+        raise ValueError(
+            "Original restored validation metadata must predate profile completion"
+        )
+    expected_applied_validation = copy.deepcopy(restored_validation)
+    expected_applied_validation["admin_license_attestation_complete"] = True
+    expected_applied_validation["verified_private_upload_complete"] = True
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        admin = db.execute(
+            "SELECT is_admin FROM users WHERE id=?", (admin_user_id,),
+        ).fetchone()
+        if not admin or not bool(admin["is_admin"]):
+            raise PermissionError("Original narration profile reversion requires an admin")
+        pack = db.execute(
+            """SELECT id,draft_title,draft_original_manifest_json,
+                      draft_validation_metadata,draft_revision
+               FROM authored_trip_packs
+               WHERE id=? AND content_kind='original_drive'""",
+            (pack_id,),
+        ).fetchone()
+        if not pack:
+            raise ValueError("Trailhead Original not found")
+        current_revision = int(pack["draft_revision"])
+        current_manifest = _decode_pack_json(
+            pack["draft_original_manifest_json"], None,
+        )
+        current_validation = _decode_pack_json(
+            pack["draft_validation_metadata"], {},
+        )
+        if (
+            not isinstance(current_manifest, dict)
+            or current_manifest.get("schema_version") != 3
+            or not isinstance(current_validation, dict)
+        ):
+            raise OriginalNarrationProfileConflictError(
+                pack_id, "the current V3 draft state is invalid",
+            )
+
+        raw_current_profile = current_manifest.get("narration_profile")
+        base_input = copy.deepcopy(current_manifest)
+        base_input.pop("narration_profile", None)
+        normalized_base, base_manifest_json = _normalize_original_manifest(
+            pack_id,
+            pack["draft_title"],
+            base_input,
+            publishing=False,
+        )
+        base_manifest_sha256 = _original_validation_hash(normalized_base)
+        if base_manifest_sha256 != expected_base_manifest_sha256:
+            raise OriginalNarrationProfileConflictError(
+                pack_id, "the profile-absent base manifest hash changed",
+            )
+
+        _validate_original_narration_profile_account_evidence(
+            pack_id, narration_profile,
+        )
+        candidate_input = copy.deepcopy(normalized_base)
+        candidate_input["narration_profile"] = copy.deepcopy(narration_profile)
+        normalized_candidate, _ = _normalize_original_manifest(
+            pack_id,
+            pack["draft_title"],
+            candidate_input,
+            publishing=False,
+        )
+        normalized_profile = normalized_candidate.get("narration_profile")
+        if (
+            not isinstance(normalized_profile, dict)
+            or normalized_profile.get("schema_version") != 2
+            or normalized_profile != narration_profile
+        ):
+            raise ValueError(
+                "Original narration profile must be a canonical schema_version 2 object"
+            )
+        profile_sha256 = _original_validation_hash(normalized_profile)
+        profile_manifest_sha256 = _original_validation_hash(normalized_candidate)
+        if profile_sha256 != expected_profile_sha256:
+            raise OriginalNarrationProfileConflictError(
+                pack_id, "the expected narration profile hash changed",
+            )
+        if profile_manifest_sha256 != expected_applied_manifest_sha256:
+            raise OriginalNarrationProfileConflictError(
+                pack_id, "the expected applied manifest hash changed",
+            )
+
+        profile_present = raw_current_profile is not None
+        if profile_present:
+            if current_revision != expected_draft_revision:
+                raise RevisionConflictError(current_revision)
+            try:
+                normalized_current, _ = _normalize_original_manifest(
+                    pack_id,
+                    pack["draft_title"],
+                    current_manifest,
+                    publishing=False,
+                )
+            except ValueError as exc:
+                raise OriginalNarrationProfileConflictError(
+                    pack_id, "the current narration profile is invalid",
+                ) from exc
+            if (
+                raw_current_profile != normalized_profile
+                or normalized_current != normalized_candidate
+                or _original_validation_hash(normalized_current)
+                != expected_applied_manifest_sha256
+            ):
+                raise OriginalNarrationProfileConflictError(
+                    pack_id, "the applied narration profile state changed",
+                )
+            if current_validation != expected_applied_validation:
+                raise OriginalNarrationProfileConflictError(
+                    pack_id, "the applied validation metadata changed",
+                )
+            replayed = False
+            before_manifest_sha256 = expected_applied_manifest_sha256
+        else:
+            if current_revision != expected_draft_revision + 1:
+                raise RevisionConflictError(current_revision)
+            normalized_current, _ = _normalize_original_manifest(
+                pack_id,
+                pack["draft_title"],
+                current_manifest,
+                publishing=False,
+            )
+            if (
+                normalized_current != normalized_base
+                or _original_validation_hash(normalized_current)
+                != expected_base_manifest_sha256
+                or current_validation != restored_validation
+            ):
+                raise OriginalNarrationProfileConflictError(
+                    pack_id, "the reverted narration profile state changed",
+                )
+            replayed = True
+            before_manifest_sha256 = expected_base_manifest_sha256
+
+        bindings = _validate_original_narration_profile_bindings_locked(
+            db,
+            pack_id,
+            normalized_base,
+            normalized_profile,
+            clean_expected,
+        )
+        before_validation_metadata = copy.deepcopy(current_validation)
+        before_validation_metadata_sha256 = _original_validation_hash(
+            before_validation_metadata
+        )
+        if replayed:
+            after_revision = current_revision
+            after_manifest_sha256 = expected_base_manifest_sha256
+            after_validation_metadata = copy.deepcopy(current_validation)
+        else:
+            updated = db.execute(
+                """UPDATE authored_trip_packs
+                   SET draft_original_manifest_json=?,draft_validation_metadata=?,
+                       draft_revision=draft_revision+1,updated_by=?,updated_at=?
+                   WHERE id=? AND draft_revision=?""",
+                (
+                    base_manifest_json,
+                    restored_validation_json,
+                    admin_user_id,
+                    int(time.time()),
+                    pack_id,
+                    current_revision,
+                ),
+            )
+            if updated.rowcount != 1:
+                refreshed = db.execute(
+                    "SELECT draft_revision FROM authored_trip_packs WHERE id=?", (pack_id,),
+                ).fetchone()
+                raise RevisionConflictError(
+                    int(refreshed["draft_revision"]) if refreshed else current_revision
+                )
+            after_revision = current_revision + 1
+            after_manifest_sha256 = expected_base_manifest_sha256
+            after_validation_metadata = copy.deepcopy(restored_validation)
+        after_validation_metadata_sha256 = _original_validation_hash(
+            after_validation_metadata
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+    return {
+        "pack_id": pack_id,
+        "before_draft_revision": current_revision,
+        "after_draft_revision": after_revision,
+        "profile_sha256": profile_sha256,
+        "applied_manifest_sha256": profile_manifest_sha256,
+        "base_manifest_sha256": base_manifest_sha256,
+        "before_manifest_sha256": before_manifest_sha256,
+        "after_manifest_sha256": after_manifest_sha256,
+        "before_validation_metadata": before_validation_metadata,
+        "before_validation_metadata_sha256": before_validation_metadata_sha256,
+        "after_validation_metadata": after_validation_metadata,
+        "after_validation_metadata_sha256": after_validation_metadata_sha256,
+        "bindings": bindings,
+        "single_attesting_admin": True,
+        "replayed": replayed,
+    }
 
 
 def _normalize_original_review_timestamp(value: object, label: str) -> str | None:
@@ -13771,6 +14843,15 @@ def save_authored_trip_pack_draft(
     content_kind: str = "trip_pack",
     original_manifest: dict | None = None,
 ) -> dict:
+    if (
+        str(content_kind or "trip_pack").strip().lower() == "original_drive"
+        and isinstance(original_manifest, dict)
+        and original_manifest.get("narration_profile") is not None
+    ):
+        raise OriginalNarrationProfileConflictError(
+            pack_id,
+            "profiled drafts must use the dedicated profile revert before any generic save",
+        )
     clean = _validate_trip_pack_fields(
         pack_id, slug, title, summary, price_credits, coverage_region,
         public_metadata, validation_metadata, template, content_kind, original_manifest,
@@ -13787,9 +14868,27 @@ def save_authored_trip_pack_draft(
         if reserved_slug:
             raise ValueError("Trip pack slug is already in use")
         existing = db.execute("SELECT * FROM authored_trip_packs WHERE id=?", (clean["id"],)).fetchone()
+        incoming_profile = (
+            clean["original_manifest"].get("narration_profile")
+            if isinstance(clean.get("original_manifest"), dict)
+            else None
+        )
         if existing:
             if existing["content_kind"] != clean["content_kind"]:
                 raise ValueError("Authored content cannot change content kind")
+            existing_manifest = _decode_pack_json(
+                existing["draft_original_manifest_json"], None,
+            )
+            existing_profile = (
+                existing_manifest.get("narration_profile")
+                if isinstance(existing_manifest, dict)
+                else None
+            )
+            if existing_profile is not None or incoming_profile is not None:
+                raise OriginalNarrationProfileConflictError(
+                    clean["id"],
+                    "profiled drafts must use the dedicated profile revert before any generic save",
+                )
             db.execute(
                 """UPDATE authored_trip_packs SET
                      content_kind=?,slug=?,draft_title=?,draft_summary=?,draft_price_credits=?,
@@ -13805,6 +14904,11 @@ def save_authored_trip_pack_draft(
                 ),
             )
         else:
+            if incoming_profile is not None:
+                raise OriginalNarrationProfileConflictError(
+                    clean["id"],
+                    "new drafts cannot attach narration_profile through the generic save path",
+                )
             db.execute(
                 """INSERT INTO authored_trip_packs
                    (id,content_kind,slug,status,draft_title,draft_summary,draft_price_credits,

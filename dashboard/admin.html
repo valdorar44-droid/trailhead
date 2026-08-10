@@ -293,6 +293,12 @@ td.name{color:var(--text);font-weight:600;}
 .originals-license-copy{color:var(--text2);font-size:11px;line-height:1.5;margin-top:4px;max-width:700px;}
 .originals-license-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px;}
 .originals-license-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;}
+.originals-license-assets{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:7px;margin:10px 0;}
+.originals-license-asset{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;border:1px solid var(--border);border-radius:9px;background:var(--s2);padding:9px 10px;color:var(--text2);text-align:left;cursor:pointer;}
+.originals-license-asset:hover,.originals-license-asset.active{border-color:var(--orange);color:var(--text);}
+.originals-license-asset strong{display:block;color:inherit;font-size:11px;line-height:1.35;}
+.originals-license-asset span{display:block;color:var(--text3);font:9px/1.45 var(--mono);margin-top:3px;overflow-wrap:anywhere;}
+.originals-license-asset-state{flex:0 0 auto;color:var(--orange)!important;font-weight:900!important;text-align:right;}
 .originals-audio{width:100%;height:44px;margin-top:8px;filter:grayscale(1);}
 .originals-place-status{color:var(--text3);font:10px/1.4 var(--mono);min-height:14px;}
 .originals-version-list{display:flex;flex-direction:column;gap:7px;}
@@ -1095,27 +1101,36 @@ td.name{color:var(--text);font-weight:600;}
                     </div>
                     <audio id="originals-narration-audio" class="originals-audio" controls preload="none" aria-label="Selected story narration preview"></audio>
                   </div>
-                  <div class="originals-field wide">
-                    <div id="originals-narration-license-panel" class="originals-license-panel" aria-labelledby="originals-narration-license-title">
-                      <div class="originals-license-head">
-                        <div>
-                          <div id="originals-narration-license-title" class="originals-license-title">NARRATION LICENSE REVIEW</div>
-                          <div id="originals-narration-license-copy" class="originals-license-copy">Attach narration to review its license provenance.</div>
-                        </div>
-                        <div id="originals-narration-license-status" class="originals-license-status" role="status" aria-live="polite">NOT AVAILABLE</div>
-                      </div>
-                      <div class="originals-license-grid">
-                        <div class="originals-field"><label for="originals-license-terms-id">TERMS ID</label><input id="originals-license-terms-id" class="originals-input" maxlength="200" placeholder="Provider terms identifier"></div>
-                        <div class="originals-field"><label for="originals-license-terms-version">TERMS VERSION</label><input id="originals-license-terms-version" class="originals-input" maxlength="120" placeholder="Version or effective date"></div>
-                        <div class="originals-field"><label for="originals-license-terms-url">REVIEWED TERMS URL</label><input id="originals-license-terms-url" class="originals-input" type="url" maxlength="2000" placeholder="https://"></div>
-                        <div class="originals-field"><label for="originals-license-reviewed-at">REVIEWED DATE</label><input id="originals-license-reviewed-at" class="originals-input" type="date"></div>
-                      </div>
-                      <div class="originals-license-actions">
-                        <button id="originals-license-open-btn" class="btn btn-ghost btn-sm" type="button" onclick="openOriginalNarrationTerms()" disabled>Open terms</button>
-                        <button id="originals-license-attest-btn" class="btn btn-primary btn-sm" type="button" onclick="attestOriginalNarrationLicense()" disabled>Record reviewed terms</button>
-                        <span class="originals-sensitive-note" style="margin:0;">Recorded by the server for this exact narration asset. Replacing the audio requires a new review.</span>
-                      </div>
+                </div>
+              </div>
+
+              <div class="card" id="originals-license-card" aria-labelledby="originals-narration-license-title">
+                <div id="originals-narration-license-panel" class="originals-license-panel">
+                  <div class="originals-license-head">
+                    <div>
+                      <div id="originals-narration-license-title" class="originals-license-title">NARRATION LICENSE REVIEW · SIGNED-IN ADMIN</div>
+                      <div id="originals-narration-license-copy" class="originals-license-copy">Save or open a draft with narration assets to begin the per-asset legal review.</div>
                     </div>
+                    <div id="originals-narration-license-status" class="originals-license-status" role="status" aria-live="polite">NOT AVAILABLE</div>
+                  </div>
+                  <div class="originals-field">
+                    <label for="originals-license-asset">EXACT CURRENT NARRATION ASSET</label>
+                    <select id="originals-license-asset" class="originals-select" onchange="selectOriginalNarrationLicenseAsset(this.value)" disabled></select>
+                  </div>
+                  <div id="originals-license-assets" class="originals-license-assets" aria-label="Current narration license review status"></div>
+                  <div class="originals-license-copy">
+                    Review the applicable official <a href="https://elevenlabs.io/terms-of-use" target="_blank" rel="noopener noreferrer">non-EEA Terms</a> or <a href="https://elevenlabs.io/terms-of-use-eu" target="_blank" rel="noopener noreferrer">EEA, Switzerland, and UK Terms</a>, plus the <a href="https://elevenlabs.io/vla" target="_blank" rel="noopener noreferrer">Voice Library Addendum</a>, <a href="https://elevenlabs.io/use-policy" target="_blank" rel="noopener noreferrer">Prohibited Use Policy</a>, and <a href="https://elevenlabs.io/bsa" target="_blank" rel="noopener noreferrer">Beta Services Addendum</a>. The signed-in administrator must choose the applicable contract from actual residence/account agreements, never from timezone or server location.
+                  </div>
+                  <div class="originals-license-grid">
+                    <div class="originals-field"><label for="originals-license-terms-id">TERMS ID</label><input id="originals-license-terms-id" class="originals-input" maxlength="200" placeholder="Enter after personally reviewing the applicable terms"></div>
+                    <div class="originals-field"><label for="originals-license-terms-version">TERMS VERSION</label><input id="originals-license-terms-version" class="originals-input" maxlength="120" placeholder="Enter the reviewed version or effective date"></div>
+                    <div class="originals-field"><label for="originals-license-terms-url">REVIEWED TERMS URL</label><input id="originals-license-terms-url" class="originals-input" type="url" maxlength="2000" placeholder="Enter the applicable official HTTPS URL"></div>
+                    <div class="originals-field"><label for="originals-license-reviewed-at">REVIEWED DATE</label><input id="originals-license-reviewed-at" class="originals-input" type="date"></div>
+                  </div>
+                  <div class="originals-license-actions">
+                    <button id="originals-license-open-btn" class="btn btn-ghost btn-sm" type="button" onclick="openOriginalNarrationTerms()" disabled>Open entered terms</button>
+                    <button id="originals-license-attest-btn" class="btn btn-primary btn-sm" type="button" onclick="attestOriginalNarrationLicense()" disabled>Record this asset review</button>
+                    <span class="originals-sensitive-note" style="margin:0;">Nothing is prefilled. The server records your signed-in admin identity for one exact SHA-256 asset and saved draft revision. Replacing audio requires a new review.</span>
                   </div>
                 </div>
               </div>
@@ -1308,6 +1323,7 @@ let selectedOriginalId = null;
 let selectedOriginal = null;
 let selectedOriginalStopIndex = 0;
 let selectedOriginalCitationIndex = 0;
+let selectedOriginalLicenseAssetId = null;
 let smokiesEditorialPacket = null;
 let selectedSmokiesEditorialId = null;
 let originalValidation = null;
@@ -2877,6 +2893,7 @@ function showOriginalEditor(original, isNew = false) {
   selectedOriginalId = isNew ? null : original.id;
   selectedOriginalStopIndex = 0;
   selectedOriginalCitationIndex = 0;
+  selectedOriginalLicenseAssetId = null;
   selectedOriginalVersion = null;
   originalRouteDrawing = false;
   originalRouteUndoStack = [];
@@ -2922,6 +2939,7 @@ function showOriginalEditor(original, isNew = false) {
         'originals-preview-chapter', 'originals-preview-variant',
         'original-stop-source-index', 'originals-simulator', 'originals-simulator-speed-input',
         'originals-simulator-direction', 'originals-simulator-time-scale',
+        'originals-license-asset',
         'originals-license-terms-id', 'originals-license-terms-version',
         'originals-license-terms-url', 'originals-license-reviewed-at'
       ].includes(event.target.id)) return;
@@ -2935,6 +2953,7 @@ function showOriginalEditor(original, isNew = false) {
   }
   originalEditorDirty = isNew;
   originalStopEditorDirty = false;
+  renderOriginalNarrationLicense();
 }
 
 function prettyJson(value) {
@@ -3069,6 +3088,7 @@ function markOriginalContentDirty() {
   }
   clearOriginalPreviewLink('Save changes before creating another app preview link.');
   renderOriginalVersionComparison();
+  renderOriginalNarrationLicense();
 }
 
 async function saveOriginalDraft() {
@@ -3604,6 +3624,7 @@ function renderOriginalPreview(manifestOverride = null) {
       document.getElementById('originals-route').innerHTML = `<div class="originals-empty" style="margin:18px;color:var(--red);">${esc(e.message)}</div>`;
       document.getElementById('originals-stops').innerHTML = '<div class="originals-empty">Fix manifest JSON.</div>';
       document.getElementById('originals-stop-card').style.display = 'none';
+      renderOriginalNarrationLicense();
       return;
     }
   }
@@ -3624,6 +3645,7 @@ function renderOriginalPreview(manifestOverride = null) {
   document.getElementById('originals-route-caption').textContent = `${coordinates.length} route points · ${route.direction || 'direction unset'}`;
   renderOriginalRoute(coordinates, stops, route.distance_m);
   renderOriginalStops(stops);
+  renderOriginalNarrationLicense();
 }
 
 function formatDistance(value) {
@@ -4591,63 +4613,179 @@ function originalNarrationRecordForStop(stop) {
   return selectedOriginal.uploaded_assets.find(asset => asset.id === stop.audio_asset_id) || null;
 }
 
-function renderOriginalNarrationLicense(record) {
+function originalNarrationLicenseAttestationComplete(record, expectedSha256) {
+  if (!record || record.sha256 !== expectedSha256) return false;
+  const metadata = record.generator_metadata && typeof record.generator_metadata === 'object'
+    ? record.generator_metadata
+    : null;
+  const attestation = metadata && metadata.license_attestation && typeof metadata.license_attestation === 'object'
+    ? metadata.license_attestation
+    : null;
+  return Boolean(
+    metadata
+    && metadata.provider
+    && metadata.license_status === 'attested'
+    && attestation
+    && String(attestation.terms_id || '').trim()
+    && String(attestation.terms_url || '').trim().startsWith('https://')
+    && String(attestation.terms_version || '').trim()
+    && /^\d{4}-\d{2}-\d{2}$/.test(String(attestation.reviewed_at || '').slice(0, 10))
+    && String(attestation.attested_at || '').trim()
+    && Number.isInteger(attestation.attested_by_admin_user_id)
+    && attestation.attested_by_admin_user_id > 0
+  );
+}
+
+function originalNarrationLicenseEntries() {
+  const manifest = selectedOriginal && (selectedOriginal.original_manifest || selectedOriginal.manifest) || {};
+  // V3 manifest.stories is authoritative and includes auto-cued and selectable-only stories.
+  // V1 uses stops. Do not derive the review set from a chapter delivery plan.
+  const references = Array.isArray(manifest.stories)
+    ? manifest.stories
+    : Array.isArray(manifest.stops) ? manifest.stops : [];
+  const manifestAssets = new Map(
+    (Array.isArray(manifest.assets) ? manifest.assets : [])
+      .filter(asset => asset && asset.kind === 'narration' && asset.id)
+      .map(asset => [String(asset.id), asset])
+  );
+  const currentNarrationRecords = new Map(
+    (Array.isArray(selectedOriginal && selectedOriginal.uploaded_assets) ? selectedOriginal.uploaded_assets : [])
+      .filter(asset => asset && asset.current !== false && asset.kind === 'narration' && asset.id)
+      .map(asset => [String(asset.id), asset])
+  );
+  const seen = new Set();
+  return references.reduce((entries, reference, index) => {
+    const assetId = String(reference && reference.audio_asset_id || '').trim();
+    if (!assetId || seen.has(assetId)) return entries;
+    seen.add(assetId);
+    const manifestAsset = manifestAssets.get(assetId) || null;
+    const record = currentNarrationRecords.get(assetId) || null;
+    const expectedSha256 = String(manifestAsset && manifestAsset.sha256 || '').trim().toLowerCase();
+    const exact = Boolean(
+      /^[a-f0-9]{64}$/.test(expectedSha256)
+      && record
+      && String(record.sha256 || '').trim().toLowerCase() === expectedSha256
+    );
+    const metadata = record && record.generator_metadata && typeof record.generator_metadata === 'object'
+      ? record.generator_metadata
+      : null;
+    const complete = exact && originalNarrationLicenseAttestationComplete(record, expectedSha256);
+    let state = 'REVIEW REQUIRED';
+    if (!manifestAsset || !/^[a-f0-9]{64}$/.test(expectedSha256)) state = 'MANIFEST SHA MISSING';
+    else if (!record) state = 'CURRENT ASSET MISSING';
+    else if (!exact) state = 'SHA MISMATCH';
+    else if (!metadata || !metadata.provider) state = 'MANUAL RIGHTS REVIEW';
+    else if (complete) state = 'RECORDED';
+    entries.push({
+      assetId,
+      title: String(reference && reference.title || assetId),
+      kind: String(reference && reference.kind || (Array.isArray(manifest.stories) ? 'story' : 'stop')),
+      sequence: Number(reference && reference.sequence) || index + 1,
+      manifestAsset,
+      record,
+      metadata,
+      expectedSha256,
+      exact,
+      complete,
+      state,
+    });
+    return entries;
+  }, []);
+}
+
+function selectOriginalNarrationLicenseAsset(assetId) {
+  selectedOriginalLicenseAssetId = String(assetId || '').trim() || null;
+  renderOriginalNarrationLicense();
+}
+
+function renderOriginalNarrationLicense(preferredRecord = null) {
   const panel = document.getElementById('originals-narration-license-panel');
   const status = document.getElementById('originals-narration-license-status');
   const copy = document.getElementById('originals-narration-license-copy');
   const button = document.getElementById('originals-license-attest-btn');
   const openButton = document.getElementById('originals-license-open-btn');
+  const selector = document.getElementById('originals-license-asset');
+  const assetList = document.getElementById('originals-license-assets');
   const fields = [
     document.getElementById('originals-license-terms-id'),
     document.getElementById('originals-license-terms-version'),
     document.getElementById('originals-license-terms-url'),
     document.getElementById('originals-license-reviewed-at')
   ];
-  if (!panel || !status || !copy || !button || !openButton || fields.some(field => !field)) return;
-  const metadata = record && record.generator_metadata && typeof record.generator_metadata === 'object'
-    ? record.generator_metadata
-    : null;
-  const attestation = metadata && metadata.license_attestation && typeof metadata.license_attestation === 'object'
-    ? metadata.license_attestation
-    : null;
-  const generated = Boolean(metadata && metadata.provider);
-  const attested = Boolean(generated && metadata.license_status === 'attested' && attestation);
-  panel.className = `originals-license-panel${attested ? ' attested' : generated ? ' needs-review' : ''}`;
-  fields.forEach(field => { field.disabled = !generated; });
-  button.disabled = !generated;
-  openButton.disabled = !generated;
+  if (!panel || !status || !copy || !button || !openButton || !selector || !assetList || fields.some(field => !field)) return;
+  const entries = originalNarrationLicenseEntries();
+  if (preferredRecord && entries.some(entry => entry.assetId === preferredRecord.id)) {
+    selectedOriginalLicenseAssetId = preferredRecord.id;
+  }
+  if (!entries.some(entry => entry.assetId === selectedOriginalLicenseAssetId)) {
+    selectedOriginalLicenseAssetId = entries[0] && entries[0].assetId || null;
+  }
+  const selected = entries.find(entry => entry.assetId === selectedOriginalLicenseAssetId) || null;
+  const exactCount = entries.filter(entry => entry.exact).length;
+  const completeCount = entries.filter(entry => entry.complete).length;
+  const draftRevision = Number(selectedOriginal && selectedOriginal.draft_revision);
+  const allExpectedReadBackComplete = entries.length > 0
+    && entries.every(entry => entry.exact && entry.complete);
+  const allComplete = Boolean(
+    selectedOriginalId
+    && !originalEditorDirty
+    && Number.isInteger(draftRevision)
+    && draftRevision >= 1
+    && allExpectedReadBackComplete
+  );
+  panel.className = `originals-license-panel${allComplete ? ' attested' : entries.length ? ' needs-review' : ''}`;
+  selector.disabled = !entries.length;
+  selector.innerHTML = entries.length
+    ? entries.map(entry => `<option value="${esc(entry.assetId)}">${esc(`${entry.sequence} · ${entry.title} · ${entry.state}`)}</option>`).join('')
+    : '<option value="">No current manifest narration</option>';
+  selector.value = selected && selected.assetId || '';
+  assetList.innerHTML = entries.map(entry => `<button type="button" class="originals-license-asset${entry.assetId === selectedOriginalLicenseAssetId ? ' active' : ''}" data-original-license-asset="${esc(entry.assetId)}" onclick="selectOriginalNarrationLicenseAsset(this.dataset.originalLicenseAsset)">
+    <span><strong>${esc(`${entry.sequence} · ${entry.title}`)}</strong><span>${esc(entry.assetId)} · ${entry.expectedSha256 ? esc(entry.expectedSha256.slice(0, 12)) + '…' : 'NO MANIFEST SHA'} · ${esc(originalHumanLabel(entry.kind))}</span></span>
+    <span class="originals-license-asset-state">${esc(entry.state)}</span>
+  </button>`).join('');
 
-  document.getElementById('originals-license-terms-id').value = attestation && attestation.terms_id
-    ? attestation.terms_id
-    : metadata && metadata.license || '';
-  document.getElementById('originals-license-terms-version').value = attestation && attestation.terms_version || '';
-  document.getElementById('originals-license-terms-url').value = attestation && attestation.terms_url || '';
-  document.getElementById('originals-license-reviewed-at').value = attestation && attestation.reviewed_at
-    ? String(attestation.reviewed_at).slice(0, 10)
-    : '';
+  // Legal evidence is never inferred or copied from a prior attestation.
+  fields.forEach(field => { field.value = ''; });
+  const generated = Boolean(selected && selected.metadata && selected.metadata.provider);
+  const canReview = Boolean(
+    selectedOriginalId
+    && !originalEditorDirty
+    && selected
+    && selected.exact
+    && generated
+    && Number.isInteger(draftRevision)
+    && draftRevision >= 1
+  );
+  fields.forEach(field => { field.disabled = !canReview; });
+  button.disabled = !canReview;
+  openButton.disabled = !canReview;
+  button.textContent = selected && selected.complete ? 'Verify stored review' : 'Record this asset review';
 
-  if (!record) {
+  if (!entries.length) {
     status.textContent = 'NOT AVAILABLE';
-    copy.textContent = 'Attach narration to review its license provenance.';
-    button.textContent = 'Record reviewed terms';
+    copy.textContent = 'The saved manifest does not reference any narration assets.';
+    return;
+  }
+  if (allComplete) status.textContent = `COMPLETE · ${completeCount}/${entries.length} EXACT`;
+  else if (originalEditorDirty) status.textContent = `SAVE DRAFT · ${completeCount}/${entries.length} RECORDED`;
+  else if (exactCount !== entries.length) status.textContent = `BLOCKED · ${exactCount}/${entries.length} EXACT`;
+  else status.textContent = `${completeCount ? 'IN PROGRESS' : 'REVIEW REQUIRED'} · ${completeCount}/${entries.length} RECORDED`;
+
+  if (!selected || !selected.exact) {
+    copy.textContent = `${selected ? selected.title : 'Selected narration'} is blocked: ${selected ? originalHumanLabel(selected.state) : 'no exact current asset'}. The current uploaded narration SHA-256 must exactly match the saved manifest before legal review can be recorded.`;
     return;
   }
   if (!generated) {
-    status.textContent = 'MANUAL UPLOAD';
-    copy.textContent = 'This recording has no server generator provenance. Confirm its usage rights in the editorial media-license review.';
-    button.textContent = 'Not required here';
+    copy.textContent = `${selected.title} has no server generator provenance. Its rights must be resolved through the separate editorial media-license review; this generator attestation cannot be used.`;
     return;
   }
-  const provider = originalNarrationProviderName(metadata.provider);
-  if (attested) {
-    status.textContent = `ATTESTED · ${provider}`;
-    copy.textContent = `Server record: ${attestation.terms_id} · ${attestation.terms_version} · reviewed ${String(attestation.reviewed_at).slice(0, 10)} · recorded ${originalReportTime(Date.parse(attestation.attested_at) / 1000)}.`;
-    button.textContent = 'Update reviewed terms';
+  const provider = originalNarrationProviderName(selected.metadata.provider);
+  const attestation = selected.metadata.license_attestation;
+  if (selected.complete) {
+    copy.textContent = `${selected.title} · ${provider} · exact SHA-256 ${selected.expectedSha256}. Server record: ${attestation.terms_id} · ${attestation.terms_version} · reviewed ${String(attestation.reviewed_at).slice(0, 10)} · recorded ${originalReportTime(Date.parse(attestation.attested_at) / 1000)}. This evidence is immutable; a different review requires a separate replacement flow.`;
     return;
   }
-  status.textContent = `REVIEW REQUIRED · ${provider}`;
-  copy.textContent = 'Open the provider’s current commercial terms, verify this narration may be published in Trailhead, then record the exact terms URL, version, and review date.';
-  button.textContent = 'Record reviewed terms';
+  copy.textContent = `${selected.title} · ${provider} · exact SHA-256 ${selected.expectedSha256}. The signed-in admin must personally review the applicable provider terms and restrictions before recording this one asset.`;
 }
 
 function fillOriginalStopEditor(stop) {
@@ -4855,13 +4993,20 @@ async function attestOriginalNarrationLicense() {
   const button = document.getElementById('originals-license-attest-btn');
   const status = document.getElementById('originals-narration-license-status');
   try {
-    const { manifest, assetId } = selectedOriginalNarrationTarget();
-    const stop = Array.isArray(manifest.stops) ? manifest.stops[selectedOriginalStopIndex] : null;
-    const record = originalNarrationRecordForStop(stop);
-    const metadata = record && record.generator_metadata && typeof record.generator_metadata === 'object'
-      ? record.generator_metadata
-      : null;
-    if (!record || !metadata || !metadata.provider) throw new Error('Attach generated narration before recording provider terms');
+    if (!selectedOriginalId) throw new Error('Save the draft before recording a license review');
+    if (originalEditorDirty) throw new Error('Save draft changes before recording a license review');
+    const entry = originalNarrationLicenseEntries()
+      .find(item => item.assetId === selectedOriginalLicenseAssetId);
+    if (!entry || !entry.record || !entry.metadata || !entry.metadata.provider) {
+      throw new Error('Choose an exact current generated narration asset');
+    }
+    if (!entry.exact) throw new Error('The current narration does not match the saved manifest SHA-256');
+    const assetId = entry.assetId;
+    const expectedSha256 = entry.expectedSha256;
+    const expectedDraftRevision = Number(selectedOriginal.draft_revision);
+    if (!Number.isInteger(expectedDraftRevision) || expectedDraftRevision < 1) {
+      throw new Error('The saved draft revision is unavailable');
+    }
     const termsId = document.getElementById('originals-license-terms-id').value.trim();
     const termsUrl = document.getElementById('originals-license-terms-url').value.trim();
     const termsVersion = document.getElementById('originals-license-terms-version').value.trim();
@@ -4873,36 +5018,63 @@ async function attestOriginalNarrationLicense() {
     if (!termsVersion) throw new Error('Enter the reviewed terms version or effective date');
     if (!/^\d{4}-\d{2}-\d{2}$/.test(reviewedAt)) throw new Error('Choose the date the terms were reviewed');
     if (reviewedAt > new Date().toISOString().slice(0, 10)) throw new Error('The review date cannot be in the future');
+    const provider = originalNarrationProviderName(entry.metadata.provider);
+    const elevenLabsChecklist = entry.metadata.provider === 'elevenlabs'
+      ? 'You personally reviewed the applicable ElevenLabs Terms of Service, Voice Library Addendum, and Prohibited Use Policy; confirmed this generation was on a paid plan and was not a Beta Service under the Beta Services Addendum; and verified the input rights plus all voice-specific, attribution, account, and Trailhead distribution restrictions.'
+      : `You personally reviewed the applicable ${provider} commercial terms and verified the paid-plan, non-beta, input-rights, voice-specific, attribution, account, and Trailhead distribution restrictions.`;
     const confirmed = window.confirm(
-      `Confirm you reviewed ${originalNarrationProviderName(metadata.provider)} terms ${termsVersion} at the supplied URL and verified this narration may be published in Trailhead. The server will record your admin identity for this exact audio asset.`
+      `You are the signed-in Trailhead administrator. ${elevenLabsChecklist} Confirm you personally verified that exact asset ${assetId}, SHA-256 ${expectedSha256}, in saved draft revision ${expectedDraftRevision} may be used within Trailhead under terms ${termsVersion} at the entered URL. This does not approve preview or publication. The server will record your admin identity for this one asset. Continue?`
     );
-    if (!confirmed) return;
+    if (!confirmed) {
+      renderOriginalNarrationLicense();
+      return;
+    }
     button.disabled = true;
     status.textContent = 'RECORDING REVIEW…';
-    const result = await api(`/api/admin/originals/${encodeURIComponent(selectedOriginalId)}/assets/${encodeURIComponent(assetId)}/license-attestation`, {
+    await api(`/api/admin/originals/${encodeURIComponent(selectedOriginalId)}/assets/${encodeURIComponent(assetId)}/license-attestation`, {
       method: 'POST',
       body: JSON.stringify({
+        expected_sha256: expectedSha256,
+        expected_draft_revision: expectedDraftRevision,
         terms_id: termsId,
         terms_url: termsUrl,
         terms_version: termsVersion,
         reviewed_at: reviewedAt
       })
     });
-    record.generator_metadata = {
-      ...metadata,
-      license_status: result.license_status,
-      license_attestation: result.license_attestation
-    };
-    renderOriginalNarrationLicense(record);
-    document.getElementById('originals-narration-status').textContent = `VERIFIED · ${originalNarrationProviderName(metadata.provider)} · ${formatBytes(record.bytes)} · LICENSE ATTESTED`;
+    const refreshed = await api(`/api/admin/originals/${encodeURIComponent(selectedOriginalId)}`);
+    selectedOriginal = refreshed;
+    if (Number(refreshed.draft_revision) !== expectedDraftRevision) {
+      throw new Error('The saved draft revision changed before the license review could be verified');
+    }
+    const readBack = originalNarrationLicenseEntries().find(item => item.assetId === assetId);
+    const readBackAttestation = readBack && readBack.metadata && readBack.metadata.license_attestation;
+    if (
+      !readBack
+      || !readBack.exact
+      || readBack.expectedSha256 !== expectedSha256
+      || !readBack.complete
+      || !readBackAttestation
+      || readBackAttestation.terms_id !== termsId
+      || readBackAttestation.terms_url !== termsUrl
+      || readBackAttestation.terms_version !== termsVersion
+      || String(readBackAttestation.reviewed_at || '').slice(0, 10) !== reviewedAt
+    ) {
+      throw new Error('The server did not read back the exact submitted attestation for the exact narration asset');
+    }
+    renderOriginalNarrationLicense(readBack.record);
+    const manifest = selectedOriginal.original_manifest || selectedOriginal.manifest || {};
+    const stop = Array.isArray(manifest.stops) ? manifest.stops[selectedOriginalStopIndex] : null;
+    if (stop && stop.audio_asset_id === assetId) {
+      document.getElementById('originals-narration-status').textContent = `VERIFIED · ${provider} · ${formatBytes(readBack.record.bytes)} · LICENSE ATTESTED`;
+    }
     if (!originalEditorDirty) await validateOriginalDraft(false);
     else renderOriginalReadiness(null, 'SAVE TO REFRESH READINESS');
-    toast('Narration license review recorded by the server', 'originals-ok');
+    toast(`Narration license review verified for ${assetId}`, 'originals-ok');
   } catch(e) {
+    renderOriginalNarrationLicense();
     status.textContent = 'REVIEW NOT RECORDED';
     toast('Narration license: ' + e.message, 'err');
-  } finally {
-    button.disabled = false;
   }
 }
 

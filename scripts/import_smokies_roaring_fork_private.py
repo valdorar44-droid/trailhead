@@ -41,6 +41,7 @@ from PIL import Image  # noqa: E402
 from db.store import (  # noqa: E402
     _probe_original_asset_file,
     _validate_trip_pack_fields,
+    reconcile_original_generator_license_metadata,
 )
 from scripts import build_smokies_roaring_fork_private_packet as packet_builder  # noqa: E402
 
@@ -744,6 +745,25 @@ def _apply_database(
                 "is_current": 1,
             }
             if existing is not None:
+                if spec["kind"] == "narration":
+                    try:
+                        existing_generator = json.loads(
+                            existing["generator_metadata_json"]
+                        )
+                        reconciled_generator = (
+                            reconcile_original_generator_license_metadata(
+                                existing_generator,
+                                generator,
+                            )
+                        )
+                    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                        raise PrivateImportError(
+                            "immutable narration generator metadata differs for "
+                            f"{spec['asset_id']}"
+                        ) from exc
+                    expected["generator_metadata_json"] = _canonical_json(
+                        reconciled_generator
+                    )
                 if any(existing[key] != value for key, value in expected.items()):
                     raise PrivateImportError(
                         f"immutable asset metadata differs for {spec['asset_id']}"

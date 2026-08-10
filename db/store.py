@@ -116,6 +116,49 @@ def _original_generator_license_attestation_complete(metadata: object) -> bool:
     return reviewed.year >= 2000 and attested.year >= 2000
 
 
+def _original_generator_provenance_metadata(metadata: object) -> dict:
+    """Return immutable generator provenance without server-owned license state."""
+    if not isinstance(metadata, dict):
+        raise ValueError("Original asset generator metadata is invalid")
+    provenance = copy.deepcopy(metadata)
+    provenance.pop("license_status", None)
+    provenance.pop("license_attestation", None)
+    return provenance
+
+
+def reconcile_original_generator_license_metadata(
+    existing_metadata: object,
+    incoming_metadata: object,
+) -> dict:
+    """Preserve a valid server-owned license overlay on matching provenance."""
+    existing = copy.deepcopy(existing_metadata)
+    incoming = copy.deepcopy(incoming_metadata)
+    if not isinstance(existing, dict) or not isinstance(incoming, dict):
+        raise ValueError("Original asset generator metadata is invalid")
+    if (
+        _original_generator_provenance_metadata(existing)
+        != _original_generator_provenance_metadata(incoming)
+    ):
+        raise ValueError("Original asset generator provenance is immutable")
+
+    existing_status = existing.get("license_status")
+    existing_has_attestation = "license_attestation" in existing
+    if existing_status == "attested" or existing_has_attestation:
+        if not _original_generator_license_attestation_complete(existing):
+            raise ValueError("Existing Original narration license attestation is incomplete")
+        result = _original_generator_provenance_metadata(incoming)
+        result["license_status"] = "attested"
+        result["license_attestation"] = copy.deepcopy(existing["license_attestation"])
+        return result
+    if existing_status not in {None, "unverified"}:
+        raise ValueError("Existing Original narration license status is invalid")
+
+    result = _original_generator_provenance_metadata(incoming)
+    if existing_status == "unverified":
+        result["license_status"] = "unverified"
+    return result
+
+
 def _backfill_original_generator_licenses(db: sqlite3.Connection) -> None:
     """Mark legacy/generated license claims unverified; never fabricate an attestation."""
     try:
@@ -11537,6 +11580,21 @@ def _original_number(
 ORIGINAL_ASSET_KINDS = {"narration", "image", "transcript", "route", "other"}
 
 
+class OriginalAssetSha256ConflictError(ValueError):
+    def __init__(self, expected_sha256: str, current_sha256: str):
+        self.expected_sha256 = str(expected_sha256)
+        self.current_sha256 = str(current_sha256)
+        super().__init__("Original asset changed after it was selected")
+
+
+class OriginalLicenseAttestationConflictError(ValueError):
+    def __init__(self, pack_id: str, asset_id: str, sha256: str):
+        self.pack_id = str(pack_id)
+        self.asset_id = str(asset_id)
+        self.sha256 = str(sha256)
+        super().__init__("Original narration already has different or incomplete license evidence")
+
+
 def _original_asset_mime_allowed(kind: str, mime_type: str) -> bool:
     if kind == "narration":
         return mime_type in {"audio/wav", "audio/mpeg"}
@@ -11830,6 +11888,13 @@ def save_authored_original_asset_record(
     generator_metadata, generator_metadata_json = _json_object(
         generator_metadata or {}, "Original asset generator metadata", 32 * 1024,
     )
+    if (
+        "license_attestation" in generator_metadata
+        or generator_metadata.get("license_status") not in {None, "unverified"}
+    ):
+        raise ValueError(
+            "Original narration license state must be created by the server attestation flow"
+        )
     public_path = _original_asset_public_path(pack_id, asset_id, sha256)
     now = int(time.time())
     db = _conn()
@@ -11846,6 +11911,16 @@ def save_authored_original_asset_record(
                WHERE pack_id=? AND asset_id=? AND sha256=?""",
             (pack_id, asset_id, sha256),
         ).fetchone()
+        if existing:
+            try:
+                reconcile_original_generator_license_metadata(
+                    _decode_pack_json(existing["generator_metadata_json"], None),
+                    generator_metadata,
+                )
+            except ValueError as exc:
+                raise ValueError(
+                    "Original content-addressed asset metadata is immutable"
+                ) from exc
         if existing and (
             existing["kind"] != kind
             or existing["mime_type"] != mime_type
@@ -11853,7 +11928,6 @@ def save_authored_original_asset_record(
             or existing["public_path"] != public_path
             or existing["media_metadata_json"] != media_metadata_json
             or existing["transcript_sha256"] != transcript_sha256
-            or existing["generator_metadata_json"] != generator_metadata_json
         ):
             raise ValueError("Original content-addressed asset metadata is immutable")
         db.execute(
@@ -11897,15 +11971,26 @@ def attest_authored_original_generator_license(
     pack_id: str,
     asset_id: str,
     *,
+    expected_sha256: str,
+    expected_draft_revision: int,
     terms_id: str,
     terms_url: str,
     terms_version: str,
     reviewed_at: str,
     admin_user_id: int,
 ) -> dict:
-    """Attach a server-owned admin attestation to the current generated narration."""
+    """Attach license evidence to one exact current narration and draft revision."""
     pack_id = _validate_canonical_id(pack_id, "Original id")
     asset_id = _validate_canonical_id(asset_id, "Original asset id")
+    expected_sha256 = str(expected_sha256 or "").strip()
+    if not re.fullmatch(r"[a-f0-9]{64}", expected_sha256):
+        raise ValueError("Original narration expected sha256 is invalid")
+    if (
+        isinstance(expected_draft_revision, bool)
+        or not isinstance(expected_draft_revision, int)
+        or expected_draft_revision < 1
+    ):
+        raise ValueError("Original expected draft revision must be a positive integer")
     clean_terms_id = str(terms_id or "").strip()
     clean_terms_url = str(terms_url or "").strip()
     clean_terms_version = str(terms_version or "").strip()
@@ -11915,10 +12000,17 @@ def attest_authored_original_generator_license(
         raise ValueError("Original narration license terms URL must use HTTPS")
     if not clean_terms_version or len(clean_terms_version) > 120:
         raise ValueError("Original narration license terms version is required")
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(reviewed_at or "").strip()):
+        raise ValueError("Original narration license reviewed_at must use YYYY-MM-DD")
     normalized_reviewed_at = _normalize_original_citation_review_date(reviewed_at)
     if not normalized_reviewed_at:
         raise ValueError("Original narration license reviewed_at is required")
-    attested_at = _datetime.now(_timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    desired_attestation = {
+        "terms_id": clean_terms_id,
+        "terms_url": clean_terms_url,
+        "terms_version": clean_terms_version,
+        "reviewed_at": normalized_reviewed_at,
+    }
     db = _conn()
     try:
         db.execute("BEGIN IMMEDIATE")
@@ -11927,6 +12019,16 @@ def attest_authored_original_generator_license(
         ).fetchone()
         if not admin or not bool(admin["is_admin"]):
             raise PermissionError("Original narration license attestation requires an admin")
+        pack = db.execute(
+            """SELECT draft_revision FROM authored_trip_packs
+               WHERE id=? AND content_kind='original_drive'""",
+            (pack_id,),
+        ).fetchone()
+        if not pack:
+            raise ValueError("Trailhead Original not found")
+        current_revision = int(pack["draft_revision"])
+        if current_revision != expected_draft_revision:
+            raise RevisionConflictError(current_revision)
         row = db.execute(
             """SELECT * FROM authored_original_assets
                WHERE pack_id=? AND asset_id=? AND is_current=1""",
@@ -11934,28 +12036,95 @@ def attest_authored_original_generator_license(
         ).fetchone()
         if not row:
             raise ValueError("Original narration asset not found")
+        if row["sha256"] != expected_sha256:
+            raise OriginalAssetSha256ConflictError(
+                expected_sha256,
+                row["sha256"],
+            )
         if row["kind"] != "narration":
             raise ValueError("Only generated Original narration can carry a license attestation")
+        if not _original_asset_file_verified(dict(row), force_hash=True):
+            raise ValueError("Original narration failed server integrity verification")
         metadata = _decode_pack_json(row["generator_metadata_json"], {})
         if not isinstance(metadata, dict) or not str(metadata.get("provider") or "").strip():
             raise ValueError("Original narration has no generator provenance to attest")
-        metadata["license_status"] = "attested"
-        metadata["license_attestation"] = {
-            "terms_id": clean_terms_id,
-            "terms_url": clean_terms_url,
-            "terms_version": clean_terms_version,
-            "reviewed_at": normalized_reviewed_at,
-            "attested_at": attested_at,
-            "attested_by_admin_user_id": int(admin_user_id),
+        provider = str(metadata["provider"]).strip().lower()
+        provider_terms_hosts = {
+            "elevenlabs": {"elevenlabs.io", "www.elevenlabs.io"},
+            "cartesia": {"cartesia.ai", "www.cartesia.ai"},
         }
-        if not _original_generator_license_attestation_complete(metadata):
-            raise ValueError("Original narration license attestation is incomplete")
-        metadata_json = json.dumps(metadata, separators=(",", ":"), sort_keys=True)
-        db.execute(
-            """UPDATE authored_original_assets SET generator_metadata_json=?,updated_at=?
-               WHERE pack_id=? AND asset_id=? AND sha256=?""",
-            (metadata_json, int(time.time()), pack_id, asset_id, row["sha256"]),
+        if provider not in provider_terms_hosts:
+            raise ValueError("Original narration generator provider is unsupported")
+        parsed_terms_url = _urlsplit(clean_terms_url)
+        if (
+            parsed_terms_url.scheme != "https"
+            or parsed_terms_url.hostname not in provider_terms_hosts[provider]
+            or parsed_terms_url.username is not None
+            or parsed_terms_url.password is not None
+            or bool(parsed_terms_url.fragment)
+        ):
+            raise ValueError(
+                f"Original {provider.title()} narration terms must use an approved HTTPS URL"
+            )
+
+        existing_attestation = metadata.get("license_attestation")
+        existing_claim = metadata.get("license_status") == "attested" or (
+            "license_attestation" in metadata
         )
+        replayed = False
+        if existing_claim:
+            if not _original_generator_license_attestation_complete(metadata):
+                raise OriginalLicenseAttestationConflictError(
+                    pack_id,
+                    asset_id,
+                    expected_sha256,
+                )
+            if not isinstance(existing_attestation, dict) or any(
+                existing_attestation.get(key) != value
+                for key, value in desired_attestation.items()
+            ):
+                raise OriginalLicenseAttestationConflictError(
+                    pack_id,
+                    asset_id,
+                    expected_sha256,
+                )
+            replayed = True
+        else:
+            if metadata.get("license_status") not in {None, "unverified"}:
+                raise OriginalLicenseAttestationConflictError(
+                    pack_id,
+                    asset_id,
+                    expected_sha256,
+                )
+            attested_at = _datetime.now(_timezone.utc).isoformat(
+                timespec="seconds"
+            ).replace("+00:00", "Z")
+            metadata["license_status"] = "attested"
+            metadata["license_attestation"] = {
+                **desired_attestation,
+                "attested_at": attested_at,
+                "attested_by_admin_user_id": int(admin_user_id),
+            }
+            if not _original_generator_license_attestation_complete(metadata):
+                raise ValueError("Original narration license attestation is incomplete")
+            metadata_json = json.dumps(metadata, separators=(",", ":"), sort_keys=True)
+            updated = db.execute(
+                """UPDATE authored_original_assets
+                   SET generator_metadata_json=?,updated_at=?
+                   WHERE pack_id=? AND asset_id=? AND sha256=? AND is_current=1""",
+                (
+                    metadata_json,
+                    int(time.time()),
+                    pack_id,
+                    asset_id,
+                    expected_sha256,
+                ),
+            )
+            if updated.rowcount != 1:
+                raise OriginalAssetSha256ConflictError(
+                    expected_sha256,
+                    row["sha256"],
+                )
         db.commit()
     except Exception:
         db.rollback()
@@ -11965,8 +12134,11 @@ def attest_authored_original_generator_license(
     return {
         "pack_id": pack_id,
         "asset_id": asset_id,
+        "sha256": expected_sha256,
+        "draft_revision": current_revision,
         "license_status": "attested",
         "license_attestation": metadata["license_attestation"],
+        "replayed": replayed,
     }
 
 

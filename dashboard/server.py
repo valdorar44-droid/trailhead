@@ -245,6 +245,7 @@ from db.store import (
     ORIGINALS_LONG_FORM_REQUIRED_CAPABILITIES,
     OriginalFeedbackTokenError, OriginalFeedbackConflictError,
     OriginalFeedbackRateLimitError,
+    OriginalAssetSha256ConflictError, OriginalLicenseAttestationConflictError,
     save_authored_trip_pack_draft, get_authored_trip_pack_admin,
     list_authored_trip_pack_versions_admin, list_authored_trip_packs_admin,
     publish_authored_trip_pack, list_published_trip_packs, get_published_trip_pack,
@@ -13233,13 +13234,19 @@ class OriginalNarrationAssetRequest(BaseModel):
 class OriginalGeneratorLicenseAttestationRequest(BaseModel):
     model_config = {"extra": "forbid", "strict": True}
 
+    expected_sha256: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[a-f0-9]{64}$",
+    )
+    expected_draft_revision: int = Field(ge=1)
     terms_id: str = Field(min_length=3, max_length=200, pattern=r"^[A-Za-z0-9_.:-]+$")
     terms_url: str = Field(max_length=2000, pattern=r"^https://[^\s]+$")
     terms_version: str = Field(min_length=1, max_length=120)
     reviewed_at: str = Field(
         min_length=10,
-        max_length=40,
-        pattern=r"^\d{4}-\d{2}-\d{2}(?:T.+(?:Z|[+-]\d{2}:\d{2}))?$",
+        max_length=10,
+        pattern=r"^\d{4}-\d{2}-\d{2}$",
     )
 
 
@@ -14767,6 +14774,21 @@ def _raise_account_store_error(exc: Exception) -> None:
             "code": "original_feedback_rate_limited",
             "message": str(exc) or "Feedback limit reached; try again later.",
         })
+    if isinstance(exc, OriginalAssetSha256ConflictError):
+        raise HTTPException(409, {
+            "code": "original_asset_sha256_conflict",
+            "message": "The narration asset changed before its license review was recorded.",
+            "expected_sha256": exc.expected_sha256,
+            "current_sha256": exc.current_sha256,
+        })
+    if isinstance(exc, OriginalLicenseAttestationConflictError):
+        raise HTTPException(409, {
+            "code": "original_license_attestation_conflict",
+            "message": "This narration already has a different license attestation.",
+            "pack_id": exc.pack_id,
+            "asset_id": exc.asset_id,
+            "sha256": exc.sha256,
+        })
     if isinstance(exc, IdempotencyConflictError):
         raise HTTPException(409, {
             "code": "idempotency_conflict",
@@ -15422,6 +15444,8 @@ async def api_admin_attest_original_generator_license(
         return attest_authored_original_generator_license(
             pack_id,
             asset_id,
+            expected_sha256=body.expected_sha256,
+            expected_draft_revision=body.expected_draft_revision,
             terms_id=body.terms_id,
             terms_url=body.terms_url,
             terms_version=body.terms_version,

@@ -2409,6 +2409,8 @@ class TrailheadOriginalsTests(unittest.TestCase):
             store.attest_authored_original_generator_license(
                 pack_id,
                 narration_id,
+                expected_sha256=record["sha256"],
+                expected_draft_revision=draft["draft_revision"],
                 terms_id="elevenlabs_commercial_terms",
                 terms_url="https://elevenlabs.io/terms-of-use",
                 terms_version="2026-07-01",
@@ -2418,6 +2420,8 @@ class TrailheadOriginalsTests(unittest.TestCase):
         attested = store.attest_authored_original_generator_license(
             pack_id,
             narration_id,
+            expected_sha256=record["sha256"],
+            expected_draft_revision=draft["draft_revision"],
             terms_id="elevenlabs_commercial_terms",
             terms_url="https://elevenlabs.io/terms-of-use",
             terms_version="2026-07-01",

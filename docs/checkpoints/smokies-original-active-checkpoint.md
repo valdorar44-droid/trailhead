@@ -1,6 +1,6 @@
 # Great Smoky Mountains Original — Active Checkpoint
 
-Last updated: 2026-08-08 (S3H capability-gated long-form playback complete)
+Last updated: 2026-08-10 (S4M SHA-pinned administrator-attestation hardening complete locally; not deployed)
 
 ## Resume protocol
 
@@ -1798,3 +1798,44 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 - Do not alter or replace a current narration asset between administrator review and attestation.
 - Do not invent terms metadata, administrator identity, or attestation time, and do not treat byte import as a verified licensed upload.
 - Do not run device preview, trusted publication validation, deploy, publish, regenerate narration, begin another chapter, or touch Cherokee/EBCI or other culturally gated material from this checkpoint.
+
+## S4M Roaring Fork administrator-attestation hardening closeout
+
+- Completed locally: 2026-08-10.
+- Branch: `feat/smokies-original-s2`.
+- Baseline/source HEAD: `003c506a700eb115a8e44355687a0533a06de436`.
+- The project owner authorized continuation in task `019fe9fb-cafa-75d3-b663-1e5051731cd5`. This stage implements and tests the operator contract only. It did not deploy code, change the production database or asset volume, perform an administrator attestation, create a narration profile, issue a preview token, run trusted validation, publish, regenerate narration, import another chapter, or touch culturally gated material.
+- Each attestation request now binds one exact current narration SHA-256 and the exact saved draft revision. The store rechecks both under `BEGIN IMMEDIATE`, rehashes the stored bytes, rechecks administrator status, and rejects stale draft or asset state without writing.
+- An exact retry is a no-op that preserves the first server-owned administrator identity, attestation time, legal record, and asset `updated_at`. Different terms, malformed partial evidence, caller-authored attested metadata, unsupported providers, unrelated provider hosts, future dates, date-times in place of calendar dates, images, missing provenance, and changed bytes all fail closed.
+- Replacing an attested narration preserves the historical attestation on the old digest and leaves the new current digest unverified. Same-byte generic upload and the purpose-built Roaring Fork importer preserve a complete server-owned overlay while continuing to reject generator-provenance drift. Database initialization also preserves complete evidence.
+- The standalone administrator panel is Manifest V1/V3 compatible. For the exact private Roaring Fork manifest it enumerates all thirteen narration assets from `manifest.stories`—five hard cues and eight selectable stories—binds each to the saved manifest SHA-256 and current uploaded record, keeps every legal field blank, and reports `COMPLETE` only after all thirteen exact records read back with complete server-owned evidence. It cannot derive completion from the five hard cues alone.
+- The administrator confirmation explicitly states that the legal action does not approve preview or publication. It links the official non-EEA and EEA/Switzerland/UK ElevenLabs Terms, Voice Library Addendum, Prohibited Use Policy, and Beta Services Addendum, and warns that the applicable contract must come from actual residence/account agreements rather than timezone or server location.
+- Current public page dates were checked only to prepare the review surface: both primary Terms pages displayed `31 March 2026`; the Voice Library Addendum displayed `6 March 2026`; the Prohibited Use Policy displayed `3 September 2025`; and the Beta Services Addendum displayed `13 November 2024`. These observations are not a signed-in administrator review, do not choose the applicable contract, and were not written into any production record or prefilled field.
+- Implementation identities before this checkpoint edit:
+  - `dashboard/admin.html`: `652dfc63dd4b3ca7072df85d715a4b74a62625122ebcf65e29a01c6dfec0ba9c`.
+  - `dashboard/admin.originals-license.test.mjs`: `416ee6811e063931512f5b7472bab29fb46e6e26e1b1e32c04174ead03382887`.
+  - `dashboard/server.py`: `c737c8c0caf97303988a8a56bf30f3290c91b55c0c8cd06c2c7f7cf9dbc97683`.
+  - `db/store.py`: `af186db1b88d1e43474e28e8440d2dcd73d31e50d35c4bbbc18de2fe8bfaafde`.
+  - `scripts/import_smokies_roaring_fork_private.py`: `6cac2f3841cf3af12eb48aaba6e2a7108d1aafddbc7b5a4762a194189d6c5bce`.
+- Verification passed: 219 focused Python tests plus 17 subtests; three standalone Studio JavaScript contract suites; Python compilation; and whitespace validation. Two environment-gated private-import E2E cases were skipped in this local run; their exact configured production-import path and readback remain represented by the unchanged S4L receipt. Coverage includes strict API parsing, server-owned identity/time, stale SHA and revision conflicts, forced byte rehash, exact replay, conflicting terms, provider-host binding, forged-overlay rejection, asset replacement, `init_db`, same-byte upload, exact importer replay, V1/V2/V3 compatibility, exact thirteen-record Roaring Fork UI membership, and existing Originals regressions.
+- The established long-form suite intentionally reports twelve source-drift failures because `roaring_fork_delivery_readiness_v1.json` binds the prior `dashboard/server.py` and `db/store.py` hashes. Those failures are retained as a fail-closed gate: no readiness evidence was rewritten and no trusted validation was run. A separate pre-existing vehicle-binding test also fails identically on untouched baseline `003c506a`; the temporary baseline worktree used to confirm that fact was removed.
+- The exact configured-import receipt remains unchanged: `originals/smokies/roaring_fork_private_import_receipt_v1.json` SHA-256 `8890c1e1431654a03feb1aa4ee4376ab50504e9841b4d8a06f0a3c003b0ebefd`. The unchanged S4L readback records thirteen unverified narration records and seven artwork records; this local stage made no production query or mutation and does not claim a fresher production observation.
+- Protected files remain unchanged:
+  - `dashboard/explore_serving_index_v2.json`: `c0726d8166ab7d110f437ff4e6acde7aa09702354f053103e3f6630a0129b869`.
+  - `docs/app-store-copy.md`: `126af147b650c2f1077fb73036d26f34f940422c07a3193bade047c73b5c225a`.
+- Release-facing gates remain false: `admin_license_attestation_complete`, `verified_private_upload_complete`, `authenticated_device_preview_complete`, `trusted_publication_validation_complete`, and `public_release`.
+
+### Exact next action after S4M
+
+1. Review and separately authorize deployment of the hardened server/operator code; a branch commit is not a production deployment.
+2. After that exact code is deployed, a real signed-in target administrator must personally determine the applicable ElevenLabs contract and review the exact primary/supporting terms, account agreement, paid-plan status at generation, non-beta status, script/input rights, James voice restrictions, attribution duties, and Trailhead distribution rights. Enter the actual terms identifier, URL, displayed version, and real review date; do not reuse test fixtures.
+3. With asset replacement operationally frozen, record and read back all thirteen independent SHA/revision-pinned attestations. Any mismatch or partial completion keeps the overall gate false; do not manufacture a bulk-complete claim.
+4. Only after all thirteen exact records verify may a separately reviewed narration profile be built and the private-upload gate be re-evaluated.
+5. Stop again before authenticated device preview, trusted validation/readiness regeneration, deployment beyond the separately approved server change, or publication.
+
+### Do not repeat after S4M
+
+- Do not rerun the S4L byte import, transfer the source archives, replace a narration, or rewrite the immutable import receipt while its identities remain unchanged.
+- Do not prefill, infer, or copy legal terms from tests, timezone, billing guesses, screenshots, or this checkpoint. Only a real signed-in administrator review may create the production evidence.
+- Do not update the checked long-form source hashes merely to make tests green. Regenerate readiness evidence only through the separately authorized trusted-validation gate.
+- Do not preview, run trusted validation, publish, regenerate narration, begin another chapter, or touch Cherokee/EBCI or other culturally gated material from this checkpoint.

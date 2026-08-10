@@ -120,6 +120,84 @@ def test_database_apply_rejects_non_admin_and_different_existing_draft(
         importer._apply_database(database, clean, [], admin["id"])
 
 
+def test_database_replay_preserves_complete_server_license_attestation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database, admin = _initialized_database(tmp_path, monkeypatch, "attested-replay")
+    packet, manifest = _packet_without_external_media()
+    clean = importer._clean_draft(packet, manifest)
+    asset_bytes = b"test narration bytes"
+    asset_sha256 = hashlib.sha256(asset_bytes).hexdigest()
+    transcript_sha256 = hashlib.sha256(b"reviewed transcript").hexdigest()
+    destination = tmp_path / "assets" / "test-narration.mp3"
+    prepared = [
+        importer.PreparedAsset(
+            spec={
+                "asset_id": "test_narration",
+                "kind": "narration",
+                "mime_type": "audio/mpeg",
+                "bytes": len(asset_bytes),
+                "sha256": asset_sha256,
+                "transcript_sha256": transcript_sha256,
+                "_destination": str(destination),
+            },
+            source_path=tmp_path / "source.mp3",
+            media_metadata={"format": "mp3"},
+        )
+    ]
+
+    inserted_pack, inserted_assets, revision = importer._apply_database(
+        database, clean, prepared, admin["id"]
+    )
+    assert inserted_pack is True
+    assert inserted_assets == [(builder.PACK_ID, "test_narration", asset_sha256)]
+    assert revision == 1
+
+    connection = importer._connect(database)
+    try:
+        row = connection.execute(
+            "SELECT generator_metadata_json,updated_at FROM authored_original_assets "
+            "WHERE pack_id=? AND asset_id=? AND sha256=?",
+            (builder.PACK_ID, "test_narration", asset_sha256),
+        ).fetchone()
+        generator = json.loads(row["generator_metadata_json"])
+        generator["license_status"] = "attested"
+        generator["license_attestation"] = {
+            "terms_id": "test_terms",
+            "terms_url": "https://elevenlabs.io/terms-of-use",
+            "terms_version": "test-v1",
+            "reviewed_at": "2026-01-01",
+            "attested_at": "2026-01-02T00:00:00Z",
+            "attested_by_admin_user_id": int(admin["id"]),
+        }
+        attested_json = importer._canonical_json(generator)
+        connection.execute(
+            "UPDATE authored_original_assets SET generator_metadata_json=? "
+            "WHERE pack_id=? AND asset_id=? AND sha256=?",
+            (attested_json, builder.PACK_ID, "test_narration", asset_sha256),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    replay_pack, replay_assets, replay_revision = importer._apply_database(
+        database, clean, prepared, admin["id"]
+    )
+    assert replay_pack is False
+    assert replay_assets == []
+    assert replay_revision == 1
+    connection = importer._connect(database)
+    try:
+        preserved = connection.execute(
+            "SELECT generator_metadata_json FROM authored_original_assets "
+            "WHERE pack_id=? AND asset_id=? AND sha256=?",
+            (builder.PACK_ID, "test_narration", asset_sha256),
+        ).fetchone()
+        assert preserved["generator_metadata_json"] == attested_json
+    finally:
+        connection.close()
+
+
 def test_import_lock_rejects_a_concurrent_process(tmp_path: Path) -> None:
     assets = tmp_path / "assets"
     assets.mkdir()

@@ -263,9 +263,10 @@ if (dryRun) {
 run(process.execPath, ['scripts/local-expo-module-resolution.test.mjs']);
 run(process.execPath, ['scripts/upload-sentry-update-sourcemaps.mjs', '--check-env']);
 // A combined `--platform all` export starts web, Android, and iOS bundlers in
-// parallel and can exhaust the bounded WSL release runner. Export each native
-// platform synchronously into its own metadata directory instead. Both exports
-// and both Sentry uploads must succeed before either candidate update exists.
+// parallel and can exhaust the bounded WSL release runner. Complete one native
+// platform at a time because `eas update --input-dir` can remove another staged
+// export directory while it prepares the upload. Candidate branches are not
+// channel-visible until both platform records pass the evidence checks below.
 for (const [index, stage] of nativeReleaseStages.entries()) {
   rmSync(new URL(`../${stage.inputDir}`, import.meta.url), { recursive: true, force: true });
   run('npx', [
@@ -277,16 +278,13 @@ for (const [index, stage] of nativeReleaseStages.entries()) {
     ...(index === 0 ? ['--clear'] : []),
     '--max-workers', '1',
   ]);
-}
-for (const stage of nativeReleaseStages) {
   run(process.execPath, [
     'scripts/upload-sentry-update-sourcemaps.mjs',
     '--input-dir', stage.inputDir,
   ]);
-}
-for (const stage of nativeReleaseStages) {
   // Capture and intentionally ignore each publish command's unreliable JSON
-  // stream. Authoritative paired evidence is queried after both publications.
+  // stream. Authoritative paired evidence is queried after both publications;
+  // a partial candidate remains isolated from the preview/production channel.
   run('npx', updateArgsFor(stage), { capture: true });
 }
 if (productionSnapshot) {

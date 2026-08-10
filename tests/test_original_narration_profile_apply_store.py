@@ -126,6 +126,9 @@ class OriginalNarrationProfileApplyStoreTests(unittest.TestCase):
             "existing_gate": "preserve-me",
             "admin_license_attestation_complete": False,
             "verified_private_upload_complete": False,
+            "authenticated_device_preview_complete": False,
+            "trusted_publication_validation_complete": False,
+            "public_release": False,
         }
         self.validation_metadata_hash = store._original_validation_hash(
             self.original_validation_metadata
@@ -918,6 +921,343 @@ class OriginalNarrationProfileApplyStoreTests(unittest.TestCase):
         with self.assertRaises(store.OriginalNarrationProfileConflictError):
             self._revert(applied)
         self.assertEqual(self._pack_row(), applied_row)
+
+    def _device_preview_evidence(self) -> dict:
+        db = store._conn()
+        try:
+            pack = db.execute(
+                "SELECT * FROM authored_trip_packs WHERE id=?", (self.pack_id,),
+            ).fetchone()
+            preview = store._authored_original_preview_manifest_from_row(
+                pack,
+                store._verified_original_asset_map_db(db, self.pack_id),
+                chapter_id="roaring_fork",
+                variant_id="one_way",
+            )
+        finally:
+            db.close()
+        manifest = json.loads(self._pack_row()["draft_original_manifest_json"])
+        variant = manifest["chapters"][0]["variants"][0]
+        hard = [item["story_id"] for item in variant["cue_refs"]]
+        selectable = [
+            item["story_id"] for item in variant["selectable_refs"]
+        ]
+        return {
+            "schema_version": 1,
+            "evidence_id": "roaring_fork_authenticated_device_preview_20260810_v1",
+            "observed_at": (datetime.now(timezone.utc) - timedelta(seconds=5)).isoformat(
+                timespec="seconds"
+            ).replace("+00:00", "Z"),
+            "application": {
+                "platform": "android",
+                "app_version": "1.0.12",
+                "build_number": "73",
+                "channel": "preview",
+                "runtime_version": "native-1.0.12-android.1",
+                "release_sha": "a" * 40,
+                "update_id": "f61a209d-2aa1-45d8-91dc-c5f9e7405992",
+            },
+            "preview": {
+                "pack_id": self.pack_id,
+                "draft_revision": 2,
+                "preview_version": store.ORIGINAL_DEVICE_PREVIEW_VERSION_BASE + 2,
+                "manifest_id": f"original_preview_manifest_{self.pack_id}_r2",
+                "manifest_schema_version": 3,
+                "manifest_sha256": store._original_validation_hash(preview),
+                "chapter_id": "roaring_fork",
+                "variant_id": "one_way",
+                "delivery_contract_sha256": variant[
+                    "delivery_contract_sha256"
+                ],
+            },
+            "coverage": {
+                "reviewed_story_ids": sorted(hard + selectable),
+                "hard_auto_story_ids": hard,
+                "selectable_story_ids": selectable,
+                "hard_auto_complete": True,
+                "selectable_complete": True,
+            },
+            "asset_download": {
+                "asset_ids": sorted(self.expected_asset_sha256),
+                "asset_count": 20,
+                "complete": True,
+                "sha256_verified": True,
+            },
+            "checks": {
+                "narration_audible": True,
+                "artwork_visible": True,
+                "caption_text_visible": True,
+                "poor_gps_behavior_verified": True,
+                "off_route_behavior_verified": True,
+            },
+        }
+
+    def _mark_device_preview(self, applied: dict, evidence: dict, **overrides):
+        current = self._pack_row()
+        validation = json.loads(current["draft_validation_metadata"])
+        arguments = {
+            "expected_draft_revision": 2,
+            "expected_base_manifest_sha256": applied["base_manifest_sha256"],
+            "expected_manifest_sha256": applied["after_manifest_sha256"],
+            "expected_profile_sha256": applied["profile_sha256"],
+            "expected_validation_metadata_sha256": (
+                store._original_validation_hash(validation)
+            ),
+            "expected_asset_sha256": self.expected_asset_sha256,
+            "expected_narration_sha256": self.expected_sha256,
+            "expected_redacted_license_attestation_sha256": (
+                self.expected_redacted_license_attestation_sha256
+            ),
+            "expected_application_release_sha": "a" * 40,
+            "expected_application_update_id": (
+                "f61a209d-2aa1-45d8-91dc-c5f9e7405992"
+            ),
+            "evidence": evidence,
+            "admin_user_id": self.admin,
+        }
+        arguments.update(overrides)
+        return store.mark_authored_original_device_preview_complete(
+            self.pack_id, **arguments,
+        )
+
+    def _revert_device_preview(
+        self,
+        applied: dict,
+        evidence: dict,
+        restore_validation_metadata: dict,
+        applied_validation_metadata_sha256: str,
+        **overrides,
+    ):
+        arguments = {
+            "expected_draft_revision": 2,
+            "expected_base_manifest_sha256": applied["base_manifest_sha256"],
+            "expected_manifest_sha256": applied["after_manifest_sha256"],
+            "expected_profile_sha256": applied["profile_sha256"],
+            "expected_applied_validation_metadata_sha256": (
+                applied_validation_metadata_sha256
+            ),
+            "expected_asset_sha256": self.expected_asset_sha256,
+            "expected_narration_sha256": self.expected_sha256,
+            "expected_redacted_license_attestation_sha256": (
+                self.expected_redacted_license_attestation_sha256
+            ),
+            "expected_application_release_sha": "a" * 40,
+            "expected_application_update_id": (
+                "f61a209d-2aa1-45d8-91dc-c5f9e7405992"
+            ),
+            "evidence": evidence,
+            "restore_validation_metadata": restore_validation_metadata,
+            "expected_restore_validation_metadata_sha256": (
+                store._original_validation_hash(restore_validation_metadata)
+            ),
+            "admin_user_id": self.admin,
+        }
+        arguments.update(overrides)
+        return store.revert_authored_original_device_preview_complete(
+            self.pack_id, **arguments,
+        )
+
+    def test_device_preview_completion_changes_only_exact_validation_metadata(self) -> None:
+        applied = self._apply()
+        before = self._pack_row()
+        evidence = self._device_preview_evidence()
+        result = self._mark_device_preview(applied, evidence)
+        after = self._pack_row()
+
+        self.assertFalse(result["replayed"])
+        self.assertEqual(result["draft_revision"], 2)
+        self.assertEqual(result["asset_count"], 20)
+        self.assertEqual(result["narration_count"], 13)
+        self.assertEqual(result["hard_auto_story_count"], 5)
+        self.assertEqual(result["selectable_story_count"], 8)
+        self.assertEqual(after["draft_revision"], before["draft_revision"])
+        self.assertEqual(
+            after["draft_original_manifest_json"],
+            before["draft_original_manifest_json"],
+        )
+        before_validation = json.loads(before["draft_validation_metadata"])
+        after_validation = json.loads(after["draft_validation_metadata"])
+        expected_validation = copy.deepcopy(before_validation)
+        expected_validation["authenticated_device_preview_complete"] = True
+        expected_validation["authenticated_device_preview_evidence"] = evidence
+        expected_validation[
+            "authenticated_device_preview_evidence_sha256"
+        ] = store._original_validation_hash(evidence)
+        self.assertEqual(after_validation, expected_validation)
+        serialized_evidence = json.dumps(
+            after_validation["authenticated_device_preview_evidence"]
+        )
+        for forbidden in (
+            "device_serial",
+            "preview_token",
+            "admin_user_id",
+            "profile-admin@example.invalid",
+        ):
+            self.assertNotIn(forbidden, serialized_evidence)
+
+    def test_device_preview_completion_exact_replay_is_a_noop(self) -> None:
+        applied = self._apply()
+        evidence = self._device_preview_evidence()
+        first = self._mark_device_preview(applied, evidence)
+        after_first = self._pack_row()
+        replay = self._mark_device_preview(applied, evidence)
+        self.assertTrue(replay["replayed"])
+        self.assertEqual(self._pack_row(), after_first)
+        self.assertEqual(replay["evidence_sha256"], first["evidence_sha256"])
+
+    def test_device_preview_completion_conflicts_leave_zero_writes(self) -> None:
+        applied = self._apply()
+        evidence = self._device_preview_evidence()
+        baseline = self._pack_row()
+        cases = []
+        failed_check = copy.deepcopy(evidence)
+        failed_check["checks"]["off_route_behavior_verified"] = False
+        cases.append(("incomplete evidence", {"evidence": failed_check}))
+        exposed_token = copy.deepcopy(evidence)
+        exposed_token["preview_token"] = "must-never-be-stored"
+        cases.append(("non-redacted evidence", {"evidence": exposed_token}))
+        wrong_assets = copy.deepcopy(self.expected_asset_sha256)
+        wrong_assets[next(iter(wrong_assets))] = "f" * 64
+        cases.append(("asset drift", {"expected_asset_sha256": wrong_assets}))
+        cases.append(("non-admin", {"admin_user_id": self.user}))
+        cases.append((
+            "metadata CAS",
+            {"expected_validation_metadata_sha256": "f" * 64},
+        ))
+        for label, overrides in cases:
+            with self.subTest(label=label):
+                with self.assertRaises((
+                    store.OriginalDevicePreviewCompletionConflictError,
+                    PermissionError,
+                )):
+                    self._mark_device_preview(
+                        applied, overrides.pop("evidence", evidence), **overrides
+                    )
+                self.assertEqual(self._pack_row(), baseline)
+
+    def test_device_preview_completion_rejects_different_immutable_evidence(self) -> None:
+        applied = self._apply()
+        evidence = self._device_preview_evidence()
+        self._mark_device_preview(applied, evidence)
+        baseline = self._pack_row()
+        changed = copy.deepcopy(evidence)
+        changed["evidence_id"] = "roaring_fork_authenticated_device_preview_replacement_v1"
+        with self.assertRaisesRegex(
+            store.OriginalDevicePreviewCompletionConflictError,
+            "different device preview evidence",
+        ):
+            self._mark_device_preview(applied, changed)
+        self.assertEqual(self._pack_row(), baseline)
+
+    def test_device_preview_application_identity_is_exact(self) -> None:
+        applied = self._apply()
+        baseline = self._pack_row()
+        evidence = self._device_preview_evidence()
+        for key, value in (
+            ("app_version", "1.0.11"),
+            ("build_number", "72"),
+            ("channel", "production"),
+            ("runtime_version", "native-1.0.11-android.7"),
+            ("release_sha", "b" * 40),
+            ("update_id", "02ef8cc1-91f0-499a-b7c9-c3efc25df514"),
+        ):
+            with self.subTest(key=key):
+                changed = copy.deepcopy(evidence)
+                changed["application"][key] = value
+                with self.assertRaisesRegex(
+                    store.OriginalDevicePreviewCompletionConflictError,
+                    "application identity",
+                ):
+                    self._mark_device_preview(applied, changed)
+                self.assertEqual(self._pack_row(), baseline)
+
+    def test_device_preview_allows_only_bounded_future_clock_skew(self) -> None:
+        applied = self._apply()
+        evidence = self._device_preview_evidence()
+        evidence["observed_at"] = (
+            datetime.now(timezone.utc) + timedelta(minutes=4)
+        ).isoformat(timespec="seconds").replace("+00:00", "Z")
+        result = self._mark_device_preview(applied, evidence)
+        self.assertFalse(result["replayed"])
+
+    def test_device_preview_rejects_future_evidence_beyond_clock_skew(self) -> None:
+        applied = self._apply()
+        baseline = self._pack_row()
+        evidence = self._device_preview_evidence()
+        evidence["observed_at"] = (
+            datetime.now(timezone.utc) + timedelta(minutes=6)
+        ).isoformat(timespec="seconds").replace("+00:00", "Z")
+        with self.assertRaisesRegex(
+            store.OriginalDevicePreviewCompletionConflictError,
+            "observed_at",
+        ):
+            self._mark_device_preview(applied, evidence)
+        self.assertEqual(self._pack_row(), baseline)
+
+    def test_device_preview_revert_restores_exact_preflight_and_replays(self) -> None:
+        applied = self._apply()
+        preflight = self._pack_row()
+        restore_validation = json.loads(preflight["draft_validation_metadata"])
+        evidence = self._device_preview_evidence()
+        marked = self._mark_device_preview(applied, evidence)
+        marked_row = self._pack_row()
+
+        reverted = self._revert_device_preview(
+            applied,
+            evidence,
+            restore_validation,
+            marked["after_validation_metadata_sha256"],
+        )
+        after = self._pack_row()
+        self.assertFalse(reverted["replayed"])
+        self.assertEqual(
+            json.loads(after["draft_validation_metadata"]), restore_validation,
+        )
+        self.assertEqual(after["draft_revision"], marked_row["draft_revision"])
+        self.assertEqual(
+            after["draft_original_manifest_json"],
+            marked_row["draft_original_manifest_json"],
+        )
+
+        replayed = self._revert_device_preview(
+            applied,
+            evidence,
+            restore_validation,
+            marked["after_validation_metadata_sha256"],
+        )
+        self.assertTrue(replayed["replayed"])
+        self.assertEqual(self._pack_row(), after)
+
+    def test_device_preview_revert_conflict_leaves_zero_writes(self) -> None:
+        applied = self._apply()
+        preflight = self._pack_row()
+        restore_validation = json.loads(preflight["draft_validation_metadata"])
+        evidence = self._device_preview_evidence()
+        marked = self._mark_device_preview(applied, evidence)
+        db = store._conn()
+        current = json.loads(self._pack_row()["draft_validation_metadata"])
+        current["unexpected_drift"] = True
+        db.execute(
+            "UPDATE authored_trip_packs SET draft_validation_metadata=? WHERE id=?",
+            (
+                json.dumps(current, separators=(",", ":"), sort_keys=True),
+                self.pack_id,
+            ),
+        )
+        db.commit()
+        db.close()
+        baseline = self._pack_row()
+        with self.assertRaisesRegex(
+            store.OriginalDevicePreviewCompletionConflictError,
+            "applied or restored validation state",
+        ):
+            self._revert_device_preview(
+                applied,
+                evidence,
+                restore_validation,
+                marked["after_validation_metadata_sha256"],
+            )
+        self.assertEqual(self._pack_row(), baseline)
 
     def test_profiled_draft_blocks_all_asset_writes_before_current_state_changes(self) -> None:
         applied = self._apply()

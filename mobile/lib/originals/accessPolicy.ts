@@ -28,7 +28,10 @@ export function originalLocalAccessIsCurrent(
 ) {
   if (!access) return false;
   if (access.access_type === 'guest_free') return true;
-  if (access.access_type === 'admin_preview') return Boolean(options.allowAdminPreview);
+  if (access.access_type === 'admin_preview') {
+    return Boolean(options.allowAdminPreview)
+      && (options.manifestId == null || access.manifest_id === options.manifestId);
+  }
   if (access.access_type === 'entitled' || access.access_type === 'permanent') return true;
   if (access.access_type !== 'explorer_subscription') return false;
   if (access.access_receipt_required === true) {

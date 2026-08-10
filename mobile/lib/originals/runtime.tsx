@@ -17,6 +17,7 @@ import {
   setCarOriginalDrive,
 } from '../carIntegration';
 import { originalsApi } from './api';
+import { originalAdminPreviewReviewEntries } from './adminPreviewReview';
 import { registerOriginalsAccountDepartureStopper } from './accountCleanup';
 import {
   type OriginalAccessStore,
@@ -72,7 +73,14 @@ import {
 } from './longFormScheduler';
 import { stopHeadlessOriginalRuntime } from './headlessRuntime';
 import { originalOwnerScopeForAccount, originalRestoreScopeIsCurrent } from './ownership';
-import { getOriginalPreviewToken } from './previewAccess';
+import {
+  clearOriginalPrivateReviewCleanupIdentityStrict,
+  clearOriginalPreviewAccessStrict,
+  getOriginalPrivateReviewCleanupIdentity,
+  getOriginalPreviewToken,
+  saveOriginalPrivateReviewCleanupIdentity,
+  type OriginalPrivateReviewCleanupIdentityV1,
+} from './previewAccess';
 import {
   completeOriginalStop,
   createOriginalSession,
@@ -151,7 +159,10 @@ export type OriginalsRuntimeValue = {
   audioCapabilities: OriginalAudioAdapter['capabilities'];
   downloadOriginal: (
     manifest: OriginalManifest,
-    options?: Omit<OriginalBundleDownloadOptions, 'onProgress' | 'ownerScope'>,
+    options?: Omit<
+      OriginalBundleDownloadOptions,
+      'onProgress' | 'ownerScope' | 'privatePreviewManifestId'
+    >,
   ) => Promise<OriginalBundleRecord>;
   startTour: (
     manifest: OriginalManifest,
@@ -185,6 +196,8 @@ export type OriginalsRuntimeValue = {
 
 /** Privileged synthetic controls intentionally excluded from the public runtime API. */
 export type OriginalsAdminRuntimeValue = {
+  privateReviewActive: boolean;
+  privateReviewCleanupPending: boolean;
   startSimulation: (
     manifest: OriginalManifest,
     selection?: OriginalChapterSelectionV2,
@@ -192,7 +205,48 @@ export type OriginalsAdminRuntimeValue = {
   skipSimulationCue: () => Promise<void>;
   clearSimulationDiagnostic: () => void;
   submitLocationSample: (sample: OriginalLocationSample) => Promise<void>;
+  reviewPreviewStory: (storyId: string) => Promise<void>;
+  endPrivateReview: () => Promise<void>;
 };
+
+type OriginalPrivateReviewIdentity = {
+  ownerScope: OriginalOwnerScope;
+  packId: string;
+  version: number;
+  manifestId: string;
+};
+
+function storedPrivateReviewIdentity(
+  identity: OriginalPrivateReviewIdentity,
+): OriginalPrivateReviewCleanupIdentityV1 {
+  return {
+    owner_scope: identity.ownerScope,
+    pack_id: identity.packId,
+    version: identity.version,
+    manifest_id: identity.manifestId,
+  };
+}
+
+function runtimePrivateReviewIdentity(
+  identity: OriginalPrivateReviewCleanupIdentityV1,
+): OriginalPrivateReviewIdentity {
+  return {
+    ownerScope: identity.owner_scope,
+    packId: identity.pack_id,
+    version: identity.version,
+    manifestId: identity.manifest_id,
+  };
+}
+
+function samePrivateReviewIdentity(
+  left: OriginalPrivateReviewIdentity,
+  right: OriginalPrivateReviewIdentity,
+) {
+  return left.ownerScope === right.ownerScope
+    && left.packId === right.packId
+    && left.version === right.version
+    && left.manifestId === right.manifestId;
+}
 
 type OriginalsRuntimeDependencies = {
   audio: OriginalAudioAdapter;
@@ -238,6 +292,8 @@ export function OriginalsRuntimeProvider({
   const [error, setError] = useState<string | null>(null);
   const [muted, setMutedState] = useState(false);
   const [simulation, setSimulation] = useState(false);
+  const [privateReviewActive, setPrivateReviewActive] = useState(false);
+  const [privateReviewCleanupPending, setPrivateReviewCleanupPending] = useState(false);
   const [lastTriggerEvaluation, setLastTriggerEvaluation] = useState<OriginalTriggerEvaluation | null>(null);
   const [audioPlaybackState, setAudioPlaybackState] = useState<OriginalAudioPlaybackState | null>(null);
 
@@ -255,9 +311,12 @@ export function OriginalsRuntimeProvider({
   const priorUserIdRef = useRef<string | number | null>(null);
   const trackingGenerationRef = useRef(0);
   const simulationRef = useRef(false);
+  const privateReviewIdentityRef = useRef<OriginalPrivateReviewIdentity | null>(null);
+  const privateReviewCleanupIdentityRef = useRef<OriginalPrivateReviewIdentity | null>(null);
   const lastTriggerEvaluationRef = useRef<OriginalTriggerEvaluation | null>(null);
   const stoppingRef = useRef(false);
   const stopTourPromiseRef = useRef<Promise<void> | null>(null);
+  const privateReviewCleanupPromiseRef = useRef<Promise<void> | null>(null);
 
   const requireCurrentAccess = useCallback(async (
     packId: string,
@@ -298,7 +357,7 @@ export function OriginalsRuntimeProvider({
         : 'Restore or acquire this exact Original version for the signed-in account.');
     }
     if (!scopeIsStillCurrent()) throw new Error('The signed-in account changed. Try again.');
-    return ownerScope;
+    return { ownerScope, access };
   }, [dependencies.access]);
 
   const publishSession = useCallback(async (next: OriginalSessionV1, active = true) => {
@@ -408,7 +467,7 @@ export function OriginalsRuntimeProvider({
     if (!operationIsCurrent()) return;
     const stop = activeManifest.stops.find(item => item.id === stopId);
     if (!stop) throw new Error('This story is not part of the active Original.');
-    const ownerScope = await requireCurrentAccess(
+    const { ownerScope } = await requireCurrentAccess(
       activeManifest.pack_id,
       activeManifest.version,
       activeSession.owner_scope,
@@ -519,7 +578,7 @@ export function OriginalsRuntimeProvider({
       && sessionRef.current?.long_form?.current_item_id === item.id
       && selectablePlanRef.current?.delivery_contract_sha256 === activePlan.delivery_contract_sha256
     );
-    const ownerScope = await requireCurrentAccess(
+    const { ownerScope } = await requireCurrentAccess(
       activeManifest.pack_id,
       activeManifest.version,
       activeSession.owner_scope,
@@ -918,6 +977,9 @@ export function OriginalsRuntimeProvider({
     };
     try {
       requireActiveActivation();
+      if (privateReviewCleanupIdentityRef.current) {
+        throw new Error('Finish removing the pending private review before starting another Original.');
+      }
       if (simulate && !useStore.getState().user?.is_admin) {
         throw new Error('The Virtual Drive Lab is available only to Trailhead admins.');
       }
@@ -930,7 +992,7 @@ export function OriginalsRuntimeProvider({
       }
       const resolved = resolveOriginalManifestForPlayback(manifestInput, chapterSelection);
       const cleanManifest = validateOriginalManifest(resolved.manifest);
-      const ownerScope = await requireCurrentAccess(
+      const { ownerScope, access: activationAccess } = await requireCurrentAccess(
         cleanManifest.pack_id,
         cleanManifest.version,
         requestScope,
@@ -947,6 +1009,21 @@ export function OriginalsRuntimeProvider({
       if (!installed || !verified) {
         throw new Error('Finish downloading and verifying this Original before starting.');
       }
+      const exactPrivateReview = Boolean(
+        simulate
+        && useStore.getState().user?.is_admin
+        && activationAccess?.owner_scope === ownerScope
+        && activationAccess.access_type === 'admin_preview'
+        && activationAccess.manifest_id === cleanManifest.manifest_id
+      );
+      const privateReviewIdentity: OriginalPrivateReviewIdentity | null = exactPrivateReview
+        ? {
+          ownerScope,
+          packId: cleanManifest.pack_id,
+          version: cleanManifest.version,
+          manifestId: cleanManifest.manifest_id,
+        }
+        : null;
       const existing = restart || simulate
         ? null
         : await dependencies.sessions.load(
@@ -981,6 +1058,8 @@ export function OriginalsRuntimeProvider({
       await releaseAudio();
       requireActiveActivation();
       simulationRef.current = simulate;
+      privateReviewIdentityRef.current = privateReviewIdentity;
+      privateReviewCleanupIdentityRef.current = null;
       lastTriggerEvaluationRef.current = null;
       manifestRef.current = cleanManifest;
       selectablePlanRef.current = resolved.source_schema_version === 3
@@ -994,6 +1073,8 @@ export function OriginalsRuntimeProvider({
         setBundle(installed);
         setError(null);
         setSimulation(simulate);
+        setPrivateReviewActive(Boolean(privateReviewIdentity));
+        setPrivateReviewCleanupPending(false);
         setLastTriggerEvaluation(null);
         setAudioPlaybackState(null);
         setState('tracking');
@@ -1041,15 +1122,22 @@ export function OriginalsRuntimeProvider({
       }
       if (activatedSessionId && simulate) {
         simulationRef.current = false;
-        if (mountedRef.current) setSimulation(false);
+        privateReviewIdentityRef.current = null;
+        if (mountedRef.current) {
+          setSimulation(false);
+          setPrivateReviewActive(false);
+        }
       }
       throw caught;
     }
-  }, [dependencies.audio, dependencies.bundles, dependencies.sessions, playOptionalItem, playStop, publishSession, releaseAudio, requireCurrentAccess, startLocation, stopLocation]);
+  }, [dependencies.access, dependencies.audio, dependencies.bundles, dependencies.sessions, playOptionalItem, playStop, publishSession, releaseAudio, requireCurrentAccess, startLocation, stopLocation]);
 
   const downloadOriginal = useCallback(async (
     manifestInput: OriginalManifest,
-    options: Omit<OriginalBundleDownloadOptions, 'onProgress' | 'ownerScope'> = {},
+    options: Omit<
+      OriginalBundleDownloadOptions,
+      'onProgress' | 'ownerScope' | 'privatePreviewManifestId'
+    > = {},
   ) => {
     let reportDownloadAnalytics = true;
     if (mountedRef.current) {
@@ -1068,7 +1156,7 @@ export function OriginalsRuntimeProvider({
         accountStorage.epoch(),
         useStore.getState().user?.id ?? null,
       );
-      const ownerScope = await requireCurrentAccess(
+      const { ownerScope, access } = await requireCurrentAccess(
         manifestInput.pack_id,
         manifestInput.version,
         requestScope,
@@ -1076,9 +1164,18 @@ export function OriginalsRuntimeProvider({
         manifestInput.manifest_id,
       );
       if (!scopeIsStillCurrent()) throw new Error('The signed-in account changed. Try again.');
-      const access = await dependencies.access.get(ownerScope, manifestInput.pack_id, manifestInput.version);
-      if (!scopeIsStillCurrent()) throw new Error('The signed-in account changed. Try again.');
-      reportDownloadAnalytics = access?.access_type !== 'admin_preview';
+      const adminPreview = access?.access_type === 'admin_preview';
+      reportDownloadAnalytics = !adminPreview;
+      if (adminPreview) {
+        const pending = await getOriginalPrivateReviewCleanupIdentity();
+        if (
+          !pending
+          || pending.owner_scope !== ownerScope
+          || pending.pack_id !== manifestInput.pack_id
+          || pending.version !== manifestInput.version
+          || pending.manifest_id !== manifestInput.manifest_id
+        ) throw new Error('The exact private preview cleanup identity is not ready.');
+      }
       const previewToken = await getOriginalPreviewToken().catch(() => null);
       if (!scopeIsStillCurrent()) throw new Error('The signed-in account changed. Try again.');
       const controller = new AbortController();
@@ -1094,6 +1191,7 @@ export function OriginalsRuntimeProvider({
         installed = await dependencies.bundles.download(manifestInput, {
           ...options,
           ownerScope,
+          privatePreviewManifestId: adminPreview ? manifestInput.manifest_id : undefined,
           headers: {
             ...(options.headers ?? {}),
             ...(requestToken ? { Authorization: `Bearer ${requestToken}` } : {}),
@@ -1185,7 +1283,7 @@ export function OriginalsRuntimeProvider({
       && manifestRef.current?.manifest_id === activeManifest.manifest_id
       && simulationRef.current === simulating
     );
-    const ownerScope = await requireCurrentAccess(
+    const { ownerScope } = await requireCurrentAccess(
       active.pack_id,
       active.version,
       active.owner_scope,
@@ -1327,6 +1425,7 @@ export function OriginalsRuntimeProvider({
         if (persistenceError) throw persistenceError;
       } finally {
         simulationRef.current = false;
+        privateReviewIdentityRef.current = null;
         lastTriggerEvaluationRef.current = null;
         sessionRef.current = null;
         manifestRef.current = null;
@@ -1341,6 +1440,10 @@ export function OriginalsRuntimeProvider({
           setSelectablePlan(null);
           setBundle(null);
           setSimulation(false);
+          setPrivateReviewActive(false);
+          if (!privateReviewCleanupIdentityRef.current) {
+            setPrivateReviewCleanupPending(false);
+          }
           setLastTriggerEvaluation(null);
           setAudioPlaybackState(null);
           setState('idle');
@@ -1362,9 +1465,248 @@ export function OriginalsRuntimeProvider({
     [stopTour],
   );
 
+  const reviewPreviewStory = useCallback(async (storyId: string) => {
+    const currentUser = useStore.getState().user;
+    const identity = privateReviewIdentityRef.current;
+    if (
+      !simulationRef.current
+      || !currentUser?.is_admin
+      || !identity
+      || privateReviewCleanupIdentityRef.current
+      || stoppingRef.current
+    ) throw new Error('Private story review is available only for an exact admin preview.');
+    const active = sessionRef.current;
+    const activeManifest = manifestRef.current;
+    const activePlan = selectablePlanRef.current;
+    const currentScope = originalOwnerScopeForAccount(currentUser.id);
+    if (
+      !active
+      || !activeManifest
+      || !activePlan
+      || identity.ownerScope !== currentScope
+      || active.owner_scope !== identity.ownerScope
+      || active.pack_id !== identity.packId
+      || active.version !== identity.version
+      || active.manifest_id !== identity.manifestId
+      || activeManifest.manifest_id !== identity.manifestId
+    ) {
+      throw new Error('No long-form private review is active.');
+    }
+    const access = await dependencies.access.get(
+      identity.ownerScope,
+      identity.packId,
+      identity.version,
+    );
+    if (
+      originalOwnerScopeForAccount(useStore.getState().user?.id ?? null) !== identity.ownerScope
+      || !useStore.getState().user?.is_admin
+      || access?.access_type !== 'admin_preview'
+      || access.manifest_id !== identity.manifestId
+    ) throw new Error('The exact private preview access is no longer active.');
+    if (
+      stoppingRef.current
+      || privateReviewCleanupIdentityRef.current
+      || sessionRef.current?.session_id !== active.session_id
+      || manifestRef.current?.manifest_id !== activeManifest.manifest_id
+      || selectablePlanRef.current?.delivery_contract_sha256 !== activePlan.delivery_contract_sha256
+    ) throw new Error('The private review changed before playback could start.');
+    const entry = originalAdminPreviewReviewEntries(activeManifest, activePlan, {
+      isAdmin: true,
+      simulation: true,
+      privatePreview: true,
+    }).find(candidate => candidate.id === storyId);
+    if (!entry) throw new Error('This story is not part of the private review selection.');
+    if (
+      active.current_stop_id
+      || active.long_form?.current_item_id
+      || active.long_form?.deferred_item_id
+      || active.long_form?.pending_group_item_ids.length
+    ) {
+      throw new Error('Finish or skip the playing story before reviewing another one.');
+    }
+    if (entry.mode === 'hard_auto') {
+      await publishSession(startManualOriginalStop(active, entry.id));
+      try {
+        await playStop(entry.id);
+      } catch (error) {
+        await publishSession(active).catch(() => {});
+        throw error;
+      }
+      return;
+    }
+    const now = Date.now();
+    const longForm = ensureOriginalLongFormSession(active, activePlan, now);
+    const selected = withOriginalLongFormSession(active, {
+      ...longForm,
+      current_item_id: entry.id,
+      current_audio_position_ms: 0,
+      current_selection_origin: 'user_explicit',
+      pending_group_item_ids: [],
+      deferred_item_id: null,
+      deferred_audio_position_ms: 0,
+      deferred_selection_origin: null,
+      capacity_candidate: null,
+      updated_at_ms: now,
+    });
+    await publishSession(selected);
+    try {
+      await playOptionalItem(entry.id, 0);
+    } catch (error) {
+      await publishSession(active).catch(() => {});
+      throw error;
+    }
+  }, [dependencies.access, playOptionalItem, playStop, publishSession]);
+
+  const endPrivateReview = useCallback(() => {
+    if (privateReviewCleanupPromiseRef.current) return privateReviewCleanupPromiseRef.current;
+    const operation = (async () => {
+      const currentUser = useStore.getState().user;
+      if (currentUser?.id == null || stoppingRef.current) {
+        throw new Error('Sign in to the account that opened this private review to clean it up.');
+      }
+      const currentScope = originalOwnerScopeForAccount(currentUser.id);
+      const durableIdentity = await getOriginalPrivateReviewCleanupIdentity();
+      let identity = durableIdentity
+        ? runtimePrivateReviewIdentity(durableIdentity)
+        : privateReviewCleanupIdentityRef.current;
+      if (identity) {
+        if (identity.ownerScope !== currentScope) {
+          throw new Error('Sign back in to the account that opened this private review.');
+        }
+        if (
+          durableIdentity
+          && privateReviewCleanupIdentityRef.current
+          && !samePrivateReviewIdentity(identity, privateReviewCleanupIdentityRef.current)
+        ) throw new Error('The pending private review cleanup identity changed; nothing was removed.');
+        if (!durableIdentity) {
+          await saveOriginalPrivateReviewCleanupIdentity(storedPrivateReviewIdentity(identity));
+        }
+      } else {
+        const active = sessionRef.current;
+        const activeManifest = manifestRef.current;
+        const activeIdentity = privateReviewIdentityRef.current;
+        if (
+          !currentUser.is_admin
+          || !simulationRef.current
+          || !active
+          || !activeManifest
+          || !activeIdentity
+          || activeIdentity.ownerScope !== currentScope
+          || active.owner_scope !== activeIdentity.ownerScope
+          || active.pack_id !== activeIdentity.packId
+          || active.version !== activeIdentity.version
+          || active.manifest_id !== activeIdentity.manifestId
+          || activeManifest.manifest_id !== activeIdentity.manifestId
+        ) throw new Error('No exact admin private review is active.');
+        const access = await dependencies.access.get(
+          activeIdentity.ownerScope,
+          activeIdentity.packId,
+          activeIdentity.version,
+        );
+        if (
+          originalOwnerScopeForAccount(useStore.getState().user?.id ?? null) !== activeIdentity.ownerScope
+          || !useStore.getState().user?.is_admin
+          || access?.access_type !== 'admin_preview'
+          || access.manifest_id !== activeIdentity.manifestId
+        ) {
+          throw new Error('The active bundle is not the exact private preview; nothing was removed.');
+        }
+        identity = activeIdentity;
+        await saveOriginalPrivateReviewCleanupIdentity(storedPrivateReviewIdentity(identity));
+      }
+      privateReviewCleanupIdentityRef.current = identity;
+      if (mountedRef.current) {
+        setPrivateReviewActive(false);
+        setPrivateReviewCleanupPending(true);
+      }
+      await clearOriginalPreviewAccessStrict();
+      if (simulationRef.current || sessionRef.current) await stopTour();
+      await dependencies.bundles.removePrivatePreview(
+        identity.ownerScope,
+        identity.packId,
+        identity.version,
+        identity.manifestId,
+      );
+      await dependencies.access.removeAdminPreview(
+        identity.ownerScope,
+        identity.packId,
+        identity.version,
+        identity.manifestId,
+      );
+      await clearOriginalPrivateReviewCleanupIdentityStrict(storedPrivateReviewIdentity(identity));
+      privateReviewCleanupIdentityRef.current = null;
+      privateReviewIdentityRef.current = null;
+      if (mountedRef.current) {
+        setPrivateReviewActive(false);
+        setPrivateReviewCleanupPending(false);
+      }
+    })();
+    privateReviewCleanupPromiseRef.current = operation;
+    const clear = () => {
+      if (privateReviewCleanupPromiseRef.current === operation) {
+        privateReviewCleanupPromiseRef.current = null;
+      }
+    };
+    operation.then(clear, clear);
+    return operation;
+  }, [dependencies.access, dependencies.bundles, stopTour]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void getOriginalPrivateReviewCleanupIdentity().then(async pending => {
+      if (cancelled || !pending) return;
+      const currentUser = useStore.getState().user;
+      if (
+        currentUser?.id == null
+        || originalOwnerScopeForAccount(currentUser.id) !== pending.owner_scope
+      ) return;
+      const identity = runtimePrivateReviewIdentity(pending);
+      privateReviewCleanupIdentityRef.current = identity;
+      if (mountedRef.current) {
+        setPrivateReviewActive(false);
+        setPrivateReviewCleanupPending(true);
+      }
+      await endPrivateReview();
+    }).catch(caught => {
+      if (cancelled || !mountedRef.current) return;
+      setError(caught instanceof Error
+        ? caught.message
+        : 'The pending private review cleanup needs attention.');
+      setState('error');
+    });
+    return () => { cancelled = true; };
+  }, [endPrivateReview, userId]);
+
   const skipCurrentStory = useCallback(async () => {
     const active = sessionRef.current;
     const activeManifest = manifestRef.current;
+    const activePlan = selectablePlanRef.current;
+    const optionalId = active?.long_form?.current_item_id;
+    if (
+      active
+      && activePlan
+      && optionalId
+      && simulationRef.current
+      && useStore.getState().user?.is_admin
+      && !stoppingRef.current
+    ) {
+      const generation = trackingGenerationRef.current;
+      await dependencies.audio.stop();
+      await dependencies.audio.unload();
+      await releaseAudio();
+      if (
+        stoppingRef.current
+        || generation !== trackingGenerationRef.current
+        || sessionRef.current?.session_id !== active.session_id
+      ) return;
+      const next = completeOriginalLongFormItem(active, activePlan, optionalId);
+      await publishSession(next);
+      if (originalAudioCoordinator.activeOwner() == null) {
+        await dependencies.audio.releaseSession().catch(() => {});
+      }
+      if (mountedRef.current) setState(next.status === 'completed' ? 'completed' : 'tracking');
+      return;
+    }
     if (!active?.current_stop_id || !activeManifest || stoppingRef.current) return;
     const generation = trackingGenerationRef.current;
     await dependencies.audio.stop();
@@ -1505,7 +1847,7 @@ export function OriginalsRuntimeProvider({
     if (active.current_stop_id) {
       throw new Error('Pause or finish the current story before replaying another one.');
     }
-    const ownerScope = await requireCurrentAccess(
+    const { ownerScope } = await requireCurrentAccess(
       active.pack_id,
       active.version,
       active.owner_scope,
@@ -2009,6 +2351,8 @@ export function OriginalsRuntimeProvider({
   ]);
 
   const adminValue = useMemo<OriginalsAdminRuntimeValue>(() => ({
+    privateReviewActive,
+    privateReviewCleanupPending,
     startSimulation: (value, selection) => {
       if (!useStore.getState().user?.is_admin) {
         return Promise.reject(new Error('The Virtual Drive Lab is available only to Trailhead admins.'));
@@ -2031,7 +2375,18 @@ export function OriginalsRuntimeProvider({
       }
       return submitLocationSample(sample);
     },
-  }), [activateTour, clearSimulationDiagnostic, skipSimulationCue, submitLocationSample]);
+    reviewPreviewStory,
+    endPrivateReview,
+  }), [
+    activateTour,
+    clearSimulationDiagnostic,
+    endPrivateReview,
+    privateReviewActive,
+    privateReviewCleanupPending,
+    reviewPreviewStory,
+    skipSimulationCue,
+    submitLocationSample,
+  ]);
 
   return (
     <OriginalsRuntimeContext.Provider value={value}>

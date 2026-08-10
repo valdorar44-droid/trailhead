@@ -25,10 +25,13 @@ export type OriginalOfflineMapAdapter = {
     options?: {
       signal?: AbortSignal;
       onProgress?: (progress: OriginalMapDownloadProgress) => void;
+      /** Called and awaited before native map bytes can be created or replaced. */
+      onPackIdentity?: (packId: string) => void | Promise<void>;
     },
   ): Promise<OriginalPreparedMap>;
   isReady?(packId: string): Promise<boolean>;
   remove?(packId: string): Promise<void>;
+  removeStrict?(packId: string): Promise<void>;
 };
 
 function mapPackName(map: OriginalOfflineMapV1, packId: string, version: number) {
@@ -74,6 +77,8 @@ export const expoOriginalOfflineMapAdapter: OriginalOfflineMapAdapter = {
       : await rendererState.resolveActiveNativeMapRenderer();
     rendererState.setActiveNativeMapRenderer(renderer);
     const name = mapPackName(map, identity.pack_id, identity.version);
+    const packId = mapPackReference(renderer, name);
+    await options.onPackIdentity?.(packId);
     const installed = await manager.getInstalledPacks(renderer);
     const ready = installed.find(pack => pack.name === name && pack.complete);
     if (ready) {
@@ -236,6 +241,19 @@ export const expoOriginalOfflineMapAdapter: OriginalOfflineMapAdapter = {
       throw rejected && rejected.status === 'rejected'
         ? rejected.reason
         : new Error('Could not remove the offline map.');
+    }
+  },
+
+  async removeStrict(packId) {
+    const manager = await import('@/components/NativeMap/offlineManager');
+    const reference = parseMapPackReference(packId);
+    if (!reference.renderer) {
+      throw new Error('The private preview offline map is not bound to one native renderer.');
+    }
+    if (!await manager.hasInstalledPackStrict(reference.name, reference.renderer)) return;
+    await manager.deletePack(reference.name, reference.renderer);
+    if (await manager.hasInstalledPackStrict(reference.name, reference.renderer)) {
+      throw new Error('The private preview offline map could not be removed from this device.');
     }
   },
 };

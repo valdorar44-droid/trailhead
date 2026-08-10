@@ -1,5 +1,6 @@
 import {
   joinOriginalPath,
+  originalBackupPath,
   promoteOriginalPathSafely,
   recoverOriginalPath,
   writeOriginalTextAtomically,
@@ -42,6 +43,17 @@ type OriginalBundleIndexV2 = {
   scopes: Partial<Record<OriginalOwnerScope, OriginalBundleScopeV1>>;
 };
 
+type OriginalPrivateBundleCleanupJournalV1 = {
+  schema_version: 1;
+  owner_scope: OriginalOwnerScope;
+  pack_id: string;
+  version: number;
+  manifest_id: string;
+  staging_directory_uri: string;
+  final_directory_uri: string;
+  map_pack_id: string | null;
+};
+
 export type OriginalBundleProgress = {
   phase: 'preparing' | 'assets' | 'map' | 'verifying' | 'promoting';
   completed_bytes: number;
@@ -56,6 +68,8 @@ export type OriginalBundleDownloadOptions = {
   signal?: AbortSignal;
   mapAdapter?: OriginalOfflineMapAdapter;
   pinVersion?: boolean;
+  /** Exact unpublished manifest; enables crash-recoverable cleanup journaling. */
+  privatePreviewManifestId?: string;
   onProgress?: (progress: OriginalBundleProgress) => void;
 };
 
@@ -183,6 +197,70 @@ export function createOriginalBundleStore(
   const versionRoot = (ownerScope: OriginalOwnerScope, packId: string, version: number) => (
     joinOriginalPath(packRoot(ownerScope, packId), String(version))
   );
+  const privateCleanupJournalPath = (
+    ownerScope: OriginalOwnerScope,
+    packId: string,
+    version: number,
+  ) => joinOriginalPath(
+    root,
+    '_private_cleanup',
+    safePart(ownerScope),
+    safePart(packId),
+    `${version}.json`,
+  );
+  const readPrivateCleanupJournal = async (
+    ownerScope: OriginalOwnerScope,
+    packId: string,
+    version: number,
+    expectedManifestId: string,
+  ): Promise<OriginalPrivateBundleCleanupJournalV1 | null> => {
+    const path = privateCleanupJournalPath(ownerScope, packId, version);
+    await recoverOriginalPath(files, path);
+    const temporaryPath = `${path}.tmp`;
+    const readablePath = (await files.info(path)).exists
+      ? path
+      : (await files.info(temporaryPath)).exists
+        ? temporaryPath
+        : null;
+    if (!readablePath) return null;
+    let parsed: Partial<OriginalPrivateBundleCleanupJournalV1>;
+    try {
+      parsed = JSON.parse(await files.readText(readablePath));
+    } catch {
+      throw new Error('The private preview download cleanup journal could not be verified.');
+    }
+    const finalDirectory = versionRoot(ownerScope, packId, version);
+    if (
+      parsed.schema_version !== 1
+      || parsed.owner_scope !== ownerScope
+      || parsed.pack_id !== packId
+      || parsed.version !== version
+      || parsed.manifest_id !== expectedManifestId
+      || parsed.final_directory_uri !== finalDirectory
+      || typeof parsed.staging_directory_uri !== 'string'
+      || !parsed.staging_directory_uri.startsWith(`${finalDirectory}.tmp-`)
+      || !/^\d+$/.test(parsed.staging_directory_uri.slice(`${finalDirectory}.tmp-`.length))
+      || (parsed.map_pack_id !== null && typeof parsed.map_pack_id !== 'string')
+    ) throw new Error('The private preview download cleanup journal identity changed.');
+    return parsed as OriginalPrivateBundleCleanupJournalV1;
+  };
+  const writePrivateCleanupJournal = (journal: OriginalPrivateBundleCleanupJournalV1) => (
+    writeOriginalTextAtomically(
+      files,
+      privateCleanupJournalPath(journal.owner_scope, journal.pack_id, journal.version),
+      JSON.stringify(journal),
+    )
+  );
+  const clearPrivateCleanupJournal = async (journal: OriginalPrivateBundleCleanupJournalV1) => {
+    const path = privateCleanupJournalPath(journal.owner_scope, journal.pack_id, journal.version);
+    const journalArtifacts = [path, `${path}.tmp`, originalBackupPath(path)];
+    for (const artifact of journalArtifacts) {
+      await files.remove(artifact);
+      if ((await files.info(artifact)).exists) {
+        throw new Error('The private preview download cleanup journal could not be cleared.');
+      }
+    }
+  };
 
   const readIndex = async (): Promise<OriginalBundleIndexV2> => {
     try {
@@ -197,6 +275,22 @@ export function createOriginalBundleStore(
     } catch {
       return emptyIndex();
     }
+  };
+  const readIndexStrict = async (): Promise<OriginalBundleIndexV2> => {
+    await recoverOriginalPath(files, indexPath);
+    if (!(await files.info(indexPath)).exists) return emptyIndex();
+    try {
+      const parsed = JSON.parse(await files.readText(indexPath));
+      if (
+        parsed?.schema_version === 2
+        && parsed.scopes
+        && typeof parsed.scopes === 'object'
+        && !Array.isArray(parsed.scopes)
+      ) return parsed;
+    } catch {
+      // Cleanup must not orphan files by treating an unreadable index as empty.
+    }
+    throw new Error('The private preview bundle index could not be verified.');
   };
 
   const writeIndex = (index: OriginalBundleIndexV2) => (
@@ -288,6 +382,40 @@ export function createOriginalBundleStore(
 
         const finalDirectory = versionRoot(ownerScope, manifest.pack_id, manifest.version);
         const stagingDirectory = `${finalDirectory}.tmp-${Date.now()}`;
+        const privateManifestId = options.privatePreviewManifestId;
+        if (privateManifestId != null && (
+          !ownerScope.startsWith('account:')
+          || privateManifestId !== manifest.manifest_id
+        )) throw new Error('The private preview download identity is invalid.');
+        let privateCleanupJournal: OriginalPrivateBundleCleanupJournalV1 | null = null;
+        if (privateManifestId) {
+          const pending = await readPrivateCleanupJournal(
+            ownerScope,
+            manifest.pack_id,
+            manifest.version,
+            privateManifestId,
+          );
+          if (pending) {
+            throw new Error('Finish the pending private preview cleanup before downloading again.');
+          }
+          privateCleanupJournal = {
+            schema_version: 1,
+            owner_scope: ownerScope,
+            pack_id: manifest.pack_id,
+            version: manifest.version,
+            manifest_id: privateManifestId,
+            staging_directory_uri: stagingDirectory,
+            final_directory_uri: finalDirectory,
+            map_pack_id: null,
+          };
+          await writePrivateCleanupJournal(privateCleanupJournal);
+          if (!await readPrivateCleanupJournal(
+            ownerScope,
+            manifest.pack_id,
+            manifest.version,
+            privateManifestId,
+          )) throw new Error('The private preview download cleanup journal could not be saved.');
+        }
         await files.remove(stagingDirectory).catch(() => {});
         await files.ensureDirectory(joinOriginalPath(stagingDirectory, 'assets'));
         let completedBytes = 0;
@@ -333,6 +461,20 @@ export function createOriginalBundleStore(
             { pack_id: `${safePart(ownerScope)}:${manifest.pack_id}`, version: manifest.version },
             {
               signal: options.signal,
+              onPackIdentity: async mapPackId => {
+                if (!privateCleanupJournal) return;
+                privateCleanupJournal = { ...privateCleanupJournal, map_pack_id: mapPackId };
+                await writePrivateCleanupJournal(privateCleanupJournal);
+                const persisted = await readPrivateCleanupJournal(
+                  ownerScope,
+                  manifest.pack_id,
+                  manifest.version,
+                  manifest.manifest_id,
+                );
+                if (persisted?.map_pack_id !== mapPackId) {
+                  throw new Error('The private preview offline map cleanup identity could not be saved.');
+                }
+              },
               onProgress: value => progress(
                 options.onProgress,
                 'map',
@@ -342,6 +484,9 @@ export function createOriginalBundleStore(
             },
           );
           preparedMapPackId = preparedMap.pack_id;
+          if (privateCleanupJournal && privateCleanupJournal.map_pack_id !== preparedMap.pack_id) {
+            throw new Error('The offline map adapter did not preserve its private cleanup identity.');
+          }
           completedBytes += manifest.offline_map.estimated_bytes;
 
           const stagedManifestUri = joinOriginalPath(stagingDirectory, 'manifest.json');
@@ -464,6 +609,81 @@ export function createOriginalBundleStore(
         delete scope.records[packId][String(version)];
         if (scope.pinned_versions[packId] === version) delete scope.pinned_versions[packId];
         await writeIndex(index);
+      });
+    },
+
+    /**
+     * Remove one identity-bound private preview without hiding partial cleanup.
+     * The index remains retryable until both the files and native map are gone.
+     */
+    removePrivatePreview(
+      ownerScope: OriginalOwnerScope,
+      packId: string,
+      version: number,
+      expectedManifestId: string,
+    ) {
+      return serialized(async () => {
+        const index = await readIndexStrict();
+        const scope = bundleScope(index, ownerScope);
+        const record = scope.records[packId]?.[String(version)];
+        const journal = await readPrivateCleanupJournal(
+          ownerScope,
+          packId,
+          version,
+          expectedManifestId,
+        );
+        const expectedFinalDirectory = versionRoot(ownerScope, packId, version);
+        const expectedBackupDirectory = originalBackupPath(expectedFinalDirectory);
+        if (!record && !journal) {
+          if (
+            (await files.info(expectedFinalDirectory)).exists
+            || (await files.info(expectedBackupDirectory)).exists
+          ) {
+            throw new Error('Unindexed private preview files remain on this device.');
+          }
+          return { removed: false as const };
+        }
+        if (record && record.manifest_id !== expectedManifestId) {
+          throw new Error('The private preview bundle identity changed; nothing was removed.');
+        }
+        if (
+          (record && record.directory_uri !== expectedFinalDirectory)
+          || (journal && journal.final_directory_uri !== expectedFinalDirectory)
+          || (
+            record?.map_pack_id
+            && journal?.map_pack_id
+            && record.map_pack_id !== journal.map_pack_id
+          )
+        ) throw new Error('The private preview cleanup targets changed; nothing was removed.');
+        const mapPackId = journal?.map_pack_id ?? record?.map_pack_id ?? null;
+        if (mapPackId) {
+          if (!defaultMapAdapter?.removeStrict) {
+            throw new Error('The private preview offline map cannot be removed on this device.');
+          }
+          await defaultMapAdapter.removeStrict(mapPackId);
+        }
+        const directories = [
+          journal?.staging_directory_uri,
+          expectedFinalDirectory,
+          expectedBackupDirectory,
+        ].filter((value): value is string => Boolean(value));
+        for (const directory of directories) {
+          await files.remove(directory);
+          if ((await files.info(directory)).exists) {
+            throw new Error('The private preview files could not be removed from this device.');
+          }
+        }
+        if (record) {
+          delete scope.records[packId][String(version)];
+          if (scope.pinned_versions[packId] === version) delete scope.pinned_versions[packId];
+          await writeIndex(index);
+        }
+        const persisted = await readIndexStrict();
+        if (persisted.scopes[ownerScope]?.records[packId]?.[String(version)]) {
+          throw new Error('The private preview bundle index could not be cleared.');
+        }
+        if (journal) await clearPrivateCleanupJournal(journal);
+        return { removed: true as const };
       });
     },
 

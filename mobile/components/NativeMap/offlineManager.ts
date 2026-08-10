@@ -151,6 +151,16 @@ export async function deletePack(name: string, renderer: NativeOfflineRenderer =
   await offlineManager(renderer).deletePack(physicalPackName(name, renderer));
 }
 
+/** Strict presence check for privacy-sensitive, identity-bound removal. */
+export async function hasInstalledPackStrict(
+  name: string,
+  renderer: NativeOfflineRenderer = 'maplibre',
+): Promise<boolean> {
+  const packs = await offlineManager(renderer).getPacks();
+  const nativeName = physicalPackName(name, renderer);
+  return Boolean(packs?.some((pack: any) => pack?.name === nativeName));
+}
+
 // ── List installed packs ──────────────────────────────────────────────────────
 export async function getInstalledPacks(renderer: NativeOfflineRenderer = 'maplibre'): Promise<InstalledPack[]> {
   try {

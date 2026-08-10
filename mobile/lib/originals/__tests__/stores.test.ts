@@ -58,14 +58,28 @@ async function main() {
     return fixtureDownload(url, destination, options);
   };
   let mapReady = true;
+  let strictMapRemovalBlocked = false;
+  const removedMapPacks: string[] = [];
   const mapAdapter = {
-    prepare: async (_map: unknown, identity: { pack_id: string; version: number }) => ({
-      pack_id: `map:${identity.pack_id}:${identity.version}`,
-      ready: true as const,
-      bytes: 500,
-    }),
+    prepare: async (
+      _map: unknown,
+      identity: { pack_id: string; version: number },
+      options?: { onPackIdentity?: (packId: string) => void | Promise<void> },
+    ) => {
+      const packId = `map:${identity.pack_id}:${identity.version}`;
+      await options?.onPackIdentity?.(packId);
+      return {
+        pack_id: packId,
+        ready: true as const,
+        bytes: 500,
+      };
+    },
     isReady: async () => mapReady,
-    remove: async () => {},
+    remove: async (packId: string) => { removedMapPacks.push(packId); },
+    removeStrict: async (packId: string) => {
+      if (strictMapRemovalBlocked) throw new Error('Strict native map absence could not be confirmed.');
+      removedMapPacks.push(packId);
+    },
   };
   const bundles = createOriginalBundleStore(files, undefined, mapAdapter);
   const manifest = originalManifest();
@@ -471,9 +485,272 @@ async function main() {
   assert.equal(previewAccess?.access_type, 'admin_preview');
   assert.equal(previewAccess?.owner_scope, accountScope);
   assert.equal(
+    previewAccess?.manifest_id,
+    previewManifest.manifest_id,
+    'admin draft access is bound to the exact immutable preview manifest',
+  );
+  assert.equal(
     await access.get('guest', manifest.pack_id, previewManifest.version),
     null,
     'admin draft access never leaks into the guest scope',
+  );
+  await bundles.download(manifest, { ownerScope: accountScope });
+  await bundles.download(previewManifest, {
+    ownerScope: accountScope,
+    pinVersion: false,
+    privatePreviewManifestId: previewManifest.manifest_id,
+  });
+  await assert.rejects(
+    bundles.removePrivatePreview(
+      accountScope,
+      previewManifest.pack_id,
+      previewManifest.version,
+      'different-manifest',
+    ),
+    /identity changed/,
+  );
+  assert.ok(
+    await bundles.get(accountScope, previewManifest.pack_id, previewManifest.version),
+    'identity mismatch leaves the private preview intact',
+  );
+  strictMapRemovalBlocked = true;
+  await assert.rejects(
+    bundles.removePrivatePreview(
+      accountScope,
+      previewManifest.pack_id,
+      previewManifest.version,
+      previewManifest.manifest_id,
+    ),
+    /absence could not be confirmed/,
+  );
+  assert.ok(
+    await bundles.get(accountScope, previewManifest.pack_id, previewManifest.version),
+    'uncertain native map cleanup keeps the exact preview index retryable',
+  );
+  strictMapRemovalBlocked = false;
+  const removedPreview = await bundles.removePrivatePreview(
+    accountScope,
+    previewManifest.pack_id,
+    previewManifest.version,
+    previewManifest.manifest_id,
+  );
+  assert.equal(removedPreview.removed, true);
+  assert.equal(
+    await bundles.get(accountScope, previewManifest.pack_id, previewManifest.version),
+    null,
+  );
+  assert.ok(
+    await bundles.get(accountScope, manifest.pack_id, manifest.version),
+    'exact preview cleanup preserves the account-owned release bundle',
+  );
+  assert.ok(
+    removedMapPacks.includes(`map:${encodeURIComponent(accountScope).replace(/%/g, '_')}:${manifest.pack_id}:${previewManifest.version}`),
+    'exact preview cleanup removes its native offline map',
+  );
+  assert.equal((await bundles.removePrivatePreview(
+    accountScope,
+    previewManifest.pack_id,
+    previewManifest.version,
+    previewManifest.manifest_id,
+  )).removed, false, 'exact private cleanup is idempotent');
+
+  const crashDownloads = {
+    'https://assets.test/one.mp3': AUDIO_ONE,
+    'https://assets.test/two.mp3': AUDIO_TWO,
+    'https://assets.test/three.mp3': AUDIO_THREE,
+  };
+  const crashFiles = createMemoryOriginalFileAdapter({ downloads: crashDownloads });
+  const crashMaps = new Set<string>();
+  let mapJournalReady!: () => void;
+  const mapJournalWasSaved = new Promise<void>(resolve => { mapJournalReady = resolve; });
+  const crashMapAdapter = {
+    prepare: async (
+      _map: unknown,
+      identity: { pack_id: string; version: number },
+      options?: { onPackIdentity?: (packId: string) => void | Promise<void> },
+    ) => {
+      const packId = `map:${identity.pack_id}:${identity.version}`;
+      await options?.onPackIdentity?.(packId);
+      crashMaps.add(packId);
+      mapJournalReady();
+      return new Promise<never>(() => {});
+    },
+    removeStrict: async (packId: string) => {
+      assert.ok(crashMaps.has(packId), 'recovery targets the exact journaled native map');
+      crashMaps.delete(packId);
+    },
+  };
+  const crashPreview = {
+    ...originalManifest(1_000_000_010),
+    manifest_id: `${manifest.manifest_id}:draft:crash-map`,
+  };
+  const crashedDownload = createOriginalBundleStore(
+    crashFiles,
+    undefined,
+    crashMapAdapter,
+  ).download(crashPreview, {
+    ownerScope: accountScope,
+    pinVersion: false,
+    privatePreviewManifestId: crashPreview.manifest_id,
+  });
+  void crashedDownload;
+  await mapJournalWasSaved;
+  const crashRecoveryBundles = createOriginalBundleStore(
+    crashFiles,
+    undefined,
+    crashMapAdapter,
+  );
+  assert.equal((await crashRecoveryBundles.removePrivatePreview(
+    accountScope,
+    crashPreview.pack_id,
+    crashPreview.version,
+    crashPreview.manifest_id,
+  )).removed, true, 'restart cleanup recovers a native-map/staging crash before index commit');
+  assert.equal(crashMaps.size, 0);
+  assert.equal(
+    [...crashFiles.directories].some(path => path.includes(`/${crashPreview.version}.tmp-`)),
+    false,
+    'restart cleanup proves the journaled staging directory absent',
+  );
+  assert.equal((await crashRecoveryBundles.removePrivatePreview(
+    accountScope,
+    crashPreview.pack_id,
+    crashPreview.version,
+    crashPreview.manifest_id,
+  )).removed, false, 'pre-index crash cleanup replays idempotently');
+
+  const promotionFiles = createMemoryOriginalFileAdapter({ downloads: crashDownloads });
+  const promotionScope = 'account:promotion-admin' as const;
+  const promotionPreview = {
+    ...originalManifest(1_000_000_011),
+    manifest_id: `${manifest.manifest_id}:draft:promotion-crash`,
+  };
+  const safePathPart = (value: string) => encodeURIComponent(value).replace(/%/g, '_');
+  const promotionFinal = `memory://docs/originals/bundles/${safePathPart(promotionScope)}/${safePathPart(promotionPreview.pack_id)}/${promotionPreview.version}`;
+  await promotionFiles.ensureDirectory(promotionFinal);
+  await promotionFiles.writeText(`${promotionFinal}/previous-private-byte`, 'private');
+  const promotionMove = promotionFiles.move.bind(promotionFiles);
+  let promotionInterrupted!: () => void;
+  const promotionWasInterrupted = new Promise<void>(resolve => { promotionInterrupted = resolve; });
+  promotionFiles.move = async (from, to) => {
+    if (to === promotionFinal && from.startsWith(`${promotionFinal}.tmp-`)) {
+      promotionInterrupted();
+      return new Promise<void>(() => {});
+    }
+    await promotionMove(from, to);
+  };
+  const promotionMaps = new Set<string>();
+  const promotionMapAdapter = {
+    prepare: async (
+      _map: unknown,
+      identity: { pack_id: string; version: number },
+      options?: { onPackIdentity?: (packId: string) => void | Promise<void> },
+    ) => {
+      const packId = `map:${identity.pack_id}:${identity.version}`;
+      await options?.onPackIdentity?.(packId);
+      promotionMaps.add(packId);
+      return { pack_id: packId, ready: true as const, bytes: 500 };
+    },
+    removeStrict: async (packId: string) => { promotionMaps.delete(packId); },
+  };
+  const interruptedPromotion = createOriginalBundleStore(
+    promotionFiles,
+    undefined,
+    promotionMapAdapter,
+  ).download(promotionPreview, {
+    ownerScope: promotionScope,
+    pinVersion: false,
+    privatePreviewManifestId: promotionPreview.manifest_id,
+  });
+  void interruptedPromotion;
+  await promotionWasInterrupted;
+  assert.equal((await promotionFiles.info(`${promotionFinal}.bak`)).exists, true);
+  const promotionRecovery = createOriginalBundleStore(
+    promotionFiles,
+    undefined,
+    promotionMapAdapter,
+  );
+  assert.equal((await promotionRecovery.removePrivatePreview(
+    promotionScope,
+    promotionPreview.pack_id,
+    promotionPreview.version,
+    promotionPreview.manifest_id,
+  )).removed, true, 'restart cleanup removes staging and backup bytes after a mid-promotion kill');
+  for (const path of [promotionFinal, `${promotionFinal}.bak`]) {
+    assert.equal((await promotionFiles.info(path)).exists, false, `${path} is proven absent`);
+  }
+  assert.equal(
+    [...promotionFiles.directories].some(path => path.startsWith(`${promotionFinal}.tmp-`)),
+    false,
+  );
+  assert.equal(promotionMaps.size, 0);
+
+  await promotionFiles.ensureDirectory(promotionFinal);
+  await assert.rejects(
+    promotionRecovery.removePrivatePreview(
+      promotionScope,
+      promotionPreview.pack_id,
+      promotionPreview.version,
+      promotionPreview.manifest_id,
+    ),
+    /Unindexed private preview files remain/,
+    'missing index/journal never masquerades as absence while deterministic private bytes remain',
+  );
+  await promotionFiles.remove(promotionFinal);
+
+  const journalTempPreview = {
+    ...originalManifest(1_000_000_012),
+    manifest_id: `${manifest.manifest_id}:draft:journal-temp-crash`,
+  };
+  const journalTempFinal = `memory://docs/originals/bundles/${safePathPart(promotionScope)}/${safePathPart(journalTempPreview.pack_id)}/${journalTempPreview.version}`;
+  const journalTempStaging = `${journalTempFinal}.tmp-123456`;
+  const journalTempPath = `memory://docs/originals/bundles/_private_cleanup/${safePathPart(promotionScope)}/${safePathPart(journalTempPreview.pack_id)}/${journalTempPreview.version}.json.tmp`;
+  await promotionFiles.ensureDirectory(journalTempStaging);
+  await promotionFiles.writeText(`${journalTempStaging}/private-byte`, 'private');
+  await promotionFiles.writeText(journalTempPath, JSON.stringify({
+    schema_version: 1,
+    owner_scope: promotionScope,
+    pack_id: journalTempPreview.pack_id,
+    version: journalTempPreview.version,
+    manifest_id: journalTempPreview.manifest_id,
+    staging_directory_uri: journalTempStaging,
+    final_directory_uri: journalTempFinal,
+    map_pack_id: null,
+  }));
+  assert.equal((await promotionRecovery.removePrivatePreview(
+    promotionScope,
+    journalTempPreview.pack_id,
+    journalTempPreview.version,
+    journalTempPreview.manifest_id,
+  )).removed, true, 'restart cleanup recovers a journal write killed before atomic promotion');
+  assert.equal((await promotionFiles.info(journalTempStaging)).exists, false);
+  assert.equal((await promotionFiles.info(journalTempPath)).exists, false);
+  await assert.rejects(
+    access.removeAdminPreview(
+      accountScope,
+      previewManifest.pack_id,
+      previewManifest.version,
+      'different-manifest',
+    ),
+    /access identity changed/,
+  );
+  assert.ok(await access.get(accountScope, previewManifest.pack_id, previewManifest.version));
+  assert.equal((await access.removeAdminPreview(
+    accountScope,
+    previewManifest.pack_id,
+    previewManifest.version,
+    previewManifest.manifest_id,
+  )).removed, true);
+  assert.equal((await access.removeAdminPreview(
+    accountScope,
+    previewManifest.pack_id,
+    previewManifest.version,
+    previewManifest.manifest_id,
+  )).removed, false, 'exact private access cleanup is idempotent');
+  assert.equal(await access.get(accountScope, previewManifest.pack_id, previewManifest.version), null);
+  assert.ok(
+    await access.get(accountScope, manifest.pack_id, manifest.version),
+    'exact preview access cleanup preserves the released entitlement',
   );
 
   // Account departure removes only the signed-in scope. A free guest Original
@@ -511,6 +788,31 @@ async function main() {
   assert.ok(await access.get('guest', manifest.pack_id, 1), 'guest-free access survives account cleanup');
   assert.ok(await access.get('account:77', manifest.pack_id, 1), 'another account scope remains isolated');
   assert.deepEqual((await feedback.listPending()).map(item => item.idempotency_key), ['guest-feedback']);
+
+  const corruptAccessFiles = createMemoryOriginalFileAdapter();
+  await corruptAccessFiles.writeText('memory://docs/originals/access/_index.json', '{');
+  await assert.rejects(
+    createOriginalAccessStore(corruptAccessFiles).removeAdminPreview(
+      accountScope,
+      previewManifest.pack_id,
+      previewManifest.version,
+      previewManifest.manifest_id,
+    ),
+    /access index could not be verified/,
+    'strict preview access cleanup never treats an unreadable index as empty',
+  );
+  const corruptBundleFiles = createMemoryOriginalFileAdapter();
+  await corruptBundleFiles.writeText('memory://docs/originals/bundles/_index.json', '{');
+  await assert.rejects(
+    createOriginalBundleStore(corruptBundleFiles, undefined, mapAdapter).removePrivatePreview(
+      accountScope,
+      previewManifest.pack_id,
+      previewManifest.version,
+      previewManifest.manifest_id,
+    ),
+    /bundle index could not be verified/,
+    'strict preview bundle cleanup never treats an unreadable index as empty',
+  );
 
   console.log('Originals durable store tests passed.');
 }

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Image, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { usePreventRemove } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -7,11 +7,17 @@ import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/lib/design';
 import {
+  originalAdminPreviewExitAction,
+  originalAdminPreviewReviewEntries,
+  originalAdminPreviewRenderableReviewEntries,
   originalSimulationSamplesForNextCue,
   runOriginalRouteValidation,
   useOriginalsAdminRuntime,
   useOriginalsRuntime,
   type OriginalRouteValidationReportV1,
+  type OriginalAdminPreviewExitSurface,
+  type OriginalAdminPreviewReviewEntry,
+  type OriginalAdminPreviewRenderableReviewEntry,
   type OriginalSessionV1,
   type OriginalStopV1,
   type OriginalTriggerDecisionDiagnostic,
@@ -21,6 +27,7 @@ import {
   getOriginalDetail,
   manifestStories,
   originalSessionToUi,
+  selectableManifestItemStory,
   selectOriginalUiChapter,
 } from '@/components/originals/originalsUiService';
 import OriginalRouteMap from '@/components/originals/OriginalRouteMap';
@@ -110,6 +117,8 @@ export default function OriginalPlayerScreen() {
   const originalsAdminRuntime = useOriginalsAdminRuntime();
   const runtimeRef = useRef(originalsRuntime);
   runtimeRef.current = originalsRuntime;
+  const adminRuntimeRef = useRef(originalsAdminRuntime);
+  adminRuntimeRef.current = originalsAdminRuntime;
   const ownsSimulationRouteRef = useRef(simulateValue === '1');
   const exitPromptVisibleRef = useRef(false);
   const [navigationAllowed, setNavigationAllowed] = useState(false);
@@ -125,6 +134,9 @@ export default function OriginalPlayerScreen() {
   const [validationReport, setValidationReport] = useState<OriginalRouteValidationReportV1 | null>(null);
   const [simulationSpeedMps, setSimulationSpeedMps] = useState(12);
   const [simulationResults, setSimulationResults] = useState<SimulationCueResult[]>([]);
+  const [reviewOpenedIds, setReviewOpenedIds] = useState<string[]>([]);
+  const [reviewBusyId, setReviewBusyId] = useState<string | null>(null);
+  const [reviewCleanupBusy, setReviewCleanupBusy] = useState(false);
   const [driveLabState, setDriveLabState] = useState<OriginalVirtualDriveLabState | null>(null);
   const [driveLabError, setDriveLabError] = useState('');
   const driveLabStateRef = useRef<OriginalVirtualDriveLabState | null>(null);
@@ -156,6 +168,41 @@ export default function OriginalPlayerScreen() {
     ...(requestedChapterId ? { chapter: requestedChapterId } : {}),
     ...(requestedVariantId ? { variant: requestedVariantId } : {}),
   }), [id, requestedChapterId, requestedVariantId, requestedVersion]);
+  const rawAdminReviewEntries = useMemo(() => originalAdminPreviewReviewEntries(
+    originalsRuntime.manifest,
+    originalsRuntime.selectablePlan,
+    {
+      isAdmin,
+      simulation: originalsRuntime.simulation && simulateValue === '1',
+      privatePreview: originalsAdminRuntime.privateReviewActive,
+    },
+  ), [
+    isAdmin,
+    originalsAdminRuntime.privateReviewActive,
+    originalsRuntime.manifest,
+    originalsRuntime.selectablePlan,
+    originalsRuntime.simulation,
+    simulateValue,
+  ]);
+  const adminReviewResolution = useMemo(() => {
+    try {
+      return {
+        entries: originalAdminPreviewRenderableReviewEntries(
+          rawAdminReviewEntries,
+          originalsRuntime.bundle?.assets,
+        ),
+        error: '',
+      };
+    } catch (caught) {
+      return {
+        entries: [] as OriginalAdminPreviewRenderableReviewEntry[],
+        error: caught instanceof Error
+          ? caught.message
+          : 'The approved private review artwork could not be verified.',
+      };
+    }
+  }, [originalsRuntime.bundle?.assets, rawAdminReviewEntries]);
+  const adminReviewEntries = adminReviewResolution.entries;
 
   useEffect(() => {
     if (!redirectConsumerToMainMap) return;
@@ -178,8 +225,22 @@ export default function OriginalPlayerScreen() {
   ]);
 
   useEffect(() => () => {
-    if (ownsSimulationRouteRef.current && runtimeRef.current.simulation) {
-      void runtimeRef.current.stopTour().catch(() => {});
+    if (
+      ownsSimulationRouteRef.current
+      && (
+        runtimeRef.current.simulation
+        || adminRuntimeRef.current.privateReviewActive
+        || adminRuntimeRef.current.privateReviewCleanupPending
+      )
+    ) {
+      if (
+        adminRuntimeRef.current.privateReviewActive
+        || adminRuntimeRef.current.privateReviewCleanupPending
+      ) {
+        void adminRuntimeRef.current.endPrivateReview().catch(() => {});
+      } else {
+        void runtimeRef.current.stopTour().catch(() => {});
+      }
     }
   }, []);
 
@@ -211,6 +272,7 @@ export default function OriginalPlayerScreen() {
       ),
     }));
     setSimulationResults([]);
+    setReviewOpenedIds([]);
     setValidationReport(null);
     setDriveLabError('');
   }, [
@@ -226,8 +288,24 @@ export default function OriginalPlayerScreen() {
   useEffect(() => {
     if (!originalsRuntime.simulation || isAdmin) return;
     commitDriveLabState(null);
-    void originalsRuntime.stopTour().catch(() => {});
-  }, [commitDriveLabState, isAdmin, originalsRuntime]);
+    const action = originalAdminPreviewExitAction('privilege_loss', {
+      privateReviewActive: originalsAdminRuntime.privateReviewActive,
+      cleanupPending: originalsAdminRuntime.privateReviewCleanupPending,
+    });
+    if (action === 'exact_private_cleanup') {
+      void originalsAdminRuntime.endPrivateReview().catch(() => {});
+    } else {
+      void originalsRuntime.stopTour().catch(() => {});
+    }
+  }, [
+    commitDriveLabState,
+    isAdmin,
+    originalsAdminRuntime.endPrivateReview,
+    originalsAdminRuntime.privateReviewActive,
+    originalsAdminRuntime.privateReviewCleanupPending,
+    originalsRuntime.simulation,
+    originalsRuntime.stopTour,
+  ]);
 
   useEffect(() => {
     if (!originalsRuntime.simulation || !isAdmin || !driveLabState?.playing) return;
@@ -327,9 +405,27 @@ export default function OriginalPlayerScreen() {
       || !originalsRuntime.manifest
       || !runtimeMatchesRequest
     ) return detail;
-    const stories = manifestStories(originalsRuntime.manifest, originalsRuntime.session);
+    const hardStories = manifestStories(originalsRuntime.manifest, originalsRuntime.session);
+    const stories = adminReviewEntries.length
+      ? adminReviewEntries.map(entry => (
+        entry.mode === 'hard_auto'
+          ? hardStories.find(story => story.id === entry.id)!
+          : selectableManifestItemStory(
+            originalsRuntime.selectablePlan,
+            entry.id,
+            originalsRuntime.session,
+          )!
+      )).filter(Boolean)
+      : hardStories;
     return { ...detail, stories, storyCount: stories.length };
-  }, [detail, originalsRuntime.manifest, originalsRuntime.session, runtimeMatchesRequest]);
+  }, [
+    adminReviewEntries,
+    detail,
+    originalsRuntime.manifest,
+    originalsRuntime.selectablePlan,
+    originalsRuntime.session,
+    runtimeMatchesRequest,
+  ]);
 
   const togglePause = useCallback(async () => {
     if (!session) return;
@@ -360,7 +456,62 @@ export default function OriginalPlayerScreen() {
     finishSimulationExit();
   }, [finishSimulationExit, originalsRuntime.simulation, router]);
 
-  const requestClosePlayer = useCallback((navigateAfterStop?: () => void) => {
+  const requestPrivateReviewCleanup = useCallback((navigateAfterCleanup?: () => void) => {
+    if (reviewCleanupBusy || exitPromptVisibleRef.current) return;
+    exitPromptVisibleRef.current = true;
+    const pending = originalsAdminRuntime.privateReviewCleanupPending;
+    Alert.alert(
+      pending ? 'Finish private review cleanup?' : 'End private review?',
+      'This removes only this private revision, its downloaded assets and offline map, and the preview credential from this device.',
+      [
+        {
+          text: pending ? 'Stay here' : 'Keep reviewing',
+          style: 'cancel',
+          onPress: () => { exitPromptVisibleRef.current = false; },
+        },
+        {
+          text: pending ? 'Retry cleanup' : 'End private review',
+          style: 'destructive',
+          onPress: () => {
+            exitPromptVisibleRef.current = false;
+            setReviewCleanupBusy(true);
+            void originalsAdminRuntime.endPrivateReview()
+              .then(() => {
+                setNavigationAllowed(true);
+                ownsSimulationRouteRef.current = false;
+                requestAnimationFrame(() => {
+                  if (navigateAfterCleanup) navigateAfterCleanup();
+                  else router.replace('/originals' as any);
+                });
+              })
+              .catch((error: any) => {
+                Alert.alert(
+                  'Private review cleanup needs attention',
+                  error?.message || 'The exact private review could not be fully removed.',
+                );
+              })
+              .finally(() => setReviewCleanupBusy(false));
+          },
+        },
+      ],
+      {
+        cancelable: true,
+        onDismiss: () => { exitPromptVisibleRef.current = false; },
+      },
+    );
+  }, [originalsAdminRuntime, reviewCleanupBusy, router]);
+
+  const requestClosePlayer = useCallback((
+    surface: OriginalAdminPreviewExitSurface,
+    navigateAfterStop?: () => void,
+  ) => {
+    if (originalAdminPreviewExitAction(surface, {
+      privateReviewActive: originalsAdminRuntime.privateReviewActive,
+      cleanupPending: originalsAdminRuntime.privateReviewCleanupPending,
+    }) === 'exact_private_cleanup') {
+      requestPrivateReviewCleanup(navigateAfterStop);
+      return;
+    }
     if (!originalsRuntime.simulation) {
       if (navigateAfterStop) navigateAfterStop();
       else closePlayer();
@@ -391,10 +542,17 @@ export default function OriginalPlayerScreen() {
         onDismiss: () => { exitPromptVisibleRef.current = false; },
       },
     );
-  }, [closePlayer, finishSimulationExit, originalsRuntime.simulation]);
+  }, [
+    closePlayer,
+    finishSimulationExit,
+    originalsAdminRuntime.privateReviewActive,
+    originalsAdminRuntime.privateReviewCleanupPending,
+    originalsRuntime.simulation,
+    requestPrivateReviewCleanup,
+  ]);
 
   usePreventRemove(simulateValue === '1' && !navigationAllowed, ({ data }) => {
-    requestClosePlayer(() => navigation.dispatch(data.action));
+    requestClosePlayer('android_back', () => navigation.dispatch(data.action));
   });
 
   const runSimulation = useCallback(async (scenario: 'trigger' | 'poor_accuracy' | 'off_route') => {
@@ -456,7 +614,27 @@ export default function OriginalPlayerScreen() {
     }
   }, [originalsRuntime.manifest, originalsRuntime.simulation, validationBusy]);
 
-  const currentStory = session?.currentStory || session?.nextStory || playerDetail?.stories[0];
+  const reviewStory = useCallback(async (entry: OriginalAdminPreviewReviewEntry) => {
+    if (reviewBusyId) return;
+    setReviewBusyId(entry.id);
+    try {
+      await originalsAdminRuntime.reviewPreviewStory(entry.id);
+      setReviewOpenedIds(current => current.includes(entry.id) ? current : [...current, entry.id]);
+      setStoriesVisible(false);
+    } catch (error: any) {
+      Alert.alert('Story review could not start', error?.message || 'Finish the playing story and try again.');
+    } finally {
+      setReviewBusyId(null);
+    }
+  }, [originalsAdminRuntime, reviewBusyId]);
+
+  const optionalCurrentStory = selectableManifestItemStory(
+    originalsRuntime.selectablePlan,
+    originalsRuntime.session?.long_form?.current_item_id,
+    originalsRuntime.session,
+  );
+  const currentStory = optionalCurrentStory || session?.currentStory || session?.nextStory || playerDetail?.stories[0];
+  const storyIsPlaying = Boolean(optionalCurrentStory || session?.currentStory);
   const nextStop = useMemo(() => {
     if (!originalsRuntime.manifest || originalsRuntime.manifest.pack_id !== id) return null;
     const nextId = session?.nextStory?.id;
@@ -568,12 +746,72 @@ export default function OriginalPlayerScreen() {
   }
 
   if (simulateValue === '1' && !isAdmin) {
+    const privateCleanupRequired = (
+      originalsAdminRuntime.privateReviewActive
+      || originalsAdminRuntime.privateReviewCleanupPending
+    );
     return (
       <SafeAreaView style={[styles.center, { backgroundColor: C.bg }] }>
         <Ionicons name="lock-closed-outline" size={34} color={C.orange} />
-        <Text style={[styles.centerText, { color: C.text2 }]}>The Virtual Drive Lab is available only to Trailhead admins.</Text>
-        <TouchableOpacity accessibilityRole="button" onPress={() => router.replace('/originals' as any)} style={[styles.recoveryButton, { borderColor: C.border }] }>
-          <Text style={[styles.recoveryText, { color: C.orange }]}>Back to Originals</Text>
+        <Text style={[styles.centerText, { color: C.text2 }]}>
+          {privateCleanupRequired
+            ? 'Admin access changed. Private playback is locked, but this exact local review can still be removed.'
+            : 'The Virtual Drive Lab is available only to Trailhead admins.'}
+        </Text>
+        <TouchableOpacity
+          accessibilityRole="button"
+          onPress={() => privateCleanupRequired
+            ? requestPrivateReviewCleanup()
+            : router.replace('/originals' as any)}
+          style={[styles.recoveryButton, { borderColor: privateCleanupRequired ? C.red : C.border }]}
+        >
+          <Text style={[styles.recoveryText, { color: privateCleanupRequired ? C.red : C.orange }]}>
+            {privateCleanupRequired ? 'Remove private review' : 'Back to Originals'}
+          </Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
+
+  if (originalsAdminRuntime.privateReviewCleanupPending) {
+    return (
+      <SafeAreaView style={[styles.center, { backgroundColor: C.bg }] }>
+        <Ionicons name="shield-checkmark-outline" size={34} color={C.orange} />
+        <Text style={[styles.centerText, { color: C.text2 }]}>Finish removing the preview credential and this exact private revision from the device.</Text>
+        <TouchableOpacity
+          testID="originals.private-review.retry-cleanup"
+          accessibilityRole="button"
+          accessibilityLabel="Retry exact private review cleanup"
+          disabled={reviewCleanupBusy}
+          onPress={() => requestPrivateReviewCleanup()}
+          style={[styles.recoveryButton, { borderColor: C.red, opacity: reviewCleanupBusy ? 0.55 : 1 }]}
+        >
+          {reviewCleanupBusy ? <ActivityIndicator size="small" color={C.red} /> : null}
+          <Text style={[styles.recoveryText, { color: C.red }]}>Retry exact cleanup</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
+
+  if (
+    originalsAdminRuntime.privateReviewActive
+    && runtimeMatchesRequest
+    && (adminReviewResolution.error || !rawAdminReviewEntries.length)
+  ) {
+    return (
+      <SafeAreaView style={[styles.center, { backgroundColor: C.bg }] }>
+        <Ionicons name="images-outline" size={34} color={C.orange} />
+        <Text style={[styles.centerText, { color: C.text2 }]}>
+          {adminReviewResolution.error || 'The exact private review story list could not be verified.'}
+        </Text>
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel="End private review and remove this downloaded revision"
+          disabled={reviewCleanupBusy}
+          onPress={() => requestPrivateReviewCleanup()}
+          style={[styles.recoveryButton, { borderColor: C.red, opacity: reviewCleanupBusy ? 0.55 : 1 }]}
+        >
+          <Text style={[styles.recoveryText, { color: C.red }]}>End private review</Text>
         </TouchableOpacity>
       </SafeAreaView>
     );
@@ -610,9 +848,20 @@ export default function OriginalPlayerScreen() {
           validationReport={validationReport}
           onRunValidation={() => void runValidationMatrix()}
           onFeedback={() => setFeedbackVisible(true)}
-          onExit={closePlayer}
+          onExit={() => requestClosePlayer('completion_exit')}
+          onEndPrivateReview={adminReviewEntries.length ? () => requestPrivateReviewCleanup() : undefined}
+          privateReviewCleanupBusy={reviewCleanupBusy}
         />
-        <StoriesModal visible={storiesVisible} detail={playerDetail} onClose={() => setStoriesVisible(false)} onReplay={storyId => void originalsRuntime.replayStory(storyId)} />
+        <StoriesModal
+          visible={storiesVisible}
+          detail={playerDetail}
+          onClose={() => setStoriesVisible(false)}
+          onReplay={storyId => void originalsRuntime.replayStory(storyId)}
+          adminReviewEntries={adminReviewEntries}
+          reviewOpenedIds={reviewOpenedIds}
+          reviewBusyId={reviewBusyId}
+          onAdminReview={entry => void reviewStory(entry)}
+        />
         {!originalsRuntime.simulation ? <OriginalFeedbackSheet visible={feedbackVisible} packId={id} version={session.version} onClose={() => setFeedbackVisible(false)} /> : null}
       </>
     );
@@ -627,7 +876,7 @@ export default function OriginalPlayerScreen() {
             testID="originals.legacy-player.minimize"
             accessibilityRole="button"
             accessibilityLabel={originalsRuntime.simulation ? 'Close trigger test' : 'Minimize tour player'}
-            onPress={() => requestClosePlayer()}
+            onPress={() => requestClosePlayer('top_close')}
             style={styles.roundButton}
           >
             <Ionicons name="chevron-down" size={22} color="#FFFFFF" />
@@ -651,7 +900,7 @@ export default function OriginalPlayerScreen() {
           <OriginalRouteMap
             route={originalsRuntime.manifest!.route}
             projectedProgressM={originalsRuntime.session!.last_projected_route_progress_m}
-            currentStoryTitle={session.currentStory?.title}
+            currentStoryTitle={storyIsPlaying ? currentStory?.title : undefined}
             nextStop={nextStop}
           />
           <View style={styles.mapStatusRow}>
@@ -739,7 +988,7 @@ export default function OriginalPlayerScreen() {
               <Ionicons name={isPaused ? 'pause' : 'headset'} size={23} color={C.orange} />
             </View>
             <View style={styles.nowCopy}>
-              <Text style={[styles.nowKicker, { color: C.orange }]}>{isPaused ? 'PAUSED BY YOU' : session.currentStory ? 'NOW PLAYING' : 'UP NEXT'}</Text>
+              <Text style={[styles.nowKicker, { color: C.orange }]}>{isPaused ? 'PAUSED BY YOU' : storyIsPlaying ? 'NOW PLAYING' : 'UP NEXT'}</Text>
               <Text style={[styles.nowTitle, { color: C.text }]} numberOfLines={2}>{currentStory?.title || 'Continue along the route'}</Text>
               <Text style={[styles.nowMeta, { color: C.text3 }]}>{currentStory?.durationLabel || 'Waiting for the next trigger'}</Text>
             </View>
@@ -775,7 +1024,7 @@ export default function OriginalPlayerScreen() {
               accessibilityRole="button"
               accessibilityLabel={originalsRuntime.simulation ? 'End trigger test' : 'End tour'}
               onPress={() => originalsRuntime.simulation
-                ? requestClosePlayer()
+                ? requestClosePlayer('end_test')
                 : Alert.alert('End this tour?', 'GPS and narration will stop. Your download and story progress will stay saved.', [
                   { text: 'Keep touring', style: 'cancel' },
                   {
@@ -795,6 +1044,21 @@ export default function OriginalPlayerScreen() {
               <Text style={[styles.secondaryLabel, { color: C.text2 }]}>{originalsRuntime.simulation ? 'End test' : 'End tour'}</Text>
             </TouchableOpacity>
           </View>
+          {originalsRuntime.simulation && adminReviewEntries.length ? (
+            <TouchableOpacity
+              testID="originals.private-review.end"
+              accessibilityRole="button"
+              accessibilityLabel="End private review and remove this downloaded revision"
+              disabled={reviewCleanupBusy}
+              onPress={() => requestPrivateReviewCleanup()}
+              style={[styles.privateReviewCleanup, { borderColor: C.red, opacity: reviewCleanupBusy ? 0.55 : 1 }]}
+            >
+              {reviewCleanupBusy
+                ? <ActivityIndicator size="small" color={C.red} />
+                : <Ionicons name="trash-outline" size={16} color={C.red} />}
+              <Text style={[styles.privateReviewCleanupText, { color: C.red }]}>End private review</Text>
+            </TouchableOpacity>
+          ) : null}
           {!originalsRuntime.simulation ? (
             <TouchableOpacity testID="originals.legacy-player.feedback" accessibilityRole="button" accessibilityLabel="Share feedback about this Original" onPress={() => setFeedbackVisible(true)} style={[styles.feedbackButton, { borderColor: C.border }] }>
               <Ionicons name="chatbubble-ellipses-outline" size={16} color={C.orange} />
@@ -805,7 +1069,16 @@ export default function OriginalPlayerScreen() {
         </View>
       </SafeAreaView>
 
-      <StoriesModal visible={storiesVisible} detail={playerDetail} onClose={() => setStoriesVisible(false)} onReplay={storyId => void originalsRuntime.replayStory(storyId)} />
+      <StoriesModal
+        visible={storiesVisible}
+        detail={playerDetail}
+        onClose={() => setStoriesVisible(false)}
+        onReplay={storyId => void originalsRuntime.replayStory(storyId)}
+        adminReviewEntries={adminReviewEntries}
+        reviewOpenedIds={reviewOpenedIds}
+        reviewBusyId={reviewBusyId}
+        onAdminReview={entry => void reviewStory(entry)}
+      />
       {!originalsRuntime.simulation ? <OriginalFeedbackSheet visible={feedbackVisible} packId={id} version={session.version} stopId={currentStory?.id} onClose={() => setFeedbackVisible(false)} /> : null}
     </View>
   );
@@ -1228,18 +1501,35 @@ function PlayerControl({ testID, icon, label, disabled = false, onPress }: { tes
   );
 }
 
+function privateReviewDurationLabel(seconds: number) {
+  const rounded = Math.max(1, Math.round(seconds));
+  return rounded < 60 ? `${rounded} sec` : `${Math.floor(rounded / 60)}:${String(rounded % 60).padStart(2, '0')}`;
+}
+
 function StoriesModal({
   visible,
   detail,
   onClose,
   onReplay,
+  adminReviewEntries = [],
+  reviewOpenedIds = [],
+  reviewBusyId = null,
+  onAdminReview,
 }: {
   visible: boolean;
   detail: OriginalUiDetail;
   onClose: () => void;
   onReplay: (storyId: string) => void;
+  adminReviewEntries?: OriginalAdminPreviewRenderableReviewEntry[];
+  reviewOpenedIds?: string[];
+  reviewBusyId?: string | null;
+  onAdminReview?: (entry: OriginalAdminPreviewRenderableReviewEntry) => void;
 }) {
   const C = useTheme();
+  const [artworkFailedIds, setArtworkFailedIds] = useState<string[]>([]);
+  useEffect(() => {
+    if (visible) setArtworkFailedIds([]);
+  }, [adminReviewEntries, visible]);
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.modalOverlay}>
@@ -1254,7 +1544,53 @@ function StoriesModal({
             </TouchableOpacity>
           </View>
           <ScrollView showsVerticalScrollIndicator={false}>
-            {detail.stories.map(story => {
+            {adminReviewEntries.length ? (
+              <>
+                <Text style={[styles.privateReviewNote, { color: C.text3 }]}>PRIVATE CONTENT REVIEW · {adminReviewEntries.length} EXACT STORIES · Scheduling and release flags are unchanged.</Text>
+                {adminReviewEntries.map(entry => {
+                  const opened = reviewOpenedIds.includes(entry.id);
+                  const busy = reviewBusyId === entry.id;
+                  const artworkFailed = artworkFailedIds.includes(entry.id);
+                  return (
+                    <TouchableOpacity
+                      key={entry.id}
+                      testID={`originals.private-review.story.${entry.id}`}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Review story ${entry.sequence}, ${entry.title}. ${entry.mode_label}`}
+                      disabled={Boolean(reviewBusyId) || artworkFailed}
+                      onPress={() => onAdminReview?.(entry)}
+                      style={[styles.storyModalRow, { borderBottomColor: C.border, opacity: reviewBusyId && !busy ? 0.55 : 1 }]}
+                    >
+                      <View style={[styles.privateReviewArtworkFrame, { borderColor: artworkFailed ? C.red : C.orange + '50', backgroundColor: C.s2 }] }>
+                        {artworkFailed ? (
+                          <Ionicons name="alert-circle-outline" size={20} color={C.red} />
+                        ) : (
+                          <Image
+                            accessibilityIgnoresInvertColors
+                            source={{ uri: entry.artwork_uri }}
+                            resizeMode="cover"
+                            onError={() => setArtworkFailedIds(current => (
+                              current.includes(entry.id) ? current : [...current, entry.id]
+                            ))}
+                            style={styles.privateReviewArtwork}
+                          />
+                        )}
+                        {busy ? (
+                          <View style={styles.privateReviewArtworkBusy}>
+                            <ActivityIndicator size="small" color="#FFFFFF" />
+                          </View>
+                        ) : null}
+                      </View>
+                      <View style={styles.storyModalCopy}>
+                        <Text style={[styles.storyModalTitle, { color: C.text }]}>{entry.sequence}. {entry.title}</Text>
+                        <Text style={[styles.storyModalMeta, { color: artworkFailed ? C.red : C.text3 }]}>{artworkFailed ? 'APPROVED ARTWORK COULD NOT BE DISPLAYED' : `${entry.mode_label} · ${privateReviewDurationLabel(entry.audio_duration_s)}${opened ? ' · OPENED' : ''}`}</Text>
+                      </View>
+                      <Ionicons name="play-circle-outline" size={21} color={C.orange} />
+                    </TouchableOpacity>
+                  );
+                })}
+              </>
+            ) : detail.stories.map(story => {
               const heard = Boolean(story.completed);
               const skipped = Boolean(story.skipped);
               const missed = Boolean(story.missed);
@@ -1300,6 +1636,8 @@ function CompletionState({
   onRunValidation,
   onFeedback,
   onExit,
+  onEndPrivateReview,
+  privateReviewCleanupBusy = false,
 }: {
   detail: OriginalUiDetail;
   session: OriginalUiSession;
@@ -1311,6 +1649,8 @@ function CompletionState({
   onRunValidation?: () => void;
   onFeedback: () => void;
   onExit?: () => void;
+  onEndPrivateReview?: () => void;
+  privateReviewCleanupBusy?: boolean;
 }) {
   const C = useTheme();
   const router = useRouter();
@@ -1364,6 +1704,19 @@ function CompletionState({
         {!simulation ? (
           <TouchableOpacity accessibilityRole="button" onPress={onFeedback} style={[styles.completionSecondary, { borderColor: C.border }] }>
             <Text style={[styles.completionSecondaryText, { color: C.orange }]}>Share feedback</Text>
+          </TouchableOpacity>
+        ) : null}
+        {simulation && onEndPrivateReview ? (
+          <TouchableOpacity
+            testID="originals.private-review.end.completed"
+            accessibilityRole="button"
+            accessibilityLabel="End private review and remove this downloaded revision"
+            disabled={privateReviewCleanupBusy}
+            onPress={onEndPrivateReview}
+            style={[styles.completionSecondary, { borderColor: C.red, opacity: privateReviewCleanupBusy ? 0.55 : 1 }]}
+          >
+            {privateReviewCleanupBusy ? <ActivityIndicator size="small" color={C.red} /> : null}
+            <Text style={[styles.completionSecondaryText, { color: C.red }]}>End private review</Text>
           </TouchableOpacity>
         ) : null}
         <TouchableOpacity accessibilityRole="button" onPress={() => simulation ? onExit?.() : router.replace('/(tabs)/trips' as any)} style={[styles.completionSecondary, { borderColor: C.border }] }>
@@ -1484,6 +1837,8 @@ const styles = StyleSheet.create({
   secondaryControls: { flexDirection: 'row', gap: 8 },
   secondaryButton: { flex: 1, minHeight: 44, borderWidth: 1, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
   secondaryLabel: { fontSize: 10, fontWeight: '800' },
+  privateReviewCleanup: { minHeight: 44, borderWidth: 1, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
+  privateReviewCleanupText: { fontSize: 10.5, fontWeight: '900' },
   feedbackButton: { minHeight: 44, borderWidth: 1, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
   feedbackButtonText: { fontSize: 10.5, fontWeight: '900' },
   modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.56)' },
@@ -1493,8 +1848,12 @@ const styles = StyleSheet.create({
   storySheetKicker: { fontSize: 8, lineHeight: 11, fontWeight: '900', letterSpacing: 0.8 },
   storySheetTitle: { marginTop: 2, fontSize: 18, lineHeight: 22, fontWeight: '900' },
   storySheetClose: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  privateReviewNote: { paddingVertical: 10, fontSize: 9, lineHeight: 14, fontWeight: '800', letterSpacing: 0.35 },
   storyModalRow: { minHeight: 66, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'center', gap: 10 },
   storyModalSequence: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  privateReviewArtworkFrame: { width: 64, height: 48, borderRadius: 9, borderWidth: 1, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
+  privateReviewArtwork: { width: '100%', height: '100%' },
+  privateReviewArtworkBusy: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', backgroundColor: '#00000066' },
   storyModalCopy: { flex: 1, minWidth: 0 },
   storyModalTitle: { fontSize: 12.5, lineHeight: 17, fontWeight: '800' },
   storyModalMeta: { marginTop: 2, fontSize: 10, lineHeight: 14, fontWeight: '600' },

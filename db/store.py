@@ -12380,6 +12380,15 @@ class OriginalNarrationProfileConflictError(ValueError):
         super().__init__(f"Original narration profile cannot be applied: {self.reason}")
 
 
+class OriginalDevicePreviewCompletionConflictError(ValueError):
+    def __init__(self, pack_id: str, reason: str):
+        self.pack_id = str(pack_id)
+        self.reason = str(reason)
+        super().__init__(
+            f"Original device preview cannot be marked complete: {self.reason}"
+        )
+
+
 def _original_asset_mime_allowed(kind: str, mime_type: str) -> bool:
     if kind == "narration":
         return mime_type in {"audio/wav", "audio/mpeg"}
@@ -12935,6 +12944,353 @@ def attest_authored_original_generator_license(
         "draft_revision": current_revision,
         "license_status": "attested",
         "license_attestation": metadata["license_attestation"],
+        "replayed": replayed,
+    }
+
+
+def revert_authored_original_device_preview_complete(
+    pack_id: str,
+    *,
+    expected_draft_revision: int,
+    expected_base_manifest_sha256: str,
+    expected_manifest_sha256: str,
+    expected_profile_sha256: str,
+    expected_applied_validation_metadata_sha256: str,
+    expected_asset_sha256: dict[str, str],
+    expected_narration_sha256: dict[str, str],
+    expected_redacted_license_attestation_sha256: dict[str, str],
+    expected_application_release_sha: str,
+    expected_application_update_id: str,
+    evidence: dict,
+    restore_validation_metadata: dict,
+    expected_restore_validation_metadata_sha256: str,
+    admin_user_id: int,
+) -> dict:
+    """Revert only the exact journaled physical-device preview assertion."""
+    pack_id = _validate_canonical_id(pack_id, "Original id")
+    if (
+        isinstance(expected_draft_revision, bool)
+        or not isinstance(expected_draft_revision, int)
+        or expected_draft_revision != 2
+    ):
+        raise ValueError("Original device preview revert requires exact draft revision 2")
+    for value, label in (
+        (expected_base_manifest_sha256, "base manifest"),
+        (expected_manifest_sha256, "manifest"),
+        (expected_profile_sha256, "profile"),
+        (expected_applied_validation_metadata_sha256, "applied validation metadata"),
+        (expected_restore_validation_metadata_sha256, "restore validation metadata"),
+    ):
+        if not isinstance(value, str) or re.fullmatch(r"[a-f0-9]{64}", value) is None:
+            raise ValueError(
+                f"Original device preview revert expected {label} sha256 is invalid"
+            )
+    if not isinstance(restore_validation_metadata, dict):
+        raise ValueError("Original device preview restore metadata must be an object")
+    restored_validation = copy.deepcopy(restore_validation_metadata)
+    if (
+        _original_validation_hash(restored_validation)
+        != expected_restore_validation_metadata_sha256
+    ):
+        raise ValueError("Original device preview restore metadata hash is invalid")
+    if (
+        restored_validation.get("admin_license_attestation_complete") is not True
+        or restored_validation.get("verified_private_upload_complete") is not True
+        or restored_validation.get("authenticated_device_preview_complete") is not False
+        or restored_validation.get("trusted_publication_validation_complete") is not False
+        or restored_validation.get("public_release") is not False
+        or restored_validation.get("authenticated_device_preview_evidence") is not None
+        or restored_validation.get("authenticated_device_preview_evidence_sha256")
+        is not None
+    ):
+        raise ValueError("Original device preview restore metadata is not exact preflight state")
+
+    def clean_hash_map(value: object, label: str, expected_count: int) -> dict[str, str]:
+        if not isinstance(value, dict) or len(value) != expected_count:
+            raise ValueError(f"Original device preview revert {label} bindings are invalid")
+        cleaned: dict[str, str] = {}
+        for raw_id, raw_sha256 in value.items():
+            if not isinstance(raw_id, str):
+                raise ValueError(f"Original device preview revert {label} id is invalid")
+            clean_id = _validate_canonical_id(
+                raw_id, f"Original device preview revert {label} id",
+            )
+            if (
+                clean_id != raw_id
+                or not isinstance(raw_sha256, str)
+                or re.fullmatch(r"[a-f0-9]{64}", raw_sha256) is None
+            ):
+                raise ValueError(
+                    f"Original device preview revert {label} binding is invalid"
+                )
+            cleaned[clean_id] = raw_sha256
+        return cleaned
+
+    clean_assets = clean_hash_map(expected_asset_sha256, "asset", 20)
+    clean_narrations = clean_hash_map(expected_narration_sha256, "narration", 13)
+    clean_attestations = clean_hash_map(
+        expected_redacted_license_attestation_sha256, "license attestation", 13,
+    )
+    if set(clean_narrations) != set(clean_attestations) or not set(
+        clean_narrations
+    ).issubset(clean_assets):
+        raise ValueError("Original device preview revert narration bindings are inconsistent")
+
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        admin = db.execute(
+            "SELECT is_admin FROM users WHERE id=?", (admin_user_id,),
+        ).fetchone()
+        if not admin or not bool(admin["is_admin"]):
+            raise PermissionError("Original device preview revert requires a current admin")
+        pack = db.execute(
+            """SELECT * FROM authored_trip_packs
+               WHERE id=? AND content_kind='original_drive'""",
+            (pack_id,),
+        ).fetchone()
+        if not pack:
+            raise ValueError("Trailhead Original not found")
+        if (
+            pack["status"] != "draft"
+            or pack["current_published_version"] is not None
+            or int(pack["draft_revision"]) != expected_draft_revision
+        ):
+            raise OriginalDevicePreviewCompletionConflictError(
+                pack_id, "the exact unpublished draft revision changed",
+            )
+        if db.execute(
+            "SELECT COUNT(*) FROM authored_trip_pack_versions WHERE pack_id=?",
+            (pack_id,),
+        ).fetchone()[0] != 0:
+            raise OriginalDevicePreviewCompletionConflictError(
+                pack_id, "a published version already exists",
+            )
+        if db.execute(
+            "SELECT COUNT(*) FROM authored_original_validation_reports WHERE pack_id=?",
+            (pack_id,),
+        ).fetchone()[0] != 0:
+            raise OriginalDevicePreviewCompletionConflictError(
+                pack_id, "trusted publication validation has already started",
+            )
+
+        raw_manifest = _decode_pack_json(
+            pack["draft_original_manifest_json"], None,
+        )
+        if not isinstance(raw_manifest, dict) or raw_manifest.get("schema_version") != 3:
+            raise OriginalDevicePreviewCompletionConflictError(
+                pack_id, "the draft is not an exact V3 manifest",
+            )
+        try:
+            normalized_manifest, _ = _normalize_original_manifest(
+                pack_id, pack["draft_title"], raw_manifest, publishing=False,
+            )
+        except ValueError as exc:
+            raise OriginalDevicePreviewCompletionConflictError(
+                pack_id, "the current draft manifest is invalid",
+            ) from exc
+        manifest_sha256 = _original_validation_hash(normalized_manifest)
+        if manifest_sha256 != expected_manifest_sha256:
+            raise OriginalDevicePreviewCompletionConflictError(
+                pack_id, "the profiled manifest hash changed",
+            )
+        normalized_profile = normalized_manifest.get("narration_profile")
+        if (
+            not isinstance(normalized_profile, dict)
+            or normalized_profile.get("schema_version") != 2
+            or _original_validation_hash(normalized_profile) != expected_profile_sha256
+        ):
+            raise OriginalDevicePreviewCompletionConflictError(
+                pack_id, "the narration profile changed",
+            )
+        base_input = copy.deepcopy(normalized_manifest)
+        base_input.pop("narration_profile", None)
+        normalized_base, _ = _normalize_original_manifest(
+            pack_id, pack["draft_title"], base_input, publishing=False,
+        )
+        base_manifest_sha256 = _original_validation_hash(normalized_base)
+        if base_manifest_sha256 != expected_base_manifest_sha256:
+            raise OriginalDevicePreviewCompletionConflictError(
+                pack_id, "the profile-absent base manifest hash changed",
+            )
+        try:
+            _validate_original_profile_all_assets_locked(
+                db, pack_id, normalized_base, clean_assets,
+            )
+            bindings = _validate_original_narration_profile_bindings_locked(
+                db,
+                pack_id,
+                normalized_base,
+                normalized_profile,
+                clean_narrations,
+            )
+        except OriginalNarrationProfileConflictError as exc:
+            raise OriginalDevicePreviewCompletionConflictError(
+                pack_id, exc.reason,
+            ) from exc
+        if {
+            str(binding["asset_id"]): str(
+                binding["redacted_license_attestation_sha256"]
+            )
+            for binding in bindings
+        } != clean_attestations:
+            raise OriginalDevicePreviewCompletionConflictError(
+                pack_id, "the redacted narration attestations changed",
+            )
+
+        chapters = {
+            str(chapter.get("id") or ""): chapter
+            for chapter in normalized_manifest.get("chapters", [])
+            if isinstance(chapter, dict)
+        }
+        if set(chapters) != {"roaring_fork"}:
+            raise OriginalDevicePreviewCompletionConflictError(
+                pack_id, "the reviewed chapter membership changed",
+            )
+        chapter = chapters["roaring_fork"]
+        variants = {
+            str(variant.get("id") or ""): variant
+            for variant in chapter.get("variants", [])
+            if isinstance(variant, dict)
+        }
+        if set(variants) != {"one_way"}:
+            raise OriginalDevicePreviewCompletionConflictError(
+                pack_id, "the reviewed variant membership changed",
+            )
+        variant = variants["one_way"]
+        hard_auto_story_ids = [
+            str(item.get("story_id") or "")
+            for item in variant.get("cue_refs", [])
+            if isinstance(item, dict)
+        ]
+        selectable_story_ids = [
+            str(item.get("story_id") or "")
+            for item in variant.get("selectable_refs", [])
+            if isinstance(item, dict)
+        ]
+        delivery_contract_sha256 = str(
+            variant.get("delivery_contract_sha256") or ""
+        )
+        if re.fullmatch(r"[a-f0-9]{64}", delivery_contract_sha256) is None:
+            raise OriginalDevicePreviewCompletionConflictError(
+                pack_id, "the reviewed delivery contract is invalid",
+            )
+        preview_manifest = _authored_original_preview_manifest_from_row(
+            pack,
+            _verified_original_asset_map_db(db, pack_id),
+            chapter_id="roaring_fork",
+            variant_id="one_way",
+        )
+        try:
+            normalized_evidence = _normalize_original_device_preview_completion_evidence(
+                evidence,
+                pack_id=pack_id,
+                draft_revision=expected_draft_revision,
+                preview_manifest=preview_manifest,
+                chapter_id="roaring_fork",
+                variant_id="one_way",
+                delivery_contract_sha256=delivery_contract_sha256,
+                hard_auto_story_ids=hard_auto_story_ids,
+                selectable_story_ids=selectable_story_ids,
+                asset_ids=sorted(clean_assets),
+                expected_application_release_sha=expected_application_release_sha,
+                expected_application_update_id=expected_application_update_id,
+                require_recent=False,
+            )
+        except ValueError as exc:
+            raise OriginalDevicePreviewCompletionConflictError(
+                pack_id, str(exc),
+            ) from exc
+        evidence_sha256 = _original_validation_hash(normalized_evidence)
+        expected_applied_validation = copy.deepcopy(restored_validation)
+        expected_applied_validation["authenticated_device_preview_complete"] = True
+        expected_applied_validation[
+            "authenticated_device_preview_evidence"
+        ] = copy.deepcopy(normalized_evidence)
+        expected_applied_validation[
+            "authenticated_device_preview_evidence_sha256"
+        ] = evidence_sha256
+        if (
+            _original_validation_hash(expected_applied_validation)
+            != expected_applied_validation_metadata_sha256
+        ):
+            raise OriginalDevicePreviewCompletionConflictError(
+                pack_id, "the journaled applied validation metadata hash changed",
+            )
+
+        current_validation = _decode_pack_json(
+            pack["draft_validation_metadata"], {},
+        )
+        if not isinstance(current_validation, dict):
+            raise ValueError("Original draft validation metadata is invalid")
+        before_validation_metadata_sha256 = _original_validation_hash(
+            current_validation
+        )
+        replayed = False
+        if (
+            current_validation == expected_applied_validation
+            and before_validation_metadata_sha256
+            == expected_applied_validation_metadata_sha256
+        ):
+            _, restored_json = _json_object(
+                restored_validation,
+                "Trip pack validation metadata",
+                256 * 1024,
+            )
+            updated = db.execute(
+                """UPDATE authored_trip_packs
+                   SET draft_validation_metadata=?
+                   WHERE id=? AND draft_revision=?
+                     AND draft_original_manifest_json=?
+                     AND draft_validation_metadata=?""",
+                (
+                    restored_json,
+                    pack_id,
+                    expected_draft_revision,
+                    pack["draft_original_manifest_json"],
+                    pack["draft_validation_metadata"],
+                ),
+            )
+            if updated.rowcount != 1:
+                raise OriginalDevicePreviewCompletionConflictError(
+                    pack_id, "the exact draft changed before the evidence revert",
+                )
+            after_validation = copy.deepcopy(restored_validation)
+        elif (
+            current_validation == restored_validation
+            and before_validation_metadata_sha256
+            == expected_restore_validation_metadata_sha256
+        ):
+            after_validation = copy.deepcopy(restored_validation)
+            replayed = True
+        else:
+            raise OriginalDevicePreviewCompletionConflictError(
+                pack_id, "the exact applied or restored validation state changed",
+            )
+        after_validation_metadata_sha256 = _original_validation_hash(
+            after_validation
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+    return {
+        "pack_id": pack_id,
+        "draft_revision": expected_draft_revision,
+        "base_manifest_sha256": base_manifest_sha256,
+        "manifest_sha256": manifest_sha256,
+        "profile_sha256": expected_profile_sha256,
+        "preview_manifest_sha256": normalized_evidence["preview"][
+            "manifest_sha256"
+        ],
+        "before_validation_metadata_sha256": before_validation_metadata_sha256,
+        "after_validation_metadata_sha256": after_validation_metadata_sha256,
+        "evidence_sha256": evidence_sha256,
+        "asset_count": len(clean_assets),
+        "narration_count": len(clean_narrations),
         "replayed": replayed,
     }
 
@@ -14075,6 +14431,601 @@ def revert_authored_original_narration_profile_v2(
         "after_validation_metadata_sha256": after_validation_metadata_sha256,
         "bindings": bindings,
         "single_attesting_admin": True,
+        "replayed": replayed,
+    }
+
+
+def _normalize_original_device_preview_completion_evidence(
+    evidence: object,
+    *,
+    pack_id: str,
+    draft_revision: int,
+    preview_manifest: dict,
+    chapter_id: str,
+    variant_id: str,
+    delivery_contract_sha256: str,
+    hard_auto_story_ids: list[str],
+    selectable_story_ids: list[str],
+    asset_ids: list[str],
+    expected_application_release_sha: str,
+    expected_application_update_id: str,
+    require_recent: bool = True,
+) -> dict:
+    """Validate the deliberately redacted physical-device proof envelope."""
+
+    def require_object(value: object, label: str, keys: set[str]) -> dict:
+        if not isinstance(value, dict) or set(value) != keys:
+            raise ValueError(f"{label} fields are invalid")
+        return value
+
+    def require_text(
+        value: object,
+        label: str,
+        *,
+        pattern: str,
+        maximum: int = 128,
+    ) -> str:
+        if not isinstance(value, str) or not value or len(value) > maximum:
+            raise ValueError(f"{label} is invalid")
+        if re.fullmatch(pattern, value) is None:
+            raise ValueError(f"{label} is invalid")
+        return value
+
+    root = require_object(
+        evidence,
+        "Original device preview evidence",
+        {
+            "schema_version",
+            "evidence_id",
+            "observed_at",
+            "application",
+            "preview",
+            "coverage",
+            "asset_download",
+            "checks",
+        },
+    )
+    if root["schema_version"] != 1:
+        raise ValueError("Original device preview evidence schema is unsupported")
+    evidence_id = require_text(
+        root["evidence_id"],
+        "Original device preview evidence id",
+        pattern=r"[a-z0-9]+(?:_[a-z0-9]+)*",
+    )
+    observed_at = str(root["observed_at"] or "")
+    try:
+        observed = _datetime.fromisoformat(
+            observed_at[:-1] + "+00:00" if observed_at.endswith("Z") else observed_at
+        )
+    except ValueError as exc:
+        raise ValueError(
+            "Original device preview observed_at must be canonical UTC"
+        ) from exc
+    if observed.tzinfo is None:
+        raise ValueError("Original device preview observed_at must be canonical UTC")
+    observed_utc = observed.astimezone(_timezone.utc)
+    canonical_observed_at = observed_utc.isoformat(timespec="seconds").replace(
+        "+00:00", "Z"
+    )
+    now = _datetime.now(_timezone.utc)
+    if (
+        canonical_observed_at != observed_at
+        or observed_utc > now + _timedelta(minutes=5)
+        or (require_recent and observed_utc < now - _timedelta(hours=24))
+    ):
+        raise ValueError(
+            "Original device preview observed_at is not a current canonical UTC time"
+        )
+
+    application = require_object(
+        root["application"],
+        "Original device preview application evidence",
+        {
+            "platform",
+            "app_version",
+            "build_number",
+            "channel",
+            "runtime_version",
+            "release_sha",
+            "update_id",
+        },
+    )
+    release_sha = require_text(
+        expected_application_release_sha,
+        "Original device preview expected release SHA",
+        pattern=r"[a-f0-9]{40}",
+        maximum=40,
+    )
+    update_id = require_text(
+        expected_application_update_id,
+        "Original device preview expected update id",
+        pattern=r"[A-Za-z0-9][A-Za-z0-9._:-]{7,127}",
+        maximum=128,
+    )
+    normalized_application = {
+        "platform": "android",
+        "app_version": "1.0.12",
+        "build_number": "73",
+        "channel": "preview",
+        "runtime_version": "native-1.0.12-android.1",
+        "release_sha": release_sha,
+        "update_id": update_id,
+    }
+    if application != normalized_application:
+        raise ValueError("Original device preview application identity drifted")
+
+    preview = require_object(
+        root["preview"],
+        "Original device preview manifest evidence",
+        {
+            "pack_id",
+            "draft_revision",
+            "preview_version",
+            "manifest_id",
+            "manifest_schema_version",
+            "manifest_sha256",
+            "chapter_id",
+            "variant_id",
+            "delivery_contract_sha256",
+        },
+    )
+    preview_manifest_sha256 = _original_validation_hash(preview_manifest)
+    expected_preview = {
+        "pack_id": pack_id,
+        "draft_revision": draft_revision,
+        "preview_version": ORIGINAL_DEVICE_PREVIEW_VERSION_BASE + draft_revision,
+        "manifest_id": f"original_preview_manifest_{pack_id}_r{draft_revision}",
+        "manifest_schema_version": 3,
+        "manifest_sha256": preview_manifest_sha256,
+        "chapter_id": chapter_id,
+        "variant_id": variant_id,
+        "delivery_contract_sha256": delivery_contract_sha256,
+    }
+    if preview != expected_preview:
+        raise ValueError("Original device preview manifest evidence drifted")
+
+    coverage = require_object(
+        root["coverage"],
+        "Original device preview story coverage",
+        {
+            "reviewed_story_ids",
+            "hard_auto_story_ids",
+            "selectable_story_ids",
+            "hard_auto_complete",
+            "selectable_complete",
+        },
+    )
+    reviewed_story_ids = sorted(hard_auto_story_ids + selectable_story_ids)
+    if (
+        len(hard_auto_story_ids) != 5
+        or len(selectable_story_ids) != 8
+        or len(reviewed_story_ids) != 13
+        or len(set(reviewed_story_ids)) != 13
+        or coverage["reviewed_story_ids"] != reviewed_story_ids
+        or coverage["hard_auto_story_ids"] != hard_auto_story_ids
+        or coverage["selectable_story_ids"] != selectable_story_ids
+        or coverage["hard_auto_complete"] is not True
+        or coverage["selectable_complete"] is not True
+    ):
+        raise ValueError("Original device preview story coverage is incomplete")
+
+    asset_download = require_object(
+        root["asset_download"],
+        "Original device preview asset download evidence",
+        {"asset_ids", "asset_count", "complete", "sha256_verified"},
+    )
+    if (
+        len(asset_ids) != 20
+        or asset_download["asset_ids"] != asset_ids
+        or asset_download["asset_count"] != 20
+        or asset_download["complete"] is not True
+        or asset_download["sha256_verified"] is not True
+    ):
+        raise ValueError("Original device preview asset download evidence is incomplete")
+
+    checks = require_object(
+        root["checks"],
+        "Original device preview behavior checks",
+        {
+            "narration_audible",
+            "artwork_visible",
+            "caption_text_visible",
+            "poor_gps_behavior_verified",
+            "off_route_behavior_verified",
+        },
+    )
+    if any(value is not True for value in checks.values()):
+        raise ValueError("Original device preview behavior checks are incomplete")
+
+    normalized = {
+        "schema_version": 1,
+        "evidence_id": evidence_id,
+        "observed_at": canonical_observed_at,
+        "application": normalized_application,
+        "preview": copy.deepcopy(expected_preview),
+        "coverage": {
+            "reviewed_story_ids": reviewed_story_ids,
+            "hard_auto_story_ids": list(hard_auto_story_ids),
+            "selectable_story_ids": list(selectable_story_ids),
+            "hard_auto_complete": True,
+            "selectable_complete": True,
+        },
+        "asset_download": {
+            "asset_ids": list(asset_ids),
+            "asset_count": 20,
+            "complete": True,
+            "sha256_verified": True,
+        },
+        "checks": {
+            "narration_audible": True,
+            "artwork_visible": True,
+            "caption_text_visible": True,
+            "poor_gps_behavior_verified": True,
+            "off_route_behavior_verified": True,
+        },
+    }
+    if root != normalized:
+        raise ValueError("Original device preview evidence is not canonical")
+    return normalized
+
+
+def mark_authored_original_device_preview_complete(
+    pack_id: str,
+    *,
+    expected_draft_revision: int,
+    expected_base_manifest_sha256: str,
+    expected_manifest_sha256: str,
+    expected_profile_sha256: str,
+    expected_validation_metadata_sha256: str,
+    expected_asset_sha256: dict[str, str],
+    expected_narration_sha256: dict[str, str],
+    expected_redacted_license_attestation_sha256: dict[str, str],
+    expected_application_release_sha: str,
+    expected_application_update_id: str,
+    evidence: dict,
+    admin_user_id: int,
+) -> dict:
+    """Mark only the physical-device preview gate for one exact private R2.
+
+    The evidence and every bound input are revalidated while holding a SQLite
+    write lock. A successful first call changes validation metadata only; it
+    deliberately leaves the draft revision and manifest byte-for-byte intact.
+    """
+    pack_id = _validate_canonical_id(pack_id, "Original id")
+    if (
+        isinstance(expected_draft_revision, bool)
+        or not isinstance(expected_draft_revision, int)
+        or expected_draft_revision != 2
+    ):
+        raise ValueError("Original device preview requires exact draft revision 2")
+    for value, label in (
+        (expected_base_manifest_sha256, "base manifest"),
+        (expected_manifest_sha256, "manifest"),
+        (expected_profile_sha256, "profile"),
+        (expected_validation_metadata_sha256, "validation metadata"),
+    ):
+        if not isinstance(value, str) or re.fullmatch(r"[a-f0-9]{64}", value) is None:
+            raise ValueError(f"Original device preview expected {label} sha256 is invalid")
+
+    def clean_hash_map(value: object, label: str, expected_count: int) -> dict[str, str]:
+        if not isinstance(value, dict) or len(value) != expected_count:
+            raise ValueError(f"Original device preview {label} bindings are invalid")
+        cleaned: dict[str, str] = {}
+        for raw_id, raw_sha256 in value.items():
+            if not isinstance(raw_id, str):
+                raise ValueError(f"Original device preview {label} id is invalid")
+            clean_id = _validate_canonical_id(raw_id, f"Original device preview {label} id")
+            if clean_id != raw_id or not isinstance(raw_sha256, str) or re.fullmatch(
+                r"[a-f0-9]{64}", raw_sha256
+            ) is None:
+                raise ValueError(f"Original device preview {label} binding is invalid")
+            cleaned[clean_id] = raw_sha256
+        return cleaned
+
+    clean_assets = clean_hash_map(expected_asset_sha256, "asset", 20)
+    clean_narrations = clean_hash_map(expected_narration_sha256, "narration", 13)
+    clean_attestations = clean_hash_map(
+        expected_redacted_license_attestation_sha256,
+        "license attestation",
+        13,
+    )
+    if set(clean_narrations) != set(clean_attestations) or not set(
+        clean_narrations
+    ).issubset(clean_assets):
+        raise ValueError("Original device preview narration bindings are inconsistent")
+
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        admin = db.execute(
+            "SELECT is_admin FROM users WHERE id=?", (admin_user_id,),
+        ).fetchone()
+        if not admin or not bool(admin["is_admin"]):
+            raise PermissionError(
+                "Original device preview completion requires a current admin"
+            )
+        pack = db.execute(
+            """SELECT * FROM authored_trip_packs
+               WHERE id=? AND content_kind='original_drive'""",
+            (pack_id,),
+        ).fetchone()
+        if not pack:
+            raise ValueError("Trailhead Original not found")
+        if (
+            pack["status"] != "draft"
+            or pack["current_published_version"] is not None
+            or int(pack["draft_revision"]) != expected_draft_revision
+        ):
+            raise OriginalDevicePreviewCompletionConflictError(
+                pack_id, "the exact unpublished draft revision changed",
+            )
+        if db.execute(
+            "SELECT COUNT(*) FROM authored_trip_pack_versions WHERE pack_id=?",
+            (pack_id,),
+        ).fetchone()[0] != 0:
+            raise OriginalDevicePreviewCompletionConflictError(
+                pack_id, "a published version already exists",
+            )
+        if db.execute(
+            "SELECT COUNT(*) FROM authored_original_validation_reports WHERE pack_id=?",
+            (pack_id,),
+        ).fetchone()[0] != 0:
+            raise OriginalDevicePreviewCompletionConflictError(
+                pack_id, "trusted publication validation has already started",
+            )
+
+        raw_manifest = _decode_pack_json(
+            pack["draft_original_manifest_json"], None,
+        )
+        if not isinstance(raw_manifest, dict) or raw_manifest.get("schema_version") != 3:
+            raise OriginalDevicePreviewCompletionConflictError(
+                pack_id, "the draft is not an exact V3 manifest",
+            )
+        try:
+            normalized_manifest, _ = _normalize_original_manifest(
+                pack_id,
+                pack["draft_title"],
+                raw_manifest,
+                publishing=False,
+            )
+        except ValueError as exc:
+            raise OriginalDevicePreviewCompletionConflictError(
+                pack_id, "the current draft manifest is invalid",
+            ) from exc
+        manifest_sha256 = _original_validation_hash(normalized_manifest)
+        if manifest_sha256 != expected_manifest_sha256:
+            raise OriginalDevicePreviewCompletionConflictError(
+                pack_id, "the profiled manifest hash changed",
+            )
+        normalized_profile = normalized_manifest.get("narration_profile")
+        if (
+            not isinstance(normalized_profile, dict)
+            or normalized_profile.get("schema_version") != 2
+            or _original_validation_hash(normalized_profile)
+            != expected_profile_sha256
+        ):
+            raise OriginalDevicePreviewCompletionConflictError(
+                pack_id, "the narration profile changed",
+            )
+        base_input = copy.deepcopy(normalized_manifest)
+        base_input.pop("narration_profile", None)
+        normalized_base, _ = _normalize_original_manifest(
+            pack_id,
+            pack["draft_title"],
+            base_input,
+            publishing=False,
+        )
+        base_manifest_sha256 = _original_validation_hash(normalized_base)
+        if base_manifest_sha256 != expected_base_manifest_sha256:
+            raise OriginalDevicePreviewCompletionConflictError(
+                pack_id, "the profile-absent base manifest hash changed",
+            )
+
+        validation_metadata = _decode_pack_json(
+            pack["draft_validation_metadata"], {},
+        )
+        if not isinstance(validation_metadata, dict):
+            raise ValueError("Original draft validation metadata is invalid")
+        before_validation_metadata_sha256 = _original_validation_hash(
+            validation_metadata
+        )
+        if before_validation_metadata_sha256 != expected_validation_metadata_sha256:
+            raise OriginalDevicePreviewCompletionConflictError(
+                pack_id, "the draft validation metadata hash changed",
+            )
+        if (
+            validation_metadata.get("admin_license_attestation_complete") is not True
+            or validation_metadata.get("verified_private_upload_complete") is not True
+            or validation_metadata.get("trusted_publication_validation_complete") is not False
+            or validation_metadata.get("public_release") is not False
+        ):
+            raise OriginalDevicePreviewCompletionConflictError(
+                pack_id, "the required upstream or downstream gates changed",
+            )
+
+        try:
+            _validate_original_profile_all_assets_locked(
+                db, pack_id, normalized_base, clean_assets,
+            )
+            bindings = _validate_original_narration_profile_bindings_locked(
+                db,
+                pack_id,
+                normalized_base,
+                normalized_profile,
+                clean_narrations,
+            )
+        except OriginalNarrationProfileConflictError as exc:
+            raise OriginalDevicePreviewCompletionConflictError(
+                pack_id, exc.reason,
+            ) from exc
+        binding_attestations = {
+            str(binding["asset_id"]): str(
+                binding["redacted_license_attestation_sha256"]
+            )
+            for binding in bindings
+        }
+        if binding_attestations != clean_attestations:
+            raise OriginalDevicePreviewCompletionConflictError(
+                pack_id, "the redacted narration attestations changed",
+            )
+
+        chapters = {
+            str(chapter.get("id") or ""): chapter
+            for chapter in normalized_manifest.get("chapters", [])
+            if isinstance(chapter, dict)
+        }
+        if set(chapters) != {"roaring_fork"}:
+            raise OriginalDevicePreviewCompletionConflictError(
+                pack_id, "the reviewed chapter membership changed",
+            )
+        chapter_id = "roaring_fork"
+        chapter = chapters[chapter_id]
+        variants = {
+            str(variant.get("id") or ""): variant
+            for variant in chapter.get("variants", [])
+            if isinstance(variant, dict)
+        }
+        if set(variants) != {"one_way"}:
+            raise OriginalDevicePreviewCompletionConflictError(
+                pack_id, "the reviewed variant membership changed",
+            )
+        variant_id = "one_way"
+        variant = variants[variant_id]
+        hard_auto_story_ids = [
+            str(item.get("story_id") or "")
+            for item in variant.get("cue_refs", [])
+            if isinstance(item, dict)
+        ]
+        selectable_story_ids = [
+            str(item.get("story_id") or "")
+            for item in variant.get("selectable_refs", [])
+            if isinstance(item, dict)
+        ]
+        delivery_contract_sha256 = str(
+            variant.get("delivery_contract_sha256") or ""
+        )
+        if re.fullmatch(r"[a-f0-9]{64}", delivery_contract_sha256) is None:
+            raise OriginalDevicePreviewCompletionConflictError(
+                pack_id, "the reviewed delivery contract is invalid",
+            )
+        verified_assets = _verified_original_asset_map_db(db, pack_id)
+        preview_manifest = _authored_original_preview_manifest_from_row(
+            pack,
+            verified_assets,
+            chapter_id=chapter_id,
+            variant_id=variant_id,
+        )
+        existing_gate = validation_metadata.get(
+            "authenticated_device_preview_complete"
+        )
+        try:
+            normalized_evidence = _normalize_original_device_preview_completion_evidence(
+                evidence,
+                pack_id=pack_id,
+                draft_revision=expected_draft_revision,
+                preview_manifest=preview_manifest,
+                chapter_id=chapter_id,
+                variant_id=variant_id,
+                delivery_contract_sha256=delivery_contract_sha256,
+                hard_auto_story_ids=hard_auto_story_ids,
+                selectable_story_ids=selectable_story_ids,
+                asset_ids=sorted(clean_assets),
+                expected_application_release_sha=(
+                    expected_application_release_sha
+                ),
+                expected_application_update_id=expected_application_update_id,
+                require_recent=existing_gate is not True,
+            )
+        except ValueError as exc:
+            raise OriginalDevicePreviewCompletionConflictError(
+                pack_id, str(exc),
+            ) from exc
+        evidence_sha256 = _original_validation_hash(normalized_evidence)
+
+        existing_evidence = validation_metadata.get(
+            "authenticated_device_preview_evidence"
+        )
+        existing_evidence_sha256 = validation_metadata.get(
+            "authenticated_device_preview_evidence_sha256"
+        )
+        replayed = False
+        if existing_gate is True:
+            if (
+                existing_evidence != normalized_evidence
+                or existing_evidence_sha256 != evidence_sha256
+            ):
+                raise OriginalDevicePreviewCompletionConflictError(
+                    pack_id, "different device preview evidence is already immutable",
+                )
+            after_validation_metadata = copy.deepcopy(validation_metadata)
+            replayed = True
+        else:
+            if (
+                existing_gate is not False
+                or existing_evidence is not None
+                or existing_evidence_sha256 is not None
+            ):
+                raise OriginalDevicePreviewCompletionConflictError(
+                    pack_id, "the device preview gate is not in its exact preflight state",
+                )
+            after_validation_metadata = copy.deepcopy(validation_metadata)
+            after_validation_metadata["authenticated_device_preview_complete"] = True
+            after_validation_metadata[
+                "authenticated_device_preview_evidence"
+            ] = copy.deepcopy(normalized_evidence)
+            after_validation_metadata[
+                "authenticated_device_preview_evidence_sha256"
+            ] = evidence_sha256
+            _, validation_json = _json_object(
+                after_validation_metadata,
+                "Trip pack validation metadata",
+                256 * 1024,
+            )
+            updated = db.execute(
+                """UPDATE authored_trip_packs
+                   SET draft_validation_metadata=?
+                   WHERE id=? AND draft_revision=?
+                     AND draft_original_manifest_json=?
+                     AND draft_validation_metadata=?""",
+                (
+                    validation_json,
+                    pack_id,
+                    expected_draft_revision,
+                    pack["draft_original_manifest_json"],
+                    pack["draft_validation_metadata"],
+                ),
+            )
+            if updated.rowcount != 1:
+                raise OriginalDevicePreviewCompletionConflictError(
+                    pack_id, "the exact draft changed before the evidence write",
+                )
+        after_validation_metadata_sha256 = _original_validation_hash(
+            after_validation_metadata
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+    return {
+        "pack_id": pack_id,
+        "draft_revision": expected_draft_revision,
+        "base_manifest_sha256": base_manifest_sha256,
+        "manifest_sha256": manifest_sha256,
+        "profile_sha256": expected_profile_sha256,
+        "preview_manifest_sha256": normalized_evidence["preview"][
+            "manifest_sha256"
+        ],
+        "before_validation_metadata_sha256": before_validation_metadata_sha256,
+        "after_validation_metadata_sha256": after_validation_metadata_sha256,
+        "evidence_sha256": evidence_sha256,
+        "asset_count": len(clean_assets),
+        "narration_count": len(clean_narrations),
+        "reviewed_story_count": 13,
+        "hard_auto_story_count": 5,
+        "selectable_story_count": 8,
         "replayed": replayed,
     }
 

@@ -94,6 +94,25 @@ async function main() {
   assert.equal(legacy.access_type, 'entitled');
   assert.equal(originalLocalAccessIsCurrent(legacy), true, 'older permanent records remain compatible');
 
+  const preview = {
+    ...legacy,
+    access_type: 'admin_preview' as const,
+    manifest_id: 'smokies-original:private-r2',
+  };
+  assert.equal(originalLocalAccessIsCurrent(preview), false, 'admin preview access is never public access');
+  assert.equal(originalLocalAccessIsCurrent(preview, undefined, {
+    allowAdminPreview: true,
+    manifestId: preview.manifest_id,
+  }), true);
+  assert.equal(originalLocalAccessIsCurrent(preview, undefined, {
+    allowAdminPreview: true,
+    manifestId: 'smokies-original:private-r3',
+  }), false, 'admin preview access is bound to the exact immutable manifest');
+  assert.equal(originalLocalAccessIsCurrent({ ...preview, manifest_id: undefined }, undefined, {
+    allowAdminPreview: true,
+    manifestId: preview.manifest_id,
+  }), false, 'legacy unbound preview records fail closed');
+
   console.log('Original access policy tests passed.');
 }
 

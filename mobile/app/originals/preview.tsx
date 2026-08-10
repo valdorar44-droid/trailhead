@@ -8,6 +8,7 @@ import {
   originalAccessStore,
   originalBundleStore,
   originalsApi,
+  saveOriginalPrivateReviewCleanupIdentity,
   useOriginalsAdminRuntime,
   useOriginalsRuntime,
 } from '@/lib/originals';
@@ -32,7 +33,6 @@ export default function OriginalDraftPreviewScreen() {
   const adminRuntimeRef = useRef(adminRuntime);
   adminRuntimeRef.current = adminRuntime;
   const startedRef = useRef(false);
-  const [attempt, setAttempt] = useState(0);
   const [phase, setPhase] = useState('Preparing Studio draft');
   const [error, setError] = useState('');
 
@@ -42,7 +42,14 @@ export default function OriginalDraftPreviewScreen() {
     let active = true;
     let simulationStarted = false;
     let handedToPlayer = false;
+    let cleanupIdentitySaved = false;
+    let cleanupPromise: Promise<void> | null = null;
     const abortController = new AbortController();
+    const cleanupPrivateAcquisition = () => {
+      if (!cleanupIdentitySaved || handedToPlayer) return Promise.resolve();
+      cleanupPromise ??= adminRuntimeRef.current.endPrivateReview();
+      return cleanupPromise;
+    };
     void (async () => {
       if (!id) throw new Error('Choose a Studio draft to test.');
       if (!user?.id || !user.is_admin) throw new Error('An admin account is required for unpublished draft testing.');
@@ -62,6 +69,13 @@ export default function OriginalDraftPreviewScreen() {
         && item.access_type === 'admin_preview'
         && item.version !== manifest.version
       ));
+      await saveOriginalPrivateReviewCleanupIdentity({
+        owner_scope: scope,
+        pack_id: manifest.pack_id,
+        version: manifest.version,
+        manifest_id: manifest.manifest_id,
+      });
+      cleanupIdentitySaved = true;
       await originalAccessStore.recordAdminPreview(manifest, user.id);
       setPhase('Downloading and verifying the draft');
       await runtimeRef.current.downloadOriginal(manifest, {
@@ -77,7 +91,7 @@ export default function OriginalDraftPreviewScreen() {
       await adminRuntimeRef.current.startSimulation(manifest, selection);
       simulationStarted = true;
       if (!active) {
-        await runtimeRef.current.stopTour().catch(() => {});
+        await cleanupPrivateAcquisition();
         return;
       }
       handedToPlayer = true;
@@ -91,16 +105,29 @@ export default function OriginalDraftPreviewScreen() {
           variant: selection?.variant_id,
         },
       } as any);
-    })().catch((caught: any) => {
+    })().catch(async (caught: any) => {
+      let cleanupError: unknown = null;
+      if (cleanupIdentitySaved && !handedToPlayer) {
+        try {
+          await cleanupPrivateAcquisition();
+        } catch (error) {
+          cleanupError = error;
+        }
+      }
       if (!active) return;
-      setError(caught?.message || 'The Studio draft could not be prepared on this device.');
+      const message = caught?.message || 'The Studio draft could not be prepared on this device.';
+      setError(cleanupError instanceof Error
+        ? `${message} Exact local cleanup is still pending: ${cleanupError.message}`
+        : message);
     });
     return () => {
       active = false;
       abortController.abort();
-      if (simulationStarted && !handedToPlayer) void runtimeRef.current.stopTour().catch(() => {});
+      if ((cleanupIdentitySaved || simulationStarted) && !handedToPlayer) {
+        void cleanupPrivateAcquisition().catch(() => {});
+      }
     };
-  }, [attempt, chapter, id, router, user?.id, user?.is_admin, variant]);
+  }, [chapter, id, router, user?.id, user?.is_admin, variant]);
 
   const progress = runtime.downloadProgress;
   const progressLabel = progress
@@ -133,17 +160,6 @@ export default function OriginalDraftPreviewScreen() {
           <View style={styles.actions}>
             <TouchableOpacity accessibilityRole="button" onPress={() => router.back()} style={[styles.secondary, { borderColor: C.border }] }>
               <Text style={[styles.secondaryText, { color: C.text2 }]}>Back</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              accessibilityRole="button"
-              onPress={() => {
-                startedRef.current = false;
-                setAttempt(value => value + 1);
-              }}
-              style={[styles.primary, { backgroundColor: C.orange }]}
-            >
-              <Ionicons name="refresh" size={16} color="#FFFFFF" />
-              <Text style={styles.primaryText}>Try again</Text>
             </TouchableOpacity>
           </View>
         )}

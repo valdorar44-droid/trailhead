@@ -92,8 +92,41 @@ const nativeRuntimeStubs: Record<string, string> = {
     }
   `,
   './previewAccess': `
+    function same(left, right) {
+      return left.owner_scope === right.owner_scope
+        && left.pack_id === right.pack_id
+        && left.version === right.version
+        && left.manifest_id === right.manifest_id;
+    }
     export async function getOriginalPreviewToken() {
       return globalThis.__originalsRuntimePreviewToken || null;
+    }
+    export async function clearOriginalPreviewAccessStrict() {
+      globalThis.__originalsRuntimePreviewClearCount = (globalThis.__originalsRuntimePreviewClearCount || 0) + 1;
+      globalThis.__originalsRuntimePreviewToken = null;
+    }
+    export async function getOriginalPrivateReviewCleanupIdentity() {
+      return globalThis.__originalsRuntimeCleanupIdentity || null;
+    }
+    export async function saveOriginalPrivateReviewCleanupIdentity(identity) {
+      const existing = globalThis.__originalsRuntimeCleanupIdentity;
+      if (existing && !same(existing, identity)) {
+        throw new Error('Finish the existing private review cleanup before opening another draft.');
+      }
+      globalThis.__originalsRuntimeCleanupIdentity = {
+        schema_version: 1,
+        ...identity,
+        created_at_ms: existing?.created_at_ms || Date.now(),
+      };
+      return globalThis.__originalsRuntimeCleanupIdentity;
+    }
+    export async function clearOriginalPrivateReviewCleanupIdentityStrict(expected) {
+      const current = globalThis.__originalsRuntimeCleanupIdentity;
+      if (!current) return;
+      if (!same(current, expected)) {
+        throw new Error('The pending private review cleanup identity changed; nothing was removed.');
+      }
+      globalThis.__originalsRuntimeCleanupIdentity = null;
     }
   `,
   './expoStores': `
@@ -157,6 +190,15 @@ async function main() {
     __originalsRuntimeAuthState?: { user: { id: string; is_admin?: boolean } | null; token: string | null };
     __originalsRuntimeEpoch?: number;
     __originalsRuntimePreviewToken?: string | null;
+    __originalsRuntimePreviewClearCount?: number;
+    __originalsRuntimeCleanupIdentity?: {
+      schema_version: 1;
+      owner_scope: `account:${string}`;
+      pack_id: string;
+      version: number;
+      manifest_id: string;
+      created_at_ms: number;
+    } | null;
     __originalsRuntimeAcquire?: (...args: unknown[]) => Promise<unknown>;
     __originalsRuntimeClaimFeatured?: (...args: unknown[]) => Promise<unknown>;
     __originalsRuntimeAnalyticsCount?: number;
@@ -168,6 +210,8 @@ async function main() {
   globals.__originalsRuntimeAuthState = { user: { id: 'admin-preview', is_admin: true }, token: 'admin-token' };
   globals.__originalsRuntimeEpoch = 0;
   globals.__originalsRuntimePreviewToken = null;
+  globals.__originalsRuntimePreviewClearCount = 0;
+  globals.__originalsRuntimeCleanupIdentity = null;
   globals.__originalsRuntimeAcquire = async () => { throw new Error('unused'); };
   globals.__originalsRuntimeClaimFeatured = async () => { throw new Error('unused'); };
   globals.__originalsRuntimeAnalyticsCount = 0;
@@ -204,6 +248,9 @@ async function main() {
   let bundleOverride: (() => Promise<Record<string, unknown>>) | null = null;
   let verifyOverride: (() => Promise<boolean>) | null = null;
   let bundleDownloadOptions: Record<string, unknown> | null = null;
+  let privateBundleRemovalFailures = 0;
+  let removedPrivateBundleIdentity: unknown[] | null = null;
+  let removedPrivateAccessIdentity: unknown[] | null = null;
 
   const manifest = originalManifest();
   const bundle = {
@@ -247,7 +294,11 @@ async function main() {
         if (accessOverride) return accessOverride();
         accessReads += 1;
         if (accessReads === 1) {
-          return { owner_scope: 'account:admin-preview', access_type: 'admin_preview' };
+          return {
+            owner_scope: 'account:admin-preview',
+            access_type: 'admin_preview',
+            manifest_id: manifest.manifest_id,
+          };
         }
         accessEntered.resolve();
         return accessGate.promise;
@@ -256,6 +307,10 @@ async function main() {
       async claimGuest() { guestClaimCount += 1; },
       async recordEntitlement() { entitlementWriteCount += 1; },
       async migrateGuestToAccount() { return []; },
+      async removeAdminPreview(...args: unknown[]) {
+        removedPrivateAccessIdentity = args;
+        return { removed: true };
+      },
     },
     bundles: {
       async get() { return bundleOverride ? bundleOverride() : bundle; },
@@ -266,6 +321,14 @@ async function main() {
       async download(_manifest: unknown, options: Record<string, unknown>) {
         bundleDownloadOptions = options;
         return { ...bundle, owner_scope: options.ownerScope };
+      },
+      async removePrivatePreview(...args: unknown[]) {
+        if (privateBundleRemovalFailures > 0) {
+          privateBundleRemovalFailures -= 1;
+          throw new Error('Injected exact private bundle removal failure.');
+        }
+        removedPrivateBundleIdentity = args;
+        return { removed: true };
       },
     },
     sessions: {
@@ -410,7 +473,11 @@ async function main() {
     concurrentStop = runtime!.stopTour();
     assert.strictEqual(concurrentStop, firstStop, 'concurrent stop calls coalesce onto one cleanup promise');
 
-    accessGate.resolve({ owner_scope: 'account:admin-preview', access_type: 'admin_preview' });
+    accessGate.resolve({
+      owner_scope: 'account:admin-preview',
+      access_type: 'admin_preview',
+      manifest_id: manifest.manifest_id,
+    });
     await Promise.all([firstStop, concurrentStop, triggeringSample]);
   });
 
@@ -421,12 +488,29 @@ async function main() {
   assert.equal(globals.__originalsRuntimeCarSyncCount, 0, 'synthetic lab activity never replaces the real Android Auto route');
   assert.equal(globals.__originalsRuntimeCarClearCount, 0, 'ending the lab never clears the real Android Auto route');
 
-  accessOverride = async () => ({ owner_scope: 'account:admin-preview', access_type: 'admin_preview' });
+  accessOverride = async () => ({
+    owner_scope: 'account:admin-preview',
+    access_type: 'admin_preview',
+    manifest_id: manifest.manifest_id,
+  });
+  globals.__originalsRuntimeCleanupIdentity = {
+    schema_version: 1,
+    owner_scope: 'account:admin-preview',
+    pack_id: manifest.pack_id,
+    version: manifest.version,
+    manifest_id: manifest.manifest_id,
+    created_at_ms: Date.now(),
+  };
   globals.__originalsRuntimePreviewToken = 'stored-preview-token';
   await act(async () => { await runtime!.downloadOriginal(manifest); });
   const recordedDownloadOptions = bundleDownloadOptions as unknown as Record<string, unknown>;
   const downloadHeaders = recordedDownloadOptions.headers as Record<string, string> | undefined;
   assert.equal(recordedDownloadOptions.ownerScope, 'account:admin-preview', 'preview headers never change ownership scope');
+  assert.equal(
+    recordedDownloadOptions.privatePreviewManifestId,
+    manifest.manifest_id,
+    'private downloads carry the exact durable cleanup identity into bundle journaling',
+  );
   assert.equal(downloadHeaders?.Authorization, 'Bearer admin-token');
   assert.equal(
     downloadHeaders?.['X-Trailhead-Originals-Preview'],
@@ -434,6 +518,145 @@ async function main() {
     'runtime asset GETs receive the stored internal preview credential',
   );
   assert.equal(globals.__originalsRuntimeAnalyticsCount, 0, 'admin preview downloads never emit production analytics');
+
+  await act(async () => { await adminRuntime!.startSimulation(manifest); });
+  assert.equal(adminRuntime!.privateReviewActive, true, 'exact bound admin access enables private review');
+  globals.__originalsRuntimePreviewToken = 'stored-preview-token';
+  privateBundleRemovalFailures = 1;
+  let firstCleanupFailure: unknown;
+  await act(async () => {
+    const firstCleanup = adminRuntime!.endPrivateReview();
+    const concurrentCleanup = adminRuntime!.endPrivateReview();
+    assert.strictEqual(
+      concurrentCleanup,
+      firstCleanup,
+      'concurrent private cleanup calls coalesce onto one exact mutation',
+    );
+    try {
+      await firstCleanup;
+    } catch (error) {
+      firstCleanupFailure = error;
+    }
+  });
+  assert.match(String(firstCleanupFailure), /Injected exact private bundle removal failure/);
+  assert.equal(globals.__originalsRuntimePreviewToken, null, 'the credential closes before destructive cleanup');
+  assert.equal(adminRuntime!.privateReviewActive, false);
+  assert.equal(adminRuntime!.privateReviewCleanupPending, true, 'partial cleanup retains an exact retry identity');
+  assert.equal(
+    (runtime as unknown as Runtime).session,
+    null,
+    'private review playback is stopped before files are removed',
+  );
+  await act(async () => { await adminRuntime!.endPrivateReview(); });
+  const expectedPrivateIdentity = [
+    'account:admin-preview',
+    manifest.pack_id,
+    manifest.version,
+    manifest.manifest_id,
+  ];
+  assert.deepEqual(removedPrivateBundleIdentity, expectedPrivateIdentity);
+  assert.deepEqual(removedPrivateAccessIdentity, expectedPrivateIdentity);
+  assert.equal(globals.__originalsRuntimePreviewClearCount, 2, 'credential removal remains idempotent on retry');
+  assert.equal(adminRuntime!.privateReviewCleanupPending, false);
+  assert.equal(globals.__originalsRuntimeCleanupIdentity, null, 'the durable marker clears only after exact local cleanup succeeds');
+
+  globals.__originalsRuntimeCleanupIdentity = {
+    schema_version: 1,
+    owner_scope: 'account:admin-preview',
+    pack_id: manifest.pack_id,
+    version: manifest.version,
+    manifest_id: manifest.manifest_id,
+    created_at_ms: Date.now(),
+  };
+  await act(async () => { await adminRuntime!.startSimulation(manifest); });
+  globals.__originalsRuntimeAuthState = {
+    user: { id: 'admin-preview', is_admin: false },
+    token: null,
+  };
+  await act(async () => { await adminRuntime!.endPrivateReview(); });
+  assert.equal(
+    globals.__originalsRuntimeCleanupIdentity,
+    null,
+    'same-process privilege/token revocation still permits exact owner-bound cleanup',
+  );
+  assert.equal(adminRuntime!.privateReviewCleanupPending, false);
+  globals.__originalsRuntimeAuthState = {
+    user: { id: 'admin-preview', is_admin: true },
+    token: 'admin-token',
+  };
+
+  removedPrivateBundleIdentity = null;
+  removedPrivateAccessIdentity = null;
+  globals.__originalsRuntimeCleanupIdentity = {
+    schema_version: 1,
+    owner_scope: 'account:admin-preview',
+    pack_id: manifest.pack_id,
+    version: manifest.version,
+    manifest_id: manifest.manifest_id,
+    created_at_ms: Date.now(),
+  };
+  globals.__originalsRuntimeAuthState = {
+    user: { id: 'admin-preview', is_admin: false },
+    token: null,
+  };
+  await act(async () => { renderer!.unmount(); });
+  runtime = null;
+  adminRuntime = null;
+  await act(async () => {
+    renderer = TestRenderer.create(
+      React.createElement(
+        runtimeModule.OriginalsRuntimeProvider,
+        { dependencies },
+        React.createElement(CaptureRuntime),
+      ),
+    );
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+  assert.deepEqual(
+    removedPrivateBundleIdentity,
+    expectedPrivateIdentity,
+    'a process restart resumes exact cleanup even after admin privilege and token loss',
+  );
+  assert.deepEqual(removedPrivateAccessIdentity, expectedPrivateIdentity);
+  assert.equal(globals.__originalsRuntimeCleanupIdentity, null);
+  assert.equal(adminRuntime!.privateReviewCleanupPending, false);
+
+  removedPrivateBundleIdentity = null;
+  removedPrivateAccessIdentity = null;
+  globals.__originalsRuntimeCleanupIdentity = {
+    schema_version: 1,
+    owner_scope: 'account:admin-preview',
+    pack_id: manifest.pack_id,
+    version: manifest.version,
+    manifest_id: manifest.manifest_id,
+    created_at_ms: Date.now(),
+  };
+  globals.__originalsRuntimeAuthState = {
+    user: { id: 'different-account', is_admin: true },
+    token: 'different-token',
+  };
+  await act(async () => { renderer!.unmount(); });
+  runtime = null;
+  adminRuntime = null;
+  await act(async () => {
+    renderer = TestRenderer.create(
+      React.createElement(
+        runtimeModule.OriginalsRuntimeProvider,
+        { dependencies },
+        React.createElement(CaptureRuntime),
+      ),
+    );
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+  assert.equal(removedPrivateBundleIdentity, null, 'restart recovery never crosses account ownership');
+  assert.equal(removedPrivateAccessIdentity, null);
+  assert.equal(
+    globals.__originalsRuntimeCleanupIdentity?.owner_scope,
+    'account:admin-preview',
+    'the owner-bound marker remains available for the correct account',
+  );
+  globals.__originalsRuntimeCleanupIdentity = null;
+  globals.__originalsRuntimeAuthState = { user: { id: 'admin-preview', is_admin: true }, token: 'admin-token' };
   accessOverride = null;
   globals.__originalsRuntimePreviewToken = null;
 
@@ -530,7 +753,7 @@ async function main() {
   assert.equal(stoppedSession?.status, 'stopped');
   assert.equal(stoppedSession?.current_audio_position_ms, 12_345, 'End tour persists the exact narration position');
   assert.equal(activeStoredSession, null, 'End tour clears the durable active pointer');
-  const stoppedRuntime = runtime as Runtime;
+  const stoppedRuntime = runtime as unknown as Runtime;
   assert.equal(stoppedRuntime.session, null, 'End tour removes the main-map player immediately');
   assert.equal(stoppedRuntime.state, 'idle');
   assert.ok(locationStopCount >= 1, 'End tour calls the attached location stop closure');

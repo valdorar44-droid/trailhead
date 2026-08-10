@@ -90,6 +90,22 @@ export function createOriginalAccessStore(
       return emptyIndex();
     }
   };
+  const readIndexStrict = async (): Promise<OriginalAccessIndexV1> => {
+    await recoverOriginalPath(files, indexPath);
+    if (!(await files.info(indexPath)).exists) return emptyIndex();
+    try {
+      const parsed = JSON.parse(await files.readText(indexPath));
+      if (
+        parsed?.schema_version === 1
+        && parsed.scopes
+        && typeof parsed.scopes === 'object'
+        && !Array.isArray(parsed.scopes)
+      ) return parsed;
+    } catch {
+      // Cleanup must not treat unreadable ownership state as an empty index.
+    }
+    throw new Error('The private preview access index could not be verified.');
+  };
   const writeIndex = (index: OriginalAccessIndexV1) => (
     writeOriginalTextAtomically(files, indexPath, JSON.stringify(index))
   );
@@ -200,6 +216,10 @@ export function createOriginalAccessStore(
           title: manifest.title,
           owner_scope: `account:${accountId}`,
           access_type: 'admin_preview',
+          manifest_id: manifest.manifest_id,
+          ...(manifest.schema_version === 2 || manifest.schema_version === 3
+            ? { manifest_schema_version: manifest.schema_version }
+            : {}),
           manifest_path: `/api/admin/originals/${encodeURIComponent(manifest.pack_id)}/device-preview/manifest`,
           claimed_at_ms: now,
           updated_at_ms: now,
@@ -269,6 +289,36 @@ export function createOriginalAccessStore(
           record.pack_id !== packId || (version != null && record.version !== version)
         ));
         await writeIndex(index);
+      });
+    },
+
+    removeAdminPreview(
+      ownerScope: OriginalOwnerScope,
+      packId: string,
+      version: number,
+      expectedManifestId: string,
+    ) {
+      return serialized(async () => {
+        const index = await readIndexStrict();
+        const records = index.scopes[ownerScope] ?? [];
+        const record = records.find(item => item.pack_id === packId && item.version === version);
+        if (!record) return { removed: false as const };
+        if (
+          record.access_type !== 'admin_preview'
+          || record.manifest_id !== expectedManifestId
+        ) {
+          throw new Error('The private preview access identity changed; nothing was removed.');
+        }
+        index.scopes[ownerScope] = records.filter(item => item !== record);
+        await writeIndex(index);
+        const persisted = await readIndexStrict();
+        const stillPresent = (persisted.scopes?.[ownerScope] ?? []).some(item => (
+          item.pack_id === packId && item.version === version
+        ));
+        if (stillPresent) {
+          throw new Error('The private preview access could not be removed from this device.');
+        }
+        return { removed: true as const };
       });
     },
 

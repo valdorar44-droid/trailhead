@@ -101,6 +101,85 @@ async function main() {
   await preview.saveOriginalPreviewAccess(longToken, undefined, nowMs);
   assert.equal(await preview.getOriginalPreviewToken(nowMs + 24 * 60 * 60 * 1_000 + 1), null, 'local preview access never exceeds 24 hours');
 
+  await preview.saveOriginalPreviewAccess(token, expiresAtMs, nowMs);
+  await preview.clearOriginalPreviewAccessStrict();
+  assert.equal(await preview.getOriginalPreviewToken(nowMs), null);
+  await preview.clearOriginalPreviewAccessStrict();
+  assert.equal(await preview.getOriginalPreviewToken(nowMs), null, 'strict preview credential cleanup is idempotent');
+
+  const cleanupIdentity = {
+    owner_scope: 'account:admin-7' as const,
+    pack_id: 'smokies-r2',
+    version: 1_000_000_002,
+    manifest_id: 'smokies-r2-private-manifest',
+  };
+  await preview.saveOriginalPrivateReviewCleanupIdentity(cleanupIdentity, nowMs);
+  const restartedPreview = await loadPreviewAccess();
+  assert.deepEqual(
+    await restartedPreview.getOriginalPrivateReviewCleanupIdentity(),
+    {
+      schema_version: 1,
+      ...cleanupIdentity,
+      created_at_ms: nowMs,
+    },
+    'the exact account-bound cleanup identity survives a process/module restart',
+  );
+  await assert.rejects(
+    restartedPreview.saveOriginalPrivateReviewCleanupIdentity({
+      ...cleanupIdentity,
+      manifest_id: 'replacement-manifest',
+    }, nowMs + 1),
+    /Finish the existing private review cleanup/,
+  );
+  await assert.rejects(
+    restartedPreview.saveOriginalPrivateReviewCleanupIdentity(cleanupIdentity, nowMs + 1),
+    /Finish the existing private review cleanup/,
+    'a duplicate acquisition cannot race cleanup even for the same immutable revision',
+  );
+  assert.equal(
+    (await restartedPreview.getOriginalPrivateReviewCleanupIdentity())?.manifest_id,
+    cleanupIdentity.manifest_id,
+    'a mismatched replay cannot replace the pending identity',
+  );
+  await assert.rejects(
+    restartedPreview.clearOriginalPrivateReviewCleanupIdentityStrict({
+      ...cleanupIdentity,
+      pack_id: 'another-pack',
+    }),
+    /identity changed/,
+  );
+  assert.ok(await restartedPreview.getOriginalPrivateReviewCleanupIdentity());
+  await restartedPreview.clearOriginalPrivateReviewCleanupIdentityStrict(cleanupIdentity);
+  await restartedPreview.clearOriginalPrivateReviewCleanupIdentityStrict(cleanupIdentity);
+  assert.equal(
+    await restartedPreview.getOriginalPrivateReviewCleanupIdentity(),
+    null,
+    'exact cleanup marker removal is idempotent',
+  );
+
+  const concurrentAcquisitions = await Promise.allSettled([
+    restartedPreview.saveOriginalPrivateReviewCleanupIdentity(cleanupIdentity, nowMs + 2),
+    restartedPreview.saveOriginalPrivateReviewCleanupIdentity(cleanupIdentity, nowMs + 2),
+  ]);
+  assert.equal(concurrentAcquisitions.filter(result => result.status === 'fulfilled').length, 1);
+  assert.equal(concurrentAcquisitions.filter(result => result.status === 'rejected').length, 1);
+  await restartedPreview.clearOriginalPrivateReviewCleanupIdentityStrict(cleanupIdentity);
+
+  globals.__previewStorage!.set(
+    'trailhead_originals_private_review_cleanup_v1',
+    JSON.stringify({ schema_version: 1, ...cleanupIdentity, owner_scope: 'guest', created_at_ms: nowMs }),
+  );
+  await assert.rejects(
+    restartedPreview.getOriginalPrivateReviewCleanupIdentity(),
+    /could not be verified/,
+    'a corrupt or non-account marker remains fail closed',
+  );
+  assert.ok(
+    globals.__previewStorage!.has('trailhead_originals_private_review_cleanup_v1'),
+    'an unverifiable cleanup marker is never silently discarded',
+  );
+  globals.__previewStorage!.delete('trailhead_originals_private_review_cleanup_v1');
+
   console.log('Originals internal preview access tests passed.');
 }
 

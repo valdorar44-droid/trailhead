@@ -12,10 +12,22 @@ for (const id of [
   'originals-preview-selection',
   'originals-preview-chapter',
   'originals-preview-variant',
+  'originals-preview-expiry',
   'originals-preview-selection-status',
 ]) {
   assert.ok(ids.includes(id), `missing Studio V2 preview control: ${id}`);
 }
+
+assert.match(
+  html,
+  /id="originals-preview-expiry"[^>]*><option value="300">5 minutes<\/option>/,
+  'private preview links must offer the shortest server-supported five-minute lifetime first',
+);
+assert.match(
+  html,
+  /<option value="900">15 minutes<\/option>/,
+  'private preview links must offer a practical bounded download window',
+);
 
 function functionSource(name, nextName) {
   const start = scripts.indexOf(`function ${name}(`);

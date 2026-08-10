@@ -17,13 +17,26 @@ assert.match(publisher, /\{ platform: 'ios', inputDir: 'dist-ios' \}/);
 assert.match(publisher, /'--platform', stage\.platform/);
 assert.match(publisher, /'--input-dir', stage\.inputDir/);
 assert.doesNotMatch(publisher, /'--platform', 'all',[\s\S]{0,240}'expo', 'export'/);
-assert.match(publisher, /for \(const \[index, stage\] of nativeReleaseStages\.entries\(\)\)/);
-assert.match(publisher, /for \(const stage of nativeReleaseStages\) \{[\s\S]*upload-sentry-update-sourcemaps/);
-assert.match(publisher, /for \(const stage of nativeReleaseStages\) \{[\s\S]*updateArgsFor\(stage\)/);
+const nativeStageLoop = publisher.match(
+  /for \(const \[index, stage\] of nativeReleaseStages\.entries\(\)\) \{([\s\S]*?)\n\}\nif \(productionSnapshot\)/,
+);
+assert.ok(nativeStageLoop, 'publisher must use one bounded native platform loop');
+const nativeStageBody = nativeStageLoop[1];
+const nativeExport = nativeStageBody.indexOf("'expo', 'export'");
+const stagedSentryUpload = nativeStageBody.indexOf(
+  "'scripts/upload-sentry-update-sourcemaps.mjs',\n    '--input-dir', stage.inputDir",
+);
+const stagedUpdatePublish = nativeStageBody.indexOf("run('npx', updateArgsFor(stage)");
 assert.ok(
-  publisher.indexOf("'scripts/upload-sentry-update-sourcemaps.mjs',\n    '--input-dir', stage.inputDir")
-    < publisher.indexOf("run('npx', updateArgsFor(stage)"),
-  'both Sentry upload stages must precede candidate publication',
+  nativeExport >= 0
+    && stagedSentryUpload > nativeExport
+    && stagedUpdatePublish > stagedSentryUpload,
+  'each native export must be uploaded to Sentry and published before the next platform starts',
+);
+assert.doesNotMatch(
+  publisher,
+  /for \(const stage of nativeReleaseStages\)/,
+  'native export, Sentry upload, and candidate publication must not be split across loops',
 );
 assert.match(sentryUploader, /process\.argv\.indexOf\('--input-dir'\)/);
 assert.match(sentryUploader, /Cannot upload OTA source maps outside the mobile project/);

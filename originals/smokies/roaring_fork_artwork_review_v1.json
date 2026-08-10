@@ -1,0 +1,380 @@
+{
+  "approval_gate": {
+    "ingestion_allowed": false,
+    "licensed_derivatives_complete": false,
+    "next_action": "obtain_explicit_visual_approval_then_download_and_hash_exact_originals",
+    "original_downloads_complete": false,
+    "original_hashes_complete": false,
+    "private_manifest_v3_artwork_binding_complete": false,
+    "public_release": false,
+    "user_visual_approval": false,
+    "verified_upload_evidence_complete": false
+  },
+  "candidates": [
+    {
+      "candidate_id": "rf_art_road",
+      "claim_limit": "generic_roaring_fork_road_scene_no_exact_stop_or_exit_claim",
+      "creator": "Sarah Stierch (Missvain)",
+      "download_url": "https://upload.wikimedia.org/wikipedia/commons/3/36/Roaring_Fork_Motor_Nature_Trail_-_March_2024_-_Sarah_Stierch_04.jpg",
+      "download_variant": "source_original",
+      "evidence_status": "source_reviewed_download_deferred",
+      "exact_credit": "Roaring Fork Motor Nature Trail, Sarah Stierch (Missvain), CC BY 4.0, via Wikimedia Commons",
+      "identity_basis": "live_visual_review_plus_geotagged_commons_roaring_fork_record",
+      "ingestion_allowed": false,
+      "license_name": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "original_bytes": null,
+      "original_sha256": null,
+      "preview_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/3/36/Roaring_Fork_Motor_Nature_Trail_-_March_2024_-_Sarah_Stierch_04.jpg/960px-Roaring_Fork_Motor_Nature_Trail_-_March_2024_-_Sarah_Stierch_04.jpg",
+      "review_dimension_basis": "source_original_metadata",
+      "review_dimensions": {
+        "height": 5712,
+        "width": 4284
+      },
+      "rights_basis": "creator_grant_cc_by_4_0",
+      "source_page_url": "https://commons.wikimedia.org/wiki/File:Roaring_Fork_Motor_Nature_Trail_-_March_2024_-_Sarah_Stierch_04.jpg",
+      "source_record": {
+        "page_id": 146614434,
+        "provider": "Wikimedia Commons",
+        "source_bytes": 9641592,
+        "source_caption": "Roaring Fork Motor Nature Trail",
+        "source_sha1": "e369769ac496c9393d3bd15d2dcd42bc733a294c"
+      },
+      "source_reviewed_at": "2026-08-09",
+      "status": "candidate_only_user_visual_approval_required",
+      "subject": "Narrow Roaring Fork Motor Nature Trail beneath tall forest",
+      "user_visual_approval": false
+    },
+    {
+      "candidate_id": "rf_art_stream",
+      "claim_limit": "generic_roaring_fork_stream_scene_no_named_feature_claim",
+      "creator": "Sarah Stierch (Missvain)",
+      "download_url": "https://upload.wikimedia.org/wikipedia/commons/7/72/Roaring_Fork_Motor_Nature_Trail_-_March_2024_-_Sarah_Stierch_03.jpg",
+      "download_variant": "source_original",
+      "evidence_status": "source_reviewed_download_deferred",
+      "exact_credit": "Roaring Fork Motor Nature Trail, Sarah Stierch (Missvain), CC BY 4.0, via Wikimedia Commons",
+      "identity_basis": "live_visual_review_plus_geotagged_commons_roaring_fork_record",
+      "ingestion_allowed": false,
+      "license_name": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "original_bytes": null,
+      "original_sha256": null,
+      "preview_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/7/72/Roaring_Fork_Motor_Nature_Trail_-_March_2024_-_Sarah_Stierch_03.jpg/1280px-Roaring_Fork_Motor_Nature_Trail_-_March_2024_-_Sarah_Stierch_03.jpg",
+      "review_dimension_basis": "source_original_metadata",
+      "review_dimensions": {
+        "height": 4284,
+        "width": 5712
+      },
+      "rights_basis": "creator_grant_cc_by_4_0",
+      "source_page_url": "https://commons.wikimedia.org/wiki/File:Roaring_Fork_Motor_Nature_Trail_-_March_2024_-_Sarah_Stierch_03.jpg",
+      "source_record": {
+        "page_id": 146613898,
+        "provider": "Wikimedia Commons",
+        "source_bytes": 9146001,
+        "source_caption": "Roaring Fork Motor Nature Trail",
+        "source_sha1": "bd05ad3d8a9f8b9fdc7e2323bc2015a4e9ace7aa"
+      },
+      "source_reviewed_at": "2026-08-09",
+      "status": "candidate_only_user_visual_approval_required",
+      "subject": "Proposed stream scene along Roaring Fork Motor Nature Trail",
+      "user_visual_approval": false
+    },
+    {
+      "candidate_id": "rf_art_forest",
+      "claim_limit": "generic_roaring_fork_forest_scene_no_old_growth_claim",
+      "creator": "Sarah Stierch (Missvain)",
+      "download_url": "https://upload.wikimedia.org/wikipedia/commons/3/36/Roaring_Fork_Motor_Nature_Trail_-_March_2024_-_Sarah_Stierch_05.jpg",
+      "download_variant": "source_original",
+      "evidence_status": "source_reviewed_download_deferred",
+      "exact_credit": "Roaring Fork Motor Nature Trail, Sarah Stierch (Missvain), CC BY 4.0, via Wikimedia Commons",
+      "identity_basis": "live_visual_review_plus_geotagged_commons_roaring_fork_record",
+      "ingestion_allowed": false,
+      "license_name": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "original_bytes": null,
+      "original_sha256": null,
+      "preview_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/3/36/Roaring_Fork_Motor_Nature_Trail_-_March_2024_-_Sarah_Stierch_05.jpg/960px-Roaring_Fork_Motor_Nature_Trail_-_March_2024_-_Sarah_Stierch_05.jpg",
+      "review_dimension_basis": "source_original_metadata",
+      "review_dimensions": {
+        "height": 4032,
+        "width": 3024
+      },
+      "rights_basis": "creator_grant_cc_by_4_0",
+      "source_page_url": "https://commons.wikimedia.org/wiki/File:Roaring_Fork_Motor_Nature_Trail_-_March_2024_-_Sarah_Stierch_05.jpg",
+      "source_record": {
+        "page_id": 146614435,
+        "provider": "Wikimedia Commons",
+        "source_bytes": 5401179,
+        "source_caption": "Roaring Fork Motor Nature Trail",
+        "source_sha1": "5034c6662ecc3f6d8333b2a4623a1d640b7630a3"
+      },
+      "source_reviewed_at": "2026-08-09",
+      "status": "candidate_only_user_visual_approval_required",
+      "subject": "Roaring Fork forest and mature tree canopy",
+      "user_visual_approval": false
+    },
+    {
+      "candidate_id": "rf_art_ogle",
+      "claim_limit": "exact_ogle_cabin_no_claim_that_frame_shows_entire_farmstead",
+      "creator": "Sarah Stierch (Missvain)",
+      "download_url": "https://upload.wikimedia.org/wikipedia/commons/4/4e/Noah_%22Bud%22_Ogle_Cabin_-_October_2023_-_Sarah_Stierch.jpg",
+      "download_variant": "source_original",
+      "evidence_status": "existing_original_verified_candidate_only",
+      "exact_credit": "Noah 'Bud' Ogle Cabin, October 2023, Sarah Stierch (Missvain), CC BY 4.0, via Wikimedia Commons",
+      "identity_basis": "exact_commons_file_title_plus_live_visual_review",
+      "ingestion_allowed": false,
+      "license_name": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "original_bytes": 5281216,
+      "original_sha256": "a828bf6c6d7f2650268f67b39669b1958f80c34dd845705f60423d8a0dfea551",
+      "preview_url": "https://upload.wikimedia.org/wikipedia/commons/thumb/4/4e/Noah_%22Bud%22_Ogle_Cabin_-_October_2023_-_Sarah_Stierch.jpg/1280px-Noah_%22Bud%22_Ogle_Cabin_-_October_2023_-_Sarah_Stierch.jpg",
+      "review_dimension_basis": "source_original_metadata",
+      "review_dimensions": {
+        "height": 3024,
+        "width": 4032
+      },
+      "rights_basis": "creator_grant_cc_by_4_0",
+      "source_page_url": "https://commons.wikimedia.org/wiki/File:Noah_%22Bud%22_Ogle_Cabin_-_October_2023_-_Sarah_Stierch.jpg",
+      "source_record": {
+        "provider": "Wikimedia Commons",
+        "source_bytes": 5281216,
+        "source_caption": "Noah 'Bud' Ogle Cabin"
+      },
+      "source_reviewed_at": "2026-08-09",
+      "status": "candidate_only_user_visual_approval_required",
+      "subject": "Exact Noah 'Bud' Ogle cabin setting",
+      "user_visual_approval": false
+    },
+    {
+      "candidate_id": "rf_art_historic_cabin",
+      "claim_limit": "generic_roaring_fork_cabin_no_structure_name_or_mill_claim",
+      "creator": "Carol M. Highsmith",
+      "download_url": "https://tile.loc.gov/storage-services/master/pnp/highsm/68300/68373u.tif",
+      "download_variant": "loc_provider_master_tiff_68373u",
+      "evidence_status": "source_reviewed_download_deferred",
+      "exact_credit": "Carol M. Highsmith's America Project in the Carol M. Highsmith Archive, Library of Congress, Prints and Photographs Division, LC-DIG-highsm-68373",
+      "identity_basis": "exact_library_of_congress_item_title_and_visual_review",
+      "ingestion_allowed": false,
+      "license_name": "Public domain; no known restrictions on publication",
+      "license_url": "https://www.loc.gov/pictures/collection/highsm/",
+      "original_bytes": null,
+      "original_sha256": null,
+      "preview_url": "https://tile.loc.gov/storage-services/service/pnp/highsm/68300/68373v.jpg",
+      "review_dimension_basis": "loc_large_service_jpeg_preview",
+      "review_dimensions": {
+        "height": 683,
+        "width": 1024
+      },
+      "rights_basis": "public_domain_dedication_no_known_restrictions",
+      "source_page_url": "https://www.loc.gov/pictures/item/2021756594/",
+      "source_record": {
+        "master_dimensions_status": "probe_after_visual_approval",
+        "master_tiff_bytes": 141728100,
+        "provider": "Library of Congress",
+        "record_id": "2021756594",
+        "reproduction_number": "LC-DIG-highsm-68373",
+        "review_preview_bytes": 868394,
+        "review_preview_url": "https://tile.loc.gov/storage-services/service/pnp/highsm/68300/68373v.jpg",
+        "rights_advisory": "No known restrictions on publication"
+      },
+      "source_reviewed_at": "2026-08-09",
+      "status": "candidate_only_user_visual_approval_required",
+      "subject": "Exact rustic cabin along Roaring Fork Motor Nature Trail",
+      "user_visual_approval": false
+    },
+    {
+      "candidate_id": "rf_art_grotto_falls",
+      "claim_limit": "destination_illustration_only_falls_not_visible_from_road_no_parking_or_access_availability_claim",
+      "creator": "National Park Service source; photographer not supplied",
+      "download_url": "https://www.nps.gov/npgallery/GetAsset/287a5ad1-1dd8-b71c-07f1-bd1b3dcc532d",
+      "download_variant": "source_original",
+      "evidence_status": "source_reviewed_download_deferred",
+      "exact_credit": "Grotto Falls, Great Smoky Mountains National Park, National Park Service; no claim to original U.S. Government work",
+      "identity_basis": "exact_nps_npgallery_title_alt_text_and_asset_id",
+      "ingestion_allowed": false,
+      "license_name": "Public domain; NPS NPGallery constraint",
+      "license_url": "https://www.nps.gov/aboutus/disclaimer.htm",
+      "original_bytes": null,
+      "original_sha256": null,
+      "preview_url": "https://www.nps.gov/npgallery/GetAsset/287a5ad1-1dd8-b71c-07f1-bd1b3dcc532d",
+      "review_dimension_basis": "source_original_metadata",
+      "review_dimensions": {
+        "height": 1470,
+        "width": 2182
+      },
+      "rights_basis": "public_domain_us_government_work",
+      "source_page_url": "https://www.nps.gov/media/photo/gallery-item.htm?gid=28FBB4C4-1DD8-B71C-07DAE9A6F3C26A2A&id=287A5AD1-1DD8-B71C-07F1BD1B3DCC532D",
+      "source_record": {
+        "asset_id": "287a5ad1-1dd8-b71c-07f1-bd1b3dcc532d",
+        "constraint": "Public domain",
+        "granting_rights": "Full",
+        "photo_credit": null,
+        "provider": "National Park Service NPGallery",
+        "source_bytes": 1760245
+      },
+      "source_reviewed_at": "2026-08-09",
+      "status": "candidate_only_user_visual_approval_required",
+      "subject": "Exact Grotto Falls on Trillium Gap Trail",
+      "user_visual_approval": false
+    },
+    {
+      "candidate_id": "rf_art_thousand_drips",
+      "claim_limit": "exact_named_feature_no_present_flow_or_parking_promise",
+      "creator": "National Park Service source; photographer not supplied",
+      "download_url": "https://www.nps.gov/npgallery/GetAsset/29186a3a-1dd8-b71c-0713-93aab0680f34",
+      "download_variant": "source_original",
+      "evidence_status": "source_reviewed_download_deferred",
+      "exact_credit": "Place of 1,000 Drips, Great Smoky Mountains National Park, National Park Service; no claim to original U.S. Government work",
+      "identity_basis": "exact_nps_npgallery_title_alt_text_and_asset_id",
+      "ingestion_allowed": false,
+      "license_name": "Public domain; NPS NPGallery constraint",
+      "license_url": "https://www.nps.gov/aboutus/disclaimer.htm",
+      "original_bytes": null,
+      "original_sha256": null,
+      "preview_url": "https://www.nps.gov/npgallery/GetAsset/29186a3a-1dd8-b71c-0713-93aab0680f34",
+      "review_dimension_basis": "source_original_metadata",
+      "review_dimensions": {
+        "height": 2180,
+        "width": 1489
+      },
+      "rights_basis": "public_domain_us_government_work",
+      "source_page_url": "https://www.nps.gov/media/photo/gallery-item.htm?gid=28FBB4C4-1DD8-B71C-07DAE9A6F3C26A2A&id=29186a3a-1dd8-b71c-0713-93aab0680f34",
+      "source_record": {
+        "asset_id": "29186a3a-1dd8-b71c-0713-93aab0680f34",
+        "constraint": "Public domain",
+        "granting_rights": "Full",
+        "photo_credit": null,
+        "provider": "National Park Service NPGallery",
+        "source_bytes": 1799456
+      },
+      "source_reviewed_at": "2026-08-09",
+      "status": "candidate_only_user_visual_approval_required",
+      "subject": "Exact Place of 1,000 Drips beside Roaring Fork road",
+      "user_visual_approval": false
+    }
+  ],
+  "chapter_id": "roaring_fork",
+  "entry_artwork_map": [
+    {
+      "candidate_id": "rf_art_ogle",
+      "entry_id": "rf_cue_02",
+      "entry_title": "Ogle farmstead",
+      "stable_order": 1
+    },
+    {
+      "candidate_id": "rf_art_ogle",
+      "entry_id": "rf_story_03",
+      "entry_title": "The Ogle farm at the edge of town",
+      "stable_order": 2
+    },
+    {
+      "candidate_id": "rf_art_road",
+      "entry_id": "rf_cue_01",
+      "entry_title": "One way from here",
+      "stable_order": 3
+    },
+    {
+      "candidate_id": "rf_art_road",
+      "entry_id": "rf_story_01",
+      "entry_title": "A road that asks you to slow down",
+      "stable_order": 4
+    },
+    {
+      "candidate_id": "rf_art_grotto_falls",
+      "entry_id": "rf_cue_04",
+      "entry_title": "Grotto Falls trail access",
+      "stable_order": 5
+    },
+    {
+      "candidate_id": "rf_art_stream",
+      "entry_id": "rf_cue_03",
+      "entry_title": "Water beside the road",
+      "stable_order": 6
+    },
+    {
+      "candidate_id": "rf_art_stream",
+      "entry_id": "rf_story_02",
+      "entry_title": "The stream behind the name",
+      "stable_order": 7
+    },
+    {
+      "candidate_id": "rf_art_forest",
+      "entry_id": "rf_story_04",
+      "entry_title": "Old trees and a wet forest",
+      "stable_order": 8
+    },
+    {
+      "candidate_id": "rf_art_historic_cabin",
+      "entry_id": "rf_story_05",
+      "entry_title": "Homes, mills, and neighbors",
+      "stable_order": 9
+    },
+    {
+      "candidate_id": "rf_art_thousand_drips",
+      "entry_id": "rf_cue_05",
+      "entry_title": "Thousand Drips",
+      "stable_order": 10
+    },
+    {
+      "candidate_id": "rf_art_thousand_drips",
+      "entry_id": "rf_story_06",
+      "entry_title": "Water falling through resistant rock",
+      "stable_order": 11
+    },
+    {
+      "candidate_id": "rf_art_historic_cabin",
+      "entry_id": "rf_story_07",
+      "entry_title": "Reading two landscapes at once",
+      "stable_order": 12
+    },
+    {
+      "candidate_id": "rf_art_road",
+      "entry_id": "rf_cue_06",
+      "entry_title": "Leaving the motor trail",
+      "stable_order": 13
+    }
+  ],
+  "known_rejections": [
+    {
+      "asset_sha256": "4a61195ac9a5d7a0dc6037cc3e3d4089def7335d1cafd2f0e20d34091d3c8011",
+      "authoritative_subject": "mountain vista at stop three",
+      "ingestion_allowed": false,
+      "rejection_reason": "does_not_depict_required_stream_and_road_scene",
+      "slot_id": "media_rf_stream",
+      "status": "rejected_identity_mismatch"
+    }
+  ],
+  "product_id": "great_smoky_mountains_ridges_rivers_living_memory",
+  "review_id": "smokies_roaring_fork_artwork_review_20260809_v1",
+  "review_scope": "source_rights_identity_and_proposed_entry_mapping",
+  "reviewed_at": "2026-08-09",
+  "schema_version": 1,
+  "source_bindings": [
+    {
+      "byte_count": 26805,
+      "path": "originals/smokies/editorial_roaring_fork_v1.json",
+      "sha256": "c3d1622d7f5109fb4632cb74af340f97a3477cd061c326f5e55055e6b074d0e2"
+    },
+    {
+      "byte_count": 41551,
+      "path": "originals/smokies/roaring_fork_trigger_preflight_v1.json",
+      "sha256": "b7b8412e07cdef5706d814550491f8c28bfadb05d3fbef38369ec7006c3b67f3"
+    },
+    {
+      "byte_count": 16980,
+      "path": "docs/originals/smokies-media-rights-v1.md",
+      "sha256": "53e515e3f3ce46cb9dd4c9d19be38d008ea5bb603e31a6be53bf5afdb7f0ab15"
+    }
+  ],
+  "status": "user_visual_approval_required",
+  "summary": {
+    "candidate_count": 7,
+    "cc_by_4_0_candidate_count": 4,
+    "download_deferred_candidate_count": 6,
+    "downloaded_original_candidate_count": 1,
+    "entry_count": 13,
+    "mapped_exactly_once": true,
+    "public_domain_candidate_count": 3
+  },
+  "variant_id": "one_way"
+}

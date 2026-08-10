@@ -1559,3 +1559,53 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 - Do not repeat standalone listening, copying, hashing, reordering, or regeneration while the thirteen hashes remain unchanged.
 - Do not interpret this File Sharing identity check as an OTA, native-build, deployment, or Trailhead runtime acceptance.
 - Do not upload to Studio, publish, begin another chapter, or narrate culturally gated material during this bounded listening closeout.
+
+## S4G Roaring Fork artwork review candidate
+
+- Completed to review gate: 2026-08-09.
+- Branch: `feat/smokies-original-s2`.
+- Baseline/source HEAD: `eb71913a552d58034c27ec88592f29f3ac14d459`.
+- This packet performs source, rights, identity, and proposed mapping review only. It does not approve, download, ingest, upload, publish, deploy, or expose artwork.
+- Protected files remain unchanged:
+  - `dashboard/explore_serving_index_v2.json`: `c0726d8166ab7d110f437ff4e6acde7aa09702354f053103e3f6630a0129b869`.
+  - `docs/app-store-copy.md`: `126af147b650c2f1077fb73036d26f34f940422c07a3193bade047c73b5c225a`.
+  - `.cursor/` was not touched.
+- Visual inspection and the authoritative HAER title proved that the former `media_rf_stream` candidate is a mountain vista at stop three, not a stream scene. Its rights remain valid, but it is now `rejected_identity_mismatch` and cannot be bound to `rf_story_02` or `rf_cue_03`.
+- A deterministic, network-free review packet maps all thirteen checked Roaring Fork entries exactly once to seven proposed candidates:
+  - narrow Roaring Fork road;
+  - generic Roaring Fork stream;
+  - generic Roaring Fork forest;
+  - exact Noah “Bud” Ogle cabin;
+  - generic documented Roaring Fork cabin;
+  - exact Grotto Falls destination illustration;
+  - exact Place of 1,000 Drips.
+- The mapping preserves strict claim limits. The generic Commons photographs cannot be presented as named stops; the forest photograph cannot be labeled old growth; the Highsmith cabin cannot be assigned a structure name or called a mill; and Grotto Falls must be presented as a trail destination that is not visible from the road, with no parking or availability promise.
+- Rights evidence is source-backed:
+  - Four Sarah Stierch photographs are CC BY 4.0 and require creator credit, license link, and a later change note for any derivative.
+  - The Carol M. Highsmith Roaring Fork cabin is under the Library of Congress `No known restrictions on publication` record `LC-DIG-highsm-68373`; final download targets the provider master TIFF, not the review JPEG.
+  - Grotto Falls and Place of 1,000 Drips are exact NPS NPGallery records with `Public domain` / `Full` rights, null photographer credit, and the commercial U.S. Government-work notice retained.
+- Only the previously downloaded Ogle original has project SHA-256 and byte evidence. The other six exact downloads, original hashes, EXIF-safe derivatives, derivative hashes, and verified uploads remain deliberately absent until visual approval.
+- The review packet remains fail-closed: `user_visual_approval=false`, `ingestion_allowed=false`, `private_manifest_v3_artwork_binding_complete=false`, and `public_release=false`.
+- Evidence hashes:
+  - `docs/originals/smokies-media-rights-v1.md`: `53e515e3f3ce46cb9dd4c9d19be38d008ea5bb603e31a6be53bf5afdb7f0ab15`.
+  - `originals/smokies/roaring_fork_artwork_review_v1.json`: `3030dfdf993b8b33cb116263ba9902dfe9e36c637f4ff7a37b11f878f0f082d4`.
+  - `scripts/build_smokies_roaring_fork_artwork_review.py`: `a57b1160ae26aaba020440657e90a59bb6f55b547210e5e818c57423f18f7987`.
+  - `tests/test_smokies_roaring_fork_artwork_review.py`: `5d42afb9ec72c7500da36e70f240639405148adf1508ff66e9018d11e517a6e0`.
+- Verification: deterministic builder check, Python compilation, whitespace check, and 39 focused artwork/source/editorial tests passed.
+- Independent review found no P0/P1 after the identity, NPS dimension/credit, Library of Congress master, premature crop-credit, and generic-caption corrections.
+- Windows storage remains too full for the six final originals and derivatives, especially the 141,728,100-byte Library of Congress master TIFF. No download was attempted and no lower-quality substitute was silently accepted.
+
+### Exact next action after S4G
+
+1. Obtain explicit visual approval for the seven-candidate contact set.
+2. Reclaim enough Windows/WSL storage for the exact originals and derivatives.
+3. Download and hash only the approved originals; preserve immutable originals, normalize orientation and strip GPS/device EXIF only in separately hashed PNG derivatives, and carry exact attribution/change records.
+4. Build a separate artwork approval overlay bound to the existing dossier hash. Do not edit `source_dossiers_v1.json`, because its hash is already bound into accepted narration evidence.
+5. Add a narrow admin-only importer that binds the accepted thirteen MP3s to the checked real-audio characterization and exact ElevenLabs James generator/license provenance; do not regenerate through the narration endpoint.
+6. Assemble a one-chapter internal OriginalManifestV3 draft, upload and verify the accepted audio plus approved artwork, then run authenticated admin device preview and trusted validation without calling Publish.
+
+### Do not repeat after S4G
+
+- Do not reconsider the rejected HAER vista as stream artwork or weaken its identity failure because its license is usable.
+- Do not download, crop, transcode, ingest, upload, or mark any proposed artwork approved before the explicit visual decision.
+- Do not edit the source dossier, regenerate accepted narration, call the narration endpoint, publish a version, expose public assets, or begin another chapter during this review gate.

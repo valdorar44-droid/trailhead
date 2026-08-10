@@ -17,9 +17,6 @@
       },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://api.gettrailhead.app",
-          "EXPO_PUBLIC_BRANCH_ATTRIBUTION_ENABLED": "false",
-        "EXPO_PUBLIC_BRANCH_CONFIGURED": "true",
-        "EXPO_PUBLIC_BRANCH_DOMAIN": "go.gettrailhead.app",
         "EXPO_PUBLIC_TELEMETRY_QA_ENABLED": "true",
         "EXPO_PUBLIC_SENTRY_TRACES_SAMPLE_RATE": "0.1"
       }
@@ -35,9 +32,6 @@
       },
       "env": {
         "EXPO_PUBLIC_API_URL": "https://api.gettrailhead.app",
-          "EXPO_PUBLIC_BRANCH_ATTRIBUTION_ENABLED": "false",
-        "EXPO_PUBLIC_BRANCH_CONFIGURED": "true",
-        "EXPO_PUBLIC_BRANCH_DOMAIN": "go.gettrailhead.app",
         "EXPO_PUBLIC_TELEMETRY_QA_ENABLED": "false",
         "EXPO_PUBLIC_SENTRY_TRACES_SAMPLE_RATE": "0.1"
       }

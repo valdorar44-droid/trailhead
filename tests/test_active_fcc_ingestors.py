@@ -1,5 +1,9 @@
+import os
+import tempfile
 import unittest
 
+from config.settings import settings
+from db import store
 from ingestors import active, fcc, ridb
 
 
@@ -18,7 +22,7 @@ class ActiveIngestorTests(unittest.TestCase):
 
         self.assertEqual(normalized["id"], "active_camp:123")
         self.assertEqual(normalized["name"], "Aspen Group Camp")
-        self.assertEqual(normalized["photo_url"], "http://www.reserveamerica.com/photos/details/aspen.jpg")
+        self.assertEqual(normalized["photo_url"], "https://www.reserveamerica.com/photos/details/aspen.jpg")
         self.assertEqual(normalized["photo_status"], "facility")
         self.assertIn("group", normalized["tags"])
         self.assertIn("ACTIVE", normalized["source_badge"])
@@ -67,6 +71,22 @@ class ActiveIngestorTests(unittest.TestCase):
 
 
 class FccIngestorTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.original_db_path = settings.db_path
+        tmp = tempfile.NamedTemporaryFile(delete=False)
+        tmp.close()
+        self.db_path = tmp.name
+        settings.db_path = self.db_path
+        store.init_db()
+
+    def tearDown(self):
+        settings.db_path = self.original_db_path
+        for suffix in ("", "-wal", "-shm"):
+            try:
+                os.unlink(self.db_path + suffix)
+            except FileNotFoundError:
+                pass
+
     def test_mobile_coverage_normalization_labels_provider_and_technology(self):
         record = fcc.normalize_mobile_coverage_record(
             {

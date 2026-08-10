@@ -56,8 +56,7 @@ import { consumeOriginalPreviewUrl } from '@/lib/originals/previewAccess';
 import {
   referralCodeFromUrl,
   rememberReferralCode,
-  startBranchReferralAttribution,
-} from '@/lib/referrals/branchAttribution';
+} from '@/lib/referrals/referralAttribution';
 import { useTrailheadFonts } from '@/lib/typography';
 import { withTrailheadTelemetry } from '@/lib/telemetry/sentry';
 import { appLinkDestinationFromUrl } from '@/lib/appLinks';
@@ -663,15 +662,6 @@ function RootLayout() {
     const linkSub = Linking.addEventListener('url', event => {
       handleIncomingUrl(event.url).catch(() => {});
     });
-    const branchUnsubscribe = startBranchReferralAttribution(code => {
-      if (useStore.getState().user) return false;
-      router.push({
-        pathname: '/(tabs)/profile',
-        params: { auth: 'register', referral_code: code },
-      } as any);
-      return true;
-    });
-
     return () => {
       launchCancelled = true;
       stopTripRepositoryAutoSync.current?.();
@@ -679,7 +669,6 @@ function RootLayout() {
       void cancelTripRepositorySync();
       notifSub.remove();
       linkSub.remove();
-      branchUnsubscribe();
       appStateSub?.remove();
     };
   }, []);
@@ -708,7 +697,7 @@ function RootLayout() {
     if (!user) return;
     storage.get(WELCOME_PENDING_ATTR_KEY).then(value => {
       if (value !== '1') return;
-      api.logAnalyticsEvent('welcome_gate_cta_attributed', sessionId, { source: 'post_sign_in', user_id: user.id }).catch(() => {});
+      api.logAnalyticsEvent('welcome_gate_cta_attributed', sessionId, { source: 'post_sign_in' }).catch(() => {});
       storage.del(WELCOME_PENDING_ATTR_KEY).catch(() => {});
     }).catch(() => {});
   }, [sessionId, user]);

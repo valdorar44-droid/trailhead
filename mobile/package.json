@@ -1,6 +1,6 @@
 {
   "name": "trailhead-mobile",
-  "version": "1.0.10",
+  "version": "1.0.12",
   "main": "expo-router/entry",
   "scripts": {
     "start": "expo start",
@@ -67,9 +67,9 @@
     "test:trail-contributions": "node --import tsx lib/__tests__/trailContributions.test.ts && node --import tsx lib/__tests__/trailContributionRepository.test.ts",
     "test:trail-preview": "node --import tsx lib/__tests__/trailPreviewPlayback.test.ts",
     "test:explore-trails": "node --import tsx lib/__tests__/trailsV2.test.ts && node --import tsx lib/__tests__/exploreDestinationRegistry.test.ts && node --import tsx lib/__tests__/exploreDetailModuleRegistry.test.ts && node --import tsx lib/__tests__/trailDiscoveryWorkspace.test.ts && node --import tsx lib/__tests__/trailSummaryPresentation.test.ts && node --import tsx lib/__tests__/trailSheetFlowContract.test.ts && node --import tsx lib/__tests__/exploreDestinationTrailIntegration.test.ts && node --import tsx lib/__tests__/exploreSourcePanel.test.ts",
-    "test:referrals": "node --import tsx lib/referrals/__tests__/referralLinks.test.ts && node scripts/branch-native-lifecycle.test.mjs",
+    "test:referrals": "node --import tsx lib/referrals/__tests__/referralLinks.test.ts",
     "test:telemetry": "node --import tsx lib/telemetry/__tests__/sanitize.test.ts && node --import tsx lib/telemetry/__tests__/mapCampSelection.test.ts && node --import tsx lib/telemetry/__tests__/sampling.test.ts && node --import tsx lib/telemetry/__tests__/qaPolicy.test.ts && node --import tsx lib/telemetry/__tests__/qaAccess.test.ts && node --import tsx lib/qa/__tests__/diagnostics.test.ts && node --import tsx lib/__tests__/offlinePlacePackDiagnostics.test.ts && node --import tsx lib/tripRepository/__tests__/qaInstrumentation.test.ts",
-    "test:privacy-controls": "node scripts/privacy-controls.test.mjs",
+    "test:privacy-controls": "node --import tsx lib/__tests__/copilotVoiceLifecycle.test.ts && node --import tsx lib/__tests__/navigationLocationDisclosure.test.ts && node scripts/privacy-controls.test.mjs",
     "ota": "npx --yes eas-cli@21.0.2 env:exec preview \"node scripts/publish-eas-update.mjs preview\" --non-interactive",
     "ota:preview:android": "npx --yes eas-cli@21.0.2 env:exec preview \"node scripts/publish-staged-preview.mjs android\" --non-interactive",
     "ota:preview:ios": "npx --yes eas-cli@21.0.2 env:exec preview \"node scripts/publish-staged-preview.mjs ios\" --non-interactive",
@@ -78,7 +78,6 @@
     "postinstall": "node scripts/patch-expo-modules.js && patch-package"
   },
   "dependencies": {
-    "@config-plugins/react-native-branch": "11.0.0",
     "@config-plugins/react-native-webrtc": "^13.0.0",
     "@expo/metro-runtime": "~6.1.2",
     "@expo/vector-icons": "^15.0.3",
@@ -131,7 +130,6 @@
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-native": "0.81.5",
-    "react-native-branch": "6.10.0",
     "react-native-gesture-handler": "~2.28.0",
     "react-native-iap": "^15.3.2",
     "react-native-nitro-modules": "^0.35.9",
@@ -163,14 +161,12 @@
       "reactNativeDirectoryCheck": {
         "enabled": true,
         "exclude": [
-          "@config-plugins/react-native-branch",
           "expo-audio-route",
           "expo-mapbox-standard-interactions",
           "expo-mission-animator",
           "expo-tile-server",
           "expo-trailhead-car-reports",
           "expo-valhalla-routing",
-          "react-native-branch",
           "react-native-webrtc"
         ],
         "listUnknownPackages": true

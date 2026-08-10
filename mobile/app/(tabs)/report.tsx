@@ -645,12 +645,8 @@ function ReportScreenContent() {
 
   useEffect(() => {
     if (view !== 'nearby' || !loc || nearby.length > 0) return;
-    const latBucket = loc.lat.toFixed(2);
-    const lngBucket = loc.lng.toFixed(2);
-    trackPhase0Once(`phase0:report-empty:${latBucket}:${lngBucket}`, 'phase0_empty_state_seen', {
+    trackPhase0Once('phase0:report-empty:nearby', 'phase0_empty_state_seen', {
       surface: 'report_nearby',
-      lat_bucket: latBucket,
-      lng_bucket: lngBucket,
     });
   }, [loc, nearby.length, view]);
 

@@ -117,9 +117,6 @@ const fullSha = run('git', ['-C', '..', 'rev-parse', 'HEAD'], { capture: true })
 // Embed the exact authoritative source revision in the update manifest so the
 // on-device QA snapshot can be matched to release evidence without user data.
 process.env.EXPO_PUBLIC_RELEASE_COMMIT_SHA = fullSha;
-if (!String(process.env.EXPO_PUBLIC_BRANCH_CONFIGURED || '').trim()) {
-  process.env.EXPO_PUBLIC_BRANCH_CONFIGURED = 'true';
-}
 const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 const require = createRequire(import.meta.url);
 const appConfig = require('../app.config.js').expo;

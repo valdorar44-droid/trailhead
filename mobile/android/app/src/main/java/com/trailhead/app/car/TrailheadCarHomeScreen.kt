@@ -23,9 +23,11 @@ import androidx.car.app.model.ListTemplate
 import androidx.car.app.model.Metadata
 import androidx.car.app.model.Pane
 import androidx.car.app.model.PaneTemplate
+import androidx.car.app.model.ParkedOnlyOnClickListener
 import androidx.car.app.model.Place
 import androidx.car.app.model.PlaceMarker
 import androidx.car.app.model.Row
+import androidx.car.app.model.SearchTemplate
 import androidx.car.app.model.Template
 import androidx.car.app.navigation.model.Destination
 import androidx.car.app.navigation.model.Maneuver
@@ -57,12 +59,21 @@ internal interface TrailheadCarSessionController {
   val muted: Boolean
   val copilotState: TrailheadCarCopilotState
   val mapSurface: TrailheadCarMapSurface
+  val guidancePermissionsGranted: Boolean
+  val copilotPermissionGranted: Boolean
 
   fun startGuidance()
   fun startNavigationRequest(
     request: TrailheadCarNavigationRequest,
     onResult: (TrailheadCarNavigationStartResult) -> Unit,
   )
+  fun cancelNavigationRequest() = Unit
+  fun searchDestinations(
+    query: String,
+    onResult: (TrailheadCarDestinationSearchResponse) -> Unit,
+  )
+  fun requestGuidancePermissions(onResult: (Boolean) -> Unit)
+  fun requestCopilotPermission(onResult: (Boolean) -> Unit)
   fun endGuidanceAndReturnHome()
   fun continueAfterArrival(stopIndex: Int)
   fun toggleMuted()
@@ -81,7 +92,7 @@ internal class TrailheadCarHomeScreen(
   override fun onGetTemplate(): Template {
     val snapshot = controller.snapshot
     controller.mapSurface.setSnapshot(snapshot)
-    if (snapshot.state != TrailheadCarSnapshotState.READY) return unavailableTemplate(snapshot.state)
+    if (snapshot.state == TrailheadCarSnapshotState.UNAVAILABLE) return unavailableTemplate(snapshot.state)
     if (snapshot.route == null) return stopsOnlyTemplate(snapshot)
     requiredNavigationPermissions().takeIf(List<String>::isNotEmpty)?.let { missing ->
       return permissionTemplate(missing)
@@ -165,28 +176,62 @@ internal class TrailheadCarHomeScreen(
   }
 
   private fun stopsOnlyTemplate(snapshot: TrailheadCarSnapshot): Template {
-    if (snapshot.stops.isEmpty()) {
-      return androidx.car.app.model.MessageTemplate.Builder("Say a destination to Google Assistant, or open a saved trip.")
-        .setTitle("Where to?")
-        .setHeaderAction(Action.APP_ICON)
-        .build()
-    }
     val list = ItemList.Builder()
-    visibleStops(snapshot).forEachIndexed { index, stop ->
+    list.addItem(
+      Row.Builder()
+        .setTitle("Search destinations")
+        .addText("Choose a place on this display")
+        .setBrowsable(true)
+        .setOnClickListener {
+          screenManager.push(TrailheadCarSearchScreen(carContext, controller))
+        }
+        .build(),
+    )
+    val limit = contentListLimit()
+    visibleStops(snapshot).take((limit - 1).coerceAtLeast(0)).forEachIndexed { index, stop ->
       list.addItem(stopRow(stop, index, snapshot.stops.size))
     }
     return ListTemplate.Builder()
-      .setTitle(snapshot.tripName)
+      .setTitle("Where to?")
       .setHeaderAction(Action.APP_ICON)
       .setSingleList(list.build())
       .build()
   }
+
+  private fun contentListLimit(): Int = carContext.getCarService(ConstraintManager::class.java)
+    .getContentLimit(ConstraintManager.CONTENT_LIMIT_TYPE_LIST)
+    .coerceAtLeast(1)
 
   private fun visibleStops(snapshot: TrailheadCarSnapshot): List<TrailheadCarStop> {
     val limit = carContext.getCarService(ConstraintManager::class.java)
       .getContentLimit(ConstraintManager.CONTENT_LIMIT_TYPE_PLACE_LIST)
       .coerceAtLeast(1)
     return snapshot.stops.take(limit)
+  }
+
+  private fun destinationChoiceRow(choice: TrailheadCarDestinationChoice): Row {
+    val place = Place.Builder(CarLocation.create(choice.lat, choice.lng)).build()
+    val builder = Row.Builder()
+      .setTitle(choice.label)
+      .setBrowsable(true)
+      .setMetadata(Metadata.Builder().setPlace(place).build())
+      .setOnClickListener {
+        screenManager.push(
+          TrailheadCarNavigationRequestScreen(
+            carContext,
+            controller,
+            TrailheadCarNavigationRequest(
+              label = choice.label,
+              lat = choice.lat,
+              lng = choice.lng,
+              mode = TrailheadCarNavigationMode.NAVIGATION,
+            ),
+            showBack = true,
+          ),
+        )
+      }
+    if (choice.detail.isNotBlank()) builder.addText(choice.detail)
+    return builder.build()
   }
 
   private fun stopRow(stop: TrailheadCarStop, index: Int, totalStops: Int): Row {
@@ -237,11 +282,11 @@ internal class TrailheadCarHomeScreen(
   private fun permissionTemplate(missing: List<String>): Template {
     val notificationMissing = missing.contains(Manifest.permission.POST_NOTIFICATIONS)
     val message = if (notificationMissing && missing.size == 1) {
-      "Allow navigation notifications on your phone when parked."
+      "When safe, use your phone to allow navigation notifications."
     } else if (notificationMissing) {
-      "Allow location and navigation notifications on your phone when parked."
+      "When safe, use your phone to allow location and navigation notifications."
     } else {
-      "Allow location on your phone when parked to show your position and begin guidance."
+      "When safe, use your phone to allow location so Trailhead can show your position and begin guidance."
     }
     return androidx.car.app.model.MessageTemplate.Builder(
       message,
@@ -251,9 +296,11 @@ internal class TrailheadCarHomeScreen(
       .addAction(
         Action.Builder()
           .setTitle("Open permissions")
-          .setOnClickListener {
-            carContext.requestPermissions(missing) { _, _ -> invalidate() }
-          }
+          .setOnClickListener(
+            ParkedOnlyOnClickListener.create {
+              carContext.requestPermissions(missing) { _, _ -> invalidate() }
+            },
+          )
           .build(),
       )
       .build()
@@ -273,13 +320,146 @@ internal class TrailheadCarHomeScreen(
   }
 }
 
+internal class TrailheadCarSearchScreen(
+  carContext: CarContext,
+  private val controller: TrailheadCarSessionController,
+) : Screen(carContext) {
+  private var query = ""
+  private var searching = false
+  private var error = ""
+  private var results: List<TrailheadCarDestinationChoice> = initialDestinations()
+  private var searchGeneration = 0L
+  private var destroyed = false
+
+  init {
+    lifecycle.addObserver(
+      object : DefaultLifecycleObserver {
+        override fun onDestroy(owner: LifecycleOwner) {
+          destroyed = true
+          searchGeneration += 1L
+        }
+      },
+    )
+  }
+
+  private val searchCallback = object : SearchTemplate.SearchCallback {
+    override fun onSearchTextChanged(searchText: String) {
+      query = searchText.take(160)
+      if (searchText.isBlank()) {
+        searchGeneration += 1L
+        searching = false
+        error = ""
+        results = initialDestinations()
+        invalidate()
+      }
+    }
+
+    override fun onSearchSubmitted(searchText: String) {
+      val submitted = searchText.trim().take(160)
+      query = submitted
+      if (submitted.length < 2) {
+        searching = false
+        results = emptyList()
+        error = "Enter at least two characters"
+        invalidate()
+        return
+      }
+      val generation = ++searchGeneration
+      searching = true
+      error = ""
+      results = emptyList()
+      invalidate()
+      controller.searchDestinations(submitted) { response ->
+        if (destroyed || generation != searchGeneration) return@searchDestinations
+        searching = false
+        when (response) {
+          is TrailheadCarDestinationSearchResponse.Ready -> {
+            results = response.destinations
+            error = if (results.isEmpty()) "No destinations found" else ""
+          }
+          is TrailheadCarDestinationSearchResponse.Failed -> {
+            results = emptyList()
+            error = response.message
+          }
+        }
+        invalidate()
+      }
+    }
+  }
+
+  override fun onGetTemplate(): Template {
+    val builder = SearchTemplate.Builder(searchCallback)
+      .setHeaderAction(Action.BACK)
+      .setSearchHint("Search destinations")
+      .setInitialSearchText(query)
+      .setShowKeyboardByDefault(query.isEmpty())
+    if (searching) return builder.setLoading(true).build()
+    val list = ItemList.Builder()
+    val limit = carContext.getCarService(ConstraintManager::class.java)
+      .getContentLimit(ConstraintManager.CONTENT_LIMIT_TYPE_LIST)
+      .coerceAtLeast(1)
+    results.take(limit).forEach { choice -> list.addItem(resultRow(choice)) }
+    if (results.isEmpty()) {
+      list.setNoItemsMessage(error.ifBlank { "Search for a place" })
+    }
+    return builder.setItemList(list.build()).build()
+  }
+
+  private fun initialDestinations(): List<TrailheadCarDestinationChoice> {
+    val saved = controller.snapshot.stops.map { stop ->
+      TrailheadCarDestinationChoice(
+        label = stop.name,
+        detail = stop.kindLabel,
+        lat = stop.lat,
+        lng = stop.lng,
+      )
+    }
+    return saved.distinctBy { "${it.label.lowercase()}:${it.lat}:${it.lng}" }
+  }
+
+  private fun resultRow(choice: TrailheadCarDestinationChoice): Row {
+    val builder = Row.Builder()
+      .setTitle(choice.label)
+      .setBrowsable(true)
+      .setOnClickListener {
+        screenManager.push(
+          TrailheadCarNavigationRequestScreen(
+            carContext,
+            controller,
+            TrailheadCarNavigationRequest(
+              label = choice.label,
+              lat = choice.lat,
+              lng = choice.lng,
+              mode = TrailheadCarNavigationMode.NAVIGATION,
+            ),
+            showBack = true,
+          ),
+        )
+      }
+    if (choice.detail.isNotBlank()) builder.addText(choice.detail)
+    return builder.build()
+  }
+}
+
 internal class TrailheadCarNavigationRequestScreen(
   carContext: CarContext,
   private val controller: TrailheadCarSessionController,
   private val request: TrailheadCarNavigationRequest,
+  private val showBack: Boolean = false,
 ) : Screen(carContext) {
   private var building = false
   private var error = ""
+  private var destroyed = false
+  private var requestCompleted = false
+
+  init {
+    lifecycle.addObserver(object : DefaultLifecycleObserver {
+      override fun onDestroy(owner: LifecycleOwner) {
+        destroyed = true
+        if (!requestCompleted) controller.cancelNavigationRequest()
+      }
+    })
+  }
 
   override fun onGetTemplate(): Template {
     val matchesSavedRoute = requestMatchesCurrentRoute(request, controller.snapshot)
@@ -297,7 +477,25 @@ internal class TrailheadCarNavigationRequestScreen(
           .addText(detail)
           .build(),
       )
-    if (!building) {
+    if (!building && !controller.guidancePermissionsGranted) {
+      pane.addAction(
+        Action.Builder()
+          .setTitle("Allow permissions")
+          .setOnClickListener(
+            ParkedOnlyOnClickListener.create {
+              error = ""
+              controller.requestGuidancePermissions { granted ->
+                if (destroyed) return@requestGuidancePermissions
+                if (!granted) {
+                  error = "When safe, use your phone to allow location and notifications."
+                }
+                invalidate()
+              }
+            },
+          )
+          .build(),
+      )
+    } else if (!building) {
       pane.addAction(
         Action.Builder()
           .setTitle(
@@ -314,8 +512,9 @@ internal class TrailheadCarNavigationRequestScreen(
             error = ""
             invalidate()
             controller.startNavigationRequest(request) { result ->
+              if (destroyed) return@startNavigationRequest
               when (result) {
-                TrailheadCarNavigationStartResult.Started -> Unit
+                TrailheadCarNavigationStartResult.Started -> requestCompleted = true
                 is TrailheadCarNavigationStartResult.Failed -> {
                   building = false
                   error = result.message
@@ -329,7 +528,7 @@ internal class TrailheadCarNavigationRequestScreen(
     }
     return PaneTemplate.Builder(pane.build())
       .setTitle(if (request.mode == TrailheadCarNavigationMode.ADD_A_STOP) "Add stop" else "Destination")
-      .setHeaderAction(Action.APP_ICON)
+      .setHeaderAction(if (showBack) Action.BACK else Action.APP_ICON)
       .build()
   }
 }
@@ -418,18 +617,31 @@ internal class TrailheadCarGuidanceScreen(
   private fun guidanceActions(): ActionStrip {
     val actions = ActionStrip.Builder()
     if (controller.snapshot.account.copilotEnabled && carContext.carAppApiLevel >= 5) {
+      val copilotClick = if (
+        controller.copilotState.status != TrailheadCarCopilotStatus.LISTENING &&
+        !controller.copilotPermissionGranted
+      ) {
+        ParkedOnlyOnClickListener.create {
+          controller.requestCopilotPermission { granted ->
+            if (granted) controller.startCopilot()
+            invalidate()
+          }
+        }
+      } else {
+        androidx.car.app.model.OnClickListener {
+          if (controller.copilotState.status == TrailheadCarCopilotStatus.LISTENING) {
+            controller.stopCopilot()
+          } else {
+            controller.startCopilot()
+          }
+          invalidate()
+        }
+      }
       actions.addAction(
         Action.Builder()
           .setTitle(copilotGuidanceActionLabel(controller.copilotState.status))
           .setIcon(carIcon(carContext, R.drawable.ic_car_copilot))
-          .setOnClickListener {
-            if (controller.copilotState.status == TrailheadCarCopilotStatus.LISTENING) {
-              controller.stopCopilot()
-            } else {
-              controller.startCopilot()
-            }
-            invalidate()
-          }
+          .setOnClickListener(copilotClick)
           .build(),
       )
     }
@@ -750,7 +962,7 @@ private fun offRouteTitle(route: TrailheadCarRoute?): String = when {
 private fun offRouteDetail(route: TrailheadCarRoute?): String = when {
   route?.isOriginalDrive == true -> "Stories continue on your phone."
   route?.isTrailFollow == true -> "Trail Follow keeps the original line."
-  else -> "Open Trailhead on your phone when parked to rebuild the route."
+  else -> "When safe, use your phone to rebuild the route in Trailhead."
 }
 
 private fun routeDestinationLabel(route: TrailheadCarRoute?): String = when {
@@ -783,7 +995,7 @@ private fun offlineTitle(offline: TrailheadCarOfflineReadiness): String = when {
 private fun offlineDetail(offline: TrailheadCarOfflineReadiness): String {
   return when {
     offline.navigationReady == true -> "Route line and guidance are on this phone"
-    offline.status == "needs_download" -> "Finish route downloads on your phone when parked"
-    else -> "Check route downloads on your phone when parked"
+    offline.status == "needs_download" -> "When safe, use your phone to finish route downloads"
+    else -> "When safe, use your phone to check route downloads"
   }
 }

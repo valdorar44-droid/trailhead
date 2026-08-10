@@ -282,6 +282,11 @@ def test_start_endpoint_moves_blocking_road_reader_off_the_event_loop(monkeypatc
     monkeypatch.setattr(server, "_trusted_original_road_observation", delayed_observation)
     monkeypatch.setattr(
         server,
+        "get_published_original_version",
+        lambda *_args, **_kwargs: {"pack_id": "smokies", "version": 1},
+    )
+    monkeypatch.setattr(
+        server,
         "get_published_original_start_readiness",
         lambda *_args, **_kwargs: {
             "status": "check_required",

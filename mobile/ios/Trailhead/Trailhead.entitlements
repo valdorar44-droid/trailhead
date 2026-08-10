@@ -12,9 +12,6 @@
     <array>
       <string>applinks:gettrailhead.app</string>
       <string>applinks:api.gettrailhead.app</string>
-      <string>applinks:go.gettrailhead.app</string>
-      <string>applinks:zswub.app.link</string>
-      <string>applinks:zswub-alternate.app.link</string>
     </array>
   </dict>
 </plist>

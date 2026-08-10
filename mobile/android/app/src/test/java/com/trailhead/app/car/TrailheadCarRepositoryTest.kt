@@ -1,13 +1,76 @@
 package com.trailhead.app.car
 
+import android.app.Application
+import java.io.File
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.annotation.Config
 
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34], application = Application::class)
 class TrailheadCarRepositoryTest {
+  @Test
+  fun temporaryHeadUnitRouteDoesNotOverwritePhoneAuthoredSnapshot() {
+    val context = RuntimeEnvironment.getApplication()
+    val phoneFile = File(context.filesDir, TrailheadCarRepository.CAR_SNAPSHOT_FILE)
+    val generatedFile = File(context.filesDir, TrailheadCarRepository.CAR_GENERATED_SNAPSHOT_FILE)
+    phoneFile.delete()
+    generatedFile.delete()
+    phoneFile.writeText(
+      """{"schemaVersion":1,"navigation":{"mode":"road_preview","routeId":"phone-route","title":"Phone trip","summary":"","source":"phone","totalDistanceM":10,"totalDurationS":10,"coords":[[-109.55,38.57],[-109.54,38.58]],"steps":[]},"stops":[]}""",
+    )
+    val generated = TrailheadCarSnapshot(
+      state = TrailheadCarSnapshotState.READY,
+      tripName = "Car search",
+      tripSummary = "",
+      rigSummary = "",
+      stops = emptyList(),
+      account = TrailheadCarAccount(
+        accountId = "stale-account",
+        signedIn = true,
+        copilotEnabled = true,
+        reportsEnabled = true,
+      ),
+      route = TrailheadCarRoute(
+        mode = TrailheadCarRouteMode.ROAD_PREVIEW,
+        routeId = "car-route",
+        title = "Car search",
+        summary = "",
+        source = "android_auto_search",
+        points = listOf(
+          TrailheadCarPoint(38.57, -109.55),
+          TrailheadCarPoint(38.58, -109.54),
+        ),
+        steps = emptyList(),
+        totalDistanceM = 10.0,
+        totalDurationS = 10.0,
+      ),
+    )
+
+    TrailheadCarRepository.saveGeneratedRoute(context, generated)
+
+    assertTrue(phoneFile.exists())
+    assertTrue(generatedFile.exists())
+    assertEquals("Car search", TrailheadCarRepository.load(context).tripName)
+    assertFalse(TrailheadCarRepository.load(context).account.signedIn)
+    assertFalse(TrailheadCarRepository.load(context).account.copilotEnabled)
+    assertFalse(TrailheadCarRepository.load(context).account.reportsEnabled)
+
+    TrailheadCarRepository.clearGeneratedRoute(context)
+
+    assertTrue(phoneFile.exists())
+    assertFalse(generatedFile.exists())
+    assertEquals("Phone trip", TrailheadCarRepository.load(context).tripName)
+    phoneFile.delete()
+  }
+
   @Test
   fun parsesVersionOneCarNavigationSnapshot() {
     val snapshot = TrailheadCarRepository.fromCarJson(

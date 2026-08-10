@@ -76,6 +76,19 @@ class EarnedOnlyCreditTests(unittest.TestCase):
         matches = [row for row in ledger if row["reason"] == "Purchased explorer pack — 350 credits"]
         self.assertEqual(len(matches), 1)
         self.assertEqual(matches[0]["amount"], 350)
+        db = store._conn()
+        try:
+            purchase = db.execute(
+                "SELECT user_id,credits,purchase_kind FROM stripe_purchases WHERE session_id=?",
+                ("cs_legacy_open",),
+            ).fetchone()
+        finally:
+            db.close()
+        self.assertEqual(dict(purchase), {
+            "user_id": self.user_id,
+            "credits": 350,
+            "purchase_kind": "stripe",
+        })
 
     def test_replayed_session_with_changed_metadata_fails_closed(self):
         store.settle_stripe_credit_purchase(
@@ -95,7 +108,23 @@ class EarnedOnlyCreditTests(unittest.TestCase):
                 799,
                 "Purchased explorer pack — 350 credits",
             )
+        other_user_id = store.create_user(
+            "other-earned-only@example.com",
+            "other_earned_only",
+            "hash",
+            "other-earned-only-code",
+        )
+        with self.assertRaisesRegex(ValueError, "does not match"):
+            store.settle_stripe_credit_purchase(
+                "cs_metadata_bound",
+                other_user_id,
+                "starter",
+                100,
+                299,
+                "Purchased starter pack — 100 credits",
+            )
         self.assertEqual(store.get_user_by_id(self.user_id)["credits"], 100)
+        self.assertEqual(store.get_user_by_id(other_user_id)["credits"], 0)
 
     def test_delayed_checkout_must_match_frozen_package_credits_currency_and_amount(self):
         valid = {

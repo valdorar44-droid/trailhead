@@ -200,14 +200,6 @@ class ViatorClient:
             return self._booking_disabled_payload("/bookings/cart/book")
         return self._post_json("/bookings/cart/book", payload, timeout=timeout or self.config.request_timeout_seconds)
 
-    def checkout_payment_accounts(self, session_token: str, payload: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
-        if not self.booking_ready():
-            return self._booking_disabled_payload("/v1/checkoutsessions/{sessionToken}/paymentaccounts")
-        token = self._path_token(session_token)
-        if not token:
-            return {"status": "empty", "reason": "session_token missing"}
-        return self._post_json(f"/v1/checkoutsessions/{token}/paymentaccounts", payload, timeout=timeout or self.config.request_timeout_seconds)
-
     def booking_status(self, payload: dict[str, Any], *, timeout: float | None = None) -> dict[str, Any]:
         if not self.booking_ready():
             return self._booking_disabled_payload("/bookings/status")

@@ -40,14 +40,10 @@ class BackendV110ContractsTests(unittest.TestCase):
         )
         store.set_user_admin(self.admin_id, True)
         self.client = TestClient(server.app)
-        with server._BRANCH_REFERRAL_CACHE_LOCK:
-            server._BRANCH_REFERRAL_CACHE.clear()
 
     def tearDown(self):
         server.app.dependency_overrides.pop(server._current_user, None)
         server.app.dependency_overrides.pop(server._optional_user, None)
-        with server._BRANCH_REFERRAL_CACHE_LOCK:
-            server._BRANCH_REFERRAL_CACHE.clear()
         settings.db_path = self.original_db_path
         self.temp.cleanup()
 
@@ -498,169 +494,24 @@ class BackendV110ContractsTests(unittest.TestCase):
         self.assertNotIn("v110_user", landing.text)
         self.assertEqual(missing.status_code, 404)
 
-    def test_referral_landing_uses_minimal_branded_branch_handoff_and_cache(self):
-        alias_secret = "branch-alias-test-secret-0123456789abcdef"
-        alias = server._branch_referral_alias("V110-Friend", alias_secret)
-        branch_url = f"https://go.gettrailhead.app/{alias}"
-        request = AsyncMock(return_value=branch_url)
-        with (
-            patch.object(settings, "branch_referral_handoff_enabled", True),
-            patch.object(settings, "branch_live_key", "key_test_1234567890abcdef"),
-            patch.object(settings, "branch_link_domain", "go.gettrailhead.app"),
-            patch.object(settings, "branch_referral_alias_secret", alias_secret),
-            patch.object(server, "_request_branch_referral_url", request),
-        ):
-            first = self.client.get("/r/V110-Friend")
-            second = self.client.get("/r/V110-Friend")
-            with server._BRANCH_REFERRAL_CACHE_LOCK:
-                server._BRANCH_REFERRAL_CACHE.clear()
-            after_restart = self.client.get("/r/V110-Friend")
-
-        self.assertEqual(first.status_code, 200)
-        self.assertEqual(second.status_code, 200)
-        self.assertEqual(after_restart.status_code, 200)
-        self.assertIn(branch_url, first.text)
-        self.assertIn("V110-Friend", first.text)
-        self.assertNotIn("v110@example.com", first.text)
-        self.assertNotIn("v110_user", first.text)
-        self.assertEqual(request.await_count, 2)
-        payload, expected_domain = request.await_args.args
-        self.assertEqual(expected_domain, "go.gettrailhead.app")
-        self.assertEqual(payload["alias"], alias)
-        self.assertNotIn("V110-Friend", payload["alias"])
-        self.assertNotIn(alias_secret, json.dumps(payload, sort_keys=True))
-        self.assertEqual(payload["feature"], "referral")
-        self.assertEqual(payload["channel"], "trailhead_referral")
-        self.assertEqual(
-            set(payload["data"]),
-            {
-                "referral_code", "$deeplink_path", "$canonical_url",
-                "$desktop_url", "$fallback_url", "$ios_url", "$android_url",
-            },
-        )
-        self.assertEqual(payload["data"]["referral_code"], "V110-Friend")
-        serialized = json.dumps(payload["data"], sort_keys=True)
-        for forbidden in (
-            "email", "username", "identity", "location", "latitude", "longitude",
-            "search", "support", "purchase", "payout",
-        ):
-            self.assertNotIn(forbidden, serialized.lower())
-
-    def test_referral_landing_fails_closed_to_visible_manual_fallback(self):
-        request = AsyncMock(side_effect=RuntimeError("provider unavailable"))
-        with (
-            patch.object(settings, "branch_referral_handoff_enabled", True),
-            patch.object(settings, "branch_live_key", "key_live_1234567890abcdef"),
-            patch.object(settings, "branch_link_domain", "go.gettrailhead.app"),
-            patch.object(
-                settings,
-                "branch_referral_alias_secret",
-                "branch-alias-test-secret-0123456789abcdef",
-            ),
-            patch.object(server, "_request_branch_referral_url", request),
-        ):
-            first = self.client.get("/r/V110-Friend")
-            second = self.client.get("/r/V110-Friend")
-
-        self.assertEqual(first.status_code, 200)
-        self.assertIn("V110-Friend", first.text)
-        self.assertIn("trailhead://referral?code=V110-Friend", first.text)
-        self.assertIn("apps.apple.com/app/id6763677349", first.text)
-        self.assertIn("play.google.com/store/apps/details", first.text)
-        self.assertNotIn("https://go.gettrailhead.app/", first.text)
-        self.assertIn("enter the code shown above", first.text)
-        self.assertEqual(request.await_count, 1)
-
-    def test_referral_handoff_requires_explicit_valid_server_configuration(self):
-        request = AsyncMock(return_value="https://go.gettrailhead.app/r/opaque")
-        with (
-            patch.object(settings, "branch_referral_handoff_enabled", True),
-            patch.object(settings, "branch_live_key", ""),
-            patch.object(settings, "branch_link_domain", "go.gettrailhead.app"),
-            patch.object(
-                settings,
-                "branch_referral_alias_secret",
-                "branch-alias-test-secret-0123456789abcdef",
-            ),
-            patch.object(server, "_request_branch_referral_url", request),
-        ):
+    def test_referral_landing_is_first_party_and_never_calls_branch(self):
+        with patch.object(
+            server.httpx,
+            "AsyncClient",
+            side_effect=AssertionError("referral landing must not call a third party"),
+        ) as client:
             landing = self.client.get("/r/V110-Friend")
+
         self.assertEqual(landing.status_code, 200)
+        self.assertIn("V110-Friend", landing.text)
         self.assertIn("trailhead://referral?code=V110-Friend", landing.text)
-        request.assert_not_awaited()
-
-        with (
-            patch.object(settings, "branch_referral_handoff_enabled", True),
-            patch.object(settings, "branch_live_key", "key_live_1234567890abcdef"),
-            patch.object(settings, "branch_link_domain", "go.gettrailhead.app"),
-            patch.object(settings, "branch_referral_alias_secret", ""),
-            patch.object(settings, "secret_key", server._BRANCH_REFERRAL_DEV_SECRET),
-            patch.object(server, "_request_branch_referral_url", request),
-        ):
-            no_server_secret = self.client.get("/r/V110-Friend")
-        self.assertIn("trailhead://referral?code=V110-Friend", no_server_secret.text)
-        request.assert_not_awaited()
-
-    def test_branch_alias_collision_is_reused_only_after_target_verification(self):
-        alias_secret = "branch-alias-test-secret-0123456789abcdef"
-        payload = server._branch_referral_request_payload(
-            "V110-Friend",
-            "key_test_1234567890abcdef",
-            "go.gettrailhead.app",
-            alias_secret,
-        )
-        candidate = f"https://go.gettrailhead.app/{payload['alias']}"
-
-        class FakeResponse:
-            def __init__(self, status_code, body=None):
-                self.status_code = status_code
-                self._body = body or {}
-
-            def json(self):
-                return self._body
-
-        class FakeClient:
-            def __init__(self, stored):
-                self.stored = stored
-                self.get_calls = []
-
-            async def __aenter__(self):
-                return self
-
-            async def __aexit__(self, *_args):
-                return False
-
-            async def post(self, *_args, **_kwargs):
-                return FakeResponse(409)
-
-            async def get(self, *_args, **kwargs):
-                self.get_calls.append(kwargs)
-                return FakeResponse(200, self.stored)
-
-        matching = {
-            "feature": payload["feature"],
-            "channel": payload["channel"],
-            "alias": payload["alias"],
-            "data": dict(payload["data"]),
-        }
-        matching_client = FakeClient(matching)
-        with patch.object(server.httpx, "AsyncClient", return_value=matching_client):
-            reused = asyncio.run(
-                server._request_branch_referral_url(payload, "go.gettrailhead.app")
-            )
-        self.assertEqual(reused, candidate)
-        self.assertEqual(matching_client.get_calls[0]["params"]["url"], candidate)
-        self.assertEqual(
-            matching_client.get_calls[0]["params"]["branch_key"],
-            "key_test_1234567890abcdef",
-        )
-
-        hostile = {**matching, "data": {**matching["data"], "referral_code": "OTHER"}}
-        with patch.object(server.httpx, "AsyncClient", return_value=FakeClient(hostile)):
-            with self.assertRaises(RuntimeError):
-                asyncio.run(
-                    server._request_branch_referral_url(payload, "go.gettrailhead.app")
-                )
+        self.assertIn("apps.apple.com/app/id6763677349", landing.text)
+        self.assertIn("play.google.com/store/apps/details", landing.text)
+        self.assertIn("enter the code shown above", landing.text)
+        self.assertNotIn("go.gettrailhead.app", landing.text)
+        self.assertNotIn("v110@example.com", landing.text)
+        self.assertNotIn("v110_user", landing.text)
+        client.assert_not_called()
 
     def test_password_deletion_authorization_is_expiring_single_use_and_required(self):
         wrong = self.client.post(

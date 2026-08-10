@@ -21,7 +21,7 @@
     <key>CFBundlePackageType</key>
     <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.10</string>
+    <string>1.0.12</string>
     <key>CFBundleSignature</key>
     <string>????</string>
     <key>CFBundleURLTypes</key>
@@ -104,18 +104,5 @@
     <string>Automatic</string>
     <key>UIViewControllerBasedStatusBarAppearance</key>
     <false/>
-    <key>branch_app_domain</key>
-    <string>go.gettrailhead.app</string>
-    <key>branch_key</key>
-    <dict>
-      <key>live</key>
-      <string>branch_key_not_configured</string>
-    </dict>
-	<key>branch_universal_link_domains</key>
-	<array>
-		<string>go.gettrailhead.app</string>
-		<string>zswub.app.link</string>
-		<string>zswub-alternate.app.link</string>
-	</array>
   </dict>
 </plist>

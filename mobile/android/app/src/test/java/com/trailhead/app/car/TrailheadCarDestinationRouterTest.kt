@@ -70,6 +70,127 @@ class TrailheadCarDestinationRouterTest {
   }
 
   @Test
+  fun headUnitSearchReturnsSelectableNamedDestinationsWithoutLocation() {
+    val requests = mutableListOf<String>()
+    val router = TrailheadCarDestinationRouter("public-token") { url ->
+      requests += url
+      """
+        {
+          "features": [
+            {
+              "properties": {"name": "Moab", "place_formatted": "Utah, United States"},
+              "geometry": {"coordinates": [-109.5498, 38.5733]}
+            },
+            {
+              "properties": {"name": "Moab KOA", "full_address": "3225 US-191, Moab, Utah"},
+              "geometry": {"coordinates": [-109.507, 38.526]}
+            }
+          ]
+        }
+      """.trimIndent()
+    }
+
+    val results = router.search("Moab", origin = null)
+
+    assertEquals(listOf("Moab", "Moab KOA"), results.map { it.label })
+    assertEquals(listOf("Utah, United States", "3225 US-191, Moab, Utah"), results.map { it.detail })
+    assertFalse(requests.single().contains("proximity="))
+    assertFalse(requests.single().contains("session_token="))
+    assertTrue(requests.single().contains("limit=6"))
+  }
+
+  @Test
+  fun routingCredentialBootstrapsFromFirstPartyConfigAndCachesPublicToken() {
+    val cache = MemoryCredentialCache()
+    val requests = mutableListOf<String>()
+    var now = 1_900_000_000_000L
+    val provider = TrailheadCarRoutingCredentialProvider(
+      apiBaseUrl = "https://api.gettrailhead.app/",
+      cache = cache,
+      httpClient = TrailheadCarHttpClient { url ->
+        requests += url
+        """{"mapbox_token":"pk.remote-public-token"}"""
+      },
+      nowMillis = { now },
+    )
+
+    assertEquals("pk.remote-public-token", provider.resolve("pk.snapshot-token"))
+    assertEquals(listOf("https://api.gettrailhead.app/api/config"), requests)
+    assertEquals("pk.remote-public-token", requireNotNull(cache.value).accessToken)
+
+    now += 60_000L
+    assertEquals("pk.remote-public-token", provider.resolve(""))
+    assertEquals(1, requests.size)
+  }
+
+  @Test
+  fun snapshotTokenIsOnlyAnOfflineFallbackAndIsNotRetimestamped() {
+    val cache = MemoryCredentialCache()
+    val provider = TrailheadCarRoutingCredentialProvider(
+      apiBaseUrl = "https://api.gettrailhead.app",
+      cache = cache,
+      httpClient = TrailheadCarHttpClient { throw IllegalStateException("offline") },
+      nowMillis = { 1_900_000_000_000L },
+    )
+
+    assertEquals("pk.snapshot-token", provider.resolve("pk.snapshot-token"))
+    assertEquals(null, cache.value)
+  }
+
+  @Test
+  fun authorizationFailureRefreshesConfigAndRetriesExactlyOnce() {
+    val cache = MemoryCredentialCache().apply {
+      value = TrailheadCarCachedCredential("pk.old-public-token", 1_900_000_000_000L)
+    }
+    var configRequests = 0
+    val provider = TrailheadCarRoutingCredentialProvider(
+      apiBaseUrl = "https://api.gettrailhead.app",
+      cache = cache,
+      httpClient = TrailheadCarHttpClient {
+        configRequests += 1
+        """{"mapbox_token":"pk.new-public-token"}"""
+      },
+      nowMillis = { 1_900_000_001_000L },
+    )
+    val attempted = mutableListOf<String>()
+
+    val (token, value) = provider.executeWithCredential("") { credential ->
+      attempted += credential
+      if (credential == "pk.old-public-token") throw TrailheadCarHttpException(401)
+      "ready"
+    }
+
+    assertEquals("pk.new-public-token", token)
+    assertEquals("ready", value)
+    assertEquals(listOf("pk.old-public-token", "pk.new-public-token"), attempted)
+    assertEquals(1, configRequests)
+  }
+
+  @Test
+  fun onlyCurrentDestinationRequestGenerationMayCommit() {
+    assertTrue(destinationRequestCanCommit(4L, 4L))
+    assertFalse(destinationRequestCanCommit(3L, 4L))
+  }
+
+  @Test
+  fun routingCredentialNeverAcceptsASecretOrInsecureConfigEndpoint() {
+    val cache = MemoryCredentialCache()
+    val insecure = TrailheadCarRoutingCredentialProvider(
+      apiBaseUrl = "http://api.gettrailhead.app",
+      cache = cache,
+      httpClient = TrailheadCarHttpClient { """{"mapbox_token":"pk.should-not-load"}""" },
+    )
+    assertThrows(IllegalStateException::class.java) { insecure.resolve("") }
+
+    val secret = TrailheadCarRoutingCredentialProvider(
+      apiBaseUrl = "https://api.gettrailhead.app",
+      cache = cache,
+      httpClient = TrailheadCarHttpClient { """{"mapbox_token":"sk.secret-token"}""" },
+    )
+    assertThrows(IllegalStateException::class.java) { secret.resolve("") }
+  }
+
+  @Test
   fun addStopKeepsThePriorDestinationInTheCalculatedRoute() {
     val requests = mutableListOf<String>()
     val router = TrailheadCarDestinationRouter("public-token") { url ->
@@ -154,5 +275,13 @@ class TrailheadCarDestinationRouterTest {
         }]
       }
     """.trimIndent()
+  }
+
+  private class MemoryCredentialCache : TrailheadCarCredentialCache {
+    var value: TrailheadCarCachedCredential? = null
+    override fun read(): TrailheadCarCachedCredential? = value
+    override fun write(value: TrailheadCarCachedCredential) {
+      this.value = value
+    }
   }
 }

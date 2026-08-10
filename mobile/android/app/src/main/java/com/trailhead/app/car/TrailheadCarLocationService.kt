@@ -39,6 +39,7 @@ class TrailheadCarLocationService : Service(), LocationListener {
       return START_NOT_STICKY
     }
     reportOnly = intent?.getBooleanExtra(EXTRA_REPORT_ONLY, false) == true
+    navigationActive = !reportOnly
     if (intent?.action == ACTION_UPDATE) {
       navigationTitle = intent.getStringExtra(EXTRA_TITLE)?.trim().orEmpty().ifEmpty { navigationTitle }
       navigationText = intent.getStringExtra(EXTRA_TEXT)?.trim().orEmpty().ifEmpty { navigationText }
@@ -48,7 +49,10 @@ class TrailheadCarLocationService : Service(), LocationListener {
     }
     startForeground(NOTIFICATION_ID, locationNotification())
     if (!active) {
-      if (!requestUpdates()) return START_NOT_STICKY
+      if (!requestUpdates()) {
+        navigationActive = false
+        return START_NOT_STICKY
+      }
       active = true
     }
     return START_NOT_STICKY
@@ -64,6 +68,7 @@ class TrailheadCarLocationService : Service(), LocationListener {
     locationManager.removeUpdates(this)
     stopForeground(STOP_FOREGROUND_REMOVE)
     active = false
+    navigationActive = false
     super.onDestroy()
   }
 
@@ -96,6 +101,8 @@ class TrailheadCarLocationService : Service(), LocationListener {
   private fun stopGuidance() {
     locationManager.removeUpdates(this)
     stopForeground(STOP_FOREGROUND_REMOVE)
+    active = false
+    navigationActive = false
     stopSelf()
   }
 
@@ -161,6 +168,10 @@ class TrailheadCarLocationService : Service(), LocationListener {
 
     @Volatile
     var active: Boolean = false
+      private set
+
+    @Volatile
+    var navigationActive: Boolean = false
       private set
 
     fun start(context: Context, reportOnly: Boolean = false) {

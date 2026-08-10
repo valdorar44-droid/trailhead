@@ -266,15 +266,44 @@ export async function startRealtimeCopilotSession(options: StartRealtimeCopilotO
   if (!ephemeralKey) throw new Error('Realtime client secret missing');
   const WebRTC = require('react-native-webrtc');
   const { RTCPeerConnection, mediaDevices } = WebRTC;
-  if (!RTCPeerConnection || !mediaDevices?.getUserMedia) throw new Error('Native WebRTC is not available in this build');
+  if (!RTCPeerConnection || (!options.narrationOnly && !mediaDevices?.getUserMedia)) {
+    throw new Error('Native WebRTC is not available in this build');
+  }
 
-  options.onStatus?.('requesting_microphone');
+  options.onStatus?.(options.narrationOnly ? 'starting_narrator' : 'requesting_microphone');
   await enableRealtimeSpeakerphone();
-  const stream = await mediaDevices.getUserMedia({ audio: true, video: false });
+  const stream = options.narrationOnly ? null : await mediaDevices.getUserMedia({ audio: true, video: false });
   await enableRealtimeSpeakerphone();
-  const pc = new RTCPeerConnection();
+  let pc: any = null;
+  let dc: any = null;
   const remoteStreams: any[] = [];
-  stream.getTracks().forEach((track: any) => pc.addTrack(track, stream));
+  let connected = false;
+  let stopped = false;
+  const cleanup = () => {
+    if (stopped) return;
+    stopped = true;
+    try { dc?.close?.(); } catch {}
+    remoteStreams.forEach((remoteStream: any) => {
+      remoteStream?.getTracks?.().forEach((track: any) => track.stop?.());
+    });
+    stream?.getTracks?.().forEach((track: any) => track.stop?.());
+    try { pc?.close?.(); } catch {}
+    disableRealtimeSpeakerphone().catch(() => {});
+    connected = false;
+    options.onStatus?.('stopped');
+  };
+  try {
+    pc = new RTCPeerConnection();
+    if (options.narrationOnly) {
+      if (typeof pc.addTransceiver !== 'function') throw new Error('Receive-only WebRTC audio is not available in this build');
+      pc.addTransceiver('audio', { direction: 'recvonly' });
+    } else {
+      stream?.getTracks?.().forEach((track: any) => pc.addTrack(track, stream));
+    }
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
   pc.ontrack = (event: any) => {
     const remoteStream = event?.streams?.[0];
     if (remoteStream) remoteStreams.push(remoteStream);
@@ -286,9 +315,8 @@ export async function startRealtimeCopilotSession(options: StartRealtimeCopilotO
     enableRealtimeSpeakerphone().catch(() => {});
   };
 
-  const dc = pc.createDataChannel('oai-events');
+  dc = pc.createDataChannel('oai-events');
   const handledToolCalls = new Set<string>();
-  let connected = false;
   let directorMode = !!options.narrationOnly;
   let onNarrationDone: (() => void) | null = options.onNarrationDone ?? null;
   let speechActive = false;
@@ -399,37 +427,27 @@ export async function startRealtimeCopilotSession(options: StartRealtimeCopilotO
     }
   };
 
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-  const response = await fetch('https://api.openai.com/v1/realtime/calls', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${ephemeralKey}`,
-      'Content-Type': 'application/sdp',
-    },
-    body: offer.sdp,
-  });
-  if (!response.ok) {
-    stream.getTracks().forEach((track: any) => track.stop());
-    pc.close();
-    disableRealtimeSpeakerphone().catch(() => {});
-    throw new Error(`Realtime connection failed (${response.status})`);
+  try {
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    const response = await fetch('https://api.openai.com/v1/realtime/calls', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${ephemeralKey}`,
+        'Content-Type': 'application/sdp',
+      },
+      body: offer.sdp,
+    });
+    if (!response.ok) throw new Error(`Realtime connection failed (${response.status})`);
+    await pc.setRemoteDescription({ type: 'answer', sdp: await response.text() });
+    await enableRealtimeSpeakerphone();
+  } catch (error) {
+    cleanup();
+    throw error;
   }
-  await pc.setRemoteDescription({ type: 'answer', sdp: await response.text() });
-  await enableRealtimeSpeakerphone();
 
   return {
-    stop: () => {
-      try { dc.close(); } catch {}
-      remoteStreams.forEach((remoteStream: any) => {
-        remoteStream?.getTracks?.().forEach((track: any) => track.stop?.());
-      });
-      stream.getTracks().forEach((track: any) => track.stop());
-      pc.close();
-      disableRealtimeSpeakerphone().catch(() => {});
-      connected = false;
-      options.onStatus?.('stopped');
-    },
+    stop: cleanup,
     isConnected: () => connected && dc?.readyState === 'open',
     enterDirectorMode: cb => {
       directorMode = true;

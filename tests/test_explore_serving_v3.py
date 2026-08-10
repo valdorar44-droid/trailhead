@@ -61,6 +61,9 @@ def place(
 class ExploreServingV3Tests(unittest.TestCase):
     def setUp(self):
         server._EXPLORE_FACET_COUNTS_CACHE.update({"key": None, "counts": {}})
+        overrides = patch.object(server, "get_explore_story_overrides", return_value={})
+        overrides.start()
+        self.addCleanup(overrides.stop)
 
     def test_pagination_total_and_order_do_not_depend_on_page_size(self):
         catalog = {

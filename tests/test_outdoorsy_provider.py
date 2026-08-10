@@ -4,7 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlsplit
 from unittest.mock import patch
 
 from scripts.explore_sources.offers.disclosure import PARTNER_BOOKING_DISCLOSURE_LABEL
@@ -96,6 +96,12 @@ class OutdoorsyProviderTests(unittest.TestCase):
         self.assertIn("source=trailhead_route_builder", offer.affiliate_url)
         self.assertNotIn("api_key", offer.to_public_dict()["affiliate_url"])
         self.assertNotIn("token", json.dumps(offer.to_public_dict()).lower())
+        affiliate_keys = set(parse_qs(urlsplit(offer.affiliate_url).query))
+        self.assertTrue({
+            "aff_sub", "aff_sub2", "aff_sub3", "aff_sub4", "aff_sub5",
+            "click_id", "account_id", "device_id", "session_id", "lat", "lng",
+            "route_id", "route_name", "search_term",
+        }.isdisjoint(affiliate_keys))
 
     def test_tune_generated_link_uses_confirmed_response_fields(self):
         class FakeResponse:
@@ -144,6 +150,13 @@ class OutdoorsyProviderTests(unittest.TestCase):
         self.assertIn("params%5Bsource%5D=trailhead", body)
         self.assertEqual(parse_qs(body)["api_key"], ["test-token"])
         self.assertNotIn("api_key", json.dumps(result.offers[0].to_public_dict()).lower())
+        tune_keys = set(parse_qs(body))
+        self.assertTrue({
+            "params[aff_sub]", "params[aff_sub2]", "params[aff_sub3]",
+            "params[click_id]", "params[account_id]", "params[device_id]",
+            "params[session_id]", "params[lat]", "params[lng]",
+            "params[route_id]", "params[route_name]", "params[search_term]",
+        }.isdisjoint(tune_keys))
 
     def test_tune_generated_link_rejects_unexpected_host(self):
         class FakeResponse:

@@ -1,15 +1,5 @@
 const enabled = value => /^(1|true|yes|on|enabled)$/i.test(String(value || ''));
 const { resolveReleaseCommitSha } = require('./scripts/release-identity.cjs');
-const branchApiKey = process.env.BRANCH_API_KEY || process.env.EXPO_PUBLIC_BRANCH_KEY || '';
-const branchDomain = process.env.EXPO_PUBLIC_BRANCH_DOMAIN || 'go.gettrailhead.app';
-const branchAlternateDomain = process.env.EXPO_PUBLIC_BRANCH_ALTERNATE_DOMAIN || '';
-const branchProvidedDomains = String(
-  process.env.EXPO_PUBLIC_BRANCH_PROVIDED_DOMAINS
-    || 'zswub.app.link,zswub-alternate.app.link',
-).split(',').map(value => value.trim()).filter(Boolean);
-const branchUniversalLinkDomains = [
-  ...new Set([branchDomain, branchAlternateDomain, ...branchProvidedDomains].filter(Boolean)),
-];
 const releaseCommitSha = resolveReleaseCommitSha(process.env);
 const sentryPluginOptions = {
   url: process.env.SENTRY_URL || 'https://sentry.io/',
@@ -21,8 +11,8 @@ module.exports = {
   expo: {
     name: 'Trailhead',
     slug: 'trailhead',
-    version: '1.0.10',
-    runtimeVersion: 'native-1.0.10-ios.6',
+    version: '1.0.12',
+    runtimeVersion: 'native-1.0.12-ios.1',
     newArchEnabled: true,
     updates: { url: 'https://u.expo.dev/92c016d2-6e63-480e-a483-a6898d7e77d5' },
     icon: './assets/icon.png',
@@ -34,14 +24,13 @@ module.exports = {
       backgroundColor: '#0c0f14',
     },
     ios: {
-      runtimeVersion: 'native-1.0.10-ios.6',
+      runtimeVersion: 'native-1.0.12-ios.1',
       supportsTablet: true,
       bundleIdentifier: 'com.trailhead.app',
       usesAppleSignIn: true,
       associatedDomains: [
         'applinks:gettrailhead.app',
         'applinks:api.gettrailhead.app',
-        ...branchUniversalLinkDomains.map(domain => `applinks:${domain}`),
       ],
       infoPlist: {
         NSLocationWhenInUseUsageDescription: 'Trailhead uses your location to show your position on the map, provide turn-by-turn navigation, find nearby campsites, and alert you to road hazard reports near your current position.',
@@ -58,7 +47,7 @@ module.exports = {
       },
     },
     android: {
-      runtimeVersion: 'native-1.0.10-android.7',
+      runtimeVersion: 'native-1.0.12-android.1',
       adaptiveIcon: {
         foregroundImage: './assets/adaptive-icon.png',
         backgroundColor: '#0c0f14',
@@ -78,7 +67,6 @@ module.exports = {
         'android.permission.MODIFY_AUDIO_SETTINGS',
         'android.permission.VIBRATE',
         'android.permission.RECORD_AUDIO',
-        'com.android.vending.INSTALL_REFERRER',
         'com.android.vending.BILLING',
       ],
       blockedPermissions: [
@@ -87,6 +75,8 @@ module.exports = {
         'android.permission.READ_EXTERNAL_STORAGE',
         'android.permission.WRITE_EXTERNAL_STORAGE',
         'android.permission.SYSTEM_ALERT_WINDOW',
+        'android.permission.FOREGROUND_SERVICE_MICROPHONE',
+        'com.android.vending.INSTALL_REFERRER',
       ],
       intentFilters: [
         {
@@ -110,12 +100,6 @@ module.exports = {
           data: [
             { scheme: 'https', host: 'api.gettrailhead.app', pathPrefix: '/originals' },
           ],
-        },
-        {
-          action: 'VIEW',
-          autoVerify: true,
-          category: ['BROWSABLE', 'DEFAULT'],
-          data: branchUniversalLinkDomains.map(host => ({ scheme: 'https', host })),
         },
       ],
     },
@@ -160,14 +144,6 @@ module.exports = {
       'expo-sqlite',
       ['@sentry/react-native/expo', sentryPluginOptions],
       [
-        '@config-plugins/react-native-branch',
-        {
-          apiKey: branchApiKey || 'branch_key_not_configured',
-          iosAppDomain: branchDomain,
-          iosUniversalLinkDomains: branchUniversalLinkDomains,
-        },
-      ],
-      [
         'expo-build-properties',
         {
           ios: {
@@ -194,17 +170,6 @@ module.exports = {
       uiSystemV2Enabled: enabled(
         process.env.EXPO_PUBLIC_UI_SYSTEM_V2_ENABLED || process.env.UI_SYSTEM_V2_ENABLED || '',
       ),
-      branch: {
-        attributionEnabled: enabled(process.env.EXPO_PUBLIC_BRANCH_ATTRIBUTION_ENABLED || 'false'),
-        // The native key stays secret. OTA manifests use this public capability
-        // bit so an update cannot accidentally disable an already-configured
-        // native Branch SDK just because EAS does not expose secret values to
-        // local env:exec commands.
-        configured: enabled(
-          process.env.EXPO_PUBLIC_BRANCH_CONFIGURED || (branchApiKey ? 'true' : 'false'),
-        ),
-        domain: branchDomain,
-      },
       googleIosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || '253003227791-o34lb5706rokbgq6qdjhagggue5kqddh.apps.googleusercontent.com',
       googleAndroidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || '253003227791-1diqvaq7d5oqnvncmdk22aus8ech1t8p.apps.googleusercontent.com',
       googleWebClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || '',

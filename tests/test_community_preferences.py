@@ -7,9 +7,10 @@ from datetime import datetime, timezone
 from unittest.mock import patch
 
 from fastapi import HTTPException
+from pydantic import ValidationError
 
 from config.settings import settings
-from dashboard.server import api_communication_preferences, api_my_community_publications
+from dashboard.server import AdminPushAudience, api_communication_preferences, api_my_community_publications
 from db import store
 
 
@@ -143,6 +144,51 @@ class CommunicationAndPublicationTests(unittest.TestCase):
         store.update_communication_preferences(self.other, {"trip_window_briefs": True})
         selected = store.select_trip_window_brief_recipients(now=timestamp)
         self.assertNotIn(self.other, [row["user_id"] for row in selected])
+
+    def test_bulk_push_is_admin_only_and_does_not_use_activity(self):
+        store.save_push_token(self.user, "ExponentPushToken[user-private]")
+        store.save_push_token(self.other, "ExponentPushToken[other-private]")
+        store.save_push_token(self.admin, "ExponentPushToken[admin-private]")
+        store.log_event(self.user, "stable-session", "support_user_message", {"private": "activity"})
+        store.update_communication_preferences(self.other, {"deal_alerts": True})
+        db = store._conn()
+        try:
+            db.execute(
+                "UPDATE users SET plan_type='explorer',plan_expires_at=?,credits=9999 WHERE id=?",
+                (int(time.time()) + 86_400, self.user),
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        self.assertEqual(store.get_push_campaign_recipients({"segment": "active_recent"}), [])
+        self.assertEqual(store.get_push_campaign_recipients({"segment": "all_users"}), [])
+        self.assertEqual(store.get_push_campaign_recipients({"segment": "deal_alerts"}), [])
+        self.assertEqual(
+            [row["id"] for row in store.get_push_campaign_recipients({"segment": "admins"})],
+            [self.admin],
+        )
+
+        campaign_id = store.create_push_campaign(
+            "admin-only-test", "admin_campaign", {"segment": "admins"},
+            "Test", "Test body", None, {}, self.admin, 1, test_only=True,
+        )
+        store.record_push_campaign_delivery(
+            campaign_id, self.admin, "ExponentPushToken[admin-private]", "sent",
+        )
+        db = store._conn()
+        try:
+            saved_token = db.execute(
+                "SELECT push_token FROM push_campaign_deliveries WHERE campaign_id=?",
+                (campaign_id,),
+            ).fetchone()[0]
+        finally:
+            db.close()
+        self.assertEqual(saved_token, "[redacted]")
+
+        for unsupported in ("active_recent", "all_users", "deal_alerts", "unknown"):
+            with self.assertRaises(ValidationError):
+                AdminPushAudience.model_validate({"segment": unsupported})
 
     def test_private_note_review_requires_owned_source_and_canonical_target(self):
         self._save_trip([{

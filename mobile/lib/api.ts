@@ -245,26 +245,6 @@ export type OutdoorOfferDetailResponse = {
   disclosure: { kind: string; label: string };
 };
 
-export type OfferEventName = 'impression' | 'click' | 'save' | 'redirect' | 'dismiss';
-
-export type OfferEventPayload = {
-  offer_id: string;
-  provider?: string;
-  placement?: string;
-  route_type?: string;
-  session_id?: string;
-  context?: {
-    camp_nights?: number;
-    party_size?: number;
-    placement?: string;
-    query_kind?: string;
-    route_type?: string;
-    surface?: string;
-    trip_type?: string;
-    vehicle_type?: string;
-  };
-};
-
 export type TripPreferencesPayload = Record<string, unknown>;
 
 export type PlanRequestOptions = {
@@ -1126,26 +1106,6 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
-  checkViatorAvailability: (payload: ViatorProviderPayload) =>
-    req<ViatorBookingResponse>('/api/viator/availability/check', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
-  holdViatorCart: (payload: ViatorProviderPayload) =>
-    req<ViatorBookingResponse>('/api/viator/bookings/cart/hold', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
-  bookViatorCart: (payload: ViatorProviderPayload) =>
-    req<ViatorBookingResponse>('/api/viator/bookings/cart/book', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
-  createViatorPaymentAccount: (sessionToken: string, payload: ViatorProviderPayload) =>
-    req<ViatorBookingResponse>(`/api/viator/checkoutsessions/${encodeURIComponent(sessionToken)}/paymentaccounts`, {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    }),
   checkViatorBookingStatus: (payload: ViatorProviderPayload) =>
     req<ViatorBookingResponse>('/api/viator/bookings/status', {
       method: 'POST',
@@ -1183,8 +1143,6 @@ export const api = {
   },
   getOutdoorOffer: (offerId: string, provider = 'outdoorsy') =>
     req<OutdoorOfferDetailResponse>(`/api/offers/${encodeURIComponent(offerId)}?provider=${encodeURIComponent(provider)}`),
-  trackOutdoorOfferEvent: (event: OfferEventName, data: OfferEventPayload) =>
-    req<{ ok: boolean }>(`/api/offers/${event}`, { method: 'POST', body: JSON.stringify(data) }),
   nearbyAudio: (lat: number, lng: number, location_name = '') =>
     req<{ narration: string }>('/api/audio/nearby', {
       method: 'POST', body: JSON.stringify({ lat, lng, location_name }),
@@ -4744,12 +4702,12 @@ export interface BookableExperience {
 export interface ViatorBookingConfig {
   source: 'viator' | string;
   merchant_of_record: string;
-  payment_solution: 'iframe' | string;
+  payment_solution: 'external_handoff' | string;
   booking_enabled: boolean;
   live_enabled: boolean;
   requires_certification?: boolean;
   requires_pci?: boolean;
-  status: 'enabled' | 'pending_access' | string;
+  status: 'external_only' | string;
 }
 export interface ViatorBookingRecord {
   id: string;
@@ -4766,7 +4724,6 @@ export interface ViatorBookingRecord {
   payment_solution?: string;
   booking_url?: string;
   voucher_url?: string;
-  provider_payload?: Record<string, any>;
   created_at?: number;
   updated_at?: number;
 }
@@ -4797,7 +4754,6 @@ export interface ViatorBookingIntentPayload {
   currency?: string;
   amount?: number;
   booking_url?: string;
-  provider_payload?: Record<string, any>;
 }
 export interface ViatorProviderPayload {
   booking_id?: string;

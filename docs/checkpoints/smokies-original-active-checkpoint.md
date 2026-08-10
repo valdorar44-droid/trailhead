@@ -1762,3 +1762,39 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 - Do not resize or recompress the historic-cabin derivative to fit the ordinary upload route, weaken that route's limit, or overwrite any approved derivative.
 - Do not add an attested narration profile from account screenshots or caller-authored JSON; only the authenticated server-owned admin flow may create the attestation.
 - Do not run device preview, trusted publication validation, deploy, publish, regenerate narration, begin another chapter, or touch Cherokee/EBCI or other culturally gated material from this checkpoint.
+
+## S4L Roaring Fork configured private byte-import closeout
+
+- Completed: 2026-08-10.
+- Branch: `feat/smokies-original-s2`.
+- Baseline/source HEAD: `9870ed454a858b8c5c5726ba929bbc60e191683f`.
+- The project owner authorized this bounded next stage in continuation task `019fe9fb-cafa-75d3-b663-1e5051731cd5` with the decision `continue` after the S4K preflight.
+- The intended configured target was verified directly as the Trailhead production service's private draft database and asset volume, then bound as `railway.trailhead.production.private`. This stage did not deploy code or create a public version.
+- Before ingestion, a SQLite backup was created and independently verified at `/data/backups/trailhead-20260810T070013Z.sqlite3`: 1,545,113,600 bytes; SHA-256 `8d51e4107c0eeefbb7abb0678b0459ec802b2d2f4e4dc48d2baa695976415eb7`; integrity check `ok`; 91 tables.
+- A production-side dry-run revalidated the unchanged packet SHA-256 `15d3a10b3a387cd23e1271e2d07428772d8f60e4568cbd417ef292d627252c1f`, canonical Manifest V3 SHA-256 `2fb77582811e28ef963f3018a8990a96612cfedee69f3b2329a73b87ac99d33a`, delivery-contract SHA-256 `9081a647a7df0e59df4bb40506ba9bfa96c750536fb715ee31b3e9ee68ee20d6`, all twenty source hashes and probes, and both protected-file hashes before the first target mutation.
+- Target preflight proved that the Roaring Fork pack did not exist, its asset-row and published-version counts were zero, the chosen existing Originals operator remained an administrator, the database schema matched the importer contract, and the report destination did not exist.
+- The bounded importer committed one private draft at revision 1 plus exactly twenty current content-addressed asset records: thirteen accepted provider-native narration MP3s and seven approved artwork PNGs totaling 239,772,665 bytes. It created twenty new storage files and twenty new rows, required no interrupted-run recovery, and required no rollback.
+- Verified transaction ID: `0792c0e78fd54e2066a12b453fbfe11e1bb1f381924e3b95cd7ddeab86115f5a`.
+- The exact configured-import receipt is preserved as `originals/smokies/roaring_fork_private_import_receipt_v1.json`: SHA-256 `8890c1e1431654a03feb1aa4ee4376ab50504e9841b4d8a06f0a3c003b0ebefd`.
+- Independent post-import readback rehashed every stored file and matched the exact twenty-entry receipt map. It confirmed thirteen narration rows, seven artwork rows, 239,772,665 total bytes, draft revision 1, zero published versions, SQLite `quick_check=ok`, private template visibility, `public_release=false`, and unchanged packet identities.
+- Every narration row retains `license_status=unverified` and contains no `license_attestation`. No terms identifier, URL, version, review date, administrator attestation, or narration profile was inferred or manufactured.
+- Release-facing gates remain false: `admin_license_attestation_complete`, `verified_private_upload_complete`, `authenticated_device_preview_complete`, `trusted_publication_validation_complete`, and `public_release`. Only `configured_private_byte_import_complete=true`.
+- No preview token was issued, no authenticated device preview or trusted validation ran, no deploy or publication occurred, no narration was regenerated, no other chapter was imported, and no Cherokee/EBCI or other culturally gated material was touched.
+- Task-scoped cleanup was verified after the final readback: the remote source staging tree, source archive, dependency archive, transfer-test file, and two temporary evidence-mirror trees were removed with zero scoped paths remaining; all twenty imported storage files and the server receipt remained present. Local staging, archives, runner, upload helper, and transfer-test paths were absent. The temporary Railway registration `trailhead-codex-rf-import-20260810` was removed, leaving only the pre-existing registered key; the pre-existing local key material was not deleted or changed.
+- Protected files remain unchanged:
+  - `dashboard/explore_serving_index_v2.json`: `c0726d8166ab7d110f437ff4e6acde7aa09702354f053103e3f6630a0129b869`.
+  - `docs/app-store-copy.md`: `126af147b650c2f1077fb73036d26f34f940422c07a3193bade047c73b5c225a`.
+
+### Exact next action after S4L
+
+1. A real signed-in target administrator must review the exact current ElevenLabs terms identifier, HTTPS URL, version, and review date; do not reuse test fixtures or infer missing values from account screenshots.
+2. Before making thirteen independent attestation calls, add or use a V3-compatible SHA-pinned and idempotent operator flow, or otherwise freeze asset replacement and verify every response/readback against the accepted narration SHA-256.
+3. After all thirteen server-owned attestations are verified, build the attested narration profile and re-evaluate the private-upload gate.
+4. Stop again before authenticated device preview, trusted validation, deployment, or publication; each remains a separate authorization and evidence gate.
+
+### Do not repeat after S4L
+
+- Do not rerun the byte import or transfer the approved sources again while the receipt, configured target, and twenty current asset identities remain unchanged.
+- Do not alter or replace a current narration asset between administrator review and attestation.
+- Do not invent terms metadata, administrator identity, or attestation time, and do not treat byte import as a verified licensed upload.
+- Do not run device preview, trusted publication validation, deploy, publish, regenerate narration, begin another chapter, or touch Cherokee/EBCI or other culturally gated material from this checkpoint.

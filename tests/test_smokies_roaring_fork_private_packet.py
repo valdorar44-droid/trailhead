@@ -1,11 +1,20 @@
-import json
+import hashlib
 import inspect
+import json
 from pathlib import Path
 
 import pytest
 
 import scripts.build_smokies_roaring_fork_private_packet as builder
 import scripts.import_smokies_roaring_fork_private as importer
+
+
+RECEIPT_PATH = (
+    builder.ROOT
+    / "originals"
+    / "smokies"
+    / "roaring_fork_private_import_receipt_v1.json"
+)
 
 
 def _read(path: Path) -> dict:
@@ -114,6 +123,83 @@ def test_importer_cannot_fabricate_a_license_attestation() -> None:
     assert generator["license_status"] == "unverified"
     assert "license_attestation" not in generator
     assert "attestation" not in str(inspect.signature(importer.apply_private))
+
+
+def test_configured_import_receipt_is_exact_and_fail_closed() -> None:
+    receipt = _read(RECEIPT_PATH)
+    packet = _read(builder.PACKET_PATH)
+
+    assert hashlib.sha256(RECEIPT_PATH.read_bytes()).hexdigest() == (
+        "8890c1e1431654a03feb1aa4ee4376ab50504e9841b4d8a06f0a3c003b0ebefd"
+    )
+    assert receipt["status"] == "verified_configured_private_import"
+    assert receipt["packet_sha256"] == hashlib.sha256(
+        builder.PACKET_PATH.read_bytes()
+    ).hexdigest()
+    assert receipt["authorization_sha256"] == hashlib.sha256(
+        builder.AUTHORIZATION_PATH.read_bytes()
+    ).hexdigest()
+    assert receipt["manifest_canonical_sha256"] == packet["manifest"][
+        "canonical_sha256"
+    ]
+    assert receipt["delivery_contract_sha256"] == packet["manifest"][
+        "delivery_contract_sha256"
+    ]
+
+    verified = {
+        item["asset_id"]: item["sha256"]
+        for item in receipt["assets"]["verified_sha256"]
+    }
+    expected = {item["asset_id"]: item["sha256"] for item in packet["assets"]}
+    assert len(receipt["assets"]["verified_sha256"]) == len(verified) == 20
+    assert verified == expected
+    assert receipt["assets"] | {"verified_sha256": None} == {
+        "artwork": 7,
+        "bytes": 239_772_665,
+        "narration": 13,
+        "total": 20,
+        "verified_sha256": None,
+    }
+
+    assert receipt["pack"] == {
+        "draft_revision": 1,
+        "id": builder.PACK_ID,
+        "status": "draft",
+    }
+    assert receipt["post_import"] == {
+        "current_asset_count": 20,
+        "draft_revision": 1,
+        "published_version_count": 0,
+        "status": "draft",
+    }
+    assert receipt["narration_license"] == {
+        "required_next_action": (
+            "authenticated admin license-attestation endpoint for each narration"
+        ),
+        "server_owned_attestation_complete": False,
+        "status": "unverified",
+    }
+    assert receipt["gates"] == {
+        "admin_license_attestation_complete": False,
+        "authenticated_device_preview_complete": False,
+        "configured_private_byte_import_complete": True,
+        "isolated_import_verified": False,
+        "public_release": False,
+        "trusted_publication_validation_complete": False,
+        "verified_private_upload_complete": False,
+    }
+    assert receipt["target"] == {
+        "asset_root_path_sha256": (
+            "b56ed55026a5f435f30a0646a3c843209e089c51acd7418d401c19368abf5c97"
+        ),
+        "classification": "configured_private",
+        "configured": True,
+        "database_path_sha256": (
+            "38a9d95c2b6aad468f1749d62625e1fb8e97cea361a5e009ab77548dce1c5eb5"
+        ),
+        "id": "railway.trailhead.production.private",
+    }
+    assert receipt["rollback"] == {"performed": False, "required": False}
 
 
 def test_source_file_preflight_rejects_symlinks(tmp_path: Path) -> None:

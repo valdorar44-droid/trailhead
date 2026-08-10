@@ -1690,3 +1690,36 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 - Do not regenerate these derivatives merely for compression or metadata comparison while their hashes and conversion runtime remain unchanged.
 - Do not edit the source dossier, immutable artwork review, accepted narration masters, or culturally gated materials.
 - Do not ingest, upload, bind, deploy, publish, call the narration endpoint, or begin another chapter during this derivative review gate.
+
+## S4J Roaring Fork derivative visual-approval closeout
+
+- Completed: 2026-08-10.
+- Branch: `feat/smokies-original-s2`.
+- Baseline/source HEAD: `443d6d5c59e74aa95adc32469cc1f6b84adf91a8`.
+- The project owner explicitly approved all seven verified derivatives in continuation task `019fe9fb-cafa-75d3-b663-1e5051731cd5` with the decision `approve all derivatives`.
+- This stage records that decision only. It did not regenerate or alter a derivative or original, ingest media, upload an asset, bind Manifest V3, change app code or backend data, deploy, publish, regenerate narration, or touch culturally gated material.
+- Protected files remain unchanged:
+  - `dashboard/explore_serving_index_v2.json`: `c0726d8166ab7d110f437ff4e6acde7aa09702354f053103e3f6630a0129b869`.
+  - `docs/app-store-copy.md`: `126af147b650c2f1077fb73036d26f34f940422c07a3193bade047c73b5c225a`.
+  - `.cursor/` was not touched.
+- The approved decision is bound to immutable derivative record `3287ba42f4d06a7733787659c8092feae89026a5194a60b9eeb342f57a98a305`, preserving all seven file SHA-256 values, decoded-pixel SHA-256 values, dimensions, exact credits, license links, change notes, and claim limits.
+- Both external evidence roots still contain exactly seven derivative PNGs totaling 213,587,790 bytes per copy. All fourteen file copies match their bound byte counts and SHA-256 values.
+- The derivative record remains immutable with `derivative_user_visual_approval=false`; approval is represented in a separate overlay rather than rewriting the review artifact:
+  - `originals/smokies/roaring_fork_artwork_derivative_approval_v1.json`: `e13c39785e90190e0dfb4db5c60c709568b68d3ecbd76910ab00799a721b951a`.
+  - `scripts/build_smokies_roaring_fork_artwork_derivative_approval.py`: `e8a2f9dfcaab0adfa0841a3f35aaa65197938b83b76934893832893936fee295`.
+  - `tests/test_smokies_roaring_fork_artwork_derivative_approval.py`: `1f20247a9e1208549d85f596c9e770fba8891d21df2883c54db754df1f3cc428`.
+- The approval overlay records `derivative_user_visual_approval=true`, but retains `admin_importer_complete=false`, `verified_upload_evidence_complete=false`, `private_manifest_v3_artwork_binding_complete=false`, `authenticated_device_preview_complete=false`, `trusted_publication_validation_complete=false`, `ingestion_allowed=false`, and `public_release=false`.
+- Verification: the derivative and approval builders passed deterministic checks; both derivative evidence roots passed exact membership, byte-count, and SHA-256 validation; Python compilation and whitespace validation passed; and seven focused approval assertions passed without pytest fixtures.
+- The immutable source dossier, artwork review, original approval, verified derivative record, protected repository files, and thirteen accepted narration masters retained their recorded identities.
+
+### Exact next action after S4J
+
+1. Await explicit authorization for a bounded admin-only importer and private Manifest V3/upload-evidence packet.
+2. Before any ingestion, define the exact accepted thirteen audio hashes, seven approved derivative hashes, creator/license/change records, James generator provenance, and fail-closed rollback behavior the importer must enforce.
+3. Keep authenticated device preview and trusted publication validation separate from ingestion, and keep public release blocked until all operational, runtime, device, source, artwork, and cultural gates pass.
+
+### Do not repeat after S4J
+
+- Do not repeat derivative visual review, regeneration, copying, or hashing while the approved hashes and evidence roots remain unchanged.
+- Do not mutate the immutable derivative record to embed approval; use the separate bound overlay.
+- Do not ingest, upload, bind Manifest V3, deploy, publish, regenerate narration, call the narration endpoint, begin another chapter, or touch culturally gated material without a separately authorized packet.

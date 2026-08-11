@@ -1,0 +1,119 @@
+{
+  "account": {
+    "account_identity_recorded": false,
+    "authenticated_session": true,
+    "auto_top_up_enabled": false,
+    "commercial_use_eligible_under_current_terms": true,
+    "creator_plan_active": true,
+    "next_billing_date": "2026-09-08",
+    "next_billing_date_basis": "visible_ui_display_renews_on_september_8_year_inferred_from_observation_date",
+    "paid_overage_authorized": false,
+    "plan": "creator",
+    "remaining_provider_credits": 116490,
+    "top_up_balance_usd": "0.00",
+    "total_provider_credits": 131000,
+    "used_provider_credits": 14510,
+    "workspace_identity_recorded": false
+  },
+  "builder_effects": {
+    "account_or_billing_changed": false,
+    "api_keys_created": 0,
+    "api_keys_deleted": 0,
+    "database_accessed": false,
+    "media_files_created": false,
+    "provider_credits_spent": 0,
+    "provider_tts_requests_sent": 0,
+    "purchase_submitted": false
+  },
+  "key_capability": {
+    "auto_disable_if_leaked_available_and_default_on": true,
+    "create_multiple_keys_available": true,
+    "endpoint_permissions_visible": [
+      "text_to_speech_access",
+      "voices_read",
+      "user_access"
+    ],
+    "one_day_expiry_available": true,
+    "per_key_credit_limit_available": true,
+    "restrict_key_available_and_default_on": true,
+    "restricted_key_dialog_inspected_without_submission": true
+  },
+  "observation_id": "great_smoky_mountains_elevenlabs_remaining_provider_observation_20260811_v1",
+  "observed_at": "2026-08-11T04:35:40.034Z",
+  "pricing": {
+    "character_limit_per_request": 40000,
+    "model_family": "multilingual_v2_v3",
+    "price_usd_per_1000_characters": "0.10",
+    "pricing_surface": "signed_in_elevenapi_subscription_ui"
+  },
+  "product_id": "great_smoky_mountains_ridges_rivers_living_memory",
+  "purchase_capability": {
+    "automatic_top_up_enabled": false,
+    "one_time_prepaid_credit_purchase_available": true,
+    "purchase_dialog_inspected_without_submission": true,
+    "quick_purchase_amounts_usd": [
+      "10.00",
+      "20.00",
+      "50.00"
+    ],
+    "visible_exchange_rate_credits": 10000,
+    "visible_exchange_rate_usd": "1.82"
+  },
+  "schema_version": 1,
+  "source": "authenticated_browser_visible_ui_and_official_public_terms",
+  "terms": {
+    "beta_services_addendum": {
+      "last_updated": "2024-11-13",
+      "terms_id": "elevenlabs_beta_services_addendum_2024-11-13",
+      "title": "Beta Services Addendum",
+      "url": "https://elevenlabs.io/bsa"
+    },
+    "commercial_use_rule": "paid_user_commercial_use_permitted_subject_to_terms_and_policies",
+    "jurisdiction": "non_eea",
+    "jurisdiction_confirmation_source": "project_owner_confirmation_in_active_task",
+    "primary_terms": {
+      "last_updated": "2026-03-31",
+      "terms_id": "elevenlabs_terms_of_service_non_eea_2026-03-31",
+      "title": "ElevenLabs Terms of Service (non-EEA)",
+      "url": "https://elevenlabs.io/terms-of-use"
+    },
+    "prohibited_use_policy": {
+      "last_updated": "2025-09-03",
+      "terms_id": "elevenlabs_prohibited_use_policy_2025-09-03",
+      "title": "ElevenLabs Prohibited Use Policy",
+      "url": "https://elevenlabs.io/use-policy"
+    },
+    "terms_acceptance_or_account_change_performed": false,
+    "verified_live_at": "2026-08-11T04:35:40.034Z",
+    "voice_library_addendum": {
+      "last_updated": "2026-03-06",
+      "terms_id": "elevenlabs_voice_library_addendum_2026-03-06",
+      "title": "ElevenLabs Voice Library Addendum",
+      "url": "https://elevenlabs.io/vla"
+    }
+  },
+  "voice_and_request_contract": {
+    "available_in_my_voices": true,
+    "beta_service_designation_observed": false,
+    "beta_services_planned": false,
+    "default_model_id_visible": "eleven_multilingual_v2",
+    "default_output_format_id_visible": "mp3_44100_128",
+    "exact_request_voice_settings": {
+      "similarity_boost": 0.5,
+      "speed": 1.0,
+      "stability": 0.5,
+      "style": 0.1,
+      "use_speaker_boost": true
+    },
+    "fine_tuned_multilingual_v2_available": true,
+    "model_supports_text_to_speech": true,
+    "notice_period_days": 730,
+    "notice_period_display": "2 years notice",
+    "request_voice_settings_override_available": true,
+    "production_request_contract_requires_non_beta": true,
+    "stored_account_voice_settings_relied_on": false,
+    "voice_id": "EkK5I93UQWFDigLMpZcX",
+    "voice_id_live_binding_present": true,
+    "voice_name": "James - Husky, Engaging and Bold"
+  }
+}

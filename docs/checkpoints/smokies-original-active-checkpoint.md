@@ -2025,3 +2025,40 @@ Review the accepted S1 packet, then begin S2 with claim-level source and media-r
 - Do not rewrite readiness V1, hand-edit readiness V2 source hashes, repoint the shared Valhalla service, or copy the validation-only operational projection into a publication manifest.
 - Do not repeat the private import, license attestations, narration-profile apply, device preview, or device marker while their exact identities remain unchanged.
 - Do not publish, regenerate narration, replace artwork, begin another chapter, or touch Cherokee/EBCI or other culturally gated material without a separately authorized gate.
+
+## S4S Roaring Fork publication-readiness HOLD closeout
+
+- Completed: 2026-08-10 local time. Evidence cutoff: `2026-08-11T01:46:27.738573Z`.
+- Release branch: `release/smokies-s4m-production-20260810`.
+- Guarded source commit: `8b0a06181d1d76640f43e09df206523e936943e1`; tree: `1d3bab630637061762b693ade16a3e554df812f9`; parent: `41aac223ab691d99ac59ecb29434668abb83426a`. The worktree was clean, pushed, and origin-equal after the evidence slice was committed.
+- The project owner authorized continuation with `continue`. This bounded stage assembled and independently audited a deterministic publication-readiness HOLD packet. It did not authorize or perform a backend deployment, database access, manifest mutation, validation rerun, cultural outreach, vehicle/account inspection, or publication.
+- The checked packet is `originals/smokies/roaring_fork_publication_readiness_v1.json`, 12,875 bytes, SHA-256 `81317b0bcdb052f1b9396fbe861aec20db3b72a9bd3f745ab5d88618ad58a199`. Its pinned historical-input record is 4,125 bytes, SHA-256 `555c4282a39b7f1affbcd7481645bba14649235df1d693883dd0a461b41879ec`.
+- The deterministic builder is `scripts/build_smokies_roaring_fork_publication_readiness.py`, SHA-256 `c2b219489d6a60d94eab83a3fedbbeebe4b09ff73c1f5966bd1ae57ebb853562`. It is network-free and database-free, checks every input hash and publication-contract source hash, and fails closed on drift. The focused test file SHA-256 is `787939699bcca0d5ea8b8fd1903495e7895922b0f9dbb057c8fd95a93806bac1`.
+- Historical S4Q/S4R/product facts are not presented as a fresh production readback. They are explicitly classified as historical and bound to immutable checkpoint commit `41aac223ab691d99ac59ecb29434668abb83426a`, checkpoint-file SHA-256 `287539d24483719c62fa5f1833b65a5a46b7512b190ccb427cd3cb113107ed26`, and the exact S4Q/S4R identities.
+- The packet preserves the accepted private evidence: revision 2; thirteen narration assets; seven artwork assets; 239,772,665 aggregate bytes; the accepted profile, device-preview, and delivery-contract hashes; and S4R report `original_validation_9df694c93ee9ef3809c33f451d04bf28`, which passed 13/13 private route scenarios with no issues. It explicitly says those facts were not re-read from production and the S4R report must not be reused after any final manifest or source change.
+- A bounded official NPS audit observed the alert feed at `2026-08-11T01:44:56.075769Z` and rechecked it at `2026-08-11T01:46:27.738573Z`. The response SHA-256 was `34e08ed1aa172b2ba9319568ea61f577dcf2c808163e9f7d0306d723c30ddd8e`; three active located closures and no unlocated closure were present; none intersected the forty-one exact Roaring Fork source segments. The only permitted statement is: “The current NPS road check does not list a closure for this chapter.” It is not a safety or guaranteed-open claim, expired after 1,800 seconds, is not evergreen evidence, and the response body is not represented as retained or builder-revalidated.
+- The official Current Cautions and Closures page was observed with a `2026-08-06` last-updated date, newer than the checked candidate's `2026-07-31` source date and `2026-08-04` review. The existing candidate remains a pinned historical input but is not acceptable for a final publication binding without a new immutable review.
+- Publication remains blocked by exactly six recorded gates:
+  1. The current artifact is a private one-chapter review manifest with `source_review_required`, no route evidence, zero offline-map byte estimate, private visibility, zero-credit catalog placeholder, and only three of ten generic publication reviews complete.
+  2. Official route evidence V1 is blocked and covers six variants; strict publication requires an exact one-variant Roaring-Fork evidence set.
+  3. The checked operational candidate requires `foothills_parkway` as an alternate while private R2 contains only Roaring Fork, and S4R's validation-only alternate projection cannot be reused for publication. The official source also needs a new reviewed candidate.
+  4. All thirteen Roaring Fork entries and seven claims are `public_record_factual`, `published_public_record`, and claim-level `not_required`; nevertheless the product-wide cultural validator has no truthful passing state for a zero-gated-claim `public_record_only` dossier. No cultural approval or public-record scope determination was invented.
+  5. Published Start Tour currently reads trusted road observations only for Manifest schema V2, while this manifest is V3; a real owner-scoped saved-rig binding also remains a Start Tour gate and is intentionally absent from this packet.
+  6. The generic publish path lacks the purpose-built atomic release authorization guard required by this workflow. `trusted_publication_validation_complete=false`, `public_release=false`, no separate owner release decision exists, and the publish endpoint was not exercised.
+- The prior product contract remains one premium four-chapter Smokies product, Explorer-included with a 900-earned-credit permanent unlock. A standalone Roaring Fork public product is not approved by this packet; changing that scope or price requires a separate product decision.
+- The cultural blocker is a product-contract/schema gap, not a request for the owner to self-approve cultural scope. No EBCI contact, reviewer recruitment, compensation discussion, Cherokee language work, culturally supplied pronunciation, or gated-content generation occurred.
+- Verification passed nine packet-specific tests, fifty-two combined packet/route/operational/cultural/current-road tests, deterministic byte comparison, Python compilation, repository whitespace validation, and an independent P0/P1 audit. The audit verdict was GO for this HOLD packet and intentional NO-GO for public release.
+- Gate state is unchanged: `admin_license_attestation_complete=true`; `verified_private_upload_complete=true`; `authenticated_device_preview_complete=true`; the exact S4R private report remains the historical trusted validation evidence; `trusted_publication_validation_complete=false`; `public_release=false`.
+
+### Exact next decisions after S4S
+
+1. Choose the public product contract: preserve the planned four-chapter, 900-credit, Explorer-included Smokies Original, or separately authorize a standalone Roaring Fork product and its final price/access copy.
+2. Separately authorize a public-record publication-scope determination process. This checkpoint does not authorize contacting EBCI or any other external reviewer.
+3. Only after those decisions, build the exact reviewed route/operational/cultural records, add Manifest V3 current-road support and an atomic release guard, assemble a final public manifest, and rerun exact trusted validation. Stop again before exercising the publish endpoint.
+
+### Do not repeat after S4S
+
+- Do not rerun the S4R private report, device preview, narration-profile apply, license attestations, or private import while their exact identities remain unchanged.
+- Do not reuse the expired NPS observation as current or say Roaring Fork is safe, guaranteed open, or publication-ready.
+- Do not weaken the strict alternate, route-evidence, cultural-scope, saved-rig, review, or publication-authorization gates merely to make the draft pass.
+- Do not publish, deploy a release change, contact EBCI, begin another chapter, regenerate narration, or replace approved artwork without the corresponding separate authorization.

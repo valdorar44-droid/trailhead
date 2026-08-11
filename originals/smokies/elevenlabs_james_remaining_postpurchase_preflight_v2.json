@@ -1,0 +1,208 @@
+{
+  "account_and_credit_gate": {
+    "auto_top_up_enabled": false,
+    "available_provider_credits": 171490,
+    "full_batch_key_quota_ceiling": 145000,
+    "full_batch_renderer_character_cap": 138300,
+    "full_batch_reserved_provider_credit_ceiling": 138190,
+    "headroom_above_key_quotas": 26490,
+    "headroom_above_renderer_caps": 33190,
+    "headroom_above_reservations": 33300,
+    "paid_usage_overage_authorized": false,
+    "point_in_time_only": true,
+    "prepaid_top_up_balance_usd": "10.00",
+    "total_provider_credits": 186000,
+    "used_provider_credits": 14510
+  },
+  "authorization": {
+    "api_key_creation_authorized_now": false,
+    "checkpoint2_owner_render_and_spend_authorized": true,
+    "fresh_preflight_passed": true,
+    "independent_renderer_code_audit_passed": false,
+    "live_provider_apply_authorized_now": false,
+    "paid_usage_overage_authorized": false,
+    "provider_request_authorized_now": false,
+    "rerender_authorized": false,
+    "tts_authorized_now": false
+  },
+  "builder_effects": {
+    "account_or_billing_changed": false,
+    "api_keys_created": 0,
+    "database_accessed": false,
+    "media_files_created": false,
+    "network_accessed": false,
+    "provider_credits_spent": 0,
+    "provider_tts_requests_sent": 0
+  },
+  "chapter_envelopes": [
+    {
+      "chapter_id": "foothills_parkway",
+      "dollar_cap_usd": "2.50",
+      "one_day_key_credit_quota": 25000,
+      "provider_request_count": 16,
+      "renderer_character_cap": 23600,
+      "reserved_provider_credit_ceiling": 23557,
+      "source_lock": {
+        "byte_count": 33701,
+        "path": "originals/smokies/elevenlabs_james_foothills_parkway_lock_v1.json",
+        "sha256": "eac2d636c4c26fd55fbc4ebe7b7be25882ffd51e6064703924d96d89fa71c119"
+      }
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "dollar_cap_usd": "7.00",
+      "one_day_key_credit_quota": 70000,
+      "provider_request_count": 33,
+      "renderer_character_cap": 66000,
+      "reserved_provider_credit_ceiling": 65938,
+      "source_lock": {
+        "byte_count": 63724,
+        "path": "originals/smokies/elevenlabs_james_mountain_crossing_lock_v1.json",
+        "sha256": "561a8a8bf62f534d485df0ebf523d13a9defd962af136240fd46e1ca5aacec25"
+      }
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "dollar_cap_usd": "5.00",
+      "one_day_key_credit_quota": 50000,
+      "provider_request_count": 23,
+      "renderer_character_cap": 48700,
+      "reserved_provider_credit_ceiling": 48695,
+      "source_lock": {
+        "byte_count": 44518,
+        "path": "originals/smokies/elevenlabs_james_cades_cove_lock_v1.json",
+        "sha256": "6c6fecdaa85d91f4e29cd08ea9c46f20d404dba8ed72962390b8d8d8dc5b6a04"
+      }
+    }
+  ],
+  "decision": {
+    "all_non_credit_gates_passed": true,
+    "credit_gate_passed": true,
+    "fresh_provider_preflight_go": true,
+    "live_apply_blocker": "independent_renderer_code_audit_and_stable_operator_required",
+    "live_apply_go": false
+  },
+  "key_lifecycle_gate": {
+    "active_keys_at_once": 1,
+    "auto_disable_if_leaked_required": true,
+    "cross_chapter_borrowing_allowed": false,
+    "expiry_hours": 24,
+    "key_count": 3,
+    "key_material_policy": "one_time_ui_copy_to_os_clipboard_then_stdin_immediate_clipboard_clear_never_file_log_or_git",
+    "keys_created": 0,
+    "keys_created_sequentially": true,
+    "per_chapter_credit_limits": [
+      {
+        "chapter_id": "foothills_parkway",
+        "credit_limit": 25000
+      },
+      {
+        "chapter_id": "mountain_crossing",
+        "credit_limit": 70000
+      },
+      {
+        "chapter_id": "little_river_cades_cove",
+        "credit_limit": 50000
+      }
+    ],
+    "scopes": [
+      "text_to_speech_access",
+      "voices_read",
+      "user_access_for_subscription_and_credit_read_only"
+    ]
+  },
+  "observed_at": "2026-08-11T05:13:04.553Z",
+  "preflight_id": "great_smoky_mountains_elevenlabs_james_remaining_postpurchase_preflight_v2",
+  "product_id": "great_smoky_mountains_ridges_rivers_living_memory",
+  "provider_contract_gate": {
+    "beta_services_used_or_planned": false,
+    "explicit_request_body_settings_required": true,
+    "model_id": "eleven_multilingual_v2",
+    "output_format_id": "mp3_44100_128",
+    "production_non_beta_contract_required": true,
+    "stored_provider_defaults_relied_on": false,
+    "voice_id": "EkK5I93UQWFDigLMpZcX",
+    "voice_name": "James - Husky, Engaging and Bold",
+    "voice_settings": {
+      "similarity_boost": 0.5,
+      "speed": 1.0,
+      "stability": 0.5,
+      "style": 0.1,
+      "use_speaker_boost": true
+    }
+  },
+  "provider_usage_baseline": {
+    "billable_request_count": 14,
+    "observed_at": "2026-08-11T05:13:04.553Z",
+    "total_usage_usd": "2.64",
+    "usage_surface": "signed_in_usage_analytics_ui"
+  },
+  "required_before_live_apply": [
+    "independent_renderer_security_and_correctness_audit_passes",
+    "renderer_and_tests_are_hash_bound",
+    "fresh_credit_terms_voice_and_key_recheck_no_older_than_15_minutes",
+    "one_exact_chapter_key_is_created_and_other_chapter_keys_are_absent",
+    "fresh_short_lived_execution_evidence_binds_chapter_key_and_external_output_root"
+  ],
+  "schema_version": 2,
+  "source_bindings": {
+    "authenticated_observation": {
+      "byte_count": 4547,
+      "path": "originals/smokies/elevenlabs_james_remaining_provider_observation_v2.json",
+      "sha256": "fde6f2e0024e486c73ba6afeb26ae1c3a640ba37435140c09362441214927bf0"
+    },
+    "checkpoint2_owner_approval": {
+      "byte_count": 68453,
+      "path": "originals/smokies/checkpoint2_owner_approval_v1.json",
+      "sha256": "3cc18dad4d1b6a80f2259e58cbe50fba3804096d0c00437eca9103e626078d5c"
+    },
+    "postpurchase_render_continuation_approval": {
+      "byte_count": 5571,
+      "path": "originals/smokies/postpurchase_render_continuation_approval_v1.json",
+      "sha256": "c7edea54c4facd3d9cc336217577bcec38b78928041e163c92b54290141f029d"
+    },
+    "prior_observation": {
+      "byte_count": 4431,
+      "path": "originals/smokies/elevenlabs_james_remaining_provider_observation_v1.json",
+      "sha256": "dfae2340fa82cb1d92e70e4d0af1d74f3e9666a72465ccbb51ec362b2b6c2e21"
+    },
+    "remaining_batch_lock": {
+      "byte_count": 10917,
+      "path": "originals/smokies/elevenlabs_james_remaining_batch_preflight_v1.json",
+      "sha256": "e396aff7b495f087838cfb284a5d9e6a7ac43c9b873550e2a71a5527a41379b4"
+    }
+  },
+  "status": "fresh_provider_preflight_green_renderer_code_audit_required",
+  "terms_gate": {
+    "commercial_use_eligible": true,
+    "jurisdiction": "non_eea",
+    "point_in_time_only": true,
+    "policy_tuple": {
+      "beta_services_addendum": {
+        "last_updated": "2024-11-13",
+        "terms_id": "elevenlabs_beta_services_addendum_2024-11-13",
+        "title": "Beta Services Addendum",
+        "url": "https://elevenlabs.io/bsa"
+      },
+      "primary_terms": {
+        "last_updated": "2026-03-31",
+        "terms_id": "elevenlabs_terms_of_service_non_eea_2026-03-31",
+        "title": "ElevenLabs Terms of Service (non-EEA)",
+        "url": "https://elevenlabs.io/terms-of-use"
+      },
+      "prohibited_use_policy": {
+        "last_updated": "2025-09-03",
+        "terms_id": "elevenlabs_prohibited_use_policy_2025-09-03",
+        "title": "ElevenLabs Prohibited Use Policy",
+        "url": "https://elevenlabs.io/use-policy"
+      },
+      "voice_library_addendum": {
+        "last_updated": "2026-03-06",
+        "terms_id": "elevenlabs_voice_library_addendum_2026-03-06",
+        "title": "ElevenLabs Voice Library Addendum",
+        "url": "https://elevenlabs.io/vla"
+      }
+    },
+    "verified_live_at": "2026-08-11T05:13:04.553Z"
+  }
+}

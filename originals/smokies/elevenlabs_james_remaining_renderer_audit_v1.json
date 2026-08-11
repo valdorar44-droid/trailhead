@@ -1,0 +1,26 @@
+{
+  "audit_artifact_created_by_auditor": true,
+  "audit_id": "smokies_remaining_renderer_operator_independent_audit_20260811_v1",
+  "audited_at": "2026-08-11T07:17:06Z",
+  "author_source_files_edited_by_auditor": 0,
+  "checkpoint2_owner_approval_sha256": "3cc18dad4d1b6a80f2259e58cbe50fba3804096d0c00437eca9103e626078d5c",
+  "dependency_sha256": {
+    "scripts/build_smokies_checkpoint2_approval.py": "ad4ad23475a9f7d077f64f08c7883e9175d45efd4d964d09f47664c5fcbbc74a",
+    "scripts/build_smokies_elevenlabs_james_postpurchase_preflight.py": "e597288b36480f267b533079c72cca034034b263bed602bcdbe1f24dfd42a1be",
+    "scripts/build_smokies_elevenlabs_james_remaining_locks.py": "44bbddf60383d6a5f3a6fcf7e2bbe4b6aad824c8397d93e093818c1b5d49d354",
+    "scripts/build_smokies_postpurchase_render_continuation_approval.py": "0481e382a9557a31fabb22c29f5c859067dc088ec5318e4568d94c1a47cae180"
+  },
+  "dry_run_default_verified": true,
+  "green_preflight_sha256": "161257f717e4c2ae3d344f295c6f2ec8b4ce5febd819e167086ed97f68f57a29",
+  "independent_audit_passed": true,
+  "operator_sha256": "585dce57d32a56927d48741f3c32ff83feaf9f1fd6a945004c7b3d1b96b5d596",
+  "operator_test_sha256": "a0acba6e3850413831e6eded6fad9ed0d9e123746985b063d3c350eb7e916b63",
+  "p0_findings": 0,
+  "p1_findings": 0,
+  "postpurchase_continuation_approval_sha256": "c7edea54c4facd3d9cc336217577bcec38b78928041e163c92b54290141f029d",
+  "provider_calls_performed_by_audit": 0,
+  "renderer_contract": "smokies_elevenlabs_james_remaining_renderer_v2",
+  "renderer_sha256": "2950b3a83d63bf6d814633485080a18b1e606588ff0ed45a1eb20f44dfbcfec7",
+  "schema_version": 1,
+  "test_sha256": "7808633c49a9b8039220c498f5f9ffe1a68859ef414678528646b947f1b702f4"
+}

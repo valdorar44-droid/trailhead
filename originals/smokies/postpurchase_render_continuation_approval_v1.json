@@ -1,0 +1,136 @@
+{
+  "builder_effects": {
+    "api_keys_created": 0,
+    "database_accessed": false,
+    "media_files_created": 0,
+    "network_accessed": false,
+    "production_mutated": false,
+    "provider_accessed": false,
+    "provider_credits_spent": 0,
+    "provider_requests_sent": 0,
+    "purchases_submitted": 0
+  },
+  "continuation_boundary": {
+    "database_accessed": false,
+    "live_api_key_creation_allowed": false,
+    "live_provider_credit_spend_allowed": false,
+    "live_provider_requests_allowed": false,
+    "narration_generated": false,
+    "next_action": "bind_fresh_redacted_postpurchase_provider_observation_and_pass_independent_renderer_audit_before_any_live_effect",
+    "owner_purchase_and_continue_event_bound": true,
+    "postpurchase_credit_capacity_preflight_passed": false,
+    "postpurchase_provider_observation_bound": false,
+    "prior_checkpoint2_render_authority_preserved": true,
+    "production_mutation_allowed": false,
+    "provider_credits_spent": 0,
+    "provider_requests_sent": 0,
+    "public_release": false,
+    "publication_allowed": false,
+    "renderer_implementation_audited": false,
+    "restricted_one_day_keys_created": 0,
+    "trusted_validation_allowed": false,
+    "upload_allowed": false
+  },
+  "kind": "smokies_postpurchase_render_continuation_approval_overlay",
+  "overlay_id": "smokies_postpurchase_render_continuation_approval_20260811_v1",
+  "owner_event": {
+    "approved_at": "2026-08-11T05:09:20.397Z",
+    "approved_at_source": "source_task_user_message_event_metadata",
+    "approved_by": "project_owner",
+    "corroborated_event_types": [
+      "response_item.message",
+      "event_msg.user_message"
+    ],
+    "decision_message_byte_count": 45,
+    "decision_message_hash_input": "exact_utf8_bytes_with_space_then_one_lf",
+    "decision_message_sha256": "74920d6d369286f77f2c48f248cf75cff0dab657a4b8a969a0476d241945ff05",
+    "decision_text_verbatim": "i bought the $10. your approved to continue \n",
+    "ephemeral_event_actor_identifier_retained": false,
+    "source_response_item_id": "msg_019fef39-a58c-7742-9fe1-4f87e5388b4d",
+    "source_task_id": "019fe9fb-cafa-75d3-b663-1e5051731cd5"
+  },
+  "product_id": "great_smoky_mountains_ridges_rivers_living_memory",
+  "purchase_and_continuation": {
+    "additional_purchase_authorized": false,
+    "automatic_top_up_authorized": false,
+    "new_or_expanded_render_scope_authorized": false,
+    "owner_authorized_resume_of_previously_approved_render": true,
+    "owner_reported_purchase_completed": true,
+    "paid_overage_authorized": false,
+    "prior_credit_shortfall_against_reservations": 21700,
+    "prior_observed_top_up_balance_usd": "0.00",
+    "purchase_amount_is_a_hard_finite_amount": true,
+    "purchase_amount_usd": "10.00",
+    "purchase_kind": "one_time_finite_prepaid_top_up",
+    "terms_acceptance_or_account_change_authorized": false
+  },
+  "recorded_at": "2026-08-11T05:09:20.397Z",
+  "schema_version": 1,
+  "source_bindings": {
+    "checkpoint2_approval": {
+      "byte_count": 68453,
+      "path": "originals/smokies/checkpoint2_owner_approval_v1.json",
+      "sha256": "3cc18dad4d1b6a80f2259e58cbe50fba3804096d0c00437eca9103e626078d5c"
+    },
+    "prior_provider_observation": {
+      "byte_count": 4431,
+      "path": "originals/smokies/elevenlabs_james_remaining_provider_observation_v1.json",
+      "sha256": "dfae2340fa82cb1d92e70e4d0af1d74f3e9666a72465ccbb51ec362b2b6c2e21"
+    },
+    "prior_provider_preflight": {
+      "byte_count": 10768,
+      "path": "originals/smokies/elevenlabs_james_remaining_provider_preflight_v1.json",
+      "sha256": "d6deaffbd86cc7b17e241ade7a28a48f07063bbb55dba43907d016da02735eb8"
+    }
+  },
+  "source_revision": {
+    "all_bound_sources_verified_at_commit": true,
+    "commit": "3a9e883eddcd5ae9ceef2297f2301f2ad87ea846",
+    "parent": "c6193547336b30105152843d8078b9407bc541d8",
+    "tree": "1e092b2d69c0d86e1985a2f7e858027a9e9366cc"
+  },
+  "status": "finite_prepaid_purchase_completed_and_prior_render_continuation_authorized_live_effects_still_closed",
+  "unchanged_render_contract": {
+    "ambiguous_timeout_5xx_invalid_audio_or_billing_behavior": "stop_and_reconcile_without_retry",
+    "automatic_rerender_count": 0,
+    "automatic_top_up_authorized": false,
+    "base_request_count": 64,
+    "chapter_envelopes": [
+      {
+        "chapter_id": "foothills_parkway",
+        "dollar_cap_usd": "2.50",
+        "one_day_key_credit_quota": 25000,
+        "provider_request_count": 16,
+        "renderer_character_cap": 23600,
+        "reserved_provider_credit_ceiling": 23557
+      },
+      {
+        "chapter_id": "mountain_crossing",
+        "dollar_cap_usd": "7.00",
+        "one_day_key_credit_quota": 70000,
+        "provider_request_count": 33,
+        "renderer_character_cap": 66000,
+        "reserved_provider_credit_ceiling": 65938
+      },
+      {
+        "chapter_id": "little_river_cades_cove",
+        "dollar_cap_usd": "5.00",
+        "one_day_key_credit_quota": 50000,
+        "provider_request_count": 23,
+        "renderer_character_cap": 48700,
+        "reserved_provider_credit_ceiling": 48695
+      }
+    ],
+    "combined_one_day_key_credit_quota": 145000,
+    "cross_chapter_borrowing_allowed": false,
+    "direction_override_request_count": 8,
+    "dollar_cap_usd": "14.50",
+    "paid_overage_authorized": false,
+    "provider_request_count": 72,
+    "renderer_character_cap": 138300,
+    "rerender_authorized": false,
+    "reserved_provider_credit_ceiling": 138190,
+    "safe_retry_only": "provider_confirmed_uncharged_429",
+    "unused_budget_transfer_allowed": false
+  }
+}

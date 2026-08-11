@@ -1,0 +1,1028 @@
+{
+  "authoring_estimates_accepted": false,
+  "boundaries": {
+    "database_accessed": false,
+    "manifest_created_or_mutated": false,
+    "network_accessed": false,
+    "provider_accessed": false,
+    "public_release_authorized": false,
+    "real_audio_timing_passed": false,
+    "trusted_report_created": false,
+    "validation_only": true
+  },
+  "chapter_id": "little_river_cades_cove",
+  "consumer_delivery_modes_supported": true,
+  "consumer_runtime_status": "ready_for_real_audio_validation",
+  "delivery_design": {
+    "all_entries_accounted_for_exactly_once": true,
+    "capacity_stories_fall_back_after_route": true,
+    "hard_cues_have_priority": true,
+    "long_stories_use_capacity_admission_when_a_later_hard_cue_exists": true,
+    "parking_or_stopped_playback_claimed": false,
+    "placement_bindings": [
+      {
+        "entry_id": "cc_cue_01",
+        "maximum_anchor_offset_m": 600.0,
+        "mode": "hard_auto",
+        "official_anchor_progress_m": 0.0,
+        "route_context": "sugarlands",
+        "scheduled_progress_m": 180
+      },
+      {
+        "entry_id": "cc_story_01",
+        "maximum_anchor_offset_m": 1500.0,
+        "mode": "capacity_deeper",
+        "official_anchor_progress_m": 0.0,
+        "route_context": "sugarlands",
+        "scheduled_progress_m": 690.0
+      },
+      {
+        "entry_id": "cc_story_02",
+        "maximum_anchor_offset_m": 1500.0,
+        "mode": "capacity_deeper",
+        "official_anchor_progress_m": 0.0,
+        "route_context": "sugarlands",
+        "scheduled_progress_m": 1230.0
+      },
+      {
+        "entry_id": "cc_cue_02",
+        "maximum_anchor_offset_m": 600.0,
+        "mode": "hard_auto",
+        "official_anchor_progress_m": 28078.6,
+        "route_context": "townsend_wye",
+        "scheduled_progress_m": 28078.6
+      },
+      {
+        "entry_id": "cc_story_03",
+        "maximum_anchor_offset_m": 1500.0,
+        "mode": "capacity_deeper",
+        "official_anchor_progress_m": 28078.6,
+        "route_context": "townsend_wye",
+        "scheduled_progress_m": 28948.6
+      },
+      {
+        "entry_id": "cc_cue_03",
+        "maximum_anchor_offset_m": 600.0,
+        "mode": "hard_auto",
+        "official_anchor_progress_m": 40130.6,
+        "route_context": "cades_cove_entrance",
+        "scheduled_progress_m": 40130.6
+      },
+      {
+        "entry_id": "cc_story_04",
+        "maximum_anchor_offset_m": 1500.0,
+        "mode": "capacity_deeper",
+        "official_anchor_progress_m": 40130.6,
+        "route_context": "cades_cove_entrance",
+        "scheduled_progress_m": 40988.9
+      },
+      {
+        "entry_id": "cc_cue_04",
+        "maximum_anchor_offset_m": 600.0,
+        "mode": "hard_auto",
+        "official_anchor_progress_m": 41937.3,
+        "route_context": "john_oliver_place",
+        "scheduled_progress_m": 41937.3
+      },
+      {
+        "entry_id": "cc_story_05",
+        "maximum_anchor_offset_m": 1500.0,
+        "mode": "capacity_deeper",
+        "official_anchor_progress_m": 41937.3,
+        "route_context": "john_oliver_place",
+        "scheduled_progress_m": 42387.3
+      },
+      {
+        "entry_id": "cc_story_06",
+        "maximum_anchor_offset_m": 1500.0,
+        "mode": "capacity_deeper",
+        "official_anchor_progress_m": 41937.3,
+        "route_context": "john_oliver_place",
+        "scheduled_progress_m": 42807.3
+      },
+      {
+        "entry_id": "cc_story_10",
+        "maximum_anchor_offset_m": 1500.0,
+        "mode": "capacity_deeper",
+        "official_anchor_progress_m": 41937.3,
+        "route_context": "john_oliver_place",
+        "scheduled_progress_m": 43227.3
+      },
+      {
+        "entry_id": "cc_cue_05",
+        "maximum_anchor_offset_m": 600.0,
+        "mode": "hard_auto",
+        "official_anchor_progress_m": 44492.3,
+        "route_context": "methodist_church",
+        "scheduled_progress_m": 44492.3
+      },
+      {
+        "entry_id": "cc_story_07",
+        "maximum_anchor_offset_m": 1500.0,
+        "mode": "capacity_deeper",
+        "official_anchor_progress_m": 44492.3,
+        "route_context": "methodist_church",
+        "scheduled_progress_m": 45362.3
+      },
+      {
+        "entry_id": "cc_story_08",
+        "maximum_anchor_offset_m": 1500.0,
+        "mode": "capacity_deeper",
+        "official_anchor_progress_m": 45321.6,
+        "route_context": "missionary_baptist_church",
+        "scheduled_progress_m": 45876.6
+      },
+      {
+        "entry_id": "cc_story_09",
+        "maximum_anchor_offset_m": 1500.0,
+        "mode": "capacity_deeper",
+        "official_anchor_progress_m": 45321.6,
+        "route_context": "missionary_baptist_church",
+        "scheduled_progress_m": 46506.6
+      },
+      {
+        "entry_id": "cc_cue_06",
+        "maximum_anchor_offset_m": 600.0,
+        "mode": "hard_auto",
+        "official_anchor_progress_m": 48424.8,
+        "route_context": "abrams_falls_trailhead",
+        "scheduled_progress_m": 48424.8
+      },
+      {
+        "entry_id": "cc_story_13",
+        "maximum_anchor_offset_m": 1500.0,
+        "mode": "capacity_deeper",
+        "official_anchor_progress_m": 48424.8,
+        "route_context": "abrams_falls_trailhead",
+        "scheduled_progress_m": 48727.4
+      },
+      {
+        "entry_id": "cc_cue_07",
+        "maximum_anchor_offset_m": 600.0,
+        "mode": "hard_auto",
+        "official_anchor_progress_m": 49120.1,
+        "route_context": "cable_mill",
+        "scheduled_progress_m": 49120.1
+      },
+      {
+        "entry_id": "cc_story_11",
+        "maximum_anchor_offset_m": 1500.0,
+        "mode": "capacity_deeper",
+        "official_anchor_progress_m": 49120.1,
+        "route_context": "cable_mill",
+        "scheduled_progress_m": 49675.1
+      },
+      {
+        "entry_id": "cc_story_12",
+        "maximum_anchor_offset_m": 1500.0,
+        "mode": "capacity_deeper",
+        "official_anchor_progress_m": 49120.1,
+        "route_context": "cable_mill",
+        "scheduled_progress_m": 50305.1
+      },
+      {
+        "entry_id": "cc_cue_08",
+        "maximum_anchor_offset_m": 600.0,
+        "mode": "hard_auto",
+        "official_anchor_progress_m": 52111.8,
+        "route_context": "tipton_place",
+        "scheduled_progress_m": 52111.8
+      },
+      {
+        "entry_id": "cc_story_14",
+        "maximum_anchor_offset_m": 1500.0,
+        "mode": "capacity_deeper",
+        "official_anchor_progress_m": 52111.8,
+        "route_context": "tipton_place",
+        "scheduled_progress_m": 52981.8
+      },
+      {
+        "entry_id": "cc_cue_09",
+        "maximum_anchor_offset_m": 600.0,
+        "mode": "hard_auto",
+        "official_anchor_progress_m": 56937.5,
+        "route_context": "cades_cove_exit",
+        "scheduled_progress_m": 56757.5
+      }
+    ],
+    "policy_id": "smokies_checked_anchor_capacity_fallback_v1",
+    "stories_without_a_later_hard_cue_are_completion_only": true
+  },
+  "delivery_semantics_sha256": "ab158e3bae3143b8b2815b39f6af4b786f5e27a19341a70c9850249f9abfcb0b",
+  "evidence_id": "smokies_little_river_cades_cove_loop_delivery_20260811_v1",
+  "expected_delivery_semantics": {
+    "entries": [
+      {
+        "coordinates": {
+          "lat": 35.6843435,
+          "lng": -83.536641
+        },
+        "delivery": {
+          "optional_content_may_delay": false,
+          "priority": "must_play",
+          "queue_policy": "durable_fifo_among_hard_auto"
+        },
+        "id": "cc_cue_01",
+        "mode": "hard_auto",
+        "stable_order": 1,
+        "trigger": {
+          "approach_bearing_deg": 283.1,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 270,
+          "route_progress_start_m": 90
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.6863005,
+          "lng": -83.5412508
+        },
+        "delivery": {
+          "admission_policy_id": "capacity_before_next_hard_v1",
+          "fallback_mode": "completion_deeper",
+          "guard_before_next_hard_auto_window_s": 30,
+          "may_queue_behind_capacity": false,
+          "may_wait_for_active_hard_auto": true,
+          "next_hard_auto_story_id": "cc_cue_02"
+        },
+        "id": "cc_story_01",
+        "mode": "capacity_deeper",
+        "stable_order": 2,
+        "trigger": {
+          "approach_bearing_deg": 252.4,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 780.0,
+          "route_progress_start_m": 600.0
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.6831325,
+          "lng": -83.5456858
+        },
+        "delivery": {
+          "admission_policy_id": "capacity_before_next_hard_v1",
+          "fallback_mode": "completion_deeper",
+          "guard_before_next_hard_auto_window_s": 30,
+          "may_queue_behind_capacity": false,
+          "may_wait_for_active_hard_auto": true,
+          "next_hard_auto_story_id": "cc_cue_02"
+        },
+        "id": "cc_story_02",
+        "mode": "capacity_deeper",
+        "stable_order": 3,
+        "trigger": {
+          "approach_bearing_deg": 226.9,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 1320.0,
+          "route_progress_start_m": 1140.0
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.659472,
+          "lng": -83.7079433
+        },
+        "delivery": {
+          "optional_content_may_delay": false,
+          "priority": "must_play",
+          "queue_policy": "durable_fifo_among_hard_auto"
+        },
+        "id": "cc_cue_02",
+        "mode": "hard_auto",
+        "stable_order": 4,
+        "trigger": {
+          "approach_bearing_deg": 308.3,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 28168.6,
+          "route_progress_start_m": 27988.6
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.6530127,
+          "lng": -83.7093695
+        },
+        "delivery": {
+          "admission_policy_id": "capacity_before_next_hard_v1",
+          "fallback_mode": "completion_deeper",
+          "guard_before_next_hard_auto_window_s": 30,
+          "may_queue_behind_capacity": false,
+          "may_wait_for_active_hard_auto": true,
+          "next_hard_auto_story_id": "cc_cue_03"
+        },
+        "id": "cc_story_03",
+        "mode": "capacity_deeper",
+        "stable_order": 5,
+        "trigger": {
+          "approach_bearing_deg": 192.8,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 29038.6,
+          "route_progress_start_m": 28858.6
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.6065275,
+          "lng": -83.7740674
+        },
+        "delivery": {
+          "optional_content_may_delay": false,
+          "priority": "must_play",
+          "queue_policy": "durable_fifo_among_hard_auto"
+        },
+        "id": "cc_cue_03",
+        "mode": "hard_auto",
+        "stable_order": 6,
+        "trigger": {
+          "approach_bearing_deg": 266.9,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 40220.6,
+          "route_progress_start_m": 40040.6
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.6068254,
+          "lng": -83.7835264
+        },
+        "delivery": {
+          "admission_policy_id": "capacity_before_next_hard_v1",
+          "fallback_mode": "completion_deeper",
+          "guard_before_next_hard_auto_window_s": 30,
+          "may_queue_behind_capacity": false,
+          "may_wait_for_active_hard_auto": true,
+          "next_hard_auto_story_id": "cc_cue_04"
+        },
+        "id": "cc_story_04",
+        "mode": "capacity_deeper",
+        "stable_order": 7,
+        "trigger": {
+          "approach_bearing_deg": 271.4,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 41078.9,
+          "route_progress_start_m": 40898.9
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.6070144,
+          "lng": -83.7932964
+        },
+        "delivery": {
+          "optional_content_may_delay": false,
+          "priority": "must_play",
+          "queue_policy": "durable_fifo_among_hard_auto"
+        },
+        "id": "cc_cue_04",
+        "mode": "hard_auto",
+        "stable_order": 8,
+        "trigger": {
+          "approach_bearing_deg": 243.0,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 42027.3,
+          "route_progress_start_m": 41847.3
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.6055697,
+          "lng": -83.7976095
+        },
+        "delivery": {
+          "admission_policy_id": "capacity_before_next_hard_v1",
+          "fallback_mode": "completion_deeper",
+          "guard_before_next_hard_auto_window_s": 30,
+          "may_queue_behind_capacity": false,
+          "may_wait_for_active_hard_auto": true,
+          "next_hard_auto_story_id": "cc_cue_05"
+        },
+        "id": "cc_story_05",
+        "mode": "capacity_deeper",
+        "stable_order": 9,
+        "trigger": {
+          "approach_bearing_deg": 278.6,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 42477.3,
+          "route_progress_start_m": 42297.3
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.6051333,
+          "lng": -83.8019102
+        },
+        "delivery": {
+          "admission_policy_id": "capacity_before_next_hard_v1",
+          "fallback_mode": "completion_deeper",
+          "guard_before_next_hard_auto_window_s": 30,
+          "may_queue_behind_capacity": false,
+          "may_wait_for_active_hard_auto": true,
+          "next_hard_auto_story_id": "cc_cue_05"
+        },
+        "id": "cc_story_06",
+        "mode": "capacity_deeper",
+        "stable_order": 10,
+        "trigger": {
+          "approach_bearing_deg": 303.3,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 42897.3,
+          "route_progress_start_m": 42717.3
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.6060782,
+          "lng": -83.8052245
+        },
+        "delivery": {
+          "admission_policy_id": "capacity_before_next_hard_v1",
+          "fallback_mode": "completion_deeper",
+          "guard_before_next_hard_auto_window_s": 30,
+          "may_queue_behind_capacity": false,
+          "may_wait_for_active_hard_auto": true,
+          "next_hard_auto_story_id": "cc_cue_05"
+        },
+        "id": "cc_story_10",
+        "mode": "capacity_deeper",
+        "stable_order": 11,
+        "trigger": {
+          "approach_bearing_deg": 226.7,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 43317.3,
+          "route_progress_start_m": 43137.3
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.6071428,
+          "lng": -83.8173342
+        },
+        "delivery": {
+          "optional_content_may_delay": false,
+          "priority": "must_play",
+          "queue_policy": "durable_fifo_among_hard_auto"
+        },
+        "id": "cc_cue_05",
+        "mode": "hard_auto",
+        "stable_order": 12,
+        "trigger": {
+          "approach_bearing_deg": 276.8,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 44582.3,
+          "route_progress_start_m": 44402.3
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.6081497,
+          "lng": -83.826563
+        },
+        "delivery": {
+          "admission_policy_id": "capacity_before_next_hard_v1",
+          "fallback_mode": "completion_deeper",
+          "guard_before_next_hard_auto_window_s": 30,
+          "may_queue_behind_capacity": false,
+          "may_wait_for_active_hard_auto": true,
+          "next_hard_auto_story_id": "cc_cue_06"
+        },
+        "id": "cc_story_07",
+        "mode": "capacity_deeper",
+        "stable_order": 13,
+        "trigger": {
+          "approach_bearing_deg": 254.8,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 45452.3,
+          "route_progress_start_m": 45272.3
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.6068384,
+          "lng": -83.8312223
+        },
+        "delivery": {
+          "admission_policy_id": "capacity_before_next_hard_v1",
+          "fallback_mode": "completion_deeper",
+          "guard_before_next_hard_auto_window_s": 30,
+          "may_queue_behind_capacity": false,
+          "may_wait_for_active_hard_auto": true,
+          "next_hard_auto_story_id": "cc_cue_06"
+        },
+        "id": "cc_story_08",
+        "mode": "capacity_deeper",
+        "stable_order": 14,
+        "trigger": {
+          "approach_bearing_deg": 286.3,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 45966.6,
+          "route_progress_start_m": 45786.6
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.6034817,
+          "lng": -83.83477
+        },
+        "delivery": {
+          "admission_policy_id": "capacity_before_next_hard_v1",
+          "fallback_mode": "completion_deeper",
+          "guard_before_next_hard_auto_window_s": 30,
+          "may_queue_behind_capacity": false,
+          "may_wait_for_active_hard_auto": true,
+          "next_hard_auto_story_id": "cc_cue_06"
+        },
+        "id": "cc_story_09",
+        "mode": "capacity_deeper",
+        "stable_order": 15,
+        "trigger": {
+          "approach_bearing_deg": 206.4,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 46596.6,
+          "route_progress_start_m": 46416.6
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.5918007,
+          "lng": -83.8450055
+        },
+        "delivery": {
+          "optional_content_may_delay": false,
+          "priority": "must_play",
+          "queue_policy": "durable_fifo_among_hard_auto"
+        },
+        "id": "cc_cue_06",
+        "mode": "hard_auto",
+        "stable_order": 16,
+        "trigger": {
+          "approach_bearing_deg": 173.8,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 48514.8,
+          "route_progress_start_m": 48334.8
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.589336,
+          "lng": -83.8439536
+        },
+        "delivery": {
+          "admission_policy_id": "capacity_before_next_hard_v1",
+          "fallback_mode": "completion_deeper",
+          "guard_before_next_hard_auto_window_s": 30,
+          "may_queue_behind_capacity": false,
+          "may_wait_for_active_hard_auto": true,
+          "next_hard_auto_story_id": "cc_cue_07"
+        },
+        "id": "cc_story_13",
+        "mode": "capacity_deeper",
+        "stable_order": 17,
+        "trigger": {
+          "approach_bearing_deg": 131.8,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 48817.4,
+          "route_progress_start_m": 48637.4
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.5866753,
+          "lng": -83.8411874
+        },
+        "delivery": {
+          "optional_content_may_delay": false,
+          "priority": "must_play",
+          "queue_policy": "durable_fifo_among_hard_auto"
+        },
+        "id": "cc_cue_07",
+        "mode": "hard_auto",
+        "stable_order": 18,
+        "trigger": {
+          "approach_bearing_deg": 135.0,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 49210.1,
+          "route_progress_start_m": 49030.1
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.5885232,
+          "lng": -83.8366805
+        },
+        "delivery": {
+          "admission_policy_id": "capacity_before_next_hard_v1",
+          "fallback_mode": "completion_deeper",
+          "guard_before_next_hard_auto_window_s": 30,
+          "may_queue_behind_capacity": false,
+          "may_wait_for_active_hard_auto": true,
+          "next_hard_auto_story_id": "cc_cue_08"
+        },
+        "id": "cc_story_11",
+        "mode": "capacity_deeper",
+        "stable_order": 19,
+        "trigger": {
+          "approach_bearing_deg": 90.8,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 49765.1,
+          "route_progress_start_m": 49585.1
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.5892576,
+          "lng": -83.8304547
+        },
+        "delivery": {
+          "admission_policy_id": "capacity_before_next_hard_v1",
+          "fallback_mode": "completion_deeper",
+          "guard_before_next_hard_auto_window_s": 30,
+          "may_queue_behind_capacity": false,
+          "may_wait_for_active_hard_auto": true,
+          "next_hard_auto_story_id": "cc_cue_08"
+        },
+        "id": "cc_story_12",
+        "mode": "capacity_deeper",
+        "stable_order": 20,
+        "trigger": {
+          "approach_bearing_deg": 138.8,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 50395.1,
+          "route_progress_start_m": 50215.1
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.5881552,
+          "lng": -83.812435
+        },
+        "delivery": {
+          "optional_content_may_delay": false,
+          "priority": "must_play",
+          "queue_policy": "durable_fifo_among_hard_auto"
+        },
+        "id": "cc_cue_08",
+        "mode": "hard_auto",
+        "stable_order": 21,
+        "trigger": {
+          "approach_bearing_deg": 64.3,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 52201.8,
+          "route_progress_start_m": 52021.8
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.5881807,
+          "lng": -83.8032232
+        },
+        "delivery": {
+          "admission_policy_id": "capacity_before_next_hard_v1",
+          "fallback_mode": "completion_deeper",
+          "guard_before_next_hard_auto_window_s": 30,
+          "may_queue_behind_capacity": false,
+          "may_wait_for_active_hard_auto": true,
+          "next_hard_auto_story_id": "cc_cue_09"
+        },
+        "id": "cc_story_14",
+        "mode": "capacity_deeper",
+        "stable_order": 22,
+        "trigger": {
+          "approach_bearing_deg": 106.2,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 53071.8,
+          "route_progress_start_m": 52891.8
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.6057223,
+          "lng": -83.7756502
+        },
+        "delivery": {
+          "optional_content_may_delay": false,
+          "priority": "must_play",
+          "queue_policy": "durable_fifo_among_hard_auto"
+        },
+        "id": "cc_cue_09",
+        "mode": "hard_auto",
+        "stable_order": 23,
+        "trigger": {
+          "approach_bearing_deg": 76.9,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 56847.5,
+          "route_progress_start_m": 56667.5
+        }
+      }
+    ],
+    "entry_ids_by_mode": {
+      "capacity_deeper": [
+        "cc_story_01",
+        "cc_story_02",
+        "cc_story_03",
+        "cc_story_04",
+        "cc_story_05",
+        "cc_story_06",
+        "cc_story_10",
+        "cc_story_07",
+        "cc_story_08",
+        "cc_story_09",
+        "cc_story_13",
+        "cc_story_11",
+        "cc_story_12",
+        "cc_story_14"
+      ],
+      "completion_deeper": [],
+      "hard_auto": [
+        "cc_cue_01",
+        "cc_cue_02",
+        "cc_cue_03",
+        "cc_cue_04",
+        "cc_cue_05",
+        "cc_cue_06",
+        "cc_cue_07",
+        "cc_cue_08",
+        "cc_cue_09"
+      ],
+      "stopped_deeper": []
+    },
+    "ogle_prelude_entry_ids": [],
+    "route_distance_m": 56937.5,
+    "route_geometry_sha256": "9f77ba8f704e82b3fb43e81f330a20771e2d8d87b44fe1fae29329cf082255c8"
+  },
+  "gates": {
+    "capacity_guard_s": 30,
+    "route_end_tail_limit_s": 240,
+    "speed_fixtures_mph": [
+      15,
+      36,
+      65,
+      75
+    ],
+    "trigger_to_play_latency_limit_s": 180
+  },
+  "kind": "original_checked_long_form_delivery_readiness",
+  "narration_binding": {
+    "directional_replacement_count": 0,
+    "effective_request_set_sha256": "6856463643a743dcec1181860a55f4b5f0592c1f4858cf8bf1efbbad73f9782f",
+    "effective_requests": [
+      {
+        "entry_id": "cc_cue_01",
+        "provider_request_id": "cc_cue_01__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "78a250add499dbc75ea6bb1ac073068d18bdddddca3ed13a3a98c952aa52dc82"
+      },
+      {
+        "entry_id": "cc_cue_02",
+        "provider_request_id": "cc_cue_02__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "7a42631f1015184f89f7fd5f8a7116155f2038a71917ab963403760e2e3d0bac"
+      },
+      {
+        "entry_id": "cc_cue_03",
+        "provider_request_id": "cc_cue_03__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "c202e6f46888bc97356c2a7a037a415a59db0c8bce66557e4b581c2ab4d890ca"
+      },
+      {
+        "entry_id": "cc_cue_04",
+        "provider_request_id": "cc_cue_04__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "d24c0e72271a23776a4f8b9b3dfc8a4ba3da5f324c5b68276c8bf9b7292fe3ea"
+      },
+      {
+        "entry_id": "cc_cue_05",
+        "provider_request_id": "cc_cue_05__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "a1e9c7df2c37fee19aabc044ea1da9c6a65b3b1a35bb219771f8a436ef737201"
+      },
+      {
+        "entry_id": "cc_cue_06",
+        "provider_request_id": "cc_cue_06__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "55c6f49d646263bc459baa46818460fd463ef3a387df8d1d974f66f9227d37c8"
+      },
+      {
+        "entry_id": "cc_cue_07",
+        "provider_request_id": "cc_cue_07__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "f1292c2fbbaad5745d688ca11ceeb010f0ed0f120bc12ec623cb49cd859ed3d7"
+      },
+      {
+        "entry_id": "cc_cue_08",
+        "provider_request_id": "cc_cue_08__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "0d1eaa6a56c06da7d062e76fb627cd6c399ce76f5ebbdac05426bccceb3e4ae7"
+      },
+      {
+        "entry_id": "cc_cue_09",
+        "provider_request_id": "cc_cue_09__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "c625c5ef9c2fd4780dad2cd55e9856c741d098aa73cccac829367de16ea37f4c"
+      },
+      {
+        "entry_id": "cc_story_01",
+        "provider_request_id": "cc_story_01__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "d57c36acec8f337ef06e8bdb7dcd4adcd9ed2d42899472c7c22b815cb5ed2cc7"
+      },
+      {
+        "entry_id": "cc_story_02",
+        "provider_request_id": "cc_story_02__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "1cf70b788279a3d9532a895cb385c26464b35e4f098c645833ef9ef6479c888a"
+      },
+      {
+        "entry_id": "cc_story_03",
+        "provider_request_id": "cc_story_03__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "9b79a336643fd8ff4a60faa26ed64635a4ecd1c704fb86029c7c9365f2685749"
+      },
+      {
+        "entry_id": "cc_story_04",
+        "provider_request_id": "cc_story_04__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "a8ab53f208de591a6a65cc46d3f6966f023279f938decda8b53e26f9517db33e"
+      },
+      {
+        "entry_id": "cc_story_05",
+        "provider_request_id": "cc_story_05__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "4a1171be4ef5048a536a3967bd6d70436bcea032a58f239fc38dbd4b35bf91b1"
+      },
+      {
+        "entry_id": "cc_story_06",
+        "provider_request_id": "cc_story_06__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "1e1c93941f0881215a1cd4019cb1e27e6eda536462728195442a962fd0937706"
+      },
+      {
+        "entry_id": "cc_story_07",
+        "provider_request_id": "cc_story_07__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "07dea08d22739fafe3c3afd00dd6ecbab2941801f60462599a1795fe6264f22e"
+      },
+      {
+        "entry_id": "cc_story_08",
+        "provider_request_id": "cc_story_08__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "6ab2e06a91e806b27d683dfd2c8ddf207af2001789c0eb66e41d2e848ccad4c1"
+      },
+      {
+        "entry_id": "cc_story_09",
+        "provider_request_id": "cc_story_09__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "b126cbcfee225f3e9f9ec2bd926e4bd4856311a3239e80d5880d7274ebabc9d8"
+      },
+      {
+        "entry_id": "cc_story_10",
+        "provider_request_id": "cc_story_10__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "e4a1d91bf99a385efd85987e991c3bb85b269f648de60a9ed0460432f688920a"
+      },
+      {
+        "entry_id": "cc_story_11",
+        "provider_request_id": "cc_story_11__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "365181142ce961ab66bdf5a6e83e1f77318afe7053ffd4412d9f389fac60cb4f"
+      },
+      {
+        "entry_id": "cc_story_12",
+        "provider_request_id": "cc_story_12__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "80f4994e8877fe3529f47d880e587f0bc255f3377364bf6592a43d892c76e316"
+      },
+      {
+        "entry_id": "cc_story_13",
+        "provider_request_id": "cc_story_13__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "e726d2e6e72dd180cf817a7b439ca8db88a1d6d6d878c3f4598ef3ab235346d7"
+      },
+      {
+        "entry_id": "cc_story_14",
+        "provider_request_id": "cc_story_14__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "e9e87c27e8e9459e39a5fff10487d3483961bc8f06379d1f247900c74e03a01e"
+      }
+    ],
+    "entry_count": 23
+  },
+  "product_id": "great_smoky_mountains_ridges_rivers_living_memory",
+  "publication_authorized": false,
+  "real_audio_required": true,
+  "recorded_from_task_id": "019fe9fb-cafa-75d3-b663-1e5051731cd5",
+  "route_binding": {
+    "anchor_order": [
+      "sugarlands",
+      "townsend_wye",
+      "cades_cove_entrance",
+      "john_oliver_place",
+      "methodist_church",
+      "missionary_baptist_church",
+      "abrams_falls_trailhead",
+      "cable_mill",
+      "tipton_place",
+      "carter_shields_cabin",
+      "cades_cove_exit"
+    ],
+    "coordinate_count": 4800,
+    "distance_m": 56937.5,
+    "full_geometry_required": true,
+    "geometry_sha256": "92478b7b5440491b4c30161a80d13571a79cb3d0fbd64a52b6137a7241679a83",
+    "official_candidate_status": "official_geometry_candidate",
+    "official_evidence_geometry_sha256": "9f77ba8f704e82b3fb43e81f330a20771e2d8d87b44fe1fae29329cf082255c8",
+    "official_route_evidence_path": "originals/smokies/official_route_evidence_v1.json",
+    "publication_evidence": false,
+    "route_spec_id": "little-river-cades-cove-loop",
+    "route_spec_path": "originals/smokies/route_variants_v1.json"
+  },
+  "schema_version": 1,
+  "source_sha256_by_path": {
+    "db/original_manifest_v3.py": "850df80086d336a3a3652d73a1e0eda403e89f06b241c2a710bcb6cbf38e53de",
+    "db/originals_remaining_validation.py": "199e0efac6bef0a64a700c4ff3a5d8863efe9780a0e14f0d8c4004891d40b39c",
+    "db/originals_validation.py": "c1f7946f0970a6ee85273a4dea0f27f544d62a7c48ec6aed68b9beca78682bd7",
+    "mobile/lib/originals/longFormScheduler.ts": "061708316537df55fb7d04b854795bcfa7f49a473ce53daa809a29bd6ab61913",
+    "mobile/lib/originals/manifestV3.ts": "6d242d9bd2f04435faf3521fadcc9a8c0803a1099c65f5c8447bc4499bb3c67e",
+    "mobile/lib/originals/session.ts": "560d0425ef42e1aab348ded5d1541ed66eb3de7e4b1968128a80f5a32da936c9",
+    "mobile/lib/originals/triggerEngine.ts": "d8f502d4eec89310bbf8fa0031814570d09965bab066385d6229f3b348215955",
+    "mobile/scripts/validate-original-long-form.ts": "bc8684bc8a1f40e772578116320d77dd88747a160991b1fcb9fa5d0f6ba4e4d8",
+    "originals/smokies/checkpoint2_owner_approval_v1.json": "3cc18dad4d1b6a80f2259e58cbe50fba3804096d0c00437eca9103e626078d5c",
+    "originals/smokies/editorial_cades_cove_v1.json": "1fedc6db4944bab671d7cfa0bacd2dda9670133d4165e27b3fe7b63ef8728845",
+    "originals/smokies/elevenlabs_james_cades_cove_lock_v1.json": "6c6fecdaa85d91f4e29cd08ea9c46f20d404dba8ed72962390b8d8d8dc5b6a04",
+    "originals/smokies/official_route_evidence_v1.json": "d946ffaf8f21ad97399b6dedfb5cbe9483fce0787653b389d7075d933f398c60",
+    "originals/smokies/remaining_chapters_review_packet_v1.json": "3ef71377c9e347cd53335cbf487d039ff973b8c28f9628b622fcee74c714b015",
+    "originals/smokies/route_variants_v1.json": "49d55fa8819822b18af54983ea11893a661689102c14532a88ebacf2ec587f24",
+    "originals/smokies/source_dossiers_v1.json": "8eb22ca5110f0f9a4287b8f184624348c2a2ca2dbc36e27ef59fc022057ce18f",
+    "scripts/build_smokies_remaining_delivery_readiness.py": "b90f6d9ea5d6f873432ef1acb582be1a0f4b56e33ccae303d235c4e1509285d8"
+  },
+  "variant_id": "sugarlands_to_cades_cove_loop"
+}

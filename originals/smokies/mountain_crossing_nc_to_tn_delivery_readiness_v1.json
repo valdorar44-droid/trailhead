@@ -1,0 +1,1192 @@
+{
+  "authoring_estimates_accepted": false,
+  "boundaries": {
+    "database_accessed": false,
+    "manifest_created_or_mutated": false,
+    "network_accessed": false,
+    "provider_accessed": false,
+    "public_release_authorized": false,
+    "real_audio_timing_passed": false,
+    "trusted_report_created": false,
+    "validation_only": true
+  },
+  "chapter_id": "mountain_crossing",
+  "consumer_delivery_modes_supported": true,
+  "consumer_runtime_status": "ready_for_real_audio_validation",
+  "delivery_design": {
+    "all_entries_accounted_for_exactly_once": true,
+    "capacity_stories_fall_back_after_route": true,
+    "hard_cues_have_priority": true,
+    "long_stories_use_capacity_admission_when_a_later_hard_cue_exists": true,
+    "parking_or_stopped_playback_claimed": false,
+    "placement_bindings": [
+      {
+        "entry_id": "mc_cue_09",
+        "maximum_anchor_offset_m": 600.0,
+        "mode": "hard_auto",
+        "official_anchor_progress_m": 4398.9,
+        "route_context": "oconaluftee",
+        "scheduled_progress_m": 4218.9
+      },
+      {
+        "entry_id": "mc_cue_10",
+        "maximum_anchor_offset_m": 600.0,
+        "mode": "hard_auto",
+        "official_anchor_progress_m": 4398.9,
+        "route_context": "oconaluftee",
+        "scheduled_progress_m": 4578.9
+      },
+      {
+        "entry_id": "mc_story_16",
+        "maximum_anchor_offset_m": 1500.0,
+        "mode": "capacity_deeper",
+        "official_anchor_progress_m": 4398.9,
+        "route_context": "oconaluftee",
+        "scheduled_progress_m": 4998.9
+      },
+      {
+        "entry_id": "mc_story_17",
+        "maximum_anchor_offset_m": 1500.0,
+        "mode": "capacity_deeper",
+        "official_anchor_progress_m": 4398.9,
+        "route_context": "oconaluftee",
+        "scheduled_progress_m": 5358.9
+      },
+      {
+        "entry_id": "mc_story_18",
+        "maximum_anchor_offset_m": 1500.0,
+        "mode": "capacity_deeper",
+        "official_anchor_progress_m": 4398.9,
+        "route_context": "oconaluftee",
+        "scheduled_progress_m": 5718.9
+      },
+      {
+        "entry_id": "mc_cue_05",
+        "maximum_anchor_offset_m": 600.0,
+        "mode": "hard_auto",
+        "official_anchor_progress_m": 29687.3,
+        "route_context": "newfound_gap_outbound",
+        "scheduled_progress_m": 29507.3
+      },
+      {
+        "entry_id": "mc_cue_08",
+        "maximum_anchor_offset_m": 600.0,
+        "mode": "hard_auto",
+        "official_anchor_progress_m": 29687.3,
+        "route_context": "newfound_gap_outbound",
+        "scheduled_progress_m": 29867.3
+      },
+      {
+        "entry_id": "mc_story_08",
+        "maximum_anchor_offset_m": 1500.0,
+        "mode": "capacity_deeper",
+        "official_anchor_progress_m": 29687.3,
+        "route_context": "newfound_gap_outbound",
+        "scheduled_progress_m": 30215.3
+      },
+      {
+        "entry_id": "mc_story_09",
+        "maximum_anchor_offset_m": 1500.0,
+        "mode": "capacity_deeper",
+        "official_anchor_progress_m": 29687.3,
+        "route_context": "newfound_gap_outbound",
+        "scheduled_progress_m": 30431.3
+      },
+      {
+        "entry_id": "mc_story_10",
+        "maximum_anchor_offset_m": 1500.0,
+        "mode": "capacity_deeper",
+        "official_anchor_progress_m": 29687.3,
+        "route_context": "newfound_gap_outbound",
+        "scheduled_progress_m": 30647.3
+      },
+      {
+        "entry_id": "mc_story_11",
+        "maximum_anchor_offset_m": 1500.0,
+        "mode": "capacity_deeper",
+        "official_anchor_progress_m": 29687.3,
+        "route_context": "newfound_gap_outbound",
+        "scheduled_progress_m": 30863.3
+      },
+      {
+        "entry_id": "mc_story_12",
+        "maximum_anchor_offset_m": 1500.0,
+        "mode": "capacity_deeper",
+        "official_anchor_progress_m": 29687.3,
+        "route_context": "newfound_gap_outbound",
+        "scheduled_progress_m": 31079.3
+      },
+      {
+        "entry_id": "mc_cue_06",
+        "maximum_anchor_offset_m": 600.0,
+        "mode": "hard_auto",
+        "official_anchor_progress_m": 40973.4,
+        "route_context": "kuwohi",
+        "scheduled_progress_m": 40793.4
+      },
+      {
+        "entry_id": "mc_cue_07",
+        "maximum_anchor_offset_m": 600.0,
+        "mode": "hard_auto",
+        "official_anchor_progress_m": 40973.4,
+        "route_context": "kuwohi",
+        "scheduled_progress_m": 41153.4
+      },
+      {
+        "entry_id": "mc_story_13",
+        "maximum_anchor_offset_m": 1500.0,
+        "mode": "capacity_deeper",
+        "official_anchor_progress_m": 40973.4,
+        "route_context": "kuwohi",
+        "scheduled_progress_m": 41573.4
+      },
+      {
+        "entry_id": "mc_story_14",
+        "maximum_anchor_offset_m": 1500.0,
+        "mode": "capacity_deeper",
+        "official_anchor_progress_m": 40973.4,
+        "route_context": "kuwohi",
+        "scheduled_progress_m": 41933.4
+      },
+      {
+        "entry_id": "mc_story_15",
+        "maximum_anchor_offset_m": 1500.0,
+        "mode": "capacity_deeper",
+        "official_anchor_progress_m": 40973.4,
+        "route_context": "kuwohi",
+        "scheduled_progress_m": 42293.4
+      },
+      {
+        "entry_id": "mc_cue_03",
+        "maximum_anchor_offset_m": 600.0,
+        "mode": "hard_auto",
+        "official_anchor_progress_m": 52259.5,
+        "route_context": "newfound_gap_return",
+        "scheduled_progress_m": 52079.5
+      },
+      {
+        "entry_id": "mc_cue_04",
+        "maximum_anchor_offset_m": 600.0,
+        "mode": "hard_auto",
+        "official_anchor_progress_m": 52259.5,
+        "route_context": "newfound_gap_return",
+        "scheduled_progress_m": 52439.5
+      },
+      {
+        "entry_id": "mc_story_03",
+        "maximum_anchor_offset_m": 1500.0,
+        "mode": "capacity_deeper",
+        "official_anchor_progress_m": 52259.5,
+        "route_context": "newfound_gap_return",
+        "scheduled_progress_m": 52787.5
+      },
+      {
+        "entry_id": "mc_story_04",
+        "maximum_anchor_offset_m": 1500.0,
+        "mode": "capacity_deeper",
+        "official_anchor_progress_m": 52259.5,
+        "route_context": "newfound_gap_return",
+        "scheduled_progress_m": 53003.5
+      },
+      {
+        "entry_id": "mc_story_05",
+        "maximum_anchor_offset_m": 1500.0,
+        "mode": "capacity_deeper",
+        "official_anchor_progress_m": 52259.5,
+        "route_context": "newfound_gap_return",
+        "scheduled_progress_m": 53219.5
+      },
+      {
+        "entry_id": "mc_story_06",
+        "maximum_anchor_offset_m": 1500.0,
+        "mode": "capacity_deeper",
+        "official_anchor_progress_m": 52259.5,
+        "route_context": "newfound_gap_return",
+        "scheduled_progress_m": 53435.5
+      },
+      {
+        "entry_id": "mc_story_07",
+        "maximum_anchor_offset_m": 1500.0,
+        "mode": "capacity_deeper",
+        "official_anchor_progress_m": 52259.5,
+        "route_context": "newfound_gap_return",
+        "scheduled_progress_m": 53651.5
+      },
+      {
+        "entry_id": "mc_cue_01",
+        "maximum_anchor_offset_m": 600.0,
+        "mode": "hard_auto",
+        "official_anchor_progress_m": 73230.6,
+        "route_context": "sugarlands",
+        "scheduled_progress_m": 72690.7
+      },
+      {
+        "entry_id": "mc_cue_02",
+        "maximum_anchor_offset_m": 600.0,
+        "mode": "hard_auto",
+        "official_anchor_progress_m": 73230.6,
+        "route_context": "sugarlands",
+        "scheduled_progress_m": 73050.7
+      },
+      {
+        "entry_id": "mc_story_01",
+        "maximum_anchor_offset_m": null,
+        "mode": "completion_deeper",
+        "official_anchor_progress_m": 73230.6,
+        "route_context": "sugarlands",
+        "scheduled_progress_m": null
+      },
+      {
+        "entry_id": "mc_story_02",
+        "maximum_anchor_offset_m": null,
+        "mode": "completion_deeper",
+        "official_anchor_progress_m": 73230.6,
+        "route_context": "sugarlands",
+        "scheduled_progress_m": null
+      }
+    ],
+    "policy_id": "smokies_checked_anchor_capacity_fallback_v1",
+    "stories_without_a_later_hard_cue_are_completion_only": true
+  },
+  "delivery_semantics_sha256": "a58e4dae46ae1cb51271645bb7bbe383d87782610b8c888a6209e4e1af3e2486",
+  "evidence_id": "smokies_mountain_crossing_nc_to_tn_delivery_20260811_v1",
+  "expected_delivery_semantics": {
+    "entries": [
+      {
+        "coordinates": {
+          "lat": 35.5115716,
+          "lng": -83.3069994
+        },
+        "delivery": {
+          "optional_content_may_delay": false,
+          "priority": "must_play",
+          "queue_policy": "durable_fifo_among_hard_auto"
+        },
+        "id": "mc_cue_09",
+        "mode": "hard_auto",
+        "stable_order": 1,
+        "trigger": {
+          "approach_bearing_deg": 359.1,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 4308.9,
+          "route_progress_start_m": 4128.9
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.5147648,
+          "lng": -83.3068135
+        },
+        "delivery": {
+          "optional_content_may_delay": false,
+          "priority": "must_play",
+          "queue_policy": "durable_fifo_among_hard_auto"
+        },
+        "id": "mc_cue_10",
+        "mode": "hard_auto",
+        "stable_order": 2,
+        "trigger": {
+          "approach_bearing_deg": 1.9,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 4668.9,
+          "route_progress_start_m": 4488.9
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.5185292,
+          "lng": -83.3068662
+        },
+        "delivery": {
+          "admission_policy_id": "capacity_before_next_hard_v1",
+          "fallback_mode": "completion_deeper",
+          "guard_before_next_hard_auto_window_s": 30,
+          "may_queue_behind_capacity": false,
+          "may_wait_for_active_hard_auto": true,
+          "next_hard_auto_story_id": "mc_cue_05"
+        },
+        "id": "mc_story_16",
+        "mode": "capacity_deeper",
+        "stable_order": 3,
+        "trigger": {
+          "approach_bearing_deg": 346.2,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 5088.9,
+          "route_progress_start_m": 4908.9
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.5215427,
+          "lng": -83.308067
+        },
+        "delivery": {
+          "admission_policy_id": "capacity_before_next_hard_v1",
+          "fallback_mode": "completion_deeper",
+          "guard_before_next_hard_auto_window_s": 30,
+          "may_queue_behind_capacity": false,
+          "may_wait_for_active_hard_auto": true,
+          "next_hard_auto_story_id": "mc_cue_05"
+        },
+        "id": "mc_story_17",
+        "mode": "capacity_deeper",
+        "stable_order": 4,
+        "trigger": {
+          "approach_bearing_deg": 11.9,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 5448.9,
+          "route_progress_start_m": 5268.9
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.5240666,
+          "lng": -83.305688
+        },
+        "delivery": {
+          "admission_policy_id": "capacity_before_next_hard_v1",
+          "fallback_mode": "completion_deeper",
+          "guard_before_next_hard_auto_window_s": 30,
+          "may_queue_behind_capacity": false,
+          "may_wait_for_active_hard_auto": true,
+          "next_hard_auto_story_id": "mc_cue_05"
+        },
+        "id": "mc_story_18",
+        "mode": "capacity_deeper",
+        "stable_order": 5,
+        "trigger": {
+          "approach_bearing_deg": 42.6,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 5808.9,
+          "route_progress_start_m": 5628.9
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.6113681,
+          "lng": -83.4270712
+        },
+        "delivery": {
+          "optional_content_may_delay": false,
+          "priority": "must_play",
+          "queue_policy": "durable_fifo_among_hard_auto"
+        },
+        "id": "mc_cue_05",
+        "mode": "hard_auto",
+        "stable_order": 6,
+        "trigger": {
+          "approach_bearing_deg": 50.4,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 29597.3,
+          "route_progress_start_m": 29417.3
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.6113681,
+          "lng": -83.4270712
+        },
+        "delivery": {
+          "optional_content_may_delay": false,
+          "priority": "must_play",
+          "queue_policy": "durable_fifo_among_hard_auto"
+        },
+        "id": "mc_cue_08",
+        "mode": "hard_auto",
+        "stable_order": 7,
+        "trigger": {
+          "approach_bearing_deg": 230.4,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 29957.3,
+          "route_progress_start_m": 29777.3
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.6101713,
+          "lng": -83.4300957
+        },
+        "delivery": {
+          "admission_policy_id": "capacity_before_next_hard_v1",
+          "fallback_mode": "completion_deeper",
+          "guard_before_next_hard_auto_window_s": 30,
+          "may_queue_behind_capacity": false,
+          "may_wait_for_active_hard_auto": true,
+          "next_hard_auto_story_id": "mc_cue_06"
+        },
+        "id": "mc_story_08",
+        "mode": "capacity_deeper",
+        "stable_order": 8,
+        "trigger": {
+          "approach_bearing_deg": 229.7,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 30305.3,
+          "route_progress_start_m": 30125.3
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.6096595,
+          "lng": -83.4323736
+        },
+        "delivery": {
+          "admission_policy_id": "capacity_before_next_hard_v1",
+          "fallback_mode": "completion_deeper",
+          "guard_before_next_hard_auto_window_s": 30,
+          "may_queue_behind_capacity": false,
+          "may_wait_for_active_hard_auto": true,
+          "next_hard_auto_story_id": "mc_cue_06"
+        },
+        "id": "mc_story_09",
+        "mode": "capacity_deeper",
+        "stable_order": 9,
+        "trigger": {
+          "approach_bearing_deg": 259.6,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 30521.3,
+          "route_progress_start_m": 30341.3
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.6090122,
+          "lng": -83.434538
+        },
+        "delivery": {
+          "admission_policy_id": "capacity_before_next_hard_v1",
+          "fallback_mode": "completion_deeper",
+          "guard_before_next_hard_auto_window_s": 30,
+          "may_queue_behind_capacity": false,
+          "may_wait_for_active_hard_auto": true,
+          "next_hard_auto_story_id": "mc_cue_06"
+        },
+        "id": "mc_story_10",
+        "mode": "capacity_deeper",
+        "stable_order": 10,
+        "trigger": {
+          "approach_bearing_deg": 263.5,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 30737.3,
+          "route_progress_start_m": 30557.3
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.6094029,
+          "lng": -83.4367498
+        },
+        "delivery": {
+          "admission_policy_id": "capacity_before_next_hard_v1",
+          "fallback_mode": "completion_deeper",
+          "guard_before_next_hard_auto_window_s": 30,
+          "may_queue_behind_capacity": false,
+          "may_wait_for_active_hard_auto": true,
+          "next_hard_auto_story_id": "mc_cue_06"
+        },
+        "id": "mc_story_11",
+        "mode": "capacity_deeper",
+        "stable_order": 11,
+        "trigger": {
+          "approach_bearing_deg": 241.4,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 30953.3,
+          "route_progress_start_m": 30773.3
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.6099191,
+          "lng": -83.4386796
+        },
+        "delivery": {
+          "admission_policy_id": "capacity_before_next_hard_v1",
+          "fallback_mode": "completion_deeper",
+          "guard_before_next_hard_auto_window_s": 30,
+          "may_queue_behind_capacity": false,
+          "may_wait_for_active_hard_auto": true,
+          "next_hard_auto_story_id": "mc_cue_06"
+        },
+        "id": "mc_story_12",
+        "mode": "capacity_deeper",
+        "stable_order": 12,
+        "trigger": {
+          "approach_bearing_deg": 259.5,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 31169.3,
+          "route_progress_start_m": 30989.3
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.5594834,
+          "lng": -83.4938693
+        },
+        "delivery": {
+          "optional_content_may_delay": false,
+          "priority": "must_play",
+          "queue_policy": "durable_fifo_among_hard_auto"
+        },
+        "id": "mc_cue_06",
+        "mode": "hard_auto",
+        "stable_order": 13,
+        "trigger": {
+          "approach_bearing_deg": 181.8,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 40883.4,
+          "route_progress_start_m": 40703.4
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.5594832,
+          "lng": -83.4938693
+        },
+        "delivery": {
+          "optional_content_may_delay": false,
+          "priority": "must_play",
+          "queue_policy": "durable_fifo_among_hard_auto"
+        },
+        "id": "mc_cue_07",
+        "mode": "hard_auto",
+        "stable_order": 14,
+        "trigger": {
+          "approach_bearing_deg": 1.8,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 41243.4,
+          "route_progress_start_m": 41063.4
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.5631098,
+          "lng": -83.4940551
+        },
+        "delivery": {
+          "admission_policy_id": "capacity_before_next_hard_v1",
+          "fallback_mode": "completion_deeper",
+          "guard_before_next_hard_auto_window_s": 30,
+          "may_queue_behind_capacity": false,
+          "may_wait_for_active_hard_auto": true,
+          "next_hard_auto_story_id": "mc_cue_03"
+        },
+        "id": "mc_story_13",
+        "mode": "capacity_deeper",
+        "stable_order": 15,
+        "trigger": {
+          "approach_bearing_deg": 347.4,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 41663.4,
+          "route_progress_start_m": 41483.4
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.565363,
+          "lng": -83.4923762
+        },
+        "delivery": {
+          "admission_policy_id": "capacity_before_next_hard_v1",
+          "fallback_mode": "completion_deeper",
+          "guard_before_next_hard_auto_window_s": 30,
+          "may_queue_behind_capacity": false,
+          "may_wait_for_active_hard_auto": true,
+          "next_hard_auto_story_id": "mc_cue_03"
+        },
+        "id": "mc_story_14",
+        "mode": "capacity_deeper",
+        "stable_order": 16,
+        "trigger": {
+          "approach_bearing_deg": 84.4,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 42023.4,
+          "route_progress_start_m": 41843.4
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.5651126,
+          "lng": -83.4884206
+        },
+        "delivery": {
+          "admission_policy_id": "capacity_before_next_hard_v1",
+          "fallback_mode": "completion_deeper",
+          "guard_before_next_hard_auto_window_s": 30,
+          "may_queue_behind_capacity": false,
+          "may_wait_for_active_hard_auto": true,
+          "next_hard_auto_story_id": "mc_cue_03"
+        },
+        "id": "mc_story_15",
+        "mode": "capacity_deeper",
+        "stable_order": 17,
+        "trigger": {
+          "approach_bearing_deg": 95.1,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 42383.4,
+          "route_progress_start_m": 42203.4
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.611368,
+          "lng": -83.4270714
+        },
+        "delivery": {
+          "optional_content_may_delay": false,
+          "priority": "must_play",
+          "queue_policy": "durable_fifo_among_hard_auto"
+        },
+        "id": "mc_cue_03",
+        "mode": "hard_auto",
+        "stable_order": 18,
+        "trigger": {
+          "approach_bearing_deg": 50.4,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 52169.5,
+          "route_progress_start_m": 51989.5
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.6117819,
+          "lng": -83.4235116
+        },
+        "delivery": {
+          "optional_content_may_delay": false,
+          "priority": "must_play",
+          "queue_policy": "durable_fifo_among_hard_auto"
+        },
+        "id": "mc_cue_04",
+        "mode": "hard_auto",
+        "stable_order": 19,
+        "trigger": {
+          "approach_bearing_deg": 66.2,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 52529.5,
+          "route_progress_start_m": 52349.5
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.6141737,
+          "lng": -83.4228462
+        },
+        "delivery": {
+          "admission_policy_id": "capacity_before_next_hard_v1",
+          "fallback_mode": "completion_deeper",
+          "guard_before_next_hard_auto_window_s": 30,
+          "may_queue_behind_capacity": false,
+          "may_wait_for_active_hard_auto": true,
+          "next_hard_auto_story_id": "mc_cue_01"
+        },
+        "id": "mc_story_03",
+        "mode": "capacity_deeper",
+        "stable_order": 20,
+        "trigger": {
+          "approach_bearing_deg": 325.2,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 52877.5,
+          "route_progress_start_m": 52697.5
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.6151797,
+          "lng": -83.4247457
+        },
+        "delivery": {
+          "admission_policy_id": "capacity_before_next_hard_v1",
+          "fallback_mode": "completion_deeper",
+          "guard_before_next_hard_auto_window_s": 30,
+          "may_queue_behind_capacity": false,
+          "may_wait_for_active_hard_auto": true,
+          "next_hard_auto_story_id": "mc_cue_01"
+        },
+        "id": "mc_story_04",
+        "mode": "capacity_deeper",
+        "stable_order": 21,
+        "trigger": {
+          "approach_bearing_deg": 282.5,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 53093.5,
+          "route_progress_start_m": 52913.5
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.6158496,
+          "lng": -83.4240573
+        },
+        "delivery": {
+          "admission_policy_id": "capacity_before_next_hard_v1",
+          "fallback_mode": "completion_deeper",
+          "guard_before_next_hard_auto_window_s": 30,
+          "may_queue_behind_capacity": false,
+          "may_wait_for_active_hard_auto": true,
+          "next_hard_auto_story_id": "mc_cue_01"
+        },
+        "id": "mc_story_05",
+        "mode": "capacity_deeper",
+        "stable_order": 22,
+        "trigger": {
+          "approach_bearing_deg": 88.5,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 53309.5,
+          "route_progress_start_m": 53129.5
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.6170854,
+          "lng": -83.4223771
+        },
+        "delivery": {
+          "admission_policy_id": "capacity_before_next_hard_v1",
+          "fallback_mode": "completion_deeper",
+          "guard_before_next_hard_auto_window_s": 30,
+          "may_queue_behind_capacity": false,
+          "may_wait_for_active_hard_auto": true,
+          "next_hard_auto_story_id": "mc_cue_01"
+        },
+        "id": "mc_story_06",
+        "mode": "capacity_deeper",
+        "stable_order": 23,
+        "trigger": {
+          "approach_bearing_deg": 65.2,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 53525.5,
+          "route_progress_start_m": 53345.5
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.6168257,
+          "lng": -83.4201651
+        },
+        "delivery": {
+          "admission_policy_id": "capacity_before_next_hard_v1",
+          "fallback_mode": "completion_deeper",
+          "guard_before_next_hard_auto_window_s": 30,
+          "may_queue_behind_capacity": false,
+          "may_wait_for_active_hard_auto": true,
+          "next_hard_auto_story_id": "mc_cue_01"
+        },
+        "id": "mc_story_07",
+        "mode": "capacity_deeper",
+        "stable_order": 24,
+        "trigger": {
+          "approach_bearing_deg": 90.0,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 53741.5,
+          "route_progress_start_m": 53561.5
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.6821379,
+          "lng": -83.5334185
+        },
+        "delivery": {
+          "optional_content_may_delay": false,
+          "priority": "must_play",
+          "queue_policy": "durable_fifo_among_hard_auto"
+        },
+        "id": "mc_cue_01",
+        "mode": "hard_auto",
+        "stable_order": 25,
+        "trigger": {
+          "approach_bearing_deg": 327.4,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 72780.7,
+          "route_progress_start_m": 72600.7
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.6843752,
+          "lng": -83.5356029
+        },
+        "delivery": {
+          "optional_content_may_delay": false,
+          "priority": "must_play",
+          "queue_policy": "durable_fifo_among_hard_auto"
+        },
+        "id": "mc_cue_02",
+        "mode": "hard_auto",
+        "stable_order": 26,
+        "trigger": {
+          "approach_bearing_deg": 251.6,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 73140.7,
+          "route_progress_start_m": 72960.7
+        }
+      },
+      {
+        "delivery": {
+          "availability": "after_route_completion",
+          "requires_route_completion": true
+        },
+        "id": "mc_story_01",
+        "mode": "completion_deeper",
+        "stable_order": 27
+      },
+      {
+        "delivery": {
+          "availability": "after_route_completion",
+          "requires_route_completion": true
+        },
+        "id": "mc_story_02",
+        "mode": "completion_deeper",
+        "stable_order": 28
+      }
+    ],
+    "entry_ids_by_mode": {
+      "capacity_deeper": [
+        "mc_story_16",
+        "mc_story_17",
+        "mc_story_18",
+        "mc_story_08",
+        "mc_story_09",
+        "mc_story_10",
+        "mc_story_11",
+        "mc_story_12",
+        "mc_story_13",
+        "mc_story_14",
+        "mc_story_15",
+        "mc_story_03",
+        "mc_story_04",
+        "mc_story_05",
+        "mc_story_06",
+        "mc_story_07"
+      ],
+      "completion_deeper": [
+        "mc_story_01",
+        "mc_story_02"
+      ],
+      "hard_auto": [
+        "mc_cue_09",
+        "mc_cue_10",
+        "mc_cue_05",
+        "mc_cue_08",
+        "mc_cue_06",
+        "mc_cue_07",
+        "mc_cue_03",
+        "mc_cue_04",
+        "mc_cue_01",
+        "mc_cue_02"
+      ],
+      "stopped_deeper": []
+    },
+    "ogle_prelude_entry_ids": [],
+    "route_distance_m": 73230.7,
+    "route_geometry_sha256": "2da7812bfd8f129492420cf6cfeca2d990950a0eb057f98c586bbcbd4aaad5b3"
+  },
+  "gates": {
+    "capacity_guard_s": 30,
+    "route_end_tail_limit_s": 240,
+    "speed_fixtures_mph": [
+      15,
+      36,
+      65,
+      75
+    ],
+    "trigger_to_play_latency_limit_s": 180
+  },
+  "kind": "original_checked_long_form_delivery_readiness",
+  "narration_binding": {
+    "directional_replacement_count": 5,
+    "effective_request_set_sha256": "dc4f04397676b3756e95e92fbe9d5ee9d69497550fff115a268637c59e409c01",
+    "effective_requests": [
+      {
+        "entry_id": "mc_cue_01",
+        "provider_request_id": "mc_cue_01__nc_to_tn",
+        "request_kind": "directional_override",
+        "transcript_sha256": "b86b8b1cd7bdf268e5c39823d534992ed54e15c0fdba0eb0ae023f97f5e67df9"
+      },
+      {
+        "entry_id": "mc_cue_02",
+        "provider_request_id": "mc_cue_02__nc_to_tn",
+        "request_kind": "directional_override",
+        "transcript_sha256": "495fdcd6b85e8cf5bd706719f7bee12c81cc9885499b090e77560a0936b91ca9"
+      },
+      {
+        "entry_id": "mc_cue_03",
+        "provider_request_id": "mc_cue_03__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "a7e4736d0885ee1f97a121ff9c9f34e8e7c7483149cdcbd51bc7eefdb234d663"
+      },
+      {
+        "entry_id": "mc_cue_04",
+        "provider_request_id": "mc_cue_04__nc_to_tn",
+        "request_kind": "directional_override",
+        "transcript_sha256": "8ec1ecdc7587a666e05531001862c1de38a4a7cb01d31b062e9b94ffc55b8694"
+      },
+      {
+        "entry_id": "mc_cue_05",
+        "provider_request_id": "mc_cue_05__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "d5ed1134c0ac7c77dd95f0555c60ab8dbbfa9923dfe4dbe391382fcbd0005a82"
+      },
+      {
+        "entry_id": "mc_cue_06",
+        "provider_request_id": "mc_cue_06__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "3bce4aefb637b04bd44ba9a5eb9d0d2bcf8ef50827923bc65cd3eb5a19e58344"
+      },
+      {
+        "entry_id": "mc_cue_07",
+        "provider_request_id": "mc_cue_07__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "6611b51e476f9eb31a017fb4d4000a343f8bfb1c1b02dc11512b8945dc0e36ba"
+      },
+      {
+        "entry_id": "mc_cue_08",
+        "provider_request_id": "mc_cue_08__nc_to_tn",
+        "request_kind": "directional_override",
+        "transcript_sha256": "431beed19885a1db7bd1cd7a2242c0cbbe99a98f9bad298fedf0497fc235dfa1"
+      },
+      {
+        "entry_id": "mc_cue_09",
+        "provider_request_id": "mc_cue_09__nc_to_tn",
+        "request_kind": "directional_override",
+        "transcript_sha256": "95cb13414d2f35338c74134f4971a152482ca4732294abf6f03811ff0359129f"
+      },
+      {
+        "entry_id": "mc_cue_10",
+        "provider_request_id": "mc_cue_10__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "c195eefde74e7e7e6c8a6826ee81706696b56e2409ad3bdc8f7839a5eb7104ed"
+      },
+      {
+        "entry_id": "mc_story_01",
+        "provider_request_id": "mc_story_01__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "988fc808bdddf5672f5525a21935ec641e6dbf14a243ff2299e4e0b52ff0fd66"
+      },
+      {
+        "entry_id": "mc_story_02",
+        "provider_request_id": "mc_story_02__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "f8eeeaeab269dec793b3769ce10882cc4f62880053ce73371b16e0b0af8ee693"
+      },
+      {
+        "entry_id": "mc_story_03",
+        "provider_request_id": "mc_story_03__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "0e91d50cc35dd2b30f60e7c554e936570fe5c0d13217ec72521e3744039ff53d"
+      },
+      {
+        "entry_id": "mc_story_04",
+        "provider_request_id": "mc_story_04__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "e5a93400302164fe9af07243d810a0b10b187d9c6cfe0137667a26236d3abcfb"
+      },
+      {
+        "entry_id": "mc_story_05",
+        "provider_request_id": "mc_story_05__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "53e348828c9b7ba95a78eba8d74520a91ea340938c918ed545051c9e2d75469c"
+      },
+      {
+        "entry_id": "mc_story_06",
+        "provider_request_id": "mc_story_06__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "a996ca1900427921dda97e5878a89a571e3960855d929bb3da3173157773334d"
+      },
+      {
+        "entry_id": "mc_story_07",
+        "provider_request_id": "mc_story_07__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "fe75b212b5d0897ec114eb1ec0cb81c6db80753b378e0f29ad94b1ce6511e861"
+      },
+      {
+        "entry_id": "mc_story_08",
+        "provider_request_id": "mc_story_08__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "af43ad867c71ca060765b1c71f67e07c40ad7b451887b8f8b9c8fa31253fac7a"
+      },
+      {
+        "entry_id": "mc_story_09",
+        "provider_request_id": "mc_story_09__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "44f2c8331e056d19c34b4391734d68cc41edf638d0a2cd9b2b388a96b73194e3"
+      },
+      {
+        "entry_id": "mc_story_10",
+        "provider_request_id": "mc_story_10__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "accc22a1dfe7385d7ad2cb962073215ccfe7a6de4427c350e91ce359c35f5e03"
+      },
+      {
+        "entry_id": "mc_story_11",
+        "provider_request_id": "mc_story_11__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "1b1712e484302dd627b89e1bb10ac3d73732e53a5087e0fbd061ff116ad5a376"
+      },
+      {
+        "entry_id": "mc_story_12",
+        "provider_request_id": "mc_story_12__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "28a4eb511c3ceaf28110f6deb16ce73e69e80b4979d16e11bc7169a6b5eb042e"
+      },
+      {
+        "entry_id": "mc_story_13",
+        "provider_request_id": "mc_story_13__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "5f8bbe6c47232ce8ba1987a05c0a2eb970061df95e0e2f9f1048c9f57d6e5806"
+      },
+      {
+        "entry_id": "mc_story_14",
+        "provider_request_id": "mc_story_14__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "4df6fb7427e0e48064a00a51117bbf01d54373a7144f2a5c177d44e6552c2ca6"
+      },
+      {
+        "entry_id": "mc_story_15",
+        "provider_request_id": "mc_story_15__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "ddde021f032738a4b4d7d6f95f845812e6ae3fb1334fddfc71718873c52a45dd"
+      },
+      {
+        "entry_id": "mc_story_16",
+        "provider_request_id": "mc_story_16__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "bc7b54fdc62a4c4edba249e1f9a34c378f14686a9e56d5802d0cff151060e1de"
+      },
+      {
+        "entry_id": "mc_story_17",
+        "provider_request_id": "mc_story_17__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "70eeaf7145fae2a2983fef0e1fb05275554b7fab6465cfed33bfd478bc7e3211"
+      },
+      {
+        "entry_id": "mc_story_18",
+        "provider_request_id": "mc_story_18__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "26e0b190acf730c230819a78cb1e705224f8b72e891ea8d99125587eba981576"
+      }
+    ],
+    "entry_count": 28
+  },
+  "product_id": "great_smoky_mountains_ridges_rivers_living_memory",
+  "publication_authorized": false,
+  "real_audio_required": true,
+  "recorded_from_task_id": "019fe9fb-cafa-75d3-b663-1e5051731cd5",
+  "route_binding": {
+    "anchor_order": [
+      "cherokee",
+      "oconaluftee",
+      "newfound_gap_outbound",
+      "kuwohi",
+      "newfound_gap_return",
+      "sugarlands"
+    ],
+    "coordinate_count": 6571,
+    "distance_m": 73230.7,
+    "full_geometry_required": true,
+    "geometry_sha256": "fce92ad2377fa6eafbc7779d952f3825895ed8ff365094a6ea32e6c83ce4d141",
+    "official_candidate_status": "official_geometry_candidate",
+    "official_evidence_geometry_sha256": "2da7812bfd8f129492420cf6cfeca2d990950a0eb057f98c586bbcbd4aaad5b3",
+    "official_route_evidence_path": "originals/smokies/official_route_evidence_v1.json",
+    "publication_evidence": false,
+    "route_spec_id": "mountain-crossing-nc-to-tn",
+    "route_spec_path": "originals/smokies/route_variants_v1.json"
+  },
+  "schema_version": 1,
+  "source_sha256_by_path": {
+    "db/original_manifest_v3.py": "850df80086d336a3a3652d73a1e0eda403e89f06b241c2a710bcb6cbf38e53de",
+    "db/originals_remaining_validation.py": "199e0efac6bef0a64a700c4ff3a5d8863efe9780a0e14f0d8c4004891d40b39c",
+    "db/originals_validation.py": "c1f7946f0970a6ee85273a4dea0f27f544d62a7c48ec6aed68b9beca78682bd7",
+    "mobile/lib/originals/longFormScheduler.ts": "061708316537df55fb7d04b854795bcfa7f49a473ce53daa809a29bd6ab61913",
+    "mobile/lib/originals/manifestV3.ts": "6d242d9bd2f04435faf3521fadcc9a8c0803a1099c65f5c8447bc4499bb3c67e",
+    "mobile/lib/originals/session.ts": "560d0425ef42e1aab348ded5d1541ed66eb3de7e4b1968128a80f5a32da936c9",
+    "mobile/lib/originals/triggerEngine.ts": "d8f502d4eec89310bbf8fa0031814570d09965bab066385d6229f3b348215955",
+    "mobile/scripts/validate-original-long-form.ts": "bc8684bc8a1f40e772578116320d77dd88747a160991b1fcb9fa5d0f6ba4e4d8",
+    "originals/smokies/checkpoint2_owner_approval_v1.json": "3cc18dad4d1b6a80f2259e58cbe50fba3804096d0c00437eca9103e626078d5c",
+    "originals/smokies/editorial_mountain_crossing_v1.json": "4a7e0acf04075da914ef486b86210167ff4220b8ea901083bd4df75d8fe21c58",
+    "originals/smokies/elevenlabs_james_mountain_crossing_lock_v1.json": "561a8a8bf62f534d485df0ebf523d13a9defd962af136240fd46e1ca5aacec25",
+    "originals/smokies/official_route_evidence_v1.json": "d946ffaf8f21ad97399b6dedfb5cbe9483fce0787653b389d7075d933f398c60",
+    "originals/smokies/remaining_chapters_review_packet_v1.json": "3ef71377c9e347cd53335cbf487d039ff973b8c28f9628b622fcee74c714b015",
+    "originals/smokies/route_variants_v1.json": "49d55fa8819822b18af54983ea11893a661689102c14532a88ebacf2ec587f24",
+    "originals/smokies/source_dossiers_v1.json": "8eb22ca5110f0f9a4287b8f184624348c2a2ca2dbc36e27ef59fc022057ce18f",
+    "scripts/build_smokies_remaining_delivery_readiness.py": "b90f6d9ea5d6f873432ef1acb582be1a0f4b56e33ccae303d235c4e1509285d8"
+  },
+  "variant_id": "nc_to_tn"
+}

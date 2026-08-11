@@ -1,0 +1,24 @@
+{
+  "authorization": {
+    "cultural_scope_expansion_authorized": false,
+    "decision": "allow_validation_only_route_target",
+    "draft_mutation_authorized": false,
+    "global_valhalla_reconfiguration_authorized": false,
+    "project_owner_authorized": true,
+    "public_release_authorized": false,
+    "source_task_id": "019fe9fb-cafa-75d3-b663-1e5051731cd5"
+  },
+  "chapter_id": "mountain_crossing",
+  "delivery_contract_binding": "resolve_exact_normalized_manifest_v3_contract_at_validation_time_after_checked_readiness",
+  "delivery_readiness_path": "originals/smokies/mountain_crossing_nc_to_tn_delivery_readiness_v1.json",
+  "delivery_readiness_sha256": "d416bf0c716434f3ee651fb8fd379ca01d082d438a16130d182cb3314d905e2d",
+  "delivery_semantics_sha256": "a58e4dae46ae1cb51271645bb7bbe383d87782610b8c888a6209e4e1af3e2486",
+  "evidence_id": "smokies_mountain_crossing_nc_to_tn_route_network_target_20260811_v1",
+  "geometry_sha256": "fce92ad2377fa6eafbc7779d952f3825895ed8ff365094a6ea32e6c83ce4d141",
+  "kind": "original_route_network_validation_target_authorization",
+  "product_id": "great_smoky_mountains_ridges_rivers_living_memory",
+  "require_full_geometry_within_configured_bounds": true,
+  "required_area_id": "south_tn",
+  "schema_version": 2,
+  "variant_id": "nc_to_tn"
+}

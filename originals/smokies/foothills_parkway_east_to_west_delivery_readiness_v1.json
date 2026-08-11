@@ -1,0 +1,603 @@
+{
+  "authoring_estimates_accepted": false,
+  "boundaries": {
+    "database_accessed": false,
+    "manifest_created_or_mutated": false,
+    "network_accessed": false,
+    "provider_accessed": false,
+    "public_release_authorized": false,
+    "real_audio_timing_passed": false,
+    "trusted_report_created": false,
+    "validation_only": true
+  },
+  "chapter_id": "foothills_parkway",
+  "consumer_delivery_modes_supported": true,
+  "consumer_runtime_status": "ready_for_real_audio_validation",
+  "delivery_design": {
+    "all_entries_accounted_for_exactly_once": true,
+    "capacity_stories_fall_back_after_route": true,
+    "hard_cues_have_priority": true,
+    "long_stories_use_capacity_admission_when_a_later_hard_cue_exists": true,
+    "parking_or_stopped_playback_claimed": false,
+    "placement_bindings": [
+      {
+        "entry_id": "fp_cue_07",
+        "maximum_anchor_offset_m": 600.0,
+        "mode": "hard_auto",
+        "official_anchor_progress_m": 0.0,
+        "route_context": "wears_valley_terminus",
+        "scheduled_progress_m": 180
+      },
+      {
+        "entry_id": "fp_cue_06",
+        "maximum_anchor_offset_m": 600.0,
+        "mode": "hard_auto",
+        "official_anchor_progress_m": 8325.6,
+        "route_context": "foothills_missing_link",
+        "scheduled_progress_m": 8325.6
+      },
+      {
+        "entry_id": "fp_story_03",
+        "maximum_anchor_offset_m": 1500.0,
+        "mode": "capacity_deeper",
+        "official_anchor_progress_m": 8325.6,
+        "route_context": "foothills_missing_link",
+        "scheduled_progress_m": 9195.6
+      },
+      {
+        "entry_id": "fp_cue_05",
+        "maximum_anchor_offset_m": 600.0,
+        "mode": "hard_auto",
+        "official_anchor_progress_m": 23743.3,
+        "route_context": "walland_east_connection",
+        "scheduled_progress_m": 23743.3
+      },
+      {
+        "entry_id": "fp_story_02",
+        "maximum_anchor_offset_m": 1500.0,
+        "mode": "capacity_deeper",
+        "official_anchor_progress_m": 23743.3,
+        "route_context": "walland_east_connection",
+        "scheduled_progress_m": 24613.3
+      },
+      {
+        "entry_id": "fp_cue_03",
+        "maximum_anchor_offset_m": 600.0,
+        "mode": "hard_auto",
+        "official_anchor_progress_m": 39400.5,
+        "route_context": "look_rock",
+        "scheduled_progress_m": 39220.5
+      },
+      {
+        "entry_id": "fp_cue_04",
+        "maximum_anchor_offset_m": 600.0,
+        "mode": "hard_auto",
+        "official_anchor_progress_m": 39400.5,
+        "route_context": "look_rock",
+        "scheduled_progress_m": 39580.5
+      },
+      {
+        "entry_id": "fp_story_04",
+        "maximum_anchor_offset_m": 1500.0,
+        "mode": "capacity_deeper",
+        "official_anchor_progress_m": 39400.5,
+        "route_context": "look_rock",
+        "scheduled_progress_m": 40000.5
+      },
+      {
+        "entry_id": "fp_story_05",
+        "maximum_anchor_offset_m": 1500.0,
+        "mode": "capacity_deeper",
+        "official_anchor_progress_m": 39400.5,
+        "route_context": "look_rock",
+        "scheduled_progress_m": 40360.5
+      },
+      {
+        "entry_id": "fp_story_06",
+        "maximum_anchor_offset_m": 1500.0,
+        "mode": "capacity_deeper",
+        "official_anchor_progress_m": 39400.5,
+        "route_context": "look_rock",
+        "scheduled_progress_m": 40720.5
+      },
+      {
+        "entry_id": "fp_cue_01",
+        "maximum_anchor_offset_m": 600.0,
+        "mode": "hard_auto",
+        "official_anchor_progress_m": 50816.7,
+        "route_context": "chilhowee_terminus",
+        "scheduled_progress_m": 50276.7
+      },
+      {
+        "entry_id": "fp_cue_02",
+        "maximum_anchor_offset_m": 600.0,
+        "mode": "hard_auto",
+        "official_anchor_progress_m": 50816.7,
+        "route_context": "chilhowee_terminus",
+        "scheduled_progress_m": 50636.7
+      },
+      {
+        "entry_id": "fp_story_01",
+        "maximum_anchor_offset_m": null,
+        "mode": "completion_deeper",
+        "official_anchor_progress_m": 50816.7,
+        "route_context": "chilhowee_terminus",
+        "scheduled_progress_m": null
+      }
+    ],
+    "policy_id": "smokies_checked_anchor_capacity_fallback_v1",
+    "stories_without_a_later_hard_cue_are_completion_only": true
+  },
+  "delivery_semantics_sha256": "c418f54fe193ee61251333090bfc7a5cf8f6ba2d70c908a3cf15cd98a8408c01",
+  "evidence_id": "smokies_foothills_parkway_east_to_west_delivery_20260811_v1",
+  "expected_delivery_semantics": {
+    "entries": [
+      {
+        "coordinates": {
+          "lat": 35.7219957,
+          "lng": -83.6458233
+        },
+        "delivery": {
+          "optional_content_may_delay": false,
+          "priority": "must_play",
+          "queue_policy": "durable_fifo_among_hard_auto"
+        },
+        "id": "fp_cue_07",
+        "mode": "hard_auto",
+        "stable_order": 1,
+        "trigger": {
+          "approach_bearing_deg": 22.9,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 270,
+          "route_progress_start_m": 90
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.7137608,
+          "lng": -83.7152249
+        },
+        "delivery": {
+          "optional_content_may_delay": false,
+          "priority": "must_play",
+          "queue_policy": "durable_fifo_among_hard_auto"
+        },
+        "id": "fp_cue_06",
+        "mode": "hard_auto",
+        "stable_order": 2,
+        "trigger": {
+          "approach_bearing_deg": 256.3,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 8415.6,
+          "route_progress_start_m": 8235.6
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.7116617,
+          "lng": -83.7239031
+        },
+        "delivery": {
+          "admission_policy_id": "capacity_before_next_hard_v1",
+          "fallback_mode": "completion_deeper",
+          "guard_before_next_hard_auto_window_s": 30,
+          "may_queue_behind_capacity": false,
+          "may_wait_for_active_hard_auto": true,
+          "next_hard_auto_story_id": "fp_cue_05"
+        },
+        "id": "fp_story_03",
+        "mode": "capacity_deeper",
+        "stable_order": 3,
+        "trigger": {
+          "approach_bearing_deg": 236.9,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 9285.6,
+          "route_progress_start_m": 9105.6
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.7184076,
+          "lng": -83.8219101
+        },
+        "delivery": {
+          "optional_content_may_delay": false,
+          "priority": "must_play",
+          "queue_policy": "durable_fifo_among_hard_auto"
+        },
+        "id": "fp_cue_05",
+        "mode": "hard_auto",
+        "stable_order": 4,
+        "trigger": {
+          "approach_bearing_deg": 270.9,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 23833.3,
+          "route_progress_start_m": 23653.3
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.7182986,
+          "lng": -83.8312745
+        },
+        "delivery": {
+          "admission_policy_id": "capacity_before_next_hard_v1",
+          "fallback_mode": "completion_deeper",
+          "guard_before_next_hard_auto_window_s": 30,
+          "may_queue_behind_capacity": false,
+          "may_wait_for_active_hard_auto": true,
+          "next_hard_auto_story_id": "fp_cue_03"
+        },
+        "id": "fp_story_02",
+        "mode": "capacity_deeper",
+        "stable_order": 5,
+        "trigger": {
+          "approach_bearing_deg": 276.8,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 24703.3,
+          "route_progress_start_m": 24523.3
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.6310001,
+          "lng": -83.9417942
+        },
+        "delivery": {
+          "optional_content_may_delay": false,
+          "priority": "must_play",
+          "queue_policy": "durable_fifo_among_hard_auto"
+        },
+        "id": "fp_cue_03",
+        "mode": "hard_auto",
+        "stable_order": 6,
+        "trigger": {
+          "approach_bearing_deg": 268.0,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 39310.5,
+          "route_progress_start_m": 39130.5
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.6318211,
+          "lng": -83.9455255
+        },
+        "delivery": {
+          "optional_content_may_delay": false,
+          "priority": "must_play",
+          "queue_policy": "durable_fifo_among_hard_auto"
+        },
+        "id": "fp_cue_04",
+        "mode": "hard_auto",
+        "stable_order": 7,
+        "trigger": {
+          "approach_bearing_deg": 273.4,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 39670.5,
+          "route_progress_start_m": 39490.5
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.6289629,
+          "lng": -83.948251
+        },
+        "delivery": {
+          "admission_policy_id": "capacity_before_next_hard_v1",
+          "fallback_mode": "completion_deeper",
+          "guard_before_next_hard_auto_window_s": 30,
+          "may_queue_behind_capacity": false,
+          "may_wait_for_active_hard_auto": true,
+          "next_hard_auto_story_id": "fp_cue_01"
+        },
+        "id": "fp_story_04",
+        "mode": "capacity_deeper",
+        "stable_order": 8,
+        "trigger": {
+          "approach_bearing_deg": 227.7,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 40090.5,
+          "route_progress_start_m": 39910.5
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.6267702,
+          "lng": -83.9508477
+        },
+        "delivery": {
+          "admission_policy_id": "capacity_before_next_hard_v1",
+          "fallback_mode": "completion_deeper",
+          "guard_before_next_hard_auto_window_s": 30,
+          "may_queue_behind_capacity": false,
+          "may_wait_for_active_hard_auto": true,
+          "next_hard_auto_story_id": "fp_cue_01"
+        },
+        "id": "fp_story_05",
+        "mode": "capacity_deeper",
+        "stable_order": 9,
+        "trigger": {
+          "approach_bearing_deg": 273.3,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 40450.5,
+          "route_progress_start_m": 40270.5
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.6264936,
+          "lng": -83.9547433
+        },
+        "delivery": {
+          "admission_policy_id": "capacity_before_next_hard_v1",
+          "fallback_mode": "completion_deeper",
+          "guard_before_next_hard_auto_window_s": 30,
+          "may_queue_behind_capacity": false,
+          "may_wait_for_active_hard_auto": true,
+          "next_hard_auto_story_id": "fp_cue_01"
+        },
+        "id": "fp_story_06",
+        "mode": "capacity_deeper",
+        "stable_order": 10,
+        "trigger": {
+          "approach_bearing_deg": 261.0,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 40810.5,
+          "route_progress_start_m": 40630.5
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.5615482,
+          "lng": -84.0070016
+        },
+        "delivery": {
+          "optional_content_may_delay": false,
+          "priority": "must_play",
+          "queue_policy": "durable_fifo_among_hard_auto"
+        },
+        "id": "fp_cue_01",
+        "mode": "hard_auto",
+        "stable_order": 11,
+        "trigger": {
+          "approach_bearing_deg": 220.4,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 50366.7,
+          "route_progress_start_m": 50186.7
+        }
+      },
+      {
+        "coordinates": {
+          "lat": 35.5589191,
+          "lng": -84.0092995
+        },
+        "delivery": {
+          "optional_content_may_delay": false,
+          "priority": "must_play",
+          "queue_policy": "durable_fifo_among_hard_auto"
+        },
+        "id": "fp_cue_02",
+        "mode": "hard_auto",
+        "stable_order": 12,
+        "trigger": {
+          "approach_bearing_deg": 206.5,
+          "bearing_tolerance_deg": 70.0,
+          "enter_radius_m": 160.0,
+          "exit_radius_m": 260.0,
+          "lead_time_s": 0.0,
+          "route_progress_end_m": 50726.7,
+          "route_progress_start_m": 50546.7
+        }
+      },
+      {
+        "delivery": {
+          "availability": "after_route_completion",
+          "requires_route_completion": true
+        },
+        "id": "fp_story_01",
+        "mode": "completion_deeper",
+        "stable_order": 13
+      }
+    ],
+    "entry_ids_by_mode": {
+      "capacity_deeper": [
+        "fp_story_03",
+        "fp_story_02",
+        "fp_story_04",
+        "fp_story_05",
+        "fp_story_06"
+      ],
+      "completion_deeper": [
+        "fp_story_01"
+      ],
+      "hard_auto": [
+        "fp_cue_07",
+        "fp_cue_06",
+        "fp_cue_05",
+        "fp_cue_03",
+        "fp_cue_04",
+        "fp_cue_01",
+        "fp_cue_02"
+      ],
+      "stopped_deeper": []
+    },
+    "ogle_prelude_entry_ids": [],
+    "route_distance_m": 50816.7,
+    "route_geometry_sha256": "58a8f0322c03136efd13f0bbcf3de00aab7b270fe37211efac1c07850ea6a358"
+  },
+  "gates": {
+    "capacity_guard_s": 30,
+    "route_end_tail_limit_s": 240,
+    "speed_fixtures_mph": [
+      15,
+      36,
+      65,
+      75
+    ],
+    "trigger_to_play_latency_limit_s": 180
+  },
+  "kind": "original_checked_long_form_delivery_readiness",
+  "narration_binding": {
+    "directional_replacement_count": 3,
+    "effective_request_set_sha256": "b7e1f031e0a3a5b05097b9efd34e6489adb7872b52ddb12067f39e9ca4d6b574",
+    "effective_requests": [
+      {
+        "entry_id": "fp_cue_01",
+        "provider_request_id": "fp_cue_01__east_to_west",
+        "request_kind": "directional_override",
+        "transcript_sha256": "395b65fd135d43ebfde1ad4b66962030fcf4a659ade759860c52f7576a322939"
+      },
+      {
+        "entry_id": "fp_cue_02",
+        "provider_request_id": "fp_cue_02__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "50cc89fa960f2896f4897ea1256388845ebc4e191c2a28b0e9c5bcf6d133b4f1"
+      },
+      {
+        "entry_id": "fp_cue_03",
+        "provider_request_id": "fp_cue_03__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "3955b44ded4912c6726ce5037d06e2b1d5a23198aa1efd5ed7be8adca6ac02f0"
+      },
+      {
+        "entry_id": "fp_cue_04",
+        "provider_request_id": "fp_cue_04__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "57494b47b2a41ea3eca334a9e902b10efd60de699a30be277838dab574830171"
+      },
+      {
+        "entry_id": "fp_cue_05",
+        "provider_request_id": "fp_cue_05__east_to_west",
+        "request_kind": "directional_override",
+        "transcript_sha256": "1564cd72eab95fcb5f915ae1202099a88d2374449b7534f137ec83410292dfac"
+      },
+      {
+        "entry_id": "fp_cue_06",
+        "provider_request_id": "fp_cue_06__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "cae6702b9820d943da22ccf77c37f45ac67738e139524da7474429e4c8e02c90"
+      },
+      {
+        "entry_id": "fp_cue_07",
+        "provider_request_id": "fp_cue_07__east_to_west",
+        "request_kind": "directional_override",
+        "transcript_sha256": "62ef3e77f6adeb8612a82bd9011e40e33c6bcb236f562da45e3e490ef301beac"
+      },
+      {
+        "entry_id": "fp_story_01",
+        "provider_request_id": "fp_story_01__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "48769cc73c2984673775b3bf96f714c7577152aa383c0c4162cb155187f8fbf2"
+      },
+      {
+        "entry_id": "fp_story_02",
+        "provider_request_id": "fp_story_02__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "36d1b5f218ad0dc0a7fe05827a40e4d7bbadbd85814ae503513b0f4efa987a01"
+      },
+      {
+        "entry_id": "fp_story_03",
+        "provider_request_id": "fp_story_03__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "fadd566208b133389f9005345337b39d12d8de1f195f2cbbe81b6159295cd6fd"
+      },
+      {
+        "entry_id": "fp_story_04",
+        "provider_request_id": "fp_story_04__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "0549301d81d4f9b17da862147e940782bfdd66d6871677b568a2e4cae7af814c"
+      },
+      {
+        "entry_id": "fp_story_05",
+        "provider_request_id": "fp_story_05__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "e6d89f51c14c3333e867e0cb204b78597d93123c12f3fd9a62fcccbe2bdc1795"
+      },
+      {
+        "entry_id": "fp_story_06",
+        "provider_request_id": "fp_story_06__base",
+        "request_kind": "base_entry",
+        "transcript_sha256": "2e64c4e31f03ebe54007f06749210b95e8b2f034a33b5d151537332241cf60e3"
+      }
+    ],
+    "entry_count": 13
+  },
+  "product_id": "great_smoky_mountains_ridges_rivers_living_memory",
+  "publication_authorized": false,
+  "real_audio_required": true,
+  "recorded_from_task_id": "019fe9fb-cafa-75d3-b663-1e5051731cd5",
+  "route_binding": {
+    "anchor_order": [
+      "wears_valley_terminus",
+      "foothills_missing_link",
+      "walland_east_connection",
+      "look_rock",
+      "chilhowee_terminus"
+    ],
+    "coordinate_count": 7948,
+    "distance_m": 50816.7,
+    "full_geometry_required": true,
+    "geometry_sha256": "7304463b5d1efe3a49f7f29a8343d2015716fc56f1931c5b53b6d93103b97acf",
+    "official_candidate_status": "official_geometry_candidate",
+    "official_evidence_geometry_sha256": "58a8f0322c03136efd13f0bbcf3de00aab7b270fe37211efac1c07850ea6a358",
+    "official_route_evidence_path": "originals/smokies/official_route_evidence_v1.json",
+    "publication_evidence": false,
+    "route_spec_id": "foothills-parkway-east-to-west",
+    "route_spec_path": "originals/smokies/route_variants_v1.json"
+  },
+  "schema_version": 1,
+  "source_sha256_by_path": {
+    "db/original_manifest_v3.py": "850df80086d336a3a3652d73a1e0eda403e89f06b241c2a710bcb6cbf38e53de",
+    "db/originals_remaining_validation.py": "199e0efac6bef0a64a700c4ff3a5d8863efe9780a0e14f0d8c4004891d40b39c",
+    "db/originals_validation.py": "c1f7946f0970a6ee85273a4dea0f27f544d62a7c48ec6aed68b9beca78682bd7",
+    "mobile/lib/originals/longFormScheduler.ts": "061708316537df55fb7d04b854795bcfa7f49a473ce53daa809a29bd6ab61913",
+    "mobile/lib/originals/manifestV3.ts": "6d242d9bd2f04435faf3521fadcc9a8c0803a1099c65f5c8447bc4499bb3c67e",
+    "mobile/lib/originals/session.ts": "560d0425ef42e1aab348ded5d1541ed66eb3de7e4b1968128a80f5a32da936c9",
+    "mobile/lib/originals/triggerEngine.ts": "d8f502d4eec89310bbf8fa0031814570d09965bab066385d6229f3b348215955",
+    "mobile/scripts/validate-original-long-form.ts": "bc8684bc8a1f40e772578116320d77dd88747a160991b1fcb9fa5d0f6ba4e4d8",
+    "originals/smokies/checkpoint2_owner_approval_v1.json": "3cc18dad4d1b6a80f2259e58cbe50fba3804096d0c00437eca9103e626078d5c",
+    "originals/smokies/editorial_scripts_v1.json": "28627001d9b3bbd129e812721064e1a0c8fc2122ec9371afa91657026b76d81e",
+    "originals/smokies/elevenlabs_james_foothills_parkway_lock_v1.json": "eac2d636c4c26fd55fbc4ebe7b7be25882ffd51e6064703924d96d89fa71c119",
+    "originals/smokies/foothills_parkway_approval_v1.json": "a301c702155512c66df60e819274271fc9a6001b398266be5d9a6329a82592bb",
+    "originals/smokies/foothills_parkway_review_packet_v1.json": "7a3217f0dc11c503f43ca12d82b339d5537de6365441f607eacfd7c3945ea926",
+    "originals/smokies/official_route_evidence_v1.json": "d946ffaf8f21ad97399b6dedfb5cbe9483fce0787653b389d7075d933f398c60",
+    "originals/smokies/route_variants_v1.json": "49d55fa8819822b18af54983ea11893a661689102c14532a88ebacf2ec587f24",
+    "originals/smokies/source_dossiers_v1.json": "8eb22ca5110f0f9a4287b8f184624348c2a2ca2dbc36e27ef59fc022057ce18f",
+    "scripts/build_smokies_remaining_delivery_readiness.py": "b90f6d9ea5d6f873432ef1acb582be1a0f4b56e33ccae303d235c4e1509285d8"
+  },
+  "variant_id": "east_to_west"
+}

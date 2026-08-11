@@ -29,6 +29,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_UP
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 REPOSITORY = Path(__file__).resolve().parents[1]
@@ -83,6 +84,61 @@ MAX_AUDIO_RESPONSE_BYTES = 64 * 1024 * 1024
 EXECUTION_EVIDENCE_MAX_AGE = timedelta(minutes=15)
 MIN_KEY_REMAINING = timedelta(hours=2)
 KEY_LIFETIME_SECONDS = 86_400
+KEY_UI_TIMEZONE = "America/Winnipeg"
+KEY_UI_TIMESTAMP_PRECISION = "minute"
+KEY_UI_TIMESTAMP_PRECISION_SECONDS = 60
+KEY_UI_ROUNDING_MODE = "unknown"
+KEY_UI_REQUESTED_TTL_LABEL = "1 day"
+KEY_EXPIRY_INTERVAL_UNCERTAINTY_SECONDS = 60
+KEY_DISPATCH_SAFETY_BUFFER_SECONDS = 300
+KEY_UI_SOURCES = {
+    "key_id": "official_signed_in_api_keys_ui_copy_key_id",
+    "key_name": "official_signed_in_api_keys_ui_name",
+    "key_preview": "official_signed_in_api_keys_ui_preview_last_4_secret_chars",
+    "created_tooltip": "official_signed_in_api_keys_ui_created_tooltip",
+    "expiry_tooltip": "official_signed_in_api_keys_ui_expiry_tooltip",
+    "enabled": "official_signed_in_api_keys_ui_enabled_status",
+    "controls": "official_signed_in_api_keys_ui_edit_cap_permissions_safeguards",
+    "uniqueness": "official_signed_in_api_keys_ui_exact_matching_row_review",
+    "timezone": "authoritative_codex_app_environment_context",
+    "browser_time": "signed_in_api_keys_page_new_date_to_string",
+    "offsets": "zoneinfo_offsets_at_created_and_expiry_ui_instants",
+}
+KEY_UI_TOOLTIP_RE = re.compile(
+    r"^(?P<month>Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) "
+    r"(?P<day>[1-9]|[12][0-9]|3[01]), (?P<year>[0-9]{4}), "
+    r"(?P<hour>[1-9]|1[0-2]):(?P<minute>[0-5][0-9]) "
+    r"(?P<meridiem>AM|PM)$"
+)
+KEY_UI_BROWSER_DATE_RE = re.compile(
+    r"^(?P<weekday>Sun|Mon|Tue|Wed|Thu|Fri|Sat) "
+    r"(?P<month>Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) +"
+    r"(?P<day>[1-9]|[12][0-9]|3[01]) (?P<year>[0-9]{4}) "
+    r"(?P<hour>[01][0-9]|2[0-3]):(?P<minute>[0-5][0-9]):"
+    r"(?P<second>[0-5][0-9]) "
+    r"GMT-0500 \(Central Daylight Time\)$"
+)
+KEY_UI_MONTHS = {
+    name: index
+    for index, name in enumerate(
+        (
+            "Jan",
+            "Feb",
+            "Mar",
+            "Apr",
+            "May",
+            "Jun",
+            "Jul",
+            "Aug",
+            "Sep",
+            "Oct",
+            "Nov",
+            "Dec",
+        ),
+        start=1,
+    )
+}
+KEY_UI_WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 PROVIDER_KEY_CHAPTER_CODES = {
     "foothills_parkway": "fp",
     "mountain_crossing": "mc",
@@ -188,7 +244,6 @@ class ExecutionEvidence:
     key_id_sha256: str
     key_material_sha256: str
     observed_at: str
-    key_expires_at: str
     available_credits: int
     remaining_batch_renderer_cap: int
     ledger_event_chain_head: str
@@ -199,14 +254,39 @@ class ExecutionEvidence:
     ledger_character_cost_total_at_start: int
     partial_usage_credits_since_prior_session: int
     key_credit_limit: int
-    provider_key_expires_at_unix: int
     key_preview_sha256: str
     provider_key_name_sha256: str
     key_session_number: int
     provider_key_matching_row_count: int
     provider_key_row_unique: bool
+    provider_key_enabled: bool
+    provider_key_created_tooltip: str
+    provider_key_expires_tooltip: str
+    provider_key_browser_date_string: str
+    provider_key_created_tooltip_sha256: str
+    provider_key_expires_tooltip_sha256: str
+    provider_key_browser_date_string_sha256: str
+    provider_key_timestamp_timezone: str
+    provider_key_timestamp_precision: str
+    provider_key_timestamp_precision_seconds: int
+    provider_key_timestamp_rounding_mode: str
+    provider_key_created_utc_offset: str
+    provider_key_expires_utc_offset: str
+    provider_key_created_tooltip_source: str
+    provider_key_expiry_tooltip_source: str
+    provider_key_timestamp_timezone_source: str
+    provider_key_timestamp_offsets_source: str
+    provider_key_browser_date_source: str
+    key_created_at_interval_lower: str
+    key_created_at_interval_upper: str
+    key_expires_at_interval_lower: str
+    key_expires_at_interval_upper: str
+    key_expiry_conservative_deadline: str
+    key_displayed_center_duration_seconds: int
+    key_duration_interval_lower_seconds: int
+    key_duration_interval_upper_seconds: int
+    requested_ttl_label: str
     requested_ttl_seconds: int
-    key_created_at_derived: str
     observed_total_usage_usd: str
     observed_billable_request_count: int
     ledger_request_count_at_start: int
@@ -220,13 +300,9 @@ class ExecutionEvidence:
             "continuation": self.continuation,
             "continuation_mode": self.continuation_mode,
             "evidence_sha256": self.file_sha256,
-            "key_expires_at": self.key_expires_at,
             "key_id_sha256": self.key_id_sha256,
             "key_material_sha256": self.key_material_sha256,
             "key_credit_limit": self.key_credit_limit,
-            "provider_key_expires_at_unix": (
-                self.provider_key_expires_at_unix
-            ),
             "key_preview_sha256": self.key_preview_sha256,
             "provider_key_name_sha256": self.provider_key_name_sha256,
             "key_session_number": self.key_session_number,
@@ -234,14 +310,78 @@ class ExecutionEvidence:
                 self.provider_key_matching_row_count
             ),
             "provider_key_row_unique": self.provider_key_row_unique,
-            "requested_ttl_seconds": self.requested_ttl_seconds,
-            "key_created_at_derived": self.key_created_at_derived,
-            "key_created_at_directly_observed": False,
-            "key_created_at_derivation": (
-                "provider_get_expires_at_unix_minus_official_ui_"
-                "requested_ttl_seconds"
+            "provider_key_enabled": self.provider_key_enabled,
+            "provider_key_created_tooltip": (
+                self.provider_key_created_tooltip
             ),
-            "expiry_directly_observed": True,
+            "provider_key_expires_tooltip": (
+                self.provider_key_expires_tooltip
+            ),
+            "provider_key_browser_date_string": (
+                self.provider_key_browser_date_string
+            ),
+            "provider_key_created_tooltip_sha256": (
+                self.provider_key_created_tooltip_sha256
+            ),
+            "provider_key_expires_tooltip_sha256": (
+                self.provider_key_expires_tooltip_sha256
+            ),
+            "provider_key_browser_date_string_sha256": (
+                self.provider_key_browser_date_string_sha256
+            ),
+            "provider_key_timestamp_timezone": (
+                self.provider_key_timestamp_timezone
+            ),
+            "provider_key_timestamp_precision": (
+                self.provider_key_timestamp_precision
+            ),
+            "provider_key_timestamp_precision_seconds": (
+                self.provider_key_timestamp_precision_seconds
+            ),
+            "provider_key_timestamp_rounding_mode": (
+                self.provider_key_timestamp_rounding_mode
+            ),
+            "provider_key_created_utc_offset": (
+                self.provider_key_created_utc_offset
+            ),
+            "provider_key_expires_utc_offset": (
+                self.provider_key_expires_utc_offset
+            ),
+            "provider_key_created_tooltip_source": (
+                self.provider_key_created_tooltip_source
+            ),
+            "provider_key_expiry_tooltip_source": (
+                self.provider_key_expiry_tooltip_source
+            ),
+            "provider_key_timestamp_timezone_source": (
+                self.provider_key_timestamp_timezone_source
+            ),
+            "provider_key_timestamp_offsets_source": (
+                self.provider_key_timestamp_offsets_source
+            ),
+            "provider_key_browser_date_source": (
+                self.provider_key_browser_date_source
+            ),
+            "key_created_at_interval_lower": self.key_created_at_interval_lower,
+            "key_created_at_interval_upper": self.key_created_at_interval_upper,
+            "key_expires_at_interval_lower": self.key_expires_at_interval_lower,
+            "key_expires_at_interval_upper": self.key_expires_at_interval_upper,
+            "key_expiry_conservative_deadline": (
+                self.key_expiry_conservative_deadline
+            ),
+            "key_displayed_center_duration_seconds": (
+                self.key_displayed_center_duration_seconds
+            ),
+            "key_duration_interval_lower_seconds": (
+                self.key_duration_interval_lower_seconds
+            ),
+            "key_duration_interval_upper_seconds": (
+                self.key_duration_interval_upper_seconds
+            ),
+            "provider_key_created_tooltip_directly_observed": True,
+            "provider_key_expires_tooltip_directly_observed": True,
+            "requested_ttl_label": self.requested_ttl_label,
+            "requested_ttl_seconds": self.requested_ttl_seconds,
             "ledger_character_cost_total_at_start": (
                 self.ledger_character_cost_total_at_start
             ),
@@ -362,6 +502,152 @@ def _parse_utc(value: object, code: str) -> datetime:
     if parsed.tzinfo is None:
         raise NarrationError(code)
     return parsed.astimezone(timezone.utc)
+
+
+def _key_ui_offset_label(value: datetime, code: str) -> str:
+    offset = value.utcoffset()
+    if offset is None or offset.total_seconds() % 60:
+        raise NarrationError(code)
+    total_minutes = int(offset.total_seconds() // 60)
+    sign = "+" if total_minutes >= 0 else "-"
+    total_minutes = abs(total_minutes)
+    return f"{sign}{total_minutes // 60:02d}:{total_minutes % 60:02d}"
+
+
+def _key_ui_strict_local_to_utc(
+    naive: datetime, *, observed_offset: object, code: str
+) -> datetime:
+    try:
+        zone = ZoneInfo(KEY_UI_TIMEZONE)
+    except ZoneInfoNotFoundError as exc:
+        raise NarrationError(code) from exc
+    candidates: dict[datetime, datetime] = {}
+    for fold in (0, 1):
+        local = naive.replace(tzinfo=zone, fold=fold)
+        utc_value = local.astimezone(timezone.utc)
+        if utc_value.astimezone(zone).replace(tzinfo=None) == naive:
+            candidates[utc_value] = local
+    if len(candidates) != 1:
+        raise NarrationError(code)
+    utc_value, local = next(iter(candidates.items()))
+    if observed_offset != _key_ui_offset_label(local, code):
+        raise NarrationError(code)
+    return utc_value
+
+
+def _key_ui_tooltip_center(
+    raw_value: str, *, observed_offset: object, code: str
+) -> datetime:
+    match = KEY_UI_TOOLTIP_RE.fullmatch(raw_value)
+    if match is None:
+        raise NarrationError(code)
+    parts = match.groupdict()
+    hour = int(parts["hour"]) % 12
+    if parts["meridiem"] == "PM":
+        hour += 12
+    try:
+        naive = datetime(
+            int(parts["year"]),
+            KEY_UI_MONTHS[parts["month"]],
+            int(parts["day"]),
+            hour,
+            int(parts["minute"]),
+        )
+    except ValueError as exc:
+        raise NarrationError(code) from exc
+    return _key_ui_strict_local_to_utc(
+        naive, observed_offset=observed_offset, code=code
+    )
+
+
+def _key_ui_browser_time(
+    raw_value: str, *, observed_at: datetime, code: str
+) -> datetime:
+    match = KEY_UI_BROWSER_DATE_RE.fullmatch(raw_value)
+    if match is None:
+        raise NarrationError(code)
+    parts = match.groupdict()
+    try:
+        naive = datetime(
+            int(parts["year"]),
+            KEY_UI_MONTHS[parts["month"]],
+            int(parts["day"]),
+            int(parts["hour"]),
+            int(parts["minute"]),
+            int(parts["second"]),
+        )
+    except ValueError as exc:
+        raise NarrationError(code) from exc
+    if KEY_UI_WEEKDAYS[naive.weekday()] != parts["weekday"]:
+        raise NarrationError(code)
+    browser_utc = _key_ui_strict_local_to_utc(
+        naive, observed_offset="-05:00", code=code
+    )
+    if abs(browser_utc - observed_at) > timedelta(minutes=2):
+        raise NarrationError(code)
+    return browser_utc
+
+
+def _key_ui_computed_intervals(
+    key: Mapping[str, Any], *, observed_at: datetime, code: str
+) -> dict[str, datetime | int]:
+    created_tooltip = key.get("provider_key_created_tooltip")
+    expires_tooltip = key.get("provider_key_expires_tooltip")
+    browser_date = key.get("provider_key_browser_date_string")
+    if any(
+        (
+            not isinstance(created_tooltip, str),
+            not isinstance(expires_tooltip, str),
+            not isinstance(browser_date, str),
+        )
+    ):
+        raise NarrationError(code)
+    if any(
+        (
+            key.get("provider_key_timestamp_timezone") != KEY_UI_TIMEZONE,
+            key.get("provider_key_created_utc_offset") != "-05:00",
+            key.get("provider_key_expires_utc_offset") != "-05:00",
+        )
+    ):
+        raise NarrationError(code)
+    _key_ui_browser_time(browser_date, observed_at=observed_at, code=code)
+    created_center = _key_ui_tooltip_center(
+        created_tooltip,
+        observed_offset=key.get("provider_key_created_utc_offset"),
+        code=code,
+    )
+    expires_center = _key_ui_tooltip_center(
+        expires_tooltip,
+        observed_offset=key.get("provider_key_expires_utc_offset"),
+        code=code,
+    )
+    uncertainty = timedelta(seconds=KEY_EXPIRY_INTERVAL_UNCERTAINTY_SECONDS)
+    created_lower = created_center - uncertainty
+    created_upper = created_center + uncertainty
+    expires_lower = expires_center - uncertainty
+    expires_upper = expires_center + uncertainty
+    duration_lower = int((expires_lower - created_upper).total_seconds())
+    duration_upper = int((expires_upper - created_lower).total_seconds())
+    if any(
+        (
+            expires_center - created_center
+            != timedelta(seconds=KEY_LIFETIME_SECONDS),
+            duration_lower != KEY_LIFETIME_SECONDS - 120,
+            duration_upper != KEY_LIFETIME_SECONDS + 120,
+            observed_at - created_lower > EXECUTION_EVIDENCE_MAX_AGE,
+            created_upper - observed_at > timedelta(minutes=2),
+            expires_lower - observed_at < MIN_KEY_REMAINING,
+        )
+    ):
+        raise NarrationError(code)
+    return {
+        "created_lower": created_lower,
+        "created_upper": created_upper,
+        "expires_lower": expires_lower,
+        "expires_upper": expires_upper,
+        "duration_lower": duration_lower,
+        "duration_upper": duration_upper,
+    }
 
 
 def _canonical_bytes(value: object) -> bytes:
@@ -1213,22 +1499,47 @@ def load_execution_evidence(
         "key_session_number",
         "provider_key_matching_row_count",
         "provider_key_row_unique",
+        "provider_key_enabled",
+        "provider_key_created_tooltip",
+        "provider_key_expires_tooltip",
+        "provider_key_browser_date_string",
+        "provider_key_created_tooltip_sha256",
+        "provider_key_expires_tooltip_sha256",
+        "provider_key_browser_date_string_sha256",
+        "provider_key_timestamp_timezone",
+        "provider_key_timestamp_precision",
+        "provider_key_timestamp_precision_seconds",
+        "provider_key_timestamp_rounding_mode",
+        "provider_key_created_utc_offset",
+        "provider_key_expires_utc_offset",
+        "key_created_at_interval_lower",
+        "key_created_at_interval_upper",
+        "key_expires_at_interval_lower",
+        "key_expires_at_interval_upper",
+        "key_expiry_conservative_deadline",
+        "key_displayed_center_duration_seconds",
+        "key_duration_interval_lower_seconds",
+        "key_duration_interval_upper_seconds",
+        "provider_key_created_tooltip_directly_observed",
+        "provider_key_expires_tooltip_directly_observed",
+        "requested_ttl_label",
         "key_credit_limit",
         "key_permissions",
         "restrict_key_enabled",
         "auto_disable_if_leaked",
         "other_chapter_keys_active",
-        "provider_key_expires_at_unix",
         "requested_ttl_seconds",
-        "key_expires_at",
-        "key_created_at_derived",
-        "key_created_at_directly_observed",
-        "key_created_at_derivation",
-        "expiry_directly_observed",
         "provider_key_id_source",
-        "provider_key_expiry_source",
         "provider_key_name_source",
         "provider_key_preview_source",
+        "provider_key_created_tooltip_source",
+        "provider_key_expiry_tooltip_source",
+        "provider_key_enabled_source",
+        "provider_key_controls_source",
+        "provider_key_uniqueness_source",
+        "provider_key_timestamp_timezone_source",
+        "provider_key_timestamp_offsets_source",
+        "provider_key_browser_date_source",
         "post_create_response_inspected",
         "key_delivery",
         "key_identity_capture",
@@ -1238,17 +1549,50 @@ def load_execution_evidence(
     material_sha = str(key.get("key_material_sha256") or "").lower()
     preview_sha = str(key.get("key_preview_sha256") or "").lower()
     key_name_sha = str(key.get("provider_key_name_sha256") or "").lower()
-    expires_unix = key.get("provider_key_expires_at_unix")
-    if isinstance(expires_unix, bool) or not isinstance(expires_unix, int):
-        raise NarrationError("execution_key_expiry_invalid")
-    try:
-        expires_from_unix = datetime.fromtimestamp(expires_unix, tz=timezone.utc)
-    except (OSError, OverflowError, ValueError) as exc:
-        raise NarrationError("execution_key_expiry_invalid") from exc
-    expires = _parse_utc(key.get("key_expires_at"), "execution_key_expiry_invalid")
-    derived_issuance = expires_from_unix - timedelta(
-        seconds=KEY_LIFETIME_SECONDS
+    created_tooltip = key.get("provider_key_created_tooltip")
+    expires_tooltip = key.get("provider_key_expires_tooltip")
+    browser_date_string = key.get("provider_key_browser_date_string")
+    if any(
+        (
+            not isinstance(created_tooltip, str),
+            not isinstance(expires_tooltip, str),
+            not isinstance(browser_date_string, str),
+        )
+    ):
+        raise NarrationError("execution_key_policy_invalid")
+    if any(
+        (
+            KEY_UI_TOOLTIP_RE.fullmatch(created_tooltip) is None,
+            KEY_UI_TOOLTIP_RE.fullmatch(expires_tooltip) is None,
+            KEY_UI_BROWSER_DATE_RE.fullmatch(browser_date_string) is None,
+        )
+    ):
+        raise NarrationError("execution_key_policy_invalid")
+    computed_key_time = _key_ui_computed_intervals(
+        key, observed_at=observed, code="execution_key_policy_invalid"
     )
+    created_lower = _parse_utc(
+        key.get("key_created_at_interval_lower"),
+        "execution_key_created_interval_invalid",
+    )
+    created_upper = _parse_utc(
+        key.get("key_created_at_interval_upper"),
+        "execution_key_created_interval_invalid",
+    )
+    expires_lower = _parse_utc(
+        key.get("key_expires_at_interval_lower"),
+        "execution_key_expiry_interval_invalid",
+    )
+    expires_upper = _parse_utc(
+        key.get("key_expires_at_interval_upper"),
+        "execution_key_expiry_interval_invalid",
+    )
+    conservative_deadline = _parse_utc(
+        key.get("key_expiry_conservative_deadline"),
+        "execution_key_expiry_interval_invalid",
+    )
+    duration_lower = int((expires_lower - created_upper).total_seconds())
+    duration_upper = int((expires_upper - created_lower).total_seconds())
     if any(
         (
             SHA256_RE.fullmatch(key_id_sha) is None,
@@ -1259,36 +1603,78 @@ def load_execution_evidence(
             isinstance(key.get("provider_key_matching_row_count"), bool),
             key.get("provider_key_matching_row_count") != 1,
             key.get("provider_key_row_unique") is not True,
+            key.get("provider_key_enabled") is not True,
+            key.get("provider_key_created_tooltip_sha256")
+            != _sha256_bytes(created_tooltip.encode("ascii")),
+            key.get("provider_key_expires_tooltip_sha256")
+            != _sha256_bytes(expires_tooltip.encode("ascii")),
+            key.get("provider_key_browser_date_string_sha256")
+            != _sha256_bytes(browser_date_string.encode("ascii")),
+            key.get("provider_key_timestamp_timezone") != KEY_UI_TIMEZONE,
+            key.get("provider_key_timestamp_precision")
+            != KEY_UI_TIMESTAMP_PRECISION,
+            key.get("provider_key_timestamp_precision_seconds")
+            != KEY_UI_TIMESTAMP_PRECISION_SECONDS,
+            key.get("provider_key_timestamp_rounding_mode")
+            != KEY_UI_ROUNDING_MODE,
+            key.get("provider_key_created_utc_offset") != "-05:00",
+            key.get("provider_key_expires_utc_offset") != "-05:00",
+            created_lower != computed_key_time["created_lower"],
+            created_upper != computed_key_time["created_upper"],
+            expires_lower != computed_key_time["expires_lower"],
+            expires_upper != computed_key_time["expires_upper"],
+            created_upper - created_lower != timedelta(seconds=120),
+            expires_upper - expires_lower != timedelta(seconds=120),
+            expires_lower - created_lower
+            != timedelta(seconds=KEY_LIFETIME_SECONDS),
+            conservative_deadline != expires_lower,
+            key.get("key_displayed_center_duration_seconds")
+            != KEY_LIFETIME_SECONDS,
+            key.get("key_duration_interval_lower_seconds") != duration_lower,
+            key.get("key_duration_interval_upper_seconds") != duration_upper,
+            duration_lower != KEY_LIFETIME_SECONDS - 120,
+            duration_upper != KEY_LIFETIME_SECONDS + 120,
+            key.get("provider_key_created_tooltip_directly_observed")
+            is not True,
+            key.get("provider_key_expires_tooltip_directly_observed")
+            is not True,
+            key.get("requested_ttl_label") != KEY_UI_REQUESTED_TTL_LABEL,
             key.get("key_credit_limit") != expected_key_credit_limit,
             key.get("key_permissions") != list(EXPECTED_KEY_PERMISSIONS),
             key.get("restrict_key_enabled") is not True,
             key.get("auto_disable_if_leaked") is not True,
             key.get("other_chapter_keys_active") is not False,
-            expires != expires_from_unix,
             key.get("requested_ttl_seconds") != KEY_LIFETIME_SECONDS,
-            key.get("key_created_at_derived") != _iso(derived_issuance),
-            key.get("key_created_at_directly_observed") is not False,
-            key.get("key_created_at_derivation")
-            != "provider_get_expires_at_unix_minus_official_ui_requested_ttl_seconds",
-            key.get("expiry_directly_observed") is not True,
             key.get("provider_key_id_source")
-            != "authenticated_get_v1_user_api_keys_row_xi_api_key",
-            key.get("provider_key_expiry_source")
-            != "authenticated_get_v1_user_api_keys_row_expires_at_unix",
+            != KEY_UI_SOURCES["key_id"],
             key.get("provider_key_name_source")
-            != "authenticated_get_v1_user_api_keys_name",
+            != KEY_UI_SOURCES["key_name"],
             key.get("provider_key_preview_source")
-            != "authenticated_get_v1_user_api_keys_xi_api_key_preview_last_4_secret_chars",
+            != KEY_UI_SOURCES["key_preview"],
+            key.get("provider_key_created_tooltip_source")
+            != KEY_UI_SOURCES["created_tooltip"],
+            key.get("provider_key_expiry_tooltip_source")
+            != KEY_UI_SOURCES["expiry_tooltip"],
+            key.get("provider_key_enabled_source")
+            != KEY_UI_SOURCES["enabled"],
+            key.get("provider_key_controls_source")
+            != KEY_UI_SOURCES["controls"],
+            key.get("provider_key_uniqueness_source")
+            != KEY_UI_SOURCES["uniqueness"],
+            key.get("provider_key_timestamp_timezone_source")
+            != KEY_UI_SOURCES["timezone"],
+            key.get("provider_key_timestamp_offsets_source")
+            != KEY_UI_SOURCES["offsets"],
+            key.get("provider_key_browser_date_source")
+            != KEY_UI_SOURCES["browser_time"],
             key.get("post_create_response_inspected") is not False,
             key.get("key_delivery")
             != "secure_piped_stdin_external_transfer_not_attested_by_operator",
             key.get("key_identity_capture")
-            != "authenticated_get_key_row_name_id_preview_expiry_and_operator_memory_material_sha256",
-            expires - observed
-            > timedelta(seconds=KEY_LIFETIME_SECONDS, minutes=2),
-            observed - derived_issuance > EXECUTION_EVIDENCE_MAX_AGE,
-            derived_issuance - observed > timedelta(minutes=2),
-            expires - now < MIN_KEY_REMAINING,
+            != "official_ui_key_row_name_id_preview_times_controls_and_operator_memory_material_sha256",
+            now - created_lower > EXECUTION_EVIDENCE_MAX_AGE,
+            created_upper - now > timedelta(minutes=2),
+            expires_lower - now < MIN_KEY_REMAINING,
         )
     ):
         raise NarrationError("execution_key_policy_invalid")
@@ -1456,7 +1842,6 @@ def load_execution_evidence(
         key_id_sha256=key_id_sha,
         key_material_sha256=material_sha,
         observed_at=_iso(observed),
-        key_expires_at=_iso(expires),
         available_credits=available,
         remaining_batch_renderer_cap=required_remaining,
         ledger_event_chain_head=ledger_head,
@@ -1469,14 +1854,61 @@ def load_execution_evidence(
             committed_since_prior_session
         ),
         key_credit_limit=expected_key_credit_limit,
-        provider_key_expires_at_unix=expires_unix,
         key_preview_sha256=preview_sha,
         provider_key_name_sha256=key_name_sha,
         key_session_number=expected_key_session_number,
         provider_key_matching_row_count=1,
         provider_key_row_unique=True,
+        provider_key_enabled=True,
+        provider_key_created_tooltip=created_tooltip,
+        provider_key_expires_tooltip=expires_tooltip,
+        provider_key_browser_date_string=browser_date_string,
+        provider_key_created_tooltip_sha256=str(
+            key["provider_key_created_tooltip_sha256"]
+        ),
+        provider_key_expires_tooltip_sha256=str(
+            key["provider_key_expires_tooltip_sha256"]
+        ),
+        provider_key_browser_date_string_sha256=str(
+            key["provider_key_browser_date_string_sha256"]
+        ),
+        provider_key_timestamp_timezone=KEY_UI_TIMEZONE,
+        provider_key_timestamp_precision=KEY_UI_TIMESTAMP_PRECISION,
+        provider_key_timestamp_precision_seconds=(
+            KEY_UI_TIMESTAMP_PRECISION_SECONDS
+        ),
+        provider_key_timestamp_rounding_mode=KEY_UI_ROUNDING_MODE,
+        provider_key_created_utc_offset=str(
+            key["provider_key_created_utc_offset"]
+        ),
+        provider_key_expires_utc_offset=str(
+            key["provider_key_expires_utc_offset"]
+        ),
+        provider_key_created_tooltip_source=str(
+            key["provider_key_created_tooltip_source"]
+        ),
+        provider_key_expiry_tooltip_source=str(
+            key["provider_key_expiry_tooltip_source"]
+        ),
+        provider_key_timestamp_timezone_source=str(
+            key["provider_key_timestamp_timezone_source"]
+        ),
+        provider_key_timestamp_offsets_source=str(
+            key["provider_key_timestamp_offsets_source"]
+        ),
+        provider_key_browser_date_source=str(
+            key["provider_key_browser_date_source"]
+        ),
+        key_created_at_interval_lower=_iso(created_lower),
+        key_created_at_interval_upper=_iso(created_upper),
+        key_expires_at_interval_lower=_iso(expires_lower),
+        key_expires_at_interval_upper=_iso(expires_upper),
+        key_expiry_conservative_deadline=_iso(conservative_deadline),
+        key_displayed_center_duration_seconds=KEY_LIFETIME_SECONDS,
+        key_duration_interval_lower_seconds=duration_lower,
+        key_duration_interval_upper_seconds=duration_upper,
+        requested_ttl_label=KEY_UI_REQUESTED_TTL_LABEL,
         requested_ttl_seconds=KEY_LIFETIME_SECONDS,
-        key_created_at_derived=_iso(derived_issuance),
         observed_total_usage_usd=f"{observed_total_usage_usd:.2f}",
         observed_billable_request_count=observed_billable_requests,
         ledger_request_count_at_start=completed_request_count,
@@ -1573,6 +2005,37 @@ def _subscription_remaining(subscription: Mapping[str, Any]) -> int:
     if used_exact < 0 or limit_exact < used_exact:
         raise NarrationError("provider_subscription_invalid")
     return limit_exact - used_exact
+
+
+def _require_conservative_key_deadline(
+    deadline_value: object,
+    *,
+    current: datetime,
+    operation_timeout_seconds: float,
+    code: str,
+) -> None:
+    if operation_timeout_seconds < 0:
+        raise NarrationError(code)
+    deadline = _parse_utc(deadline_value, code)
+    required = timedelta(
+        seconds=operation_timeout_seconds + KEY_DISPATCH_SAFETY_BUFFER_SECONDS
+    )
+    if deadline - current < required:
+        raise NarrationError(code)
+
+
+def _require_execution_key_deadline(
+    execution: ExecutionEvidence,
+    *,
+    current: datetime,
+    operation_timeout_seconds: float,
+) -> None:
+    _require_conservative_key_deadline(
+        execution.key_expiry_conservative_deadline,
+        current=current,
+        operation_timeout_seconds=operation_timeout_seconds,
+        code="conservative_key_expiry_deadline_too_close",
+    )
 
 
 def provider_preflight(
@@ -1986,10 +2449,6 @@ def _replay_events(
                     "continuation_mode",
                     "evidence_sha256",
                     "key_credit_limit",
-                    "key_created_at_derived",
-                    "key_created_at_derivation",
-                    "key_created_at_directly_observed",
-                    "key_expires_at",
                     "key_id_sha256",
                     "key_material_sha256",
                     "key_preview_sha256",
@@ -1997,6 +2456,35 @@ def _replay_events(
                     "key_session_number",
                     "provider_key_matching_row_count",
                     "provider_key_row_unique",
+                    "provider_key_enabled",
+                    "provider_key_created_tooltip",
+                    "provider_key_expires_tooltip",
+                    "provider_key_browser_date_string",
+                    "provider_key_created_tooltip_sha256",
+                    "provider_key_expires_tooltip_sha256",
+                    "provider_key_browser_date_string_sha256",
+                    "provider_key_timestamp_timezone",
+                    "provider_key_timestamp_precision",
+                    "provider_key_timestamp_precision_seconds",
+                    "provider_key_timestamp_rounding_mode",
+                    "provider_key_created_utc_offset",
+                    "provider_key_expires_utc_offset",
+                    "provider_key_created_tooltip_source",
+                    "provider_key_expiry_tooltip_source",
+                    "provider_key_timestamp_timezone_source",
+                    "provider_key_timestamp_offsets_source",
+                    "provider_key_browser_date_source",
+                    "key_created_at_interval_lower",
+                    "key_created_at_interval_upper",
+                    "key_expires_at_interval_lower",
+                    "key_expires_at_interval_upper",
+                    "key_expiry_conservative_deadline",
+                    "key_displayed_center_duration_seconds",
+                    "key_duration_interval_lower_seconds",
+                    "key_duration_interval_upper_seconds",
+                    "provider_key_created_tooltip_directly_observed",
+                    "provider_key_expires_tooltip_directly_observed",
+                    "requested_ttl_label",
                     "ledger_character_cost_total_at_start",
                     "ledger_request_count_at_start",
                     "observed_at",
@@ -2007,11 +2495,9 @@ def _replay_events(
                     "prior_key_deleted_and_verified",
                     "prior_key_deleted_at",
                     "prior_key_id_sha256",
-                    "provider_key_expires_at_unix",
                     "remaining_batch_renderer_cap",
                     "replacement_key_creation_initiated_at",
                     "requested_ttl_seconds",
-                    "expiry_directly_observed",
                 },
                 "render_session_event_invalid",
             )
@@ -2023,6 +2509,9 @@ def _replay_events(
                 "key_material_sha256",
                 "key_preview_sha256",
                 "provider_key_name_sha256",
+                "provider_key_created_tooltip_sha256",
+                "provider_key_expires_tooltip_sha256",
+                "provider_key_browser_date_string_sha256",
             ):
                 _validate_hash_field(payload[name], "render_session_hash_invalid")
             expected_session_number = len(state["sessions"]) + 1
@@ -2043,31 +2532,122 @@ def _replay_events(
                 )
             ):
                 raise NarrationError("render_session_key_name_invalid")
-            expires_unix = payload["provider_key_expires_at_unix"]
-            if isinstance(expires_unix, bool) or not isinstance(expires_unix, int):
-                raise NarrationError("render_session_key_expiry_invalid")
-            try:
-                expires_at = datetime.fromtimestamp(expires_unix, tz=timezone.utc)
-            except (OSError, OverflowError, ValueError) as exc:
-                raise NarrationError("render_session_key_expiry_invalid") from exc
             observed_at = _parse_utc(
                 payload["observed_at"], "render_session_observed_at_invalid"
             )
-            created_derived = expires_at - timedelta(
-                seconds=KEY_LIFETIME_SECONDS
+            created_tooltip = payload["provider_key_created_tooltip"]
+            expires_tooltip = payload["provider_key_expires_tooltip"]
+            browser_date_string = payload["provider_key_browser_date_string"]
+            if any(
+                (
+                    not isinstance(created_tooltip, str),
+                    not isinstance(expires_tooltip, str),
+                    not isinstance(browser_date_string, str),
+                )
+            ):
+                raise NarrationError("render_session_key_expiry_invalid")
+            if any(
+                (
+                    KEY_UI_TOOLTIP_RE.fullmatch(created_tooltip) is None,
+                    KEY_UI_TOOLTIP_RE.fullmatch(expires_tooltip) is None,
+                    KEY_UI_BROWSER_DATE_RE.fullmatch(browser_date_string) is None,
+                )
+            ):
+                raise NarrationError("render_session_key_expiry_invalid")
+            computed_key_time = _key_ui_computed_intervals(
+                payload,
+                observed_at=observed_at,
+                code="render_session_key_expiry_invalid",
+            )
+            created_lower = _parse_utc(
+                payload["key_created_at_interval_lower"],
+                "render_session_key_time_invalid",
+            )
+            created_upper = _parse_utc(
+                payload["key_created_at_interval_upper"],
+                "render_session_key_time_invalid",
+            )
+            expires_lower = _parse_utc(
+                payload["key_expires_at_interval_lower"],
+                "render_session_key_time_invalid",
+            )
+            expires_upper = _parse_utc(
+                payload["key_expires_at_interval_upper"],
+                "render_session_key_time_invalid",
+            )
+            conservative_deadline = _parse_utc(
+                payload["key_expiry_conservative_deadline"],
+                "render_session_key_time_invalid",
+            )
+            duration_lower = int(
+                (expires_lower - created_upper).total_seconds()
+            )
+            duration_upper = int(
+                (expires_upper - created_lower).total_seconds()
             )
             if any(
                 (
-                    payload["key_expires_at"] != _iso(expires_at),
+                    payload["provider_key_enabled"] is not True,
+                    payload["provider_key_created_tooltip_sha256"]
+                    != _sha256_bytes(
+                        created_tooltip.encode("ascii")
+                    ),
+                    payload["provider_key_expires_tooltip_sha256"]
+                    != _sha256_bytes(
+                        expires_tooltip.encode("ascii")
+                    ),
+                    payload["provider_key_browser_date_string_sha256"]
+                    != _sha256_bytes(
+                        browser_date_string.encode("ascii")
+                    ),
+                    payload["provider_key_timestamp_timezone"]
+                    != KEY_UI_TIMEZONE,
+                    payload["provider_key_timestamp_precision"]
+                    != KEY_UI_TIMESTAMP_PRECISION,
+                    payload["provider_key_timestamp_precision_seconds"]
+                    != KEY_UI_TIMESTAMP_PRECISION_SECONDS,
+                    payload["provider_key_timestamp_rounding_mode"]
+                    != KEY_UI_ROUNDING_MODE,
+                    payload["provider_key_created_utc_offset"] != "-05:00",
+                    payload["provider_key_expires_utc_offset"] != "-05:00",
+                    created_lower != computed_key_time["created_lower"],
+                    created_upper != computed_key_time["created_upper"],
+                    expires_lower != computed_key_time["expires_lower"],
+                    expires_upper != computed_key_time["expires_upper"],
+                    payload["provider_key_created_tooltip_source"]
+                    != KEY_UI_SOURCES["created_tooltip"],
+                    payload["provider_key_expiry_tooltip_source"]
+                    != KEY_UI_SOURCES["expiry_tooltip"],
+                    payload["provider_key_timestamp_timezone_source"]
+                    != KEY_UI_SOURCES["timezone"],
+                    payload["provider_key_timestamp_offsets_source"]
+                    != KEY_UI_SOURCES["offsets"],
+                    payload["provider_key_browser_date_source"]
+                    != KEY_UI_SOURCES["browser_time"],
+                    created_upper - created_lower != timedelta(seconds=120),
+                    expires_upper - expires_lower != timedelta(seconds=120),
+                    expires_lower - created_lower
+                    != timedelta(seconds=KEY_LIFETIME_SECONDS),
+                    conservative_deadline != expires_lower,
+                    payload["key_displayed_center_duration_seconds"]
+                    != KEY_LIFETIME_SECONDS,
+                    payload["key_duration_interval_lower_seconds"]
+                    != duration_lower,
+                    payload["key_duration_interval_upper_seconds"]
+                    != duration_upper,
+                    duration_lower != KEY_LIFETIME_SECONDS - 120,
+                    duration_upper != KEY_LIFETIME_SECONDS + 120,
+                    payload["provider_key_created_tooltip_directly_observed"]
+                    is not True,
+                    payload["provider_key_expires_tooltip_directly_observed"]
+                    is not True,
+                    payload["requested_ttl_label"]
+                    != KEY_UI_REQUESTED_TTL_LABEL,
                     payload["requested_ttl_seconds"] != KEY_LIFETIME_SECONDS,
-                    payload["key_created_at_derived"] != _iso(created_derived),
-                    payload["key_created_at_directly_observed"] is not False,
-                    payload["key_created_at_derivation"]
-                    != "provider_get_expires_at_unix_minus_official_ui_requested_ttl_seconds",
-                    payload["expiry_directly_observed"] is not True,
-                    observed_at - created_derived
+                    observed_at - created_lower
                     > EXECUTION_EVIDENCE_MAX_AGE,
-                    created_derived - observed_at > timedelta(minutes=2),
+                    created_upper - observed_at > timedelta(minutes=2),
+                    expires_lower - observed_at < MIN_KEY_REMAINING,
                 )
             ):
                 raise NarrationError("render_session_key_expiry_invalid")
@@ -2883,6 +3463,48 @@ def _audio_inventory(
     return rows, _sha256_bytes(_canonical_bytes(rows))
 
 
+_KEY_UI_CLOSEOUT_FIELDS = (
+    "provider_key_created_tooltip",
+    "provider_key_expires_tooltip",
+    "provider_key_browser_date_string",
+    "provider_key_created_tooltip_sha256",
+    "provider_key_expires_tooltip_sha256",
+    "provider_key_browser_date_string_sha256",
+    "provider_key_timestamp_timezone",
+    "provider_key_timestamp_precision",
+    "provider_key_timestamp_precision_seconds",
+    "provider_key_timestamp_rounding_mode",
+    "provider_key_created_utc_offset",
+    "provider_key_expires_utc_offset",
+    "provider_key_created_tooltip_source",
+    "provider_key_expiry_tooltip_source",
+    "provider_key_timestamp_timezone_source",
+    "provider_key_timestamp_offsets_source",
+    "provider_key_browser_date_source",
+    "key_created_at_interval_lower",
+    "key_created_at_interval_upper",
+    "key_expires_at_interval_lower",
+    "key_expires_at_interval_upper",
+    "key_expiry_conservative_deadline",
+    "key_displayed_center_duration_seconds",
+    "key_duration_interval_lower_seconds",
+    "key_duration_interval_upper_seconds",
+    "provider_key_created_tooltip_directly_observed",
+    "provider_key_expires_tooltip_directly_observed",
+    "requested_ttl_label",
+    "requested_ttl_seconds",
+)
+
+
+def _key_ui_time_evidence_from_session(
+    session: Mapping[str, Any],
+) -> dict[str, Any]:
+    try:
+        return {name: session[name] for name in _KEY_UI_CLOSEOUT_FIELDS}
+    except KeyError as exc:
+        raise NarrationError("session_key_ui_time_evidence_missing") from exc
+
+
 def _validate_closeout(
     chapter_dir: Path,
     *,
@@ -2920,6 +3542,11 @@ def _validate_closeout(
         "key_material_sha256",
         "key_deleted",
         "key_deletion_verified",
+        "key_deleted_at",
+        "key_deletion_source",
+        "key_ui_time_evidence",
+        "key_expiry_conservative_deadline",
+        "key_deleted_before_conservative_expiry",
         "no_other_active_render_keys",
         "starting_provider_credits",
         "ending_provider_credits",
@@ -2966,6 +3593,25 @@ def _validate_closeout(
     sessions = state["sessions"]
     if not sessions:
         raise NarrationError("chapter_closeout_session_missing")
+    deleted_at = _parse_utc(
+        raw.get("key_deleted_at"), "chapter_closeout_key_deleted_at_invalid"
+    )
+    conservative_deadline = _parse_utc(
+        sessions[-1]["key_expiry_conservative_deadline"],
+        "chapter_closeout_key_expiry_deadline_invalid",
+    )
+    if any(
+        (
+            deleted_at < _parse_utc(
+                state["updated_at"], "render_event_timestamp_invalid"
+            ),
+            deleted_at > observed,
+            observed
+            > conservative_deadline
+            - timedelta(seconds=KEY_DISPATCH_SAFETY_BUFFER_SECONDS),
+        )
+    ):
+        raise NarrationError("chapter_closeout_key_deadline_invalid")
     committed = sum(
         int(item["accepted"]["character_cost"])
         for item in state["items"].values()
@@ -3057,6 +3703,15 @@ def _validate_closeout(
         "key_material_sha256": sessions[-1]["key_material_sha256"],
         "key_deleted": True,
         "key_deletion_verified": True,
+        "key_deleted_at": raw["key_deleted_at"],
+        "key_deletion_source": (
+            "official_signed_in_api_keys_ui_delete_and_absence_verification"
+        ),
+        "key_ui_time_evidence": _key_ui_time_evidence_from_session(
+            sessions[-1]
+        ),
+        "key_expiry_conservative_deadline": _iso(conservative_deadline),
+        "key_deleted_before_conservative_expiry": True,
         "no_other_active_render_keys": True,
         "starting_provider_credits": starting_provider_credits,
         "ending_provider_credits": ending_credits,
@@ -3331,6 +3986,18 @@ def _render_chapter(
         raise NarrationError("manual_provider_reconciliation_required")
     recovered: list[str] = []
     if events:
+        if any(
+            item["state"] == "accepted_pending_promotion"
+            for item in state["items"].values()
+        ):
+            if not state["sessions"]:
+                raise NarrationError("local_recovery_session_missing")
+            _require_conservative_key_deadline(
+                state["sessions"][-1]["key_expiry_conservative_deadline"],
+                current=now(),
+                operation_timeout_seconds=0,
+                code="local_recovery_after_conservative_key_expiry",
+            )
         events, state, recovered = _recover_accepted_items(
             chapter_dir,
             events,
@@ -3416,6 +4083,11 @@ def _render_chapter(
         ledger_updated_at=state["updated_at"],
         now=current_time,
     )
+    _require_execution_key_deadline(
+        execution,
+        current=current_time,
+        operation_timeout_seconds=timeout * 3,
+    )
     if execution.available_credits != starting_provider_credits - already_committed:
         raise NarrationError("execution_credit_reconciliation_mismatch")
     if not events:
@@ -3449,6 +4121,11 @@ def _render_chapter(
             at=now(),
         )
         transport = transport_factory()
+        _require_execution_key_deadline(
+            execution,
+            current=now(),
+            operation_timeout_seconds=timeout * 3,
+        )
         preflight = provider_preflight(
             transport,
             api_key=api_key,
@@ -3490,6 +4167,11 @@ def _render_chapter(
             while item["state"] in {"reserved", "retryable_429"}:
                 if item["attempts"] >= MAX_PROVIDER_ATTEMPTS:
                     raise NarrationError("provider_retry_exhausted")
+                _require_execution_key_deadline(
+                    execution,
+                    current=now(),
+                    operation_timeout_seconds=timeout,
+                )
                 committed = sum(
                     int(row["accepted"]["character_cost"])
                     for row in state["items"].values()

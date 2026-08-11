@@ -69,37 +69,68 @@ def _render_observation(
             packet.chapter_id, key_session_number
         ),
         "provider_key_preview": key[-4:].decode("ascii"),
-        "provider_key_expires_at_unix": evidence_key_policy[
-            "provider_key_expires_at_unix"
+        "provider_key_created_tooltip": evidence_key_policy[
+            "provider_key_created_tooltip"
+        ],
+        "provider_key_expires_tooltip": evidence_key_policy[
+            "provider_key_expires_tooltip"
+        ],
+        "provider_key_created_tooltip_directly_observed": True,
+        "provider_key_expires_tooltip_directly_observed": True,
+        "provider_key_timestamp_timezone": renderer.KEY_UI_TIMEZONE,
+        "provider_key_timestamp_timezone_source": renderer.KEY_UI_SOURCES[
+            "timezone"
+        ],
+        "provider_key_timestamp_precision": (
+            renderer.KEY_UI_TIMESTAMP_PRECISION
+        ),
+        "provider_key_timestamp_precision_seconds": (
+            renderer.KEY_UI_TIMESTAMP_PRECISION_SECONDS
+        ),
+        "provider_key_timestamp_rounding_mode": (
+            renderer.KEY_UI_ROUNDING_MODE
+        ),
+        "provider_key_created_utc_offset": "-05:00",
+        "provider_key_expires_utc_offset": "-05:00",
+        "provider_key_timestamp_offsets_source": renderer.KEY_UI_SOURCES[
+            "offsets"
+        ],
+        "provider_key_browser_date_string": evidence_key_policy[
+            "provider_key_browser_date_string"
+        ],
+        "provider_key_browser_date_source": renderer.KEY_UI_SOURCES[
+            "browser_time"
         ],
         "provider_key_matching_row_count": 1,
         "provider_key_row_unique": True,
+        "provider_key_enabled": True,
+        "requested_ttl_label": renderer.KEY_UI_REQUESTED_TTL_LABEL,
         "requested_ttl_seconds": renderer.KEY_LIFETIME_SECONDS,
         "key_credit_limit": evidence_key_policy["key_credit_limit"],
         "key_permissions": evidence_key_policy["key_permissions"],
         "restrict_key_enabled": True,
         "auto_disable_if_leaked": True,
         "other_chapter_keys_active": False,
-        "expiry_directly_observed": True,
-        "provider_key_id_source": (
-            "authenticated_get_v1_user_api_keys_row_xi_api_key"
-        ),
-        "provider_key_expiry_source": (
-            "authenticated_get_v1_user_api_keys_row_expires_at_unix"
-        ),
-        "provider_key_name_source": (
-            "authenticated_get_v1_user_api_keys_name"
-        ),
-        "provider_key_preview_source": (
-            "authenticated_get_v1_user_api_keys_xi_api_key_preview_"
-            "last_4_secret_chars"
-        ),
+        "provider_key_id_source": renderer.KEY_UI_SOURCES["key_id"],
+        "provider_key_name_source": renderer.KEY_UI_SOURCES["key_name"],
+        "provider_key_preview_source": renderer.KEY_UI_SOURCES["key_preview"],
+        "provider_key_created_tooltip_source": renderer.KEY_UI_SOURCES[
+            "created_tooltip"
+        ],
+        "provider_key_expiry_tooltip_source": renderer.KEY_UI_SOURCES[
+            "expiry_tooltip"
+        ],
+        "provider_key_enabled_source": renderer.KEY_UI_SOURCES["enabled"],
+        "provider_key_controls_source": renderer.KEY_UI_SOURCES["controls"],
+        "provider_key_uniqueness_source": renderer.KEY_UI_SOURCES[
+            "uniqueness"
+        ],
         "post_create_response_inspected": False,
         "key_delivery": (
             "secure_piped_stdin_external_transfer_not_attested_by_operator"
         ),
         "key_identity_capture": (
-            "authenticated_get_key_row_name_id_preview_expiry_and_operator_"
+            "official_ui_key_row_name_id_preview_times_controls_and_operator_"
             "memory_material_sha256"
         ),
     }
@@ -220,6 +251,10 @@ def _closeout_observation(
         "ending_billable_request_count": 14 + len(packet.requests),
         "ending_total_usage_usd": ending_usd,
         "key_id": raw_key_id,
+        "key_deleted_at": renderer._iso(renderer_test.NOW),
+        "key_deletion_source": (
+            "official_signed_in_api_keys_ui_delete_and_absence_verification"
+        ),
         "key_deleted": True,
         "key_deletion_verified": True,
         "no_other_active_render_keys": True,
@@ -304,8 +339,18 @@ def test_operator_full_chapter_hashes_raw_key_id_and_never_persists_key(
         provider_key_name.encode("ascii")
     ).hexdigest()
     assert evidence["key_policy"]["key_session_number"] == 1
-    assert evidence["key_policy"]["key_created_at_directly_observed"] is False
-    assert evidence["key_policy"]["expiry_directly_observed"] is True
+    assert evidence["key_policy"][
+        "provider_key_created_tooltip_directly_observed"
+    ] is True
+    assert evidence["key_policy"][
+        "provider_key_expires_tooltip_directly_observed"
+    ] is True
+    assert evidence["key_policy"]["provider_key_timestamp_rounding_mode"] == (
+        "unknown"
+    )
+    assert evidence["key_policy"]["key_expiry_conservative_deadline"] == (
+        evidence["key_policy"]["key_expires_at_interval_lower"]
+    )
     assert evidence["source_observation_sha256"] == renderer._sha256_bytes(
         renderer._canonical_bytes(observation)
     )
@@ -440,11 +485,17 @@ def test_stale_provider_key_row_stops_before_key_read_or_network(
     packet = renderer.load_chapter_packet("foothills_parkway")
     root = renderer_test._root(tmp_path)
     observation = _render_observation(packet=packet, root=root, sources=sources)
-    stale_issuance = renderer_test.NOW - renderer.EXECUTION_EVIDENCE_MAX_AGE - timedelta(
-        seconds=1
+    stale_created_center = (
+        renderer_test.NOW - renderer.EXECUTION_EVIDENCE_MAX_AGE
+    ).replace(second=0, microsecond=0)
+    observation["key_policy"]["provider_key_created_tooltip"] = (
+        renderer_test._ui_tooltip(stale_created_center)
     )
-    observation["key_policy"]["provider_key_expires_at_unix"] = int(
-        (stale_issuance + timedelta(seconds=renderer.KEY_LIFETIME_SECONDS)).timestamp()
+    observation["key_policy"]["provider_key_expires_tooltip"] = (
+        renderer_test._ui_tooltip(
+            stale_created_center
+            + timedelta(seconds=renderer.KEY_LIFETIME_SECONDS)
+        )
     )
     path = _write_private_json(tmp_path / "stale-key-observation.json", observation)
     transport = renderer_test.FakeTransport()
@@ -456,7 +507,10 @@ def test_stale_provider_key_row_stops_before_key_read_or_network(
         key=RAW_KEY,
         key_counter=key_reads,
     )
-    with pytest.raises(renderer.NarrationError, match="render_observation_key_delivery_invalid"):
+    with pytest.raises(
+        renderer.NarrationError,
+        match="render_observation_key_time_contract_invalid",
+    ):
         operator.run_operator(
             action=operator.RENDER_ACTION,
             chapter_id=packet.chapter_id,
@@ -467,6 +521,170 @@ def test_stale_provider_key_row_stops_before_key_read_or_network(
         )
     assert key_reads == []
     assert transport.get_calls == [] and transport.post_calls == []
+
+
+def test_observation_age_and_key_age_cannot_accumulate_before_key_read(
+    tmp_path: Path, monkeypatch
+) -> None:
+    sources = renderer_test._sources()
+    packet = renderer.load_chapter_packet("foothills_parkway")
+    root = renderer_test._root(tmp_path)
+    observed = renderer_test.NOW - timedelta(minutes=14)
+    created_center = observed.replace(second=0, microsecond=0) - timedelta(
+        minutes=13
+    )
+    observation = _render_observation(
+        packet=packet,
+        root=root,
+        sources=sources,
+        observed=observed,
+    )
+    observation["key_policy"]["provider_key_created_tooltip"] = (
+        renderer_test._ui_tooltip(created_center)
+    )
+    observation["key_policy"]["provider_key_expires_tooltip"] = (
+        renderer_test._ui_tooltip(
+            created_center + timedelta(seconds=renderer.KEY_LIFETIME_SECONDS)
+        )
+    )
+    path = _write_private_json(
+        tmp_path / "combined-age-observation.json", observation
+    )
+    transport = renderer_test.FakeTransport()
+    key_reads: list[int] = []
+    _configure(
+        monkeypatch,
+        sources=sources,
+        transport=transport,
+        key=RAW_KEY,
+        key_counter=key_reads,
+    )
+    with pytest.raises(
+        renderer.NarrationError,
+        match="render_observation_key_action_time_invalid",
+    ):
+        operator.run_operator(
+            action=operator.RENDER_ACTION,
+            chapter_id=packet.chapter_id,
+            output_root=root,
+            observation_path=path,
+            apply=True,
+            verified_output_format=renderer.OUTPUT_FORMAT_ID,
+        )
+    assert key_reads == []
+    assert transport.get_calls == [] and transport.post_calls == []
+    assert list(root.parent.glob("*.execution-evidence.json")) == []
+
+
+def test_ui_minute_time_evidence_rejects_timezone_dst_rounding_and_source_drift(
+    tmp_path: Path, monkeypatch
+) -> None:
+    sources = renderer_test._sources()
+    packet = renderer.load_chapter_packet("foothills_parkway")
+    created_center = renderer_test.NOW.replace(second=0, microsecond=0) - timedelta(
+        minutes=1
+    )
+    stale_center = (
+        renderer_test.NOW - renderer.EXECUTION_EVIDENCE_MAX_AGE
+    ).replace(second=0, microsecond=0)
+    cases = {
+        "missing-timezone": {"provider_key_timestamp_timezone": None},
+        "timezone-source-drift": {
+            "provider_key_timestamp_timezone_source": "browser_intl_assumption"
+        },
+        "missing-browser-time": {"provider_key_browser_date_string": ""},
+        "stale-browser-time": {
+            "provider_key_browser_date_string": renderer_test._browser_date_string(
+                renderer_test.NOW - timedelta(minutes=3)
+            )
+        },
+        "browser-offset-mismatch": {
+            "provider_key_browser_date_string": renderer_test._browser_date_string(
+                renderer_test.NOW
+            ).replace("GMT-0500", "GMT-0600")
+        },
+        "created-offset-mismatch": {"provider_key_created_utc_offset": "-06:00"},
+        "expiry-offset-transition": {"provider_key_expires_utc_offset": "-06:00"},
+        "malformed-created-tooltip": {"provider_key_created_tooltip": "Aug 11 2026"},
+        "ambiguous-dst-fold": {
+            "provider_key_created_tooltip": "Nov 1, 2026, 1:30 AM",
+            "provider_key_expires_tooltip": "Nov 2, 2026, 1:30 AM",
+        },
+        "nonexistent-dst-gap": {
+            "provider_key_created_tooltip": "Mar 8, 2026, 2:30 AM",
+            "provider_key_expires_tooltip": "Mar 9, 2026, 2:30 AM",
+        },
+        "displayed-duration-23h59": {
+            "provider_key_expires_tooltip": renderer_test._ui_tooltip(
+                created_center + timedelta(hours=23, minutes=59)
+            )
+        },
+        "displayed-duration-24h01": {
+            "provider_key_expires_tooltip": renderer_test._ui_tooltip(
+                created_center + timedelta(hours=24, minutes=1)
+            )
+        },
+        "stale-created-lower-bound": {
+            "provider_key_created_tooltip": renderer_test._ui_tooltip(stale_center),
+            "provider_key_expires_tooltip": renderer_test._ui_tooltip(
+                stale_center + timedelta(seconds=renderer.KEY_LIFETIME_SECONDS)
+            ),
+        },
+        "stale-key-with-expiry-lower-below-two-hours": {
+            "provider_key_created_tooltip": renderer_test._ui_tooltip(
+                renderer_test.NOW - timedelta(hours=23)
+            ),
+            "provider_key_expires_tooltip": renderer_test._ui_tooltip(
+                renderer_test.NOW + timedelta(hours=1)
+            ),
+        },
+        "future-created-upper-bound": {
+            "provider_key_created_tooltip": renderer_test._ui_tooltip(
+                renderer_test.NOW + timedelta(minutes=2)
+            ),
+            "provider_key_expires_tooltip": renderer_test._ui_tooltip(
+                renderer_test.NOW
+                + timedelta(minutes=2, seconds=renderer.KEY_LIFETIME_SECONDS)
+            ),
+        },
+        "ttl-label-drift": {"requested_ttl_label": "24 hours"},
+        "disabled-key": {"provider_key_enabled": False},
+        "tooltip-source-drift": {
+            "provider_key_created_tooltip_source": "manual_timestamp_entry"
+        },
+    }
+
+    for name, changes in cases.items():
+        case_dir = tmp_path / name
+        case_dir.mkdir(mode=0o700)
+        root = renderer_test._root(case_dir)
+        observation = _render_observation(
+            packet=packet, root=root, sources=sources
+        )
+        observation["key_policy"].update(changes)
+        path = _write_private_json(
+            case_dir / "render-observation.json", observation
+        )
+        transport = renderer_test.FakeTransport()
+        key_reads: list[int] = []
+        _configure(
+            monkeypatch,
+            sources=sources,
+            transport=transport,
+            key=RAW_KEY,
+            key_counter=key_reads,
+        )
+        with pytest.raises(renderer.NarrationError):
+            operator.run_operator(
+                action=operator.RENDER_ACTION,
+                chapter_id=packet.chapter_id,
+                output_root=root,
+                observation_path=path,
+                apply=True,
+                verified_output_format=renderer.OUTPUT_FORMAT_ID,
+            )
+        assert key_reads == [], name
+        assert transport.get_calls == [] and transport.post_calls == [], name
 
 
 def test_provider_key_id_cannot_be_substituted_with_preview_and_stops_before_key_read(
@@ -809,8 +1027,12 @@ def test_crash_after_one_success_rotates_to_new_residual_key_without_rerender(
     assert renderer._parse_utc(
         replacement["replacement_key_creation_initiated_at"], "test"
     ) >= renderer._parse_utc(replacement["prior_key_deleted_at"], "test")
-    assert replacement["key_created_at_directly_observed"] is False
-    assert replacement["expiry_directly_observed"] is True
+    assert replacement["provider_key_created_tooltip_directly_observed"] is True
+    assert replacement["provider_key_expires_tooltip_directly_observed"] is True
+    assert replacement["provider_key_timestamp_rounding_mode"] == "unknown"
+    assert replacement["key_expiry_conservative_deadline"] == replacement[
+        "key_expires_at_interval_lower"
+    ]
 
 
 def test_closeout_is_prevalidated_idempotent_and_derives_key_hash(
@@ -849,6 +1071,12 @@ def test_closeout_is_prevalidated_idempotent_and_derives_key_hash(
     closeout = json.loads(before)
     assert closeout["key_id_sha256"] == hashlib.sha256(RAW_KEY_ID.encode()).hexdigest()
     assert closeout["key_material_sha256"] == state["sessions"][-1]["key_material_sha256"]
+    assert closeout["key_ui_time_evidence"] == (
+        renderer._key_ui_time_evidence_from_session(state["sessions"][-1])
+    )
+    assert closeout["key_ui_time_evidence"][
+        "key_expiry_conservative_deadline"
+    ] == closeout["key_expiry_conservative_deadline"]
     assert RAW_KEY_ID not in final_path.read_text()
     assert not transport.responses
 
@@ -900,7 +1128,12 @@ def test_missing_usage_usd_creates_provisional_record_that_unlocks_nothing(
     )
     assert result["next_chapter_unlocked"] is False
     assert result["qa_eligible"] is False
-    assert (chapter / renderer.PROVISIONAL_CLOSEOUT_NAME).is_file()
+    provisional_path = chapter / renderer.PROVISIONAL_CLOSEOUT_NAME
+    assert provisional_path.is_file()
+    provisional = json.loads(provisional_path.read_text())
+    assert provisional["key_ui_time_evidence"] == (
+        renderer._key_ui_time_evidence_from_session(state["sessions"][-1])
+    )
     assert not renderer._path_present(chapter / renderer.CLOSEOUT_NAME)
     with pytest.raises(renderer.NarrationError):
         renderer._validate_prior_sequence(

@@ -27,6 +27,94 @@ def _synthetic_mp3(marker: int, *, frames: int = 20, mono: bool = True) -> bytes
     return frame * frames
 
 
+def _ui_time_payload(
+    *, created_center_utc: datetime, observed_at_utc: datetime
+) -> dict[str, object]:
+    expires_center_utc = created_center_utc + timedelta(
+        seconds=builder.KEY_LIFETIME_SECONDS
+    )
+    fixed_cdt = timedelta(hours=-5)
+
+    def tooltip(value: datetime) -> str:
+        local = value + fixed_cdt
+        hour = local.hour % 12 or 12
+        meridiem = "AM" if local.hour < 12 else "PM"
+        return (
+            f"{local.strftime('%b')} {local.day}, {local.year}, "
+            f"{hour}:{local.minute:02d} {meridiem}"
+        )
+
+    def browser_date(value: datetime) -> str:
+        local = value + fixed_cdt
+        return (
+            f"{local.strftime('%a %b')} {local.day:02d} {local.year} "
+            f"{local.hour:02d}:{local.minute:02d}:{local.second:02d} "
+            "GMT-0500 (Central Daylight Time)"
+        )
+
+    created_tooltip = tooltip(created_center_utc)
+    expires_tooltip = tooltip(expires_center_utc)
+    browser_date_string = browser_date(observed_at_utc)
+    uncertainty = timedelta(seconds=builder.KEY_UI_INTERVAL_UNCERTAINTY_SECONDS)
+    created_lower = created_center_utc - uncertainty
+    created_upper = created_center_utc + uncertainty
+    expires_lower = expires_center_utc - uncertainty
+    expires_upper = expires_center_utc + uncertainty
+    return {
+        "provider_key_created_tooltip": created_tooltip,
+        "provider_key_expires_tooltip": expires_tooltip,
+        "provider_key_browser_date_string": browser_date_string,
+        "provider_key_created_tooltip_sha256": hashlib.sha256(
+            created_tooltip.encode("ascii")
+        ).hexdigest(),
+        "provider_key_expires_tooltip_sha256": hashlib.sha256(
+            expires_tooltip.encode("ascii")
+        ).hexdigest(),
+        "provider_key_browser_date_string_sha256": hashlib.sha256(
+            browser_date_string.encode("ascii")
+        ).hexdigest(),
+        "provider_key_timestamp_timezone": builder.KEY_UI_TIMEZONE,
+        "provider_key_timestamp_precision": builder.KEY_UI_TIMESTAMP_PRECISION,
+        "provider_key_timestamp_precision_seconds": (
+            builder.KEY_UI_TIMESTAMP_PRECISION_SECONDS
+        ),
+        "provider_key_timestamp_rounding_mode": builder.KEY_UI_ROUNDING_MODE,
+        "provider_key_created_utc_offset": "-05:00",
+        "provider_key_expires_utc_offset": "-05:00",
+        "provider_key_created_tooltip_source": builder.KEY_UI_SOURCES[
+            "created_tooltip"
+        ],
+        "provider_key_expiry_tooltip_source": builder.KEY_UI_SOURCES[
+            "expiry_tooltip"
+        ],
+        "provider_key_timestamp_timezone_source": builder.KEY_UI_SOURCES[
+            "timezone"
+        ],
+        "provider_key_timestamp_offsets_source": builder.KEY_UI_SOURCES[
+            "offsets"
+        ],
+        "provider_key_browser_date_source": builder.KEY_UI_SOURCES[
+            "browser_time"
+        ],
+        "key_created_at_interval_lower": builder._iso_utc(created_lower),
+        "key_created_at_interval_upper": builder._iso_utc(created_upper),
+        "key_expires_at_interval_lower": builder._iso_utc(expires_lower),
+        "key_expires_at_interval_upper": builder._iso_utc(expires_upper),
+        "key_expiry_conservative_deadline": builder._iso_utc(expires_lower),
+        "key_displayed_center_duration_seconds": builder.KEY_LIFETIME_SECONDS,
+        "key_duration_interval_lower_seconds": (
+            builder.KEY_LIFETIME_SECONDS - 120
+        ),
+        "key_duration_interval_upper_seconds": (
+            builder.KEY_LIFETIME_SECONDS + 120
+        ),
+        "provider_key_created_tooltip_directly_observed": True,
+        "provider_key_expires_tooltip_directly_observed": True,
+        "requested_ttl_label": builder.KEY_UI_REQUESTED_TTL_LABEL,
+        "requested_ttl_seconds": builder.KEY_LIFETIME_SECONDS,
+    }
+
+
 def _prepare_full_fixture(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -206,25 +294,14 @@ def _prepare_full_fixture(
                 "provider_usage_baseline": builder.PREBATCH_BASELINE,
             },
         )
-        session_expires_at = datetime(2026, 8, 12, 6, 0, tzinfo=UTC)
-        session_created_at = session_expires_at - timedelta(seconds=86_400)
+        session_created_at = datetime(2026, 8, 11, 6, 0, tzinfo=UTC)
+        session_observed_at = datetime(2026, 8, 11, 6, 0, tzinfo=UTC)
         session_payload = {
             "available_credits": starting_credits,
             "continuation": False,
             "continuation_mode": "initial",
             "evidence_sha256": preflight_sha,
             "key_credit_limit": spec["one_day_key_credit_quota"],
-            "key_created_at_derived": session_created_at.isoformat().replace(
-                "+00:00", "Z"
-            ),
-            "key_created_at_derivation": (
-                "provider_get_expires_at_unix_minus_official_ui_"
-                "requested_ttl_seconds"
-            ),
-            "key_created_at_directly_observed": False,
-            "key_expires_at": session_expires_at.isoformat().replace(
-                "+00:00", "Z"
-            ),
             "key_id_sha256": key_id_sha,
             "key_material_sha256": key_material_sha,
             "key_session_number": 1,
@@ -236,12 +313,17 @@ def _prepare_full_fixture(
             ).hexdigest(),
             "provider_key_matching_row_count": 1,
             "provider_key_row_unique": True,
+            "provider_key_enabled": True,
+            **_ui_time_payload(
+                created_center_utc=session_created_at,
+                observed_at_utc=session_observed_at,
+            ),
             "key_preview_sha256": hashlib.sha256(
                 f"preview:{chapter_id}".encode()
             ).hexdigest(),
             "ledger_character_cost_total_at_start": 0,
             "ledger_request_count_at_start": 0,
-            "observed_at": "2026-08-11T06:00:00Z",
+            "observed_at": builder._iso_utc(session_observed_at),
             "observed_billable_request_count": starting_requests,
             "observed_total_usage_usd": f"{starting_usd:.2f}",
             "partial_billable_requests_since_prior_session": 0,
@@ -249,7 +331,6 @@ def _prepare_full_fixture(
             "prior_key_deleted_and_verified": False,
             "prior_key_deleted_at": None,
             "prior_key_id_sha256": None,
-            "provider_key_expires_at_unix": int(session_expires_at.timestamp()),
             "remaining_batch_renderer_cap": sum(
                 builder.LOCK_SPECS[value]["renderer_character_cap"]
                 for value in builder.CHAPTER_ORDER[
@@ -257,8 +338,6 @@ def _prepare_full_fixture(
                 ]
             ),
             "replacement_key_creation_initiated_at": None,
-            "requested_ttl_seconds": 86_400,
-            "expiry_directly_observed": True,
         }
         append_event("execution_session_started", None, session_payload)
         preflight_payload = {
@@ -518,6 +597,17 @@ def _prepare_full_fixture(
             "key_material_sha256": key_material_sha,
             "key_deleted": True,
             "key_deletion_verified": True,
+            "key_deleted_at": "2026-08-11T07:59:00Z",
+            "key_deletion_source": (
+                "official_signed_in_api_keys_ui_delete_and_absence_verification"
+            ),
+            "key_ui_time_evidence": {
+                name: session_payload[name] for name in builder.KEY_UI_TIME_FIELDS
+            },
+            "key_expiry_conservative_deadline": session_payload[
+                "key_expiry_conservative_deadline"
+            ],
+            "key_deleted_before_conservative_expiry": True,
             "no_other_active_render_keys": True,
             "starting_provider_credits": starting_credits,
             "ending_provider_credits": ending_credits,
@@ -679,6 +769,33 @@ def test_missing_key_closeout_fails_closed(
         builder.build(root, probe_audio=probe)
 
 
+def test_closeout_must_bind_exact_session_ui_time_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, probe = _prepare_full_fixture(tmp_path, monkeypatch)
+    path = root / builder.CHAPTER_ORDER[0] / "chapter-closeout.json"
+    value = json.loads(path.read_text(encoding="utf-8"))
+    value["key_ui_time_evidence"]["requested_ttl_label"] = "24 hours"
+    _json(path, value)
+    with pytest.raises(builder.AudioQaError, match="UI-time closeout"):
+        builder.build(root, probe_audio=probe)
+
+
+def test_closeout_uses_conservative_expiry_deadline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, probe = _prepare_full_fixture(tmp_path, monkeypatch)
+    path = root / builder.CHAPTER_ORDER[0] / "chapter-closeout.json"
+    value = json.loads(path.read_text(encoding="utf-8"))
+    value["key_deleted_at"] = "2026-08-12T05:55:00Z"
+    value["observed_at"] = "2026-08-12T05:55:30Z"
+    _json(path, value)
+    with pytest.raises(builder.AudioQaError, match="deletion deadline"):
+        builder.build(root, probe_audio=probe)
+
+
 def test_dollar_reconciliation_drift_fails_closed(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -734,12 +851,21 @@ def test_renderer_audit_drift_fails_closed(
         ("provider_key_name_sha256", "0" * 64),
         ("provider_key_matching_row_count", 2),
         ("provider_key_row_unique", False),
+        ("provider_key_enabled", False),
         ("key_preview_sha256", "x" * 64),
+        ("provider_key_created_tooltip_sha256", "0" * 64),
+        ("provider_key_created_utc_offset", "-06:00"),
+        ("provider_key_timestamp_timezone", "Etc/GMT+5"),
+        ("key_expiry_conservative_deadline", "2026-08-12T06:00:00Z"),
         ("provider_key_expires_at_unix", 1),
-        ("key_created_at_derived", "2026-08-10T00:00:00Z"),
+        ("key_created_at_derived", "2026-08-11T06:00:00Z"),
+        ("provider_key_browser_date_string", (
+            "Tue Aug 11 2026 00:30:00 GMT-0500 (Central Daylight Time)"
+        )),
+        ("provider_key_created_tooltip", "Nov 1, 2026, 1:30 AM"),
     ),
 )
-def test_exact_key_identity_and_derived_expiry_session_contract(
+def test_exact_key_identity_and_ui_time_session_contract(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     field: str,
@@ -757,7 +883,7 @@ def test_exact_key_identity_and_derived_expiry_session_contract(
     )
     drifted = json.loads(json.dumps(ledger["execution_sessions"]))
     drifted[0][field] = bad_value
-    with pytest.raises(builder.AudioQaError, match="session|expiry"):
+    with pytest.raises(builder.AudioQaError, match="provider|session|expiry"):
         builder._validate_session_preflight_contract(
             chapter_id=chapter_id,
             sessions=drifted,
@@ -776,7 +902,8 @@ def test_recovery_key_rotation_session_is_exact_and_ordered(
     )
     initial = ledger["execution_sessions"][0]
     initial_preflight = ledger["provider_preflights"][0]
-    recovery_expires = datetime(2026, 8, 12, 7, 1, tzinfo=UTC)
+    recovery_created = datetime(2026, 8, 11, 7, 1, tzinfo=UTC)
+    recovery_observed = datetime(2026, 8, 11, 7, 2, tzinfo=UTC)
     recovery = {
         **initial,
         "available_credits": initial["available_credits"] - 1_000,
@@ -786,20 +913,21 @@ def test_recovery_key_rotation_session_is_exact_and_ordered(
         "key_credit_limit": (
             builder.LOCK_SPECS[chapter_id]["renderer_character_cap"] - 1_000
         ),
-        "key_created_at_derived": (
-            recovery_expires - timedelta(seconds=86_400)
-        ).isoformat().replace("+00:00", "Z"),
-        "key_expires_at": recovery_expires.isoformat().replace("+00:00", "Z"),
         "key_id_sha256": hashlib.sha256(b"recovery-key-id").hexdigest(),
         "key_material_sha256": hashlib.sha256(b"recovery-key-material").hexdigest(),
         "key_session_number": 2,
         "provider_key_name_sha256": hashlib.sha256(
             b"trailhead-smokies-james-fp-session-2"
         ).hexdigest(),
+        "provider_key_enabled": True,
+        **_ui_time_payload(
+            created_center_utc=recovery_created,
+            observed_at_utc=recovery_observed,
+        ),
         "key_preview_sha256": hashlib.sha256(b"WXYZ").hexdigest(),
         "ledger_character_cost_total_at_start": 1_000,
         "ledger_request_count_at_start": 1,
-        "observed_at": "2026-08-11T07:02:00Z",
+        "observed_at": builder._iso_utc(recovery_observed),
         "observed_billable_request_count": initial[
             "observed_billable_request_count"
         ]
@@ -810,7 +938,6 @@ def test_recovery_key_rotation_session_is_exact_and_ordered(
         "prior_key_deleted_and_verified": True,
         "prior_key_deleted_at": "2026-08-11T07:00:00Z",
         "prior_key_id_sha256": initial["key_id_sha256"],
-        "provider_key_expires_at_unix": int(recovery_expires.timestamp()),
         "remaining_batch_renderer_cap": (
             initial["remaining_batch_renderer_cap"] - 1_000
         ),

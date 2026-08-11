@@ -22,6 +22,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Mapping, Sequence
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 REPOSITORY = Path(__file__).resolve().parents[1]
@@ -36,6 +37,26 @@ RENDER_ACTION = "render"
 CLOSEOUT_ACTION = "closeout"
 OBSERVATION_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_]{19,127}$")
 USD_RE = re.compile(r"^\d+\.\d{2}$")
+UI_TOOLTIP_RE = re.compile(
+    r"^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) "
+    r"([1-9]|[12][0-9]|3[01]), ([0-9]{4}), "
+    r"([1-9]|1[0-2]):([0-5][0-9]) (AM|PM)$"
+)
+UI_BROWSER_DATE_RE = re.compile(
+    r"^(Sun|Mon|Tue|Wed|Thu|Fri|Sat) "
+    r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) +"
+    r"([1-9]|[12][0-9]|3[01]) ([0-9]{4}) "
+    r"([01][0-9]|2[0-3]):([0-5][0-9]):([0-5][0-9]) "
+    r"GMT(-[0-9]{4}) \(Central Daylight Time\)$"
+)
+UI_MONTHS = {
+    name: index
+    for index, name in enumerate(
+        ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"),
+        start=1,
+    )
+}
+UI_WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 KEY_READER = renderer._read_key_from_stdin
 TRANSPORT_FACTORY = renderer.UrllibProviderTransport
 PROBE_AUDIO = renderer._strict_probe_mono_mp3
@@ -101,6 +122,208 @@ def _observation_common(
     renderer._parse_utc(raw.get("observed_at"), "operator_observation_time_invalid")
 
 
+def _utc_offset_label(value: datetime) -> str:
+    offset = value.utcoffset()
+    if offset is None or offset.total_seconds() % 60:
+        raise renderer.NarrationError("render_observation_key_timezone_invalid")
+    total_minutes = int(offset.total_seconds() // 60)
+    sign = "+" if total_minutes >= 0 else "-"
+    total_minutes = abs(total_minutes)
+    return f"{sign}{total_minutes // 60:02d}:{total_minutes % 60:02d}"
+
+
+def _strict_local_to_utc(
+    naive: datetime,
+    *,
+    timezone_name: str,
+    observed_offset: object,
+    code: str,
+) -> datetime:
+    try:
+        zone = ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError as exc:
+        raise renderer.NarrationError(code) from exc
+    candidates: dict[datetime, datetime] = {}
+    for fold in (0, 1):
+        local = naive.replace(tzinfo=zone, fold=fold)
+        utc_value = local.astimezone(timezone.utc)
+        roundtrip = utc_value.astimezone(zone)
+        if roundtrip.replace(tzinfo=None) == naive:
+            candidates[utc_value] = local
+    if len(candidates) != 1:
+        raise renderer.NarrationError("render_observation_key_timezone_ambiguous")
+    utc_value, local = next(iter(candidates.items()))
+    if observed_offset != _utc_offset_label(local):
+        raise renderer.NarrationError("render_observation_key_offset_mismatch")
+    return utc_value
+
+
+def _parse_ui_tooltip_minute(
+    raw_value: object,
+    *,
+    timezone_name: str,
+    observed_offset: object,
+    code: str,
+) -> datetime:
+    if not isinstance(raw_value, str):
+        raise renderer.NarrationError(code)
+    match = UI_TOOLTIP_RE.fullmatch(raw_value)
+    if match is None:
+        raise renderer.NarrationError(code)
+    month_name, day, year, hour, minute, meridiem = match.groups()
+    hour_value = int(hour) % 12 + (12 if meridiem == "PM" else 0)
+    try:
+        naive = datetime(
+            int(year),
+            UI_MONTHS[month_name],
+            int(day),
+            hour_value,
+            int(minute),
+        )
+    except ValueError as exc:
+        raise renderer.NarrationError(code) from exc
+    return _strict_local_to_utc(
+        naive,
+        timezone_name=timezone_name,
+        observed_offset=observed_offset,
+        code=code,
+    )
+
+
+def _parse_browser_date_string(
+    raw_value: object, *, observed_at: datetime, timezone_name: str
+) -> tuple[datetime, str]:
+    if not isinstance(raw_value, str):
+        raise renderer.NarrationError("render_observation_browser_time_invalid")
+    match = UI_BROWSER_DATE_RE.fullmatch(raw_value)
+    if match is None:
+        raise renderer.NarrationError("render_observation_browser_time_invalid")
+    (
+        weekday,
+        month_name,
+        day,
+        year,
+        hour,
+        minute,
+        second,
+        compact_offset,
+    ) = match.groups()
+    try:
+        naive = datetime(
+            int(year),
+            UI_MONTHS[month_name],
+            int(day),
+            int(hour),
+            int(minute),
+            int(second),
+        )
+    except ValueError as exc:
+        raise renderer.NarrationError("render_observation_browser_time_invalid") from exc
+    if UI_WEEKDAYS[naive.weekday()] != weekday:
+        raise renderer.NarrationError("render_observation_browser_time_invalid")
+    offset = f"{compact_offset[:3]}:{compact_offset[3:]}"
+    if offset != "-05:00":
+        raise renderer.NarrationError("render_observation_browser_offset_invalid")
+    browser_utc = _strict_local_to_utc(
+        naive,
+        timezone_name=timezone_name,
+        observed_offset=offset,
+        code="render_observation_browser_time_invalid",
+    )
+    if abs(browser_utc - observed_at) > timedelta(minutes=2):
+        raise renderer.NarrationError("render_observation_browser_time_stale")
+    return browser_utc, offset
+
+
+def _ui_time_evidence(
+    key: Mapping[str, Any], *, observed_at: datetime
+) -> dict[str, Any]:
+    timezone_name = key.get("provider_key_timestamp_timezone")
+    if timezone_name != renderer.KEY_UI_TIMEZONE:
+        raise renderer.NarrationError("render_observation_key_timezone_invalid")
+    if any(
+        (
+            key.get("provider_key_timestamp_precision")
+            != renderer.KEY_UI_TIMESTAMP_PRECISION,
+            key.get("provider_key_timestamp_precision_seconds")
+            != renderer.KEY_UI_TIMESTAMP_PRECISION_SECONDS,
+            key.get("provider_key_timestamp_rounding_mode")
+            != renderer.KEY_UI_ROUNDING_MODE,
+            key.get("provider_key_timestamp_timezone_source")
+            != renderer.KEY_UI_SOURCES["timezone"],
+            key.get("provider_key_browser_date_source")
+            != renderer.KEY_UI_SOURCES["browser_time"],
+            key.get("provider_key_timestamp_offsets_source")
+            != renderer.KEY_UI_SOURCES["offsets"],
+        )
+    ):
+        raise renderer.NarrationError("render_observation_key_time_contract_invalid")
+    _browser_utc, browser_offset = _parse_browser_date_string(
+        key.get("provider_key_browser_date_string"),
+        observed_at=observed_at,
+        timezone_name=timezone_name,
+    )
+    if any(
+        (
+            key.get("provider_key_created_utc_offset") != browser_offset,
+            key.get("provider_key_expires_utc_offset") != browser_offset,
+        )
+    ):
+        raise renderer.NarrationError("render_observation_key_offset_transition")
+    created_center = _parse_ui_tooltip_minute(
+        key.get("provider_key_created_tooltip"),
+        timezone_name=timezone_name,
+        observed_offset=key.get("provider_key_created_utc_offset"),
+        code="render_observation_key_created_tooltip_invalid",
+    )
+    expires_center = _parse_ui_tooltip_minute(
+        key.get("provider_key_expires_tooltip"),
+        timezone_name=timezone_name,
+        observed_offset=key.get("provider_key_expires_utc_offset"),
+        code="render_observation_key_expiry_tooltip_invalid",
+    )
+    uncertainty = timedelta(
+        seconds=renderer.KEY_EXPIRY_INTERVAL_UNCERTAINTY_SECONDS
+    )
+    created_lower = created_center - uncertainty
+    created_upper = created_center + uncertainty
+    expires_lower = expires_center - uncertainty
+    expires_upper = expires_center + uncertainty
+    duration_lower = int((expires_lower - created_upper).total_seconds())
+    duration_upper = int((expires_upper - created_lower).total_seconds())
+    if any(
+        (
+            int((expires_center - created_center).total_seconds())
+            != renderer.KEY_LIFETIME_SECONDS,
+            duration_lower != renderer.KEY_LIFETIME_SECONDS - 120,
+            duration_upper != renderer.KEY_LIFETIME_SECONDS + 120,
+            key.get("requested_ttl_label")
+            != renderer.KEY_UI_REQUESTED_TTL_LABEL,
+            key.get("requested_ttl_seconds")
+            != renderer.KEY_LIFETIME_SECONDS,
+            key.get("provider_key_created_tooltip_directly_observed")
+            is not True,
+            key.get("provider_key_expires_tooltip_directly_observed")
+            is not True,
+            observed_at - created_lower
+            > renderer.EXECUTION_EVIDENCE_MAX_AGE,
+            created_upper - observed_at > timedelta(minutes=2),
+            expires_lower - observed_at < renderer.MIN_KEY_REMAINING,
+        )
+    ):
+        raise renderer.NarrationError("render_observation_key_time_contract_invalid")
+    return {
+        "created_center": created_center,
+        "created_lower": created_lower,
+        "created_upper": created_upper,
+        "expires_center": expires_center,
+        "expires_lower": expires_lower,
+        "expires_upper": expires_upper,
+        "duration_lower_seconds": duration_lower,
+        "duration_upper_seconds": duration_upper,
+    }
+
+
 def _load_render_observation(
     path: Path,
     packet: renderer.ChapterPacket,
@@ -146,20 +369,38 @@ def _load_render_observation(
         "provider_key_id",
         "provider_key_name",
         "provider_key_preview",
-        "provider_key_expires_at_unix",
+        "provider_key_created_tooltip",
+        "provider_key_expires_tooltip",
+        "provider_key_created_tooltip_directly_observed",
+        "provider_key_expires_tooltip_directly_observed",
+        "provider_key_timestamp_timezone",
+        "provider_key_timestamp_timezone_source",
+        "provider_key_timestamp_precision",
+        "provider_key_timestamp_precision_seconds",
+        "provider_key_timestamp_rounding_mode",
+        "provider_key_created_utc_offset",
+        "provider_key_expires_utc_offset",
+        "provider_key_timestamp_offsets_source",
+        "provider_key_browser_date_string",
+        "provider_key_browser_date_source",
         "provider_key_matching_row_count",
         "provider_key_row_unique",
+        "provider_key_enabled",
+        "requested_ttl_label",
         "requested_ttl_seconds",
         "key_credit_limit",
         "key_permissions",
         "restrict_key_enabled",
         "auto_disable_if_leaked",
         "other_chapter_keys_active",
-        "expiry_directly_observed",
         "provider_key_id_source",
-        "provider_key_expiry_source",
         "provider_key_name_source",
         "provider_key_preview_source",
+        "provider_key_created_tooltip_source",
+        "provider_key_expiry_tooltip_source",
+        "provider_key_enabled_source",
+        "provider_key_controls_source",
+        "provider_key_uniqueness_source",
         "post_create_response_inspected",
         "key_delivery",
         "key_identity_capture",
@@ -195,54 +436,63 @@ def _load_render_observation(
         raw_key_id.encode("ascii"), raw_key_name.encode("ascii")
     ):
         raise renderer.NarrationError("render_observation_key_identity_invalid")
-    expires_unix = key.get("provider_key_expires_at_unix")
-    if isinstance(expires_unix, bool) or not isinstance(expires_unix, int):
-        raise renderer.NarrationError("render_observation_key_expiry_invalid")
-    try:
-        expires_at = datetime.fromtimestamp(expires_unix, tz=timezone.utc)
-    except (OSError, OverflowError, ValueError) as exc:
-        raise renderer.NarrationError("render_observation_key_expiry_invalid") from exc
     observed_at = renderer._parse_utc(
         raw.get("observed_at"), "render_observation_time_invalid"
     )
-    created_derived = expires_at - timedelta(
-        seconds=renderer.KEY_LIFETIME_SECONDS
-    )
+    current = NOW()
+    if (
+        observed_at > current + timedelta(minutes=2)
+        or current - observed_at > renderer.EXECUTION_EVIDENCE_MAX_AGE
+    ):
+        raise renderer.NarrationError("render_observation_not_fresh")
+    key_time = _ui_time_evidence(key, observed_at=observed_at)
+    if any(
+        (
+            current - key_time["created_lower"]
+            > renderer.EXECUTION_EVIDENCE_MAX_AGE,
+            key_time["created_upper"] - current > timedelta(minutes=2),
+            key_time["expires_lower"] - current < renderer.MIN_KEY_REMAINING,
+        )
+    ):
+        raise renderer.NarrationError(
+            "render_observation_key_action_time_invalid"
+        )
     credit_limit = key.get("key_credit_limit")
     if isinstance(credit_limit, bool) or not isinstance(credit_limit, int):
         raise renderer.NarrationError("render_observation_key_delivery_invalid")
     if any(
         (
-            key.get("requested_ttl_seconds")
-            != renderer.KEY_LIFETIME_SECONDS,
             not 0 < credit_limit <= packet.key_credit_quota,
             key.get("key_permissions")
             != list(renderer.EXPECTED_KEY_PERMISSIONS),
             key.get("restrict_key_enabled") is not True,
             key.get("auto_disable_if_leaked") is not True,
             key.get("other_chapter_keys_active") is not False,
-            key.get("expiry_directly_observed") is not True,
+            key.get("provider_key_enabled") is not True,
             isinstance(key.get("provider_key_matching_row_count"), bool),
             key.get("provider_key_matching_row_count") != 1,
             key.get("provider_key_row_unique") is not True,
             key.get("provider_key_id_source")
-            != "authenticated_get_v1_user_api_keys_row_xi_api_key",
-            key.get("provider_key_expiry_source")
-            != "authenticated_get_v1_user_api_keys_row_expires_at_unix",
+            != renderer.KEY_UI_SOURCES["key_id"],
             key.get("provider_key_name_source")
-            != "authenticated_get_v1_user_api_keys_name",
+            != renderer.KEY_UI_SOURCES["key_name"],
             key.get("provider_key_preview_source")
-            != "authenticated_get_v1_user_api_keys_xi_api_key_preview_last_4_secret_chars",
+            != renderer.KEY_UI_SOURCES["key_preview"],
+            key.get("provider_key_created_tooltip_source")
+            != renderer.KEY_UI_SOURCES["created_tooltip"],
+            key.get("provider_key_expiry_tooltip_source")
+            != renderer.KEY_UI_SOURCES["expiry_tooltip"],
+            key.get("provider_key_enabled_source")
+            != renderer.KEY_UI_SOURCES["enabled"],
+            key.get("provider_key_controls_source")
+            != renderer.KEY_UI_SOURCES["controls"],
+            key.get("provider_key_uniqueness_source")
+            != renderer.KEY_UI_SOURCES["uniqueness"],
             key.get("post_create_response_inspected") is not False,
             key.get("key_delivery")
             != "secure_piped_stdin_external_transfer_not_attested_by_operator",
             key.get("key_identity_capture")
-            != "authenticated_get_key_row_name_id_preview_expiry_and_operator_memory_material_sha256",
-            observed_at - created_derived
-            > renderer.EXECUTION_EVIDENCE_MAX_AGE,
-            created_derived - observed_at > timedelta(minutes=2),
-            expires_at - observed_at
-            > timedelta(seconds=renderer.KEY_LIFETIME_SECONDS, minutes=2),
+            != "official_ui_key_row_name_id_preview_times_controls_and_operator_memory_material_sha256",
         )
     ):
         raise renderer.NarrationError("render_observation_key_delivery_invalid")
@@ -274,11 +524,13 @@ def _build_execution_evidence(
         packet.chapter_id, key_session_number
     ):
         raise renderer.NarrationError("render_observation_key_name_invalid")
-    expires_unix = int(observed_key["provider_key_expires_at_unix"])
-    expires_at = datetime.fromtimestamp(expires_unix, tz=timezone.utc)
-    created_derived = expires_at - timedelta(
-        seconds=renderer.KEY_LIFETIME_SECONDS
+    observed_at = renderer._parse_utc(
+        observation["observed_at"], "render_observation_time_invalid"
     )
+    time_evidence = _ui_time_evidence(observed_key, observed_at=observed_at)
+    created_tooltip = str(observed_key["provider_key_created_tooltip"])
+    expires_tooltip = str(observed_key["provider_key_expires_tooltip"])
+    browser_date_string = str(observed_key["provider_key_browser_date_string"])
     key = {
         "key_id_sha256": key_id_sha256,
         "key_material_sha256": key_material_sha256,
@@ -292,29 +544,91 @@ def _build_execution_evidence(
         "other_chapter_keys_active": observed_key[
             "other_chapter_keys_active"
         ],
-        "provider_key_expires_at_unix": expires_unix,
         "provider_key_matching_row_count": 1,
         "provider_key_row_unique": True,
-        "requested_ttl_seconds": renderer.KEY_LIFETIME_SECONDS,
-        "key_expires_at": renderer._iso(expires_at),
-        "key_created_at_derived": renderer._iso(created_derived),
-        "key_created_at_directly_observed": False,
-        "key_created_at_derivation": (
-            "provider_get_expires_at_unix_minus_official_ui_"
-            "requested_ttl_seconds"
+        "provider_key_enabled": True,
+        "provider_key_created_tooltip": created_tooltip,
+        "provider_key_expires_tooltip": expires_tooltip,
+        "provider_key_browser_date_string": browser_date_string,
+        "provider_key_created_tooltip_sha256": hashlib.sha256(
+            created_tooltip.encode("ascii")
+        ).hexdigest(),
+        "provider_key_expires_tooltip_sha256": hashlib.sha256(
+            expires_tooltip.encode("ascii")
+        ).hexdigest(),
+        "provider_key_browser_date_string_sha256": hashlib.sha256(
+            browser_date_string.encode("ascii")
+        ).hexdigest(),
+        "provider_key_timestamp_timezone": renderer.KEY_UI_TIMEZONE,
+        "provider_key_timestamp_precision": renderer.KEY_UI_TIMESTAMP_PRECISION,
+        "provider_key_timestamp_precision_seconds": (
+            renderer.KEY_UI_TIMESTAMP_PRECISION_SECONDS
         ),
-        "expiry_directly_observed": True,
+        "provider_key_timestamp_rounding_mode": renderer.KEY_UI_ROUNDING_MODE,
+        "provider_key_created_utc_offset": observed_key[
+            "provider_key_created_utc_offset"
+        ],
+        "provider_key_expires_utc_offset": observed_key[
+            "provider_key_expires_utc_offset"
+        ],
+        "key_created_at_interval_lower": renderer._iso(
+            time_evidence["created_lower"]
+        ),
+        "key_created_at_interval_upper": renderer._iso(
+            time_evidence["created_upper"]
+        ),
+        "key_expires_at_interval_lower": renderer._iso(
+            time_evidence["expires_lower"]
+        ),
+        "key_expires_at_interval_upper": renderer._iso(
+            time_evidence["expires_upper"]
+        ),
+        "key_expiry_conservative_deadline": renderer._iso(
+            time_evidence["expires_lower"]
+        ),
+        "key_displayed_center_duration_seconds": renderer.KEY_LIFETIME_SECONDS,
+        "key_duration_interval_lower_seconds": time_evidence[
+            "duration_lower_seconds"
+        ],
+        "key_duration_interval_upper_seconds": time_evidence[
+            "duration_upper_seconds"
+        ],
+        "provider_key_created_tooltip_directly_observed": True,
+        "provider_key_expires_tooltip_directly_observed": True,
+        "requested_ttl_label": renderer.KEY_UI_REQUESTED_TTL_LABEL,
+        "requested_ttl_seconds": renderer.KEY_LIFETIME_SECONDS,
         "provider_key_id_source": observed_key[
             "provider_key_id_source"
-        ],
-        "provider_key_expiry_source": observed_key[
-            "provider_key_expiry_source"
         ],
         "provider_key_name_source": observed_key[
             "provider_key_name_source"
         ],
         "provider_key_preview_source": observed_key[
             "provider_key_preview_source"
+        ],
+        "provider_key_created_tooltip_source": observed_key[
+            "provider_key_created_tooltip_source"
+        ],
+        "provider_key_expiry_tooltip_source": observed_key[
+            "provider_key_expiry_tooltip_source"
+        ],
+        "provider_key_enabled_source": observed_key[
+            "provider_key_enabled_source"
+        ],
+        "provider_key_controls_source": observed_key[
+            "provider_key_controls_source"
+        ],
+        "provider_key_uniqueness_source": observed_key[
+            "provider_key_uniqueness_source"
+        ],
+        "provider_key_timestamp_timezone_source": observed_key[
+            "provider_key_timestamp_timezone_source"
+        ],
+        "provider_key_timestamp_offsets_source": observed_key[
+            "provider_key_timestamp_offsets_source"
+        ],
+        "provider_key_browser_date_source": observed_key[
+            "provider_key_browser_date_source"
         ],
         "post_create_response_inspected": False,
         "key_delivery": observed_key["key_delivery"],
@@ -731,6 +1045,8 @@ def _load_closeout_observation(path: Path, chapter_id: str) -> dict[str, Any]:
         "ending_billable_request_count",
         "ending_total_usage_usd",
         "key_id",
+        "key_deleted_at",
+        "key_deletion_source",
         "key_deleted",
         "key_deletion_verified",
         "no_other_active_render_keys",
@@ -761,10 +1077,16 @@ def _load_closeout_observation(path: Path, chapter_id: str) -> dict[str, Any]:
     observed = renderer._parse_utc(
         raw["observed_at"], "closeout_observation_time_invalid"
     )
+    deleted_at = renderer._parse_utc(
+        raw["key_deleted_at"], "closeout_observation_key_deleted_at_invalid"
+    )
     current = NOW()
     if (
         observed > current + renderer.timedelta(minutes=2)
         or current - observed > renderer.EXECUTION_EVIDENCE_MAX_AGE
+        or deleted_at > observed
+        or raw.get("key_deletion_source")
+        != "official_signed_in_api_keys_ui_delete_and_absence_verification"
     ):
         raise renderer.NarrationError("closeout_observation_not_fresh")
     return raw
@@ -799,6 +1121,26 @@ def _closeout_apply(
         probe_audio=PROBE_AUDIO,
     )
     observation = _load_closeout_observation(observation_path, chapter_id)
+    if not state["sessions"]:
+        raise renderer.NarrationError("chapter_closeout_session_missing")
+    session = state["sessions"][-1]
+    deleted_at = renderer._parse_utc(
+        observation["key_deleted_at"],
+        "closeout_observation_key_deleted_at_invalid",
+    )
+    rendered_at = renderer._parse_utc(
+        state["updated_at"], "render_event_timestamp_invalid"
+    )
+    renderer._require_conservative_key_deadline(
+        session["key_expiry_conservative_deadline"],
+        current=renderer._parse_utc(
+            observation["observed_at"], "closeout_observation_time_invalid"
+        ),
+        operation_timeout_seconds=0,
+        code="closeout_after_conservative_key_expiry_deadline",
+    )
+    if deleted_at < rendered_at:
+        raise renderer.NarrationError("closeout_key_deleted_before_render_complete")
     observation_sha = renderer._sha256_bytes(
         renderer._canonical_bytes(observation)
     )
@@ -860,6 +1202,15 @@ def _closeout_apply(
             ],
             "key_deleted": True,
             "key_deletion_verified": True,
+            "key_deleted_at": observation["key_deleted_at"],
+            "key_deletion_source": observation["key_deletion_source"],
+            "key_ui_time_evidence": renderer._key_ui_time_evidence_from_session(
+                session
+            ),
+            "key_expiry_conservative_deadline": session[
+                "key_expiry_conservative_deadline"
+            ],
+            "key_deleted_before_conservative_expiry": True,
             "no_other_active_render_keys": True,
             "ending_provider_credits": ending_credits,
             "ending_billable_request_count": ending_requests,
@@ -934,6 +1285,15 @@ def _closeout_apply(
         ],
         "key_deleted": observation["key_deleted"],
         "key_deletion_verified": observation["key_deletion_verified"],
+        "key_deleted_at": observation["key_deleted_at"],
+        "key_deletion_source": observation["key_deletion_source"],
+        "key_ui_time_evidence": renderer._key_ui_time_evidence_from_session(
+            session
+        ),
+        "key_expiry_conservative_deadline": session[
+            "key_expiry_conservative_deadline"
+        ],
+        "key_deleted_before_conservative_expiry": True,
         "no_other_active_render_keys": observation[
             "no_other_active_render_keys"
         ],

@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_UP
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 
 REPOSITORY = Path(__file__).resolve().parents[1]
@@ -104,6 +105,90 @@ MAX_PREFERRED_WPM = 185.0
 MIN_DURATION_FLAG_S = 2.0
 MAX_DURATION_FLAG_S = 300.0
 SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
+KEY_LIFETIME_SECONDS = 86_400
+KEY_UI_TIMEZONE = "America/Winnipeg"
+KEY_UI_TIMESTAMP_PRECISION = "minute"
+KEY_UI_TIMESTAMP_PRECISION_SECONDS = 60
+KEY_UI_ROUNDING_MODE = "unknown"
+KEY_UI_REQUESTED_TTL_LABEL = "1 day"
+KEY_UI_INTERVAL_UNCERTAINTY_SECONDS = 60
+KEY_UI_EVIDENCE_MAX_AGE = timedelta(minutes=15)
+KEY_UI_MAX_FUTURE_SKEW = timedelta(minutes=2)
+KEY_UI_MIN_REMAINING = timedelta(hours=2)
+KEY_DISPATCH_SAFETY_BUFFER_SECONDS = 300
+KEY_UI_TOOLTIP_RE = re.compile(
+    r"^(?P<month>Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) "
+    r"(?P<day>[1-9]|[12][0-9]|3[01]), (?P<year>[0-9]{4}), "
+    r"(?P<hour>[1-9]|1[0-2]):(?P<minute>[0-5][0-9]) "
+    r"(?P<meridiem>AM|PM)$"
+)
+KEY_UI_BROWSER_DATE_RE = re.compile(
+    r"^(?P<weekday>Sun|Mon|Tue|Wed|Thu|Fri|Sat) "
+    r"(?P<month>Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) +"
+    r"(?P<day>[1-9]|[12][0-9]|3[01]) (?P<year>[0-9]{4}) "
+    r"(?P<hour>[01][0-9]|2[0-3]):(?P<minute>[0-5][0-9]):"
+    r"(?P<second>[0-5][0-9]) "
+    r"GMT-0500 \(Central Daylight Time\)$"
+)
+KEY_UI_MONTHS = {
+    name: index
+    for index, name in enumerate(
+        (
+            "Jan",
+            "Feb",
+            "Mar",
+            "Apr",
+            "May",
+            "Jun",
+            "Jul",
+            "Aug",
+            "Sep",
+            "Oct",
+            "Nov",
+            "Dec",
+        ),
+        start=1,
+    )
+}
+KEY_UI_WEEKDAYS = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+KEY_UI_TIME_FIELDS = (
+    "provider_key_created_tooltip",
+    "provider_key_expires_tooltip",
+    "provider_key_browser_date_string",
+    "provider_key_created_tooltip_sha256",
+    "provider_key_expires_tooltip_sha256",
+    "provider_key_browser_date_string_sha256",
+    "provider_key_timestamp_timezone",
+    "provider_key_timestamp_precision",
+    "provider_key_timestamp_precision_seconds",
+    "provider_key_timestamp_rounding_mode",
+    "provider_key_created_utc_offset",
+    "provider_key_expires_utc_offset",
+    "provider_key_created_tooltip_source",
+    "provider_key_expiry_tooltip_source",
+    "provider_key_timestamp_timezone_source",
+    "provider_key_timestamp_offsets_source",
+    "provider_key_browser_date_source",
+    "key_created_at_interval_lower",
+    "key_created_at_interval_upper",
+    "key_expires_at_interval_lower",
+    "key_expires_at_interval_upper",
+    "key_expiry_conservative_deadline",
+    "key_displayed_center_duration_seconds",
+    "key_duration_interval_lower_seconds",
+    "key_duration_interval_upper_seconds",
+    "provider_key_created_tooltip_directly_observed",
+    "provider_key_expires_tooltip_directly_observed",
+    "requested_ttl_label",
+    "requested_ttl_seconds",
+)
+KEY_UI_SOURCES = {
+    "created_tooltip": "official_signed_in_api_keys_ui_created_tooltip",
+    "expiry_tooltip": "official_signed_in_api_keys_ui_expiry_tooltip",
+    "timezone": "authoritative_codex_app_environment_context",
+    "offsets": "zoneinfo_offsets_at_created_and_expiry_ui_instants",
+    "browser_time": "signed_in_api_keys_page_new_date_to_string",
+}
 
 LOCK_SPECS = {
     "foothills_parkway": {
@@ -283,6 +368,196 @@ def _parse_utc_timestamp(value: object, label: str) -> datetime:
     if parsed.tzinfo is None or parsed.utcoffset() != timedelta(0):
         raise AudioQaError(f"{label} timestamp is invalid")
     return parsed.astimezone(timezone.utc)
+
+
+def _iso_utc(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _key_ui_offset_label(value: datetime, label: str) -> str:
+    offset = value.utcoffset()
+    if offset is None or offset.total_seconds() % 60:
+        raise AudioQaError(f"{label} UTC offset is invalid")
+    total_minutes = int(offset.total_seconds() // 60)
+    sign = "+" if total_minutes >= 0 else "-"
+    total_minutes = abs(total_minutes)
+    return f"{sign}{total_minutes // 60:02d}:{total_minutes % 60:02d}"
+
+
+def _key_ui_strict_local_to_utc(
+    naive: datetime, *, observed_offset: object, label: str
+) -> datetime:
+    try:
+        zone = ZoneInfo(KEY_UI_TIMEZONE)
+    except ZoneInfoNotFoundError as error:
+        raise AudioQaError(f"{label} timezone is unavailable") from error
+    candidates: dict[datetime, datetime] = {}
+    for fold in (0, 1):
+        local = naive.replace(tzinfo=zone, fold=fold)
+        utc_value = local.astimezone(timezone.utc)
+        if utc_value.astimezone(zone).replace(tzinfo=None) == naive:
+            candidates[utc_value] = local
+    if len(candidates) != 1:
+        raise AudioQaError(f"{label} is ambiguous or nonexistent")
+    utc_value, local = next(iter(candidates.items()))
+    if observed_offset != _key_ui_offset_label(local, label):
+        raise AudioQaError(f"{label} UTC offset drifted")
+    return utc_value
+
+
+def _key_ui_tooltip_center(
+    raw_value: object, *, observed_offset: object, label: str
+) -> datetime:
+    if not isinstance(raw_value, str):
+        raise AudioQaError(f"{label} tooltip is invalid")
+    match = KEY_UI_TOOLTIP_RE.fullmatch(raw_value)
+    if match is None:
+        raise AudioQaError(f"{label} tooltip is invalid")
+    parts = match.groupdict()
+    hour = int(parts["hour"]) % 12
+    if parts["meridiem"] == "PM":
+        hour += 12
+    try:
+        naive = datetime(
+            int(parts["year"]),
+            KEY_UI_MONTHS[parts["month"]],
+            int(parts["day"]),
+            hour,
+            int(parts["minute"]),
+        )
+    except ValueError as error:
+        raise AudioQaError(f"{label} tooltip is invalid") from error
+    return _key_ui_strict_local_to_utc(
+        naive, observed_offset=observed_offset, label=label
+    )
+
+
+def _key_ui_browser_time(
+    raw_value: object, *, observed_at: datetime, label: str
+) -> datetime:
+    if not isinstance(raw_value, str):
+        raise AudioQaError(f"{label} browser date is invalid")
+    match = KEY_UI_BROWSER_DATE_RE.fullmatch(raw_value)
+    if match is None:
+        raise AudioQaError(f"{label} browser date is invalid")
+    parts = match.groupdict()
+    try:
+        naive = datetime(
+            int(parts["year"]),
+            KEY_UI_MONTHS[parts["month"]],
+            int(parts["day"]),
+            int(parts["hour"]),
+            int(parts["minute"]),
+            int(parts["second"]),
+        )
+    except ValueError as error:
+        raise AudioQaError(f"{label} browser date is invalid") from error
+    if KEY_UI_WEEKDAYS[naive.weekday()] != parts["weekday"]:
+        raise AudioQaError(f"{label} browser weekday drifted")
+    browser_utc = _key_ui_strict_local_to_utc(
+        naive, observed_offset="-05:00", label=label
+    )
+    if abs(browser_utc - observed_at) > timedelta(minutes=2):
+        raise AudioQaError(f"{label} browser date is stale")
+    return browser_utc
+
+
+def _key_ui_time_evidence(
+    value: Mapping[str, Any], *, observed_at: datetime, label: str
+) -> dict[str, Any]:
+    if value.get("provider_key_timestamp_timezone") != KEY_UI_TIMEZONE:
+        raise AudioQaError(f"{label} timezone provenance drifted")
+    created_offset = value.get("provider_key_created_utc_offset")
+    expires_offset = value.get("provider_key_expires_utc_offset")
+    if created_offset != "-05:00" or expires_offset != "-05:00":
+        raise AudioQaError(f"{label} UTC offset drifted")
+    created_tooltip = value.get("provider_key_created_tooltip")
+    expires_tooltip = value.get("provider_key_expires_tooltip")
+    browser_date = value.get("provider_key_browser_date_string")
+    _key_ui_browser_time(browser_date, observed_at=observed_at, label=label)
+    created_center = _key_ui_tooltip_center(
+        created_tooltip, observed_offset=created_offset, label=label
+    )
+    expires_center = _key_ui_tooltip_center(
+        expires_tooltip, observed_offset=expires_offset, label=label
+    )
+    uncertainty = timedelta(seconds=KEY_UI_INTERVAL_UNCERTAINTY_SECONDS)
+    created_lower = created_center - uncertainty
+    created_upper = created_center + uncertainty
+    expires_lower = expires_center - uncertainty
+    expires_upper = expires_center + uncertainty
+    duration_lower = int((expires_lower - created_upper).total_seconds())
+    duration_upper = int((expires_upper - created_lower).total_seconds())
+    try:
+        zone = ZoneInfo(KEY_UI_TIMEZONE)
+    except ZoneInfoNotFoundError as error:
+        raise AudioQaError(f"{label} timezone is unavailable") from error
+    observed_interval_offsets = {
+        (created_center + timedelta(minutes=minute))
+        .astimezone(zone)
+        .utcoffset()
+        for minute in range((KEY_LIFETIME_SECONDS // 60) + 1)
+    }
+    expected = {
+        "provider_key_created_tooltip_sha256": _sha256_bytes(
+            str(created_tooltip).encode("ascii")
+        ),
+        "provider_key_expires_tooltip_sha256": _sha256_bytes(
+            str(expires_tooltip).encode("ascii")
+        ),
+        "provider_key_browser_date_string_sha256": _sha256_bytes(
+            str(browser_date).encode("ascii")
+        ),
+        "provider_key_timestamp_precision": KEY_UI_TIMESTAMP_PRECISION,
+        "provider_key_timestamp_precision_seconds": (
+            KEY_UI_TIMESTAMP_PRECISION_SECONDS
+        ),
+        "provider_key_timestamp_rounding_mode": KEY_UI_ROUNDING_MODE,
+        "provider_key_created_tooltip_source": KEY_UI_SOURCES[
+            "created_tooltip"
+        ],
+        "provider_key_expiry_tooltip_source": KEY_UI_SOURCES[
+            "expiry_tooltip"
+        ],
+        "provider_key_timestamp_timezone_source": KEY_UI_SOURCES["timezone"],
+        "provider_key_timestamp_offsets_source": KEY_UI_SOURCES["offsets"],
+        "provider_key_browser_date_source": KEY_UI_SOURCES["browser_time"],
+        "key_created_at_interval_lower": _iso_utc(created_lower),
+        "key_created_at_interval_upper": _iso_utc(created_upper),
+        "key_expires_at_interval_lower": _iso_utc(expires_lower),
+        "key_expires_at_interval_upper": _iso_utc(expires_upper),
+        "key_expiry_conservative_deadline": _iso_utc(expires_lower),
+        "key_displayed_center_duration_seconds": KEY_LIFETIME_SECONDS,
+        "key_duration_interval_lower_seconds": KEY_LIFETIME_SECONDS - 120,
+        "key_duration_interval_upper_seconds": KEY_LIFETIME_SECONDS + 120,
+        "provider_key_created_tooltip_directly_observed": True,
+        "provider_key_expires_tooltip_directly_observed": True,
+        "requested_ttl_label": KEY_UI_REQUESTED_TTL_LABEL,
+        "requested_ttl_seconds": KEY_LIFETIME_SECONDS,
+    }
+    if any(value.get(name) != expected_value for name, expected_value in expected.items()):
+        raise AudioQaError(f"{label} interval or provenance drifted")
+    if any(
+        (
+            expires_center - created_center
+            != timedelta(seconds=KEY_LIFETIME_SECONDS),
+            created_upper - created_lower != timedelta(seconds=120),
+            expires_upper - expires_lower != timedelta(seconds=120),
+            duration_lower != KEY_LIFETIME_SECONDS - 120,
+            duration_upper != KEY_LIFETIME_SECONDS + 120,
+            len(observed_interval_offsets) != 1,
+            observed_at - created_lower > KEY_UI_EVIDENCE_MAX_AGE,
+            created_upper - observed_at > KEY_UI_MAX_FUTURE_SKEW,
+            expires_lower - observed_at < KEY_UI_MIN_REMAINING,
+        )
+    ):
+        raise AudioQaError(f"{label} conservative timing gate failed")
+    return {
+        "created_lower": created_lower,
+        "created_upper": created_upper,
+        "expires_lower": expires_lower,
+        "expires_upper": expires_upper,
+    }
 
 
 def _reject_secret_material(value: object) -> None:
@@ -1091,16 +1366,14 @@ def _validate_session_preflight_contract(
             "continuation_mode",
             "evidence_sha256",
             "key_credit_limit",
-            "key_created_at_derived",
-            "key_created_at_derivation",
-            "key_created_at_directly_observed",
-            "key_expires_at",
             "key_id_sha256",
             "key_material_sha256",
             "key_session_number",
             "provider_key_name_sha256",
             "provider_key_matching_row_count",
             "provider_key_row_unique",
+            "provider_key_enabled",
+            *KEY_UI_TIME_FIELDS,
             "key_preview_sha256",
             "ledger_character_cost_total_at_start",
             "ledger_request_count_at_start",
@@ -1112,11 +1385,8 @@ def _validate_session_preflight_contract(
             "prior_key_deleted_and_verified",
             "prior_key_deleted_at",
             "prior_key_id_sha256",
-            "provider_key_expires_at_unix",
             "remaining_batch_renderer_cap",
             "replacement_key_creation_initiated_at",
-            "requested_ttl_seconds",
-            "expiry_directly_observed",
         }:
             raise AudioQaError(f"provider execution session drifted: {chapter_id}")
         available = session.get("available_credits")
@@ -1130,7 +1400,6 @@ def _validate_session_preflight_contract(
                 not _valid_sha(session.get("provider_key_name_sha256")),
                 not _valid_sha(session.get("key_preview_sha256")),
                 not isinstance(session.get("observed_at"), str),
-                not isinstance(session.get("key_expires_at"), str),
                 prior_credits is not None
                 and isinstance(available, int)
                 and available > prior_credits,
@@ -1148,8 +1417,11 @@ def _validate_session_preflight_contract(
                     for name in (
                         "key_credit_limit",
                         "key_session_number",
-                        "provider_key_expires_at_unix",
                         "requested_ttl_seconds",
+                        "provider_key_timestamp_precision_seconds",
+                        "key_displayed_center_duration_seconds",
+                        "key_duration_interval_lower_seconds",
+                        "key_duration_interval_upper_seconds",
                         "ledger_character_cost_total_at_start",
                         "ledger_request_count_at_start",
                         "partial_usage_credits_since_prior_session",
@@ -1166,15 +1438,10 @@ def _validate_session_preflight_contract(
                         f"{KEY_NAME_CODES[chapter_id]}-session-{index + 1}"
                     ).encode("utf-8")
                 ),
+                isinstance(session.get("provider_key_matching_row_count"), bool),
                 session.get("provider_key_matching_row_count") != 1,
                 session.get("provider_key_row_unique") is not True,
-                session.get("key_created_at_directly_observed") is not False,
-                session.get("key_created_at_derivation")
-                != (
-                    "provider_get_expires_at_unix_minus_official_ui_"
-                    "requested_ttl_seconds"
-                ),
-                session.get("expiry_directly_observed") is not True,
+                session.get("provider_key_enabled") is not True,
             )
         ):
             raise AudioQaError(f"provider execution session drifted: {chapter_id}")
@@ -1192,29 +1459,14 @@ def _validate_session_preflight_contract(
             raise AudioQaError(
                 f"provider residual exposure drifted: {chapter_id}"
             )
-        try:
-            expires_at = datetime.fromtimestamp(
-                int(session["provider_key_expires_at_unix"]), tz=timezone.utc
-            )
-        except (OSError, OverflowError, ValueError) as error:
-            raise AudioQaError(
-                f"provider key expiry evidence drifted: {chapter_id}"
-            ) from error
         observed_at = _parse_utc_timestamp(
             session["observed_at"], "provider session observation"
         )
-        derived_created_at = expires_at - timedelta(seconds=86_400)
-        if any(
-            (
-                session.get("key_expires_at")
-                != expires_at.isoformat().replace("+00:00", "Z"),
-                session.get("key_created_at_derived")
-                != derived_created_at.isoformat().replace("+00:00", "Z"),
-                observed_at - derived_created_at > timedelta(minutes=15),
-                derived_created_at - observed_at > timedelta(minutes=2),
-            )
-        ):
-            raise AudioQaError(f"provider key expiry evidence drifted: {chapter_id}")
+        _key_ui_time_evidence(
+            session,
+            observed_at=observed_at,
+            label=f"provider key UI time evidence: {chapter_id}",
+        )
         if index == 0:
             key_id_sha256 = str(session["key_id_sha256"])
             key_material_sha256 = str(session["key_material_sha256"])
@@ -1638,6 +1890,11 @@ def _validate_provisional_record(
         "key_material_sha256",
         "key_deleted",
         "key_deletion_verified",
+        "key_deleted_at",
+        "key_deletion_source",
+        "key_ui_time_evidence",
+        "key_expiry_conservative_deadline",
+        "key_deleted_before_conservative_expiry",
         "no_other_active_render_keys",
         "ending_provider_credits",
         "ending_billable_request_count",
@@ -1673,6 +1930,13 @@ def _validate_provisional_record(
             != closeout.get("key_material_sha256"),
             raw.get("key_deleted") is not True,
             raw.get("key_deletion_verified") is not True,
+            raw.get("key_deleted_at") != closeout.get("key_deleted_at"),
+            raw.get("key_deletion_source") != closeout.get("key_deletion_source"),
+            raw.get("key_ui_time_evidence")
+            != closeout.get("key_ui_time_evidence"),
+            raw.get("key_expiry_conservative_deadline")
+            != closeout.get("key_expiry_conservative_deadline"),
+            raw.get("key_deleted_before_conservative_expiry") is not True,
             raw.get("no_other_active_render_keys") is not True,
             raw.get("ending_provider_credits")
             != closeout.get("ending_provider_credits"),
@@ -1736,6 +2000,11 @@ def _validate_closeout(
         "key_material_sha256",
         "key_deleted",
         "key_deletion_verified",
+        "key_deleted_at",
+        "key_deletion_source",
+        "key_ui_time_evidence",
+        "key_expiry_conservative_deadline",
+        "key_deleted_before_conservative_expiry",
         "no_other_active_render_keys",
         "starting_provider_credits",
         "ending_provider_credits",
@@ -1760,6 +2029,49 @@ def _validate_closeout(
         "paid_overage_used",
     }
     sessions = ledger.get("execution_sessions")
+    if (
+        not isinstance(sessions, list)
+        or not sessions
+        or not isinstance(sessions[-1], dict)
+    ):
+        raise AudioQaError(f"chapter key/provider closeout drifted: {chapter_id}")
+    last_session = sessions[-1]
+    key_ui_time = closeout.get("key_ui_time_evidence")
+    expected_key_ui_time = {
+        name: last_session.get(name) for name in KEY_UI_TIME_FIELDS
+    }
+    if (
+        not isinstance(key_ui_time, dict)
+        or set(key_ui_time) != set(KEY_UI_TIME_FIELDS)
+        or key_ui_time != expected_key_ui_time
+    ):
+        raise AudioQaError(f"chapter key UI-time closeout drifted: {chapter_id}")
+    observed_at = _parse_utc_timestamp(
+        closeout.get("observed_at"), "provider closeout observation"
+    )
+    deleted_at = _parse_utc_timestamp(
+        closeout.get("key_deleted_at"), "provider key deletion"
+    )
+    ledger_updated_at = _parse_utc_timestamp(
+        ledger.get("updated_at"), "render ledger update"
+    )
+    conservative_deadline = _parse_utc_timestamp(
+        closeout.get("key_expiry_conservative_deadline"),
+        "provider key conservative expiry",
+    )
+    if any(
+        (
+            closeout.get("key_expiry_conservative_deadline")
+            != last_session.get("key_expiry_conservative_deadline"),
+            closeout.get("key_deleted_before_conservative_expiry") is not True,
+            deleted_at < ledger_updated_at,
+            deleted_at > observed_at,
+            observed_at
+            > conservative_deadline
+            - timedelta(seconds=KEY_DISPATCH_SAFETY_BUFFER_SECONDS),
+        )
+    ):
+        raise AudioQaError(f"chapter key deletion deadline drifted: {chapter_id}")
     if any(
         (
             set(closeout) != expected_fields,
@@ -1772,8 +2084,6 @@ def _validate_closeout(
             ),
             closeout.get("source")
             != "authenticated_provider_usage_and_key_management_ui",
-            not isinstance(closeout.get("observed_at"), str),
-            closeout.get("observed_at", "") < str(ledger.get("updated_at") or ""),
             closeout.get("renderer_contract") != RENDERER_CONTRACT,
             closeout.get("chapter_id") != chapter_id,
             closeout.get("render_event_count") != event_count,
@@ -1783,17 +2093,15 @@ def _validate_closeout(
             != _audio_inventory_hash(audio_rows),
             closeout.get("prior_closeout_sha256") != prior_closeout_sha256,
             closeout.get("key_id_sha256")
-            != (sessions[-1] if isinstance(sessions, list) and sessions else {}).get(
-                "key_id_sha256"
-            ),
+            != last_session.get("key_id_sha256"),
             closeout.get("key_material_sha256")
-            != (sessions[-1] if isinstance(sessions, list) and sessions else {}).get(
-                "key_material_sha256"
-            ),
+            != last_session.get("key_material_sha256"),
             not _valid_sha(closeout.get("key_id_sha256")),
             not _valid_sha(closeout.get("key_material_sha256")),
             closeout.get("key_deleted") is not True,
             closeout.get("key_deletion_verified") is not True,
+            closeout.get("key_deletion_source")
+            != "official_signed_in_api_keys_ui_delete_and_absence_verification",
             closeout.get("no_other_active_render_keys") is not True,
             closeout.get("ledger_character_cost_total") != chapter_cost,
             closeout.get("provider_reported_usage_credits") != chapter_cost,
@@ -1911,6 +2219,13 @@ def _validate_closeout(
         "key_id_sha256": closeout["key_id_sha256"],
         "key_deleted": True,
         "key_deletion_verified": True,
+        "key_deleted_at": closeout["key_deleted_at"],
+        "key_deletion_source": closeout["key_deletion_source"],
+        "key_ui_time_evidence": key_ui_time,
+        "key_expiry_conservative_deadline": closeout[
+            "key_expiry_conservative_deadline"
+        ],
+        "key_deleted_before_conservative_expiry": True,
         "no_other_active_render_keys": True,
         "starting_provider_credits": starting,
         "ending_provider_credits": ending,

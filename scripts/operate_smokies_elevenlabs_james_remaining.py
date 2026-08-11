@@ -684,6 +684,13 @@ def _build_execution_evidence(
         completed_since_prior = completed_request_count - int(
             prior_session["ledger_request_count_at_start"]
         )
+        partial_billable_input_characters = (
+            renderer._locked_billable_input_characters_between_requests(
+                packet,
+                int(prior_session["ledger_request_count_at_start"]),
+                completed_request_count,
+            )
+        )
         prior_key_id_sha256 = hashlib.sha256(
             str(recovery.get("prior_key_id")).encode("utf-8")
         ).hexdigest()
@@ -698,7 +705,7 @@ def _build_execution_evidence(
             ) from exc
         partial_usage_usd = ending_usage_usd - starting_usage_usd
         ledger_partial_usage_usd = renderer._unrounded_usage_cost(
-            committed_since_prior
+            partial_billable_input_characters
         )
         expected_key_limit = packet.renderer_character_cap - committed
         if any(
@@ -763,6 +770,9 @@ def _build_execution_evidence(
             ],
             "partial_usage_ending_provider_credits": available,
             "partial_usage_ledger_credits": committed_since_prior,
+            "partial_usage_ledger_billable_input_characters": (
+                partial_billable_input_characters
+            ),
             "partial_usage_reconciliation_passed": True,
             "partial_usage_starting_total_usage_usd": (
                 f"{starting_usage_usd:.2f}"
@@ -1029,9 +1039,55 @@ def _render_apply(
             key_material[index] = 0
 
 
-def _load_closeout_observation(path: Path, chapter_id: str) -> dict[str, Any]:
+def _load_closeout_observation(
+    path: Path, chapter_id: str
+) -> tuple[dict[str, Any], str]:
+    resolved = _outside_repository_file(
+        path, "closeout_observation_file_invalid"
+    )
+    if resolved == renderer.LIVE_FOOTHILLS_CLOSEOUT_OBSERVATION_PATH.resolve(
+        strict=False
+    ):
+        if chapter_id != "foothills_parkway":
+            raise renderer.NarrationError(
+                "live_closeout_observation_chapter_invalid"
+            )
+        live = renderer._load_bound_live_foothills_closeout_observation()
+        ending = live["ending_account"]
+        provider = live["provider_ui_evidence"]
+        canonical = {
+            "schema_version": 2,
+            "kind": "smokies_remaining_render_closeout_observation_v2",
+            "observation_id": live["observation_id"],
+            "source": "authenticated_browser",
+            "observed_at": live["observed_at"],
+            "chapter_id": live["chapter_id"],
+            "ending_provider_credits": ending["provider_credits_remaining"],
+            "ending_billable_request_count": ending[
+                "billable_request_count"
+            ],
+            "ending_total_usage_usd": ending["total_usage_usd"],
+            "key_id": provider["key_id"],
+            "key_deleted_at": provider["key_deleted_at"],
+            "key_deletion_source": provider["key_deletion_source"],
+            "key_deleted": provider["key_deleted"],
+            "key_deletion_verified": provider["key_deletion_verified"],
+            "no_other_active_render_keys": provider[
+                "no_other_active_render_keys"
+            ],
+            "other_account_usage_observed": provider[
+                "other_account_usage_observed"
+            ],
+            "privacy": {
+                "account_identity_recorded": False,
+                "workspace_identity_recorded": False,
+                "key_material_recorded": False,
+                "local_paths_recorded": False,
+            },
+        }
+        return canonical, renderer.LIVE_FOOTHILLS_CLOSEOUT_OBSERVATION_SHA256
     raw = _load(
-        _outside_repository_file(path, "closeout_observation_file_invalid"),
+        resolved,
         "closeout_observation_unreadable",
     )
     expected_fields = {
@@ -1089,7 +1145,7 @@ def _load_closeout_observation(path: Path, chapter_id: str) -> dict[str, Any]:
         != "official_signed_in_api_keys_ui_delete_and_absence_verification"
     ):
         raise renderer.NarrationError("closeout_observation_not_fresh")
-    return raw
+    return raw, renderer._sha256_bytes(renderer._canonical_bytes(raw))
 
 
 def _closeout_apply(
@@ -1120,7 +1176,9 @@ def _closeout_apply(
         state=state,
         probe_audio=PROBE_AUDIO,
     )
-    observation = _load_closeout_observation(observation_path, chapter_id)
+    observation, observation_sha = _load_closeout_observation(
+        observation_path, chapter_id
+    )
     if not state["sessions"]:
         raise renderer.NarrationError("chapter_closeout_session_missing")
     session = state["sessions"][-1]
@@ -1141,9 +1199,6 @@ def _closeout_apply(
     )
     if deleted_at < rendered_at:
         raise renderer.NarrationError("closeout_key_deleted_before_render_complete")
-    observation_sha = renderer._sha256_bytes(
-        renderer._canonical_bytes(observation)
-    )
     observed_key_id_sha256 = hashlib.sha256(
         observation["key_id"].encode("utf-8")
     ).hexdigest()
@@ -1151,6 +1206,22 @@ def _closeout_apply(
         int(item["accepted"]["character_cost"])
         for item in state["items"].values()
     )
+    billable_input_characters = renderer._completed_billable_input_characters(
+        packet, state
+    )
+    ledger_input_usage_usd = renderer._unrounded_usage_cost(
+        billable_input_characters
+    )
+    projected_chapter_cost = renderer._projected_cost(
+        billable_input_characters
+    )
+    if any(
+        (
+            billable_input_characters != packet.payload_character_count,
+            projected_chapter_cost > Decimal(packet.dollar_cap_usd),
+        )
+    ):
+        raise renderer.NarrationError("closeout_chapter_dollar_cap_invalid")
     _rows, inventory_sha = renderer._audio_inventory(packet, state)
     ending_credits = observation["ending_provider_credits"]
     ending_requests = observation["ending_billable_request_count"]
@@ -1195,6 +1266,9 @@ def _closeout_apply(
             "render_ledger_sha256": renderer._sha256_file(
                 chapter_dir / renderer.LEDGER_NAME
             ),
+            "audio_inventory_schema_version": (
+                renderer.AUDIO_INVENTORY_SCHEMA_VERSION
+            ),
             "audio_inventory_sha256": inventory_sha,
             "key_id_sha256": state["sessions"][-1]["key_id_sha256"],
             "key_material_sha256": state["sessions"][-1][
@@ -1215,6 +1289,18 @@ def _closeout_apply(
             "ending_provider_credits": ending_credits,
             "ending_billable_request_count": ending_requests,
             "ending_total_usage_usd": None,
+            "ledger_provider_credit_cost_total": committed,
+            "ledger_billable_input_character_count_total": (
+                billable_input_characters
+            ),
+            "ledger_input_character_usage_usd_unrounded": (
+                f"{ledger_input_usage_usd:.4f}"
+            ),
+            "projected_chapter_cost_ceiling_usd": str(
+                projected_chapter_cost
+            ),
+            "chapter_dollar_cap_usd": packet.dollar_cap_usd,
+            "credit_and_input_character_meters_independent": True,
             "total_usage_usd_observation": (
                 "unavailable_on_authenticated_surface"
             ),
@@ -1254,7 +1340,7 @@ def _closeout_apply(
         delta_usd_raw = f"{delta_usd:.2f}"
         tolerance_usd = "0.01"
         dollar_passed = (
-            abs(delta_usd - renderer._unrounded_usage_cost(committed))
+            abs(delta_usd - ledger_input_usage_usd)
             <= Decimal("0.01")
         )
         observation_sources = {
@@ -1262,10 +1348,12 @@ def _closeout_apply(
             "billable_request_count": "authenticated_usage_analytics_ui_exact_integer",
             "total_usage_usd": "authenticated_usage_analytics_ui_two_decimal_rounded",
             "chapter_usage_usd": "derived_difference_of_observed_rounded_totals",
-            "ledger_usage_usd": "ledger_character_cost_at_locked_rate",
+            "ledger_usage_usd": (
+                "locked_payload_input_characters_at_locked_rate"
+            ),
         }
     closeout = {
-        "schema_version": 2,
+        "schema_version": 3,
         "closeout_id": f"smokies_closeout_{observation_sha[:32]}",
         "source": "authenticated_provider_usage_and_key_management_ui",
         "source_observation_sha256": observation_sha,
@@ -1276,6 +1364,9 @@ def _closeout_apply(
         "render_event_head_sha256": state["event_head_sha256"],
         "render_ledger_sha256": renderer._sha256_file(
             chapter_dir / renderer.LEDGER_NAME
+        ),
+        "audio_inventory_schema_version": (
+            renderer.AUDIO_INVENTORY_SCHEMA_VERSION
         ),
         "audio_inventory_sha256": inventory_sha,
         "prior_closeout_sha256": prior_closeout_sha,
@@ -1299,7 +1390,10 @@ def _closeout_apply(
         ],
         "starting_provider_credits": starting_credits,
         "ending_provider_credits": ending_credits,
-        "ledger_character_cost_total": committed,
+        "ledger_provider_credit_cost_total": committed,
+        "ledger_billable_input_character_count_total": (
+            billable_input_characters
+        ),
         "provider_reported_usage_credits": starting_credits - ending_credits,
         "starting_billable_request_count": starting_requests,
         "ending_billable_request_count": ending_requests,
@@ -1307,7 +1401,14 @@ def _closeout_apply(
         "starting_total_usage_usd": starting_usd_raw,
         "ending_total_usage_usd": ending_usd_raw,
         "provider_reported_chapter_usage_usd": delta_usd_raw,
-        "ledger_usage_usd_unrounded": f"{renderer._unrounded_usage_cost(committed):.4f}",
+        "ledger_input_character_usage_usd_unrounded": (
+            f"{ledger_input_usage_usd:.4f}"
+        ),
+        "locked_input_rate_usd_per_1000_characters": "0.10",
+        "projected_chapter_cost_ceiling_usd": str(projected_chapter_cost),
+        "chapter_dollar_cap_usd": packet.dollar_cap_usd,
+        "chapter_dollar_cap_passed": True,
+        "credit_and_input_character_meters_independent": True,
         "dollar_reconciliation_tolerance_usd": tolerance_usd,
         "observation_sources": observation_sources,
         "prebatch_baseline": {

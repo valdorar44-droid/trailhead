@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
 from datetime import timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -41,7 +42,13 @@ def _render_observation(
     already_committed: int = 0,
     prior_session: dict | None = None,
     recovery_prior_raw_key_id: str | None = None,
+    completed_request_count: int | None = None,
 ) -> dict:
+    completed_count = (
+        (1 if already_committed else 0)
+        if completed_request_count is None
+        else completed_request_count
+    )
     evidence = renderer_test._evidence_value(
         packet=packet,
         root=root,
@@ -55,7 +62,8 @@ def _render_observation(
         committed_since_prior_session=already_committed,
         observed_total_usage_usd=observed_usage_usd,
         observed_billable_request_count=observed_requests,
-        completed_requests_since_prior_session=(1 if already_committed else 0),
+        completed_request_count=completed_count,
+        completed_requests_since_prior_session=completed_count,
     )
     evidence_key_policy = evidence["key_policy"]
     key_session_number = (
@@ -239,7 +247,10 @@ def _closeout_observation(
     )
     ending_usd = None
     if total_usage_available:
-        ending_usd = f"{Decimal('2.64') + renderer._unrounded_usage_cost(committed):.2f}"
+        usage = renderer._unrounded_usage_cost(
+            packet.payload_character_count
+        )
+        ending_usd = f"{Decimal('2.64') + Decimal(f'{usage:.2f}'):.2f}"
     return {
         "schema_version": 2,
         "kind": "smokies_remaining_render_closeout_observation_v2",
@@ -361,8 +372,44 @@ def test_operator_full_chapter_hashes_raw_key_id_and_never_persists_key(
     )
     assert RAW_KEY not in persisted
     assert RAW_KEY_ID.encode() not in persisted
-    assert RAW_KEY[-4:] not in persisted
     assert provider_key_name.encode() not in persisted
+    raw_preview = RAW_KEY[-4:].decode("ascii")
+
+    def scalar_values(value, path=()):
+        if isinstance(value, dict):
+            for name, child in value.items():
+                yield from scalar_values(child, (*path, name))
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                yield from scalar_values(child, (*path, str(index)))
+        else:
+            yield path, value
+
+    persisted_json = []
+    for path in [*root.rglob("*.json"), *root.rglob("*.ndjson"), *evidence_files]:
+        if path.suffix == ".ndjson":
+            persisted_json.extend(
+                json.loads(line)
+                for line in path.read_text(encoding="utf-8").splitlines()
+                if line
+            )
+        else:
+            persisted_json.append(json.loads(path.read_text(encoding="utf-8")))
+    for document in persisted_json:
+        for field_path, value in scalar_values(document):
+            if not isinstance(value, str):
+                continue
+            assert value != raw_preview
+            field_name = field_path[-1] if field_path else ""
+            raw_key_field = (
+                any(
+                    marker in field_name
+                    for marker in ("preview", "key_material", "api_key")
+                )
+                and not field_name.endswith("_sha256")
+            )
+            if raw_key_field:
+                assert raw_preview not in value
     assert RAW_KEY_ID in observation_path.read_text()
 
 
@@ -932,7 +979,7 @@ def test_crash_after_one_success_rotates_to_new_residual_key_without_rerender(
     root = renderer_test._root(tmp_path)
     first_observation = _render_observation(packet=packet, root=root, sources=sources)
     first_path = _write_private_json(tmp_path / "first-observation.json", first_observation)
-    first_transport = renderer_test.FakeTransport()
+    first_transport = renderer_test.DivergentCharacterCostTransport([1_175])
     _configure(
         monkeypatch,
         sources=sources,
@@ -973,9 +1020,20 @@ def test_crash_after_one_success_rotates_to_new_residual_key_without_rerender(
         if item["state"] == "completed"
     )
     assert committed > 0
-    assert sum(item["state"] == "completed" for item in state["items"].values()) == 1
+    completed_count = sum(
+        item["state"] == "completed" for item in state["items"].values()
+    )
+    assert completed_count == 1
+    assert committed == 1_175
+    assert committed != packet.requests[0].payload_character_count
     observed = renderer_test.NOW + timedelta(minutes=2)
-    ending_usd = f"{Decimal('2.64') + renderer._unrounded_usage_cost(committed):.2f}"
+    partial_input_characters = (
+        renderer._locked_billable_input_characters_for_request_count(
+            packet, completed_count
+        )
+    )
+    partial_usage = renderer._unrounded_usage_cost(partial_input_characters)
+    ending_usd = f"{Decimal('2.64') + Decimal(f'{partial_usage:.2f}'):.2f}"
     recovery_observation = _render_observation(
         packet=packet,
         root=root,
@@ -1033,6 +1091,17 @@ def test_crash_after_one_success_rotates_to_new_residual_key_without_rerender(
     assert replacement["key_expiry_conservative_deadline"] == replacement[
         "key_expires_at_interval_lower"
     ]
+    recovery_evidence = json.loads(
+        (root.parent / result["execution_evidence_filename"]).read_text()
+    )
+    continuation = recovery_evidence["continuation"]
+    assert continuation["partial_usage_ledger_credits"] == 1_175
+    assert continuation[
+        "partial_usage_ledger_billable_input_characters"
+    ] == packet.requests[0].payload_character_count
+    assert continuation["partial_usage_ledger_usd_unrounded"] == (
+        f"{renderer._unrounded_usage_cost(packet.requests[0].payload_character_count):.4f}"
+    )
 
 
 def test_closeout_is_prevalidated_idempotent_and_derives_key_hash(
@@ -1071,6 +1140,16 @@ def test_closeout_is_prevalidated_idempotent_and_derives_key_hash(
     closeout = json.loads(before)
     assert closeout["key_id_sha256"] == hashlib.sha256(RAW_KEY_ID.encode()).hexdigest()
     assert closeout["key_material_sha256"] == state["sessions"][-1]["key_material_sha256"]
+    assert closeout["audio_inventory_schema_version"] == 2
+    assert closeout["ledger_billable_input_character_count_total"] == (
+        packet.payload_character_count
+    )
+    assert closeout["ledger_input_character_usage_usd_unrounded"] == (
+        f"{renderer._unrounded_usage_cost(packet.payload_character_count):.4f}"
+    )
+    assert closeout["projected_chapter_cost_ceiling_usd"] == str(
+        renderer._projected_cost(packet.payload_character_count)
+    )
     assert closeout["key_ui_time_evidence"] == (
         renderer._key_ui_time_evidence_from_session(state["sessions"][-1])
     )
@@ -1079,6 +1158,161 @@ def test_closeout_is_prevalidated_idempotent_and_derives_key_hash(
     ] == closeout["key_expiry_conservative_deadline"]
     assert RAW_KEY_ID not in final_path.read_text()
     assert not transport.responses
+
+
+def test_exact_live_foothills_observation_maps_to_idempotent_schema3_closeout(
+    tmp_path: Path, monkeypatch
+) -> None:
+    live_observation_path = renderer.LIVE_FOOTHILLS_CLOSEOUT_OBSERVATION_PATH
+    live_root = live_observation_path.parent / renderer.OUTPUT_ROOT_BASENAME
+    if not live_observation_path.is_file() or not live_root.is_dir():
+        pytest.skip("bound private Foothills render evidence is not present")
+    live_observation = json.loads(
+        live_observation_path.read_text(encoding="utf-8")
+    )
+    live_execution_path = live_root.parent / live_observation[
+        "render_evidence"
+    ]["execution_evidence_filename"]
+    live_paths = [live_observation_path, live_execution_path]
+    live_paths.extend(path for path in live_root.rglob("*") if path.is_file())
+
+    def live_snapshot() -> dict[str, tuple[int, int, int, str]]:
+        return {
+            str(path): (
+                path.stat().st_mode & 0o777,
+                path.stat().st_size,
+                path.stat().st_mtime_ns,
+                renderer._sha256_file(path),
+            )
+            for path in live_paths
+        }
+
+    before = live_snapshot()
+    root = renderer_test._root(tmp_path)
+    shutil.copytree(live_root, root)
+    copied_observation_path = root.parent / "bound-live-closeout-observation.json"
+    copied_execution_path = root.parent / live_execution_path.name
+    shutil.copy2(live_observation_path, copied_observation_path)
+    shutil.copy2(live_execution_path, copied_execution_path)
+    copied_observation_path.chmod(0o600)
+    copied_execution_path.chmod(0o600)
+    chapter = root / "foothills_parkway"
+    (chapter / renderer.CLOSEOUT_NAME).unlink(missing_ok=True)
+    (chapter / renderer.PROVISIONAL_CLOSEOUT_NAME).unlink(missing_ok=True)
+
+    real_output_root_hash = renderer._output_root_hash
+
+    def bound_output_root_hash(path: Path) -> str:
+        if path.resolve() == root.resolve():
+            return renderer.LIVE_FOOTHILLS_OUTPUT_ROOT_SHA256
+        return real_output_root_hash(path)
+
+    monkeypatch.setattr(renderer, "_output_root_hash", bound_output_root_hash)
+    monkeypatch.setattr(
+        renderer,
+        "LIVE_FOOTHILLS_CLOSEOUT_OBSERVATION_PATH",
+        copied_observation_path,
+    )
+    sources = renderer_test._sources()
+    monkeypatch.setattr(renderer, "load_audit_evidence", lambda: sources)
+    monkeypatch.setattr(operator, "PROBE_AUDIO", renderer._strict_probe_mono_mp3)
+    observed = renderer._parse_utc(live_observation["observed_at"], "test")
+    monkeypatch.setattr(operator, "NOW", lambda: observed)
+
+    with pytest.raises(renderer.NarrationError):
+        renderer._validate_prior_sequence(
+            root,
+            chapter_id="mountain_crossing",
+            sources=sources,
+            probe_audio=renderer._strict_probe_mono_mp3,
+        )
+
+    ending = live_observation["ending_account"]
+    provider = live_observation["provider_ui_evidence"]
+    recreated_observation = {
+        "schema_version": 2,
+        "kind": "smokies_remaining_render_closeout_observation_v2",
+        "observation_id": "smokies_recreated_foothills_closeout_v2",
+        "source": "authenticated_browser",
+        "observed_at": live_observation["observed_at"],
+        "chapter_id": "foothills_parkway",
+        "ending_provider_credits": ending["provider_credits_remaining"],
+        "ending_billable_request_count": ending["billable_request_count"],
+        "ending_total_usage_usd": ending["total_usage_usd"],
+        "key_id": provider["key_id"],
+        "key_deleted_at": provider["key_deleted_at"],
+        "key_deletion_source": provider["key_deletion_source"],
+        "key_deleted": True,
+        "key_deletion_verified": True,
+        "no_other_active_render_keys": True,
+        "other_account_usage_observed": False,
+        "privacy": {
+            "account_identity_recorded": False,
+            "workspace_identity_recorded": False,
+            "key_material_recorded": False,
+            "local_paths_recorded": False,
+        },
+    }
+    recreated_path = _write_private_json(
+        root.parent / "recreated-closeout-observation.json",
+        recreated_observation,
+    )
+    with pytest.raises(
+        renderer.NarrationError,
+        match="legacy_live_closeout_observation_binding_invalid",
+    ):
+        operator.run_operator(
+            action=operator.CLOSEOUT_ACTION,
+            chapter_id="foothills_parkway",
+            output_root=root,
+            observation_path=recreated_path,
+            apply=True,
+        )
+    assert not (chapter / renderer.CLOSEOUT_NAME).exists()
+
+    first = operator.run_operator(
+        action=operator.CLOSEOUT_ACTION,
+        chapter_id="foothills_parkway",
+        output_root=root,
+        observation_path=copied_observation_path,
+        apply=True,
+    )
+    closeout_path = chapter / renderer.CLOSEOUT_NAME
+    first_bytes = closeout_path.read_bytes()
+    second = operator.run_operator(
+        action=operator.CLOSEOUT_ACTION,
+        chapter_id="foothills_parkway",
+        output_root=root,
+        observation_path=copied_observation_path,
+        apply=True,
+    )
+    assert first["status"] == second["status"] == "chapter_closeout_verified"
+    assert first["chapter_closeout_sha256"] == second["chapter_closeout_sha256"]
+    assert closeout_path.read_bytes() == first_bytes
+    closeout = json.loads(first_bytes)
+    assert closeout["schema_version"] == 3
+    assert closeout["source_observation_sha256"] == (
+        renderer.LIVE_FOOTHILLS_CLOSEOUT_OBSERVATION_SHA256
+    )
+    assert closeout["observed_at"] == "2026-08-11T09:00:47.409Z"
+    assert closeout["ledger_provider_credit_cost_total"] == 11_775
+    assert closeout["ledger_billable_input_character_count_total"] == 21_408
+    assert closeout["ledger_input_character_usage_usd_unrounded"] == "2.1408"
+    assert closeout["provider_reported_chapter_usage_usd"] == "2.14"
+    assert closeout["projected_chapter_cost_ceiling_usd"] == "2.15"
+    assert closeout["chapter_dollar_cap_usd"] == "2.50"
+    assert closeout["audio_inventory_schema_version"] == 2
+    unlocked = renderer._validate_prior_sequence(
+        root,
+        chapter_id="mountain_crossing",
+        sources=sources,
+        probe_audio=renderer._strict_probe_mono_mp3,
+    )
+    assert unlocked[:3] == (159_715, 30, Decimal("4.78"))
+    assert not (root / "mountain_crossing").exists()
+    assert first["network_used"] is second["network_used"] is False
+    assert first["key_read"] is second["key_read"] is False
+    assert live_snapshot() == before
 
 
 def test_bad_closeout_never_creates_final_record(
@@ -1131,6 +1365,12 @@ def test_missing_usage_usd_creates_provisional_record_that_unlocks_nothing(
     provisional_path = chapter / renderer.PROVISIONAL_CLOSEOUT_NAME
     assert provisional_path.is_file()
     provisional = json.loads(provisional_path.read_text())
+    assert provisional["audio_inventory_schema_version"] == 2
+    assert provisional["ledger_billable_input_character_count_total"] == (
+        packet.payload_character_count
+    )
+    assert provisional["final_usage_reconciliation_complete"] is False
+    assert provisional["next_chapter_unlocked"] is False
     assert provisional["key_ui_time_evidence"] == (
         renderer._key_ui_time_evidence_from_session(state["sessions"][-1])
     )

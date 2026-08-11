@@ -5,6 +5,7 @@ import http.server
 import io
 import json
 import threading
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -133,6 +134,26 @@ class FakeTransport:
         return self.probes[content]
 
 
+class DivergentCharacterCostTransport(FakeTransport):
+    def __init__(self, character_costs: list[int], *, remaining: int = 171_490):
+        super().__init__(remaining=remaining)
+        self.character_costs = list(character_costs)
+
+    def post(self, url, *, headers, body, timeout):
+        response = super().post(url, headers=headers, body=body, timeout=timeout)
+        index = len(self.post_calls) - 1
+        if index >= len(self.character_costs):
+            raise AssertionError("missing divergent character-cost fixture")
+        return renderer.ProviderResponse(
+            response.status_code,
+            {
+                **response.headers,
+                "character-cost": str(self.character_costs[index]),
+            },
+            response.body,
+        )
+
+
 def _sources() -> renderer.SourceBindings:
     approval_sha, continuation_sha, preflight_sha = renderer._validate_owner_sources()
     return renderer.SourceBindings(
@@ -238,8 +259,15 @@ def _evidence_value(
         prior_usage = Decimal(prior_session["observed_total_usage_usd"])
         ending_usage = Decimal(observed_total_usage_usd)
         usage_delta = ending_usage - prior_usage
+        partial_billable_input_characters = (
+            renderer._locked_billable_input_characters_between_requests(
+                packet,
+                int(prior_session["ledger_request_count_at_start"]),
+                completed_request_count,
+            )
+        )
         ledger_usage = renderer._unrounded_usage_cost(
-            committed_since_prior_session
+            partial_billable_input_characters
         )
         continuation = {
             "prior_execution_evidence_sha256": prior_session[
@@ -266,6 +294,9 @@ def _evidence_value(
             ],
             "partial_usage_ending_provider_credits": available,
             "partial_usage_ledger_credits": committed_since_prior_session,
+            "partial_usage_ledger_billable_input_characters": (
+                partial_billable_input_characters
+            ),
             "partial_usage_reconciliation_passed": True,
             "partial_usage_starting_total_usage_usd": f"{prior_usage:.2f}",
             "partial_usage_ending_total_usage_usd": f"{ending_usage:.2f}",
@@ -877,11 +908,15 @@ def _closeout_value(
     committed = sum(
         item["accepted"]["character_cost"] for item in state["items"].values()
     )
+    billable_input_characters = packet.payload_character_count
     _rows, inventory_sha = renderer._audio_inventory(packet, state)
-    chapter_usd = renderer._projected_cost(committed)
-    exact_usage_usd = renderer._unrounded_usage_cost(committed)
+    chapter_usd = renderer._projected_cost(billable_input_characters)
+    exact_usage_usd = renderer._unrounded_usage_cost(
+        billable_input_characters
+    )
+    observed_usage_usd = Decimal(f"{exact_usage_usd:.2f}")
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "closeout_id": f"smokies_closeout_{('c' * 64)[:32]}",
         "source": "authenticated_provider_usage_and_key_management_ui",
         "source_observation_sha256": "c" * 64,
@@ -891,6 +926,9 @@ def _closeout_value(
         "render_event_count": state["event_count"],
         "render_event_head_sha256": state["event_head_sha256"],
         "render_ledger_sha256": renderer._sha256_file(chapter / renderer.LEDGER_NAME),
+        "audio_inventory_schema_version": (
+            renderer.AUDIO_INVENTORY_SCHEMA_VERSION
+        ),
         "audio_inventory_sha256": inventory_sha,
         "prior_closeout_sha256": None,
         "key_id_sha256": state["sessions"][-1]["key_id_sha256"],
@@ -911,15 +949,25 @@ def _closeout_value(
         "no_other_active_render_keys": True,
         "starting_provider_credits": 171_490,
         "ending_provider_credits": 171_490 - committed,
-        "ledger_character_cost_total": committed,
+        "ledger_provider_credit_cost_total": committed,
+        "ledger_billable_input_character_count_total": (
+            billable_input_characters
+        ),
         "provider_reported_usage_credits": committed,
         "starting_billable_request_count": 14,
         "ending_billable_request_count": 30,
         "provider_reported_request_count": 16,
         "starting_total_usage_usd": "2.64",
-        "ending_total_usage_usd": f"{Decimal('2.64') + chapter_usd:.2f}",
-        "provider_reported_chapter_usage_usd": f"{chapter_usd:.2f}",
-        "ledger_usage_usd_unrounded": f"{exact_usage_usd:.4f}",
+        "ending_total_usage_usd": f"{Decimal('2.64') + observed_usage_usd:.2f}",
+        "provider_reported_chapter_usage_usd": f"{observed_usage_usd:.2f}",
+        "ledger_input_character_usage_usd_unrounded": (
+            f"{exact_usage_usd:.4f}"
+        ),
+        "locked_input_rate_usd_per_1000_characters": "0.10",
+        "projected_chapter_cost_ceiling_usd": str(chapter_usd),
+        "chapter_dollar_cap_usd": packet.dollar_cap_usd,
+        "chapter_dollar_cap_passed": True,
+        "credit_and_input_character_meters_independent": True,
         "dollar_reconciliation_tolerance_usd": "0.01",
         "observation_sources": {
             "provider_credits": (
@@ -932,7 +980,9 @@ def _closeout_value(
                 "authenticated_usage_analytics_ui_two_decimal_rounded"
             ),
             "chapter_usage_usd": "derived_difference_of_observed_rounded_totals",
-            "ledger_usage_usd": "ledger_character_cost_at_locked_rate",
+            "ledger_usage_usd": (
+                "locked_payload_input_characters_at_locked_rate"
+            ),
         },
         "prebatch_baseline": {
             "used_provider_credits": 14_510,
@@ -984,6 +1034,221 @@ def test_closeout_requires_exact_usage_key_deletion_and_full_prior_readback(
             sources=sources,
             probe_audio=transport.probe,
         )
+
+
+def test_live_foothills_accounting_keeps_credit_and_input_meters_independent(
+    tmp_path: Path, monkeypatch
+) -> None:
+    packet = renderer.load_chapter_packet("foothills_parkway")
+    target_provider_credits = 11_775
+    character_costs = [
+        target_provider_credits * entry.payload_character_count
+        // packet.payload_character_count
+        for entry in packet.requests
+    ]
+    for index in range(target_provider_credits - sum(character_costs)):
+        character_costs[index] += 1
+    assert sum(character_costs) == target_provider_credits
+    assert all(
+        0 < cost <= entry.reserved_provider_credit_ceiling
+        for cost, entry in zip(character_costs, packet.requests, strict=True)
+    )
+    transport = DivergentCharacterCostTransport(character_costs)
+    _result, root, packet, sources = _run(
+        tmp_path, monkeypatch, transport
+    )
+    chapter = root / packet.chapter_id
+    _events, state = renderer._load_state(
+        chapter, packet=packet, sources=sources, root=root
+    )
+    closeout = _closeout_value(chapter, packet, state)
+    validated = renderer._validate_closeout(
+        chapter,
+        packet=packet,
+        state=state,
+        starting_provider_credits=171_490,
+        starting_billable_requests=14,
+        starting_total_usage_usd=Decimal("2.64"),
+        prior_closeout_sha256=None,
+        raw_value=closeout,
+    )
+    rows, inventory_sha = renderer._audio_inventory(packet, state)
+    assert validated["ledger_provider_credit_cost_total"] == 11_775
+    assert validated["provider_reported_usage_credits"] == 11_775
+    assert validated["ledger_billable_input_character_count_total"] == 21_408
+    assert validated["ledger_input_character_usage_usd_unrounded"] == "2.1408"
+    assert validated["provider_reported_chapter_usage_usd"] == "2.14"
+    assert validated["projected_chapter_cost_ceiling_usd"] == "2.15"
+    assert validated["chapter_dollar_cap_usd"] == "2.50"
+    assert validated["credit_and_input_character_meters_independent"] is True
+    assert validated["audio_inventory_schema_version"] == 2
+    assert inventory_sha == renderer._sha256_bytes(
+        renderer._canonical_bytes({"schema_version": 2, "rows": rows})
+    )
+
+
+@pytest.mark.parametrize(
+    ("chapter_id", "payload_characters", "exact_usd", "ceiling_usd", "cap_usd"),
+    (
+        ("foothills_parkway", 21_408, "2.1408", "2.15", "2.50"),
+        ("mountain_crossing", 59_928, "5.9928", "6.00", "7.00"),
+        ("little_river_cades_cove", 44_259, "4.4259", "4.43", "5.00"),
+    ),
+)
+def test_chapter_input_character_dollar_caps_are_independent_and_exact(
+    chapter_id: str,
+    payload_characters: int,
+    exact_usd: str,
+    ceiling_usd: str,
+    cap_usd: str,
+) -> None:
+    packet = renderer.load_chapter_packet(chapter_id)
+    assert packet.payload_character_count == payload_characters
+    assert f"{renderer._unrounded_usage_cost(payload_characters):.4f}" == exact_usd
+    assert str(renderer._projected_cost(payload_characters)) == ceiling_usd
+    assert packet.dollar_cap_usd == cap_usd
+    assert renderer._projected_cost(payload_characters) <= Decimal(cap_usd)
+
+
+def test_dispatch_enforces_locked_input_dollar_cap_even_when_credit_cost_is_low(
+    tmp_path: Path, monkeypatch
+) -> None:
+    original_loader = renderer.load_chapter_packet
+    packet = replace(
+        original_loader("foothills_parkway"), dollar_cap_usd="0.01"
+    )
+    root = _root(tmp_path)
+    sources = _sources()
+    evidence = _write_evidence(
+        tmp_path,
+        _evidence_value(packet=packet, root=root, sources=sources),
+        "low-dollar-cap-evidence.json",
+    )
+    transport = DivergentCharacterCostTransport([1])
+    monkeypatch.setattr(renderer, "load_audit_evidence", lambda: sources)
+    monkeypatch.setattr(
+        renderer,
+        "load_chapter_packet",
+        lambda chapter_id: (
+            packet if chapter_id == packet.chapter_id else original_loader(chapter_id)
+        ),
+    )
+    with pytest.raises(
+        renderer.NarrationError, match="provider_audio_or_cost_ambiguous"
+    ):
+        renderer.run_renderer(
+            chapter_id=packet.chapter_id,
+            output_root=root,
+            apply=True,
+            verified_output_format=renderer.OUTPUT_FORMAT_ID,
+            execution_evidence_path=evidence,
+            key_reader=lambda: bytearray(KEY),
+            transport_factory=lambda: transport,
+            probe_audio=transport.probe,
+            sleep=lambda _seconds: None,
+            now=lambda: NOW,
+            _operator_capability=renderer._OPERATOR_APPLY_CAPABILITY,
+        )
+    assert len(transport.post_calls) == 1
+    assert transport.post_calls[0]["body"]["text"] == packet.requests[0].transcript
+    events = renderer._read_events(
+        root / packet.chapter_id / renderer.EVENTS_NAME, root=root
+    )
+    assert events[-1]["event_type"] == "ambiguous_audio_or_cost"
+    assert all(
+        item["state"] != "completed"
+        for item in renderer._replay_events(
+            events, packet=packet, sources=sources, root=root
+        )["items"].values()
+    )
+
+
+def test_bound_live_foothills_closeout_validation_is_exact_and_read_only() -> None:
+    observation_path = renderer.LIVE_FOOTHILLS_CLOSEOUT_OBSERVATION_PATH
+    root = observation_path.parent / renderer.OUTPUT_ROOT_BASENAME
+    if not observation_path.is_file() or not root.is_dir():
+        pytest.skip("bound private Foothills render evidence is not present")
+    observation = json.loads(observation_path.read_text(encoding="utf-8"))
+    execution_path = root.parent / observation["render_evidence"][
+        "execution_evidence_filename"
+    ]
+    tracked_paths = [observation_path, execution_path]
+    tracked_paths.extend(path for path in root.rglob("*") if path.is_file())
+
+    def immutable_snapshot() -> dict[str, tuple[int, int, int, str]]:
+        return {
+            str(path): (
+                path.stat().st_mode & 0o777,
+                path.stat().st_size,
+                path.stat().st_mtime_ns,
+                renderer._sha256_file(path),
+            )
+            for path in tracked_paths
+        }
+
+    before = immutable_snapshot()
+    packet = renderer.load_chapter_packet("foothills_parkway")
+    chapter = root / packet.chapter_id
+    _events, state = renderer._load_state(
+        chapter, packet=packet, sources=_sources(), root=root
+    )
+    assert state["legacy_live_foothills_accounting"] is True
+    assert state["event_count"] == 68
+    assert state["event_head_sha256"] == renderer.LIVE_FOOTHILLS_RENDER_EVENT_HEAD_SHA256
+    assert renderer._completed_billable_input_characters(packet, state) == 21_408
+    closeout = _closeout_value(chapter, packet, state)
+    closeout.update(
+        {
+            "source_observation_sha256": (
+                renderer.LIVE_FOOTHILLS_CLOSEOUT_OBSERVATION_SHA256
+            ),
+            "closeout_id": (
+                "smokies_closeout_"
+                f"{renderer.LIVE_FOOTHILLS_CLOSEOUT_OBSERVATION_SHA256[:32]}"
+            ),
+            "observed_at": "2026-08-11T09:00:47.409Z",
+            "key_deleted_at": "2026-08-11T09:00:08.200Z",
+        }
+    )
+    arguments = {
+        "packet": packet,
+        "state": state,
+        "starting_provider_credits": 171_490,
+        "starting_billable_requests": 14,
+        "starting_total_usage_usd": Decimal("2.64"),
+        "prior_closeout_sha256": None,
+        "raw_value": closeout,
+    }
+    first = renderer._validate_closeout(chapter, **arguments)
+    second = renderer._validate_closeout(chapter, **arguments)
+    assert first == second == closeout
+    assert first["ledger_provider_credit_cost_total"] == 11_775
+    assert first["ledger_billable_input_character_count_total"] == 21_408
+    assert first["ledger_input_character_usage_usd_unrounded"] == "2.1408"
+    assert first["provider_reported_chapter_usage_usd"] == "2.14"
+    assert first["projected_chapter_cost_ceiling_usd"] == "2.15"
+    assert first["audio_inventory_schema_version"] == 2
+
+    tampered_source = json.loads(json.dumps(closeout))
+    tampered_source["source_observation_sha256"] = "d" * 64
+    tampered_source["closeout_id"] = f"smokies_closeout_{('d' * 64)[:32]}"
+    with pytest.raises(
+        renderer.NarrationError,
+        match="legacy_live_closeout_observation_binding_invalid",
+    ):
+        renderer._validate_closeout(
+            chapter, **{**arguments, "raw_value": tampered_source}
+        )
+    tampered_time = json.loads(json.dumps(closeout))
+    tampered_time["observed_at"] = "2026-08-11T09:00:48.409Z"
+    with pytest.raises(
+        renderer.NarrationError,
+        match="legacy_live_closeout_observation_binding_invalid",
+    ):
+        renderer._validate_closeout(
+            chapter, **{**arguments, "raw_value": tampered_time}
+        )
+    assert immutable_snapshot() == before
 
 
 def test_unexpected_orphan_output_blocks_before_key_and_network(
@@ -1585,6 +1850,12 @@ def test_late_cades_rotation_uses_only_residual_exposure(tmp_path: Path) -> None
         "ledger_request_count_at_start": 0,
     }
     observed = NOW + timedelta(minutes=2)
+    completed_request_count = 22
+    observed_input_usage = renderer._unrounded_usage_cost(
+        renderer._locked_billable_input_characters_between_requests(
+            packet, 0, completed_request_count
+        )
+    )
     value = _evidence_value(
         packet=packet,
         root=root,
@@ -1597,9 +1868,10 @@ def test_late_cades_rotation_uses_only_residual_exposure(tmp_path: Path) -> None
         key_id_material=b"new-cades-key",
         already_committed=committed,
         committed_since_prior_session=committed,
-        observed_total_usage_usd="7.44",
+        observed_total_usage_usd=f"{Decimal('2.64') + observed_input_usage:.2f}",
         observed_billable_request_count=36,
-        completed_requests_since_prior_session=22,
+        completed_request_count=completed_request_count,
+        completed_requests_since_prior_session=completed_request_count,
     )
     evidence = _write_evidence(tmp_path, value, "late-cades.json")
     execution = renderer.load_execution_evidence(
@@ -1611,8 +1883,8 @@ def test_late_cades_rotation_uses_only_residual_exposure(tmp_path: Path) -> None
         prior_session=prior_session,
         already_committed=committed,
         committed_since_prior_session=committed,
-        completed_request_count=22,
-        completed_requests_since_prior_session=22,
+        completed_request_count=completed_request_count,
+        completed_requests_since_prior_session=completed_request_count,
         chapter_starting_total_usage_usd=Decimal("2.64"),
         chapter_starting_billable_requests=14,
         ledger_updated_at=renderer._iso(NOW),
@@ -1638,8 +1910,8 @@ def test_late_cades_rotation_uses_only_residual_exposure(tmp_path: Path) -> None
             prior_session=prior_session,
             already_committed=committed,
             committed_since_prior_session=committed,
-            completed_request_count=22,
-            completed_requests_since_prior_session=22,
+            completed_request_count=completed_request_count,
+            completed_requests_since_prior_session=completed_request_count,
             chapter_starting_total_usage_usd=Decimal("2.64"),
             chapter_starting_billable_requests=14,
             ledger_updated_at=renderer._iso(NOW),

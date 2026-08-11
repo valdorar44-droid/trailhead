@@ -73,6 +73,7 @@ EVENTS_NAME = "render-events.ndjson"
 LEDGER_NAME = "render-ledger.json"
 CLOSEOUT_NAME = "chapter-closeout.json"
 PROVISIONAL_CLOSEOUT_NAME = "chapter-key-deletion-provisional.json"
+AUDIO_INVENTORY_SCHEMA_VERSION = 2
 CHAPTER_ORDER = preflight_builder.CHAPTER_ORDER
 MAX_PROVIDER_ATTEMPTS = 3
 MAX_RETRY_AFTER_SECONDS = 60.0
@@ -154,6 +155,39 @@ EXPECTED_KEY_PERMISSIONS = (
 )
 PREBATCH_BILLABLE_REQUEST_COUNT = 14
 PREBATCH_TOTAL_USAGE_USD = Decimal("2.64")
+LIVE_FOOTHILLS_CLOSEOUT_OBSERVATION_PATH = (
+    Path.home()
+    / ".trailhead-smokies-james-private-v1"
+    / "foothills-live-closeout-observation-v1.json"
+)
+LIVE_FOOTHILLS_CLOSEOUT_OBSERVATION_SHA256 = (
+    "9a60babeac71b51f5211d3794c39fcbd918ab3e958b143f20a9c8e8c96306ad8"
+)
+LIVE_FOOTHILLS_RENDER_LEDGER_SHA256 = (
+    "35df089889c3b37675ec32efce7a03b011b99fde44cd47dba8667ecaa60f2a2c"
+)
+LIVE_FOOTHILLS_RENDER_EVENTS_SHA256 = (
+    "0d2225cace264fadb78d18939e80f34017abd0b91baf77849804de3a073daaf1"
+)
+LIVE_FOOTHILLS_RENDER_EVENT_COUNT = 68
+LIVE_FOOTHILLS_RENDER_EVENT_HEAD_SHA256 = (
+    "91c73eca69c0f6584e5e7fe1c5a90272ecea3b9a84f323f9e9021ac4d1ba25c0"
+)
+LIVE_FOOTHILLS_EXECUTION_EVIDENCE_SHA256 = (
+    "acad27590fe39a395fa9eb6f87de1b18f0a738023246ccec620592e2d7db68c5"
+)
+LIVE_FOOTHILLS_LEGACY_RENDERER_AUDIT_SHA256 = (
+    "d0f9a07190420b9824cb823109762b4007ab0b46b31046a297e112e08149fb06"
+)
+LIVE_FOOTHILLS_LEGACY_OPERATOR_SHA256 = (
+    "195d43e372d9665708ee52e69f45c8397026e0b1aaa9083fdd3a39482a665c6b"
+)
+LIVE_FOOTHILLS_LEGACY_OPERATOR_TEST_SHA256 = (
+    "b6dbe9212328cf7ea823be87599a9f159d68fdbfcc06a72d58438740e47325bf"
+)
+LIVE_FOOTHILLS_OUTPUT_ROOT_SHA256 = (
+    "15ba24dfe0282736210cab583095db8f8ecc781261e9e1f0bda445c49808b078"
+)
 DIRECT_DEPENDENCY_PATHS = (
     Path(approval_builder.__file__).resolve(),
     Path(preflight_builder.__file__).resolve(),
@@ -900,6 +934,8 @@ def load_chapter_packet(chapter_id: str) -> ChapterPacket:
             budget.get("proposed_one_day_api_key_credit_quota")
             != spec.expected_one_day_key_credit_quota,
             budget.get("dollar_cap_usd") != spec.expected_dollar_cap_usd,
+            _projected_cost(payload_count)
+            > Decimal(str(spec.expected_dollar_cap_usd)),
             budget.get("rerender_budget") != 0,
             budget.get("paid_overage_authorized") is not False,
             budget.get("cross_chapter_borrowing_allowed") is not False,
@@ -1069,6 +1105,88 @@ def _require_owned_regular_file(path: Path, root: Path, code: str) -> Path:
     ):
         raise NarrationError(code)
     return _require_root_confined(path, root, code)
+
+
+def _load_bound_live_foothills_closeout_observation() -> dict[str, Any]:
+    path = LIVE_FOOTHILLS_CLOSEOUT_OBSERVATION_PATH
+    _require_owned_directory(
+        path.parent, path.parent, "live_foothills_observation_parent_invalid"
+    )
+    _require_owned_regular_file(
+        path, path.parent, "live_foothills_observation_file_invalid"
+    )
+    if (
+        path.stat().st_size != 3_093
+        or _sha256_file(path) != LIVE_FOOTHILLS_CLOSEOUT_OBSERVATION_SHA256
+    ):
+        raise NarrationError("live_foothills_observation_binding_drift")
+    raw = _load_json(path, "live_foothills_observation_unreadable")
+    render_evidence = raw.get("render_evidence")
+    ending_account = raw.get("ending_account")
+    reconciliation = raw.get("independent_reconciliation")
+    provider_evidence = raw.get("provider_ui_evidence")
+    safety = raw.get("safety")
+    if not all(
+        isinstance(value, Mapping)
+        for value in (
+            render_evidence,
+            ending_account,
+            reconciliation,
+            provider_evidence,
+            safety,
+        )
+    ):
+        raise NarrationError("live_foothills_observation_semantics_invalid")
+    if any(
+        (
+            raw.get("schema_version") != 1,
+            raw.get("kind")
+            != "smokies_remaining_live_closeout_observation_v1",
+            raw.get("observation_id")
+            != "smokies_foothills_live_closeout_20260811T090047409Z",
+            raw.get("source")
+            != "authenticated_provider_ui_and_immutable_render_ledger",
+            raw.get("observed_at") != "2026-08-11T09:00:47.409Z",
+            raw.get("chapter_id") != "foothills_parkway",
+            render_evidence.get("render_ledger_sha256")
+            != LIVE_FOOTHILLS_RENDER_LEDGER_SHA256,
+            render_evidence.get("render_event_count")
+            != LIVE_FOOTHILLS_RENDER_EVENT_COUNT,
+            render_evidence.get("render_event_head_sha256")
+            != LIVE_FOOTHILLS_RENDER_EVENT_HEAD_SHA256,
+            render_evidence.get("execution_evidence_sha256")
+            != LIVE_FOOTHILLS_EXECUTION_EVIDENCE_SHA256,
+            render_evidence.get("provider_credit_cost_total")
+            != 11_775,
+            render_evidence.get("locked_payload_character_count")
+            != 21_408,
+            ending_account.get("provider_credits_remaining")
+            != 159_715,
+            ending_account.get("billable_request_count") != 30,
+            ending_account.get("total_usage_usd") != "4.78",
+            reconciliation.get(
+                "locked_input_character_usage_usd_unrounded"
+            )
+            != "2.1408",
+            reconciliation.get(
+                "chapter_usd_ceiling_passed"
+            )
+            is not True,
+            provider_evidence.get("key_deleted") is not True,
+            provider_evidence.get("key_deletion_verified")
+            is not True,
+            provider_evidence.get("exact_key_absent")
+            is not True,
+            provider_evidence.get(
+                "no_other_active_render_keys"
+            )
+            is not True,
+            safety.get("next_chapter_started") is not False,
+            safety.get("final_closeout_written") is not False,
+        )
+    ):
+        raise NarrationError("live_foothills_observation_semantics_invalid")
+    return raw
 
 
 def _root_marker(root: Path) -> dict[str, Any]:
@@ -1701,8 +1819,15 @@ def load_execution_evidence(
             observed_billable_requests
             - int(prior_session["observed_billable_request_count"])
         )
+        partial_billable_input_characters = (
+            _locked_billable_input_characters_between_requests(
+                packet,
+                int(prior_session["ledger_request_count_at_start"]),
+                completed_request_count,
+            )
+        )
         ledger_partial_usage_usd = _unrounded_usage_cost(
-            committed_since_prior_session
+            partial_billable_input_characters
         )
         expected_continuation = {
             "prior_execution_evidence_sha256": prior_session[
@@ -1731,6 +1856,9 @@ def load_execution_evidence(
             ],
             "partial_usage_ending_provider_credits": available,
             "partial_usage_ledger_credits": committed_since_prior_session,
+            "partial_usage_ledger_billable_input_characters": (
+                partial_billable_input_characters
+            ),
             "partial_usage_reconciliation_passed": True,
             "partial_usage_starting_total_usage_usd": (
                 f"{prior_total_usage_usd:.2f}"
@@ -2222,6 +2350,56 @@ def _unrounded_usage_cost(character_count: int) -> Decimal:
     )
 
 
+def _locked_billable_input_characters_for_request_count(
+    packet: ChapterPacket, request_count: int
+) -> int:
+    if (
+        isinstance(request_count, bool)
+        or not isinstance(request_count, int)
+        or not 0 <= request_count <= len(packet.requests)
+    ):
+        raise NarrationError("billable_input_request_count_invalid")
+    return sum(
+        entry.payload_character_count for entry in packet.requests[:request_count]
+    )
+
+
+def _completed_billable_input_characters(
+    packet: ChapterPacket, state: Mapping[str, Any]
+) -> int:
+    completed_count = 0
+    incomplete_seen = False
+    for entry in packet.requests:
+        item = state["items"][entry.provider_request_id]
+        completed = item["state"] == "completed"
+        if completed and incomplete_seen:
+            raise NarrationError("completed_request_order_invalid")
+        if completed:
+            completed_count += 1
+        else:
+            incomplete_seen = True
+    return _locked_billable_input_characters_for_request_count(
+        packet, completed_count
+    )
+
+
+def _locked_billable_input_characters_between_requests(
+    packet: ChapterPacket, start_count: int, end_count: int
+) -> int:
+    if (
+        isinstance(start_count, bool)
+        or isinstance(end_count, bool)
+        or not isinstance(start_count, int)
+        or not isinstance(end_count, int)
+        or not 0 <= start_count <= end_count <= len(packet.requests)
+    ):
+        raise NarrationError("billable_input_request_range_invalid")
+    return sum(
+        entry.payload_character_count
+        for entry in packet.requests[start_count:end_count]
+    )
+
+
 def _master_name(entry: RenderRequest) -> str:
     return f"{entry.stable_order:02d}-{entry.provider_request_id}.mp3"
 
@@ -2317,6 +2495,45 @@ def _initial_event_payload(
     }
 
 
+def _legacy_live_foothills_initial_event_payload(
+    packet: ChapterPacket, root: Path
+) -> dict[str, Any]:
+    if packet.chapter_id != "foothills_parkway":
+        raise NarrationError("legacy_live_chapter_invalid")
+    sources = SourceBindings(
+        checkpoint2_approval_sha256=(
+            "3cc18dad4d1b6a80f2259e58cbe50fba3804096d0c00437eca9103e626078d5c"
+        ),
+        continuation_approval_sha256=(
+            "c7edea54c4facd3d9cc336217577bcec38b78928041e163c92b54290141f029d"
+        ),
+        green_preflight_sha256=(
+            "161257f717e4c2ae3d344f295c6f2ec8b4ce5febd819e167086ed97f68f57a29"
+        ),
+        renderer_audit_sha256=LIVE_FOOTHILLS_LEGACY_RENDERER_AUDIT_SHA256,
+        operator_sha256=LIVE_FOOTHILLS_LEGACY_OPERATOR_SHA256,
+        operator_test_sha256=LIVE_FOOTHILLS_LEGACY_OPERATOR_TEST_SHA256,
+        dependency_sha256={
+            "scripts/build_smokies_checkpoint2_approval.py": (
+                "ad4ad23475a9f7d077f64f08c7883e9175d45efd4d964d09f47664c5fcbbc74a"
+            ),
+            "scripts/build_smokies_elevenlabs_james_postpurchase_preflight.py": (
+                "e597288b36480f267b533079c72cca034034b263bed602bcdbe1f24dfd42a1be"
+            ),
+            "scripts/build_smokies_elevenlabs_james_remaining_locks.py": (
+                "44bbddf60383d6a5f3a6fcf7e2bbe4b6aad824c8397d93e093818c1b5d49d354"
+            ),
+            "scripts/build_smokies_postpurchase_render_continuation_approval.py": (
+                "0481e382a9557a31fabb22c29f5c859067dc088ec5318e4568d94c1a47cae180"
+            ),
+        },
+    )
+    expected = _initial_event_payload(packet, sources, root)
+    if expected["output_root_sha256"] != LIVE_FOOTHILLS_OUTPUT_ROOT_SHA256:
+        raise NarrationError("legacy_live_output_root_binding_invalid")
+    return expected
+
+
 def _new_state(packet: ChapterPacket) -> dict[str, Any]:
     return {
         "initialized": False,
@@ -2324,6 +2541,7 @@ def _new_state(packet: ChapterPacket) -> dict[str, Any]:
         "created_at": None,
         "updated_at": None,
         "status": "in_progress",
+        "legacy_live_foothills_accounting": False,
         "sessions": [],
         "preflights": [],
         "items": {
@@ -2394,6 +2612,7 @@ def _replay_events(
     packet: ChapterPacket,
     sources: SourceBindings,
     root: Path,
+    allow_bound_legacy_live_foothills: bool = False,
 ) -> dict[str, Any]:
     state = _new_state(packet)
     previous = "0" * 64
@@ -2429,12 +2648,21 @@ def _replay_events(
             raise NarrationError("render_event_payload_invalid")
 
         if expected_seq == 1:
+            current_initial = _initial_event_payload(packet, sources, root)
+            legacy_initial = (
+                _legacy_live_foothills_initial_event_payload(packet, root)
+                if allow_bound_legacy_live_foothills
+                else None
+            )
             if (
                 event_type != "ledger_initialized"
                 or request_id is not None
-                or payload != _initial_event_payload(packet, sources, root)
+                or payload not in (current_initial, legacy_initial)
             ):
                 raise NarrationError("render_initial_event_invalid")
+            state["legacy_live_foothills_accounting"] = (
+                legacy_initial is not None and payload == legacy_initial
+            )
             state["initialized"] = True
             state["initial"] = payload
             state["created_at"] = event["at"]
@@ -2677,6 +2905,13 @@ def _replay_events(
                 requests_since_prior = completed_at_start - int(
                     prior["ledger_request_count_at_start"]
                 )
+                billable_input_characters_since_prior = (
+                    _locked_billable_input_characters_between_requests(
+                        packet,
+                        int(prior["ledger_request_count_at_start"]),
+                        completed_at_start,
+                    )
+                )
                 observed_usage_delta = Decimal(
                     payload["observed_total_usage_usd"]
                 ) - Decimal(prior["observed_total_usage_usd"])
@@ -2711,7 +2946,9 @@ def _replay_events(
                         != packet.renderer_character_cap - committed_at_start,
                         abs(
                             observed_usage_delta
-                            - _unrounded_usage_cost(since_prior)
+                            - _unrounded_usage_cost(
+                                billable_input_characters_since_prior
+                            )
                         )
                         > Decimal("0.01"),
                     )
@@ -2883,7 +3120,13 @@ def _replay_events(
                         isinstance(cost, int)
                         and not 0 < cost <= entry.reserved_provider_credit_ceiling,
                         payload["projected_cost_usd"]
-                        != str(_projected_cost(int(cost))),
+                        != str(
+                            _projected_cost(
+                                int(cost)
+                                if state["legacy_live_foothills_accounting"]
+                                else entry.payload_character_count
+                            )
+                        ),
                         payload["content_type"] != "audio/mpeg",
                         payload["stage_audio_file"] != _stage_audio_name(entry),
                         payload["stage_metadata_file"]
@@ -2963,7 +3206,13 @@ def _replay_events(
             expected = {
                 "provider_request_count": len(packet.requests),
                 "character_cost_total": committed,
-                "projected_cost_usd": str(_projected_cost(committed)),
+                "projected_cost_usd": str(
+                    _projected_cost(
+                        committed
+                        if state["legacy_live_foothills_accounting"]
+                        else packet.payload_character_count
+                    )
+                ),
                 "rerender_count": 0,
                 "status": "render_complete_pending_key_deletion_closeout",
             }
@@ -3011,7 +3260,13 @@ def _snapshot(state: Mapping[str, Any], packet: ChapterPacket) -> dict[str, Any]
         "provider_preflights": state["preflights"],
         "caps": state["initial"]["caps"],
         "character_cost_total": committed,
-        "projected_cost_usd": str(_projected_cost(committed)),
+        "projected_cost_usd": str(
+            _projected_cost(
+                committed
+                if state["legacy_live_foothills_accounting"]
+                else _completed_billable_input_characters(packet, state)
+            )
+        ),
         "items": state["items"],
     }
 
@@ -3056,7 +3311,60 @@ def _load_state(
             raise NarrationError("render_snapshot_without_authoritative_journal")
         return [], _new_state(packet)
     events = _read_events(events_path, root=root)
-    state = _replay_events(events, packet=packet, sources=sources, root=root)
+    first_payload = (
+        events[0].get("payload")
+        if events and isinstance(events[0], Mapping)
+        else None
+    )
+    legacy_live_candidate = (
+        packet.chapter_id == "foothills_parkway"
+        and isinstance(first_payload, dict)
+        and first_payload.get("renderer_audit_sha256")
+        == LIVE_FOOTHILLS_LEGACY_RENDERER_AUDIT_SHA256
+        and first_payload.get("operator_sha256")
+        == LIVE_FOOTHILLS_LEGACY_OPERATOR_SHA256
+        and first_payload.get("operator_test_sha256")
+        == LIVE_FOOTHILLS_LEGACY_OPERATOR_TEST_SHA256
+    )
+    if legacy_live_candidate:
+        observation = _load_bound_live_foothills_closeout_observation()
+        if any(
+            (
+                not _path_present(ledger_path),
+                _sha256_file(events_path)
+                != LIVE_FOOTHILLS_RENDER_EVENTS_SHA256,
+                not _path_present(ledger_path)
+                or _sha256_file(ledger_path)
+                != LIVE_FOOTHILLS_RENDER_LEDGER_SHA256,
+                _output_root_hash(root) != LIVE_FOOTHILLS_OUTPUT_ROOT_SHA256,
+                observation["render_evidence"]["render_event_count"]
+                != len(events),
+                observation["render_evidence"]["render_event_head_sha256"]
+                != events[-1].get("event_sha256"),
+            )
+        ):
+            raise NarrationError("legacy_live_foothills_binding_invalid")
+        execution_name = observation["render_evidence"][
+            "execution_evidence_filename"
+        ]
+        execution_path = root.parent / execution_name
+        _require_owned_regular_file(
+            execution_path,
+            root.parent,
+            "legacy_live_execution_evidence_invalid",
+        )
+        if (
+            _sha256_file(execution_path)
+            != LIVE_FOOTHILLS_EXECUTION_EVIDENCE_SHA256
+        ):
+            raise NarrationError("legacy_live_execution_evidence_drift")
+    state = _replay_events(
+        events,
+        packet=packet,
+        sources=sources,
+        root=root,
+        allow_bound_legacy_live_foothills=legacy_live_candidate,
+    )
     expected_snapshot = _snapshot(state, packet)
     current_snapshot = None
     if _path_present(ledger_path):
@@ -3065,7 +3373,19 @@ def _load_state(
             current_snapshot = _load_json(ledger_path, "render_ledger_unreadable")
         except NarrationError:
             current_snapshot = None
-    if current_snapshot != expected_snapshot:
+    if legacy_live_candidate:
+        if any(
+            (
+                state["status"]
+                != "render_complete_pending_key_deletion_closeout",
+                state["event_count"] != LIVE_FOOTHILLS_RENDER_EVENT_COUNT,
+                state["event_head_sha256"]
+                != LIVE_FOOTHILLS_RENDER_EVENT_HEAD_SHA256,
+                current_snapshot != expected_snapshot,
+            )
+        ):
+            raise NarrationError("legacy_live_foothills_state_drift")
+    elif current_snapshot != expected_snapshot:
         _atomic_replace_json(ledger_path, expected_snapshot)
     return events, state
 
@@ -3430,7 +3750,9 @@ def _complete_if_ready(
         payload={
             "provider_request_count": len(packet.requests),
             "character_cost_total": committed,
-            "projected_cost_usd": str(_projected_cost(committed)),
+            "projected_cost_usd": str(
+                _projected_cost(packet.payload_character_count)
+            ),
             "rerender_count": 0,
             "status": "render_complete_pending_key_deletion_closeout",
         },
@@ -3458,9 +3780,17 @@ def _audio_inventory(
                 "duration_s": accepted["audio"]["duration_s"],
                 "words_per_minute": accepted["words_per_minute"],
                 "character_cost": accepted["character_cost"],
+                "provider_credit_cost": accepted["character_cost"],
+                "locked_billable_input_character_count": (
+                    entry.payload_character_count
+                ),
             }
         )
-    return rows, _sha256_bytes(_canonical_bytes(rows))
+    inventory = {
+        "schema_version": AUDIO_INVENTORY_SCHEMA_VERSION,
+        "rows": rows,
+    }
+    return rows, _sha256_bytes(_canonical_bytes(inventory))
 
 
 _KEY_UI_CLOSEOUT_FIELDS = (
@@ -3536,6 +3866,7 @@ def _validate_closeout(
         "render_event_count",
         "render_event_head_sha256",
         "render_ledger_sha256",
+        "audio_inventory_schema_version",
         "audio_inventory_sha256",
         "prior_closeout_sha256",
         "key_id_sha256",
@@ -3550,7 +3881,8 @@ def _validate_closeout(
         "no_other_active_render_keys",
         "starting_provider_credits",
         "ending_provider_credits",
-        "ledger_character_cost_total",
+        "ledger_provider_credit_cost_total",
+        "ledger_billable_input_character_count_total",
         "provider_reported_usage_credits",
         "starting_billable_request_count",
         "ending_billable_request_count",
@@ -3558,7 +3890,12 @@ def _validate_closeout(
         "starting_total_usage_usd",
         "ending_total_usage_usd",
         "provider_reported_chapter_usage_usd",
-        "ledger_usage_usd_unrounded",
+        "ledger_input_character_usage_usd_unrounded",
+        "locked_input_rate_usd_per_1000_characters",
+        "projected_chapter_cost_ceiling_usd",
+        "chapter_dollar_cap_usd",
+        "chapter_dollar_cap_passed",
+        "credit_and_input_character_meters_independent",
         "dollar_reconciliation_tolerance_usd",
         "observation_sources",
         "prebatch_baseline",
@@ -3573,7 +3910,7 @@ def _validate_closeout(
     if set(raw) != expected_fields:
         raise NarrationError("chapter_closeout_schema_invalid")
     if (
-        raw.get("schema_version") != 2
+        raw.get("schema_version") != 3
         or SAFE_ID_RE.fullmatch(str(raw.get("closeout_id") or "")) is None
         or raw.get("source")
         != "authenticated_provider_usage_and_key_management_ui"
@@ -3588,6 +3925,20 @@ def _validate_closeout(
     if raw.get("closeout_id") != f"smokies_closeout_{source_observation_sha256[:32]}":
         raise NarrationError("chapter_closeout_source_observation_binding_invalid")
     observed = _parse_utc(raw.get("observed_at"), "chapter_closeout_time_invalid")
+    if state.get("legacy_live_foothills_accounting") is True and any(
+        (
+            source_observation_sha256
+            != LIVE_FOOTHILLS_CLOSEOUT_OBSERVATION_SHA256,
+            raw.get("closeout_id")
+            != (
+                "smokies_closeout_"
+                f"{LIVE_FOOTHILLS_CLOSEOUT_OBSERVATION_SHA256[:32]}"
+            ),
+            raw.get("observed_at") != "2026-08-11T09:00:47.409Z",
+            raw.get("key_deleted_at") != "2026-08-11T09:00:08.200Z",
+        )
+    ):
+        raise NarrationError("legacy_live_closeout_observation_binding_invalid")
     if observed < _parse_utc(state["updated_at"], "render_event_timestamp_invalid"):
         raise NarrationError("chapter_closeout_predates_render")
     sessions = state["sessions"]
@@ -3616,11 +3967,25 @@ def _validate_closeout(
         int(item["accepted"]["character_cost"])
         for item in state["items"].values()
     )
+    billable_input_characters = _completed_billable_input_characters(
+        packet, state
+    )
+    if billable_input_characters != packet.payload_character_count:
+        raise NarrationError("chapter_closeout_billable_input_incomplete")
     _, inventory_sha = _audio_inventory(packet, state)
     ending_credits = starting_provider_credits - committed
     ending_requests = starting_billable_requests + len(packet.requests)
-    exact_ledger_usage_usd = _unrounded_usage_cost(committed)
-    if raw["ledger_usage_usd_unrounded"] != f"{exact_ledger_usage_usd:.4f}":
+    exact_ledger_usage_usd = _unrounded_usage_cost(
+        billable_input_characters
+    )
+    projected_chapter_cost = _projected_cost(billable_input_characters)
+    if any(
+        (
+            raw["ledger_input_character_usage_usd_unrounded"]
+            != f"{exact_ledger_usage_usd:.4f}",
+            projected_chapter_cost > Decimal(packet.dollar_cap_usd),
+        )
+    ):
         raise NarrationError("chapter_closeout_dollar_reconciliation_invalid")
     dollar_available = raw["ending_total_usage_usd"] is not None
     if not dollar_available:
@@ -3668,7 +4033,9 @@ def _validate_closeout(
             "chapter_usage_usd": (
                 "derived_difference_of_observed_rounded_totals"
             ),
-            "ledger_usage_usd": "ledger_character_cost_at_locked_rate",
+            "ledger_usage_usd": (
+                "locked_payload_input_characters_at_locked_rate"
+            ),
         }
         dollar_reconciliation: bool | None = True
     else:
@@ -3690,13 +4057,16 @@ def _validate_closeout(
             ),
             "total_usage_usd": "unavailable_on_authenticated_surface",
             "chapter_usage_usd": "not_computed_without_observed_totals",
-            "ledger_usage_usd": "ledger_character_cost_at_locked_rate",
+            "ledger_usage_usd": (
+                "locked_payload_input_characters_at_locked_rate"
+            ),
         }
         dollar_reconciliation = None
     expected_values = {
         "render_event_count": state["event_count"],
         "render_event_head_sha256": state["event_head_sha256"],
         "render_ledger_sha256": _sha256_file(chapter_dir / LEDGER_NAME),
+        "audio_inventory_schema_version": AUDIO_INVENTORY_SCHEMA_VERSION,
         "audio_inventory_sha256": inventory_sha,
         "prior_closeout_sha256": prior_closeout_sha256,
         "key_id_sha256": sessions[-1]["key_id_sha256"],
@@ -3715,11 +4085,19 @@ def _validate_closeout(
         "no_other_active_render_keys": True,
         "starting_provider_credits": starting_provider_credits,
         "ending_provider_credits": ending_credits,
-        "ledger_character_cost_total": committed,
+        "ledger_provider_credit_cost_total": committed,
+        "ledger_billable_input_character_count_total": (
+            billable_input_characters
+        ),
         "provider_reported_usage_credits": committed,
         "starting_billable_request_count": starting_billable_requests,
         "ending_billable_request_count": ending_requests,
         "provider_reported_request_count": len(packet.requests),
+        "locked_input_rate_usd_per_1000_characters": "0.10",
+        "projected_chapter_cost_ceiling_usd": str(projected_chapter_cost),
+        "chapter_dollar_cap_usd": packet.dollar_cap_usd,
+        "chapter_dollar_cap_passed": True,
+        "credit_and_input_character_meters_independent": True,
         "observation_sources": dollar_sources,
         "prebatch_baseline": {
             "used_provider_credits": 14_510,
@@ -4320,11 +4698,18 @@ def _render_chapter(
                     for row in state["items"].values()
                     if row["state"] == "completed"
                 )
+                committed_billable_input_characters = (
+                    _completed_billable_input_characters(packet, state)
+                )
+                candidate_billable_input_characters = (
+                    committed_billable_input_characters
+                    + entry.payload_character_count
+                )
                 if not invalid and any(
                     (
                         cost > entry.reserved_provider_credit_ceiling,
                         committed + cost > packet.renderer_character_cap,
-                        _projected_cost(committed + cost)
+                        _projected_cost(candidate_billable_input_characters)
                         > Decimal(packet.dollar_cap_usd),
                     )
                 ):
@@ -4347,7 +4732,9 @@ def _render_chapter(
                     "attempt": attempt,
                     "request_fingerprint": _request_fingerprint(packet, entry),
                     "character_cost": cost,
-                    "projected_cost_usd": str(_projected_cost(cost)),
+                    "projected_cost_usd": str(
+                        _projected_cost(entry.payload_character_count)
+                    ),
                     "content_type": "audio/mpeg",
                     "response_sha256": probe.sha256,
                     "response_bytes": probe.byte_count,
@@ -4428,7 +4815,13 @@ def _render_chapter(
             "safe_uncharged_429_retries": retried_429,
             "provider_request_count": len(packet.requests),
             "character_cost_total": committed,
-            "projected_cost_usd": str(_projected_cost(committed)),
+            "provider_credit_cost_total": committed,
+            "locked_billable_input_character_count": (
+                packet.payload_character_count
+            ),
+            "projected_cost_usd": str(
+                _projected_cost(packet.payload_character_count)
+            ),
             "network_used": True,
             "provider_preflight_network_used": True,
             "tts_network_used": bool(rendered),

@@ -43,6 +43,7 @@ ROOT_MARKER_NAME = ".trailhead-smokies-james-remaining-root.json"
 ROOT_CONTRACT = "smokies_elevenlabs_james_remaining_external_root_v1"
 PROVISIONAL_CLOSEOUT_NAME = "chapter-key-deletion-provisional.json"
 REPORT_FILENAME = "remaining-audio-qa-v1.json"
+AUDIO_INVENTORY_SCHEMA_VERSION = 2
 VOICE_ID = "EkK5I93UQWFDigLMpZcX"
 VOICE_NAME = "James - Husky, Engaging and Bold"
 MODEL_ID = "eleven_multilingual_v2"
@@ -86,6 +87,7 @@ EXPECTED_AGGREGATE = {
     "provider_request_count": 72,
     "base_request_count": 64,
     "direction_override_request_count": 8,
+    "payload_character_count": 125_595,
     "reserved_provider_credit_ceiling": 138_190,
     "renderer_character_cap": 138_300,
     "one_day_key_credit_quota": 145_000,
@@ -105,6 +107,36 @@ MAX_PREFERRED_WPM = 185.0
 MIN_DURATION_FLAG_S = 2.0
 MAX_DURATION_FLAG_S = 300.0
 SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
+LIVE_FOOTHILLS_CLOSEOUT_OBSERVATION_PATH = (
+    Path.home()
+    / ".trailhead-smokies-james-private-v1"
+    / "foothills-live-closeout-observation-v1.json"
+)
+LIVE_FOOTHILLS_CLOSEOUT_OBSERVATION_SHA256 = (
+    "9a60babeac71b51f5211d3794c39fcbd918ab3e958b143f20a9c8e8c96306ad8"
+)
+LIVE_FOOTHILLS_RENDER_LEDGER_SHA256 = (
+    "35df089889c3b37675ec32efce7a03b011b99fde44cd47dba8667ecaa60f2a2c"
+)
+LIVE_FOOTHILLS_RENDER_EVENTS_SHA256 = (
+    "0d2225cace264fadb78d18939e80f34017abd0b91baf77849804de3a073daaf1"
+)
+LIVE_FOOTHILLS_RENDER_EVENT_COUNT = 68
+LIVE_FOOTHILLS_RENDER_EVENT_HEAD_SHA256 = (
+    "91c73eca69c0f6584e5e7fe1c5a90272ecea3b9a84f323f9e9021ac4d1ba25c0"
+)
+LIVE_FOOTHILLS_EXECUTION_EVIDENCE_SHA256 = (
+    "acad27590fe39a395fa9eb6f87de1b18f0a738023246ccec620592e2d7db68c5"
+)
+LIVE_FOOTHILLS_LEGACY_RENDERER_AUDIT_SHA256 = (
+    "d0f9a07190420b9824cb823109762b4007ab0b46b31046a297e112e08149fb06"
+)
+LIVE_FOOTHILLS_LEGACY_OPERATOR_SHA256 = (
+    "195d43e372d9665708ee52e69f45c8397026e0b1aaa9083fdd3a39482a665c6b"
+)
+LIVE_FOOTHILLS_LEGACY_OPERATOR_TEST_SHA256 = (
+    "b6dbe9212328cf7ea823be87599a9f159d68fdbfcc06a72d58438740e47325bf"
+)
 KEY_LIFETIME_SECONDS = 86_400
 KEY_UI_TIMEZONE = "America/Winnipeg"
 KEY_UI_TIMESTAMP_PRECISION = "minute"
@@ -197,6 +229,7 @@ LOCK_SPECS = {
         "byte_count": 33_701,
         "sha256": "eac2d636c4c26fd55fbc4ebe7b7be25882ffd51e6064703924d96d89fa71c119",
         "provider_request_count": 16,
+        "payload_character_count": 21_408,
         "base_request_count": 13,
         "direction_override_request_count": 3,
         "reserved_provider_credit_ceiling": 23_557,
@@ -210,6 +243,7 @@ LOCK_SPECS = {
         "byte_count": 63_724,
         "sha256": "561a8a8bf62f534d485df0ebf523d13a9defd962af136240fd46e1ca5aacec25",
         "provider_request_count": 33,
+        "payload_character_count": 59_928,
         "base_request_count": 28,
         "direction_override_request_count": 5,
         "reserved_provider_credit_ceiling": 65_938,
@@ -223,6 +257,7 @@ LOCK_SPECS = {
         "byte_count": 44_518,
         "sha256": "6c6fecdaa85d91f4e29cd08ea9c46f20d404dba8ed72962390b8d8d8dc5b6a04",
         "provider_request_count": 23,
+        "payload_character_count": 44_259,
         "base_request_count": 23,
         "direction_override_request_count": 0,
         "reserved_provider_credit_ceiling": 48_695,
@@ -677,10 +712,20 @@ def _strict_mp3_probe(content: bytes) -> StrictAudioProbe:
     )
 
 
-def _projected_cost(character_cost: int) -> Decimal:
+def _projected_cost(billable_input_character_count: int) -> Decimal:
     return (
-        Decimal(character_cost) / Decimal(1000) * Decimal("0.10")
+        Decimal(billable_input_character_count)
+        / Decimal(1000)
+        * Decimal("0.10")
     ).quantize(Decimal("0.01"), rounding=ROUND_UP)
+
+
+def _unrounded_input_usage_cost(
+    billable_input_character_count: int,
+) -> Decimal:
+    return (
+        Decimal(billable_input_character_count) / Decimal(10_000)
+    ).quantize(Decimal("0.0001"))
 
 
 def _load_checked_sources() -> tuple[
@@ -692,6 +737,7 @@ def _load_checked_sources() -> tuple[
     total_base = 0
     total_overrides = 0
     total_requests = 0
+    total_payload_characters = 0
     total_reserved = 0
     total_cap = 0
     total_key_quota = 0
@@ -757,6 +803,9 @@ def _load_checked_sources() -> tuple[
         _validate_direction_map(lock, requests)
         locks[chapter_id] = lock
         total_requests += int(spec["provider_request_count"])
+        total_payload_characters += sum(
+            int(row["payload_character_count"]) for row in requests
+        )
         total_base += int(spec["base_request_count"])
         total_overrides += int(spec["direction_override_request_count"])
         total_reserved += int(spec["reserved_provider_credit_ceiling"])
@@ -776,9 +825,10 @@ def _load_checked_sources() -> tuple[
     _validate_runtime_sources(runtime)
 
     if {
-        "provider_request_count": total_requests,
-        "base_request_count": total_base,
-        "direction_override_request_count": total_overrides,
+            "provider_request_count": total_requests,
+            "base_request_count": total_base,
+            "direction_override_request_count": total_overrides,
+            "payload_character_count": total_payload_characters,
         "reserved_provider_credit_ceiling": total_reserved,
         "renderer_character_cap": total_cap,
         "one_day_key_credit_quota": total_key_quota,
@@ -1153,7 +1203,9 @@ def _pronunciation_terms(transcript: str) -> list[str]:
 
 def _audio_inventory_hash(rows: Sequence[Mapping[str, Any]]) -> str:
     return _canonical_sha256(
-        [
+        {
+            "schema_version": AUDIO_INVENTORY_SCHEMA_VERSION,
+            "rows": [
             {
                 "provider_request_id": row["provider_request_id"],
                 "raw_transcript_sha256": row["raw_transcript_sha256"],
@@ -1163,10 +1215,15 @@ def _audio_inventory_hash(rows: Sequence[Mapping[str, Any]]) -> str:
                 "audio_bytes": row["audio_bytes"],
                 "duration_s": row["duration_s"],
                 "words_per_minute": row["words_per_minute"],
-                "character_cost": row["provider_character_cost"],
+                "character_cost": row["provider_credit_cost"],
+                "provider_credit_cost": row["provider_credit_cost"],
+                "locked_billable_input_character_count": row[
+                    "locked_billable_input_character_count"
+                ],
             }
             for row in rows
-        ]
+            ],
+        }
     )
 
 
@@ -1200,7 +1257,7 @@ def _request_inventory_hash(requests: Sequence[Mapping[str, Any]]) -> str:
 
 
 def _request_event_pairs(
-    events: Sequence[Mapping[str, Any]], expected_ids: set[str]
+    events: Sequence[Mapping[str, Any]], expected_ids: Sequence[str]
 ) -> dict[str, tuple[Mapping[str, Any], Mapping[str, Any]]]:
     allowed_types = {
         "ledger_initialized",
@@ -1221,6 +1278,10 @@ def _request_event_pairs(
         or events[-1].get("provider_request_id") is not None
     ):
         raise AudioQaError("render event lifecycle boundary drifted")
+    expected_order = list(expected_ids)
+    expected_id_set = set(expected_order)
+    if len(expected_order) != len(expected_id_set):
+        raise AudioQaError("render request inventory contains duplicate IDs")
     per_request: dict[str, dict[str, list[Mapping[str, Any]]]] = {
         request_id: {
             "request_reserved": [],
@@ -1235,9 +1296,16 @@ def _request_event_pairs(
         if event_type not in per_request[next(iter(per_request))]:
             continue
         request_id = str(event.get("provider_request_id") or "")
-        if request_id not in per_request:
+        if request_id not in expected_id_set:
             raise AudioQaError("render event references an unknown request")
         per_request[request_id][event_type].append(event)
+    completed_order = [
+        str(event.get("provider_request_id") or "")
+        for event in events
+        if event.get("event_type") == "request_completed"
+    ]
+    if completed_order != expected_order:
+        raise AudioQaError("render request completion prefix order drifted")
     pairs: dict[str, tuple[Mapping[str, Any], Mapping[str, Any]]] = {}
     for request_id, grouped in per_request.items():
         if any(len(grouped[event_type]) != 1 for event_type in grouped):
@@ -1289,7 +1357,7 @@ def _validate_chapter_event_identity(
     preflight_sha256: str,
     audit_sha256: str,
     dependency_sha256: Mapping[str, str],
-) -> None:
+) -> bool:
     spec = LOCK_SPECS[chapter_id]
     requests = lock["requests"]
     expected_initial = {
@@ -1325,7 +1393,20 @@ def _validate_chapter_event_identity(
         },
         "provider_usage_baseline": PREBATCH_BASELINE,
     }
-    if events[0].get("payload") != expected_initial:
+    legacy_initial = {
+        **expected_initial,
+        "renderer_audit_sha256": LIVE_FOOTHILLS_LEGACY_RENDERER_AUDIT_SHA256,
+        "operator_sha256": LIVE_FOOTHILLS_LEGACY_OPERATOR_SHA256,
+        "operator_test_sha256": LIVE_FOOTHILLS_LEGACY_OPERATOR_TEST_SHA256,
+    }
+    legacy_live_foothills = (
+        chapter_id == "foothills_parkway"
+        and events[0].get("payload") == legacy_initial
+    )
+    if (
+        events[0].get("payload") != expected_initial
+        and not legacy_live_foothills
+    ):
         raise AudioQaError(f"render initialization binding drifted: {chapter_id}")
     complete_payload = events[-1].get("payload")
     if not isinstance(complete_payload, dict) or any(
@@ -1337,11 +1418,13 @@ def _validate_chapter_event_identity(
         )
     ):
         raise AudioQaError(f"chapter completion event drifted: {chapter_id}")
+    return legacy_live_foothills
 
 
 def _validate_session_preflight_contract(
     *,
     chapter_id: str,
+    requests: Sequence[Mapping[str, Any]],
     sessions: object,
     preflights: object,
 ) -> None:
@@ -1356,6 +1439,27 @@ def _validate_session_preflight_contract(
         int(LOCK_SPECS[value]["renderer_character_cap"])
         for value in CHAPTER_ORDER[CHAPTER_ORDER.index(chapter_id) :]
     )
+    ordered_requests = sorted(requests, key=lambda row: int(row["stable_order"]))
+
+    def locked_input_characters_between(start: int, end: int) -> int:
+        if any(
+            (
+                isinstance(start, bool),
+                isinstance(end, bool),
+                not isinstance(start, int),
+                not isinstance(end, int),
+                start < 0,
+                end < start,
+                end > len(ordered_requests),
+            )
+        ):
+            raise AudioQaError(
+                f"provider completed request prefix drifted: {chapter_id}"
+            )
+        return sum(
+            int(row["payload_character_count"])
+            for row in ordered_requests[start:end]
+        )
     key_id_sha256: str | None = None
     key_material_sha256: str | None = None
     prior_credits: int | None = None
@@ -1509,6 +1613,15 @@ def _validate_session_preflight_contract(
                 raise AudioQaError(
                     f"provider recovery dollar evidence drifted: {chapter_id}"
                 ) from error
+            prior_request_count = int(
+                prior["ledger_request_count_at_start"]
+            )
+            current_request_count = int(
+                session["ledger_request_count_at_start"]
+            )
+            partial_input_characters = locked_input_characters_between(
+                prior_request_count, current_request_count
+            )
             if any(
                 (
                     session.get("continuation_mode")
@@ -1546,7 +1659,9 @@ def _validate_session_preflight_contract(
                     != partial_requests,
                     abs(
                         observed_usd_delta
-                        - Decimal(int(partial_credits or 0)) / Decimal(10_000)
+                        - _unrounded_input_usage_cost(
+                            partial_input_characters
+                        )
                     )
                     > Decimal("0.01"),
                 )
@@ -1606,6 +1721,7 @@ def _validate_audio_item(
     completed_event: Mapping[str, Any],
     chapter_dir: Path,
     probe_audio: Callable[[bytes], StrictAudioProbe],
+    legacy_credit_projected_cost: bool,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     request_id = str(request.get("provider_request_id") or "")
     transcript = _resolve_transcript(request.get("transcript_source"))
@@ -1722,6 +1838,7 @@ def _validate_audio_item(
     probe = probe_audio(audio)
     metadata = _load_json(metadata_path)
     cost = accepted.get("character_cost")
+    locked_input_count = int(request.get("payload_character_count") or 0)
     if (
         isinstance(cost, bool)
         or not isinstance(cost, int)
@@ -1729,6 +1846,7 @@ def _validate_audio_item(
         or cost > int(request.get("reserved_provider_credit_ceiling") or 0)
     ):
         raise AudioQaError(f"provider cost is invalid: {request_id}")
+    projected_cost_basis = cost if legacy_credit_projected_cost else locked_input_count
     word_count = int(request.get("word_count") or 0)
     wpm = word_count / probe.duration_s * 60 if probe.duration_s > 0 else 0
     if not MIN_HARD_WPM <= wpm <= MAX_HARD_WPM:
@@ -1738,7 +1856,8 @@ def _validate_audio_item(
             accepted.get("response_sha256") != probe.sha256,
             accepted.get("response_bytes") != probe.byte_count,
             accepted.get("content_type") != "audio/mpeg",
-            accepted.get("projected_cost_usd") != str(_projected_cost(cost)),
+            accepted.get("projected_cost_usd")
+            != str(_projected_cost(projected_cost_basis)),
             accepted.get("words_per_minute") != round(wpm, 3),
             not probe.all_bytes_accounted_for,
         )
@@ -1778,7 +1897,7 @@ def _validate_audio_item(
         "voice_settings": VOICE_SETTINGS,
         "request_fingerprint": accepted["request_fingerprint"],
         "character_cost": cost,
-        "projected_cost_usd": str(_projected_cost(cost)),
+        "projected_cost_usd": str(_projected_cost(projected_cost_basis)),
         "content_type": "audio/mpeg",
         "response_sha256": probe.sha256,
         "response_bytes": probe.byte_count,
@@ -1847,7 +1966,9 @@ def _validate_audio_item(
         "duration_s": round(probe.duration_s, 6),
         "words_per_minute": round(wpm, 3),
         "provider_character_cost": cost,
-        "projected_cost_usd": str(_projected_cost(cost)),
+        "provider_credit_cost": cost,
+        "locked_billable_input_character_count": locked_input_count,
+        "projected_cost_usd": str(_projected_cost(projected_cost_basis)),
         "request_fingerprint": item["request_fingerprint"],
         "provider_attempt_count": 1,
         "retry_count": 0,
@@ -1885,6 +2006,7 @@ def _validate_provisional_record(
         "render_event_count",
         "render_event_head_sha256",
         "render_ledger_sha256",
+        "audio_inventory_schema_version",
         "audio_inventory_sha256",
         "key_id_sha256",
         "key_material_sha256",
@@ -1899,6 +2021,12 @@ def _validate_provisional_record(
         "ending_provider_credits",
         "ending_billable_request_count",
         "ending_total_usage_usd",
+        "ledger_provider_credit_cost_total",
+        "ledger_billable_input_character_count_total",
+        "ledger_input_character_usage_usd_unrounded",
+        "projected_chapter_cost_ceiling_usd",
+        "chapter_dollar_cap_usd",
+        "credit_and_input_character_meters_independent",
         "total_usage_usd_observation",
         "final_usage_reconciliation_complete",
         "replacement_key_authorized",
@@ -1924,6 +2052,8 @@ def _validate_provisional_record(
             raw.get("render_event_count") != event_count,
             raw.get("render_event_head_sha256") != event_head,
             raw.get("render_ledger_sha256") != _sha256_path(ledger_path),
+            raw.get("audio_inventory_schema_version")
+            != AUDIO_INVENTORY_SCHEMA_VERSION,
             raw.get("audio_inventory_sha256") != _audio_inventory_hash(audio_rows),
             raw.get("key_id_sha256") != closeout.get("key_id_sha256"),
             raw.get("key_material_sha256")
@@ -1943,6 +2073,18 @@ def _validate_provisional_record(
             raw.get("ending_billable_request_count")
             != closeout.get("ending_billable_request_count"),
             raw.get("ending_total_usage_usd") is not None,
+            raw.get("ledger_provider_credit_cost_total")
+            != closeout.get("ledger_provider_credit_cost_total"),
+            raw.get("ledger_billable_input_character_count_total")
+            != closeout.get("ledger_billable_input_character_count_total"),
+            raw.get("ledger_input_character_usage_usd_unrounded")
+            != closeout.get("ledger_input_character_usage_usd_unrounded"),
+            raw.get("projected_chapter_cost_ceiling_usd")
+            != closeout.get("projected_chapter_cost_ceiling_usd"),
+            raw.get("chapter_dollar_cap_usd")
+            != closeout.get("chapter_dollar_cap_usd"),
+            raw.get("credit_and_input_character_meters_independent")
+            is not True,
             raw.get("total_usage_usd_observation")
             != "unavailable_on_authenticated_surface",
             raw.get("final_usage_reconciliation_complete") is not False,
@@ -1976,6 +2118,8 @@ def _validate_closeout(
     event_head: str,
     audio_rows: Sequence[Mapping[str, Any]],
     chapter_cost: int,
+    chapter_input_characters: int,
+    legacy_live_foothills: bool,
     prior_ending_credits: int | None,
     prior_ending_requests: int | None,
     prior_ending_total_usage_usd: Decimal | None,
@@ -1994,6 +2138,7 @@ def _validate_closeout(
         "render_event_count",
         "render_event_head_sha256",
         "render_ledger_sha256",
+        "audio_inventory_schema_version",
         "audio_inventory_sha256",
         "prior_closeout_sha256",
         "key_id_sha256",
@@ -2008,7 +2153,8 @@ def _validate_closeout(
         "no_other_active_render_keys",
         "starting_provider_credits",
         "ending_provider_credits",
-        "ledger_character_cost_total",
+        "ledger_provider_credit_cost_total",
+        "ledger_billable_input_character_count_total",
         "provider_reported_usage_credits",
         "starting_billable_request_count",
         "ending_billable_request_count",
@@ -2016,7 +2162,12 @@ def _validate_closeout(
         "starting_total_usage_usd",
         "ending_total_usage_usd",
         "provider_reported_chapter_usage_usd",
-        "ledger_usage_usd_unrounded",
+        "ledger_input_character_usage_usd_unrounded",
+        "locked_input_rate_usd_per_1000_characters",
+        "projected_chapter_cost_ceiling_usd",
+        "chapter_dollar_cap_usd",
+        "chapter_dollar_cap_passed",
+        "credit_and_input_character_meters_independent",
         "dollar_reconciliation_tolerance_usd",
         "observation_sources",
         "prebatch_baseline",
@@ -2059,6 +2210,22 @@ def _validate_closeout(
         closeout.get("key_expiry_conservative_deadline"),
         "provider key conservative expiry",
     )
+    if legacy_live_foothills and any(
+        (
+            closeout.get("source_observation_sha256")
+            != LIVE_FOOTHILLS_CLOSEOUT_OBSERVATION_SHA256,
+            closeout.get("closeout_id")
+            != (
+                "smokies_closeout_"
+                f"{LIVE_FOOTHILLS_CLOSEOUT_OBSERVATION_SHA256[:32]}"
+            ),
+            closeout.get("observed_at") != "2026-08-11T09:00:47.409Z",
+            closeout.get("key_deleted_at") != "2026-08-11T09:00:08.200Z",
+        )
+    ):
+        raise AudioQaError(
+            "bound live Foothills closeout observation drifted"
+        )
     if any(
         (
             closeout.get("key_expiry_conservative_deadline")
@@ -2075,7 +2242,7 @@ def _validate_closeout(
     if any(
         (
             set(closeout) != expected_fields,
-            closeout.get("schema_version") != 2,
+            closeout.get("schema_version") != 3,
             not _valid_sha(closeout.get("source_observation_sha256")),
             closeout.get("closeout_id")
             != (
@@ -2089,6 +2256,8 @@ def _validate_closeout(
             closeout.get("render_event_count") != event_count,
             closeout.get("render_event_head_sha256") != event_head,
             closeout.get("render_ledger_sha256") != _sha256_path(ledger_path),
+            closeout.get("audio_inventory_schema_version")
+            != AUDIO_INVENTORY_SCHEMA_VERSION,
             closeout.get("audio_inventory_sha256")
             != _audio_inventory_hash(audio_rows),
             closeout.get("prior_closeout_sha256") != prior_closeout_sha256,
@@ -2103,7 +2272,10 @@ def _validate_closeout(
             closeout.get("key_deletion_source")
             != "official_signed_in_api_keys_ui_delete_and_absence_verification",
             closeout.get("no_other_active_render_keys") is not True,
-            closeout.get("ledger_character_cost_total") != chapter_cost,
+            closeout.get("ledger_provider_credit_cost_total")
+            != chapter_cost,
+            closeout.get("ledger_billable_input_character_count_total")
+            != chapter_input_characters,
             closeout.get("provider_reported_usage_credits") != chapter_cost,
             closeout.get("provider_reported_request_count")
             != spec["provider_request_count"],
@@ -2122,8 +2294,19 @@ def _validate_closeout(
                 "chapter_usage_usd": (
                     "derived_difference_of_observed_rounded_totals"
                 ),
-                "ledger_usage_usd": "ledger_character_cost_at_locked_rate",
+                "ledger_usage_usd": (
+                    "locked_payload_input_characters_at_locked_rate"
+                ),
             },
+            closeout.get("locked_input_rate_usd_per_1000_characters")
+            != "0.10",
+            closeout.get("projected_chapter_cost_ceiling_usd")
+            != str(_projected_cost(chapter_input_characters)),
+            closeout.get("chapter_dollar_cap_usd")
+            != str(spec["dollar_cap_usd"]),
+            closeout.get("chapter_dollar_cap_passed") is not True,
+            closeout.get("credit_and_input_character_meters_independent")
+            is not True,
             closeout.get("account_credit_reconciliation_passed") is not True,
             closeout.get("usage_credit_reconciliation_passed") is not True,
             closeout.get("request_count_reconciliation_passed") is not True,
@@ -2173,14 +2356,20 @@ def _validate_closeout(
         chapter_usd = Decimal(
             str(closeout.get("provider_reported_chapter_usage_usd"))
         )
-        ledger_usd = Decimal(str(closeout.get("ledger_usage_usd_unrounded")))
+        ledger_usd = Decimal(
+            str(
+                closeout.get(
+                    "ledger_input_character_usage_usd_unrounded"
+                )
+            )
+        )
         tolerance_usd = Decimal(
             str(closeout.get("dollar_reconciliation_tolerance_usd"))
         )
     except InvalidOperation as error:
         raise AudioQaError(f"provider dollar closeout is invalid: {chapter_id}") from error
-    exact_ledger_usd = (Decimal(chapter_cost) / Decimal(10_000)).quantize(
-        Decimal("0.0001")
+    exact_ledger_usd = _unrounded_input_usage_cost(
+        chapter_input_characters
     )
     if any(
         (
@@ -2193,7 +2382,7 @@ def _validate_closeout(
                 str(closeout.get("provider_reported_chapter_usage_usd")),
             )
             is None,
-            closeout.get("ledger_usage_usd_unrounded")
+            closeout.get("ledger_input_character_usage_usd_unrounded")
             != f"{exact_ledger_usd:.4f}",
             closeout.get("dollar_reconciliation_tolerance_usd") != "0.01",
             start_usd != expected_start_usd,
@@ -2215,6 +2404,7 @@ def _validate_closeout(
         "render_ledger_sha256": _sha256_path(ledger_path),
         "source_observation_sha256": closeout["source_observation_sha256"],
         "prior_closeout_sha256": prior_closeout_sha256,
+        "audio_inventory_schema_version": AUDIO_INVENTORY_SCHEMA_VERSION,
         "audio_inventory_sha256": _audio_inventory_hash(audio_rows),
         "key_id_sha256": closeout["key_id_sha256"],
         "key_deleted": True,
@@ -2229,6 +2419,10 @@ def _validate_closeout(
         "no_other_active_render_keys": True,
         "starting_provider_credits": starting,
         "ending_provider_credits": ending,
+        "ledger_provider_credit_cost_total": chapter_cost,
+        "ledger_billable_input_character_count_total": (
+            chapter_input_characters
+        ),
         "provider_reported_usage_credits": chapter_cost,
         "starting_billable_request_count": start_requests,
         "ending_billable_request_count": end_requests,
@@ -2236,7 +2430,16 @@ def _validate_closeout(
         "starting_total_usage_usd": f"{start_usd:.2f}",
         "ending_total_usage_usd": f"{end_usd:.2f}",
         "provider_reported_chapter_usage_usd": f"{chapter_usd:.2f}",
-        "ledger_usage_usd_unrounded": f"{ledger_usd:.4f}",
+        "ledger_input_character_usage_usd_unrounded": (
+            f"{ledger_usd:.4f}"
+        ),
+        "locked_input_rate_usd_per_1000_characters": "0.10",
+        "projected_chapter_cost_ceiling_usd": str(
+            _projected_cost(chapter_input_characters)
+        ),
+        "chapter_dollar_cap_usd": str(spec["dollar_cap_usd"]),
+        "chapter_dollar_cap_passed": True,
+        "credit_and_input_character_meters_independent": True,
         "dollar_reconciliation_tolerance_usd": "0.01",
         "account_credit_reconciliation_passed": True,
         "usage_credit_reconciliation_passed": True,
@@ -2364,6 +2567,7 @@ def build(
     prior_ending_total_usage_usd: Decimal | None = None
     prior_closeout_sha256: str | None = None
     aggregate_cost = 0
+    aggregate_input_characters = 0
 
     for chapter_id in CHAPTER_ORDER:
         spec = LOCK_SPECS[chapter_id]
@@ -2376,7 +2580,7 @@ def build(
         events, event_head = _parse_events(events_path)
         _reject_secret_material(ledger)
         _reject_secret_material(events)
-        _validate_chapter_event_identity(
+        legacy_live_foothills = _validate_chapter_event_identity(
             chapter_id=chapter_id,
             lock=lock,
             events=events,
@@ -2386,6 +2590,48 @@ def build(
             audit_sha256=audit_sha,
             dependency_sha256=dependency_sha256,
         )
+        if legacy_live_foothills:
+            observation_path = LIVE_FOOTHILLS_CLOSEOUT_OBSERVATION_PATH
+            observation = _load_json(observation_path)
+            render_evidence = observation.get("render_evidence")
+            execution_name = (
+                render_evidence.get("execution_evidence_filename")
+                if isinstance(render_evidence, dict)
+                else None
+            )
+            execution_path = (
+                root.parent / execution_name
+                if isinstance(execution_name, str)
+                and Path(execution_name).name == execution_name
+                and "/" not in execution_name
+                and "\\" not in execution_name
+                else None
+            )
+            if any(
+                (
+                    observation_path.is_symlink(),
+                    not observation_path.is_file(),
+                    _sha256_path(observation_path)
+                    != LIVE_FOOTHILLS_CLOSEOUT_OBSERVATION_SHA256,
+                    _sha256_path(ledger_path)
+                    != LIVE_FOOTHILLS_RENDER_LEDGER_SHA256,
+                    _sha256_path(events_path)
+                    != LIVE_FOOTHILLS_RENDER_EVENTS_SHA256,
+                    execution_path is None,
+                    execution_path is not None and execution_path.is_symlink(),
+                    execution_path is not None
+                    and not execution_path.is_file(),
+                    execution_path is not None
+                    and execution_path.is_file()
+                    and _sha256_path(execution_path)
+                    != LIVE_FOOTHILLS_EXECUTION_EVIDENCE_SHA256,
+                    len(events) != LIVE_FOOTHILLS_RENDER_EVENT_COUNT,
+                    event_head != LIVE_FOOTHILLS_RENDER_EVENT_HEAD_SHA256,
+                )
+            ):
+                raise AudioQaError(
+                    "bound live Foothills render evidence drifted"
+                )
         expected_caps = {
             "renderer_characters": spec["renderer_character_cap"],
             "api_key_credits": spec["one_day_key_credit_quota"],
@@ -2447,20 +2693,27 @@ def build(
             )
         ):
             raise AudioQaError(f"render ledger identity drifted: {chapter_id}")
+        requests = lock["requests"]
         _validate_session_preflight_contract(
             chapter_id=chapter_id,
+            requests=requests,
             sessions=ledger["execution_sessions"],
             preflights=ledger["provider_preflights"],
         )
         items = ledger.get("items")
-        requests = lock["requests"]
-        expected_ids = {str(row["provider_request_id"]) for row in requests}
-        if not isinstance(items, dict) or set(items) != expected_ids:
+        ordered_requests = sorted(
+            requests, key=lambda row: int(row["stable_order"])
+        )
+        expected_ids = [
+            str(row["provider_request_id"]) for row in ordered_requests
+        ]
+        if not isinstance(items, dict) or set(items) != set(expected_ids):
             raise AudioQaError(f"render ledger inventory drifted: {chapter_id}")
         request_event_pairs = _request_event_pairs(events, expected_ids)
         chapter_rows: list[dict[str, Any]] = []
         chapter_cost = 0
-        for request in sorted(requests, key=lambda row: int(row["stable_order"])):
+        chapter_input_characters = 0
+        for request in ordered_requests:
             request_id = str(request["provider_request_id"])
             item = items[request_id]
             if not isinstance(item, dict):
@@ -2474,6 +2727,7 @@ def build(
                 completed_event=request_event_pairs[request_id][1],
                 chapter_dir=chapter_dir,
                 probe_audio=probe_audio,
+                legacy_credit_projected_cost=legacy_live_foothills,
             )
             if row["audio_sha256"] in seen_audio_hashes:
                 raise AudioQaError("duplicate MP3 bytes detected")
@@ -2484,6 +2738,9 @@ def build(
             chapter_rows.append(row)
             audio_rows.append(row)
             chapter_cost += int(row["provider_character_cost"])
+            chapter_input_characters += int(
+                row["locked_billable_input_character_count"]
+            )
             for flag in item_flags:
                 flagged.append(
                     {
@@ -2494,15 +2751,20 @@ def build(
                         **flag,
                     }
                 )
+        ledger_projected_basis = (
+            chapter_cost if legacy_live_foothills else chapter_input_characters
+        )
         if any(
             (
                 ledger.get("character_cost_total") != chapter_cost,
                 ledger.get("projected_cost_usd")
-                != str(_projected_cost(chapter_cost)),
+                != str(_projected_cost(ledger_projected_basis)),
                 events[-1]["payload"].get("character_cost_total")
                 != chapter_cost,
                 events[-1]["payload"].get("projected_cost_usd")
-                != str(_projected_cost(chapter_cost)),
+                != str(_projected_cost(ledger_projected_basis)),
+                chapter_input_characters
+                != int(spec["payload_character_count"]),
             )
         ):
             raise AudioQaError(f"chapter ledger cost drifted: {chapter_id}")
@@ -2510,7 +2772,7 @@ def build(
             spec["renderer_character_cap"]
         ):
             raise AudioQaError(f"chapter provider cost cap exceeded: {chapter_id}")
-        chapter_projected = _projected_cost(chapter_cost)
+        chapter_projected = _projected_cost(chapter_input_characters)
         if chapter_projected > Decimal(str(spec["dollar_cap_usd"])):
             raise AudioQaError(f"chapter dollar cap exceeded: {chapter_id}")
         closeout = _load_json(closeout_path)
@@ -2532,6 +2794,8 @@ def build(
                 event_head=event_head,
                 audio_rows=chapter_rows,
                 chapter_cost=chapter_cost,
+                chapter_input_characters=chapter_input_characters,
+                legacy_live_foothills=legacy_live_foothills,
                 prior_ending_credits=prior_ending_credits,
                 prior_ending_requests=prior_ending_requests,
                 prior_ending_total_usage_usd=prior_ending_total_usage_usd,
@@ -2549,6 +2813,7 @@ def build(
         )
         closeouts.append(closeout_public)
         aggregate_cost += chapter_cost
+        aggregate_input_characters += chapter_input_characters
         chapter_results.append(
             {
                 "chapter_id": chapter_id,
@@ -2575,6 +2840,11 @@ def build(
                 "provisional_key_deletion_record": provisional_public,
                 "audio_inventory_sha256": _audio_inventory_hash(chapter_rows),
                 "provider_character_cost": chapter_cost,
+                "provider_credit_cost": chapter_cost,
+                "locked_billable_input_character_count": (
+                    chapter_input_characters
+                ),
+                "legacy_live_foothills_accounting": legacy_live_foothills,
                 "projected_cost_usd": str(chapter_projected),
                 "reserved_provider_credit_ceiling": spec[
                     "reserved_provider_credit_ceiling"
@@ -2594,7 +2864,11 @@ def build(
         "renderer_character_cap"
     ]:
         raise AudioQaError("aggregate provider cost cap exceeded")
-    aggregate_projected = _projected_cost(aggregate_cost)
+    if aggregate_input_characters != EXPECTED_AGGREGATE[
+        "payload_character_count"
+    ]:
+        raise AudioQaError("aggregate locked input-character count drifted")
+    aggregate_projected = _projected_cost(aggregate_input_characters)
     if aggregate_projected > Decimal(EXPECTED_AGGREGATE["dollar_cap_usd"]):
         raise AudioQaError("aggregate dollar cap exceeded")
     representative = _representative_listening_set(locks, audio_rows)
@@ -2641,6 +2915,13 @@ def build(
         "aggregate": {
             **EXPECTED_AGGREGATE,
             "actual_provider_character_cost": aggregate_cost,
+            "actual_provider_credit_cost": aggregate_cost,
+            "actual_locked_billable_input_character_count": (
+                aggregate_input_characters
+            ),
+            "actual_locked_input_usage_usd_unrounded": (
+                f"{_unrounded_input_usage_cost(aggregate_input_characters):.4f}"
+            ),
             "actual_projected_cost_usd": str(aggregate_projected),
             "ending_provider_credits": prior_ending_credits,
             "ending_billable_request_count": prior_ending_requests,

@@ -219,6 +219,7 @@ def _prepare_full_fixture(
         events: list[dict] = []
         inventory: list[dict] = []
         chapter_cost = 0
+        chapter_input_characters = 0
         prior_event = "0" * 64
         key_id_sha = hashlib.sha256(f"key-id-{chapter_id}".encode()).hexdigest()
         key_material_sha = hashlib.sha256(
@@ -382,8 +383,9 @@ def _prepare_full_fixture(
             filename = f"{request['stable_order']:02d}-{request_id}.mp3"
             metadata_name = f"{request['stable_order']:02d}-{request_id}.json"
             (chapter / filename).write_bytes(audio)
-            cost = request["normalized_character_count"]
+            cost = max(1, request["normalized_character_count"] // 2)
             chapter_cost += cost
+            chapter_input_characters += request["payload_character_count"]
             fingerprint = hashlib.sha256(f"fingerprint:{request_id}".encode()).hexdigest()
             audio_evidence = {
                 "bitrate_kbps": 128,
@@ -412,7 +414,9 @@ def _prepare_full_fixture(
                 "attempt": 1,
                 "request_fingerprint": fingerprint,
                 "character_cost": cost,
-                "projected_cost_usd": str(builder._projected_cost(cost)),
+                "projected_cost_usd": str(
+                    builder._projected_cost(request["payload_character_count"])
+                ),
                 "content_type": "audio/mpeg",
                 "response_sha256": audio_sha,
                 "response_bytes": len(audio),
@@ -499,7 +503,11 @@ def _prepare_full_fixture(
                     "voice_settings": builder.VOICE_SETTINGS,
                     "request_fingerprint": fingerprint,
                     "character_cost": cost,
-                    "projected_cost_usd": str(builder._projected_cost(cost)),
+                    "projected_cost_usd": str(
+                        builder._projected_cost(
+                            request["payload_character_count"]
+                        )
+                    ),
                     "content_type": "audio/mpeg",
                     "response_sha256": audio_sha,
                     "response_bytes": len(audio),
@@ -528,6 +536,10 @@ def _prepare_full_fixture(
                     "duration_s": round(duration, 6),
                     "words_per_minute": 150.0,
                     "character_cost": cost,
+                    "provider_credit_cost": cost,
+                    "locked_billable_input_character_count": request[
+                        "payload_character_count"
+                    ],
                 }
             )
         complete_event = append_event(
@@ -536,7 +548,9 @@ def _prepare_full_fixture(
             {
                 "provider_request_count": len(lock["requests"]),
                 "character_cost_total": chapter_cost,
-                "projected_cost_usd": str(builder._projected_cost(chapter_cost)),
+                "projected_cost_usd": str(
+                    builder._projected_cost(chapter_input_characters)
+                ),
                 "rerender_count": 0,
                 "status": "render_complete_pending_key_deletion_closeout",
             },
@@ -565,15 +579,17 @@ def _prepare_full_fixture(
             "provider_preflights": [preflight_payload],
             "caps": caps,
             "character_cost_total": chapter_cost,
-            "projected_cost_usd": str(builder._projected_cost(chapter_cost)),
+            "projected_cost_usd": str(
+                builder._projected_cost(chapter_input_characters)
+            ),
             "items": items,
         }
         ledger_path = chapter / "render-ledger.json"
         _json(ledger_path, ledger)
         ending_credits = starting_credits - chapter_cost
         ending_requests = starting_requests + spec["provider_request_count"]
-        ledger_usd = (Decimal(chapter_cost) / Decimal(10_000)).quantize(
-            Decimal("0.0001")
+        ledger_usd = builder._unrounded_input_usage_cost(
+            chapter_input_characters
         )
         ending_usd = (starting_usd + ledger_usd).quantize(Decimal("0.01"))
         chapter_usd = ending_usd - starting_usd
@@ -581,7 +597,7 @@ def _prepare_full_fixture(
             f"closeout-observation:{chapter_id}".encode()
         ).hexdigest()
         closeout = {
-            "schema_version": 2,
+            "schema_version": 3,
             "closeout_id": f"smokies_closeout_{source_observation_sha[:32]}",
             "source": "authenticated_provider_usage_and_key_management_ui",
             "source_observation_sha256": source_observation_sha,
@@ -591,7 +607,15 @@ def _prepare_full_fixture(
             "render_event_count": len(events),
             "render_event_head_sha256": prior_event,
             "render_ledger_sha256": hashlib.sha256(ledger_path.read_bytes()).hexdigest(),
-            "audio_inventory_sha256": builder._canonical_sha256(inventory),
+            "audio_inventory_schema_version": (
+                builder.AUDIO_INVENTORY_SCHEMA_VERSION
+            ),
+            "audio_inventory_sha256": builder._canonical_sha256(
+                {
+                    "schema_version": builder.AUDIO_INVENTORY_SCHEMA_VERSION,
+                    "rows": inventory,
+                }
+            ),
             "prior_closeout_sha256": prior_closeout_sha,
             "key_id_sha256": key_id_sha,
             "key_material_sha256": key_material_sha,
@@ -611,7 +635,10 @@ def _prepare_full_fixture(
             "no_other_active_render_keys": True,
             "starting_provider_credits": starting_credits,
             "ending_provider_credits": ending_credits,
-            "ledger_character_cost_total": chapter_cost,
+            "ledger_provider_credit_cost_total": chapter_cost,
+            "ledger_billable_input_character_count_total": (
+                chapter_input_characters
+            ),
             "provider_reported_usage_credits": chapter_cost,
             "starting_billable_request_count": starting_requests,
             "ending_billable_request_count": ending_requests,
@@ -619,7 +646,16 @@ def _prepare_full_fixture(
             "starting_total_usage_usd": f"{starting_usd:.2f}",
             "ending_total_usage_usd": f"{ending_usd:.2f}",
             "provider_reported_chapter_usage_usd": f"{chapter_usd:.2f}",
-            "ledger_usage_usd_unrounded": f"{ledger_usd:.4f}",
+            "ledger_input_character_usage_usd_unrounded": (
+                f"{ledger_usd:.4f}"
+            ),
+            "locked_input_rate_usd_per_1000_characters": "0.10",
+            "projected_chapter_cost_ceiling_usd": str(
+                builder._projected_cost(chapter_input_characters)
+            ),
+            "chapter_dollar_cap_usd": spec["dollar_cap_usd"],
+            "chapter_dollar_cap_passed": True,
+            "credit_and_input_character_meters_independent": True,
             "dollar_reconciliation_tolerance_usd": "0.01",
             "observation_sources": {
                 "provider_credits": (
@@ -634,7 +670,9 @@ def _prepare_full_fixture(
                 "chapter_usage_usd": (
                     "derived_difference_of_observed_rounded_totals"
                 ),
-                "ledger_usage_usd": "ledger_character_cost_at_locked_rate",
+                "ledger_usage_usd": (
+                    "locked_payload_input_characters_at_locked_rate"
+                ),
             },
             "prebatch_baseline": builder.PREBATCH_BASELINE,
             "account_credit_reconciliation_passed": True,
@@ -709,7 +747,27 @@ def test_full_72_file_qa_and_representative_listening_set(
     assert closeouts[1]["prior_closeout_sha256"] == closeouts[0]["sha256"]
     assert closeouts[2]["prior_closeout_sha256"] == closeouts[1]["sha256"]
     assert all(row["dollar_reconciliation_passed"] for row in closeouts)
+    assert all(
+        row["credit_and_input_character_meters_independent"] is True
+        for row in closeouts
+    )
+    assert value["aggregate"]["actual_provider_credit_cost"] != value[
+        "aggregate"
+    ]["actual_locked_billable_input_character_count"]
+    assert (
+        value["aggregate"]["actual_locked_billable_input_character_count"]
+        == 125_595
+    )
+    assert value["aggregate"]["actual_locked_input_usage_usd_unrounded"] == (
+        "12.5595"
+    )
+    assert value["aggregate"]["actual_projected_cost_usd"] == "12.56"
     assert all(row["all_bytes_accounted_for"] for row in value["audio_assets"])
+    assert all(
+        row["provider_credit_cost"] == row["provider_character_cost"]
+        and row["locked_billable_input_character_count"] > 0
+        for row in value["audio_assets"]
+    )
     listening = value["representative_owner_listening_set"]
     assert listening["all_flags_included"] is True
     assert set(listening["required_chapter_directions"]).issubset(
@@ -725,6 +783,88 @@ def test_full_72_file_qa_and_representative_listening_set(
     assert str(tmp_path) not in serialized
     assert "/home/" not in serialized
     assert "C:\\Users" not in serialized
+
+
+def test_bound_live_foothills_legacy_media_is_read_only_and_exact() -> None:
+    observation_path = builder.LIVE_FOOTHILLS_CLOSEOUT_OBSERVATION_PATH
+    root = observation_path.parent / builder.EXPECTED_RENDER_ROOT_BASENAME
+    chapter_id = "foothills_parkway"
+    chapter = root / chapter_id
+    if not observation_path.is_file() or not chapter.is_dir():
+        pytest.skip("bound private Foothills render evidence is not present")
+    observation = json.loads(observation_path.read_text(encoding="utf-8"))
+    execution_path = root.parent / observation["render_evidence"][
+        "execution_evidence_filename"
+    ]
+    tracked_paths = [observation_path, execution_path]
+    tracked_paths.extend(
+        path for path in chapter.iterdir() if path.is_file()
+    )
+
+    def snapshot() -> dict[str, tuple[int, int, int, str]]:
+        return {
+            path.name: (
+                path.stat().st_mode & 0o777,
+                path.stat().st_size,
+                path.stat().st_mtime_ns,
+                hashlib.sha256(path.read_bytes()).hexdigest(),
+            )
+            for path in tracked_paths
+        }
+
+    before = snapshot()
+    ledger_path = chapter / "render-ledger.json"
+    events_path = chapter / "render-events.ndjson"
+    assert hashlib.sha256(observation_path.read_bytes()).hexdigest() == (
+        builder.LIVE_FOOTHILLS_CLOSEOUT_OBSERVATION_SHA256
+    )
+    assert hashlib.sha256(ledger_path.read_bytes()).hexdigest() == (
+        builder.LIVE_FOOTHILLS_RENDER_LEDGER_SHA256
+    )
+    assert hashlib.sha256(events_path.read_bytes()).hexdigest() == (
+        builder.LIVE_FOOTHILLS_RENDER_EVENTS_SHA256
+    )
+    assert hashlib.sha256(execution_path.read_bytes()).hexdigest() == (
+        builder.LIVE_FOOTHILLS_EXECUTION_EVIDENCE_SHA256
+    )
+    ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+    events, event_head = builder._parse_events(events_path)
+    assert len(events) == builder.LIVE_FOOTHILLS_RENDER_EVENT_COUNT
+    assert event_head == builder.LIVE_FOOTHILLS_RENDER_EVENT_HEAD_SHA256
+    lock = json.loads(
+        builder.LOCK_SPECS[chapter_id]["path"].read_text(encoding="utf-8")
+    )
+    requests = sorted(
+        lock["requests"], key=lambda row: int(row["stable_order"])
+    )
+    builder._validate_session_preflight_contract(
+        chapter_id=chapter_id,
+        requests=requests,
+        sessions=ledger["execution_sessions"],
+        preflights=ledger["provider_preflights"],
+    )
+    request_ids = [str(row["provider_request_id"]) for row in requests]
+    pairs = builder._request_event_pairs(events, request_ids)
+    rows = []
+    for request in requests:
+        request_id = str(request["provider_request_id"])
+        row, _flags = builder._validate_audio_item(
+            chapter_id=chapter_id,
+            lock_id=str(lock["lock_id"]),
+            request=request,
+            item=ledger["items"][request_id],
+            accepted_event=pairs[request_id][0],
+            completed_event=pairs[request_id][1],
+            chapter_dir=chapter,
+            probe_audio=builder._strict_mp3_probe,
+            legacy_credit_projected_cost=True,
+        )
+        rows.append(row)
+    assert sum(row["provider_credit_cost"] for row in rows) == 11_775
+    assert sum(
+        row["locked_billable_input_character_count"] for row in rows
+    ) == 21_408
+    assert snapshot() == before
 
 
 def test_retry_or_duplicate_attempt_fails_closed(
@@ -876,8 +1016,12 @@ def test_exact_key_identity_and_ui_time_session_contract(
     ledger = json.loads(
         (root / chapter_id / "render-ledger.json").read_text(encoding="utf-8")
     )
+    requests = json.loads(
+        builder.LOCK_SPECS[chapter_id]["path"].read_text(encoding="utf-8")
+    )["requests"]
     builder._validate_session_preflight_contract(
         chapter_id=chapter_id,
+        requests=requests,
         sessions=ledger["execution_sessions"],
         preflights=ledger["provider_preflights"],
     )
@@ -886,6 +1030,7 @@ def test_exact_key_identity_and_ui_time_session_contract(
     with pytest.raises(builder.AudioQaError, match="provider|session|expiry"):
         builder._validate_session_preflight_contract(
             chapter_id=chapter_id,
+            requests=requests,
             sessions=drifted,
             preflights=ledger["provider_preflights"],
         )
@@ -900,8 +1045,16 @@ def test_recovery_key_rotation_session_is_exact_and_ordered(
     ledger = json.loads(
         (root / chapter_id / "render-ledger.json").read_text(encoding="utf-8")
     )
+    requests = json.loads(
+        builder.LOCK_SPECS[chapter_id]["path"].read_text(encoding="utf-8")
+    )["requests"]
     initial = ledger["execution_sessions"][0]
     initial_preflight = ledger["provider_preflights"][0]
+    partial_input_characters = int(requests[0]["payload_character_count"])
+    recovery_observed_usd = (
+        Decimal(initial["observed_total_usage_usd"])
+        + builder._unrounded_input_usage_cost(partial_input_characters)
+    ).quantize(Decimal("0.01"))
     recovery_created = datetime(2026, 8, 11, 7, 1, tzinfo=UTC)
     recovery_observed = datetime(2026, 8, 11, 7, 2, tzinfo=UTC)
     recovery = {
@@ -932,7 +1085,7 @@ def test_recovery_key_rotation_session_is_exact_and_ordered(
             "observed_billable_request_count"
         ]
         + 1,
-        "observed_total_usage_usd": "2.74",
+        "observed_total_usage_usd": f"{recovery_observed_usd:.2f}",
         "partial_billable_requests_since_prior_session": 1,
         "partial_usage_credits_since_prior_session": 1_000,
         "prior_key_deleted_and_verified": True,
@@ -950,9 +1103,23 @@ def test_recovery_key_rotation_session_is_exact_and_ordered(
     }
     builder._validate_session_preflight_contract(
         chapter_id=chapter_id,
+        requests=requests,
         sessions=[initial, recovery],
         preflights=[initial_preflight, recovery_preflight],
     )
+    wrong_credit_based_usd = {
+        **recovery,
+        "observed_total_usage_usd": (
+            f"{Decimal(initial['observed_total_usage_usd']) + Decimal('0.10'):.2f}"
+        ),
+    }
+    with pytest.raises(builder.AudioQaError, match="recovery session"):
+        builder._validate_session_preflight_contract(
+            chapter_id=chapter_id,
+            requests=requests,
+            sessions=[initial, wrong_credit_based_usd],
+            preflights=[initial_preflight, recovery_preflight],
+        )
     wrong_static = {
         **recovery,
         "remaining_batch_renderer_cap": initial["remaining_batch_renderer_cap"],
@@ -960,6 +1127,7 @@ def test_recovery_key_rotation_session_is_exact_and_ordered(
     with pytest.raises(builder.AudioQaError, match="residual exposure"):
         builder._validate_session_preflight_contract(
             chapter_id=chapter_id,
+            requests=requests,
             sessions=[initial, wrong_static],
             preflights=[initial_preflight, recovery_preflight],
         )
@@ -967,6 +1135,7 @@ def test_recovery_key_rotation_session_is_exact_and_ordered(
     with pytest.raises(builder.AudioQaError, match="recovery session"):
         builder._validate_session_preflight_contract(
             chapter_id=chapter_id,
+            requests=requests,
             sessions=[initial, recovery],
             preflights=[initial_preflight, recovery_preflight],
         )

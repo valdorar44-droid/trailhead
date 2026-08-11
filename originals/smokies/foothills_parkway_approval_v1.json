@@ -1,0 +1,332 @@
+{
+  "approval": {
+    "approved_at": "2026-08-11T03:09:33.129Z",
+    "approved_at_source": "source_task_user_message_event_metadata",
+    "approved_by": "project_owner",
+    "decision": "approve_all_exact_items_in_preceding_review_gate",
+    "decision_message_hash_input": "utf8_with_trailing_newline",
+    "decision_message_sha256": "7f8518f7db5e9a55049f49c4ea6d6e8f509695231e60cbd607bcb36c88a75a14",
+    "decision_text": "approved",
+    "scope": "all_thirteen_exact_scripts_and_both_exact_original_artwork_candidates",
+    "source_task_id": "019fe9fb-cafa-75d3-b663-1e5051731cd5"
+  },
+  "approval_boundary": {
+    "artwork_derivatives_created": false,
+    "artwork_sanitation_authorized": false,
+    "artwork_sanitation_complete": false,
+    "database_accessed": false,
+    "derivative_visual_approval": false,
+    "foothills_exact_original_artwork_user_approved": true,
+    "foothills_exact_scripts_user_approved": true,
+    "foothills_narration_approved": false,
+    "foothills_narrator_approved": false,
+    "ingestion_allowed": false,
+    "manifest_creation_or_mutation_allowed": false,
+    "narration_generated": false,
+    "network_accessed_by_builder": false,
+    "next_action": "stop_before_sanitation_derivatives_or_narration_until_separately_authorized",
+    "other_chapters_approved": false,
+    "production_mutation_allowed": false,
+    "public_release": false,
+    "publication_allowed": false,
+    "tts_or_render_authorized": false,
+    "upload_allowed": false
+  },
+  "approval_set_bindings": {
+    "artwork_approval_set_sha256": "94dbb9448eab966c5dbe67ec3eecc808e64e099f68f820fca47bd56f6fd89121",
+    "script_approval_set_sha256": "bc9aa03556198d3910086e2a89e2313bacb4134ab8684f8fc0a81dddace93644"
+  },
+  "approved_artwork_originals": [
+    {
+      "asset_url": "https://upload.wikimedia.org/wikipedia/commons/2/2a/Foothills_Parkway%2C_October_2018--Andrea_Walton_%2843968388000%29.jpg",
+      "candidate_id": "media_fp_panorama",
+      "creator": "Andrea Walton (NPS)",
+      "derivative_user_visual_approval": false,
+      "dimensions": {
+        "height": 3024,
+        "width": 4032
+      },
+      "exact_credit": "Foothills Parkway, October 2018, Andrea Walton, Great Smoky Mountains National Park (NPS), public domain",
+      "exact_original_user_visual_approval": true,
+      "format": "JPEG",
+      "ingestion_allowed": false,
+      "intended_use": "chapter_artwork",
+      "license_name": "Public domain",
+      "license_record_url": "https://commons.wikimedia.org/wiki/File:Foothills_Parkway,_October_2018--Andrea_Walton_(43968388000).jpg",
+      "original_bytes": 2067676,
+      "original_has_unsanitized_device_exif": true,
+      "original_has_unsanitized_gps_exif": true,
+      "original_immutable": true,
+      "original_sha256": "92da599e63f7f2afabd81106d6649441b11b5406e7c94ec3ba448c643e6f19d8",
+      "publication_allowed": false,
+      "rendering_allowed": false,
+      "required_commercial_notice": "No claim to original U.S. Government works.",
+      "rights_basis": "public_domain_us_government_work",
+      "sanitation_authorized": false,
+      "sanitized_derivative_complete": false,
+      "source_page_url": "https://www.nps.gov/places/foothills-parkway.htm",
+      "stable_order": 1,
+      "subject": "Exact Foothills Parkway ridge panorama",
+      "upload_allowed": false
+    },
+    {
+      "asset_url": "https://upload.wikimedia.org/wikipedia/commons/5/58/Foothills_Parkway_Bridge_number_2_in_Great_Smoky_Mountains_National_Park_in_Tennessee_%2820133297129%29.jpg",
+      "candidate_id": "media_fp_engineering",
+      "creator": "Federal Highway Administration",
+      "derivative_user_visual_approval": false,
+      "dimensions": {
+        "height": 3240,
+        "width": 4320
+      },
+      "exact_credit": "Foothills Parkway Bridge number 2, Great Smoky Mountains National Park, Federal Highway Administration (FHWA), public domain",
+      "exact_original_user_visual_approval": true,
+      "format": "JPEG",
+      "ingestion_allowed": false,
+      "intended_use": "story_artwork",
+      "license_name": "Public domain",
+      "license_record_url": "https://commons.wikimedia.org/wiki/File:Foothills_Parkway_Bridge_number_2_in_Great_Smoky_Mountains_National_Park_in_Tennessee_(20133297129).jpg",
+      "original_bytes": 1650379,
+      "original_has_unsanitized_device_exif": true,
+      "original_has_unsanitized_gps_exif": false,
+      "original_immutable": true,
+      "original_sha256": "ed4f3bc69b7fd0f34040e3214a1633f410327c0deb3c0c04412d861760de78af",
+      "publication_allowed": false,
+      "rendering_allowed": false,
+      "required_commercial_notice": "No claim to original U.S. Government works.",
+      "rights_basis": "public_domain_us_government_work",
+      "sanitation_authorized": false,
+      "sanitized_derivative_complete": false,
+      "source_page_url": "https://www.nps.gov/grsm/learn/news/foothills-parkway-opening.htm",
+      "stable_order": 2,
+      "subject": "Exact Missing Link bridge or construction scene",
+      "upload_allowed": false
+    }
+  ],
+  "approved_scripts": [
+    {
+      "base_variant_id": "west_to_east",
+      "direction_overrides": [],
+      "exact_transcript_user_approved": true,
+      "id": "fp_story_01",
+      "kind": "story",
+      "narration_generated": false,
+      "narrator_approved": false,
+      "stable_order": 1,
+      "title": "A parkway made for the view",
+      "transcript_sha256": "48769cc73c2984673775b3bf96f714c7577152aa383c0c4162cb155187f8fbf2",
+      "tts_or_render_authorized": false
+    },
+    {
+      "base_variant_id": "west_to_east",
+      "direction_overrides": [],
+      "exact_transcript_user_approved": true,
+      "id": "fp_story_02",
+      "kind": "story",
+      "narration_generated": false,
+      "narrator_approved": false,
+      "stable_order": 2,
+      "title": "The unfinished road",
+      "transcript_sha256": "36d1b5f218ad0dc0a7fe05827a40e4d7bbadbd85814ae503513b0f4efa987a01",
+      "tts_or_render_authorized": false
+    },
+    {
+      "base_variant_id": "west_to_east",
+      "direction_overrides": [],
+      "exact_transcript_user_approved": true,
+      "id": "fp_story_03",
+      "kind": "story",
+      "narration_generated": false,
+      "narrator_approved": false,
+      "stable_order": 3,
+      "title": "Bridging the Missing Link",
+      "transcript_sha256": "fadd566208b133389f9005345337b39d12d8de1f195f2cbbe81b6159295cd6fd",
+      "tts_or_render_authorized": false
+    },
+    {
+      "base_variant_id": "west_to_east",
+      "direction_overrides": [],
+      "exact_transcript_user_approved": true,
+      "id": "fp_story_04",
+      "kind": "story",
+      "narration_generated": false,
+      "narrator_approved": false,
+      "stable_order": 4,
+      "title": "Reading the ridgelines",
+      "transcript_sha256": "0549301d81d4f9b17da862147e940782bfdd66d6871677b568a2e4cae7af814c",
+      "tts_or_render_authorized": false
+    },
+    {
+      "base_variant_id": "west_to_east",
+      "direction_overrides": [],
+      "exact_transcript_user_approved": true,
+      "id": "fp_story_05",
+      "kind": "story",
+      "narration_generated": false,
+      "narrator_approved": false,
+      "stable_order": 5,
+      "title": "A forest mosaic from above",
+      "transcript_sha256": "e6d89f51c14c3333e867e0cb204b78597d93123c12f3fd9a62fcccbe2bdc1795",
+      "tts_or_render_authorized": false
+    },
+    {
+      "base_variant_id": "west_to_east",
+      "direction_overrides": [],
+      "exact_transcript_user_approved": true,
+      "id": "fp_story_06",
+      "kind": "story",
+      "narration_generated": false,
+      "narrator_approved": false,
+      "stable_order": 6,
+      "title": "What the view says about the air",
+      "transcript_sha256": "2e64c4e31f03ebe54007f06749210b95e8b2f034a33b5d151537332241cf60e3",
+      "tts_or_render_authorized": false
+    },
+    {
+      "base_variant_id": "west_to_east",
+      "direction_overrides": [
+        {
+          "exact_transcript_user_approved": true,
+          "narration_approved": false,
+          "title_sha256": null,
+          "transcript_sha256": "395b65fd135d43ebfde1ad4b66962030fcf4a659ade759860c52f7576a322939",
+          "variant_id": "east_to_west"
+        }
+      ],
+      "exact_transcript_user_approved": true,
+      "id": "fp_cue_01",
+      "kind": "cue",
+      "narration_generated": false,
+      "narrator_approved": false,
+      "stable_order": 7,
+      "title": "Parkway orientation",
+      "transcript_sha256": "39eb2bfecfa2851aa19b32167adb7029c13182258cbe630a08328c5d7ef61c4d",
+      "tts_or_render_authorized": false
+    },
+    {
+      "base_variant_id": "west_to_east",
+      "direction_overrides": [],
+      "exact_transcript_user_approved": true,
+      "id": "fp_cue_02",
+      "kind": "cue",
+      "narration_generated": false,
+      "narrator_approved": false,
+      "stable_order": 8,
+      "title": "A long view",
+      "transcript_sha256": "50cc89fa960f2896f4897ea1256388845ebc4e191c2a28b0e9c5bcf6d133b4f1",
+      "tts_or_render_authorized": false
+    },
+    {
+      "base_variant_id": "west_to_east",
+      "direction_overrides": [],
+      "exact_transcript_user_approved": true,
+      "id": "fp_cue_03",
+      "kind": "cue",
+      "narration_generated": false,
+      "narrator_approved": false,
+      "stable_order": 9,
+      "title": "Look Rock",
+      "transcript_sha256": "3955b44ded4912c6726ce5037d06e2b1d5a23198aa1efd5ed7be8adca6ac02f0",
+      "tts_or_render_authorized": false
+    },
+    {
+      "base_variant_id": "west_to_east",
+      "direction_overrides": [],
+      "exact_transcript_user_approved": true,
+      "id": "fp_cue_04",
+      "kind": "cue",
+      "narration_generated": false,
+      "narrator_approved": false,
+      "stable_order": 10,
+      "title": "Forest from the ridge",
+      "transcript_sha256": "57494b47b2a41ea3eca334a9e902b10efd60de699a30be277838dab574830171",
+      "tts_or_render_authorized": false
+    },
+    {
+      "base_variant_id": "west_to_east",
+      "direction_overrides": [
+        {
+          "exact_transcript_user_approved": true,
+          "narration_approved": false,
+          "title_sha256": null,
+          "transcript_sha256": "1564cd72eab95fcb5f915ae1202099a88d2374449b7534f137ec83410292dfac",
+          "variant_id": "east_to_west"
+        }
+      ],
+      "exact_transcript_user_approved": true,
+      "id": "fp_cue_05",
+      "kind": "cue",
+      "narration_generated": false,
+      "narrator_approved": false,
+      "stable_order": 11,
+      "title": "Walland connection",
+      "transcript_sha256": "55e5b68266498c13baca420a99480a31529c35d132dbcbec883b3bdbb529c7f1",
+      "tts_or_render_authorized": false
+    },
+    {
+      "base_variant_id": "west_to_east",
+      "direction_overrides": [],
+      "exact_transcript_user_approved": true,
+      "id": "fp_cue_06",
+      "kind": "cue",
+      "narration_generated": false,
+      "narrator_approved": false,
+      "stable_order": 12,
+      "title": "Across the Missing Link",
+      "transcript_sha256": "cae6702b9820d943da22ccf77c37f45ac67738e139524da7474429e4c8e02c90",
+      "tts_or_render_authorized": false
+    },
+    {
+      "base_variant_id": "west_to_east",
+      "direction_overrides": [
+        {
+          "exact_transcript_user_approved": true,
+          "narration_approved": false,
+          "title_sha256": "7ffca6ba2b589df599f27e0a565d5f8f817340539aebd9efccc169213c08dd5a",
+          "transcript_sha256": "62ef3e77f6adeb8612a82bd9011e40e33c6bcb236f562da45e3e490ef301beac",
+          "variant_id": "east_to_west"
+        }
+      ],
+      "exact_transcript_user_approved": true,
+      "id": "fp_cue_07",
+      "kind": "cue",
+      "narration_generated": false,
+      "narrator_approved": false,
+      "stable_order": 13,
+      "title": "Wears Valley end",
+      "transcript_sha256": "684e5befea32976be4c8f7cd354ddb76a80d0f6bee1fbed418b415a356e16194",
+      "tts_or_render_authorized": false
+    }
+  ],
+  "chapter_id": "foothills_parkway",
+  "overlay_id": "smokies_foothills_parkway_approval_20260810_v1",
+  "product_id": "great_smoky_mountains_ridges_rivers_living_memory",
+  "recorded_at": "2026-08-11T03:09:33.129Z",
+  "schema_version": 1,
+  "source_bindings": [
+    {
+      "byte_count": 55719,
+      "path": "originals/smokies/foothills_parkway_review_packet_v1.json",
+      "sha256": "7a3217f0dc11c503f43ca12d82b339d5537de6365441f607eacfd7c3945ea926"
+    },
+    {
+      "byte_count": 30948,
+      "path": "docs/originals/foothills-parkway-review-sheet-v1.md",
+      "sha256": "aef724ffa60792be57d2efeed3668c32127518787119f31b44243f211620d240"
+    }
+  ],
+  "source_revision": {
+    "guarded_review_source_commit": "7b37de90f8df9a5f9a04e6fda0a6fc276d4e3cd5",
+    "review_gate_checkpoint_commit": "b501dedcb381705a8c84328650f1bfc5db6afc19",
+    "review_packet_and_sheet_unchanged_between_bound_commits": true,
+    "review_packet_id": "smokies_foothills_parkway_review_20260810_v1"
+  },
+  "status": "exact_scripts_and_original_artwork_approved_downstream_work_blocked",
+  "summary": {
+    "approved_cue_count": 7,
+    "approved_original_artwork_bytes": 3718055,
+    "approved_original_artwork_count": 2,
+    "approved_reverse_override_count": 3,
+    "approved_script_count": 13,
+    "approved_story_count": 6
+  }
+}

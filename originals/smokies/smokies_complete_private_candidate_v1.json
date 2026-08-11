@@ -1,0 +1,404 @@
+{
+  "attribution_set": {
+    "artwork_asset_count": 13,
+    "attribution_id": "smokies_pack_wide_attribution_20260811_v1",
+    "byte_count": 14144,
+    "path": "originals/smokies/smokies_pack_attribution_set_v1.json",
+    "sha256": "b8be1091be196faf4d93c9930c3a0be3b1d1cd7acc2a056512329d7140e6483d"
+  },
+  "candidate_id": "smokies_complete_private_candidate_20260811_v1",
+  "delivery_contracts": [
+    {
+      "chapter_id": "foothills_parkway",
+      "delivery_contract_sha256": "3bbe34acb5f7852f74758be5693a4a17c26a68e7798e25a7ed5ace821f699a92",
+      "readiness_path": "originals/smokies/foothills_parkway_east_to_west_delivery_readiness_v1.json",
+      "route_network_target_path": "originals/smokies/foothills_parkway_east_to_west_route_network_validation_target_v1.json",
+      "validation_passed": false,
+      "variant_id": "east_to_west"
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "delivery_contract_sha256": "711dfe1a21d8d5c90f78306b78ddb909a0e182cbeb635397a3165056c4fd6167",
+      "readiness_path": "originals/smokies/foothills_parkway_west_to_east_delivery_readiness_v1.json",
+      "route_network_target_path": "originals/smokies/foothills_parkway_west_to_east_route_network_validation_target_v1.json",
+      "validation_passed": false,
+      "variant_id": "west_to_east"
+    },
+    {
+      "chapter_id": "little_river_cades_cove",
+      "delivery_contract_sha256": "b0485e2d11f2e62d74e85e2c90b5b97a8d3b75e28008d39f0c0664561dcaae50",
+      "readiness_path": "originals/smokies/little_river_cades_cove_loop_delivery_readiness_v1.json",
+      "route_network_target_path": "originals/smokies/little_river_cades_cove_loop_route_network_validation_target_v1.json",
+      "validation_passed": false,
+      "variant_id": "sugarlands_to_cades_cove_loop"
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "delivery_contract_sha256": "173ef53f5c43c40e2828c391ca567f3ce0fdb3c0deb904d36ee2c9ad18e89593",
+      "readiness_path": "originals/smokies/mountain_crossing_nc_to_tn_delivery_readiness_v1.json",
+      "route_network_target_path": "originals/smokies/mountain_crossing_nc_to_tn_route_network_validation_target_v1.json",
+      "validation_passed": false,
+      "variant_id": "nc_to_tn"
+    },
+    {
+      "chapter_id": "mountain_crossing",
+      "delivery_contract_sha256": "88f5cf237374687295ea838ff271aa719be8d9db54ac9026b94564c4219c9a58",
+      "readiness_path": "originals/smokies/mountain_crossing_tn_to_nc_delivery_readiness_v1.json",
+      "route_network_target_path": "originals/smokies/mountain_crossing_tn_to_nc_route_network_validation_target_v1.json",
+      "validation_passed": false,
+      "variant_id": "tn_to_nc"
+    },
+    {
+      "chapter_id": "roaring_fork",
+      "delivery_contract_sha256": "9081a647a7df0e59df4bb40506ba9bfa96c750536fb715ee31b3e9ee68ee20d6",
+      "readiness_path": null,
+      "route_network_target_path": "originals/smokies/roaring_fork_route_network_validation_target_v1.json",
+      "validation_passed": false,
+      "variant_id": "one_way"
+    }
+  ],
+  "gates": {
+    "database_accessed": false,
+    "database_mutation_allowed": false,
+    "deployment_allowed": false,
+    "ingestion_allowed": false,
+    "owner_dual_platform_preview_accepted": false,
+    "private_candidate_built": true,
+    "production_mutation_allowed": false,
+    "public_release": false,
+    "publication_allowed": false,
+    "trusted_validation_allowed": false,
+    "trusted_validation_passed": false,
+    "upload_allowed": false
+  },
+  "kind": "trailhead_original_complete_private_candidate",
+  "manifest": {
+    "asset_paths_are_expected_immutable_api_routes": true,
+    "asset_upload_or_availability_claimed": false,
+    "base_entry_count": 77,
+    "byte_count": 3768450,
+    "chapter_count": 4,
+    "content_asset_count": 98,
+    "directional_substitution_count": 8,
+    "image_asset_count": 13,
+    "narration_asset_count": 85,
+    "normalized_canonical_sha256": "a7d7e19eb8eb02c2051a47578619f59f2857864fa6937eaaf705d34440767fd6",
+    "offline_region_count": 1,
+    "offline_region_id": "smokies_ridges_rivers_living_memory_union_private_v1",
+    "path": "originals/smokies/smokies_complete_private_manifest_v3.json",
+    "schema_version": 3,
+    "sha256": "d2cfa5aeb0116359326f682fb49d59ee156157f9efbfb8e8a53f99e830ca54eb",
+    "variant_count": 6
+  },
+  "narration_profile": {
+    "byte_count": 1451,
+    "byte_identical_to_historical_accepted_profile": true,
+    "exact_james_settings_bound_by_three_remaining_locks": true,
+    "historical_roaring_fork_profile_path": "originals/smokies/roaring_fork_narration_profile_v2.json",
+    "historical_roaring_fork_profile_sha256": "10fd4f5f04cbfbc411a1e7c31061700d17752af61e1501a4b7b4652c0d2ee377",
+    "path": "originals/smokies/smokies_pack_narration_profile_v2.json",
+    "profile_applied_to_all_85_narration_assets": true,
+    "profile_id": "smokies_pack_wide_james_narration_20260811_v1",
+    "sha256": "10fd4f5f04cbfbc411a1e7c31061700d17752af61e1501a4b7b4652c0d2ee377"
+  },
+  "next_action": "build_compatible_signed_mobile_candidates_then_request_exact_dual_platform_private_preview",
+  "privacy": {
+    "absolute_local_paths_serialized": false,
+    "external_media_root_serialized": false,
+    "provider_key_or_account_identity_serialized": false,
+    "raw_exif_serialized": false
+  },
+  "private_candidate_assembly_authority": {
+    "authority_expands_to_upload_or_database_or_release": false,
+    "automatic_network_free_private_candidate_step": true,
+    "prior_media_overlays_rewritten_to_manufacture_manifest_authority": false,
+    "source_task_id": "019fe9fb-cafa-75d3-b663-1e5051731cd5",
+    "trigger": "exact_checkpoint3_media_acceptance_complete",
+    "workflow_checkpoint": 4
+  },
+  "product_contract": {
+    "approval_overlay_path": "originals/smokies/checkpoint2_owner_approval_v1.json",
+    "approval_overlay_sha256": "3cc18dad4d1b6a80f2259e58cbe50fba3804096d0c00437eca9103e626078d5c",
+    "changing_scope_or_price_requires_separate_product_decision": true,
+    "chapter_ids": [
+      "mountain_crossing",
+      "little_river_cades_cove",
+      "roaring_fork",
+      "foothills_parkway"
+    ],
+    "credit_type": "earned_credits",
+    "explorer_included": true,
+    "pack_scope": "one_premium_four_chapter_product",
+    "permanent_credit_price": 900,
+    "public_catalog_product_count": 1,
+    "route_variant_count": 6,
+    "source_path": "originals/smokies/remaining_chapters_review_packet_v1.json",
+    "source_sha256": "3ef71377c9e347cd53335cbf487d039ff973b8c28f9628b622fcee74c714b015",
+    "standalone_chapter_products_approved": false,
+    "standalone_foothills_public_product_approved": false,
+    "standalone_product_ids": [],
+    "standalone_roaring_fork_public_product_approved": false
+  },
+  "product_id": "great_smoky_mountains_ridges_rivers_living_memory",
+  "readiness_and_route_targets": {
+    "delivery_readiness_record_count": 5,
+    "non_roaring_fork_variant_count": 5,
+    "pairs": [
+      {
+        "chapter_id": "foothills_parkway",
+        "delivery_contract_resolved_from_normalized_manifest": "3bbe34acb5f7852f74758be5693a4a17c26a68e7798e25a7ed5ace821f699a92",
+        "readiness": {
+          "byte_count": 20959,
+          "path": "originals/smokies/foothills_parkway_east_to_west_delivery_readiness_v1.json",
+          "sha256": "2eaafeb3573a8f15aed8b6ab68a660bc00e4807a6bd1b462e2fcb88aab4bd716"
+        },
+        "route_network_target": {
+          "byte_count": 1300,
+          "path": "originals/smokies/foothills_parkway_east_to_west_route_network_validation_target_v1.json",
+          "sha256": "9598a7080733d1f33a5c01f608419bae28bcf24f7b9d37ed3a0c838efab26171"
+        },
+        "trusted_validation_passed": false,
+        "variant_id": "east_to_west"
+      },
+      {
+        "chapter_id": "foothills_parkway",
+        "delivery_contract_resolved_from_normalized_manifest": "711dfe1a21d8d5c90f78306b78ddb909a0e182cbeb635397a3165056c4fd6167",
+        "readiness": {
+          "byte_count": 21485,
+          "path": "originals/smokies/foothills_parkway_west_to_east_delivery_readiness_v1.json",
+          "sha256": "743719296433bb9528f88fe56aed158d8f08fb8af4a5c6fd42fc7f11610c5a6d"
+        },
+        "route_network_target": {
+          "byte_count": 1300,
+          "path": "originals/smokies/foothills_parkway_west_to_east_route_network_validation_target_v1.json",
+          "sha256": "f534a8289d2205fb3d1f0d23736cd50a771bad657e8e9e6c855a480672c7bc5f"
+        },
+        "trusted_validation_passed": false,
+        "variant_id": "west_to_east"
+      },
+      {
+        "chapter_id": "little_river_cades_cove",
+        "delivery_contract_resolved_from_normalized_manifest": "b0485e2d11f2e62d74e85e2c90b5b97a8d3b75e28008d39f0c0664561dcaae50",
+        "readiness": {
+          "byte_count": 34810,
+          "path": "originals/smokies/little_river_cades_cove_loop_delivery_readiness_v1.json",
+          "sha256": "00abe0b8646332d27636856ab0c9029760d6b33f6ff4215d2364c17674b3fa90"
+        },
+        "route_network_target": {
+          "byte_count": 1319,
+          "path": "originals/smokies/little_river_cades_cove_loop_route_network_validation_target_v1.json",
+          "sha256": "59ad07c506489c036c9ff26b94c3ec11e114e22c2dc5fd3ae5a402310797acd9"
+        },
+        "trusted_validation_passed": false,
+        "variant_id": "sugarlands_to_cades_cove_loop"
+      },
+      {
+        "chapter_id": "mountain_crossing",
+        "delivery_contract_resolved_from_normalized_manifest": "173ef53f5c43c40e2828c391ca567f3ce0fdb3c0deb904d36ee2c9ad18e89593",
+        "readiness": {
+          "byte_count": 40121,
+          "path": "originals/smokies/mountain_crossing_nc_to_tn_delivery_readiness_v1.json",
+          "sha256": "d416bf0c716434f3ee651fb8fd379ca01d082d438a16130d182cb3314d905e2d"
+        },
+        "route_network_target": {
+          "byte_count": 1288,
+          "path": "originals/smokies/mountain_crossing_nc_to_tn_route_network_validation_target_v1.json",
+          "sha256": "6ba74de0ab77e9ff12aa4e52c54377533e95a92cbf9219a254b345676dccd7c5"
+        },
+        "trusted_validation_passed": false,
+        "variant_id": "nc_to_tn"
+      },
+      {
+        "chapter_id": "mountain_crossing",
+        "delivery_contract_resolved_from_normalized_manifest": "88f5cf237374687295ea838ff271aa719be8d9db54ac9026b94564c4219c9a58",
+        "readiness": {
+          "byte_count": 39422,
+          "path": "originals/smokies/mountain_crossing_tn_to_nc_delivery_readiness_v1.json",
+          "sha256": "05dd58aa92040f2815fdc1e8b5ddb352af1fbfa0263193093c49950359a5cfe8"
+        },
+        "route_network_target": {
+          "byte_count": 1288,
+          "path": "originals/smokies/mountain_crossing_tn_to_nc_route_network_validation_target_v1.json",
+          "sha256": "1dd7704e476fd9df6aabe4b20771d62ddb9f1f2d257d838340757cec19fe7e2b"
+        },
+        "trusted_validation_passed": false,
+        "variant_id": "tn_to_nc"
+      }
+    ],
+    "route_network_target_record_count": 5
+  },
+  "roaring_fork_preservation": {
+    "asset_rows_sha256": "2b0bf018fe2da3fd24910ebcd488fc462c3442817b5bf4a448b6593058b07f87",
+    "candidate_asset_rows_sha256": "2b0bf018fe2da3fd24910ebcd488fc462c3442817b5bf4a448b6593058b07f87",
+    "candidate_delivery_projection_sha256": "90e8531576b6bb5a0630d9849a2195274a03a36e53a0f295ce40e4ff68663d27",
+    "candidate_story_rows_sha256": "ea089c1b7707b93ef5ab9d22c93d172739e0c165923cce379bbb536a2aba47dc",
+    "delivery_projection_sha256": "90e8531576b6bb5a0630d9849a2195274a03a36e53a0f295ce40e4ff68663d27",
+    "image_asset_count": 7,
+    "narration_asset_count": 13,
+    "source_manifest": {
+      "byte_count": 171413,
+      "path": "originals/smokies/roaring_fork_private_manifest_v3.json",
+      "sha256": "7e9cab7e0325c6124a2605c83867929780f575e5814c7fdc634c091a9c351467"
+    },
+    "source_manifest_or_historical_evidence_rewritten": false,
+    "story_count": 13,
+    "story_rows_sha256": "ea089c1b7707b93ef5ab9d22c93d172739e0c165923cce379bbb536a2aba47dc"
+  },
+  "route_duration_estimates": {
+    "basis": "deterministic_private_placeholder_at_36_mph_from_checked_route_distance",
+    "owner_accepted": false,
+    "publication_evidence": false,
+    "real_audio_timing_passed": false,
+    "trusted_validation_evidence": false
+  },
+  "schema_version": 1,
+  "source_bindings": {
+    "db/original_manifest_v3.py": {
+      "byte_count": 46624,
+      "path": "db/original_manifest_v3.py",
+      "sha256": "850df80086d336a3a3652d73a1e0eda403e89f06b241c2a710bcb6cbf38e53de"
+    },
+    "docs/originals/smokies-operational-readiness-v1.json": {
+      "byte_count": 8016,
+      "path": "docs/originals/smokies-operational-readiness-v1.json",
+      "sha256": "359c8e2ff8086de56054d99503cb2661730a9977534c3007ff4c6d0db2cafb8f"
+    },
+    "originals/smokies/checkpoint2_owner_approval_v1.json": {
+      "byte_count": 68453,
+      "path": "originals/smokies/checkpoint2_owner_approval_v1.json",
+      "sha256": "3cc18dad4d1b6a80f2259e58cbe50fba3804096d0c00437eca9103e626078d5c"
+    },
+    "originals/smokies/editorial_cades_cove_v1.json": {
+      "byte_count": 52892,
+      "path": "originals/smokies/editorial_cades_cove_v1.json",
+      "sha256": "1fedc6db4944bab671d7cfa0bacd2dda9670133d4165e27b3fe7b63ef8728845"
+    },
+    "originals/smokies/editorial_mountain_crossing_v1.json": {
+      "byte_count": 71637,
+      "path": "originals/smokies/editorial_mountain_crossing_v1.json",
+      "sha256": "4a7e0acf04075da914ef486b86210167ff4220b8ea901083bd4df75d8fe21c58"
+    },
+    "originals/smokies/editorial_scripts_v1.json": {
+      "byte_count": 27077,
+      "path": "originals/smokies/editorial_scripts_v1.json",
+      "sha256": "28627001d9b3bbd129e812721064e1a0c8fc2122ec9371afa91657026b76d81e"
+    },
+    "originals/smokies/elevenlabs_james_cades_cove_lock_v1.json": {
+      "byte_count": 44518,
+      "path": "originals/smokies/elevenlabs_james_cades_cove_lock_v1.json",
+      "sha256": "6c6fecdaa85d91f4e29cd08ea9c46f20d404dba8ed72962390b8d8d8dc5b6a04"
+    },
+    "originals/smokies/elevenlabs_james_foothills_parkway_lock_v1.json": {
+      "byte_count": 33701,
+      "path": "originals/smokies/elevenlabs_james_foothills_parkway_lock_v1.json",
+      "sha256": "eac2d636c4c26fd55fbc4ebe7b7be25882ffd51e6064703924d96d89fa71c119"
+    },
+    "originals/smokies/elevenlabs_james_mountain_crossing_lock_v1.json": {
+      "byte_count": 63724,
+      "path": "originals/smokies/elevenlabs_james_mountain_crossing_lock_v1.json",
+      "sha256": "561a8a8bf62f534d485df0ebf523d13a9defd962af136240fd46e1ca5aacec25"
+    },
+    "originals/smokies/foothills_parkway_east_to_west_delivery_readiness_v1.json": {
+      "byte_count": 20959,
+      "path": "originals/smokies/foothills_parkway_east_to_west_delivery_readiness_v1.json",
+      "sha256": "2eaafeb3573a8f15aed8b6ab68a660bc00e4807a6bd1b462e2fcb88aab4bd716"
+    },
+    "originals/smokies/foothills_parkway_east_to_west_route_network_validation_target_v1.json": {
+      "byte_count": 1300,
+      "path": "originals/smokies/foothills_parkway_east_to_west_route_network_validation_target_v1.json",
+      "sha256": "9598a7080733d1f33a5c01f608419bae28bcf24f7b9d37ed3a0c838efab26171"
+    },
+    "originals/smokies/foothills_parkway_west_to_east_delivery_readiness_v1.json": {
+      "byte_count": 21485,
+      "path": "originals/smokies/foothills_parkway_west_to_east_delivery_readiness_v1.json",
+      "sha256": "743719296433bb9528f88fe56aed158d8f08fb8af4a5c6fd42fc7f11610c5a6d"
+    },
+    "originals/smokies/foothills_parkway_west_to_east_route_network_validation_target_v1.json": {
+      "byte_count": 1300,
+      "path": "originals/smokies/foothills_parkway_west_to_east_route_network_validation_target_v1.json",
+      "sha256": "f534a8289d2205fb3d1f0d23736cd50a771bad657e8e9e6c855a480672c7bc5f"
+    },
+    "originals/smokies/little_river_cades_cove_loop_delivery_readiness_v1.json": {
+      "byte_count": 34810,
+      "path": "originals/smokies/little_river_cades_cove_loop_delivery_readiness_v1.json",
+      "sha256": "00abe0b8646332d27636856ab0c9029760d6b33f6ff4215d2364c17674b3fa90"
+    },
+    "originals/smokies/little_river_cades_cove_loop_route_network_validation_target_v1.json": {
+      "byte_count": 1319,
+      "path": "originals/smokies/little_river_cades_cove_loop_route_network_validation_target_v1.json",
+      "sha256": "59ad07c506489c036c9ff26b94c3ec11e114e22c2dc5fd3ae5a402310797acd9"
+    },
+    "originals/smokies/mountain_crossing_nc_to_tn_delivery_readiness_v1.json": {
+      "byte_count": 40121,
+      "path": "originals/smokies/mountain_crossing_nc_to_tn_delivery_readiness_v1.json",
+      "sha256": "d416bf0c716434f3ee651fb8fd379ca01d082d438a16130d182cb3314d905e2d"
+    },
+    "originals/smokies/mountain_crossing_nc_to_tn_route_network_validation_target_v1.json": {
+      "byte_count": 1288,
+      "path": "originals/smokies/mountain_crossing_nc_to_tn_route_network_validation_target_v1.json",
+      "sha256": "6ba74de0ab77e9ff12aa4e52c54377533e95a92cbf9219a254b345676dccd7c5"
+    },
+    "originals/smokies/mountain_crossing_tn_to_nc_delivery_readiness_v1.json": {
+      "byte_count": 39422,
+      "path": "originals/smokies/mountain_crossing_tn_to_nc_delivery_readiness_v1.json",
+      "sha256": "05dd58aa92040f2815fdc1e8b5ddb352af1fbfa0263193093c49950359a5cfe8"
+    },
+    "originals/smokies/mountain_crossing_tn_to_nc_route_network_validation_target_v1.json": {
+      "byte_count": 1288,
+      "path": "originals/smokies/mountain_crossing_tn_to_nc_route_network_validation_target_v1.json",
+      "sha256": "1dd7704e476fd9df6aabe4b20771d62ddb9f1f2d257d838340757cec19fe7e2b"
+    },
+    "originals/smokies/official_route_evidence_v1.json": {
+      "byte_count": 2762475,
+      "path": "originals/smokies/official_route_evidence_v1.json",
+      "sha256": "d946ffaf8f21ad97399b6dedfb5cbe9483fce0787653b389d7075d933f398c60"
+    },
+    "originals/smokies/remaining_chapters_review_packet_v1.json": {
+      "byte_count": 262825,
+      "path": "originals/smokies/remaining_chapters_review_packet_v1.json",
+      "sha256": "3ef71377c9e347cd53335cbf487d039ff973b8c28f9628b622fcee74c714b015"
+    },
+    "originals/smokies/remaining_media_acceptance_v1.json": {
+      "byte_count": 120715,
+      "path": "originals/smokies/remaining_media_acceptance_v1.json",
+      "sha256": "e593b5f280b62e00a0887e24cef131858e768f1cbe056476e3b631342a788a2a"
+    },
+    "originals/smokies/roaring_fork_artwork_derivative_approval_v1.json": {
+      "byte_count": 14276,
+      "path": "originals/smokies/roaring_fork_artwork_derivative_approval_v1.json",
+      "sha256": "e13c39785e90190e0dfb4db5c60c709568b68d3ecbd76910ab00799a721b951a"
+    },
+    "originals/smokies/roaring_fork_artwork_review_v1.json": {
+      "byte_count": 17269,
+      "path": "originals/smokies/roaring_fork_artwork_review_v1.json",
+      "sha256": "3030dfdf993b8b33cb116263ba9902dfe9e36c637f4ff7a37b11f878f0f082d4"
+    },
+    "originals/smokies/roaring_fork_narration_profile_v2.json": {
+      "byte_count": 1451,
+      "path": "originals/smokies/roaring_fork_narration_profile_v2.json",
+      "sha256": "10fd4f5f04cbfbc411a1e7c31061700d17752af61e1501a4b7b4652c0d2ee377"
+    },
+    "originals/smokies/roaring_fork_private_manifest_v3.json": {
+      "byte_count": 171413,
+      "path": "originals/smokies/roaring_fork_private_manifest_v3.json",
+      "sha256": "7e9cab7e0325c6124a2605c83867929780f575e5814c7fdc634c091a9c351467"
+    },
+    "originals/smokies/route_variants_v1.json": {
+      "byte_count": 9936,
+      "path": "originals/smokies/route_variants_v1.json",
+      "sha256": "49d55fa8819822b18af54983ea11893a661689102c14532a88ebacf2ec587f24"
+    },
+    "originals/smokies/source_dossiers_v1.json": {
+      "byte_count": 85708,
+      "path": "originals/smokies/source_dossiers_v1.json",
+      "sha256": "8eb22ca5110f0f9a4287b8f184624348c2a2ca2dbc36e27ef59fc022057ce18f"
+    }
+  },
+  "source_revision": {
+    "commit": "102fff55328f4d15ec5757f82f87d235508ebb2b",
+    "frozen_route_readiness_slice_committed": true,
+    "tree": "3017790b491545559634c498612ce4a017a0d880",
+    "uncommitted_release_guard_work_bound": false
+  },
+  "status": "complete_private_candidate_owner_dual_platform_preview_required"
+}

@@ -1,0 +1,302 @@
+{
+  "artwork_asset_count": 13,
+  "artwork_attributions": [
+    {
+      "asset_id": "cc_art_cable_mill",
+      "change_note": "Modified from the original: applied recorded TIFF orientation, replicated each 8-bit grayscale sample equally into sRGB R/G/B channels, and removed metadata; no crop or resize.",
+      "chapter_id": "little_river_cades_cove",
+      "exact_credit": "Perspective view of east (front) and north side, Becky Cable House, Townsend, Blount County, TN, HABS TENN,5-CADCO,4-1, Library of Congress, public domain",
+      "historical_attribution_preserved": false,
+      "license_name": "Public domain",
+      "license_url": null,
+      "required_commercial_notice": "No claim to original U.S. Government works.",
+      "rights_basis": "public_domain_us_government_work",
+      "sha256": "3540935d92ae2d48a6b2ce15c37da653bd32ec371fb1249191625ce10addcd9b",
+      "story_ids": [
+        "cc_cue_07",
+        "cc_story_11",
+        "cc_story_12"
+      ]
+    },
+    {
+      "asset_id": "cc_art_cove",
+      "change_note": "Modified from the original: applied recorded TIFF orientation, replicated each 8-bit grayscale sample equally into sRGB R/G/B channels, and removed metadata; no crop or resize.",
+      "chapter_id": "little_river_cades_cove",
+      "exact_credit": "View of Cades Cove Loop Road with fields and mountains looking NE, HAER TENN,78-GAT.V,6D-26 (David Haas), Great Smoky Mountains National Park Roads and Bridges survey, Library of Congress, public domain",
+      "historical_attribution_preserved": false,
+      "license_name": "Public domain",
+      "license_url": null,
+      "required_commercial_notice": "No claim to original U.S. Government works.",
+      "rights_basis": "public_domain_us_government_work",
+      "sha256": "80a82ae8ee7353b46ec24105ab80b2e651cd38375f50d9d64a346d092a99652c",
+      "story_ids": [
+        "cc_cue_01",
+        "cc_cue_02",
+        "cc_cue_03",
+        "cc_cue_04",
+        "cc_cue_05",
+        "cc_cue_06",
+        "cc_cue_08",
+        "cc_cue_09",
+        "cc_story_01",
+        "cc_story_02",
+        "cc_story_03",
+        "cc_story_04",
+        "cc_story_05",
+        "cc_story_06",
+        "cc_story_07",
+        "cc_story_08",
+        "cc_story_09",
+        "cc_story_10",
+        "cc_story_13",
+        "cc_story_14"
+      ]
+    },
+    {
+      "asset_id": "fp_art_engineering",
+      "change_note": "Modified from the original: applied recorded EXIF orientation, converted the embedded ICC profile to sRGB, and removed metadata; no crop or resize.",
+      "chapter_id": "foothills_parkway",
+      "exact_credit": "Foothills Parkway Bridge number 2, Great Smoky Mountains National Park, Federal Highway Administration (FHWA), public domain",
+      "historical_attribution_preserved": false,
+      "license_name": "Public domain",
+      "license_url": null,
+      "required_commercial_notice": "No claim to original U.S. Government works.",
+      "rights_basis": "public_domain_us_government_work",
+      "sha256": "f96f1e5143e116e042916ec3f40cd4120454bfa579e9782639c5b2b672271c5e",
+      "story_ids": [
+        "fp_cue_06",
+        "fp_story_03"
+      ]
+    },
+    {
+      "asset_id": "fp_art_panorama",
+      "change_note": "Modified from the original: applied recorded EXIF orientation, preserved full-frame RGB samples under an sRGB assumption, and removed metadata; no crop or resize.",
+      "chapter_id": "foothills_parkway",
+      "exact_credit": "Foothills Parkway, October 2018, Andrea Walton, Great Smoky Mountains National Park (NPS), public domain",
+      "historical_attribution_preserved": false,
+      "license_name": "Public domain",
+      "license_url": null,
+      "required_commercial_notice": "No claim to original U.S. Government works.",
+      "rights_basis": "public_domain_us_government_work",
+      "sha256": "75e7605dfd26db71a8fb1877c7195e8f1df18c41d1cc9342041c6f34d5dbaba1",
+      "story_ids": [
+        "fp_cue_01",
+        "fp_cue_02",
+        "fp_cue_03",
+        "fp_cue_04",
+        "fp_cue_05",
+        "fp_cue_07",
+        "fp_story_01",
+        "fp_story_02",
+        "fp_story_04",
+        "fp_story_05",
+        "fp_story_06"
+      ]
+    },
+    {
+      "asset_id": "mc_art_kuwohi",
+      "change_note": "Modified from the original: selected the Baseline MP Primary Image at MPO frame 0, applied recorded EXIF orientation, converted its embedded ICC profile to sRGB, excluded the secondary MPO frame, and removed metadata; no crop or resize.",
+      "chapter_id": "mountain_crossing",
+      "exact_credit": "\"Kuwohi (also known as Clingmans Dome) Observation Tower - 1\" by APK, CC BY 4.0, via Wikimedia Commons",
+      "historical_attribution_preserved": false,
+      "license_name": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "required_commercial_notice": null,
+      "rights_basis": "cc_by_4_0_creator_grant",
+      "sha256": "956fad4e641b7abe498908e70f0b108f6363fe833f640f6cc02583e1a5713b32",
+      "story_ids": [
+        "mc_cue_01",
+        "mc_cue_02",
+        "mc_cue_03",
+        "mc_cue_04",
+        "mc_cue_05",
+        "mc_cue_06",
+        "mc_cue_07",
+        "mc_cue_08",
+        "mc_story_01",
+        "mc_story_02",
+        "mc_story_03",
+        "mc_story_04",
+        "mc_story_05",
+        "mc_story_06",
+        "mc_story_07",
+        "mc_story_08",
+        "mc_story_09",
+        "mc_story_10",
+        "mc_story_11",
+        "mc_story_12",
+        "mc_story_13",
+        "mc_story_14",
+        "mc_story_15"
+      ]
+    },
+    {
+      "asset_id": "mc_art_oconaluftee",
+      "change_note": "Modified from the original: applied recorded EXIF orientation, converted the embedded ICC profile to sRGB, and removed metadata; no crop or resize.",
+      "chapter_id": "mountain_crossing",
+      "exact_credit": "Elk near Oconaluftee Visitor Center, Doug Brinkmeyer, Great Smoky Mountains National Park (NPS), public domain",
+      "historical_attribution_preserved": false,
+      "license_name": "Public domain",
+      "license_url": null,
+      "required_commercial_notice": "No claim to original U.S. Government works.",
+      "rights_basis": "public_domain_us_government_work",
+      "sha256": "9dff31bfd0c3e4417b2a67685e5fa3cb67bba8605a3099eb377de197904afd13",
+      "story_ids": [
+        "mc_cue_09",
+        "mc_cue_10",
+        "mc_story_16",
+        "mc_story_17",
+        "mc_story_18"
+      ]
+    },
+    {
+      "asset_id": "rf_art_forest",
+      "change_note": "Full frame preserved with no crop or resize; recorded EXIF orientation applied; tagged source color converted to sRGB where present; converted to PNG; EXIF, GPS, device, text, time, and other ancillary metadata removed.",
+      "chapter_id": "roaring_fork",
+      "exact_credit": "Roaring Fork Motor Nature Trail, Sarah Stierch (Missvain), CC BY 4.0, via Wikimedia Commons",
+      "historical_attribution_preserved": true,
+      "license_name": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "required_commercial_notice": null,
+      "rights_basis": "creator_grant_cc_by_4_0",
+      "sha256": "b2aeb6ec1d315a2f19bd7871343a5e7ef7b083e61107d6157b2b0a3926a4d266",
+      "story_ids": [
+        "rf_story_04"
+      ]
+    },
+    {
+      "asset_id": "rf_art_grotto_falls",
+      "change_note": "Full frame preserved with no crop or resize; recorded EXIF orientation applied; tagged source color converted to sRGB where present; converted to PNG; EXIF, GPS, device, text, time, and other ancillary metadata removed.",
+      "chapter_id": "roaring_fork",
+      "exact_credit": "Grotto Falls, Great Smoky Mountains National Park, National Park Service; no claim to original U.S. Government work",
+      "historical_attribution_preserved": true,
+      "license_name": "Public domain; NPS NPGallery constraint",
+      "license_url": "https://www.nps.gov/aboutus/disclaimer.htm",
+      "required_commercial_notice": "No claim to original U.S. Government works.",
+      "rights_basis": "public_domain_us_government_work",
+      "sha256": "bf186d2fd61196ca7ec6196af2668200a1de43f140f5c574642e256a0452682a",
+      "story_ids": [
+        "rf_cue_04"
+      ]
+    },
+    {
+      "asset_id": "rf_art_historic_cabin",
+      "change_note": "Full frame preserved with no crop or resize; recorded EXIF orientation applied; tagged source color converted to sRGB where present; converted to PNG; EXIF, GPS, device, text, time, and other ancillary metadata removed.",
+      "chapter_id": "roaring_fork",
+      "exact_credit": "Carol M. Highsmith's America Project in the Carol M. Highsmith Archive, Library of Congress, Prints and Photographs Division, LC-DIG-highsm-68373",
+      "historical_attribution_preserved": true,
+      "license_name": "Public domain; no known restrictions on publication",
+      "license_url": "https://www.loc.gov/pictures/collection/highsm/",
+      "required_commercial_notice": null,
+      "rights_basis": "public_domain_dedication_no_known_restrictions",
+      "sha256": "5ab0ead6c1a826743a883dcba01664aba93848de1e04a5b4a1d3a95b5252ac67",
+      "story_ids": [
+        "rf_story_05",
+        "rf_story_07"
+      ]
+    },
+    {
+      "asset_id": "rf_art_ogle",
+      "change_note": "Full frame preserved with no crop or resize; recorded EXIF orientation applied; tagged source color converted to sRGB where present; converted to PNG; EXIF, GPS, device, text, time, and other ancillary metadata removed.",
+      "chapter_id": "roaring_fork",
+      "exact_credit": "Noah 'Bud' Ogle Cabin, October 2023, Sarah Stierch (Missvain), CC BY 4.0, via Wikimedia Commons",
+      "historical_attribution_preserved": true,
+      "license_name": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "required_commercial_notice": null,
+      "rights_basis": "creator_grant_cc_by_4_0",
+      "sha256": "a300ccc802b810b8af3fbd14a1a487413a2c569ae5afe836d07fa1f2da1201b4",
+      "story_ids": [
+        "rf_cue_02",
+        "rf_story_03"
+      ]
+    },
+    {
+      "asset_id": "rf_art_road",
+      "change_note": "Full frame preserved with no crop or resize; recorded EXIF orientation applied; tagged source color converted to sRGB where present; converted to PNG; EXIF, GPS, device, text, time, and other ancillary metadata removed.",
+      "chapter_id": "roaring_fork",
+      "exact_credit": "Roaring Fork Motor Nature Trail, Sarah Stierch (Missvain), CC BY 4.0, via Wikimedia Commons",
+      "historical_attribution_preserved": true,
+      "license_name": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "required_commercial_notice": null,
+      "rights_basis": "creator_grant_cc_by_4_0",
+      "sha256": "5442a2ee936f0c3a3e54c81a4be0550c2599465494214f5567d2bd1daf481086",
+      "story_ids": [
+        "rf_cue_01",
+        "rf_cue_06",
+        "rf_story_01"
+      ]
+    },
+    {
+      "asset_id": "rf_art_stream",
+      "change_note": "Full frame preserved with no crop or resize; recorded EXIF orientation applied; tagged source color converted to sRGB where present; converted to PNG; EXIF, GPS, device, text, time, and other ancillary metadata removed.",
+      "chapter_id": "roaring_fork",
+      "exact_credit": "Roaring Fork Motor Nature Trail, Sarah Stierch (Missvain), CC BY 4.0, via Wikimedia Commons",
+      "historical_attribution_preserved": true,
+      "license_name": "CC BY 4.0",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/",
+      "required_commercial_notice": null,
+      "rights_basis": "creator_grant_cc_by_4_0",
+      "sha256": "ff2671b29b7a0d2818f4a75c12b092e2640adf0306c9a645f7ed61c765e3d8f5",
+      "story_ids": [
+        "rf_cue_03",
+        "rf_story_02"
+      ]
+    },
+    {
+      "asset_id": "rf_art_thousand_drips",
+      "change_note": "Full frame preserved with no crop or resize; recorded EXIF orientation applied; tagged source color converted to sRGB where present; converted to PNG; EXIF, GPS, device, text, time, and other ancillary metadata removed.",
+      "chapter_id": "roaring_fork",
+      "exact_credit": "Place of 1,000 Drips, Great Smoky Mountains National Park, National Park Service; no claim to original U.S. Government work",
+      "historical_attribution_preserved": true,
+      "license_name": "Public domain; NPS NPGallery constraint",
+      "license_url": "https://www.nps.gov/aboutus/disclaimer.htm",
+      "required_commercial_notice": "No claim to original U.S. Government works.",
+      "rights_basis": "public_domain_us_government_work",
+      "sha256": "479650107bf76599950bd05734221e69fcc74066d248b52fce21b5ca19f478b0",
+      "story_ids": [
+        "rf_cue_05",
+        "rf_story_06"
+      ]
+    }
+  ],
+  "attribution_id": "smokies_pack_wide_attribution_20260811_v1",
+  "gates": {
+    "database_mutation_allowed": false,
+    "deployment_allowed": false,
+    "publication_allowed": false,
+    "trusted_validation_allowed": false,
+    "upload_allowed": false
+  },
+  "kind": "trailhead_original_pack_attribution_set",
+  "narration": {
+    "commercial_terms_are_bound_by_profile_and_source_evidence": true,
+    "model_id": "eleven_multilingual_v2",
+    "provider": "elevenlabs",
+    "provider_attribution_claimed_as_required": false,
+    "voice_id": "EkK5I93UQWFDigLMpZcX",
+    "voice_name": "James - Husky, Engaging and Bold"
+  },
+  "privacy": {
+    "absolute_local_paths_serialized": false,
+    "provider_or_account_secret_serialized": false,
+    "raw_exif_serialized": false
+  },
+  "product_id": "great_smoky_mountains_ridges_rivers_living_memory",
+  "schema_version": 1,
+  "source_bindings": {
+    "remaining_media_acceptance": {
+      "path": "originals/smokies/remaining_media_acceptance_v1.json",
+      "sha256": "e593b5f280b62e00a0887e24cef131858e768f1cbe056476e3b631342a788a2a"
+    },
+    "roaring_fork_artwork_derivative_approval": {
+      "path": "originals/smokies/roaring_fork_artwork_derivative_approval_v1.json",
+      "sha256": "e13c39785e90190e0dfb4db5c60c709568b68d3ecbd76910ab00799a721b951a"
+    },
+    "roaring_fork_artwork_review": {
+      "path": "originals/smokies/roaring_fork_artwork_review_v1.json",
+      "sha256": "3030dfdf993b8b33cb116263ba9902dfe9e36c637f4ff7a37b11f878f0f082d4"
+    }
+  }
+}

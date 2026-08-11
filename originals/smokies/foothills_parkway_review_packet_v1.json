@@ -1,0 +1,974 @@
+{
+  "artwork_candidates": [
+    {
+      "asset_url": "https://upload.wikimedia.org/wikipedia/commons/2/2a/Foothills_Parkway%2C_October_2018--Andrea_Walton_%2843968388000%29.jpg",
+      "candidate_id": "media_fp_panorama",
+      "creator": "Andrea Walton (NPS)",
+      "device_exif_present": true,
+      "dimensions": {
+        "height": 3024,
+        "width": 4032
+      },
+      "dossier_status": "candidate_requires_clearance",
+      "exact_credit": "Foothills Parkway, October 2018, Andrea Walton, Great Smoky Mountains National Park (NPS), public domain",
+      "exif_caveat": "Original contains GPS coordinates plus Apple iPhone 7/device metadata; a separately hashed sanitized derivative is required before any later ingestion consideration.",
+      "exif_orientation": 1,
+      "existing_original_evidence": "hash_bound_review_copy_only",
+      "format": "JPEG",
+      "gps_exif_present": true,
+      "identity_match": "NPS photograph of the Foothills Parkway matching the exact ridge-panorama slot",
+      "ingestion_allowed": false,
+      "intended_use": "chapter_artwork",
+      "license_name": "Public domain",
+      "license_record_url": "https://commons.wikimedia.org/wiki/File:Foothills_Parkway,_October_2018--Andrea_Walton_(43968388000).jpg",
+      "local_evidence_locator": "smokies_media_s2:media_fp_panorama",
+      "local_hash_verified_at_packet_build": true,
+      "original_bytes": 2067676,
+      "original_sha256": "92da599e63f7f2afabd81106d6649441b11b5406e7c94ec3ba448c643e6f19d8",
+      "publication_allowed": false,
+      "rendering_allowed": false,
+      "required_commercial_notice": "No claim to original U.S. Government works.",
+      "rights_basis": "public_domain_us_government_work",
+      "sanitized_derivative_complete": false,
+      "source_page_url": "https://www.nps.gov/places/foothills-parkway.htm",
+      "stable_order": 1,
+      "status": "candidate_only_user_visual_approval_required",
+      "subject": "Exact Foothills Parkway ridge panorama",
+      "upload_allowed": false,
+      "user_visual_approval": false
+    },
+    {
+      "asset_url": "https://upload.wikimedia.org/wikipedia/commons/5/58/Foothills_Parkway_Bridge_number_2_in_Great_Smoky_Mountains_National_Park_in_Tennessee_%2820133297129%29.jpg",
+      "candidate_id": "media_fp_engineering",
+      "creator": "Federal Highway Administration",
+      "device_exif_present": true,
+      "dimensions": {
+        "height": 3240,
+        "width": 4320
+      },
+      "dossier_status": "exact_asset_not_selected",
+      "exact_credit": "Foothills Parkway Bridge number 2, Great Smoky Mountains National Park, Federal Highway Administration (FHWA), public domain",
+      "exif_caveat": "Original has no GPS IFD but retains Canon device/date metadata; a separately hashed sanitized derivative is required before any later ingestion consideration.",
+      "exif_orientation": 1,
+      "existing_original_evidence": "hash_bound_review_copy_only",
+      "format": "JPEG",
+      "gps_exif_present": false,
+      "identity_match": "FHWA photograph of Foothills Parkway Bridge number 2 matching the exact Missing Link engineering slot",
+      "ingestion_allowed": false,
+      "intended_use": "story_artwork",
+      "license_name": "Public domain",
+      "license_record_url": "https://commons.wikimedia.org/wiki/File:Foothills_Parkway_Bridge_number_2_in_Great_Smoky_Mountains_National_Park_in_Tennessee_(20133297129).jpg",
+      "local_evidence_locator": "smokies_media_s2:media_fp_engineering",
+      "local_hash_verified_at_packet_build": true,
+      "original_bytes": 1650379,
+      "original_sha256": "ed4f3bc69b7fd0f34040e3214a1633f410327c0deb3c0c04412d861760de78af",
+      "publication_allowed": false,
+      "rendering_allowed": false,
+      "required_commercial_notice": "No claim to original U.S. Government works.",
+      "rights_basis": "public_domain_us_government_work",
+      "sanitized_derivative_complete": false,
+      "source_page_url": "https://www.nps.gov/grsm/learn/news/foothills-parkway-opening.htm",
+      "stable_order": 2,
+      "status": "candidate_only_user_visual_approval_required",
+      "subject": "Exact Missing Link bridge or construction scene",
+      "upload_allowed": false,
+      "user_visual_approval": false
+    }
+  ],
+  "chapter_id": "foothills_parkway",
+  "claims": [
+    {
+      "chapter_id": "foothills_parkway",
+      "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
+      "id": "fp_air_monitoring",
+      "source_ids": [
+        "nps_grsm_air_quality"
+      ],
+      "statement": "Look Rock is an air-quality monitoring and viewing location where haze and visibility can be discussed with measured context.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
+      "id": "fp_forest_mosaic",
+      "source_ids": [
+        "nps_grsm_statistics",
+        "nps_grsm_vegetation"
+      ],
+      "statement": "The long view spans a mosaic of forest communities structured by elevation and aspect.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
+      "id": "fp_geologic_view",
+      "source_ids": [
+        "nps_grsm_geology"
+      ],
+      "statement": "Parkway overlooks reveal the layered ridges produced by ancient mountain building and long erosion.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
+      "id": "fp_long_build",
+      "source_ids": [
+        "nps_grsm_foothills",
+        "nps_grsm_foothills_history"
+      ],
+      "statement": "Construction unfolded in separated segments over decades and the full authorized corridor remains incomplete.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
+      "id": "fp_missing_link",
+      "source_ids": [
+        "nps_grsm_missing_link_bridge"
+      ],
+      "statement": "The Missing Link used multiple bridges, including an 800-foot curved bridge carried on tall piers, to cross steep terrain.",
+      "status": "source_verified"
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "cultural_gate": "not_required",
+      "cultural_scope": {
+        "classification": "public_record_factual",
+        "collection_method": "published_public_record",
+        "review_triggers": []
+      },
+      "id": "fp_scenic_corridor",
+      "source_ids": [
+        "nps_grsm_foothills"
+      ],
+      "statement": "Foothills Parkway was authorized as a scenic corridor along the Tennessee side of the Smokies.",
+      "status": "source_verified"
+    }
+  ],
+  "decision_gate": {
+    "artwork_ingestion_allowed": false,
+    "artwork_sanitation_allowed": false,
+    "artwork_sanitation_complete": false,
+    "artwork_status": "candidate_only",
+    "artwork_visual_decisions_recorded": false,
+    "database_accessed": false,
+    "manifest_creation_or_mutation_allowed": false,
+    "narration_generated": false,
+    "narrator_selected_for_foothills": false,
+    "network_accessed_by_builder": false,
+    "next_action": "collect_explicit_approve_or_revise_decisions_for_all_thirteen_scripts_and_both_artwork_candidates",
+    "other_chapters_approved": false,
+    "production_mutation_allowed": false,
+    "public_release": false,
+    "publication_allowed": false,
+    "script_decisions_recorded": false,
+    "tts_or_render_authorized": false,
+    "upload_allowed": false
+  },
+  "dossier_entries": [
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_scenic_corridor"
+      ],
+      "directional_adaptation": true,
+      "id": "fp_cue_01",
+      "kind": "cue",
+      "purpose": "State the chapter direction and scenic purpose.",
+      "route_context": "chilhowee_terminus",
+      "script_status": "outline_only",
+      "sequence": 1,
+      "target_words": 80,
+      "title": "Parkway orientation",
+      "visible_scene": "A ridge road opens toward the national park."
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_geologic_view"
+      ],
+      "directional_adaptation": true,
+      "id": "fp_cue_02",
+      "kind": "cue",
+      "purpose": "Invite the passenger to notice depth in the ridge sequence.",
+      "route_context": "chilhowee_terminus",
+      "script_status": "outline_only",
+      "sequence": 2,
+      "target_words": 80,
+      "title": "A long view",
+      "visible_scene": "The trees open to distant ridges."
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_air_monitoring"
+      ],
+      "directional_adaptation": true,
+      "id": "fp_cue_03",
+      "kind": "cue",
+      "purpose": "Identify the primary viewpoint without asserting visibility.",
+      "route_context": "look_rock",
+      "script_status": "outline_only",
+      "sequence": 3,
+      "target_words": 80,
+      "title": "Look Rock",
+      "visible_scene": "The observation area and tower access appear."
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_forest_mosaic"
+      ],
+      "directional_adaptation": true,
+      "id": "fp_cue_04",
+      "kind": "cue",
+      "purpose": "Point out the forest mosaic before the longer ecology story.",
+      "route_context": "look_rock",
+      "script_status": "outline_only",
+      "sequence": 4,
+      "target_words": 80,
+      "title": "Forest from the ridge",
+      "visible_scene": "The road crosses a change in slope and exposure."
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_long_build"
+      ],
+      "directional_adaptation": true,
+      "id": "fp_cue_05",
+      "kind": "cue",
+      "purpose": "Orient the passenger to the segmented parkway history.",
+      "route_context": "walland_east_connection",
+      "script_status": "outline_only",
+      "sequence": 5,
+      "target_words": 80,
+      "title": "Walland connection",
+      "visible_scene": "The parkway meets a major gap in its historic construction sequence."
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_missing_link"
+      ],
+      "directional_adaptation": true,
+      "id": "fp_cue_06",
+      "kind": "cue",
+      "purpose": "Call attention to the engineering before the full story.",
+      "route_context": "foothills_missing_link",
+      "script_status": "outline_only",
+      "sequence": 6,
+      "target_words": 80,
+      "title": "Across the Missing Link",
+      "visible_scene": "Bridges carry the road across steep terrain."
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_scenic_corridor"
+      ],
+      "directional_adaptation": true,
+      "id": "fp_cue_07",
+      "kind": "cue",
+      "purpose": "Close the chapter and return the listener to ordinary navigation context.",
+      "route_context": "wears_valley_terminus",
+      "script_status": "outline_only",
+      "sequence": 7,
+      "target_words": 80,
+      "title": "Wears Valley end",
+      "visible_scene": "The scenic section descends toward the valley road network."
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_scenic_corridor"
+      ],
+      "directional_adaptation": true,
+      "id": "fp_story_01",
+      "kind": "story",
+      "purpose": "Explain the scenic-corridor purpose and its relationship to the national park.",
+      "route_context": "chilhowee_terminus",
+      "script_status": "outline_only",
+      "sequence": 1,
+      "target_words": 450,
+      "title": "A parkway made for the view",
+      "visible_scene": "The road runs along lower ridges facing the Smokies."
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_long_build"
+      ],
+      "directional_adaptation": true,
+      "id": "fp_story_02",
+      "kind": "story",
+      "purpose": "Tell the multi-decade construction story without framing incompletion as failure alone.",
+      "route_context": "walland_east_connection",
+      "script_status": "outline_only",
+      "sequence": 2,
+      "target_words": 450,
+      "title": "The unfinished road",
+      "visible_scene": "Completed pavement ends while the authorized corridor continues on maps."
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_missing_link"
+      ],
+      "directional_adaptation": true,
+      "id": "fp_story_03",
+      "kind": "story",
+      "purpose": "Make engineering visible in the road's most difficult section.",
+      "route_context": "foothills_missing_link",
+      "script_status": "outline_only",
+      "sequence": 3,
+      "target_words": 450,
+      "title": "Bridging the Missing Link",
+      "visible_scene": "Elevated bridges cross steep, broken terrain."
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_geologic_view"
+      ],
+      "directional_adaptation": true,
+      "id": "fp_story_04",
+      "kind": "story",
+      "purpose": "Connect the panorama to mountain building and erosion.",
+      "route_context": "look_rock",
+      "script_status": "outline_only",
+      "sequence": 4,
+      "target_words": 450,
+      "title": "Reading the ridgelines",
+      "visible_scene": "Successive mountain ridges stack across the horizon."
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_forest_mosaic"
+      ],
+      "directional_adaptation": true,
+      "id": "fp_story_05",
+      "kind": "story",
+      "purpose": "Show how elevation and aspect organize the broad view.",
+      "route_context": "look_rock",
+      "script_status": "outline_only",
+      "sequence": 5,
+      "target_words": 450,
+      "title": "A forest mosaic from above",
+      "visible_scene": "Different slopes and elevations carry subtly different forests."
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_air_monitoring"
+      ],
+      "directional_adaptation": true,
+      "id": "fp_story_06",
+      "kind": "story",
+      "purpose": "Use monitoring context to distinguish weather, natural haze, and pollution without guessing from one view.",
+      "route_context": "look_rock",
+      "script_status": "outline_only",
+      "sequence": 6,
+      "target_words": 450,
+      "title": "What the view says about the air",
+      "visible_scene": "Visibility changes across the same mountain panorama."
+    }
+  ],
+  "kind": "original_chapter_review_only",
+  "official_sources": [
+    {
+      "authority": "official",
+      "id": "nps_grsm_air_quality",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-05",
+      "rights_status": "reference_only",
+      "role": "story",
+      "scope": [
+        "air_quality",
+        "haze",
+        "monitoring"
+      ],
+      "title": "Air Quality",
+      "url": "https://www.nps.gov/grsm/learn/nature/air-quality.htm"
+    },
+    {
+      "authority": "official",
+      "id": "nps_grsm_foothills",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-05",
+      "rights_status": "reference_only",
+      "role": "story",
+      "scope": [
+        "authorization",
+        "foothills_parkway",
+        "scenic_drive"
+      ],
+      "title": "Foothills Parkway",
+      "url": "https://www.nps.gov/places/foothills-parkway.htm"
+    },
+    {
+      "authority": "official",
+      "id": "nps_grsm_foothills_history",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-05",
+      "rights_status": "reference_only",
+      "role": "story",
+      "scope": [
+        "engineering",
+        "foothills_parkway",
+        "missing_link"
+      ],
+      "title": "Foothills Parkway design and technical studies",
+      "url": "https://www.nps.gov/grsm/learn/news/national-park-service-plans-to-complete-additional-design-work-and-technical-studies-for-foothills-parkway-section-8d.htm"
+    },
+    {
+      "authority": "official",
+      "id": "nps_grsm_geology",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-05",
+      "rights_status": "reference_only",
+      "role": "story",
+      "scope": [
+        "cades_cove",
+        "erosion",
+        "mountain_building",
+        "rock"
+      ],
+      "title": "Geology",
+      "url": "https://www.nps.gov/grsm/learn/nature/geology.htm"
+    },
+    {
+      "authority": "official",
+      "id": "nps_grsm_missing_link_bridge",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-05",
+      "rights_status": "reference_only",
+      "role": "story",
+      "scope": [
+        "bridge_engineering",
+        "foothills_parkway",
+        "missing_link"
+      ],
+      "title": "Foothills Parkway Missing Link bridge construction",
+      "url": "https://www.nps.gov/grsm/learn/news/fhp-contract-award.htm"
+    },
+    {
+      "authority": "official",
+      "id": "nps_grsm_statistics",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-05",
+      "rights_status": "reference_only",
+      "role": "story",
+      "scope": [
+        "park_scale",
+        "roads",
+        "species",
+        "streams"
+      ],
+      "title": "Park Statistics",
+      "url": "https://www.nps.gov/grsm/learn/management/statistics.htm"
+    },
+    {
+      "authority": "official",
+      "id": "nps_grsm_vegetation",
+      "publisher": "National Park Service",
+      "reviewed_at": "2026-08-05",
+      "rights_status": "reference_only",
+      "role": "story",
+      "scope": [
+        "elevation",
+        "forest",
+        "habitat"
+      ],
+      "title": "Vegetation Types",
+      "url": "https://www.nps.gov/grsm/learn/nature/vegetation-types.htm"
+    }
+  ],
+  "packet_id": "smokies_foothills_parkway_review_20260810_v1",
+  "product_contract": {
+    "changing_scope_or_price_requires_separate_product_decision": true,
+    "chapter_ids": [
+      "mountain_crossing",
+      "little_river_cades_cove",
+      "roaring_fork",
+      "foothills_parkway"
+    ],
+    "credit_type": "earned_credits",
+    "explorer_included": true,
+    "pack_scope": "one_premium_four_chapter_product",
+    "permanent_credit_price": 900,
+    "standalone_foothills_public_product_approved": false,
+    "standalone_roaring_fork_public_product_approved": false
+  },
+  "product_id": "great_smoky_mountains_ridges_rivers_living_memory",
+  "protected_roaring_fork_evidence": {
+    "aggregate_asset_bytes": 239772665,
+    "artwork_count": 7,
+    "current_asset_count": 20,
+    "delivery_contract_sha256": "9081a647a7df0e59df4bb40506ba9bfa96c750536fb715ee31b3e9ee68ee20d6",
+    "device_preview_evidence_canonical_sha256": "f17ac77a29718cef56ccb2556e44e86800d81482fd0e9cca18acb2537722f750",
+    "draft_revision": 2,
+    "evidence_class": "historical_s4r_production_readback",
+    "live_database_rechecked_by_builder": false,
+    "narration_count": 13,
+    "narration_profile_canonical_sha256": "f79b386031ca0faf6e07332e53ea037f957eb7d9871c4bbf05d5b0aff09c2af5",
+    "observed_at": "2026-08-11T01:33:56Z",
+    "private_manifest_canonical_sha256": "2fb77582811e28ef963f3018a8990a96612cfedee69f3b2329a73b87ac99d33a",
+    "private_manifest_file_sha256": "7e9cab7e0325c6124a2605c83867929780f575e5814c7fdc634c091a9c351467",
+    "profiled_manifest_canonical_sha256": "14d83293ba3b09aad00998668311447b5224f5172e641d35163de2865e3c9eb8",
+    "published_version_count": 0,
+    "status": "preserved_unchanged_and_excluded_from_this_review",
+    "trusted_private_validation": {
+      "current_at_s4r_readback": true,
+      "engine": "original-trigger-v3",
+      "evidence_class": "historical_s4r_production_readback",
+      "issues": [],
+      "live_report_rechecked_by_builder": false,
+      "must_rerun_after_final_manifest_or_source_change": true,
+      "publication_approval": false,
+      "redacted_report_sha256": "ffbab03a0bdc839cbbdaa422a1b4910eaeb61acdc1d4102dbdc40e8d643fc059",
+      "report_id": "original_validation_9df694c93ee9ef3809c33f451d04bf28",
+      "route_scenarios_passed": 13,
+      "route_scenarios_required": 13,
+      "selection": "roaring_fork_one_way_private_v1:one_way",
+      "source_commit": "111a4eb7cc8bb21ac1bbdd3418b1dbec4ca90637",
+      "status": "passed"
+    }
+  },
+  "public_record_scope": {
+    "blocked_entry_count": 0,
+    "claim_count": 6,
+    "claim_ids": [
+      "fp_air_monitoring",
+      "fp_forest_mosaic",
+      "fp_geologic_view",
+      "fp_long_build",
+      "fp_missing_link",
+      "fp_scenic_corridor"
+    ],
+    "claim_set_sha256": "380df1b7a6ff9ac424aefe3da2497b9af09eb9f1dba528582cc91ce13d72d6d3",
+    "classification": "public_record_factual",
+    "collection_method": "published_public_record",
+    "culturally_gated_claim_count": 0,
+    "external_outreach_required": false
+  },
+  "recorded_from_task_id": "019fe9fb-cafa-75d3-b663-1e5051731cd5",
+  "review_scope": {
+    "artwork_candidate_count": 2,
+    "chapter_id": "foothills_parkway",
+    "cue_count": 7,
+    "other_chapters_approved": false,
+    "reverse_override_entry_ids": [
+      "fp_cue_01",
+      "fp_cue_05",
+      "fp_cue_07"
+    ],
+    "script_count": 13,
+    "story_count": 6,
+    "variant_ids": [
+      "west_to_east",
+      "east_to_west"
+    ]
+  },
+  "route_review_context": {
+    "foothills_variant_count": 2,
+    "full_product_variant_count": 6,
+    "route_evidence_publication_status": "blocked",
+    "status": "official_geometry_candidate_for_editorial_review_only",
+    "variants": [
+      {
+        "anchor_ids": [
+          "chilhowee_terminus",
+          "look_rock",
+          "walland_east_connection",
+          "foothills_missing_link",
+          "wears_valley_terminus"
+        ],
+        "distance_m": 50816.7,
+        "geometry_ready_for_editorial_cues": true,
+        "geometry_sha256": "3b86e6b62db0be72edd15557d3f503bfe79baa869877044a7deb4f4b487f547d",
+        "publication_evidence": false,
+        "reverse_pair_id": "foothills-parkway-east-to-west",
+        "route_spec_id": "foothills-parkway-west-to-east",
+        "status": "official_geometry_candidate",
+        "variant_id": "west_to_east"
+      },
+      {
+        "anchor_ids": [
+          "wears_valley_terminus",
+          "foothills_missing_link",
+          "walland_east_connection",
+          "look_rock",
+          "chilhowee_terminus"
+        ],
+        "distance_m": 50816.7,
+        "geometry_ready_for_editorial_cues": true,
+        "geometry_sha256": "58a8f0322c03136efd13f0bbcf3de00aab7b270fe37211efac1c07850ea6a358",
+        "publication_evidence": false,
+        "reverse_pair_id": "foothills-parkway-west-to-east",
+        "route_spec_id": "foothills-parkway-east-to-west",
+        "status": "official_geometry_candidate",
+        "variant_id": "east_to_west"
+      }
+    ]
+  },
+  "schema_version": 1,
+  "scripts": [
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_scenic_corridor"
+      ],
+      "decision_status": "user_approve_or_revise_required",
+      "id": "fp_story_01",
+      "kind": "story",
+      "rendering_allowed": false,
+      "script_status": "draft_review_required",
+      "sequence": 1,
+      "source_ids": [
+        "nps_grsm_foothills"
+      ],
+      "stable_order": 1,
+      "title": "A parkway made for the view",
+      "transcript": "Look beyond the guardrail and the road seems to float along the lower ridges. The high wall of the Smokies holds the horizon, while folds of wooded country fall away toward the Tennessee Valley. That view is not a lucky side effect of getting from one town to another. It is the reason this road exists.\n\nCongress authorized Foothills Parkway in 1944 as a scenic parkway along the Tennessee side of Great Smoky Mountains National Park. The plan called for a long corridor following the foothills rather than cutting straight across them. From here, the main range stays in view for mile after mile. The road repeatedly turns toward an overlook, slips back into the trees, and then opens another window across the mountains.\n\nA parkway is a particular kind of road. Its job is not simply to shorten a trip. It shapes the trip itself. Curves, grades, overlooks, and the land beside the pavement are treated as one experience. Here, the destination is not only at the end of the road. It is present in every opening between the trees and in the changing relationship between the lower ridges and the main range beyond them.\n\nThat rhythm matters. A long, uninterrupted panorama can become background, but the parkway makes the forest act like a curtain. Enclosed stretches quiet the view. Then a turn opens the landscape again, and the distance feels newly discovered. Overlooks give the eye time to stop moving even when the journey continues. The road does not need a sign at every curve to interpret the mountains; its alignment performs much of that work. Even the pauses between views are part of that rhythm.\n\nThe full authorized corridor stretches for seventy-two miles, yet it was never completed as one continuous highway. Portions opened at different times, and unfinished sections remain part of its story. That interrupted history makes the finished pavement feel less like an ordinary state route and more like a sequence of carefully placed balconies. Each completed section reveals a different relationship between the foothills and the national park beyond them.\n\nNotice the layers in the view. The near slopes have individual trees and folds you can follow with your eye. Farther away, details merge into blue and gray bands. The highest ridges form the park's distant edge. The road keeps rearranging those layers as it turns, making the mountains seem to advance, retreat, and overlap.\n\nThat was the central promise of Foothills Parkway: not a shortcut through the Smokies, but a road built to help people see them. Whenever the landscape opens, watch how the pavement aims your attention outward. The engineered curve beneath you and the broad landscape beyond it are parts of the same design.",
+      "transcript_sha256": "48769cc73c2984673775b3bf96f714c7577152aa383c0c4162cb155187f8fbf2"
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_long_build"
+      ],
+      "decision_status": "user_approve_or_revise_required",
+      "id": "fp_story_02",
+      "kind": "story",
+      "rendering_allowed": false,
+      "script_status": "draft_review_required",
+      "sequence": 2,
+      "source_ids": [
+        "nps_grsm_foothills",
+        "nps_grsm_foothills_history"
+      ],
+      "stable_order": 2,
+      "title": "The unfinished road",
+      "transcript": "A finished lane can hide a complicated history. The pavement here is smooth, the shoulders are settled, and the road seems inevitable. On a map, however, Foothills Parkway is a chain of completed sections separated by gaps. That broken line records nearly a century of ambition, engineering, funding, and difficult terrain.\n\nThe idea of a scenic road beside Great Smoky Mountains National Park began in the 1930s. Federal legislation authorized the parkway in 1944, and construction started in the 1950s with the Gatlinburg Spur. The vision was large: a seventy-two-mile corridor across the Tennessee foothills. Work did not move steadily from one end to the other. Different sections advanced at different times, while other pieces waited.\n\nThe reasons become visible as you travel. These foothills are not a flat shelf beneath the main range. Ridges rise and fall, ravines cut across the proposed line, and unstable slopes can turn a short distance on a map into a major construction problem. Funding also arrived in starts and stops. A segment might be graded or partly built, then remain unfinished while plans, money, and engineering caught up.\n\nAn unfinished road also changes how communities encounter it. One completed portion may function as a local scenic drive while another ends miles away. A graded corridor can exist without serving through traffic. When a gap finally closes, two familiar dead ends become one new journey. The map changes in a moment, but the physical connection represents years of surveys, design choices, contracts, and work on the mountain.\n\nThat history is why the parkway should not be read only as a project that took too long. It is also a record of changing expectations. Building a scenic road through steep land requires more than laying pavement. Engineers must decide how a road will sit on the mountain, how water will move around it, and how a structure can cross broken ground without erasing the very landscape people came to see. Public review and environmental study have become a larger part of those decisions over time.\n\nIn 2024, the National Park Service announced more design work and technical studies for another proposed section between Wears Valley and the Spur. No completion schedule was established. That is an operational decision for the future, separate from the story you are hearing now, but it shows that the authorized corridor remains unfinished and still under consideration.\n\nAs you pass a junction or the end of a completed section, imagine the parkway as layers of time rather than a single ribbon. Some pavement dates to the middle of the twentieth century. Other stretches arrived decades later. Between them are plans that were revised, paused, or never built. The open road in front of you is the visible part of a much longer story—one measured not only in miles, but in generations of work.",
+      "transcript_sha256": "36d1b5f218ad0dc0a7fe05827a40e4d7bbadbd85814ae503513b0f4efa987a01"
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_missing_link"
+      ],
+      "decision_status": "user_approve_or_revise_required",
+      "id": "fp_story_03",
+      "kind": "story",
+      "rendering_allowed": false,
+      "script_status": "draft_review_required",
+      "sequence": 3,
+      "source_ids": [
+        "nps_grsm_missing_link_bridge"
+      ],
+      "stable_order": 3,
+      "title": "Bridging the Missing Link",
+      "transcript": "Watch as the road leaves solid ground and sweeps across the slope. For a moment, the parkway is no longer resting on the mountain. It is being carried through open air. The bridge curves rather than crossing in a straight line, and the tall supports below it disappear into steep wooded ravines.\n\nThis is part of the section long known as the Missing Link, a short but exceptionally difficult gap between Walland and Wears Valley. Construction had advanced from both directions, yet broken terrain kept the two sides apart. The distance on a map was modest. The engineering problem was not.\n\nOne of the key structures is Bridge Number Two. The National Park Service described it as an eight-hundred-foot elevated roadway forming a serpentine curve. Four piers, some reaching as high as one hundred feet, support the bridge as it crosses two ravines on the south slope of Chilhowee Mountain. When the construction contract was announced in 2009, this was the longest single bridge required to complete the gap.\n\nThe curve is the important part to notice. A straight bridge could connect two points, but this road also had to follow the parkway's alignment and sit within a scenic mountain landscape. The structure bends with the route while lifting it above ground that would have been difficult to cut, fill, and stabilize. Instead of forcing the ravines to become a roadbed, the bridge spans them.\n\nThat solution demanded a different view of the landscape. The slopes below are not empty space. They carry water, soil, trees, and the shape of the mountain itself. Piers concentrate the bridge's support at selected points, leaving much of the ground between them open. From the roadway, most of that work is easy to miss. You feel a gentle curve and see a broad view. Underneath, loads move from the deck into the piers and down to carefully engineered foundations.\n\nConstruction itself unfolded in stages. A major bridge could advance while other structures and approaches were being designed or built from the opposite side. The contract for Bridge Number Two formed one part of a wider effort extending east from Walland and west from Wears Valley. The visible structure was a milestone, not the entire solution.\n\nThat is worth remembering as the roadway carries you across the ravines today. The completed experience compresses years of separate decisions into a few quiet seconds. Design, piers, deck, approaches, and pavement now read as one curve because each part was made to meet the next.\n\nAs the tires return to ground, notice how quietly the bridge does its job. It crosses two ravines, holds a long curve high on the slope, and preserves the experience of a road moving with the mountain. The biggest engineering on Foothills Parkway is often the part designed to feel almost effortless from the passenger seat.",
+      "transcript_sha256": "fadd566208b133389f9005345337b39d12d8de1f195f2cbbe81b6159295cd6fd"
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_geologic_view"
+      ],
+      "decision_status": "user_approve_or_revise_required",
+      "id": "fp_story_04",
+      "kind": "story",
+      "rendering_allowed": false,
+      "script_status": "draft_review_required",
+      "sequence": 4,
+      "source_ids": [
+        "nps_grsm_geology"
+      ],
+      "stable_order": 4,
+      "title": "Reading the ridgelines",
+      "transcript": "The ridges ahead look soft from a distance—blue folds stacked one behind another—but their story begins with rock, pressure, and an almost unimaginable span of time. The view from Foothills Parkway lets you see the result at landscape scale. Near ridges stand dark and detailed. Farther ridges fade toward the horizon, each one marking another resistant fold of the mountains.\n\nMost rocks in Great Smoky Mountains National Park began as sediment. Between roughly eight hundred and five hundred forty-five million years ago, clay, silt, sand, and pebbles washed from ancient highlands into low basins along the edge of North America. Layer after layer accumulated. Those deposits were eventually cemented into more than nine miles of rock now grouped under the name Ocoee Supergroup.\n\nThe layers did not remain flat. Between about three hundred ten and two hundred forty-five million years ago, the tectonic plates carrying North America and Africa collided as the supercontinent Pangaea formed. Heat and pressure changed the sedimentary rocks. Sandstone recrystallized into harder metasandstone or quartzite. Shale became slate. Huge masses of older rock moved along faults and were pushed over younger layers. The Appalachian chain rose on a continental scale.\n\nThe mountains created by those collisions were probably far higher than the Smokies you see today. Their present shape is the work of erosion. Water, ice, wind, and gravity kept removing material, carving valleys and carrying sediment away. Harder rock resisted that wearing more effectively, so resistant layers remained as high ridges while weaker material disappeared more quickly. The skyline is therefore not simply where mountains rose. It is also where certain rocks endured.\n\nThe park contains about twenty named rock formations, so the range is not made from one material wearing down at one rate. Metamorphosed sandstone, siltstone, and shale dominate much of the landscape. Their different resistance helps produce ledges, channels, peaks, and valleys. The green cover softens those boundaries, but it does not erase them.\n\nLook at the long profile ahead. Peaks do not form one clean wall. Ridges overlap because streams have cut through the uplifted mass from many directions. Every valley gives water another route downhill, and every spur is a remnant between drainage systems. From this distance, vegetation hides most individual rock surfaces, but the underlying geology still controls the broad shape.\n\nThe process continues. National Park Service geologists estimate that these mountains are being eroded by about two inches every thousand years. That is too slow to see during one drive, yet over millions of years it is enough to turn towering highlands into the layered horizon in front of you.\n\nSo when the next overlook opens, read the view in two directions through time. The folded and metamorphosed rocks record ancient continental collisions. The valleys and rounded ridges record everything that happened afterward. Foothills Parkway gives you a seat between those stories, moving across a landscape that is still being shaped one grain at a time.",
+      "transcript_sha256": "0549301d81d4f9b17da862147e940782bfdd66d6871677b568a2e4cae7af814c"
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_forest_mosaic"
+      ],
+      "decision_status": "user_approve_or_revise_required",
+      "id": "fp_story_05",
+      "kind": "story",
+      "rendering_allowed": false,
+      "script_status": "draft_review_required",
+      "sequence": 5,
+      "source_ids": [
+        "nps_grsm_statistics",
+        "nps_grsm_vegetation"
+      ],
+      "stable_order": 5,
+      "title": "A forest mosaic from above",
+      "transcript": "From a moving car, the mountains can look like one continuous blanket of green. Slow your eye down and the blanket begins to break into pieces. A sunny slope may look lighter and more open. A shaded fold may hold taller, darker trees. High ridges can carry a different texture from the valleys below. What looks uniform from a distance is actually a forest mosaic.\n\nNational Park Service scientists describe plant communities as groups of species that share similar living conditions. The trees in the canopy are only the most visible layer. Under them are shrubs, wildflowers, mosses, fungi, insects, birds, and mammals using different combinations of food, moisture, shelter, and temperature. Change the conditions, and the community changes with them.\n\nTwo of the strongest controls in the Smokies are elevation and aspect. Elevation affects temperature, rainfall, cloud exposure, and the length of the growing season. Aspect is the direction a slope faces. A south-facing slope receives sunlight differently from a north-facing one, which can alter warmth and moisture even when the two slopes are close together. A ridge and its shaded backside may therefore support noticeably different vegetation.\n\nThe park identifies eight major forest types covering ninety-six percent of its area: spruce-fir, northern hardwood, cove hardwood, hemlock, oak-hickory, pine-oak, montane alluvial, and successional forest. The remaining ground includes meadows, rock outcrops, heath balds, and grassy balds. Those names are scientific categories, but from the parkway they become visible as texture, color, and density across the land.\n\nEach community also creates habitat for other forms of life. Leaves, bark, roots, wood, nectar, fruit, and seeds become food or shelter for organisms adapted to use them. The forest floor, understory, and canopy are connected layers, not separate scenery. A shift in the dominant plants changes opportunities for insects, birds, mammals, and fungi as well.\n\nLower, drier slopes often appear different from cool coves where water and rich soil collect. High-elevation forests face stronger wind, colder temperatures, and frequent cloud. Along streams, trees and plants respond to moving water and floodplain soils. Historic clearing created another set of conditions; when fields and disturbed areas returned to woodland, successional forests recorded that recovery.\n\nThese communities do more than fill the view. Forests store carbon, cycle nutrients, filter air and water, reduce erosion, and provide habitat. A change in one layer can affect many others. Park scientists map vegetation and maintain long-term monitoring plots because the mosaic is not fixed. Storms, insects, disease, fire, climate, and human history all continue to rearrange it.\n\nAt the next opening, choose two slopes and compare them. Notice which one faces the light, which one drops into a damp hollow, and where the color or canopy texture changes. You are not looking at one forest repeated across every ridge. You are looking at many communities fitted to the folds of the mountains, each responding to the particular place where it grows.",
+      "transcript_sha256": "e6d89f51c14c3333e867e0cb204b78597d93123c12f3fd9a62fcccbe2bdc1795"
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_air_monitoring"
+      ],
+      "decision_status": "user_approve_or_revise_required",
+      "id": "fp_story_06",
+      "kind": "story",
+      "rendering_allowed": false,
+      "script_status": "draft_review_required",
+      "sequence": 6,
+      "source_ids": [
+        "nps_grsm_air_quality"
+      ],
+      "stable_order": 6,
+      "title": "What the view says about the air",
+      "transcript": "The same overlook can show a completely different mountain range from one day to the next. On a clear day, distant ridges hold their shape and color. On another day, they dissolve into a pale veil. Some of that softness is natural cloud and moisture—the mist that helped give the Smokies their name. Some is human-made haze. A single glance cannot measure the difference, which is why the park monitors the air.\n\nLook Rock is both a viewing place and an air-quality monitoring location. Instruments there help researchers track what is moving through the atmosphere above the foothills. Monitoring matters because visibility is not only about whether the sky looks attractive. The same pollutants that scatter light can affect human health, plants, soils, and high-elevation streams.\n\nThe National Park Service describes pollution haze as a more uniform whitish layer than the natural, mist-like clouds that form around the mountains. Tiny airborne particles scatter light, washing out color and hiding distant features. Much of the pollution arrives from outside the park. Winds carry emissions from power plants, industry, and vehicles toward the southern Appalachians, where mountain terrain and weather patterns can concentrate them.\n\nThe value of a monitoring station is repetition. One view may be memorable, but a long series of observations can show how visibility and pollution change across seasons and years. Researchers can compare what people see from an overlook with measured conditions, then study how regional emissions and weather influence the park. A long record turns a shifting panorama into evidence.\n\nVisibility is only the most immediate signal. Ground-level ozone can irritate human lungs and injure plant leaves. Sulfur and nitrogen pollution can arrive in rain, dry particles, and cloud water, altering soils and streams. At high elevations, clouds can place vegetation directly inside acidic moisture. The forested ridge in the distance and the chemistry of the air between you are therefore part of the same system.\n\nThis is why it is better to describe today's view carefully rather than declare the air good or bad from appearance alone. Weather, humidity, natural mist, smoke, and pollution can overlap. Current readings and official advisories provide the evidence for current conditions; this story provides the context for understanding why those readings matter. The mountains make that shared atmosphere visible.\n\nAs the panorama opens again, see how the atmosphere creates depth. Near ridges are dark. Distant ridges grow lighter and bluer as more air lies between you and them. On a clear day, that effect makes the range seem endless. When the far ridges disappear, the missing detail is information too. Look Rock turns that changing view into a long-term record of the air shared by the park and the communities around it.",
+      "transcript_sha256": "2e64c4e31f03ebe54007f06749210b95e8b2f034a33b5d151537332241cf60e3"
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_scenic_corridor"
+      ],
+      "decision_status": "user_approve_or_revise_required",
+      "id": "fp_cue_01",
+      "kind": "cue",
+      "rendering_allowed": false,
+      "script_status": "draft_review_required",
+      "sequence": 1,
+      "source_ids": [
+        "nps_grsm_foothills"
+      ],
+      "stable_order": 7,
+      "title": "Parkway orientation",
+      "transcript": "You are entering Foothills Parkway at Chilhowee Lake, traveling east toward Wears Valley. This chapter stays on the Tennessee side of the Smokies and follows the ridge road rather than crossing the national park. Let ordinary navigation handle each turn. The stories ahead stay with the view: the parkway's long construction, the mountains beneath it, the forest across them, and the air between each ridge.",
+      "transcript_sha256": "39eb2bfecfa2851aa19b32167adb7029c13182258cbe630a08328c5d7ef61c4d",
+      "variant_overrides": [
+        {
+          "chapter_id": "foothills_parkway",
+          "transcript": "You are entering Foothills Parkway at Wears Valley, traveling west toward Chilhowee Lake. This chapter stays on the Tennessee side of the Smokies and follows the ridge road rather than crossing the national park. Let ordinary navigation handle each turn. The stories ahead stay with the view: the parkway's long construction, the mountains beneath it, the forest across them, and the air between each ridge.",
+          "variant_id": "east_to_west"
+        }
+      ]
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_geologic_view"
+      ],
+      "decision_status": "user_approve_or_revise_required",
+      "id": "fp_cue_02",
+      "kind": "cue",
+      "rendering_allowed": false,
+      "script_status": "draft_review_required",
+      "sequence": 2,
+      "source_ids": [
+        "nps_grsm_geology"
+      ],
+      "stable_order": 8,
+      "title": "A long view",
+      "transcript": "The trees are opening to the first long view. Notice how the ridges stack instead of forming one wall. Their rocks were folded and altered during ancient continental collisions, then cut into separate spurs and valleys by erosion. Near ridges keep their detail; distant ones fade through layers of atmosphere. The longer geology story will return to that horizon.",
+      "transcript_sha256": "50cc89fa960f2896f4897ea1256388845ebc4e191c2a28b0e9c5bcf6d133b4f1"
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_air_monitoring"
+      ],
+      "decision_status": "user_approve_or_revise_required",
+      "id": "fp_cue_03",
+      "kind": "cue",
+      "rendering_allowed": false,
+      "script_status": "draft_review_required",
+      "sequence": 3,
+      "source_ids": [
+        "nps_grsm_air_quality"
+      ],
+      "stable_order": 9,
+      "title": "Look Rock",
+      "transcript": "Look Rock is ahead. It is a viewpoint and an air-monitoring location, where instruments help the park measure particles, ozone, weather, and other conditions affecting the Smokies. Visibility alone cannot tell the whole story, so notice the view without guessing what causes it. Current readings and official advisories—not the color of the horizon by itself—describe today's air.",
+      "transcript_sha256": "3955b44ded4912c6726ce5037d06e2b1d5a23198aa1efd5ed7be8adca6ac02f0"
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_forest_mosaic"
+      ],
+      "decision_status": "user_approve_or_revise_required",
+      "id": "fp_cue_04",
+      "kind": "cue",
+      "rendering_allowed": false,
+      "script_status": "draft_review_required",
+      "sequence": 4,
+      "source_ids": [
+        "nps_grsm_statistics",
+        "nps_grsm_vegetation"
+      ],
+      "stable_order": 10,
+      "title": "Forest from the ridge",
+      "transcript": "The broad green view is not one uniform forest. Elevation and the direction each slope faces help organize different plant communities across the mountains. Compare a bright exposed slope with a shaded hollow, or a low ridge with the high country beyond it. Changes in color and canopy texture are clues to the forest mosaic described in the forest feature.",
+      "transcript_sha256": "57494b47b2a41ea3eca334a9e902b10efd60de699a30be277838dab574830171"
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_long_build"
+      ],
+      "decision_status": "user_approve_or_revise_required",
+      "id": "fp_cue_05",
+      "kind": "cue",
+      "rendering_allowed": false,
+      "script_status": "draft_review_required",
+      "sequence": 5,
+      "source_ids": [
+        "nps_grsm_foothills",
+        "nps_grsm_foothills_history"
+      ],
+      "stable_order": 11,
+      "title": "Walland connection",
+      "transcript": "This part of the parkway belongs to a road built in separated pieces across many decades. The corridor was authorized in 1944, but difficult terrain, changing plans, and uneven funding kept it from becoming one continuous highway. Around Walland and Wears Valley, completed sections once approached a stubborn gap from opposite directions. The road ahead carries that construction history in its bridges.",
+      "transcript_sha256": "55e5b68266498c13baca420a99480a31529c35d132dbcbec883b3bdbb529c7f1",
+      "variant_overrides": [
+        {
+          "chapter_id": "foothills_parkway",
+          "transcript": "This part of the parkway belongs to a road built in separated pieces across many decades. The corridor was authorized in 1944, but difficult terrain, changing plans, and uneven funding kept it from becoming one continuous highway. Around Walland and Wears Valley, completed sections once approached a stubborn gap from opposite directions. The bridges you just crossed carry that construction history.",
+          "variant_id": "east_to_west"
+        }
+      ]
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_missing_link"
+      ],
+      "decision_status": "user_approve_or_revise_required",
+      "id": "fp_cue_06",
+      "kind": "cue",
+      "rendering_allowed": false,
+      "script_status": "draft_review_required",
+      "sequence": 6,
+      "source_ids": [
+        "nps_grsm_missing_link_bridge"
+      ],
+      "stable_order": 12,
+      "title": "Across the Missing Link",
+      "transcript": "The parkway is entering the section once called the Missing Link. Watch for elevated bridges crossing steep, broken ground. One of them carries an eight-hundred-foot serpentine curve on four tall piers across two ravines. The structure lets the road follow the mountain without turning every hollow into a roadbed. The full story begins as the pavement moves out over open air.",
+      "transcript_sha256": "cae6702b9820d943da22ccf77c37f45ac67738e139524da7474429e4c8e02c90"
+    },
+    {
+      "chapter_id": "foothills_parkway",
+      "claim_ids": [
+        "fp_scenic_corridor"
+      ],
+      "decision_status": "user_approve_or_revise_required",
+      "id": "fp_cue_07",
+      "kind": "cue",
+      "rendering_allowed": false,
+      "script_status": "draft_review_required",
+      "sequence": 7,
+      "source_ids": [
+        "nps_grsm_foothills"
+      ],
+      "stable_order": 13,
+      "title": "Wears Valley end",
+      "transcript": "The scenic section is descending toward Wears Valley and the ordinary road network. This chapter ends here, but the parkway's idea remains visible behind you: a road designed to reveal the Smokies rather than merely pass them. Trailhead will return to regular navigation after the final cue. Current closures and route availability are checked separately whenever you start this chapter.",
+      "transcript_sha256": "684e5befea32976be4c8f7cd354ddb76a80d0f6bee1fbed418b415a356e16194",
+      "variant_overrides": [
+        {
+          "chapter_id": "foothills_parkway",
+          "title": "Chilhowee Lake end",
+          "transcript": "The scenic section is nearing Chilhowee Lake and the ordinary road network. This chapter ends here, but the parkway's idea remains visible behind you: a road designed to reveal the Smokies rather than merely pass them. Trailhead will return to regular navigation after this cue. Current closures and route availability are checked separately whenever you start the chapter.",
+          "variant_id": "east_to_west"
+        }
+      ]
+    }
+  ],
+  "source_bindings": {
+    "editorial": {
+      "byte_count": 27077,
+      "path": "originals/smokies/editorial_scripts_v1.json",
+      "sha256": "28627001d9b3bbd129e812721064e1a0c8fc2122ec9371afa91657026b76d81e"
+    },
+    "media_rights": {
+      "byte_count": 16980,
+      "path": "docs/originals/smokies-media-rights-v1.md",
+      "sha256": "53e515e3f3ce46cb9dd4c9d19be38d008ea5bb603e31a6be53bf5afdb7f0ab15"
+    },
+    "official_route_evidence": {
+      "byte_count": 2762475,
+      "path": "originals/smokies/official_route_evidence_v1.json",
+      "sha256": "d946ffaf8f21ad97399b6dedfb5cbe9483fce0787653b389d7075d933f398c60"
+    },
+    "roaring_fork_delivery_readiness": {
+      "byte_count": 17131,
+      "path": "originals/smokies/roaring_fork_delivery_readiness_v2.json",
+      "sha256": "7cf1b601d48845e3bc404a501d33a9f2c1e2567544c03347b99de0524ee923e6"
+    },
+    "roaring_fork_narration_profile": {
+      "byte_count": 1451,
+      "path": "originals/smokies/roaring_fork_narration_profile_v2.json",
+      "sha256": "10fd4f5f04cbfbc411a1e7c31061700d17752af61e1501a4b7b4652c0d2ee377"
+    },
+    "roaring_fork_private_manifest": {
+      "byte_count": 171413,
+      "path": "originals/smokies/roaring_fork_private_manifest_v3.json",
+      "sha256": "7e9cab7e0325c6124a2605c83867929780f575e5814c7fdc634c091a9c351467"
+    },
+    "roaring_fork_publication_readiness": {
+      "byte_count": 12875,
+      "path": "originals/smokies/roaring_fork_publication_readiness_v1.json",
+      "sha256": "81317b0bcdb052f1b9396fbe861aec20db3b72a9bd3f745ab5d88618ad58a199"
+    },
+    "route_variants": {
+      "byte_count": 9936,
+      "path": "originals/smokies/route_variants_v1.json",
+      "sha256": "49d55fa8819822b18af54983ea11893a661689102c14532a88ebacf2ec587f24"
+    },
+    "source_dossier": {
+      "byte_count": 85708,
+      "path": "originals/smokies/source_dossiers_v1.json",
+      "sha256": "8eb22ca5110f0f9a4287b8f184624348c2a2ca2dbc36e27ef59fc022057ce18f"
+    }
+  },
+  "status": "explicit_script_and_artwork_decisions_required",
+  "subset_bindings": {
+    "claims": "380df1b7a6ff9ac424aefe3da2497b9af09eb9f1dba528582cc91ce13d72d6d3",
+    "dossier_entries": "362406e324e05b45dc947c30cc57d935c25934f537fe1c1baf5ad4c61c0d86cb",
+    "editorial_entries": "928685bf6d56a77417b3ac9a02e1706055e63cea89938ff9f5505c845e1a4c0a",
+    "media_candidates": "1097c8f385bea1d46f115d978bfb486d46d110bcaf8707aa1662dfc96607a415",
+    "route_evidence": "80ce61bec4b07641d08324f913e0c6fdb33057ccaf3c96a0e88f7eda7f138cd8",
+    "route_variants": "32a1912f9a76f08d1b8d9c4daf684ced77e2388132d648280519196030fd0b9c",
+    "sources": "dfa5a92ff27689e0f884245c72ae3972bba3be9c4aadfe3ae8b79d6429231294"
+  }
+}

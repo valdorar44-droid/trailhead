@@ -29,8 +29,11 @@ LONG_FORM_PREFLIGHT_PATH = Path(
 LEGACY_LONG_FORM_READINESS_PATH = Path(
     "originals/smokies/roaring_fork_delivery_readiness_v1.json"
 )
-LONG_FORM_READINESS_PATH = Path(
+V2_LONG_FORM_READINESS_PATH = Path(
     "originals/smokies/roaring_fork_delivery_readiness_v2.json"
+)
+LONG_FORM_READINESS_PATH = Path(
+    "originals/smokies/roaring_fork_delivery_readiness_v3.json"
 )
 ROARING_FORK_ROUTE_NETWORK_TARGET_PATH = Path(
     "originals/smokies/roaring_fork_route_network_validation_target_v1.json"
@@ -73,8 +76,10 @@ TRUSTED_LONG_FORM_VALIDATOR_SOURCE_PATHS = (
     Path("dashboard/server.py"),
     Path("originals/smokies/editorial_roaring_fork_v1.json"),
     Path("originals/smokies/official_route_evidence_v1.json"),
+    Path("originals/smokies/smokies_public_record_scope_determination_v1.json"),
     LONG_FORM_PREFLIGHT_PATH,
     LEGACY_LONG_FORM_READINESS_PATH,
+    V2_LONG_FORM_READINESS_PATH,
     LONG_FORM_READINESS_PATH,
     ROARING_FORK_ROUTE_NETWORK_TARGET_PATH,
     Path("originals/smokies/source_dossiers_v1.json"),
@@ -144,7 +149,7 @@ ORIGINAL_LONG_FORM_CHECKED_DELIVERY_EVIDENCE = {
         "roaring_fork",
         "one_way",
     ): {
-        "evidence_id": "smokies_roaring_fork_delivery_v2",
+        "evidence_id": "smokies_roaring_fork_delivery_v3",
         "artifact_path": LONG_FORM_PREFLIGHT_PATH,
         "readiness_path": LONG_FORM_READINESS_PATH,
     },

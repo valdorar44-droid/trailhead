@@ -12,13 +12,26 @@ def _read(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def test_checked_publication_readiness_packet_is_deterministic() -> None:
-    assert builder.build() == _read(builder.OUTPUT_PATH)
-    assert builder.main(["--check"]) == 0
+def _historical_packet() -> dict:
+    raw = builder.OUTPUT_PATH.read_bytes()
+    assert hashlib.sha256(raw).hexdigest() == (
+        "81317b0bcdb052f1b9396fbe861aec20db3b72a9bd3f745ab5d88618ad58a199"
+    )
+    return json.loads(raw)
+
+
+def test_checked_publication_readiness_packet_is_immutable_historical_evidence() -> None:
+    packet = _historical_packet()
+    assert packet["packet_id"] == builder.PACKET_ID
+    with pytest.raises(
+        builder.PublicationReadinessError,
+        match="contract source drifted: originals_cultural_review.py",
+    ):
+        builder.build()
 
 
 def test_packet_is_an_exact_six_blocker_hold_not_a_release() -> None:
-    packet = builder.build()
+    packet = _historical_packet()
     assert packet["kind"] == "original_publication_readiness_hold"
     assert packet["scope"] == {
         "product_id": "great_smoky_mountains_ridges_rivers_living_memory",
@@ -44,7 +57,7 @@ def test_packet_is_an_exact_six_blocker_hold_not_a_release() -> None:
 
 
 def test_private_acceptance_is_preserved_without_becoming_publication_evidence() -> None:
-    packet = builder.build()
+    packet = _historical_packet()
     accepted = packet["accepted_private_evidence"]
     assert accepted["current_asset_count"] == 20
     assert accepted["narration_count"] == 13
@@ -63,7 +76,7 @@ def test_private_acceptance_is_preserved_without_becoming_publication_evidence()
 
 
 def test_road_observation_is_explicitly_transient_and_claim_limited() -> None:
-    observation = builder.build()["official_road_observation"]
+    observation = _historical_packet()["official_road_observation"]
     assert observation["safe_statement"] == (
         "The current NPS road check does not list a closure for this chapter."
     )
@@ -79,7 +92,7 @@ def test_road_observation_is_explicitly_transient_and_claim_limited() -> None:
 
 def test_public_record_claims_do_not_invent_cultural_approval() -> None:
     blocker = next(
-        row for row in builder.build()["blockers"]
+        row for row in _historical_packet()["blockers"]
         if row["id"] == "public_record_cultural_scope_contract"
     )
     facts = blocker["facts"]
@@ -90,11 +103,11 @@ def test_public_record_claims_do_not_invent_cultural_approval() -> None:
     assert facts["claim_level_cultural_gate"] == "not_required"
     assert facts["registered_publication_determination_present"] is False
     assert facts["registered_gated_content_approval_present"] is False
-    assert builder.build()["decision_boundary"]["cultural_outreach_performed"] is False
+    assert _historical_packet()["decision_boundary"]["cultural_outreach_performed"] is False
 
 
 def test_private_catalog_and_review_state_remain_fail_closed() -> None:
-    blocker = builder.build()["blockers"][0]
+    blocker = _historical_packet()["blockers"][0]
     facts = blocker["facts"]
     assert facts["completed_publication_reviews"] == [
         "audio_assets_reviewed",
@@ -131,7 +144,7 @@ def test_historical_inputs_bind_the_immutable_s4r_checkpoint() -> None:
 
 
 def test_contract_sources_are_bound_and_external_inputs_are_not_current_claims() -> None:
-    packet = builder.build()
+    packet = _historical_packet()
     for binding_id in (
         "manifest_v2_contract",
         "manifest_v3_contract",

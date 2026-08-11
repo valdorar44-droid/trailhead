@@ -62,6 +62,40 @@ def _route_evidence(source_ids: list[str]) -> dict:
     }
 
 
+def _published_server_manifest(schema_version: int) -> dict:
+    evidence = load_registered_route_evidence("smokies-official-routes-2026-v1")
+    return {
+        "schema_version": schema_version,
+        "route_evidence": {
+            "evidence_id": "smokies-official-routes-2026-v1",
+            "evidence_sha256": canonical_sha256(evidence),
+        },
+        "chapters": [{
+            "id": "foothills_parkway",
+            "default_variant_id": "west_to_east",
+            "variants": [
+                {"id": "west_to_east"},
+                {"id": "east_to_west"},
+            ],
+        }],
+    }
+
+
+def _install_open_server_observation(monkeypatch, schema_version: int) -> None:
+    monkeypatch.setenv("TRAILHEAD_ORIGINALS_ROAD_READINESS_ENABLED", "internal")
+    monkeypatch.setattr(
+        server,
+        "get_published_original_server_manifest",
+        lambda *_args, **_kwargs: _published_server_manifest(schema_version),
+    )
+
+    class Reader:
+        def get(self, **_kwargs):
+            return _feed([])
+
+    monkeypatch.setattr(server, "default_current_road_reader", Reader())
+
+
 def test_nps_feed_parses_active_dates_and_ignores_information_rows():
     snapshot = _feed([
         _record(),
@@ -188,34 +222,7 @@ def test_reader_returns_fresh_cache_on_refresh_failure_but_never_invents_one():
 
 
 def test_start_observation_uses_server_manifest_and_fails_closed(monkeypatch):
-    evidence = load_registered_route_evidence("smokies-official-routes-2026-v1")
-    binding = {
-        "evidence_id": "smokies-official-routes-2026-v1",
-        "evidence_sha256": canonical_sha256(evidence),
-    }
-    monkeypatch.setenv("TRAILHEAD_ORIGINALS_ROAD_READINESS_ENABLED", "internal")
-    monkeypatch.setattr(
-        server,
-        "get_published_original_server_manifest",
-        lambda *_args, **_kwargs: {
-            "schema_version": 2,
-            "route_evidence": binding,
-            "chapters": [{
-                "id": "foothills_parkway",
-                "default_variant_id": "west_to_east",
-                "variants": [
-                    {"id": "west_to_east"},
-                    {"id": "east_to_west"},
-                ],
-            }],
-        },
-    )
-
-    class Reader:
-        def get(self, **_kwargs):
-            return _feed([])
-
-    monkeypatch.setattr(server, "default_current_road_reader", Reader())
+    _install_open_server_observation(monkeypatch, 2)
     observation = server._trusted_original_road_observation(
         pack_id="great_smoky_mountains_ridges_rivers_living_memory",
         version=1,
@@ -243,6 +250,57 @@ def test_start_observation_uses_server_manifest_and_fails_closed(monkeypatch):
             raise OriginalCurrentRoadsError("unavailable")
 
     monkeypatch.setattr(server, "default_current_road_reader", FailingReader())
+    assert server._trusted_original_road_observation(
+        pack_id="great_smoky_mountains_ridges_rivers_living_memory",
+        version=1,
+        chapter_id="foothills_parkway",
+        variant_id="west_to_east",
+        user={"id": 7, "is_admin": True},
+        now=NOW,
+    ) is None
+
+
+def test_v3_start_observation_accepts_explicit_variant(monkeypatch):
+    _install_open_server_observation(monkeypatch, 3)
+
+    observation = server._trusted_original_road_observation(
+        pack_id="great_smoky_mountains_ridges_rivers_living_memory",
+        version=1,
+        chapter_id="foothills_parkway",
+        variant_id="west_to_east",
+        user={"id": 7, "is_admin": True},
+        now=NOW,
+    )
+
+    assert observation is not None
+    assert set(observation["road_states"].values()) == {"open"}
+
+
+def test_v3_start_observation_accepts_default_variant(monkeypatch):
+    _install_open_server_observation(monkeypatch, 3)
+
+    observation = server._trusted_original_road_observation(
+        pack_id="great_smoky_mountains_ridges_rivers_living_memory",
+        version=1,
+        chapter_id="foothills_parkway",
+        variant_id=None,
+        user={"id": 7, "is_admin": True},
+        now=NOW,
+    )
+
+    assert observation is not None
+    assert set(observation["road_states"].values()) == {"open"}
+
+
+def test_v3_start_observation_fails_closed_when_feed_is_unavailable(monkeypatch):
+    _install_open_server_observation(monkeypatch, 3)
+
+    class FailingReader:
+        def get(self, **_kwargs):
+            raise OriginalCurrentRoadsError("unavailable")
+
+    monkeypatch.setattr(server, "default_current_road_reader", FailingReader())
+
     assert server._trusted_original_road_observation(
         pack_id="great_smoky_mountains_ridges_rivers_living_memory",
         version=1,

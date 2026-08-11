@@ -10840,7 +10840,10 @@ def _trusted_original_road_observation(
         version,
         user_id=user["id"] if user else None,
     )
-    if not isinstance(manifest, dict) or int(manifest.get("schema_version") or 0) != 2:
+    if (
+        not isinstance(manifest, dict)
+        or int(manifest.get("schema_version") or 0) not in {2, 3}
+    ):
         return None
     chapter = next((
         item

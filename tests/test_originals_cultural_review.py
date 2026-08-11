@@ -59,6 +59,45 @@ def _install_gated_kuwohi_dossier(tmp_path, monkeypatch):
     return _install_dossier(payload, tmp_path, monkeypatch)
 
 
+def _determination_for_current_dossier():
+    registry = cultural._dossier_registry()
+    return {
+        "schema_version": 1,
+        "kind": "trailhead_original_public_record_scope_determination",
+        "determination_id": cultural.SMOKIES_PUBLIC_RECORD_SCOPE_DETERMINATION_ID,
+        "product_id": SMOKIES_PRODUCT,
+        "status": "accepted_internal_scope_determination",
+        "scope": "exact_checked_in_public_record_factual_claims_only",
+        "authority": "Trailhead project owner",
+        "authorization_basis": (
+            "project_owner_authorized_internal_source_scope_determination"
+        ),
+        "authorized_at": "2026-08-10",
+        "determination_basis": (
+            "source_verified published public records bound by the immutable "
+            "source dossier"
+        ),
+        "dossier_sha256": registry["dossier_sha256"],
+        "public_record_claim_ids": sorted(registry["public_record_claim_ids"]),
+        "external_outreach_required": False,
+        "external_outreach_performed": False,
+        "ebci_approval_claimed": False,
+        "prohibited_until_approved": sorted(cultural.CULTURAL_PROHIBITIONS_V1),
+    }
+
+
+def _install_determination(record, tmp_path, monkeypatch):
+    path = tmp_path / "public-record-scope.json"
+    raw = json.dumps(record, separators=(",", ":"), sort_keys=True).encode()
+    path.write_bytes(raw)
+    monkeypatch.setitem(
+        cultural._REGISTERED_PUBLIC_RECORD_SCOPE_DETERMINATIONS,
+        cultural.SMOKIES_PUBLIC_RECORD_SCOPE_DETERMINATION_ID,
+        (path, hashlib.sha256(raw).hexdigest()),
+    )
+    return path
+
+
 def test_smokies_story_claims_are_exact_and_unknown_ids_fail_closed():
     binding = cultural.validate_cultural_story_claims(
         product_id=SMOKIES_PRODUCT,
@@ -92,13 +131,66 @@ def test_smokies_story_claims_are_exact_and_unknown_ids_fail_closed():
         )
 
 
-def test_public_record_drafting_scope_is_not_publication_approval():
-    with pytest.raises(
-        cultural.OriginalCulturalReviewError,
-        match="scope determination is required before this Original can be published",
-    ):
-        cultural.validate_cultural_publication_scope(SMOKIES_PRODUCT)
+def test_registered_internal_public_record_scope_allows_exact_current_dossier():
+    registry = cultural._dossier_registry()
+    assert registry["cultural_status"] == "public_record_only"
+    assert len(registry["public_record_claim_ids"]) == 47
+    assert not registry["required_claim_ids"]
+    assert {
+        claim_id.split("_", 1)[0]
+        for claim_id in registry["public_record_claim_ids"]
+    } == {"cc", "fp", "mc", "rf"}
+
+    cultural.validate_cultural_publication_scope(SMOKIES_PRODUCT)
     cultural.validate_cultural_publication_scope("another_original")
+
+
+def test_public_record_determination_is_hash_and_claim_set_bound(
+    tmp_path, monkeypatch
+):
+    record = _determination_for_current_dossier()
+    path = _install_determination(record, tmp_path, monkeypatch)
+    monkeypatch.setitem(
+        cultural._REGISTERED_PUBLIC_RECORD_SCOPE_DETERMINATIONS,
+        cultural.SMOKIES_PUBLIC_RECORD_SCOPE_DETERMINATION_ID,
+        (path, "0" * 64),
+    )
+    with pytest.raises(cultural.OriginalCulturalReviewError, match="hash"):
+        cultural.validate_cultural_publication_scope(SMOKIES_PRODUCT)
+
+    record["public_record_claim_ids"].pop()
+    _install_determination(record, tmp_path, monkeypatch)
+    with pytest.raises(cultural.OriginalCulturalReviewError, match="claim set"):
+        cultural.validate_cultural_publication_scope(SMOKIES_PRODUCT)
+
+
+def test_internal_determination_cannot_claim_outreach_or_ebci_approval(
+    tmp_path, monkeypatch
+):
+    record = _determination_for_current_dossier()
+    record["external_outreach_required"] = True
+    _install_determination(record, tmp_path, monkeypatch)
+    with pytest.raises(cultural.OriginalCulturalReviewError, match="does not match"):
+        cultural.validate_cultural_publication_scope(SMOKIES_PRODUCT)
+
+    record["external_outreach_required"] = False
+    record["ebci_approval_claimed"] = True
+    _install_determination(record, tmp_path, monkeypatch)
+    with pytest.raises(cultural.OriginalCulturalReviewError, match="does not match"):
+        cultural.validate_cultural_publication_scope(SMOKIES_PRODUCT)
+
+
+def test_public_record_determination_does_not_release_mixed_gated_claims(
+    tmp_path, monkeypatch
+):
+    _install_gated_kuwohi_dossier(tmp_path, monkeypatch)
+    _install_determination(
+        _determination_for_current_dossier(),
+        tmp_path,
+        monkeypatch,
+    )
+    with pytest.raises(cultural.OriginalCulturalReviewError, match="EBCI cultural approval"):
+        cultural.validate_cultural_publication_scope(SMOKIES_PRODUCT)
 
 
 def test_runtime_registry_rejects_scope_and_status_drift(tmp_path, monkeypatch):
@@ -112,6 +204,26 @@ def test_runtime_registry_rejects_scope_and_status_drift(tmp_path, monkeypatch):
     ]
     _install_dossier(payload, tmp_path, monkeypatch)
     with pytest.raises(cultural.OriginalCulturalReviewError, match="public-record scope"):
+        cultural._dossier_registry()
+
+    payload = build_dossier()
+    claim = next(
+        item for item in payload["claims"]
+        if item["id"] == "mc_kuwohi_public_record"
+    )
+    claim["status"] = "cultural_review_required"
+    _install_dossier(payload, tmp_path, monkeypatch)
+    with pytest.raises(cultural.OriginalCulturalReviewError, match="not source verified"):
+        cultural._dossier_registry()
+
+    payload = build_dossier()
+    claim = next(
+        item for item in payload["claims"]
+        if item["id"] == "mc_kuwohi_public_record"
+    )
+    claim["source_ids"] = []
+    _install_dossier(payload, tmp_path, monkeypatch)
+    with pytest.raises(cultural.OriginalCulturalReviewError, match="source binding"):
         cultural._dossier_registry()
 
     payload = _install_gated_kuwohi_dossier(tmp_path, monkeypatch)

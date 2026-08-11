@@ -43,11 +43,18 @@ def test_strong_check_is_network_free_and_requires_local_evidence() -> None:
     assert result.stdout == ""
 
 
-def test_ci_safe_check_recomputes_tracked_sources_without_ignored_audio(
+def test_historical_check_fails_closed_after_readiness_registry_advances(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(builder, "_local_evidence_available", lambda: False)
-    assert builder.main(["--check"]) == 0
+    with pytest.raises(
+        builder.CharacterizationError,
+        match=(
+            "timing semantics source drifted: "
+            "mobile/scripts/validate-original-long-form.ts"
+        ),
+    ):
+        builder.main(["--check"])
 
 
 def test_publication_boundary_and_exact_delivery_classification() -> None:
@@ -264,7 +271,21 @@ def test_final_source_hashes_and_route_geometry_are_bound() -> None:
     }
 
 
-def test_tracked_tampering_fails_closed_without_private_audio() -> None:
+def test_tracked_tampering_fails_closed_against_historical_source_bindings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    readiness = json.loads(builder.READINESS_PATH.read_text(encoding="utf-8"))
+    historical_hash = readiness["source_sha256_by_path"][
+        "mobile/scripts/validate-original-long-form.ts"
+    ]
+    current_sha256_path = builder._sha256_path
+
+    def historical_sha256_path(path: Path) -> str:
+        if path == builder.REPOSITORY / "mobile/scripts/validate-original-long-form.ts":
+            return historical_hash
+        return current_sha256_path(path)
+
+    monkeypatch.setattr(builder, "_sha256_path", historical_sha256_path)
     value = _tracked()
     mutated = copy.deepcopy(value)
     mutated["renderer_evidence"]["assets"][0]["audio_sha256"] = "0" * 64

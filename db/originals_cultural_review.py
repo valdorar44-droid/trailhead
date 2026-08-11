@@ -30,6 +30,26 @@ DEFAULT_SMOKIES_SOURCE_DOSSIER = (
     / "smokies"
     / "source_dossiers_v1.json"
 )
+DEFAULT_SMOKIES_PUBLIC_RECORD_SCOPE_DETERMINATION = (
+    Path(__file__).resolve().parents[1]
+    / "originals"
+    / "smokies"
+    / "smokies_public_record_scope_determination_v1.json"
+)
+SMOKIES_PUBLIC_RECORD_SCOPE_DETERMINATION_ID = (
+    "smokies_public_record_scope_2026_v1"
+)
+
+# The expected file hash makes the checked-in internal determination immutable
+# at runtime instead of trusting whichever bytes happen to exist at its path.
+_REGISTERED_PUBLIC_RECORD_SCOPE_DETERMINATIONS: dict[
+    str, tuple[Path, str]
+] = {
+    SMOKIES_PUBLIC_RECORD_SCOPE_DETERMINATION_ID: (
+        DEFAULT_SMOKIES_PUBLIC_RECORD_SCOPE_DETERMINATION,
+        "bea2ed1a3a5df0a54c7369ec3738155a5530cea93f26531959475442b9758f3d",
+    )
+}
 
 # Approval records are deliberately empty until Trailhead completes the
 # compensated EBCI review and checks in the resulting immutable attestation.
@@ -99,6 +119,25 @@ def _dossier_registry() -> dict[str, Any]:
         raise OriginalCulturalReviewError(
             "The checked-in Smokies cultural claim registry is invalid"
         )
+    raw_sources = payload.get("sources")
+    if not isinstance(raw_sources, list):
+        raise OriginalCulturalReviewError(
+            "The checked-in Smokies source registry is invalid"
+        )
+    source_ids = []
+    for raw_source in raw_sources:
+        source = _object(raw_source, "A Smokies source-dossier source")
+        source_id = str(source.get("id") or "").strip()
+        if not source_id:
+            raise OriginalCulturalReviewError(
+                "The checked-in Smokies source registry is incomplete"
+            )
+        source_ids.append(source_id)
+    if len(source_ids) != len(set(source_ids)):
+        raise OriginalCulturalReviewError(
+            "The checked-in Smokies source registry is incomplete"
+        )
+    registered_source_ids = frozenset(source_ids)
     claim_gates: dict[str, str] = {}
     claim_scopes: dict[str, dict[str, Any]] = {}
     for raw_claim in claims:
@@ -115,6 +154,8 @@ def _dossier_registry() -> dict[str, Any]:
             )
         classification = str(scope.get("classification") or "").strip()
         collection_method = str(scope.get("collection_method") or "").strip()
+        claim_status = str(claim.get("status") or "").strip()
+        raw_source_ids = claim.get("source_ids")
         raw_triggers = scope.get("review_triggers")
         if (
             not isinstance(raw_triggers, list)
@@ -124,6 +165,19 @@ def _dossier_registry() -> dict[str, Any]:
         ):
             raise OriginalCulturalReviewError(
                 "The checked-in Smokies cultural review triggers are invalid"
+            )
+        if (
+            not isinstance(raw_source_ids, list)
+            or any(
+                not isinstance(item, str) or not item.strip()
+                for item in raw_source_ids
+            )
+            or not raw_source_ids
+            or len(raw_source_ids) != len(set(raw_source_ids))
+            or not set(raw_source_ids).issubset(registered_source_ids)
+        ):
+            raise OriginalCulturalReviewError(
+                "The checked-in Smokies claim source binding is invalid"
             )
         if (
             not claim_id
@@ -144,6 +198,15 @@ def _dossier_registry() -> dict[str, Any]:
                 raise OriginalCulturalReviewError(
                     "The checked-in Smokies gated cultural scope is incomplete"
                 )
+            expected_claim_status = (
+                "cultural_review_approved"
+                if cultural_status == "approved"
+                else "cultural_review_required"
+            )
+            if claim_status != expected_claim_status:
+                raise OriginalCulturalReviewError(
+                    "The checked-in Smokies gated claim status is inconsistent"
+                )
         elif (
             {
                 "classification": classification,
@@ -153,6 +216,10 @@ def _dossier_registry() -> dict[str, Any]:
         ):
             raise OriginalCulturalReviewError(
                 "The checked-in Smokies public-record scope does not match its claim gate"
+            )
+        elif claim_status != "source_verified":
+            raise OriginalCulturalReviewError(
+                "The checked-in Smokies public-record claim is not source verified"
             )
         claim_gates[claim_id] = gate
         claim_scopes[claim_id] = {
@@ -229,6 +296,11 @@ def _dossier_registry() -> dict[str, Any]:
         "claim_gates": claim_gates,
         "claim_scopes": claim_scopes,
         "story_claims": story_claims,
+        "public_record_claim_ids": frozenset(
+            claim_id
+            for claim_id, gate in claim_gates.items()
+            if gate == "not_required"
+        ),
         "required_claim_ids": required,
     }
 
@@ -244,21 +316,123 @@ def cultural_dossier_binding(product_id: str) -> dict | None:
     }
 
 
-def validate_cultural_publication_scope(product_id: str) -> None:
-    """Require an immutable EBCI scope or approval record before public release.
+def _validate_public_record_scope_determination(registry: dict[str, Any]) -> None:
+    registration = _REGISTERED_PUBLIC_RECORD_SCOPE_DETERMINATIONS.get(
+        SMOKIES_PUBLIC_RECORD_SCOPE_DETERMINATION_ID
+    )
+    if registration is None:
+        raise OriginalCulturalReviewError(
+            "An immutable internal public-record scope determination is required "
+            "before this Original can be published"
+        )
+    path, expected_sha256 = registration
+    try:
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise OriginalCulturalReviewError(
+            "The registered public-record scope determination could not be loaded"
+        ) from exc
+    if hashlib.sha256(raw).hexdigest() != expected_sha256:
+        raise OriginalCulturalReviewError(
+            "The registered public-record scope determination hash does not match"
+        )
+    try:
+        record = _object(
+            json.loads(raw),
+            "The registered public-record scope determination",
+        )
+    except json.JSONDecodeError as exc:
+        raise OriginalCulturalReviewError(
+            "The registered public-record scope determination is invalid"
+        ) from exc
+    allowed_keys = {
+        "schema_version",
+        "kind",
+        "determination_id",
+        "product_id",
+        "status",
+        "scope",
+        "authority",
+        "authorization_basis",
+        "authorized_at",
+        "determination_basis",
+        "dossier_sha256",
+        "public_record_claim_ids",
+        "external_outreach_required",
+        "external_outreach_performed",
+        "ebci_approval_claimed",
+        "prohibited_until_approved",
+    }
+    if set(record) != allowed_keys:
+        raise OriginalCulturalReviewError(
+            "The registered public-record scope determination contract is invalid"
+        )
+    if (
+        record.get("schema_version") != 1
+        or record.get("kind")
+        != "trailhead_original_public_record_scope_determination"
+        or record.get("determination_id")
+        != SMOKIES_PUBLIC_RECORD_SCOPE_DETERMINATION_ID
+        or record.get("product_id") != registry["product_id"]
+        or record.get("status") != "accepted_internal_scope_determination"
+        or record.get("scope")
+        != "exact_checked_in_public_record_factual_claims_only"
+        or record.get("authority") != "Trailhead project owner"
+        or record.get("authorization_basis")
+        != "project_owner_authorized_internal_source_scope_determination"
+        or record.get("determination_basis")
+        != "source_verified published public records bound by the immutable source dossier"
+        or record.get("dossier_sha256") != registry["dossier_sha256"]
+        or record.get("external_outreach_required") is not False
+        or record.get("external_outreach_performed") is not False
+        or record.get("ebci_approval_claimed") is not False
+    ):
+        raise OriginalCulturalReviewError(
+            "The registered public-record scope determination does not match this Original"
+        )
+    try:
+        date.fromisoformat(str(record.get("authorized_at") or ""))
+    except ValueError as exc:
+        raise OriginalCulturalReviewError(
+            "The registered public-record scope determination date is invalid"
+        ) from exc
+    raw_claim_ids = record.get("public_record_claim_ids")
+    if (
+        not isinstance(raw_claim_ids, list)
+        or any(not isinstance(item, str) or not item.strip() for item in raw_claim_ids)
+        or raw_claim_ids != sorted(raw_claim_ids)
+        or len(raw_claim_ids) != len(set(raw_claim_ids))
+        or frozenset(raw_claim_ids) != registry["public_record_claim_ids"]
+    ):
+        raise OriginalCulturalReviewError(
+            "The registered public-record scope determination claim set does not match"
+        )
+    raw_prohibitions = record.get("prohibited_until_approved")
+    if (
+        not isinstance(raw_prohibitions, list)
+        or raw_prohibitions != sorted(raw_prohibitions)
+        or set(raw_prohibitions) != CULTURAL_PROHIBITIONS_V1
+    ):
+        raise OriginalCulturalReviewError(
+            "The registered public-record scope determination weakens cultural safeguards"
+        )
 
-    Public official records may be drafted and reviewed internally, but the
-    absence of a published public-record exemption is not treated as release
-    approval for a commercial Original.
-    """
+
+def validate_cultural_publication_scope(product_id: str) -> None:
+    """Accept exact public records internally; keep gated material fail-closed."""
 
     registry = _dossier_registry()
     if str(product_id or "").strip() != registry["product_id"]:
         return
-    if registry["cultural_status"] != "approved":
+    if registry["public_record_claim_ids"]:
+        _validate_public_record_scope_determination(registry)
+    if (
+        registry["required_claim_ids"]
+        and registry["cultural_status"] != "approved"
+    ):
         raise OriginalCulturalReviewError(
-            "An immutable EBCI cultural scope determination is required before "
-            "this Original can be published"
+            "An immutable EBCI cultural approval is required before gated material "
+            "in this Original can be published"
         )
 
 

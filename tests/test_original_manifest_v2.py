@@ -872,12 +872,12 @@ def test_v2_blocks_ebci_claims_until_an_immutable_approval_is_registered(
     cultural._dossier_registry.cache_clear()
 
 
-def test_v2_public_record_drafting_scope_cannot_publish():
+def test_v2_public_record_scope_does_not_bypass_exact_story_binding():
     payload = _v2_payload()
     payload["pack_id"] = "great_smoky_mountains_ridges_rivers_living_memory"
     with pytest.raises(
         OriginalManifestV2Error,
-        match="scope determination is required before this Original can be published",
+        match="story moab_story_01 is not registered in the Smokies source dossier",
     ):
         store._normalize_original_manifest(
             payload["pack_id"],

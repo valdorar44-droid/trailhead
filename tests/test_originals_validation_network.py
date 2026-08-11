@@ -1,3 +1,5 @@
+import copy
+import hashlib
 import json
 import subprocess
 from datetime import datetime, timezone
@@ -5,6 +7,30 @@ import unittest
 from unittest.mock import patch
 
 from db import originals_validation as validation
+
+
+def _roaring_fork_validation_selection_item():
+    evidence = json.loads((
+        validation.REPO_ROOT / "originals/smokies/official_route_evidence_v1.json"
+    ).read_text(encoding="utf-8"))
+    route = next(
+        item for item in evidence["variants"]
+        if item["chapter_id"] == "roaring_fork"
+        and item["variant_id"] == "one_way"
+    )
+    return {
+        "manifest": {
+            "pack_id": "great_smoky_mountains_ridges_rivers_living_memory",
+            "route": {"geometry": copy.deepcopy(route["geometry"])},
+        },
+        "selection": {
+            "chapter_id": "roaring_fork",
+            "variant_id": "one_way",
+            "delivery_contract_sha256": (
+                "9081a647a7df0e59df4bb40506ba9bfa96c750536fb715ee31b3e9ee68ee20d6"
+            ),
+        },
+    }
 
 
 def _encode_polyline6(points):
@@ -189,6 +215,120 @@ def _manifest(coordinates):
             }],
         }],
     }
+
+
+class OriginalRouteNetworkValidationTargetTests(unittest.TestCase):
+    def setUp(self):
+        self.selection_item = _roaring_fork_validation_selection_item()
+        coordinates = self.selection_item["manifest"]["route"]["geometry"][
+            "coordinates"
+        ]
+        self.target_url = "http://south-tn.internal:8002"
+        self.area_config = json.dumps([{
+            "id": "south_tn",
+            "url": self.target_url,
+            "bounds": {
+                "s": min(point[1] for point in coordinates) - 0.1,
+                "w": min(point[0] for point in coordinates) - 0.1,
+                "n": max(point[1] for point in coordinates) + 0.1,
+                "e": max(point[0] for point in coordinates) + 0.1,
+            },
+        }])
+
+    def test_exact_r2_binding_resolves_existing_target_without_exposing_url(self):
+        before = copy.deepcopy(self.selection_item)
+        result = validation.trusted_original_route_network_validation_target(
+            self.selection_item,
+            configured_area_urls=self.area_config,
+        )
+
+        self.assertEqual(self.selection_item, before)
+        self.assertEqual(result["valhalla_url"], self.target_url)
+        evidence = result["evidence"]
+        self.assertEqual(evidence["target_id"], "south_tn")
+        self.assertEqual(evidence["route_point_count"], 1_175)
+        self.assertEqual(
+            evidence["geometry_sha256"],
+            "8265453122ca82a8583d1aabc66a95cf2787537c45b2fbe6195d699914521481",
+        )
+        self.assertEqual(
+            evidence["target_binding_sha256"],
+            hashlib.sha256(json.dumps({
+                "id": "south_tn",
+                "bounds": json.loads(self.area_config)[0]["bounds"],
+                "url": self.target_url,
+            }, separators=(",", ":"), sort_keys=True).encode("utf-8")).hexdigest(),
+        )
+        self.assertNotIn(self.target_url, json.dumps(evidence, sort_keys=True))
+        self.assertTrue(evidence["validation_only"])
+        self.assertFalse(evidence["draft_mutated"])
+        self.assertFalse(evidence["global_config_mutated"])
+        self.assertFalse(evidence["public_release_authorized"])
+
+    def test_non_roaring_fork_selection_is_a_config_independent_noop(self):
+        generic = copy.deepcopy(self.selection_item)
+        generic["manifest"]["pack_id"] = "another_original"
+        result = validation.trusted_original_route_network_validation_target(
+            generic,
+            configured_area_urls="",
+        )
+        self.assertIsNone(result)
+
+        legacy_v1 = {
+            "key": "manifest",
+            "selection": None,
+            "manifest": {"schema_version": 1},
+        }
+        self.assertIsNone(
+            validation.trusted_original_route_network_validation_target(
+                legacy_v1,
+                configured_area_urls="",
+            )
+        )
+
+    def test_r2_identity_and_config_drift_fail_closed(self):
+        geometry_drift = copy.deepcopy(self.selection_item)
+        geometry_drift["manifest"]["route"]["geometry"]["coordinates"][0][0] += 0.001
+        contract_drift = copy.deepcopy(self.selection_item)
+        contract_drift["selection"]["delivery_contract_sha256"] = "f" * 64
+        for label, selection_item in (
+            ("geometry", geometry_drift),
+            ("delivery contract", contract_drift),
+        ):
+            with self.subTest(label=label):
+                with self.assertRaisesRegex(
+                    validation.OriginalValidationRunnerError,
+                    "different R2 input",
+                ):
+                    validation.trusted_original_route_network_validation_target(
+                        selection_item,
+                        configured_area_urls=self.area_config,
+                    )
+
+        out_of_bounds = json.dumps([{
+            "id": "south_tn",
+            "url": self.target_url,
+            "bounds": {"s": 0, "w": 0, "n": 1, "e": 1},
+        }])
+        with self.assertRaisesRegex(
+            validation.OriginalValidationRunnerError,
+            "outside the configured south_tn target",
+        ):
+            validation.trusted_original_route_network_validation_target(
+                self.selection_item,
+                configured_area_urls=out_of_bounds,
+            )
+
+        query_url = json.loads(self.area_config)
+        query_url[0]["url"] = f"{self.target_url}?graph=south_tn"
+        with self.assertRaisesRegex(
+            validation.OriginalValidationRunnerError,
+            "validation area URL is invalid",
+        ):
+            validation.trusted_original_route_network_validation_target(
+                self.selection_item,
+                configured_area_urls=json.dumps(query_url),
+            )
 
 
 class OriginalRouteNetworkValidationTests(unittest.TestCase):

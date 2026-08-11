@@ -12,6 +12,7 @@ from pathlib import Path
 import subprocess
 from typing import Any, Iterable
 from urllib import error as urllib_error, request as urllib_request
+from urllib.parse import urlsplit
 
 
 class OriginalValidationRunnerError(RuntimeError):
@@ -25,8 +26,14 @@ LONG_FORM_RUNNER_PATH = MOBILE_ROOT / "scripts" / "validate-original-long-form.t
 LONG_FORM_PREFLIGHT_PATH = Path(
     "originals/smokies/roaring_fork_trigger_preflight_v1.json"
 )
-LONG_FORM_READINESS_PATH = Path(
+LEGACY_LONG_FORM_READINESS_PATH = Path(
     "originals/smokies/roaring_fork_delivery_readiness_v1.json"
+)
+LONG_FORM_READINESS_PATH = Path(
+    "originals/smokies/roaring_fork_delivery_readiness_v2.json"
+)
+ROARING_FORK_ROUTE_NETWORK_TARGET_PATH = Path(
+    "originals/smokies/roaring_fork_route_network_validation_target_v1.json"
 )
 MAX_OUTPUT_BYTES = 2 * 1024 * 1024
 DEFAULT_VALIDATOR_TIMEOUT_SECONDS = 180
@@ -42,6 +49,7 @@ MAX_NETWORK_DISTANCE_DELTA_M = 300.0
 ROUTE_NETWORK_OVERRIDE_MAX_AGE_DAYS = 30
 TRUSTED_VALIDATOR_SOURCE_PATHS = (
     Path("db/originals_validation.py"),
+    ROARING_FORK_ROUTE_NETWORK_TARGET_PATH,
     Path("mobile/lib/routeProjection.ts"),
     Path("mobile/lib/originals/manifest.ts"),
     Path("mobile/lib/originals/routeProjection.ts"),
@@ -66,7 +74,9 @@ TRUSTED_LONG_FORM_VALIDATOR_SOURCE_PATHS = (
     Path("originals/smokies/editorial_roaring_fork_v1.json"),
     Path("originals/smokies/official_route_evidence_v1.json"),
     LONG_FORM_PREFLIGHT_PATH,
+    LEGACY_LONG_FORM_READINESS_PATH,
     LONG_FORM_READINESS_PATH,
+    ROARING_FORK_ROUTE_NETWORK_TARGET_PATH,
     Path("originals/smokies/source_dossiers_v1.json"),
     Path("scripts/build_smokies_roaring_fork_trigger_preflight.py"),
     Path("scripts/build_smokies_long_form_delivery_readiness.py"),
@@ -134,7 +144,7 @@ ORIGINAL_LONG_FORM_CHECKED_DELIVERY_EVIDENCE = {
         "roaring_fork",
         "one_way",
     ): {
-        "evidence_id": "smokies_roaring_fork_delivery_v1",
+        "evidence_id": "smokies_roaring_fork_delivery_v2",
         "artifact_path": LONG_FORM_PREFLIGHT_PATH,
         "readiness_path": LONG_FORM_READINESS_PATH,
     },
@@ -1664,6 +1674,232 @@ _OVERRIDABLE_NETWORK_FINDINGS = {
     "restricted_road_use",
     "unpaved_surface",
 }
+
+
+def _configured_original_validation_area_target(
+    required_area_id: str,
+    configured_area_urls: str,
+) -> dict:
+    """Resolve one existing area target without changing or exposing global config."""
+
+    raw = str(configured_area_urls or "").strip()
+    if not raw:
+        raise OriginalValidationRunnerError(
+            "Configured Valhalla area targets are unavailable"
+        )
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        parsed = []
+        for chunk in raw.split(";"):
+            parts = [part.strip() for part in chunk.split("|")]
+            if len(parts) < 6:
+                continue
+            parsed.append({
+                "id": parts[0],
+                "url": parts[1],
+                "bounds": {
+                    "s": parts[2], "w": parts[3],
+                    "n": parts[4], "e": parts[5],
+                },
+            })
+    if isinstance(parsed, dict):
+        parsed = parsed.get("areas")
+    if not isinstance(parsed, list):
+        raise OriginalValidationRunnerError(
+            "Configured Valhalla area targets are invalid"
+        )
+
+    matches = [
+        item for item in parsed
+        if isinstance(item, dict)
+        and str(item.get("id") or item.get("name") or "").strip()
+        == required_area_id
+    ]
+    if len(matches) != 1:
+        raise OriginalValidationRunnerError(
+            "Required Valhalla validation area target is unavailable or ambiguous"
+        )
+    match = matches[0]
+    url = str(match.get("url") or "").strip().rstrip("/")
+    parsed_url = urlsplit(url)
+    if (
+        parsed_url.scheme not in {"http", "https"}
+        or not parsed_url.netloc
+        or parsed_url.username is not None
+        or parsed_url.password is not None
+        or bool(parsed_url.query)
+        or bool(parsed_url.fragment)
+    ):
+        raise OriginalValidationRunnerError(
+            "Required Valhalla validation area URL is invalid"
+        )
+    bounds = match.get("bounds")
+    if not isinstance(bounds, dict):
+        raise OriginalValidationRunnerError(
+            "Required Valhalla validation area bounds are unavailable"
+        )
+    try:
+        clean_bounds = {
+            key: float(bounds[key]) for key in ("s", "w", "n", "e")
+        }
+    except (KeyError, TypeError, ValueError) as exc:
+        raise OriginalValidationRunnerError(
+            "Required Valhalla validation area bounds are invalid"
+        ) from exc
+    if (
+        any(not math.isfinite(value) for value in clean_bounds.values())
+        or not -90 <= clean_bounds["s"] < clean_bounds["n"] <= 90
+        or not -180 <= clean_bounds["w"] < clean_bounds["e"] <= 180
+    ):
+        raise OriginalValidationRunnerError(
+            "Required Valhalla validation area bounds are invalid"
+        )
+    return {"id": required_area_id, "url": url, "bounds": clean_bounds}
+
+
+def trusted_original_route_network_validation_target(
+    selection_item: dict,
+    *,
+    configured_area_urls: str,
+) -> dict | None:
+    """Resolve the existing area target authorized for exact Roaring Fork R2.
+
+    The raw configured URL is returned only to the trusted caller. Durable
+    evidence receives only the target ID and its canonical binding hash, not
+    the internal URL, and neither the draft nor the process-global Valhalla
+    configuration is changed.
+    """
+
+    manifest = selection_item.get("manifest") if isinstance(selection_item, dict) else None
+    selection = selection_item.get("selection") if isinstance(selection_item, dict) else None
+    if not isinstance(manifest, dict):
+        raise OriginalValidationRunnerError(
+            "Trusted route-network target selection is invalid"
+        )
+    # Schema V1 compiles as the root manifest with no chapter/variant
+    # selection. It is outside the source-controlled RF target registry.
+    if selection is None:
+        return None
+    if not isinstance(selection, dict):
+        raise OriginalValidationRunnerError(
+            "Trusted route-network target selection is invalid"
+        )
+    key = (
+        str(manifest.get("pack_id") or "").strip(),
+        str(selection.get("chapter_id") or "").strip(),
+        str(selection.get("variant_id") or "").strip(),
+    )
+    expected_key = (
+        "great_smoky_mountains_ridges_rivers_living_memory",
+        "roaring_fork",
+        "one_way",
+    )
+    if key != expected_key:
+        return None
+
+    path = REPO_ROOT / ROARING_FORK_ROUTE_NETWORK_TARGET_PATH
+    if not path.is_file():
+        raise OriginalValidationRunnerError(
+            "Checked Roaring Fork route-network target evidence is unavailable"
+        )
+    raw = path.read_bytes()
+    try:
+        artifact = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise OriginalValidationRunnerError(
+            "Checked Roaring Fork route-network target evidence is invalid"
+        ) from exc
+    expected_keys = {
+        "schema_version", "kind", "evidence_id", "product_id", "chapter_id",
+        "variant_id", "geometry_sha256", "delivery_contract_sha256",
+        "required_area_id", "require_full_geometry_within_configured_bounds",
+        "authorization",
+    }
+    expected_authorization = {
+        "decision": "allow_validation_only_route_target",
+        "project_owner_authorized": True,
+        "source_task_id": "019fe9fb-cafa-75d3-b663-1e5051731cd5",
+        "draft_mutation_authorized": False,
+        "global_valhalla_reconfiguration_authorized": False,
+        "public_release_authorized": False,
+        "cultural_scope_expansion_authorized": False,
+    }
+    if (
+        not isinstance(artifact, dict)
+        or set(artifact) != expected_keys
+        or artifact.get("schema_version") != 1
+        or artifact.get("kind")
+        != "original_route_network_validation_target_authorization"
+        or artifact.get("evidence_id")
+        != "smokies_roaring_fork_route_network_validation_target_20260810_v1"
+        or (
+            artifact.get("product_id"), artifact.get("chapter_id"),
+            artifact.get("variant_id"),
+        ) != expected_key
+        or artifact.get("required_area_id") != "south_tn"
+        or artifact.get("require_full_geometry_within_configured_bounds") is not True
+        or artifact.get("authorization") != expected_authorization
+    ):
+        raise OriginalValidationRunnerError(
+            "Checked Roaring Fork route-network target contract is invalid"
+        )
+
+    coordinates = manifest.get("route", {}).get("geometry", {}).get("coordinates") or []
+    geometry_sha256 = original_route_geometry_sha256(coordinates)
+    delivery_contract_sha256 = str(
+        selection.get("delivery_contract_sha256") or ""
+    ).strip().lower()
+    if (
+        artifact.get("geometry_sha256") != geometry_sha256
+        or artifact.get("delivery_contract_sha256") != delivery_contract_sha256
+    ):
+        raise OriginalValidationRunnerError(
+            "Checked Roaring Fork route-network target addresses different R2 input"
+        )
+
+    target = _configured_original_validation_area_target(
+        "south_tn", configured_area_urls,
+    )
+    bounds = target["bounds"]
+    for index, point in enumerate(coordinates):
+        try:
+            lng, lat = float(point[0]), float(point[1])
+        except (IndexError, TypeError, ValueError) as exc:
+            raise OriginalValidationRunnerError(
+                f"Roaring Fork validation coordinate {index + 1} is invalid"
+            ) from exc
+        if not (
+            bounds["s"] <= lat <= bounds["n"]
+            and bounds["w"] <= lng <= bounds["e"]
+        ):
+            raise OriginalValidationRunnerError(
+                "Roaring Fork R2 geometry is outside the configured south_tn target"
+            )
+
+    configuration_binding = {
+        "id": target["id"],
+        "bounds": bounds,
+        "url": target["url"],
+    }
+    evidence = {
+        "schema_version": 1,
+        "evidence_id": artifact["evidence_id"],
+        "evidence_sha256": hashlib.sha256(raw).hexdigest(),
+        "geometry_sha256": geometry_sha256,
+        "delivery_contract_sha256": delivery_contract_sha256,
+        "target_id": target["id"],
+        "target_binding_sha256": hashlib.sha256(json.dumps(
+            configuration_binding,
+            separators=(",", ":"), sort_keys=True, ensure_ascii=False,
+        ).encode("utf-8")).hexdigest(),
+        "route_point_count": len(coordinates),
+        "validation_only": True,
+        "draft_mutated": False,
+        "global_config_mutated": False,
+        "public_release_authorized": False,
+    }
+    return {"valhalla_url": target["url"], "evidence": evidence}
 
 
 def _validated_route_network_override(

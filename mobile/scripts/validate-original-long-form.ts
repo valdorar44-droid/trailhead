@@ -120,9 +120,9 @@ const CHECKED_DELIVERY_EVIDENCE = new Map([
   [
     'great_smoky_mountains_ridges_rivers_living_memory:roaring_fork:one_way',
     {
-      evidence_id: 'smokies_roaring_fork_delivery_v1',
+      evidence_id: 'smokies_roaring_fork_delivery_v2',
       artifact_path: 'originals/smokies/roaring_fork_trigger_preflight_v1.json',
-      readiness_path: 'originals/smokies/roaring_fork_delivery_readiness_v1.json',
+      readiness_path: 'originals/smokies/roaring_fork_delivery_readiness_v2.json',
     },
   ],
 ]);

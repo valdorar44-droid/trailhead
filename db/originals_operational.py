@@ -648,6 +648,87 @@ def validate_manifest_operational_binding(
     return candidate
 
 
+def validate_manifest_operational_validation_projection(
+    *,
+    chapter_id: str,
+    manifest_chapter_ids: object,
+    operational_sources: object,
+    operational_readiness: object,
+    now: datetime | None = None,
+    require_current: bool = False,
+) -> dict[str, Any]:
+    """Validate an exact manifest-local projection for trusted draft validation.
+
+    A private draft may intentionally omit an alternate chapter that exists in
+    the checked operational candidate.  Validation may project the candidate's
+    alternates onto the chapters actually present in that draft, but every
+    other candidate field and source must still match exactly.  Publication and
+    start readiness must continue to use :func:`validate_manifest_operational_binding`.
+    """
+
+    clean_chapter_id = _stable_id(
+        chapter_id, "Manifest validation operational chapter id"
+    )
+    clean_manifest_chapter_ids = _unique_ids(
+        manifest_chapter_ids,
+        "Manifest validation operational chapter ids",
+    )
+    if clean_chapter_id not in clean_manifest_chapter_ids:
+        raise OriginalOperationalReadinessError(
+            "Manifest validation operational chapter is not present in the manifest"
+        )
+
+    readiness = _object(
+        operational_readiness, "Manifest validation operational readiness"
+    )
+    candidate = load_checked_in_operational_candidate(
+        candidate_id=str(readiness.get("candidate_id") or ""),
+        candidate_sha256=str(readiness.get("candidate_sha256") or ""),
+        chapter_id=clean_chapter_id,
+        now=now,
+        require_current=require_current,
+    )
+    projected = manifest_operational_fields(candidate, clean_chapter_id)
+    if operational_sources != projected["operational_sources"]:
+        raise OriginalOperationalReadinessError(
+            "Manifest validation operational sources do not match the checked-in candidate"
+        )
+
+    checked_alternates = list(
+        projected["operational_readiness"]["alternate_chapter_ids"]
+    )
+    manifest_chapter_id_set = set(clean_manifest_chapter_ids)
+    manifest_local_alternates = [
+        alternate_id
+        for alternate_id in checked_alternates
+        if alternate_id in manifest_chapter_id_set
+    ]
+    expected_readiness = copy.deepcopy(projected["operational_readiness"])
+    expected_readiness["alternate_chapter_ids"] = manifest_local_alternates
+    if operational_readiness != expected_readiness:
+        raise OriginalOperationalReadinessError(
+            "Manifest validation operational readiness does not match the "
+            "checked-in candidate's manifest-local projection"
+        )
+
+    return {
+        "schema_version": 1,
+        "kind": "original_operational_validation_projection",
+        "projection_mode": "validation_only_manifest_local_alternates_v1",
+        "chapter_id": clean_chapter_id,
+        "candidate_id": candidate["candidate_id"],
+        "candidate_sha256": operational_candidate_sha256(candidate),
+        "manifest_chapter_ids": sorted(clean_manifest_chapter_ids),
+        "checked_alternate_chapter_ids": checked_alternates,
+        "manifest_local_alternate_chapter_ids": manifest_local_alternates,
+        "omitted_external_alternate_chapter_ids": [
+            alternate_id
+            for alternate_id in checked_alternates
+            if alternate_id not in manifest_chapter_id_set
+        ],
+    }
+
+
 def evaluate_chapter_readiness(
     candidate: object,
     *,

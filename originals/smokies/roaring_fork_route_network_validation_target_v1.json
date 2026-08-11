@@ -1,0 +1,21 @@
+{
+  "authorization": {
+    "cultural_scope_expansion_authorized": false,
+    "decision": "allow_validation_only_route_target",
+    "draft_mutation_authorized": false,
+    "global_valhalla_reconfiguration_authorized": false,
+    "project_owner_authorized": true,
+    "public_release_authorized": false,
+    "source_task_id": "019fe9fb-cafa-75d3-b663-1e5051731cd5"
+  },
+  "chapter_id": "roaring_fork",
+  "delivery_contract_sha256": "9081a647a7df0e59df4bb40506ba9bfa96c750536fb715ee31b3e9ee68ee20d6",
+  "evidence_id": "smokies_roaring_fork_route_network_validation_target_20260810_v1",
+  "geometry_sha256": "8265453122ca82a8583d1aabc66a95cf2787537c45b2fbe6195d699914521481",
+  "kind": "original_route_network_validation_target_authorization",
+  "product_id": "great_smoky_mountains_ridges_rivers_living_memory",
+  "required_area_id": "south_tn",
+  "require_full_geometry_within_configured_bounds": true,
+  "schema_version": 1,
+  "variant_id": "one_way"
+}

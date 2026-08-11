@@ -11,9 +11,11 @@ from db.originals_validation import (
     normalize_original_long_form_validation_output,
     normalize_original_validation_output,
     original_long_form_audio_binding,
+    original_long_form_preflight_binding,
     original_route_geometry_sha256,
     run_originals_long_form_validation_cli,
     run_originals_validation_cli,
+    trusted_original_route_network_validation_target,
     trusted_originals_long_form_validator_source_sha256,
     trusted_originals_validator_source_sha256,
     validate_original_route_network,
@@ -36,6 +38,7 @@ from db.originals_operational import (
     evaluate_chapter_readiness,
     operational_candidate_sha256,
     validate_manifest_operational_binding,
+    validate_manifest_operational_validation_projection,
 )
 from db.originals_vehicle_binding import (
     derive_original_vehicle_class,
@@ -16501,7 +16504,12 @@ def _original_validation_material(manifest: dict, draft_revision: int) -> dict:
         else None
     )
     validation_selections = []
+    long_form_preflight_bindings: list[dict] = []
     for item in _compiled_original_validation_selections(manifest):
+        route_network_target = trusted_original_route_network_validation_target(
+            item,
+            configured_area_urls=settings.valhalla_area_urls,
+        )
         selection = {
             "key": item["key"],
             "selection": item["selection"],
@@ -16509,6 +16517,10 @@ def _original_validation_material(manifest: dict, draft_revision: int) -> dict:
                 item["manifest"]["route"]["geometry"]["coordinates"],
             ),
         }
+        if route_network_target is not None:
+            selection["route_network_target"] = copy.deepcopy(
+                route_network_target["evidence"]
+            )
         if item.get("delivery_contract_sha256"):
             selection["delivery_contract_sha256"] = item[
                 "delivery_contract_sha256"
@@ -16516,18 +16528,41 @@ def _original_validation_material(manifest: dict, draft_revision: int) -> dict:
             selection["audio_binding_sha256"] = original_long_form_audio_binding(
                 item["long_form_compiled"]
             )["binding_sha256"]
-        validation_selections.append(selection)
-    operational_readiness_candidates = _original_operational_bindings(manifest)
-    if int(manifest.get("schema_version") or 0) in {2, 3}:
-        for chapter in manifest.get("chapters") or []:
-            # Validation may run before the review window expires, but it must
-            # still bind to an exact checked-in candidate and projection.
-            validate_manifest_operational_binding(
-                chapter_id=str(chapter.get("id") or ""),
-                operational_sources=chapter.get("operational_sources"),
-                operational_readiness=chapter.get("operational_readiness"),
-                require_current=False,
+            preflight_binding = original_long_form_preflight_binding(
+                item["long_form_compiled"]
             )
+            long_form_preflight_bindings.append({
+                "key": item["key"],
+                **preflight_binding,
+            })
+        validation_selections.append(selection)
+    long_form_preflight_bindings.sort(
+        key=lambda item: str(item.get("key") or ""),
+    )
+    operational_readiness_candidates = _original_operational_bindings(manifest)
+    operational_validation_projections: list[dict] = []
+    if int(manifest.get("schema_version") or 0) in {2, 3}:
+        chapters = manifest.get("chapters") or []
+        manifest_chapter_ids = [
+            str(chapter.get("id") or "") for chapter in chapters
+        ]
+        for chapter in chapters:
+            # Validation may run before the review window expires, but it must
+            # still bind to the exact checked-in candidate. Private validation
+            # projects alternates only to chapters actually present; strict
+            # start/publication validation remains unchanged.
+            operational_validation_projections.append(
+                validate_manifest_operational_validation_projection(
+                    chapter_id=str(chapter.get("id") or ""),
+                    manifest_chapter_ids=manifest_chapter_ids,
+                    operational_sources=chapter.get("operational_sources"),
+                    operational_readiness=chapter.get("operational_readiness"),
+                    require_current=False,
+                )
+            )
+    operational_validation_projections.sort(
+        key=lambda item: str(item.get("chapter_id") or ""),
+    )
     input_sha256 = _original_validation_hash({
         "draft_revision": int(draft_revision),
         "manifest_sha256": manifest_sha256,
@@ -16538,7 +16573,9 @@ def _original_validation_material(manifest: dict, draft_revision: int) -> dict:
         "long_form_validator_source_sha256": long_form_validator_source_sha256,
         "scenario_ids": ORIGINAL_VIRTUAL_VALIDATION_REQUIRED_SCENARIOS,
         "validation_selections": validation_selections,
+        "long_form_preflight_bindings": long_form_preflight_bindings,
         "operational_readiness_candidates": operational_readiness_candidates,
+        "operational_validation_projections": operational_validation_projections,
     })
     return {
         "draft_revision": int(draft_revision),
@@ -16548,7 +16585,9 @@ def _original_validation_material(manifest: dict, draft_revision: int) -> dict:
         "long_form_validator_source_sha256": long_form_validator_source_sha256,
         "input_sha256": input_sha256,
         "validation_selections": validation_selections,
+        "long_form_preflight_bindings": long_form_preflight_bindings,
         "operational_readiness_candidates": operational_readiness_candidates,
+        "operational_validation_projections": operational_validation_projections,
     }
 
 
@@ -16723,24 +16762,97 @@ def _current_original_validation_report_db(
 def create_authored_original_virtual_validation_run(
     pack_id: str,
     admin_user_id: int,
+    *,
+    require_zero_active_reports: bool = False,
+    require_zero_pack_reports: bool = False,
+    expected_draft_revision: int | None = None,
+    expected_manifest_sha256: str | None = None,
+    expected_assets_sha256: str | None = None,
+    expected_input_sha256: str | None = None,
 ) -> dict:
     """Persist a hash-bound running report before any trusted worker executes."""
     pack_id = _validate_canonical_id(pack_id, "Original id")
-    manifest = _get_authored_original_validation_manifest(pack_id)
-    if not manifest:
-        raise ValueError("Trailhead Original not found")
-    draft_revision = int(manifest["version"]) - ORIGINAL_DEVICE_PREVIEW_VERSION_BASE
-    material = _original_validation_material(manifest, draft_revision)
-    report_id = f"original_validation_{secrets.token_hex(16)}"
-    started_at = int(time.time())
+    strict_snapshot = (
+        require_zero_active_reports
+        or require_zero_pack_reports
+        or expected_draft_revision is not None
+        or expected_manifest_sha256 is not None
+        or expected_assets_sha256 is not None
+        or expected_input_sha256 is not None
+    )
+    manifest: dict | None = None
+    material: dict | None = None
+    draft_revision: int | None = None
+    if not strict_snapshot:
+        manifest = _get_authored_original_validation_manifest(pack_id)
+        if not manifest:
+            raise ValueError("Trailhead Original not found")
+        draft_revision = (
+            int(manifest["version"]) - ORIGINAL_DEVICE_PREVIEW_VERSION_BASE
+        )
+        material = _original_validation_material(manifest, draft_revision)
     db = _conn()
     try:
-        _recover_incomplete_original_validation_runs_db(db)
+        if strict_snapshot:
+            # Serialize the strict preconditions with the insert. Production
+            # operators use this path so neither concurrent report creation nor
+            # a draft change can land between material inspection and insert.
+            db.execute("BEGIN IMMEDIATE")
+            if require_zero_active_reports:
+                active_count = int(db.execute(
+                    """SELECT COUNT(*) FROM authored_original_validation_reports
+                       WHERE status IN ('running','executing')"""
+                ).fetchone()[0])
+                if active_count:
+                    raise ValueError(
+                        "Another authored Original validation is active"
+                    )
+            if require_zero_pack_reports:
+                pack_report_count = int(db.execute(
+                    """SELECT COUNT(*) FROM authored_original_validation_reports
+                       WHERE pack_id=?""",
+                    (pack_id,),
+                ).fetchone()[0])
+                if pack_report_count:
+                    raise ValueError(
+                        "Authored Original validation reports are append-only"
+                    )
+            pack = db.execute(
+                """SELECT * FROM authored_trip_packs
+                   WHERE id=? AND content_kind='original_drive'""",
+                (pack_id,),
+            ).fetchone()
+            if not pack:
+                raise ValueError("Trailhead Original not found")
+            manifest = _authored_original_validation_manifest_from_row(
+                pack,
+                _verified_original_asset_map_db(db, pack_id),
+                include_validation_audio_evidence=True,
+            )
+            draft_revision = int(pack["draft_revision"])
+            material = _original_validation_material(manifest, draft_revision)
+            expected_material = {
+                "draft_revision": expected_draft_revision,
+                "manifest_sha256": expected_manifest_sha256,
+                "assets_sha256": expected_assets_sha256,
+                "input_sha256": expected_input_sha256,
+            }
+            for key, expected in expected_material.items():
+                if expected is not None and material[key] != expected:
+                    raise ValueError(
+                        "Authored Original validation material changed before creation"
+                    )
+        else:
+            _recover_incomplete_original_validation_runs_db(db)
+        if manifest is None or material is None or draft_revision is None:
+            raise ValueError("Authored Original validation material is unavailable")
         admin = db.execute(
             "SELECT is_admin FROM users WHERE id=?", (admin_user_id,),
         ).fetchone()
         if not admin or not bool(admin["is_admin"]):
             raise PermissionError("Original validation requires an admin")
+        report_id = f"original_validation_{secrets.token_hex(16)}"
+        started_at = int(time.time())
         db.execute(
             """INSERT INTO authored_original_validation_reports
                (id,pack_id,draft_revision,manifest_sha256,assets_sha256,input_sha256,
@@ -16760,6 +16872,9 @@ def create_authored_original_virtual_validation_run(
             "SELECT * FROM authored_original_validation_reports WHERE id=?", (report_id,),
         ).fetchone()
         db.commit()
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
     return _original_validation_report_from_row(row, current_material=material)
@@ -16773,11 +16888,30 @@ def _execute_original_validation_selection(
     validator_source_sha256: str,
     long_form_runner=None,
     long_form_validator_source_sha256: str | None = None,
+    expected_route_network_target: dict | None = None,
 ) -> dict:
     manifest = selection_item["manifest"]
+    route_network_target = None
+    if expected_route_network_target is not None:
+        route_network_target = trusted_original_route_network_validation_target(
+            selection_item,
+            configured_area_urls=settings.valhalla_area_urls,
+        )
+        if (
+            route_network_target is None
+            or route_network_target.get("evidence")
+            != expected_route_network_target
+        ):
+            raise OriginalValidationRunnerError(
+                "Configured route-network validation target drifted after report creation"
+            )
     network_summary = route_network_validator(
         manifest,
-        valhalla_url=settings.valhalla_url,
+        valhalla_url=(
+            route_network_target["valhalla_url"]
+            if route_network_target is not None
+            else settings.valhalla_url
+        ),
     )
     geometry_sha256 = original_route_geometry_sha256(
         manifest["route"]["geometry"]["coordinates"],
@@ -16788,6 +16922,11 @@ def _execute_original_validation_selection(
     ):
         raise OriginalValidationRunnerError(
             "Route-network validation is for different geometry"
+        )
+    network_summary = copy.deepcopy(network_summary)
+    if route_network_target is not None:
+        network_summary["validation_target"] = copy.deepcopy(
+            expected_route_network_target
         )
     raw = runner(
         manifest,
@@ -16987,7 +17126,13 @@ def execute_authored_original_virtual_validation_run(
             long_form_runner or run_originals_long_form_validation_cli
         )
         selection_items = _compiled_original_validation_selections(manifest)
+        material_selections = {
+            str(item.get("key") or ""): item
+            for item in material.get("validation_selections") or []
+            if isinstance(item, dict)
+        }
         if len(selection_items) == 1 and selection_items[0]["selection"] is None:
+            material_selection = material_selections.get(selection_items[0]["key"], {})
             selection_result = _execute_original_validation_selection(
                 selection_items[0],
                 runner=execute,
@@ -16996,6 +17141,9 @@ def execute_authored_original_virtual_validation_run(
                 validator_source_sha256=material["validator_source_sha256"],
                 long_form_validator_source_sha256=material.get(
                     "long_form_validator_source_sha256"
+                ),
+                expected_route_network_target=material_selection.get(
+                    "route_network_target"
                 ),
             )
             engine_version = selection_result["engine_version"]
@@ -17009,6 +17157,9 @@ def execute_authored_original_virtual_validation_run(
             execution_errors = False
             for selection_item in selection_items:
                 try:
+                    material_selection = material_selections.get(
+                        selection_item["key"], {}
+                    )
                     selection_results.append(_execute_original_validation_selection(
                         selection_item,
                         runner=execute,
@@ -17017,6 +17168,9 @@ def execute_authored_original_virtual_validation_run(
                         validator_source_sha256=material["validator_source_sha256"],
                         long_form_validator_source_sha256=material.get(
                             "long_form_validator_source_sha256"
+                        ),
+                        expected_route_network_target=material_selection.get(
+                            "route_network_target"
                         ),
                     ))
                 except Exception as exc:
@@ -17049,6 +17203,14 @@ def execute_authored_original_virtual_validation_run(
             scenarios = aggregate["scenarios"]
             issues = aggregate["issues"]
             status = aggregate["status"]
+        if material.get("operational_validation_projections"):
+            summary["operational_validation_projections"] = copy.deepcopy(
+                material["operational_validation_projections"]
+            )
+        if material.get("long_form_preflight_bindings"):
+            summary["long_form_preflight_bindings"] = copy.deepcopy(
+                material["long_form_preflight_bindings"]
+            )
     except Exception as exc:
         clean = re.sub(r"\s+", " ", str(exc or "Virtual validation failed")).strip()
         issues = [clean[:1000] or "Virtual validation failed"]

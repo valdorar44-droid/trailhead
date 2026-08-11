@@ -947,6 +947,58 @@ def test_store_accepts_delivery_contract_only_from_separate_long_form_runner():
     ]
 
 
+def test_store_uses_the_hash_bound_rf_validation_target_without_reporting_its_url(
+    monkeypatch,
+):
+    item = _validation_item()
+    item.pop("long_form_compiled")
+    item.pop("delivery_contract_sha256")
+    item["selection"]["delivery_contract_sha256"] = (
+        "9081a647a7df0e59df4bb40506ba9bfa96c750536fb715ee31b3e9ee68ee20d6"
+    )
+    coordinates = item["manifest"]["route"]["geometry"]["coordinates"]
+    target_url = "https://south-tn.internal.test"
+    configured = json.dumps([{
+        "id": "south_tn",
+        "url": target_url,
+        "bounds": {
+            "s": min(point[1] for point in coordinates) - 0.01,
+            "w": min(point[0] for point in coordinates) - 0.01,
+            "n": max(point[1] for point in coordinates) + 0.01,
+            "e": max(point[0] for point in coordinates) + 0.01,
+        },
+    }])
+    monkeypatch.setattr(store.settings, "valhalla_area_urls", configured)
+    expected = validation.trusted_original_route_network_validation_target(
+        item,
+        configured_area_urls=configured,
+    )
+    captured = {}
+
+    def network_validator(manifest, *, valhalla_url):
+        captured["url"] = valhalla_url
+        return {
+            "geometry_sha256": store.original_route_geometry_sha256(
+                manifest["route"]["geometry"]["coordinates"],
+            ),
+            "override": None,
+        }
+
+    result = store._execute_original_validation_selection(
+        item,
+        runner=store.run_originals_validation_cli,
+        route_network_validator=network_validator,
+        validator_source_sha256=store.trusted_originals_validator_source_sha256(),
+        expected_route_network_target=expected["evidence"],
+    )
+
+    assert captured["url"] == target_url
+    assert result["summary"]["route"]["network"]["validation_target"] == (
+        expected["evidence"]
+    )
+    assert target_url not in json.dumps(result, sort_keys=True)
+
+
 def test_hard_only_route_result_can_never_synthesize_delivery_validation():
     result = {
         "key": "selection:variant",

@@ -14,6 +14,7 @@ from db.originals_operational import (
     operational_candidate_sha256,
     load_checked_in_operational_candidate,
     validate_manifest_operational_binding,
+    validate_manifest_operational_validation_projection,
 )
 from db import store
 
@@ -118,6 +119,95 @@ def test_checked_in_binding_requires_exact_hash_projection_and_current_review():
             candidate_sha256=operational_candidate_sha256(candidate),
             now=datetime(2026, 9, 4, tzinfo=timezone.utc),
             require_current=True,
+        )
+
+
+def test_private_validation_projection_limits_alternates_to_manifest_chapters():
+    candidate = _candidate()
+    projected = manifest_operational_fields(candidate, "roaring_fork")
+    private_readiness = copy.deepcopy(projected["operational_readiness"])
+    private_readiness["alternate_chapter_ids"] = []
+
+    evidence = validate_manifest_operational_validation_projection(
+        chapter_id="roaring_fork",
+        manifest_chapter_ids=["roaring_fork"],
+        operational_sources=projected["operational_sources"],
+        operational_readiness=private_readiness,
+        now=NOW,
+        require_current=True,
+    )
+
+    assert evidence == {
+        "schema_version": 1,
+        "kind": "original_operational_validation_projection",
+        "projection_mode": "validation_only_manifest_local_alternates_v1",
+        "chapter_id": "roaring_fork",
+        "candidate_id": candidate["candidate_id"],
+        "candidate_sha256": operational_candidate_sha256(candidate),
+        "manifest_chapter_ids": ["roaring_fork"],
+        "checked_alternate_chapter_ids": ["foothills_parkway"],
+        "manifest_local_alternate_chapter_ids": [],
+        "omitted_external_alternate_chapter_ids": ["foothills_parkway"],
+    }
+    with pytest.raises(
+        OriginalOperationalReadinessError,
+        match="operational readiness does not match",
+    ):
+        validate_manifest_operational_binding(
+            chapter_id="roaring_fork",
+            operational_sources=projected["operational_sources"],
+            operational_readiness=private_readiness,
+            now=NOW,
+            require_current=True,
+        )
+
+
+def test_validation_projection_requires_exact_manifest_local_relationship():
+    candidate = _candidate()
+    projected = manifest_operational_fields(candidate, "roaring_fork")
+    private_readiness = copy.deepcopy(projected["operational_readiness"])
+    private_readiness["alternate_chapter_ids"] = []
+
+    with pytest.raises(
+        OriginalOperationalReadinessError,
+        match="manifest-local projection",
+    ):
+        validate_manifest_operational_validation_projection(
+            chapter_id="roaring_fork",
+            manifest_chapter_ids=["roaring_fork", "foothills_parkway"],
+            operational_sources=projected["operational_sources"],
+            operational_readiness=private_readiness,
+        )
+
+    advertised_external_alternate = copy.deepcopy(private_readiness)
+    advertised_external_alternate["alternate_chapter_ids"] = ["foothills_parkway"]
+    with pytest.raises(
+        OriginalOperationalReadinessError,
+        match="manifest-local projection",
+    ):
+        validate_manifest_operational_validation_projection(
+            chapter_id="roaring_fork",
+            manifest_chapter_ids=["roaring_fork"],
+            operational_sources=projected["operational_sources"],
+            operational_readiness=advertised_external_alternate,
+        )
+
+    drifted_sources = copy.deepcopy(projected["operational_sources"])
+    drifted_sources[0]["title"] += " drift"
+    with pytest.raises(OriginalOperationalReadinessError, match="sources"):
+        validate_manifest_operational_validation_projection(
+            chapter_id="roaring_fork",
+            manifest_chapter_ids=["roaring_fork"],
+            operational_sources=drifted_sources,
+            operational_readiness=private_readiness,
+        )
+
+    with pytest.raises(OriginalOperationalReadinessError, match="not present"):
+        validate_manifest_operational_validation_projection(
+            chapter_id="roaring_fork",
+            manifest_chapter_ids=["foothills_parkway"],
+            operational_sources=projected["operational_sources"],
+            operational_readiness=private_readiness,
         )
 
 

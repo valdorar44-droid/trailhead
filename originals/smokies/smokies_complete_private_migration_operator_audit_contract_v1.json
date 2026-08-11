@@ -1,0 +1,62 @@
+{
+  "audit_state": {
+    "independent_audit_artifact_created": false,
+    "independent_audit_passed": false,
+    "live_apply_allowed": false
+  },
+  "boundaries": {
+    "database_accessed": false,
+    "external_media_accessed": false,
+    "network_accessed": false,
+    "production_mutation_performed": false,
+    "publication_performed": false
+  },
+  "contract_id": "smokies_complete_private_migration_operator_audit_contract_v1",
+  "kind": "original_private_migration_operator_audit_contract",
+  "product_id": "great_smoky_mountains_ridges_rivers_living_memory",
+  "required_artifact": {
+    "kind": "original_private_migration_operator_audit",
+    "required_bindings": [
+      "migration_packet",
+      "packet_builder",
+      "migration_operator",
+      "migration_operator_tests",
+      "db_store",
+      "roaring_fork_import_operator",
+      "sqlite_backup_operator",
+      "manifest_v3_normalizer",
+      "source_commit_and_tree"
+    ],
+    "required_findings": {
+      "audit_artifact_created_by_auditor": true,
+      "author_source_files_edited_by_auditor": 0,
+      "p0_count": 0,
+      "p1_count": 0
+    },
+    "schema_version": 1,
+    "status": "independent_audit_passed"
+  },
+  "schema_version": 1,
+  "transitive_source_contract": {
+    "db/original_manifest_v3.py": {
+      "byte_count": 46624,
+      "path": "db/original_manifest_v3.py",
+      "sha256": "850df80086d336a3a3652d73a1e0eda403e89f06b241c2a710bcb6cbf38e53de"
+    },
+    "db/store.py": {
+      "byte_count": 1092550,
+      "path": "db/store.py",
+      "sha256": "67d25b92ada63d172eca69d0fe556eaf82d04e726dd6fd53dc31097c1c519b4f"
+    },
+    "scripts/backup_sqlite.py": {
+      "byte_count": 3542,
+      "path": "scripts/backup_sqlite.py",
+      "sha256": "85491c0e16b84a5ea9c42ed1f669521b5d9b10628a6bedbb23ae96790d566bcf"
+    },
+    "scripts/import_smokies_roaring_fork_private.py": {
+      "byte_count": 49032,
+      "path": "scripts/import_smokies_roaring_fork_private.py",
+      "sha256": "6cac2f3841cf3af12eb48aaba6e2a7108d1aafddbc7b5a4762a194189d6c5bce"
+    }
+  }
+}

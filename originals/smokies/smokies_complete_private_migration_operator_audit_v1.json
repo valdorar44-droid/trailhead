@@ -1,0 +1,101 @@
+{
+  "audit_contract_binding": {
+    "byte_count": 2045,
+    "path": "originals/smokies/smokies_complete_private_migration_operator_audit_contract_v1.json",
+    "sha256": "8bd1277e3032e8e1f56e13631718c2809dfe04898a8730b669d746139ffa9e91"
+  },
+  "bindings": {
+    "db_store": {
+      "byte_count": 1092550,
+      "path": "db/store.py",
+      "sha256": "67d25b92ada63d172eca69d0fe556eaf82d04e726dd6fd53dc31097c1c519b4f"
+    },
+    "manifest_v3_normalizer": {
+      "byte_count": 46624,
+      "path": "db/original_manifest_v3.py",
+      "sha256": "850df80086d336a3a3652d73a1e0eda403e89f06b241c2a710bcb6cbf38e53de"
+    },
+    "migration_operator": {
+      "byte_count": 126542,
+      "path": "scripts/migrate_smokies_complete_private.py",
+      "sha256": "d3f4b658411a9cceb348571e0a6be9ae557b7f2c1de7c6a7779fdf51b4c7c5b8"
+    },
+    "migration_operator_tests": {
+      "byte_count": 73024,
+      "path": "tests/test_smokies_complete_private_migration.py",
+      "sha256": "4a84cf1b8b8063bc63e5840c8e687e2799046ff2db215d9b0db1665b38ed7777"
+    },
+    "migration_packet": {
+      "byte_count": 5803004,
+      "path": "originals/smokies/smokies_complete_private_migration_packet_v1.json",
+      "sha256": "d6cd8545ee68b3a93681c0e8ba4c3ee3bacd65ffd442c92dbc3e385585f4eec8"
+    },
+    "packet_builder": {
+      "byte_count": 42695,
+      "path": "scripts/build_smokies_complete_private_migration.py",
+      "sha256": "e61e3955107380814d2259944620423a5fda81dba25e9f88e0c9a2a87a31d232"
+    },
+    "roaring_fork_import_operator": {
+      "byte_count": 49032,
+      "path": "scripts/import_smokies_roaring_fork_private.py",
+      "sha256": "6cac2f3841cf3af12eb48aaba6e2a7108d1aafddbc7b5a4762a194189d6c5bce"
+    },
+    "source_commit_and_tree": {
+      "commit": "a4ef35366eaecdb762e316036a54e47436c71b1a",
+      "tree": "9d45a61f6dad1266497cb6564a7334a4255da6b5"
+    },
+    "sqlite_backup_operator": {
+      "byte_count": 3542,
+      "path": "scripts/backup_sqlite.py",
+      "sha256": "85491c0e16b84a5ea9c42ed1f669521b5d9b10628a6bedbb23ae96790d566bcf"
+    }
+  },
+  "checks": {
+    "deterministic_packet_builder": {
+      "status": "passed"
+    },
+    "exact_eight_suite_regression": {
+      "passed": 144,
+      "skipped": 2,
+      "status": "passed",
+      "subtests_passed": 27
+    },
+    "focused_migration_regression": {
+      "passed": 49,
+      "status": "passed"
+    },
+    "privacy_and_absolute_path_scan": {
+      "serialized_absolute_filesystem_paths": 0,
+      "serialized_secrets": 0,
+      "status": "passed"
+    },
+    "whitespace_and_syntax": {
+      "status": "passed"
+    }
+  },
+  "contract_id": "smokies_complete_private_migration_operator_audit_contract_v1",
+  "effects": {
+    "database_accessed": false,
+    "database_mutated": false,
+    "external_media_accessed": false,
+    "external_media_mutated": false,
+    "live_apply_performed": false,
+    "network_accessed": false,
+    "production_mutation_performed": false,
+    "provider_accessed": false,
+    "provider_mutated": false,
+    "publication_performed": false,
+    "upload_performed": false
+  },
+  "findings": {
+    "audit_artifact_created_by_auditor": true,
+    "author_source_files_edited_by_auditor": 0,
+    "p0_count": 0,
+    "p1_count": 0
+  },
+  "kind": "original_private_migration_operator_audit",
+  "live_apply_reviewed": true,
+  "product_id": "great_smoky_mountains_ridges_rivers_living_memory",
+  "schema_version": 1,
+  "status": "independent_audit_passed"
+}

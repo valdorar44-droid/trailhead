@@ -246,6 +246,11 @@ from db.store import (
     OriginalFeedbackTokenError, OriginalFeedbackConflictError,
     OriginalFeedbackRateLimitError,
     OriginalAssetSha256ConflictError, OriginalLicenseAttestationConflictError,
+    OriginalV3ReleaseAuthorizationRequiredError,
+    OriginalV3ReleaseAuthorizationConflictError,
+    OriginalV3ReleaseAuthorizationExpiredError,
+    ORIGINAL_V3_RELEASE_CREATE_CONFIRMATION,
+    ORIGINAL_V3_RELEASE_CONSUME_CONFIRMATION,
     save_authored_trip_pack_draft, get_authored_trip_pack_admin,
     list_authored_trip_pack_versions_admin, list_authored_trip_packs_admin,
     publish_authored_trip_pack, list_published_trip_packs, get_published_trip_pack,
@@ -267,6 +272,10 @@ from db.store import (
     get_authored_original_asset_record_admin,
     get_authored_original_asset_record_admin_by_sha256,
     get_authored_original_device_preview_manifest,
+    get_authored_original_v3_release_road_targets,
+    get_authored_original_v3_release_authorization_by_key,
+    create_authored_original_v3_release_authorization,
+    consume_authored_original_v3_release_authorization,
     create_authored_original_virtual_validation_run,
     execute_authored_original_virtual_validation_run,
     start_authored_original_virtual_validation,
@@ -323,6 +332,7 @@ from db.store import (
     consume_account_deletion_authorization,
 )
 from db.originals_current_roads import (
+    NPS_ROAD_ALERTS_SOURCE_ID,
     OriginalCurrentRoadsError,
     build_operational_observation,
     default_current_road_reader,
@@ -10880,6 +10890,69 @@ def _trusted_original_road_observation(
         return None
 
 
+def _trusted_original_v3_release_road_evidence(
+    *,
+    pack_id: str,
+    now: datetime,
+) -> dict:
+    """Force-refresh and bind one official observation across all V3 variants."""
+    try:
+        target_envelope = get_authored_original_v3_release_road_targets(pack_id)
+        if not isinstance(target_envelope, dict):
+            raise ValueError("Trailhead Original not found")
+        binding = target_envelope.get("route_evidence")
+        targets = target_envelope.get("targets")
+        if (
+            not isinstance(binding, dict)
+            or not isinstance(targets, list)
+            or not targets
+        ):
+            raise ValueError("Release road targets are unavailable")
+        route_evidence = load_registered_route_evidence(binding.get("evidence_id"))
+        candidate = load_operational_candidate()
+        feed = default_current_road_reader.get(now=now, force_refresh=True)
+        observations = []
+        for target in targets:
+            observations.append({
+                "chapter_id": target["chapter_id"],
+                "variant_id": target["variant_id"],
+                "observation": build_operational_observation(
+                    candidate=candidate,
+                    route_evidence=route_evidence,
+                    route_evidence_sha256=str(
+                        binding.get("evidence_sha256") or ""
+                    ),
+                    chapter_id=target["chapter_id"],
+                    variant_id=target["variant_id"],
+                    feed=feed,
+                ),
+            })
+        return {
+            "schema_version": 1,
+            "source": "server_owned_nps_current_road_observation_v1",
+            "feed": {
+                "source_id": NPS_ROAD_ALERTS_SOURCE_ID,
+                "observed_at": feed.observed_at.isoformat().replace(
+                    "+00:00", "Z"
+                ),
+                "response_sha256": feed.response_sha256,
+            },
+            "route_evidence": {
+                "evidence_id": binding.get("evidence_id"),
+                "evidence_sha256": binding.get("evidence_sha256"),
+            },
+            "observations": observations,
+        }
+    except (
+        OriginalCurrentRoadsError,
+        OriginalRouteEvidenceError,
+        ValueError,
+    ) as exc:
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "server-owned current-road evidence is unavailable"
+        ) from exc
+
+
 def _require_product_feature(env_name: str, user: dict | None = None) -> None:
     if not _product_feature_enabled(env_name, user):
         raise HTTPException(404, {
@@ -12947,6 +13020,23 @@ class AuthoredOriginalDraftRequest(BaseModel):
     access_policy: Optional[OriginalAccessPolicyV1] = None
 
 
+class OriginalV3ReleaseAuthorizationRequest(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    confirmation: Literal[ORIGINAL_V3_RELEASE_CREATE_CONFIRMATION]
+
+
+class OriginalV3ReleaseConsumeRequest(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    confirmation: Literal[ORIGINAL_V3_RELEASE_CONSUME_CONFIRMATION]
+    expected_snapshot_sha256: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[a-f0-9]{64}$",
+    )
+
+
 class OriginalAssetUploadRequest(BaseModel):
     model_config = {"extra": "forbid", "strict": True}
 
@@ -14459,6 +14549,25 @@ async def create_account_trip(body: AccountTripRequest, user: dict = Depends(_cu
 
 
 def _raise_account_store_error(exc: Exception) -> None:
+    if isinstance(exc, OriginalV3ReleaseAuthorizationRequiredError):
+        raise HTTPException(409, {
+            "code": "original_v3_release_authorization_required",
+            "message": (
+                "V3 Originals can only be published through the exact "
+                "single-use release authorization gate."
+            ),
+        })
+    if isinstance(exc, OriginalV3ReleaseAuthorizationExpiredError):
+        raise HTTPException(410, {
+            "code": "original_v3_release_authorization_expired",
+            "message": "The release authorization or road observation expired.",
+        })
+    if isinstance(exc, OriginalV3ReleaseAuthorizationConflictError):
+        raise HTTPException(409, {
+            "code": "original_v3_release_authorization_conflict",
+            "message": "The exact authorized release snapshot changed.",
+            "reason": exc.reason,
+        })
     if isinstance(exc, OriginalConsumerUpdateRequiredError):
         raise HTTPException(426, {
             "code": "original_consumer_update_required",
@@ -15412,6 +15521,79 @@ async def api_admin_publish_original(pack_id: str, admin: dict = Depends(_requir
             pack_id,
             admin["id"],
             required_content_kind="original_drive",
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
+@app.post(
+    "/api/admin/originals/{pack_id}/release-authorizations",
+    status_code=201,
+)
+async def api_admin_create_original_v3_release_authorization(
+    pack_id: str,
+    body: OriginalV3ReleaseAuthorizationRequest,
+    idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=160,
+    ),
+    admin: dict = Depends(_require_admin),
+):
+    observed_now = datetime.now(timezone.utc)
+    try:
+        existing = await asyncio.to_thread(
+            get_authored_original_v3_release_authorization_by_key,
+            pack_id,
+            admin["id"],
+            idempotency_key=idempotency_key,
+            now=int(observed_now.timestamp()),
+        )
+        if existing is not None:
+            return existing
+        road_evidence = await asyncio.to_thread(
+            _trusted_original_v3_release_road_evidence,
+            pack_id=pack_id,
+            now=observed_now,
+        )
+        return await asyncio.to_thread(
+            create_authored_original_v3_release_authorization,
+            pack_id,
+            admin["id"],
+            idempotency_key=idempotency_key,
+            confirmation=body.confirmation,
+            current_road_evidence=road_evidence,
+            now=int(observed_now.timestamp()),
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
+@app.post(
+    "/api/admin/originals/{pack_id}/release-authorizations/{authorization_id}/consume",
+)
+async def api_admin_consume_original_v3_release_authorization(
+    pack_id: str,
+    authorization_id: str,
+    body: OriginalV3ReleaseConsumeRequest,
+    idempotency_key: str = Header(
+        ...,
+        alias="Idempotency-Key",
+        min_length=8,
+        max_length=160,
+    ),
+    admin: dict = Depends(_require_admin),
+):
+    try:
+        return await asyncio.to_thread(
+            consume_authored_original_v3_release_authorization,
+            pack_id,
+            authorization_id,
+            admin["id"],
+            idempotency_key=idempotency_key,
+            expected_snapshot_sha256=body.expected_snapshot_sha256,
+            confirmation=body.confirmation,
         )
     except Exception as exc:
         _raise_account_store_error(exc)

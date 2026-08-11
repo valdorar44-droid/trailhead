@@ -1539,6 +1539,48 @@ def init_db():
             started_at         INTEGER NOT NULL,
             completed_at       INTEGER
         );
+        CREATE TABLE IF NOT EXISTS authored_original_release_authorizations_v1 (
+            id                           TEXT PRIMARY KEY,
+            pack_id                      TEXT NOT NULL REFERENCES authored_trip_packs(id) ON DELETE CASCADE,
+            draft_revision               INTEGER NOT NULL,
+            manifest_sha256               TEXT NOT NULL,
+            assets_sha256                 TEXT NOT NULL,
+            asset_count                   INTEGER NOT NULL CHECK(asset_count = 98),
+            validation_report_id          TEXT NOT NULL REFERENCES authored_original_validation_reports(id),
+            validation_report_sha256      TEXT NOT NULL,
+            device_evidence_sha256        TEXT NOT NULL,
+            reviews_sha256                TEXT NOT NULL,
+            catalog_sha256                TEXT NOT NULL,
+            current_road_evidence_sha256  TEXT NOT NULL,
+            current_road_observed_at      INTEGER NOT NULL,
+            current_road_expires_at       INTEGER NOT NULL,
+            next_version                  INTEGER NOT NULL,
+            snapshot_json                 TEXT NOT NULL,
+            snapshot_sha256               TEXT NOT NULL,
+            idempotency_key               TEXT NOT NULL,
+            request_sha256                TEXT NOT NULL,
+            authorized_by                 INTEGER NOT NULL REFERENCES users(id),
+            created_at                    INTEGER NOT NULL,
+            expires_at                    INTEGER NOT NULL,
+            status                        TEXT NOT NULL DEFAULT 'active'
+                                                   CHECK(status IN ('active','consumed')),
+            consumed_at                   INTEGER,
+            consumed_by                   INTEGER REFERENCES users(id),
+            published_version             INTEGER,
+            response_json                 TEXT,
+            UNIQUE(authorized_by, idempotency_key),
+            UNIQUE(pack_id, published_version),
+            CHECK(expires_at > created_at),
+            CHECK(expires_at <= created_at + 900),
+            CHECK(expires_at <= current_road_expires_at),
+            CHECK(
+                (status='active' AND consumed_at IS NULL AND consumed_by IS NULL
+                 AND published_version IS NULL AND response_json IS NULL)
+                OR
+                (status='consumed' AND consumed_at IS NOT NULL AND consumed_by IS NOT NULL
+                 AND published_version IS NOT NULL AND response_json IS NOT NULL)
+            )
+        );
         CREATE TABLE IF NOT EXISTS authored_original_feedback_tokens (
             id          TEXT PRIMARY KEY,
             pack_id     TEXT NOT NULL,
@@ -1934,6 +1976,7 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_authored_trip_pack_entitlements_user ON authored_trip_pack_entitlements(user_id, acquired_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_authored_original_validation_latest ON authored_original_validation_reports(pack_id,started_at DESC,id DESC)",
         "CREATE INDEX IF NOT EXISTS idx_authored_original_validation_binding ON authored_original_validation_reports(pack_id,draft_revision,manifest_sha256,assets_sha256,status)",
+        "CREATE INDEX IF NOT EXISTS idx_authored_original_release_authorizations_pack ON authored_original_release_authorizations_v1(pack_id,status,expires_at)",
         "CREATE INDEX IF NOT EXISTS idx_authored_original_feedback_issuance_ip ON authored_original_feedback_token_issuances(pack_id,version,ip_subject_hmac,created_at)",
         "CREATE INDEX IF NOT EXISTS idx_authored_original_feedback_issuance_install ON authored_original_feedback_token_issuances(pack_id,version,install_subject_hmac,created_at) WHERE install_subject_hmac IS NOT NULL",
         "CREATE INDEX IF NOT EXISTS idx_authored_original_feedback_issuance_created ON authored_original_feedback_token_issuances(created_at)",
@@ -2445,6 +2488,48 @@ def init_db():
             started_at         INTEGER NOT NULL,
             completed_at       INTEGER
         )""",
+        """CREATE TABLE IF NOT EXISTS authored_original_release_authorizations_v1 (
+            id                           TEXT PRIMARY KEY,
+            pack_id                      TEXT NOT NULL REFERENCES authored_trip_packs(id) ON DELETE CASCADE,
+            draft_revision               INTEGER NOT NULL,
+            manifest_sha256               TEXT NOT NULL,
+            assets_sha256                 TEXT NOT NULL,
+            asset_count                   INTEGER NOT NULL CHECK(asset_count = 98),
+            validation_report_id          TEXT NOT NULL REFERENCES authored_original_validation_reports(id),
+            validation_report_sha256      TEXT NOT NULL,
+            device_evidence_sha256        TEXT NOT NULL,
+            reviews_sha256                TEXT NOT NULL,
+            catalog_sha256                TEXT NOT NULL,
+            current_road_evidence_sha256  TEXT NOT NULL,
+            current_road_observed_at      INTEGER NOT NULL,
+            current_road_expires_at       INTEGER NOT NULL,
+            next_version                  INTEGER NOT NULL,
+            snapshot_json                 TEXT NOT NULL,
+            snapshot_sha256               TEXT NOT NULL,
+            idempotency_key               TEXT NOT NULL,
+            request_sha256                TEXT NOT NULL,
+            authorized_by                 INTEGER NOT NULL REFERENCES users(id),
+            created_at                    INTEGER NOT NULL,
+            expires_at                    INTEGER NOT NULL,
+            status                        TEXT NOT NULL DEFAULT 'active'
+                                                   CHECK(status IN ('active','consumed')),
+            consumed_at                   INTEGER,
+            consumed_by                   INTEGER REFERENCES users(id),
+            published_version             INTEGER,
+            response_json                 TEXT,
+            UNIQUE(authorized_by, idempotency_key),
+            UNIQUE(pack_id, published_version),
+            CHECK(expires_at > created_at),
+            CHECK(expires_at <= created_at + 900),
+            CHECK(expires_at <= current_road_expires_at),
+            CHECK(
+                (status='active' AND consumed_at IS NULL AND consumed_by IS NULL
+                 AND published_version IS NULL AND response_json IS NULL)
+                OR
+                (status='consumed' AND consumed_at IS NOT NULL AND consumed_by IS NOT NULL
+                 AND published_version IS NOT NULL AND response_json IS NOT NULL)
+            )
+        )""",
         """CREATE TABLE IF NOT EXISTS authored_original_feedback_tokens (
             id          TEXT PRIMARY KEY,
             pack_id     TEXT NOT NULL,
@@ -2558,6 +2643,7 @@ def init_db():
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_authored_trip_pack_entitlements_legacy_pack ON authored_trip_pack_entitlements(user_id,pack_id) WHERE content_kind='trip_pack'",
         "CREATE INDEX IF NOT EXISTS idx_authored_trip_pack_acquisition_entitlement ON authored_trip_pack_acquisition_requests(entitlement_id)",
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_authored_original_assets_current ON authored_original_assets(pack_id,asset_id) WHERE is_current=1",
+        "CREATE INDEX IF NOT EXISTS idx_authored_original_release_authorizations_pack ON authored_original_release_authorizations_v1(pack_id,status,expires_at)",
         "ALTER TABLE authored_original_assets ADD COLUMN media_metadata_json TEXT NOT NULL DEFAULT '{}'",
         "ALTER TABLE authored_original_assets ADD COLUMN transcript_sha256 TEXT",
         "ALTER TABLE authored_original_assets ADD COLUMN generator_metadata_json TEXT NOT NULL DEFAULT '{}'",
@@ -5890,6 +5976,8 @@ def get_user_by_id(user_id: int) -> dict | None:
 _USER_FK_DELETE_POLICIES = frozenset({
     ("account_deletion_authorizations", "user_id"),
     ("app_store_subscriptions", "user_id"),
+    ("authored_original_release_authorizations_v1", "authorized_by"),
+    ("authored_original_release_authorizations_v1", "consumed_by"),
     ("authored_original_feedback", "user_id"),
     ("authored_trip_pack_acquisition_requests", "user_id"),
     ("authored_trip_pack_entitlements", "user_id"),
@@ -11982,6 +12070,101 @@ ORIGINAL_OPERATIONAL_SOURCE_MAX_AGE_DAYS = 30
 ORIGINAL_VIRTUAL_VALIDATION_SUITE_VERSION = "originals_virtual_route_v3"
 ORIGINAL_VIRTUAL_VALIDATION_ENGINE_VERSION = "original-trigger-v3"
 ORIGINAL_VIRTUAL_VALIDATION_RUN_TIMEOUT_SECONDS = 2 * 3600
+ORIGINAL_V3_RELEASE_AUTHORIZATION_TTL_SECONDS = 15 * 60
+ORIGINAL_V3_RELEASE_ROAD_MAX_AGE_SECONDS = 30 * 60
+ORIGINAL_V3_RELEASE_TARGET_PACK_ID = (
+    "great_smoky_mountains_ridges_rivers_living_memory"
+)
+ORIGINAL_V3_RELEASE_TARGET_TITLE = (
+    "Great Smoky Mountains: Ridges, Rivers & Living Memory"
+)
+ORIGINAL_V3_RELEASE_TARGET_CANDIDATE_ID = (
+    "smokies_complete_private_candidate_20260811_v1"
+)
+ORIGINAL_V3_RELEASE_TARGET_CANDIDATE_SOURCE_COMMIT = (
+    "6acfb31d80294f0d90e559a080c11af138c6a559"
+)
+ORIGINAL_V3_RELEASE_TARGET_CANDIDATE_ARTIFACT_SHA256 = (
+    "ee01f78dcb43ec9a3b9d02e1cd6e0271675f033dbc9ed6fb18ce2562b4cb0aee"
+)
+ORIGINAL_V3_RELEASE_TARGET_MANIFEST_ARTIFACT_SHA256 = (
+    "d2cfa5aeb0116359326f682fb49d59ee156157f9efbfb8e8a53f99e830ca54eb"
+)
+ORIGINAL_V3_RELEASE_TARGET_PRIVATE_MANIFEST_OBJECT_SHA256 = (
+    "a7d7e19eb8eb02c2051a47578619f59f2857864fa6937eaaf705d34440767fd6"
+)
+ORIGINAL_V3_RELEASE_TARGET_CONTENT_PROJECTION_SHA256 = (
+    "35414d27e5a26dcfc5ef352f94322ca1fc88d17a4977c16b32ebd53f0bcdaf16"
+)
+ORIGINAL_V3_RELEASE_TARGET_CHAPTER_VARIANTS = (
+    ("mountain_crossing", ("tn_to_nc", "nc_to_tn")),
+    (
+        "little_river_cades_cove",
+        ("sugarlands_to_cades_cove_loop",),
+    ),
+    ("roaring_fork", ("one_way",)),
+    ("foothills_parkway", ("west_to_east", "east_to_west")),
+)
+ORIGINAL_V3_RELEASE_TARGET_CHAPTER_ENTRY_COUNTS = {
+    "mountain_crossing": 28,
+    "little_river_cades_cove": 23,
+    "roaring_fork": 13,
+    "foothills_parkway": 13,
+}
+ORIGINAL_V3_RELEASE_TARGET_VARIANT_ENTRY_COUNTS = {
+    ("mountain_crossing", "tn_to_nc"): 28,
+    ("mountain_crossing", "nc_to_tn"): 28,
+    ("little_river_cades_cove", "sugarlands_to_cades_cove_loop"): 23,
+    ("roaring_fork", "one_way"): 13,
+    ("foothills_parkway", "west_to_east"): 13,
+    ("foothills_parkway", "east_to_west"): 13,
+}
+ORIGINAL_V3_RELEASE_TARGET_DIRECTIONAL_REPLACEMENTS = (
+    ("fp_cue_01", "foothills_parkway", "east_to_west"),
+    ("fp_cue_05", "foothills_parkway", "east_to_west"),
+    ("fp_cue_07", "foothills_parkway", "east_to_west"),
+    ("mc_cue_01", "mountain_crossing", "nc_to_tn"),
+    ("mc_cue_02", "mountain_crossing", "nc_to_tn"),
+    ("mc_cue_04", "mountain_crossing", "nc_to_tn"),
+    ("mc_cue_08", "mountain_crossing", "nc_to_tn"),
+    ("mc_cue_09", "mountain_crossing", "nc_to_tn"),
+)
+ORIGINAL_V3_RELEASE_TARGET_OFFLINE_REGION_ID = (
+    "smokies_ridges_rivers_living_memory_union_private_v1"
+)
+ORIGINAL_V3_RELEASE_TARGET_STANDALONE_IDENTIFIERS = frozenset({
+    "mountain_crossing",
+    "mountain-crossing",
+    "little_river_cades_cove",
+    "little-river-cades-cove",
+    "little-river-cades-cove-loop",
+    "roaring_fork",
+    "roaring-fork",
+    "roaring-fork-motor-nature-trail",
+    "foothills_parkway",
+    "foothills-parkway",
+})
+ORIGINAL_V3_RELEASE_TARGET_CATALOG_TITLE_MARKERS = (
+    "great smoky mountains ridges rivers living memory",
+    "mountain crossing",
+    "little river",
+    "cades cove",
+    "roaring fork",
+    "foothills parkway",
+)
+ORIGINAL_V3_RELEASE_REQUIRED_CHAPTER_COUNT = 4
+ORIGINAL_V3_RELEASE_REQUIRED_BASE_ENTRY_COUNT = 77
+ORIGINAL_V3_RELEASE_REQUIRED_DIRECTIONAL_REPLACEMENT_COUNT = 8
+ORIGINAL_V3_RELEASE_REQUIRED_NARRATION_ASSET_COUNT = 85
+ORIGINAL_V3_RELEASE_REQUIRED_IMAGE_ASSET_COUNT = 13
+ORIGINAL_V3_RELEASE_REQUIRED_ASSET_COUNT = 98
+ORIGINAL_V3_RELEASE_REQUIRED_VARIANT_COUNT = 6
+ORIGINAL_V3_RELEASE_CREATE_CONFIRMATION = (
+    "CREATE SINGLE-USE V3 RELEASE AUTHORIZATION"
+)
+ORIGINAL_V3_RELEASE_CONSUME_CONFIRMATION = (
+    "PUBLISH THIS EXACT V3 RELEASE SNAPSHOT"
+)
 ORIGINAL_VIRTUAL_VALIDATION_REQUIRED_SCENARIOS = (
     "baseline_slow_15mph",
     "baseline_cruise_36mph",
@@ -12390,6 +12573,20 @@ class OriginalDevicePreviewCompletionConflictError(ValueError):
         super().__init__(
             f"Original device preview cannot be marked complete: {self.reason}"
         )
+
+
+class OriginalV3ReleaseAuthorizationRequiredError(PermissionError):
+    """A V3 draft attempted to bypass its dedicated publication gate."""
+
+
+class OriginalV3ReleaseAuthorizationConflictError(ValueError):
+    def __init__(self, reason: str):
+        self.reason = str(reason)
+        super().__init__(f"Original V3 release authorization conflict: {self.reason}")
+
+
+class OriginalV3ReleaseAuthorizationExpiredError(ValueError):
+    """The single-use authorization or its road observation expired."""
 
 
 def _original_asset_mime_allowed(kind: str, mime_type: str) -> bool:
@@ -15650,6 +15847,7 @@ def _normalize_original_manifest(
     verified_assets: dict[str, dict] | None = None,
     validated_selections: set[str] | None = None,
     validated_delivery_contracts: set[str] | None = None,
+    route_evidence_document: dict | None = None,
 ) -> tuple[dict, str]:
     """Dispatch immutable Original manifests through their strict schema gate."""
     schema_version = manifest.get("schema_version") if isinstance(manifest, dict) else None
@@ -15672,6 +15870,7 @@ def _normalize_original_manifest(
             publishing=publishing,
             verified_assets=verified_assets,
             validated_selections=validated_selections,
+            route_evidence_document=route_evidence_document,
         )
     if schema_version == 3:
         return normalize_original_manifest_v3(
@@ -15684,6 +15883,7 @@ def _normalize_original_manifest(
             verified_assets=verified_assets,
             validated_selections=validated_selections,
             validated_delivery_contracts=validated_delivery_contracts,
+            route_evidence_document=route_evidence_document,
         )
     raise ValueError("Original manifest schema_version must be 1, 2, or 3")
 
@@ -17706,6 +17906,2081 @@ def moderate_original_feedback(
     return _original_feedback_from_row(saved, admin=True)
 
 
+def _original_v3_release_idempotency_key(value: object) -> str:
+    clean = str(value or "").strip()
+    if (
+        not 8 <= len(clean) <= 160
+        or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]*", clean) is None
+    ):
+        raise ValueError(
+            "Original V3 release idempotency key must be 8-160 safe characters"
+        )
+    return clean
+
+
+def _original_v3_release_canonical_time(
+    value: object,
+    label: str,
+) -> tuple[str, _datetime, int]:
+    raw = str(value or "")
+    if not raw.endswith("Z"):
+        raise ValueError(f"{label} must be canonical UTC")
+    try:
+        parsed = _datetime.fromisoformat(raw[:-1] + "+00:00")
+    except ValueError as exc:
+        raise ValueError(f"{label} must be canonical UTC") from exc
+    parsed = parsed.astimezone(_timezone.utc)
+    canonical = parsed.isoformat().replace("+00:00", "Z")
+    if raw != canonical:
+        raise ValueError(f"{label} must be canonical UTC")
+    return canonical, parsed, int(parsed.timestamp())
+
+
+def _original_v3_release_sha256(value: object, label: str) -> str:
+    if not isinstance(value, str) or re.fullmatch(r"[a-f0-9]{64}", value) is None:
+        raise ValueError(f"{label} sha256 is invalid")
+    return value
+
+
+def _original_v3_release_device_evidence_db(
+    db: sqlite3.Connection,
+    validation: dict,
+    *,
+    pack_id: str,
+    draft_revision: int,
+    manifest_sha256: str,
+    assets_sha256: str,
+) -> tuple[dict, str]:
+    """Require one exact owner-accepted Android+iOS private preview envelope."""
+    if validation.get("dual_platform_private_preview_complete") is not True:
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "dual-platform private preview is incomplete"
+        )
+    evidence = validation.get("dual_platform_private_preview_evidence")
+    stored_sha256 = validation.get(
+        "dual_platform_private_preview_evidence_sha256"
+    )
+    required_root = {
+        "schema_version",
+        "evidence_id",
+        "pack_id",
+        "draft_revision",
+        "manifest_sha256",
+        "assets_sha256",
+        "accepted_at",
+        "accepted_by_admin_user_id",
+        "platforms",
+    }
+    if not isinstance(evidence, dict) or set(evidence) != required_root:
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "dual-platform device evidence fields are invalid"
+        )
+    evidence_id = str(evidence.get("evidence_id") or "")
+    if (
+        evidence.get("schema_version") != 1
+        or re.fullmatch(r"[a-z0-9]+(?:_[a-z0-9]+)*", evidence_id) is None
+        or evidence.get("pack_id") != pack_id
+        or evidence.get("draft_revision") != draft_revision
+        or evidence.get("manifest_sha256") != manifest_sha256
+        or evidence.get("assets_sha256") != assets_sha256
+    ):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "dual-platform device evidence snapshot drifted"
+        )
+    try:
+        accepted_at, accepted, _ = _original_v3_release_canonical_time(
+            evidence.get("accepted_at"),
+            "Original dual-platform preview accepted_at",
+        )
+    except ValueError as exc:
+        raise OriginalV3ReleaseAuthorizationConflictError(str(exc)) from exc
+    if accepted > _datetime.now(_timezone.utc) + _timedelta(minutes=5):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "dual-platform device evidence is dated in the future"
+        )
+    accepted_by = evidence.get("accepted_by_admin_user_id")
+    if isinstance(accepted_by, bool) or not isinstance(accepted_by, int) or accepted_by < 1:
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "dual-platform device evidence approver is invalid"
+        )
+    approver = db.execute(
+        "SELECT is_admin FROM users WHERE id=?", (accepted_by,),
+    ).fetchone()
+    if not approver or not bool(approver["is_admin"]):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "dual-platform device evidence approver is no longer an admin"
+        )
+    platforms = evidence.get("platforms")
+    required_platform = {
+        "platform", "build_identity_sha256", "preview_evidence_sha256", "complete",
+    }
+    if (
+        not isinstance(platforms, list)
+        or len(platforms) != 2
+        or any(not isinstance(item, dict) or set(item) != required_platform for item in platforms)
+    ):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "dual-platform device evidence coverage is invalid"
+        )
+    normalized_platforms = []
+    for item in platforms:
+        platform = str(item.get("platform") or "")
+        if platform not in {"android", "ios"} or item.get("complete") is not True:
+            raise OriginalV3ReleaseAuthorizationConflictError(
+                "dual-platform device evidence is incomplete"
+            )
+        try:
+            build_sha256 = _original_v3_release_sha256(
+                item.get("build_identity_sha256"),
+                f"Original {platform} build identity",
+            )
+            preview_sha256 = _original_v3_release_sha256(
+                item.get("preview_evidence_sha256"),
+                f"Original {platform} preview evidence",
+            )
+        except ValueError as exc:
+            raise OriginalV3ReleaseAuthorizationConflictError(str(exc)) from exc
+        normalized_platforms.append({
+            "platform": platform,
+            "build_identity_sha256": build_sha256,
+            "preview_evidence_sha256": preview_sha256,
+            "complete": True,
+        })
+    normalized_platforms.sort(key=lambda item: item["platform"])
+    if [item["platform"] for item in normalized_platforms] != ["android", "ios"]:
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "dual-platform device evidence must contain Android and iOS once each"
+        )
+    normalized = {
+        "schema_version": 1,
+        "evidence_id": evidence_id,
+        "pack_id": pack_id,
+        "draft_revision": draft_revision,
+        "manifest_sha256": manifest_sha256,
+        "assets_sha256": assets_sha256,
+        "accepted_at": accepted_at,
+        "accepted_by_admin_user_id": accepted_by,
+        "platforms": normalized_platforms,
+    }
+    if evidence != normalized:
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "dual-platform device evidence is not canonical"
+        )
+    evidence_sha256 = _original_validation_hash(normalized)
+    if stored_sha256 != evidence_sha256:
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "dual-platform device evidence hash drifted"
+        )
+    return normalized, evidence_sha256
+
+
+def _original_v3_release_report_snapshot(
+    row: sqlite3.Row | dict,
+    material: dict,
+) -> tuple[dict, str]:
+    raw = dict(row)
+    report = _original_validation_report_from_row(raw, current_material=material)
+    report.update({
+        "manifest_json_sha256": _original_validation_hash(
+            _decode_pack_json(raw.get("manifest_json"), None)
+        ),
+        "started_by": int(raw["started_by"]) if raw.get("started_by") is not None else None,
+    })
+    summary = report.get("summary")
+    selections = report.get("scenarios")
+    issues = report.get("issues")
+    expected_selections = [
+        str(item.get("key") or "")
+        for item in material.get("validation_selections") or []
+    ]
+    expected_contracts = [
+        f"{item.get('key')}:{item.get('delivery_contract_sha256')}"
+        for item in material.get("validation_selections") or []
+    ]
+    scenario_count = sum(
+        len(item.get("scenarios") or [])
+        for item in selections or []
+        if isinstance(item, dict)
+    )
+    scenario_contract_valid = bool(
+        isinstance(selections, list)
+        and len(selections) == len(material.get("validation_selections") or [])
+        and all(
+            isinstance(selection, dict)
+            and selection.get("selection_key") == expected["key"]
+            and selection.get("passed") is True
+            and selection.get("issues") == []
+            and isinstance(selection.get("summary"), dict)
+            and selection["summary"].get("required")
+            == len(ORIGINAL_VIRTUAL_VALIDATION_REQUIRED_SCENARIOS)
+            and selection["summary"].get("passed")
+            == len(ORIGINAL_VIRTUAL_VALIDATION_REQUIRED_SCENARIOS)
+            and selection["summary"].get("failed") == 0
+            and isinstance(selection.get("delivery_validation"), dict)
+            and selection["delivery_validation"].get("passed") is True
+            and selection["delivery_validation"].get(
+                "delivery_contract_sha256"
+            ) == expected.get("delivery_contract_sha256")
+            and [
+                item.get("id")
+                for item in selection.get("scenarios") or []
+                if isinstance(item, dict)
+            ] == list(ORIGINAL_VIRTUAL_VALIDATION_REQUIRED_SCENARIOS)
+            and all(
+                isinstance(item, dict)
+                and item.get("required") is True
+                and item.get("passed") is True
+                and item.get("issues") == []
+                for item in selection.get("scenarios") or []
+            )
+            for selection, expected in zip(
+                selections, material.get("validation_selections") or []
+            )
+        )
+    )
+    if (
+        report.get("status") != "passed"
+        or report.get("passed") is not True
+        or report.get("current") is not True
+        or issues != []
+        or not isinstance(summary, dict)
+        or summary.get("required") != 78
+        or summary.get("passed") != 78
+        or summary.get("failed") != 0
+        or summary.get("selection_count") != ORIGINAL_V3_RELEASE_REQUIRED_VARIANT_COUNT
+        or summary.get("selections_passed") != ORIGINAL_V3_RELEASE_REQUIRED_VARIANT_COUNT
+        or summary.get("selections_failed") != 0
+        or summary.get("validated_selections") != expected_selections
+        or summary.get("validated_delivery_contracts") != expected_contracts
+        or not isinstance(selections, list)
+        or len(selections) != ORIGINAL_V3_RELEASE_REQUIRED_VARIANT_COUNT
+        or scenario_count != 78
+        or not scenario_contract_valid
+        or any(
+            not isinstance(item, dict)
+            or item.get("passed") is not True
+            or item.get("issues") != []
+            or len(item.get("scenarios") or []) != len(
+                ORIGINAL_VIRTUAL_VALIDATION_REQUIRED_SCENARIOS
+            )
+            for item in selections
+        )
+    ):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "trusted validation report does not contain exact 6-selection, 78-scenario, zero-issue evidence"
+        )
+    return report, _original_validation_hash(report)
+
+
+def _original_v3_release_product_contract(public_metadata: object) -> dict:
+    if not isinstance(public_metadata, dict):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies catalog public metadata is invalid"
+        )
+    contract = public_metadata.get("product_contract")
+    expected = {
+        "pack_scope": "one_premium_four_chapter_product",
+        "chapter_ids": [
+            chapter_id
+            for chapter_id, _ in ORIGINAL_V3_RELEASE_TARGET_CHAPTER_VARIANTS
+        ],
+        "credit_type": "earned_credits",
+        "permanent_credit_price": 900,
+        "explorer_included": True,
+        "standalone_chapter_products_approved": False,
+        "standalone_foothills_public_product_approved": False,
+        "standalone_roaring_fork_public_product_approved": False,
+        "changing_scope_or_price_requires_separate_product_decision": True,
+        "route_variant_count": ORIGINAL_V3_RELEASE_REQUIRED_VARIANT_COUNT,
+        "public_catalog_product_count": 1,
+        "standalone_product_ids": [],
+    }
+    if not isinstance(contract, dict):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies catalog product contract is missing"
+        )
+    drifted = sorted(
+        key for key, expected_value in expected.items()
+        if contract.get(key) != expected_value
+    )
+    if drifted:
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies catalog product contract drifted: " + ", ".join(drifted)
+        )
+    return copy.deepcopy(expected)
+
+
+def _original_v3_release_manifest_contract(
+    manifest: object,
+    *,
+    pack_id: str,
+) -> dict:
+    """Require the exact accepted four-chapter Smokies product shape."""
+    if pack_id != ORIGINAL_V3_RELEASE_TARGET_PACK_ID:
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "dedicated V3 release authorization is not configured for this Original"
+        )
+    if (
+        not isinstance(manifest, dict)
+        or manifest.get("schema_version") != 3
+        or manifest.get("title") != ORIGINAL_V3_RELEASE_TARGET_TITLE
+    ):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies release manifest identity drifted"
+        )
+
+    chapters = manifest.get("chapters")
+    if (
+        not isinstance(chapters, list)
+        or len(chapters) != ORIGINAL_V3_RELEASE_REQUIRED_CHAPTER_COUNT
+        or any(not isinstance(chapter, dict) for chapter in chapters)
+    ):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies release requires exactly four chapters"
+        )
+    actual_chapter_variants: list[tuple[str, tuple[str, ...]]] = []
+    for chapter in chapters:
+        variants = chapter.get("variants")
+        if not isinstance(variants, list) or any(
+            not isinstance(variant, dict) for variant in variants
+        ):
+            raise OriginalV3ReleaseAuthorizationConflictError(
+                "Smokies chapter variants are invalid"
+            )
+        actual_chapter_variants.append((
+            str(chapter.get("id") or ""),
+            tuple(str(variant.get("id") or "") for variant in variants),
+        ))
+    if tuple(actual_chapter_variants) != ORIGINAL_V3_RELEASE_TARGET_CHAPTER_VARIANTS:
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies release chapter or exact variant membership drifted"
+        )
+
+    stories = manifest.get("stories")
+    if (
+        not isinstance(stories, list)
+        or len(stories) != ORIGINAL_V3_RELEASE_REQUIRED_BASE_ENTRY_COUNT
+        or any(not isinstance(story, dict) for story in stories)
+    ):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies release requires exactly 77 base entries"
+        )
+    story_ids = [str(story.get("id") or "") for story in stories]
+    if "" in story_ids or len(set(story_ids)) != len(story_ids):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies base entry identities are invalid"
+        )
+
+    story_chapters: dict[str, set[str]] = {}
+    for chapter in chapters:
+        chapter_id = str(chapter["id"])
+        for variant in chapter["variants"]:
+            referenced_in_variant: list[str] = []
+            for field in ("cue_refs", "selectable_refs"):
+                references = variant.get(field)
+                if not isinstance(references, list) or any(
+                    not isinstance(reference, dict) for reference in references
+                ):
+                    raise OriginalV3ReleaseAuthorizationConflictError(
+                        "Smokies route delivery references are invalid"
+                    )
+                referenced_in_variant.extend(
+                    str(reference.get("story_id") or "")
+                    for reference in references
+                )
+            if (
+                "" in referenced_in_variant
+                or len(set(referenced_in_variant)) != len(referenced_in_variant)
+            ):
+                raise OriginalV3ReleaseAuthorizationConflictError(
+                    "Smokies route delivery entry identities are invalid"
+                )
+            variant_key = (chapter_id, str(variant["id"]))
+            if len(referenced_in_variant) != (
+                ORIGINAL_V3_RELEASE_TARGET_VARIANT_ENTRY_COUNTS[variant_key]
+            ):
+                raise OriginalV3ReleaseAuthorizationConflictError(
+                    "Smokies exact per-variant base-entry coverage drifted"
+                )
+            for story_id in referenced_in_variant:
+                story_chapters.setdefault(story_id, set()).add(chapter_id)
+    if set(story_ids) != set(story_chapters) or any(
+        len(chapter_ids) != 1 for chapter_ids in story_chapters.values()
+    ):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies base entries are not bound to exactly one chapter"
+        )
+    actual_chapter_entry_counts = {
+        chapter_id: sum(
+            story_chapters[story_id] == {chapter_id} for story_id in story_ids
+        )
+        for chapter_id, _ in ORIGINAL_V3_RELEASE_TARGET_CHAPTER_VARIANTS
+    }
+    if actual_chapter_entry_counts != ORIGINAL_V3_RELEASE_TARGET_CHAPTER_ENTRY_COUNTS:
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies chapter base-entry split drifted"
+        )
+
+    directional_replacements: list[tuple[str, str, str]] = []
+    base_audio_ids: list[str] = []
+    artwork_ids: list[str] = []
+    replacement_audio_ids: list[str] = []
+    valid_variants = {
+        chapter_id: set(variant_ids)
+        for chapter_id, variant_ids in ORIGINAL_V3_RELEASE_TARGET_CHAPTER_VARIANTS
+    }
+    for story in stories:
+        story_id = str(story["id"])
+        base_audio_ids.append(str(story.get("audio_asset_id") or ""))
+        artwork_ids.append(str(story.get("artwork_asset_id") or ""))
+        overrides = story.get("variant_overrides", [])
+        if not isinstance(overrides, list) or any(
+            not isinstance(override, dict) for override in overrides
+        ):
+            raise OriginalV3ReleaseAuthorizationConflictError(
+                "Smokies directional replacements are invalid"
+            )
+        for override in overrides:
+            chapter_id = str(override.get("chapter_id") or "")
+            variant_id = str(override.get("variant_id") or "")
+            audio_asset_id = str(override.get("audio_asset_id") or "")
+            if (
+                story_chapters[story_id] != {chapter_id}
+                or variant_id not in valid_variants.get(chapter_id, set())
+                or not audio_asset_id
+            ):
+                raise OriginalV3ReleaseAuthorizationConflictError(
+                    "Smokies directional replacement binding drifted"
+                )
+            directional_replacements.append((story_id, chapter_id, variant_id))
+            replacement_audio_ids.append(audio_asset_id)
+    if tuple(sorted(directional_replacements)) != tuple(
+        sorted(ORIGINAL_V3_RELEASE_TARGET_DIRECTIONAL_REPLACEMENTS)
+    ):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies exact eight directional replacements drifted"
+        )
+    if (
+        len(directional_replacements)
+        != ORIGINAL_V3_RELEASE_REQUIRED_DIRECTIONAL_REPLACEMENT_COUNT
+        or "" in base_audio_ids
+        or "" in artwork_ids
+        or len(set(base_audio_ids)) != len(base_audio_ids)
+        or len(set(replacement_audio_ids)) != len(replacement_audio_ids)
+        or set(base_audio_ids) & set(replacement_audio_ids)
+    ):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies base or replacement media binding drifted"
+        )
+
+    assets = manifest.get("assets")
+    if (
+        not isinstance(assets, list)
+        or len(assets) != ORIGINAL_V3_RELEASE_REQUIRED_ASSET_COUNT
+        or any(not isinstance(asset, dict) for asset in assets)
+    ):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies release requires exactly 98 content assets"
+        )
+    asset_ids = [str(asset.get("id") or "") for asset in assets]
+    if "" in asset_ids or len(set(asset_ids)) != len(asset_ids):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies content asset identities are invalid"
+        )
+    narration_asset_ids = {
+        str(asset["id"]) for asset in assets if asset.get("kind") == "narration"
+    }
+    image_asset_ids = {
+        str(asset["id"]) for asset in assets if asset.get("kind") == "image"
+    }
+    if (
+        len(narration_asset_ids)
+        != ORIGINAL_V3_RELEASE_REQUIRED_NARRATION_ASSET_COUNT
+        or len(image_asset_ids) != ORIGINAL_V3_RELEASE_REQUIRED_IMAGE_ASSET_COUNT
+        or narration_asset_ids | image_asset_ids != set(asset_ids)
+        or narration_asset_ids != set(base_audio_ids) | set(replacement_audio_ids)
+        or image_asset_ids != set(artwork_ids)
+    ):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies release requires exactly 85 narration and 13 used image assets"
+        )
+
+    offline_map = manifest.get("offline_map")
+    bounds = offline_map.get("bounds") if isinstance(offline_map, dict) else None
+    if (
+        not isinstance(offline_map, dict)
+        or offline_map.get("region_id")
+        != ORIGINAL_V3_RELEASE_TARGET_OFFLINE_REGION_ID
+        or not isinstance(bounds, dict)
+        or set(bounds) != {"north", "south", "east", "west"}
+        or any(
+            isinstance(bounds[key], bool)
+            or not isinstance(bounds[key], (int, float))
+            for key in bounds
+        )
+        or float(bounds["north"]) <= float(bounds["south"])
+        or float(bounds["east"]) <= float(bounds["west"])
+        or "offline_maps" in manifest
+    ):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies release requires its one exact union offline-map region"
+        )
+
+    return {
+        "schema_version": 1,
+        "product_id": ORIGINAL_V3_RELEASE_TARGET_PACK_ID,
+        "chapter_variants": [
+            {"chapter_id": chapter_id, "variant_ids": list(variant_ids)}
+            for chapter_id, variant_ids in ORIGINAL_V3_RELEASE_TARGET_CHAPTER_VARIANTS
+        ],
+        "chapter_entry_counts": copy.deepcopy(
+            ORIGINAL_V3_RELEASE_TARGET_CHAPTER_ENTRY_COUNTS
+        ),
+        "variant_entry_counts": [
+            {
+                "chapter_id": chapter_id,
+                "variant_id": variant_id,
+                "entry_count": entry_count,
+            }
+            for (chapter_id, variant_id), entry_count in (
+                ORIGINAL_V3_RELEASE_TARGET_VARIANT_ENTRY_COUNTS.items()
+            )
+        ],
+        "chapter_count": ORIGINAL_V3_RELEASE_REQUIRED_CHAPTER_COUNT,
+        "variant_count": ORIGINAL_V3_RELEASE_REQUIRED_VARIANT_COUNT,
+        "base_entry_count": ORIGINAL_V3_RELEASE_REQUIRED_BASE_ENTRY_COUNT,
+        "directional_replacement_count": (
+            ORIGINAL_V3_RELEASE_REQUIRED_DIRECTIONAL_REPLACEMENT_COUNT
+        ),
+        "narration_asset_count": ORIGINAL_V3_RELEASE_REQUIRED_NARRATION_ASSET_COUNT,
+        "image_asset_count": ORIGINAL_V3_RELEASE_REQUIRED_IMAGE_ASSET_COUNT,
+        "content_asset_count": ORIGINAL_V3_RELEASE_REQUIRED_ASSET_COUNT,
+        "offline_region_count": 1,
+        "offline_region_id": ORIGINAL_V3_RELEASE_TARGET_OFFLINE_REGION_ID,
+    }
+
+
+def _original_v3_release_content_projection(manifest: object) -> dict:
+    """Project immutable accepted content while excluding final-readiness state.
+
+    The checked private candidate intentionally precedes road, device, review,
+    and trusted-validation completion.  Those facts must mature before release,
+    but they may not change the accepted stories, routes, delivery contracts,
+    media identities, product structure, or offline coverage.  The complete
+    final draft is still hashed separately in every short-lived authorization.
+    """
+    if not isinstance(manifest, dict):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies release content projection requires a manifest object"
+        )
+    allowed_root_keys = {
+        "schema_version", "manifest_id", "pack_id", "version", "locale",
+        "title", "stories", "chapters", "assets", "offline_map", "review",
+        "narration_profile", "route_evidence", "consumer_contract",
+    }
+    extra_root_keys = sorted(set(manifest) - allowed_root_keys)
+    if extra_root_keys:
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies release manifest contains unsupported final-draft fields: "
+            + ", ".join(extra_root_keys)
+        )
+    if (
+        manifest.get("schema_version") != 3
+        or manifest.get("title") != ORIGINAL_V3_RELEASE_TARGET_TITLE
+        or (
+            manifest.get("pack_id") is not None
+            and manifest.get("pack_id") != ORIGINAL_V3_RELEASE_TARGET_PACK_ID
+        )
+    ):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies release content projection identity drifted"
+        )
+
+    review = manifest.get("review")
+    allowed_review_keys = {
+        "editorial_status", "field_drive_completed_at",
+        "source_review_completed_at",
+    }
+    if not isinstance(review, dict) or set(review) - allowed_review_keys:
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies final review may mature only its status and review timestamps"
+        )
+    if review.get("editorial_status") not in {
+        "owner_dual_platform_preview_required", "approved",
+    }:
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies final editorial status is outside the accepted review path"
+        )
+    if manifest.get("route_evidence") is not None and not isinstance(
+        manifest.get("route_evidence"), dict,
+    ):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies final route-evidence binding is invalid"
+        )
+
+    chapters = manifest.get("chapters")
+    projected_chapters: list[dict] = []
+    if not isinstance(chapters, list) or any(
+        not isinstance(chapter, dict) for chapter in chapters
+    ):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies release content projection requires chapter objects"
+        )
+    for chapter in chapters:
+        projected_chapter = copy.deepcopy(chapter)
+        if projected_chapter.get("id") == "roaring_fork":
+            safety = projected_chapter.get("safety")
+            disclaimers = safety.get("disclaimers") if isinstance(safety, dict) else None
+            private_disclaimer = (
+                "This private draft does not replace current NPS information."
+            )
+            final_disclaimer = (
+                "This tour does not replace current NPS information."
+            )
+            if (
+                not isinstance(disclaimers, list)
+                or not disclaimers
+                or disclaimers[0] not in {private_disclaimer, final_disclaimer}
+            ):
+                raise OriginalV3ReleaseAuthorizationConflictError(
+                    "Roaring Fork final disclaimer drifted outside its exact private-to-public transition"
+                )
+            # Only the accepted private-state label may mature; every other
+            # safety field and every other disclaimer remains byte-for-byte
+            # content-bound by this projection.
+            disclaimers[0] = private_disclaimer
+            access = projected_chapter.get("access")
+            private_access_note = (
+                "Accessibility and stop conditions require a current NPS check; "
+                "this draft makes no parking or access guarantee."
+            )
+            final_access_note = (
+                "Accessibility and stop conditions require a current NPS check; "
+                "this tour makes no parking or access guarantee."
+            )
+            if (
+                not isinstance(access, dict)
+                or access.get("accessibility_notes")
+                not in {private_access_note, final_access_note}
+            ):
+                raise OriginalV3ReleaseAuthorizationConflictError(
+                    "Roaring Fork access note drifted outside its exact private-to-public transition"
+                )
+            access["accessibility_notes"] = private_access_note
+        sources = projected_chapter.get("operational_sources")
+        if not isinstance(sources, list) or any(
+            not isinstance(source, dict) for source in sources
+        ):
+            raise OriginalV3ReleaseAuthorizationConflictError(
+                "Smokies operational-source projection is invalid"
+            )
+        for source in sources:
+            # A refreshed checked operational candidate may advance only the
+            # source-review date without inheriting accepted content authority.
+            source.pop("reviewed_at", None)
+        readiness = projected_chapter.get("operational_readiness")
+        if not isinstance(readiness, dict):
+            raise OriginalV3ReleaseAuthorizationConflictError(
+                "Smokies operational-readiness projection is invalid"
+            )
+        # These two fields name the refreshed, checked backend candidate.  Its
+        # policy, scopes, alternates, and source set remain content-bound.
+        readiness.pop("candidate_id", None)
+        readiness.pop("candidate_sha256", None)
+        projected_chapters.append(projected_chapter)
+
+    assets = manifest.get("assets")
+    if not isinstance(assets, list) or any(
+        not isinstance(asset, dict) for asset in assets
+    ):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies release content projection requires asset objects"
+        )
+    projected_assets = [{
+        key: copy.deepcopy(asset.get(key))
+        for key in ("id", "kind", "mime_type", "bytes", "sha256")
+    } for asset in assets]
+
+    offline_map = manifest.get("offline_map")
+    if not isinstance(offline_map, dict):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies release content projection requires one offline region"
+        )
+    projected_offline_map = copy.deepcopy(offline_map)
+    projected_offline_map.pop("estimated_bytes", None)
+
+    narration_profile = manifest.get("narration_profile")
+    if not isinstance(narration_profile, dict):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies release content projection requires its narration profile"
+        )
+    projected_profile = copy.deepcopy(narration_profile)
+    commercial_license = projected_profile.get("commercial_license")
+    if not isinstance(commercial_license, dict):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies release narration license projection is invalid"
+        )
+    commercial_license.pop("verified_at", None)
+
+    return {
+        "schema_version": manifest.get("schema_version"),
+        "locale": copy.deepcopy(manifest.get("locale")),
+        "title": manifest.get("title"),
+        "consumer_contract": copy.deepcopy(manifest.get("consumer_contract")),
+        "stories": copy.deepcopy(manifest.get("stories")),
+        "chapters": projected_chapters,
+        "assets": projected_assets,
+        "offline_map": projected_offline_map,
+        "narration_profile": projected_profile,
+    }
+
+
+def _original_v3_release_private_candidate_identity(manifest: object) -> dict:
+    content_projection = _original_v3_release_content_projection(manifest)
+    content_projection_sha256 = _original_validation_hash(content_projection)
+    if (
+        content_projection_sha256
+        != ORIGINAL_V3_RELEASE_TARGET_CONTENT_PROJECTION_SHA256
+    ):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies draft content drifted from the committed complete private candidate"
+        )
+    return {
+        "candidate_id": ORIGINAL_V3_RELEASE_TARGET_CANDIDATE_ID,
+        "source_commit": ORIGINAL_V3_RELEASE_TARGET_CANDIDATE_SOURCE_COMMIT,
+        "candidate_artifact_sha256": (
+            ORIGINAL_V3_RELEASE_TARGET_CANDIDATE_ARTIFACT_SHA256
+        ),
+        "manifest_artifact_sha256": (
+            ORIGINAL_V3_RELEASE_TARGET_MANIFEST_ARTIFACT_SHA256
+        ),
+        "private_manifest_object_sha256": (
+            ORIGINAL_V3_RELEASE_TARGET_PRIVATE_MANIFEST_OBJECT_SHA256
+        ),
+        "content_projection_sha256": content_projection_sha256,
+        "final_draft_manifest_sha256": _original_validation_hash(manifest),
+    }
+
+
+def _original_v3_release_final_readiness_contract(manifest: object) -> dict:
+    """Require and bind the exact final-only fields excluded from content identity."""
+    if not isinstance(manifest, dict):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies final-readiness manifest is invalid"
+        )
+    review = manifest.get("review")
+    if not isinstance(review, dict) or review.get("editorial_status") != "approved":
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies editorial review is not approved for final release"
+        )
+    try:
+        field_drive_completed_at = _normalize_original_review_timestamp(
+            review.get("field_drive_completed_at"),
+            "Smokies final field_drive_completed_at",
+        )
+        source_review_completed_at = _normalize_original_review_timestamp(
+            review.get("source_review_completed_at"),
+            "Smokies final source_review_completed_at",
+        )
+    except ValueError as exc:
+        raise OriginalV3ReleaseAuthorizationConflictError(str(exc)) from exc
+    if not field_drive_completed_at or not source_review_completed_at:
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies final release requires both review completion timestamps"
+        )
+
+    offline_map = manifest.get("offline_map")
+    estimated_bytes = (
+        offline_map.get("estimated_bytes")
+        if isinstance(offline_map, dict) else None
+    )
+    if (
+        isinstance(estimated_bytes, bool)
+        or not isinstance(estimated_bytes, int)
+        or estimated_bytes <= 0
+    ):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies union offline map requires a reviewed positive byte count"
+        )
+    route_evidence = manifest.get("route_evidence")
+    if not isinstance(route_evidence, dict):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies final server-owned route-evidence binding is absent"
+        )
+
+    chapters = manifest.get("chapters")
+    if not isinstance(chapters, list):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies final chapter readiness is invalid"
+        )
+    roaring_fork_rows = [
+        chapter for chapter in chapters
+        if isinstance(chapter, dict) and chapter.get("id") == "roaring_fork"
+    ]
+    if len(roaring_fork_rows) != 1:
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies final Roaring Fork chapter identity is invalid"
+        )
+    roaring_fork = roaring_fork_rows[0]
+    expected_disclaimer = (
+        "This tour does not replace current NPS information."
+    )
+    expected_access_note = (
+        "Accessibility and stop conditions require a current NPS check; "
+        "this tour makes no parking or access guarantee."
+    )
+    safety = roaring_fork.get("safety")
+    disclaimers = safety.get("disclaimers") if isinstance(safety, dict) else None
+    access = roaring_fork.get("access")
+    if (
+        not isinstance(disclaimers, list)
+        or not disclaimers
+        or disclaimers[0] != expected_disclaimer
+        or not isinstance(access, dict)
+        or access.get("accessibility_notes") != expected_access_note
+    ):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Roaring Fork private-state copy was not exactly finalized"
+        )
+
+    profile = manifest.get("narration_profile")
+    commercial = profile.get("commercial_license") if isinstance(profile, dict) else None
+    try:
+        profile_verified_at = _normalize_original_review_timestamp(
+            commercial.get("verified_at") if isinstance(commercial, dict) else None,
+            "Smokies final narration profile verified_at",
+        )
+    except ValueError as exc:
+        raise OriginalV3ReleaseAuthorizationConflictError(str(exc)) from exc
+    if not profile_verified_at:
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies final narration profile verification is absent"
+        )
+
+    operational_bindings: list[dict] = []
+    for chapter in chapters:
+        if not isinstance(chapter, dict):
+            raise OriginalV3ReleaseAuthorizationConflictError(
+                "Smokies final chapter readiness is invalid"
+            )
+        readiness = chapter.get("operational_readiness")
+        sources = chapter.get("operational_sources")
+        if not isinstance(readiness, dict) or not isinstance(sources, list):
+            raise OriginalV3ReleaseAuthorizationConflictError(
+                "Smokies final operational binding is absent"
+            )
+        operational_bindings.append({
+            "chapter_id": chapter.get("id"),
+            "candidate_id": readiness.get("candidate_id"),
+            "candidate_sha256": readiness.get("candidate_sha256"),
+            "operational_sources_sha256": _original_validation_hash(sources),
+        })
+
+    return {
+        "schema_version": 1,
+        "editorial_status": "approved",
+        "field_drive_completed_at": field_drive_completed_at,
+        "source_review_completed_at": source_review_completed_at,
+        "offline_map_estimated_bytes": estimated_bytes,
+        "route_evidence_sha256": _original_validation_hash(route_evidence),
+        "narration_profile_verified_at": profile_verified_at,
+        "operational_bindings": operational_bindings,
+        "roaring_fork_final_disclaimer": expected_disclaimer,
+        "roaring_fork_final_accessibility_note": expected_access_note,
+    }
+
+
+def _original_v3_release_catalog_inventory_db(
+    db: sqlite3.Connection,
+    *,
+    pack_id: str,
+) -> tuple[dict, str]:
+    """Bind the real public catalog and reject another Smokies/chapter listing."""
+    if pack_id != ORIGINAL_V3_RELEASE_TARGET_PACK_ID:
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "dedicated V3 release catalog inventory is not configured for this Original"
+        )
+    target_chapter_ids = {
+        chapter_id
+        for chapter_id, _ in ORIGINAL_V3_RELEASE_TARGET_CHAPTER_VARIANTS
+    }
+    rows = db.execute(
+        """SELECT p.id,p.slug,p.status,p.current_published_version,
+                  v.title AS published_title,
+                  v.public_metadata,v.original_manifest_json
+           FROM authored_trip_packs p
+           JOIN authored_trip_pack_versions v
+             ON v.pack_id=p.id AND v.version=p.current_published_version
+           WHERE p.content_kind='original_drive' AND p.id<>?
+             AND p.status='published' AND p.current_published_version IS NOT NULL
+           ORDER BY p.id""",
+        (pack_id,),
+    ).fetchall()
+    conflicts: list[dict] = []
+    for raw_row in rows:
+        row = dict(raw_row)
+        manifest = _decode_pack_json(row.get("original_manifest_json"), {})
+        metadata = _decode_pack_json(row.get("public_metadata"), {})
+        markers: set[str] = set()
+        row_id = str(row.get("id") or "").strip().lower()
+        slug = str(row.get("slug") or "").strip().lower()
+        published_title = re.sub(
+            r"[^a-z0-9]+", " ",
+            str(row.get("published_title") or "").strip().lower(),
+        ).strip()
+        if row_id in ORIGINAL_V3_RELEASE_TARGET_STANDALONE_IDENTIFIERS:
+            markers.add("pack_id")
+        if slug in ORIGINAL_V3_RELEASE_TARGET_STANDALONE_IDENTIFIERS:
+            markers.add("slug")
+        if any(
+            marker in published_title
+            for marker in ORIGINAL_V3_RELEASE_TARGET_CATALOG_TITLE_MARKERS
+        ):
+            markers.add("published_title")
+        if isinstance(manifest, dict):
+            if manifest.get("product_id") == pack_id or manifest.get("pack_id") == pack_id:
+                markers.add("manifest_product_id")
+            if manifest.get("chapter_id") in target_chapter_ids:
+                markers.add("manifest_chapter_id")
+            chapters = manifest.get("chapters")
+            if isinstance(chapters, list) and any(
+                isinstance(chapter, dict)
+                and chapter.get("id") in target_chapter_ids
+                for chapter in chapters
+            ):
+                markers.add("manifest_chapters")
+        if isinstance(metadata, dict):
+            if (
+                metadata.get("product_id") == pack_id
+                or metadata.get("parent_product_id") == pack_id
+            ):
+                markers.add("metadata_product_id")
+            if metadata.get("chapter_id") in target_chapter_ids:
+                markers.add("metadata_chapter_id")
+            contract = metadata.get("product_contract")
+            contract_chapter_ids = (
+                contract.get("chapter_ids") if isinstance(contract, dict) else None
+            )
+            if isinstance(contract_chapter_ids, list) and (
+                set(str(item) for item in contract_chapter_ids) & target_chapter_ids
+            ):
+                markers.add("metadata_product_contract")
+        if markers:
+            conflicts.append({
+                "pack_id": row["id"],
+                "slug": row["slug"],
+                "published_title": row["published_title"],
+                "published_version": int(row["current_published_version"]),
+                "match_markers": sorted(markers),
+            })
+    inventory = {
+        "schema_version": 1,
+        "target_product_id": pack_id,
+        "other_published_smokies_or_chapter_listing_count": len(conflicts),
+        "other_published_smokies_or_chapter_listings": conflicts,
+    }
+    if conflicts:
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "another published Smokies or standalone chapter catalog listing exists"
+        )
+    return inventory, _original_validation_hash(inventory)
+
+
+def _original_v3_release_catalog_snapshot(
+    db: sqlite3.Connection,
+    pack: sqlite3.Row | dict,
+) -> tuple[dict, str]:
+    raw = dict(pack)
+    public_metadata = _decode_pack_json(raw.get("draft_public_metadata"), {})
+    if (
+        raw.get("id") != ORIGINAL_V3_RELEASE_TARGET_PACK_ID
+        or raw.get("content_kind") != "original_drive"
+        or raw.get("draft_title") != ORIGINAL_V3_RELEASE_TARGET_TITLE
+        or int(raw.get("draft_price_credits") or -1) != 900
+    ):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies catalog identity or 900-credit price drifted"
+        )
+    try:
+        access_policy, access_policy_explicit = _original_access_policy(
+            public_metadata, int(raw["draft_price_credits"]),
+        )
+    except (TypeError, ValueError) as exc:
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies catalog access policy is invalid"
+        ) from exc
+    if (
+        access_policy_explicit is not True
+        or access_policy != {
+            "schema_version": 1,
+            "explorer_included": True,
+            "permanent_credit_price": 900,
+        }
+    ):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies catalog must remain Explorer-included at 900 earned credits"
+        )
+    product_contract = _original_v3_release_product_contract(public_metadata)
+    listing_inventory, listing_inventory_sha256 = (
+        _original_v3_release_catalog_inventory_db(
+            db,
+            pack_id=str(raw["id"]),
+        )
+    )
+    catalog = {
+        "schema_version": 1,
+        "pack_id": raw["id"],
+        "content_kind": raw["content_kind"],
+        "slug": raw["slug"],
+        "title": raw["draft_title"],
+        "summary": raw["draft_summary"],
+        "price_credits": int(raw["draft_price_credits"]),
+        "coverage_region": raw["draft_coverage_region"],
+        "public_metadata": public_metadata,
+        "access_policy": access_policy,
+        "access_policy_explicit": access_policy_explicit,
+        "product_contract": product_contract,
+        "listing_inventory": listing_inventory,
+        "listing_inventory_sha256": listing_inventory_sha256,
+        "template_sha256": _original_validation_hash(
+            _decode_pack_json(raw.get("draft_template_json"), None)
+        ),
+        "prior_status": raw["status"],
+        "prior_published_version": (
+            int(raw["current_published_version"])
+            if raw.get("current_published_version") is not None else None
+        ),
+    }
+    return catalog, _original_validation_hash(catalog)
+
+
+def _original_v3_release_road_targets(manifest: dict) -> list[dict]:
+    targets: list[dict] = []
+    for chapter in manifest.get("chapters") or []:
+        if not isinstance(chapter, dict):
+            continue
+        readiness = chapter.get("operational_readiness")
+        if not isinstance(readiness, dict):
+            raise OriginalV3ReleaseAuthorizationConflictError(
+                "chapter operational readiness is unavailable"
+            )
+        for variant in chapter.get("variants") or []:
+            if not isinstance(variant, dict):
+                continue
+            targets.append({
+                "chapter_id": str(chapter.get("id") or ""),
+                "variant_id": str(variant.get("id") or ""),
+                "candidate_id": str(readiness.get("candidate_id") or ""),
+                "candidate_sha256": str(readiness.get("candidate_sha256") or "").lower(),
+            })
+    targets.sort(key=lambda item: (item["chapter_id"], item["variant_id"]))
+    if (
+        len(targets) != ORIGINAL_V3_RELEASE_REQUIRED_VARIANT_COUNT
+        or len({(item["chapter_id"], item["variant_id"]) for item in targets})
+        != ORIGINAL_V3_RELEASE_REQUIRED_VARIANT_COUNT
+        or any(
+            not item["chapter_id"]
+            or not item["variant_id"]
+            or not item["candidate_id"]
+            or re.fullmatch(r"[a-f0-9]{64}", item["candidate_sha256"]) is None
+            for item in targets
+        )
+    ):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "release requires exactly six uniquely identified route variants"
+        )
+    return targets
+
+
+def _normalize_original_v3_release_road_evidence(
+    evidence: object,
+    *,
+    manifest: dict,
+    now: int,
+) -> tuple[dict, str, int, int]:
+    required_root = {
+        "schema_version", "source", "feed", "route_evidence", "observations",
+    }
+    if not isinstance(evidence, dict) or set(evidence) != required_root:
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "current-road evidence fields are invalid"
+        )
+    if (
+        evidence.get("schema_version") != 1
+        or evidence.get("source") != "server_owned_nps_current_road_observation_v1"
+    ):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "current-road evidence source is invalid"
+        )
+    feed = evidence.get("feed")
+    route_binding = evidence.get("route_evidence")
+    observations = evidence.get("observations")
+    if not isinstance(feed, dict) or set(feed) != {
+        "source_id", "observed_at", "response_sha256",
+    }:
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "current-road feed evidence is invalid"
+        )
+    if (
+        feed.get("source_id") != "grsm-current-cautions"
+        or re.fullmatch(r"[a-f0-9]{64}", str(feed.get("response_sha256") or "")) is None
+    ):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "current-road feed identity is invalid"
+        )
+    try:
+        observed_at, observed, observed_epoch = _original_v3_release_canonical_time(
+            feed.get("observed_at"), "Original current-road observed_at",
+        )
+    except ValueError as exc:
+        raise OriginalV3ReleaseAuthorizationConflictError(str(exc)) from exc
+    if observed_epoch > now + 5:
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "current-road observation is dated in the future"
+        )
+    road_expires_at = observed_epoch + ORIGINAL_V3_RELEASE_ROAD_MAX_AGE_SECONDS
+    if road_expires_at <= now:
+        raise OriginalV3ReleaseAuthorizationExpiredError(
+            "Current-road observation is older than 30 minutes"
+        )
+    manifest_binding = manifest.get("route_evidence")
+    if (
+        not isinstance(route_binding, dict)
+        or set(route_binding) != {"evidence_id", "evidence_sha256"}
+        or not isinstance(manifest_binding, dict)
+        or route_binding.get("evidence_id") != manifest_binding.get("evidence_id")
+        or route_binding.get("evidence_sha256") != manifest_binding.get("evidence_sha256")
+        or re.fullmatch(
+            r"[a-f0-9]{64}", str(route_binding.get("evidence_sha256") or ""),
+        ) is None
+    ):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "current-road route-evidence binding drifted"
+        )
+    targets = _original_v3_release_road_targets(manifest)
+    if not isinstance(observations, list) or len(observations) != len(targets):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "current-road observation coverage is incomplete"
+        )
+    normalized_observations: list[dict] = []
+    for target, item in zip(targets, observations):
+        if not isinstance(item, dict) or set(item) != {
+            "chapter_id", "variant_id", "observation",
+        }:
+            raise OriginalV3ReleaseAuthorizationConflictError(
+                "current-road observation fields are invalid"
+            )
+        if (
+            item.get("chapter_id") != target["chapter_id"]
+            or item.get("variant_id") != target["variant_id"]
+        ):
+            raise OriginalV3ReleaseAuthorizationConflictError(
+                "current-road observation route membership drifted"
+            )
+        observation = item.get("observation")
+        if not isinstance(observation, dict) or set(observation) != {
+            "candidate_id", "candidate_sha256", "source_id", "observed_at", "road_states",
+        }:
+            raise OriginalV3ReleaseAuthorizationConflictError(
+                "current-road observation payload is invalid"
+            )
+        road_states = observation.get("road_states")
+        if (
+            observation.get("candidate_id") != target["candidate_id"]
+            or observation.get("candidate_sha256") != target["candidate_sha256"]
+            or observation.get("source_id") != feed["source_id"]
+            or observation.get("observed_at") != observed_at
+            or not isinstance(road_states, dict)
+            or not road_states
+            or any(state != "open" for state in road_states.values())
+        ):
+            raise OriginalV3ReleaseAuthorizationConflictError(
+                "current-road observation is stale, changed, or not fully open"
+            )
+        normalized_observations.append({
+            "chapter_id": target["chapter_id"],
+            "variant_id": target["variant_id"],
+            "observation": copy.deepcopy(observation),
+        })
+    normalized = {
+        "schema_version": 1,
+        "source": "server_owned_nps_current_road_observation_v1",
+        "feed": {
+            "source_id": "grsm-current-cautions",
+            "observed_at": observed_at,
+            "response_sha256": feed["response_sha256"],
+        },
+        "route_evidence": copy.deepcopy(route_binding),
+        "observations": normalized_observations,
+    }
+    if evidence != normalized:
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "current-road evidence is not canonical"
+        )
+    return (
+        normalized,
+        _original_validation_hash(normalized),
+        observed_epoch,
+        road_expires_at,
+    )
+
+
+def _authored_original_v3_release_snapshot_db(
+    db: sqlite3.Connection,
+    pack: sqlite3.Row | dict,
+    *,
+    admin_user_id: int,
+    idempotency_key: str,
+    current_road_evidence: dict,
+    now: int,
+) -> tuple[dict, str, dict]:
+    """Rebuild every publication input while the caller holds a write lock."""
+    raw_pack = dict(pack)
+    pack_id = str(raw_pack.get("id") or "")
+    raw_manifest = _decode_pack_json(
+        raw_pack.get("draft_original_manifest_json"), None,
+    )
+    if (
+        raw_pack.get("content_kind") != "original_drive"
+        or not isinstance(raw_manifest, dict)
+        or raw_manifest.get("schema_version") != 3
+    ):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "dedicated release authorization requires a V3 Original draft"
+        )
+    raw_manifest_contract = _original_v3_release_manifest_contract(
+        raw_manifest,
+        pack_id=pack_id,
+    )
+    private_candidate = _original_v3_release_private_candidate_identity(
+        raw_manifest
+    )
+    final_readiness = _original_v3_release_final_readiness_contract(
+        raw_manifest
+    )
+    validation = _decode_pack_json(
+        raw_pack.get("draft_validation_metadata"), None,
+    )
+    if not isinstance(validation, dict):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "draft validation metadata is invalid"
+        )
+    missing = sorted(
+        check for check in ORIGINAL_VALIDATION_CHECKS
+        if validation.get(check) is not True
+    )
+    if missing:
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "ten-review gate is incomplete: " + ", ".join(missing)
+        )
+    template_for_scan = _decode_pack_json(raw_pack.get("draft_template_json"), {})
+    if isinstance(template_for_scan, dict):
+        template_for_scan = dict(template_for_scan)
+        for structural_key in (
+            "schema_version", "trip_id", "status", "visibility", "source",
+        ):
+            template_for_scan.pop(structural_key, None)
+    unresolved_path = _original_unresolved_copy_path({
+        "title": raw_pack.get("draft_title"),
+        "summary": raw_pack.get("draft_summary"),
+        "public_metadata": _decode_pack_json(
+            raw_pack.get("draft_public_metadata"), {},
+        ),
+        "template": template_for_scan,
+    }, "original")
+    if unresolved_path:
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            f"release content is unresolved at {unresolved_path}"
+        )
+
+    verified_assets = _verified_original_asset_map_db(db, pack_id)
+    preview_manifest = _authored_original_validation_manifest_from_row(
+        raw_pack,
+        verified_assets,
+        include_validation_audio_evidence=True,
+    )
+    if preview_manifest.get("schema_version") != 3:
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "release validation manifest is not V3"
+        )
+    preview_manifest_contract = _original_v3_release_manifest_contract(
+        preview_manifest,
+        pack_id=pack_id,
+    )
+    if preview_manifest_contract != raw_manifest_contract:
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies resolved preview manifest contract drifted from its draft"
+        )
+    manifest_assets = {
+        str(item.get("id") or ""): item
+        for item in preview_manifest.get("assets") or []
+        if isinstance(item, dict)
+    }
+    if (
+        "" in manifest_assets
+        or len(manifest_assets) != ORIGINAL_V3_RELEASE_REQUIRED_ASSET_COUNT
+        or len(verified_assets) != ORIGINAL_V3_RELEASE_REQUIRED_ASSET_COUNT
+        or set(manifest_assets) != set(verified_assets)
+    ):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "release requires exactly 98 verified current manifest assets"
+        )
+    assets = sorted(({
+        "id": asset_id,
+        "kind": manifest_assets[asset_id].get("kind"),
+        "mime_type": manifest_assets[asset_id].get("mime_type"),
+        "bytes": manifest_assets[asset_id].get("bytes"),
+        "sha256": manifest_assets[asset_id].get("sha256"),
+    } for asset_id in manifest_assets), key=lambda item: item["id"])
+    material = _original_validation_material(
+        preview_manifest, int(raw_pack["draft_revision"]),
+    )
+    if (
+        len(material.get("validation_selections") or [])
+        != ORIGINAL_V3_RELEASE_REQUIRED_VARIANT_COUNT
+    ):
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "trusted validation material does not contain exactly six selections"
+        )
+    report_rows = db.execute(
+        """SELECT * FROM authored_original_validation_reports
+           WHERE pack_id=? AND draft_revision=? ORDER BY started_at,id""",
+        (pack_id, int(raw_pack["draft_revision"])),
+    ).fetchall()
+    if len(report_rows) != 1:
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "release requires exactly one append-only report for this draft revision"
+        )
+    report_row = _current_original_validation_report_db(db, pack_id, material)
+    if not report_row or report_row["id"] != report_rows[0]["id"]:
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "trusted validation report is absent, stale, or not the sole report"
+        )
+    report, report_sha256 = _original_v3_release_report_snapshot(
+        report_row, material,
+    )
+    validated_selections = set(
+        report["summary"].get("validated_selections") or []
+    )
+    validated_delivery_contracts = set(
+        report["summary"].get("validated_delivery_contracts") or []
+    )
+    next_version = int(db.execute(
+        "SELECT COALESCE(MAX(version),0)+1 FROM authored_trip_pack_versions WHERE pack_id=?",
+        (pack_id,),
+    ).fetchone()[0])
+    publication_manifest, publication_manifest_json = _normalize_original_manifest(
+        pack_id,
+        raw_pack["draft_title"],
+        raw_manifest,
+        version=next_version,
+        publishing=True,
+        verified_assets=verified_assets,
+        validated_selections=validated_selections,
+        validated_delivery_contracts=validated_delivery_contracts,
+    )
+    if publication_manifest.get("schema_version") != 3:
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "publication manifest is not V3"
+        )
+    publication_manifest_contract = _original_v3_release_manifest_contract(
+        publication_manifest,
+        pack_id=pack_id,
+    )
+    if publication_manifest_contract != raw_manifest_contract:
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "Smokies publication manifest contract drifted from its draft"
+        )
+
+    device_evidence, device_evidence_sha256 = (
+        _original_v3_release_device_evidence_db(
+            db,
+            validation,
+            pack_id=pack_id,
+            draft_revision=int(raw_pack["draft_revision"]),
+            manifest_sha256=material["manifest_sha256"],
+            assets_sha256=material["assets_sha256"],
+        )
+    )
+    reviews = {
+        "schema_version": 1,
+        "checks": {
+            key: True for key in sorted(ORIGINAL_VALIDATION_CHECKS)
+        },
+        "draft_validation_metadata_sha256": _original_validation_hash(validation),
+    }
+    reviews_sha256 = _original_validation_hash(reviews)
+    catalog, catalog_sha256 = _original_v3_release_catalog_snapshot(db, raw_pack)
+    (
+        normalized_road_evidence,
+        road_evidence_sha256,
+        road_observed_at,
+        road_expires_at,
+    ) = _normalize_original_v3_release_road_evidence(
+        current_road_evidence,
+        manifest=preview_manifest,
+        now=now,
+    )
+    snapshot = {
+        "schema_version": 1,
+        "snapshot_type": "OriginalV3ReleaseSnapshotV1",
+        "pack_id": pack_id,
+        "draft_revision": int(raw_pack["draft_revision"]),
+        "draft_manifest_sha256": _original_validation_hash(raw_manifest),
+        "private_candidate": private_candidate,
+        "final_readiness": final_readiness,
+        "final_readiness_sha256": _original_validation_hash(final_readiness),
+        "manifest_contract": raw_manifest_contract,
+        "manifest_contract_sha256": _original_validation_hash(
+            raw_manifest_contract
+        ),
+        "manifest_sha256": material["manifest_sha256"],
+        "publication_manifest_sha256": _original_validation_hash(
+            publication_manifest
+        ),
+        "assets_sha256": material["assets_sha256"],
+        "asset_count": ORIGINAL_V3_RELEASE_REQUIRED_ASSET_COUNT,
+        "assets": assets,
+        "validation_report": report,
+        "validation_report_sha256": report_sha256,
+        "device_evidence": device_evidence,
+        "device_evidence_sha256": device_evidence_sha256,
+        "reviews": reviews,
+        "reviews_sha256": reviews_sha256,
+        "catalog": catalog,
+        "catalog_sha256": catalog_sha256,
+        "current_road_evidence": normalized_road_evidence,
+        "current_road_evidence_sha256": road_evidence_sha256,
+        "current_road_observed_at": road_observed_at,
+        "current_road_expires_at": road_expires_at,
+        "next_version": next_version,
+        "authorized_by_admin_user_id": int(admin_user_id),
+        "idempotency_key_sha256": hashlib.sha256(
+            idempotency_key.encode("utf-8")
+        ).hexdigest(),
+    }
+    snapshot_sha256 = _original_validation_hash(snapshot)
+    context = {
+        "pack": raw_pack,
+        "validation": validation,
+        "preview_manifest": preview_manifest,
+        "material": material,
+        "report_row": dict(report_row),
+        "publication_manifest_json": publication_manifest_json,
+        "validated_selections": validated_selections,
+        "validated_delivery_contracts": validated_delivery_contracts,
+    }
+    return snapshot, snapshot_sha256, context
+
+
+def get_authored_original_v3_release_road_targets(pack_id: str) -> dict | None:
+    """Expose only the exact private draft identities needed by the server reader."""
+    pack_id = _validate_canonical_id(pack_id, "Original id")
+    db = _conn()
+    try:
+        pack = db.execute(
+            """SELECT * FROM authored_trip_packs
+               WHERE id=? AND content_kind='original_drive'""",
+            (pack_id,),
+        ).fetchone()
+        if not pack:
+            return None
+        raw_manifest = _decode_pack_json(
+            pack["draft_original_manifest_json"], None,
+        )
+        if not isinstance(raw_manifest, dict) or raw_manifest.get("schema_version") != 3:
+            raise OriginalV3ReleaseAuthorizationConflictError(
+                "dedicated release road check requires a V3 Original draft"
+            )
+        raw_contract = _original_v3_release_manifest_contract(
+            raw_manifest,
+            pack_id=pack_id,
+        )
+        _original_v3_release_private_candidate_identity(raw_manifest)
+        _original_v3_release_final_readiness_contract(raw_manifest)
+        _original_v3_release_catalog_snapshot(db, pack)
+        manifest = _authored_original_validation_manifest_from_row(
+            pack,
+            _verified_original_asset_map_db(db, pack_id),
+            include_validation_audio_evidence=True,
+        )
+        if (
+            _original_v3_release_manifest_contract(manifest, pack_id=pack_id)
+            != raw_contract
+        ):
+            raise OriginalV3ReleaseAuthorizationConflictError(
+                "Smokies resolved road-check manifest contract drifted"
+            )
+        route_evidence = manifest.get("route_evidence")
+        if not isinstance(route_evidence, dict):
+            raise OriginalV3ReleaseAuthorizationConflictError(
+                "release route-evidence binding is unavailable"
+            )
+        return {
+            "schema_version": 1,
+            "pack_id": pack_id,
+            "draft_revision": int(pack["draft_revision"]),
+            "manifest_sha256": _original_validation_hash(manifest),
+            "route_evidence": copy.deepcopy(route_evidence),
+            "targets": _original_v3_release_road_targets(manifest),
+        }
+    finally:
+        db.close()
+
+
+def _authored_original_v3_release_authorization_from_row(
+    row: sqlite3.Row | dict,
+    *,
+    now: int | None = None,
+) -> dict:
+    raw = dict(row)
+    check_time = int(time.time()) if now is None else int(now)
+    result = {
+        "schema_version": 1,
+        "authorization_id": raw["id"],
+        "pack_id": raw["pack_id"],
+        "draft_revision": int(raw["draft_revision"]),
+        "snapshot": _decode_pack_json(raw["snapshot_json"], None),
+        "snapshot_sha256": raw["snapshot_sha256"],
+        "authorized_by_admin_user_id": int(raw["authorized_by"]),
+        "created_at": int(raw["created_at"]),
+        "expires_at": int(raw["expires_at"]),
+        "road_expires_at": int(raw["current_road_expires_at"]),
+        "status": raw["status"],
+        "expired": bool(raw["status"] == "active" and int(raw["expires_at"]) <= check_time),
+        "consumed_at": (
+            int(raw["consumed_at"]) if raw.get("consumed_at") is not None else None
+        ),
+        "published_version": (
+            int(raw["published_version"])
+            if raw.get("published_version") is not None else None
+        ),
+    }
+    return result
+
+
+def get_authored_original_v3_release_authorization_by_key(
+    pack_id: str,
+    admin_user_id: int,
+    *,
+    idempotency_key: str,
+    now: int | None = None,
+) -> dict | None:
+    """Return an exact create replay before attempting another road fetch."""
+    pack_id = _validate_canonical_id(pack_id, "Original id")
+    clean_key = _original_v3_release_idempotency_key(idempotency_key)
+    if (
+        isinstance(admin_user_id, bool)
+        or not isinstance(admin_user_id, int)
+        or admin_user_id < 1
+    ):
+        raise ValueError("Original V3 release administrator id is invalid")
+    db = _conn()
+    try:
+        admin = db.execute(
+            "SELECT is_admin FROM users WHERE id=?", (admin_user_id,),
+        ).fetchone()
+        if not admin or not bool(admin["is_admin"]):
+            raise PermissionError("Original V3 release authorization requires an admin")
+        row = db.execute(
+            """SELECT * FROM authored_original_release_authorizations_v1
+               WHERE authorized_by=? AND idempotency_key=?""",
+            (admin_user_id, clean_key),
+        ).fetchone()
+        if not row:
+            return None
+        if row["pack_id"] != pack_id:
+            raise OriginalV3ReleaseAuthorizationConflictError(
+                "idempotency key was used for a different authorization"
+            )
+        result = _authored_original_v3_release_authorization_from_row(
+            row, now=now,
+        )
+        result["replayed"] = True
+        return result
+    finally:
+        db.close()
+
+
+def create_authored_original_v3_release_authorization(
+    pack_id: str,
+    admin_user_id: int,
+    *,
+    idempotency_key: str,
+    confirmation: str,
+    current_road_evidence: dict,
+    now: int | None = None,
+) -> dict:
+    """Create one short-lived authorization without publishing anything."""
+    pack_id = _validate_canonical_id(pack_id, "Original id")
+    if (
+        isinstance(admin_user_id, bool)
+        or not isinstance(admin_user_id, int)
+        or admin_user_id < 1
+    ):
+        raise ValueError("Original V3 release administrator id is invalid")
+    clean_key = _original_v3_release_idempotency_key(idempotency_key)
+    if confirmation != ORIGINAL_V3_RELEASE_CREATE_CONFIRMATION:
+        raise ValueError("Exact V3 release authorization confirmation is required")
+    timestamp = int(time.time()) if now is None else int(now)
+    request_sha256 = _original_validation_hash({
+        "schema_version": 1,
+        "pack_id": pack_id,
+        "authorized_by_admin_user_id": int(admin_user_id),
+        "idempotency_key_sha256": hashlib.sha256(
+            clean_key.encode("utf-8")
+        ).hexdigest(),
+        "confirmation": confirmation,
+    })
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        admin = db.execute(
+            "SELECT is_admin FROM users WHERE id=?", (admin_user_id,),
+        ).fetchone()
+        if not admin or not bool(admin["is_admin"]):
+            raise PermissionError("Original V3 release authorization requires an admin")
+        existing = db.execute(
+            """SELECT * FROM authored_original_release_authorizations_v1
+               WHERE authorized_by=? AND idempotency_key=?""",
+            (admin_user_id, clean_key),
+        ).fetchone()
+        if existing:
+            if existing["request_sha256"] != request_sha256:
+                raise OriginalV3ReleaseAuthorizationConflictError(
+                    "idempotency key was used for a different authorization"
+                )
+            db.commit()
+            result = _authored_original_v3_release_authorization_from_row(
+                existing, now=timestamp,
+            )
+            result["replayed"] = True
+            return result
+        pack = db.execute(
+            "SELECT * FROM authored_trip_packs WHERE id=?", (pack_id,),
+        ).fetchone()
+        if not pack:
+            raise ValueError("Trailhead Original not found")
+        if pack_id == ORIGINAL_V3_RELEASE_TARGET_PACK_ID:
+            _original_v3_release_catalog_inventory_db(db, pack_id=pack_id)
+        snapshot, snapshot_sha256, _ = _authored_original_v3_release_snapshot_db(
+            db,
+            pack,
+            admin_user_id=admin_user_id,
+            idempotency_key=clean_key,
+            current_road_evidence=current_road_evidence,
+            now=timestamp,
+        )
+        expires_at = min(
+            timestamp + ORIGINAL_V3_RELEASE_AUTHORIZATION_TTL_SECONDS,
+            int(snapshot["current_road_expires_at"]),
+        )
+        if expires_at <= timestamp:
+            raise OriginalV3ReleaseAuthorizationExpiredError(
+                "Current-road evidence expires before authorization can be created"
+            )
+        authorization_id = f"original_v3_release_{secrets.token_hex(16)}"
+        db.execute(
+            """INSERT INTO authored_original_release_authorizations_v1
+               (id,pack_id,draft_revision,manifest_sha256,assets_sha256,asset_count,
+                validation_report_id,validation_report_sha256,device_evidence_sha256,
+                reviews_sha256,catalog_sha256,current_road_evidence_sha256,
+                current_road_observed_at,current_road_expires_at,next_version,
+                snapshot_json,snapshot_sha256,idempotency_key,request_sha256,
+                authorized_by,created_at,expires_at,status)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active')""",
+            (
+                authorization_id,
+                pack_id,
+                snapshot["draft_revision"],
+                snapshot["manifest_sha256"],
+                snapshot["assets_sha256"],
+                snapshot["asset_count"],
+                snapshot["validation_report"]["id"],
+                snapshot["validation_report_sha256"],
+                snapshot["device_evidence_sha256"],
+                snapshot["reviews_sha256"],
+                snapshot["catalog_sha256"],
+                snapshot["current_road_evidence_sha256"],
+                snapshot["current_road_observed_at"],
+                snapshot["current_road_expires_at"],
+                snapshot["next_version"],
+                json.dumps(snapshot, separators=(",", ":"), sort_keys=True),
+                snapshot_sha256,
+                clean_key,
+                request_sha256,
+                admin_user_id,
+                timestamp,
+                expires_at,
+            ),
+        )
+        saved = db.execute(
+            "SELECT * FROM authored_original_release_authorizations_v1 WHERE id=?",
+            (authorization_id,),
+        ).fetchone()
+        db.commit()
+    except sqlite3.IntegrityError as exc:
+        db.rollback()
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "authorization raced with another release request"
+        ) from exc
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    result = _authored_original_v3_release_authorization_from_row(
+        saved, now=timestamp,
+    )
+    result["replayed"] = False
+    return result
+
+
+def _authored_original_v3_release_publication_validation_metadata(
+    context: dict,
+    *,
+    authorization_id: str,
+    snapshot_sha256: str,
+    authorized_by_admin_user_id: int,
+    consumed_at: int,
+) -> dict:
+    published = copy.deepcopy(context["validation"])
+    private_device_evidence = published.pop(
+        "dual_platform_private_preview_evidence", None,
+    )
+    if isinstance(private_device_evidence, dict):
+        published["dual_platform_private_preview_evidence_redacted"] = True
+    report_row = context["report_row"]
+    material = context["material"]
+    published.pop("trigger_drive_tested", None)
+    published["virtual_route_validated"] = True
+    published["virtual_validation_report"] = {
+        "schema_version": 1,
+        "report_type": "OriginalRouteValidationReportV1",
+        "id": report_row["id"],
+        "input_sha256": report_row["input_sha256"],
+        "validator_source_sha256": report_row["validator_source_sha256"],
+        "suite_version": report_row["suite_version"],
+        "engine_version": report_row["engine_version"],
+        "completed_at": int(report_row["completed_at"]),
+        "validated_selections": sorted(context["validated_selections"]),
+        "validated_delivery_contracts": sorted(
+            context["validated_delivery_contracts"]
+        ),
+        "long_form_validator_source_sha256": material[
+            "long_form_validator_source_sha256"
+        ],
+    }
+    operational = _original_operational_publication_metadata(
+        context["preview_manifest"]
+    )
+    if operational is not None:
+        published["operational_readiness"] = operational
+    raw_manifest = _decode_pack_json(
+        context["pack"].get("draft_original_manifest_json"), {},
+    )
+    raw_route_binding = (
+        raw_manifest.get("route_evidence")
+        if isinstance(raw_manifest, dict) else None
+    )
+    cultural_product_id = str(
+        raw_route_binding.get("product_id")
+        if isinstance(raw_route_binding, dict)
+        else context["pack"]["id"]
+    ).strip()
+    cultural_binding = cultural_dossier_binding(cultural_product_id)
+    if cultural_binding is not None:
+        published["cultural_review"] = cultural_binding
+    published["trusted_publication_validation_complete"] = True
+    published["public_release_authorized"] = True
+    published["public_release"] = True
+    published["release_authorization"] = {
+        "schema_version": 1,
+        "authorization_record_sha256": _original_validation_hash({
+            "authorization_id": authorization_id,
+            "authorized_by_admin_user_id": int(authorized_by_admin_user_id),
+        }),
+        "snapshot_sha256": snapshot_sha256,
+        "consumed_at": int(consumed_at),
+        "single_use": True,
+    }
+    return published
+
+
+def consume_authored_original_v3_release_authorization(
+    pack_id: str,
+    authorization_id: str,
+    admin_user_id: int,
+    *,
+    idempotency_key: str,
+    expected_snapshot_sha256: str,
+    confirmation: str,
+    now: int | None = None,
+) -> dict:
+    """Atomically consume one exact authorization and activate its version."""
+    pack_id = _validate_canonical_id(pack_id, "Original id")
+    if (
+        isinstance(admin_user_id, bool)
+        or not isinstance(admin_user_id, int)
+        or admin_user_id < 1
+    ):
+        raise ValueError("Original V3 release administrator id is invalid")
+    authorization_id = _validate_canonical_id(
+        authorization_id, "Original V3 release authorization id",
+    )
+    clean_key = _original_v3_release_idempotency_key(idempotency_key)
+    expected_snapshot_sha256 = _original_v3_release_sha256(
+        expected_snapshot_sha256, "Original V3 release snapshot",
+    )
+    if confirmation != ORIGINAL_V3_RELEASE_CONSUME_CONFIRMATION:
+        raise ValueError("Exact V3 publication confirmation is required")
+    timestamp = int(time.time()) if now is None else int(now)
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        admin = db.execute(
+            "SELECT is_admin FROM users WHERE id=?", (admin_user_id,),
+        ).fetchone()
+        if not admin or not bool(admin["is_admin"]):
+            raise PermissionError("Original V3 publication requires a current admin")
+        authorization = db.execute(
+            """SELECT * FROM authored_original_release_authorizations_v1
+               WHERE id=?""",
+            (authorization_id,),
+        ).fetchone()
+        if not authorization:
+            raise ValueError("Original V3 release authorization not found")
+        if authorization["pack_id"] != pack_id:
+            raise OriginalV3ReleaseAuthorizationConflictError(
+                "authorization belongs to a different Original"
+            )
+        if (
+            int(authorization["authorized_by"]) != int(admin_user_id)
+            or authorization["idempotency_key"] != clean_key
+            or authorization["snapshot_sha256"] != expected_snapshot_sha256
+        ):
+            raise OriginalV3ReleaseAuthorizationConflictError(
+                "authorization identity, administrator, key, or snapshot changed"
+            )
+        if authorization["status"] == "consumed":
+            response = _decode_pack_json(authorization["response_json"], None)
+            if not isinstance(response, dict):
+                raise OriginalV3ReleaseAuthorizationConflictError(
+                    "consumed authorization response is unavailable"
+                )
+            db.commit()
+            response = copy.deepcopy(response)
+            response["replayed"] = True
+            return response
+        if authorization["status"] != "active":
+            raise OriginalV3ReleaseAuthorizationConflictError(
+                "authorization is not active"
+            )
+        if (
+            timestamp >= int(authorization["expires_at"])
+            or timestamp >= int(authorization["current_road_expires_at"])
+        ):
+            raise OriginalV3ReleaseAuthorizationExpiredError(
+                "Original V3 release authorization expired"
+            )
+        stored_snapshot = _decode_pack_json(
+            authorization["snapshot_json"], None,
+        )
+        if (
+            not isinstance(stored_snapshot, dict)
+            or _original_validation_hash(stored_snapshot)
+            != authorization["snapshot_sha256"]
+        ):
+            raise OriginalV3ReleaseAuthorizationConflictError(
+                "stored release snapshot failed integrity verification"
+            )
+        pack = db.execute(
+            "SELECT * FROM authored_trip_packs WHERE id=?", (pack_id,),
+        ).fetchone()
+        if not pack:
+            raise OriginalV3ReleaseAuthorizationConflictError(
+                "authorized Original no longer exists"
+            )
+        if pack_id == ORIGINAL_V3_RELEASE_TARGET_PACK_ID:
+            _original_v3_release_catalog_inventory_db(db, pack_id=pack_id)
+        current_snapshot, current_snapshot_sha256, context = (
+            _authored_original_v3_release_snapshot_db(
+                db,
+                pack,
+                admin_user_id=admin_user_id,
+                idempotency_key=clean_key,
+                current_road_evidence=stored_snapshot[
+                    "current_road_evidence"
+                ],
+                now=timestamp,
+            )
+        )
+        denormalized_bindings = {
+            "draft_revision": int(authorization["draft_revision"]),
+            "manifest_sha256": authorization["manifest_sha256"],
+            "assets_sha256": authorization["assets_sha256"],
+            "asset_count": int(authorization["asset_count"]),
+            "validation_report_id": authorization["validation_report_id"],
+            "validation_report_sha256": authorization["validation_report_sha256"],
+            "device_evidence_sha256": authorization["device_evidence_sha256"],
+            "reviews_sha256": authorization["reviews_sha256"],
+            "catalog_sha256": authorization["catalog_sha256"],
+            "current_road_evidence_sha256": authorization[
+                "current_road_evidence_sha256"
+            ],
+            "current_road_observed_at": int(
+                authorization["current_road_observed_at"]
+            ),
+            "current_road_expires_at": int(
+                authorization["current_road_expires_at"]
+            ),
+            "next_version": int(authorization["next_version"]),
+        }
+        current_bindings = {
+            "draft_revision": current_snapshot["draft_revision"],
+            "manifest_sha256": current_snapshot["manifest_sha256"],
+            "assets_sha256": current_snapshot["assets_sha256"],
+            "asset_count": current_snapshot["asset_count"],
+            "validation_report_id": current_snapshot["validation_report"]["id"],
+            "validation_report_sha256": current_snapshot[
+                "validation_report_sha256"
+            ],
+            "device_evidence_sha256": current_snapshot["device_evidence_sha256"],
+            "reviews_sha256": current_snapshot["reviews_sha256"],
+            "catalog_sha256": current_snapshot["catalog_sha256"],
+            "current_road_evidence_sha256": current_snapshot[
+                "current_road_evidence_sha256"
+            ],
+            "current_road_observed_at": current_snapshot[
+                "current_road_observed_at"
+            ],
+            "current_road_expires_at": current_snapshot[
+                "current_road_expires_at"
+            ],
+            "next_version": current_snapshot["next_version"],
+        }
+        if (
+            current_snapshot != stored_snapshot
+            or current_snapshot_sha256 != expected_snapshot_sha256
+            or current_bindings != denormalized_bindings
+        ):
+            raise OriginalV3ReleaseAuthorizationConflictError(
+                "authorized release snapshot drifted before consumption"
+            )
+        version = int(current_snapshot["next_version"])
+        published_validation_metadata = (
+            _authored_original_v3_release_publication_validation_metadata(
+                context,
+                authorization_id=authorization_id,
+                snapshot_sha256=expected_snapshot_sha256,
+                authorized_by_admin_user_id=admin_user_id,
+                consumed_at=timestamp,
+            )
+        )
+        db.execute(
+            """INSERT INTO authored_trip_pack_versions
+               (pack_id,version,content_kind,slug,title,summary,price_credits,coverage_region,
+                public_metadata,validation_metadata,template_json,original_manifest_json,
+                published_by,published_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                pack_id,
+                version,
+                "original_drive",
+                pack["slug"],
+                pack["draft_title"],
+                pack["draft_summary"],
+                pack["draft_price_credits"],
+                pack["draft_coverage_region"],
+                pack["draft_public_metadata"],
+                json.dumps(
+                    published_validation_metadata,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+                pack["draft_template_json"],
+                context["publication_manifest_json"],
+                admin_user_id,
+                timestamp,
+            ),
+        )
+        updated = db.execute(
+            """UPDATE authored_trip_packs
+               SET status='published',current_published_version=?,updated_by=?,updated_at=?
+               WHERE id=? AND content_kind='original_drive' AND draft_revision=?
+                 AND draft_original_manifest_json=? AND draft_validation_metadata=?
+                 AND status=? AND current_published_version IS ?""",
+            (
+                version,
+                admin_user_id,
+                timestamp,
+                pack_id,
+                pack["draft_revision"],
+                pack["draft_original_manifest_json"],
+                pack["draft_validation_metadata"],
+                pack["status"],
+                pack["current_published_version"],
+            ),
+        )
+        if updated.rowcount != 1:
+            raise OriginalV3ReleaseAuthorizationConflictError(
+                "catalog activation lost its exact compare-and-swap"
+            )
+        published = db.execute(
+            """SELECT p.id,p.slug,v.*,p.status
+               FROM authored_trip_packs p JOIN authored_trip_pack_versions v
+                 ON v.pack_id=p.id AND v.version=p.current_published_version
+               WHERE p.id=?""",
+            (pack_id,),
+        ).fetchone()
+        if not published:
+            raise OriginalV3ReleaseAuthorizationConflictError(
+                "immutable publication version was not readable before commit"
+            )
+        publication = _public_trip_pack_from_row(
+            published, include_template=True,
+        )
+        response = {
+            "schema_version": 1,
+            "authorization_id": authorization_id,
+            "pack_id": pack_id,
+            "snapshot_sha256": expected_snapshot_sha256,
+            "published_version": version,
+            "consumed_at": timestamp,
+            "publication": publication,
+            "replayed": False,
+        }
+        consumed = db.execute(
+            """UPDATE authored_original_release_authorizations_v1
+               SET status='consumed',consumed_at=?,consumed_by=?,published_version=?,
+                   response_json=?
+               WHERE id=? AND status='active'""",
+            (
+                timestamp,
+                admin_user_id,
+                version,
+                json.dumps(response, separators=(",", ":"), sort_keys=True),
+                authorization_id,
+            ),
+        )
+        if consumed.rowcount != 1:
+            raise OriginalV3ReleaseAuthorizationConflictError(
+                "release authorization was consumed concurrently"
+            )
+        db.commit()
+    except sqlite3.IntegrityError as exc:
+        db.rollback()
+        raise OriginalV3ReleaseAuthorizationConflictError(
+            "publication raced or violated immutable release constraints"
+        ) from exc
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    return response
+
+
 def validate_authored_original_draft(pack_id: str) -> dict | None:
     pack_id = _validate_canonical_id(pack_id, "Original id")
     db = _conn()
@@ -17811,6 +20086,17 @@ def publish_authored_trip_pack(
             raise ValueError("Trip pack not found")
         if required_content_kind and pack["content_kind"] != required_content_kind:
             raise ValueError("Authored content kind does not match this publishing endpoint")
+        draft_manifest = _decode_pack_json(
+            pack["draft_original_manifest_json"], None,
+        )
+        if (
+            pack["content_kind"] == "original_drive"
+            and isinstance(draft_manifest, dict)
+            and draft_manifest.get("schema_version") == 3
+        ):
+            raise OriginalV3ReleaseAuthorizationRequiredError(
+                "Original V3 publication requires a single-use release authorization"
+            )
         validation = _decode_pack_json(pack["draft_validation_metadata"], {})
         published_validation_metadata = dict(validation)
         validation_checks = (

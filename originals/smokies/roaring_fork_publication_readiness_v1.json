@@ -1,0 +1,308 @@
+{
+  "accepted_private_evidence": {
+    "aggregate_asset_bytes": 239772665,
+    "artwork_count": 7,
+    "current_asset_count": 20,
+    "delivery_contract_sha256": "9081a647a7df0e59df4bb40506ba9bfa96c750536fb715ee31b3e9ee68ee20d6",
+    "device_preview_evidence_canonical_sha256": "f17ac77a29718cef56ccb2556e44e86800d81482fd0e9cca18acb2537722f750",
+    "evidence_class": "historical_s4r_production_readback",
+    "live_database_rechecked_by_builder": false,
+    "narration_count": 13,
+    "narration_profile_canonical_sha256": "f79b386031ca0faf6e07332e53ea037f957eb7d9871c4bbf05d5b0aff09c2af5",
+    "observed_at": "2026-08-11T01:33:56Z",
+    "private_manifest_canonical_sha256": "2fb77582811e28ef963f3018a8990a96612cfedee69f3b2329a73b87ac99d33a",
+    "profiled_manifest_canonical_sha256": "14d83293ba3b09aad00998668311447b5224f5172e641d35163de2865e3c9eb8",
+    "published_version_count": 0
+  },
+  "blockers": [
+    {
+      "facts": {
+        "approved_product_credit_price": 900,
+        "approved_product_explorer_included": true,
+        "catalog_price_credits": 0,
+        "catalog_visibility": "private",
+        "completed_publication_reviews": [
+          "audio_assets_reviewed",
+          "media_licenses_reviewed",
+          "transcripts_reviewed"
+        ],
+        "current_manifest_scope": "private_revision_2_roaring_fork_one_way",
+        "editorial_status": "source_review_required",
+        "missing_publication_reviews": [
+          "cue_route_reviewed",
+          "narration_reviewed",
+          "offline_bundle_reviewed",
+          "route_reviewed",
+          "safety_access_reviewed",
+          "season_reviewed",
+          "source_citations_reviewed"
+        ],
+        "offline_map_estimated_bytes": 0,
+        "route_evidence_present": false
+      },
+      "id": "final_publication_manifest_and_catalog",
+      "required_resolution": "review the final public product, pricing/access, copy, citations, offline-map evidence, and all ten publication checks in a new manifest revision",
+      "status": "blocked"
+    },
+    {
+      "facts": {
+        "required_manifest_variant_ids": [
+          "roaring_fork:one_way"
+        ],
+        "v1_blockers": [
+          "trusted_current_road_observation",
+          "server_owned_vehicle_class",
+          "editorial_and_cultural_review"
+        ],
+        "v1_publication_status": "blocked",
+        "v1_variant_count": 6,
+        "v1_variant_ids": [
+          "foothills_parkway:east_to_west",
+          "foothills_parkway:west_to_east",
+          "little_river_cades_cove:sugarlands_to_cades_cove_loop",
+          "mountain_crossing:nc_to_tn",
+          "mountain_crossing:tn_to_nc",
+          "roaring_fork:one_way"
+        ]
+      },
+      "id": "exact_route_evidence",
+      "required_resolution": "create and separately review an exact Roaring-Fork-only publication route evidence overlay; preserve official_route_evidence_v1 unchanged",
+      "status": "blocked"
+    },
+    {
+      "facts": {
+        "checked_alternate_chapter_ids": [
+          "foothills_parkway"
+        ],
+        "checked_candidate_sha256": "17b9eea045ac2369e7679f5fbec3291cca46374b004165f15087ceb4bded7a21",
+        "checked_current_cautions_last_updated": "2026-07-31",
+        "checked_reviewed_at": "2026-08-04T00:00:00Z",
+        "official_current_cautions_last_updated": "2026-08-06",
+        "private_manifest_alternate_chapter_ids": [],
+        "validation_only_projection_is_not_publication_evidence": true
+      },
+      "id": "current_operational_evidence_and_strict_alternates",
+      "required_resolution": "create a newly reviewed immutable operational candidate for the chosen public product scope, rebind its hash, and rerun strict validation",
+      "status": "blocked"
+    },
+    {
+      "facts": {
+        "claim_classification": "public_record_factual",
+        "claim_count": 7,
+        "claim_ids": [
+          "rf_farm_community",
+          "rf_ogle_farm",
+          "rf_old_growth",
+          "rf_preservation",
+          "rf_route_character",
+          "rf_stream",
+          "rf_waterfalls"
+        ],
+        "claim_level_cultural_gate": "not_required",
+        "claim_set_sha256": "f34a4daae2202d2fc714ff1119c6dd40f75fc72876c9345af0d47fccbe665f42",
+        "collection_method": "published_public_record",
+        "dossier_status": "public_record_only",
+        "registered_gated_content_approval_present": false,
+        "registered_publication_determination_present": false,
+        "roaring_fork_entry_count": 13
+      },
+      "id": "public_record_cultural_scope_contract",
+      "required_resolution": "add and obtain an immutable authority-issued public-record publication-scope determination distinct from gated-content approval; do not invent gated claims or self-approve the product",
+      "status": "blocked"
+    },
+    {
+      "facts": {
+        "account_vehicle_evidence_allowed_in_packet": false,
+        "blocked_vehicle_classes": [
+          "bus",
+          "commercial_service",
+          "motorhome",
+          "towing_trailer",
+          "van_over_25_ft"
+        ],
+        "live_observation_required_at_start": true,
+        "manifest_schema": 3,
+        "passenger_and_motorcycle_policy_compatible": true,
+        "server_owned_vehicle_binding_required_at_start": true,
+        "trusted_current_road_reader_schema_support": [
+          2
+        ]
+      },
+      "id": "published_start_runtime_safety",
+      "required_resolution": "support schema V3 in the trusted road observation path and verify the existing privacy-redacted saved-rig policy at Start Tour after publication",
+      "status": "blocked"
+    },
+    {
+      "facts": {
+        "public_release": false,
+        "publish_endpoint_exercised": false,
+        "separate_owner_publication_authorization_present": false,
+        "trusted_private_report_passed": true,
+        "trusted_private_report_reusable_after_manifest_or_source_change": false,
+        "trusted_publication_validation_complete": false
+      },
+      "id": "atomic_public_release_authorization",
+      "required_resolution": "add a server-owned atomic publish authorization guard, produce a fresh exact report for the final revision, and obtain a separate explicit release decision",
+      "status": "blocked"
+    }
+  ],
+  "decision_boundary": {
+    "blocker_count": 6,
+    "cultural_outreach_performed": false,
+    "database_accessed": false,
+    "network_accessed_by_builder": false,
+    "next_authority_decision": "authorize a public-record publication-scope determination process; this packet does not authorize outreach",
+    "next_product_decision": "preserve the planned four-chapter 900-credit Explorer-included product or separately approve a standalone Roaring Fork public product",
+    "production_mutation_performed": false,
+    "public_release": false,
+    "publication_ready": false,
+    "publish_endpoint_authorized": false,
+    "publish_endpoint_exercised": false
+  },
+  "evidence_cutoff_at": "2026-08-11T01:46:27.738573Z",
+  "kind": "original_publication_readiness_hold",
+  "official_road_observation": {
+    "active_located_closure_count": 3,
+    "etag": "W/\"f6fbc211d25dd1:0\"",
+    "evergreen_reuse_allowed": false,
+    "evidence_class": "historical_external_observation_not_revalidated_by_builder",
+    "expires_at": "2026-08-11T02:14:56.075769Z",
+    "last_modified": "Wed, 05 Aug 2026 20:58:14 GMT",
+    "not_a_safety_or_guaranteed_open_claim": true,
+    "observed_at": "2026-08-11T01:44:56.075769Z",
+    "rechecked_at": "2026-08-11T01:46:27.738573Z",
+    "record_count": 5,
+    "response_body_retained_in_repository": false,
+    "response_sha256": "34e08ed1aa172b2ba9319568ea61f577dcf2c808163e9f7d0306d723c30ddd8e",
+    "roaring_fork_segment_intersection_count": 0,
+    "route_source_segment_count": 41,
+    "safe_statement": "The current NPS road check does not list a closure for this chapter.",
+    "source_url": "https://www.nps.gov/grsm/park-alerts-grsm.json",
+    "unlocated_closure_count": 0
+  },
+  "packet_id": "smokies_roaring_fork_publication_readiness_20260810_v1",
+  "prior_product_contract": {
+    "changing_scope_or_price_requires_separate_product_decision": true,
+    "chapter_ids": [
+      "mountain_crossing",
+      "little_river_cades_cove",
+      "roaring_fork",
+      "foothills_parkway"
+    ],
+    "explorer_included": true,
+    "pack_scope": "one_premium_four_chapter_product",
+    "permanent_credit_price": 900,
+    "standalone_roaring_fork_public_product_approved": false
+  },
+  "schema_version": 1,
+  "scope": {
+    "chapter_id": "roaring_fork",
+    "draft_revision": 2,
+    "manifest_schema": 3,
+    "product_id": "great_smoky_mountains_ridges_rivers_living_memory",
+    "variant_id": "one_way"
+  },
+  "source_bindings": {
+    "cultural_scope_contract": {
+      "bytes": 17257,
+      "path": "db/originals_cultural_review.py",
+      "sha256": "360cd487fc43ccf8ccc94430144484c4b9c3ebf3e04dd7e4b3a67f73027b4f97"
+    },
+    "delivery_readiness_v2": {
+      "bytes": 17131,
+      "path": "originals/smokies/roaring_fork_delivery_readiness_v2.json",
+      "sha256": "7cf1b601d48845e3bc404a501d33a9f2c1e2567544c03347b99de0524ee923e6"
+    },
+    "historical_inputs": {
+      "bytes": 4125,
+      "path": "originals/smokies/roaring_fork_publication_readiness_inputs_v1.json",
+      "sha256": "555c4282a39b7f1affbcd7481645bba14649235df1d693883dd0a461b41879ec"
+    },
+    "manifest_v2_contract": {
+      "bytes": 58354,
+      "path": "db/original_manifest_v2.py",
+      "sha256": "50e2b636beae76b2ba30e6cd2871e98679a22563c73872ffa7c7e52a3d3c7931"
+    },
+    "manifest_v3_contract": {
+      "bytes": 46624,
+      "path": "db/original_manifest_v3.py",
+      "sha256": "850df80086d336a3a3652d73a1e0eda403e89f06b241c2a710bcb6cbf38e53de"
+    },
+    "narration_profile": {
+      "bytes": 1451,
+      "path": "originals/smokies/roaring_fork_narration_profile_v2.json",
+      "sha256": "10fd4f5f04cbfbc411a1e7c31061700d17752af61e1501a4b7b4652c0d2ee377"
+    },
+    "official_route_evidence_v1": {
+      "bytes": 2762475,
+      "path": "originals/smokies/official_route_evidence_v1.json",
+      "sha256": "d946ffaf8f21ad97399b6dedfb5cbe9483fce0787653b389d7075d933f398c60"
+    },
+    "operational_candidate_v1": {
+      "bytes": 8016,
+      "path": "docs/originals/smokies-operational-readiness-v1.json",
+      "sha256": "359c8e2ff8086de56054d99503cb2661730a9977534c3007ff4c6d0db2cafb8f"
+    },
+    "operational_contract": {
+      "bytes": 36000,
+      "path": "db/originals_operational.py",
+      "sha256": "9b6193cd275c7c7e51ee9724335165d1c3618700ea61ac43b6235f80ca12ba4d"
+    },
+    "private_import_packet": {
+      "bytes": 123112,
+      "path": "originals/smokies/roaring_fork_private_import_packet_v1.json",
+      "sha256": "15d3a10b3a387cd23e1271e2d07428772d8f60e4568cbd417ef292d627252c1f"
+    },
+    "private_import_receipt": {
+      "bytes": 5307,
+      "path": "originals/smokies/roaring_fork_private_import_receipt_v1.json",
+      "sha256": "8890c1e1431654a03feb1aa4ee4376ab50504e9841b4d8a06f0a3c003b0ebefd"
+    },
+    "private_manifest": {
+      "bytes": 171413,
+      "path": "originals/smokies/roaring_fork_private_manifest_v3.json",
+      "sha256": "7e9cab7e0325c6124a2605c83867929780f575e5814c7fdc634c091a9c351467"
+    },
+    "publication_store_contract": {
+      "bytes": 996106,
+      "path": "db/store.py",
+      "sha256": "c3defe0312a999a38eb123fcad198449a1cf8e4c744db8c5befea9bd531df87c"
+    },
+    "published_start_runtime_contract": {
+      "bytes": 1744049,
+      "path": "dashboard/server.py",
+      "sha256": "8771645974d82a6c2f961b29ca6119a5da1454f7242513c3401f9df6b0cd09ea"
+    },
+    "route_evidence_contract": {
+      "bytes": 12913,
+      "path": "db/originals_route_evidence.py",
+      "sha256": "aa58a8bdd4bf5c10221d2071e8240f60d01ae4d4d464792ad75adf77775701fc"
+    },
+    "source_dossiers_v1": {
+      "bytes": 85708,
+      "path": "originals/smokies/source_dossiers_v1.json",
+      "sha256": "8eb22ca5110f0f9a4287b8f184624348c2a2ca2dbc36e27ef59fc022057ce18f"
+    },
+    "vehicle_binding_contract": {
+      "bytes": 3423,
+      "path": "db/originals_vehicle_binding.py",
+      "sha256": "1656948207e013cfb258cd03af1be008c1dcae99baf2c4c8f600796a5f213517"
+    }
+  },
+  "trusted_private_validation": {
+    "current_at_s4r_readback": true,
+    "engine": "original-trigger-v3",
+    "evidence_class": "historical_s4r_production_readback",
+    "issues": [],
+    "live_report_rechecked_by_builder": false,
+    "must_rerun_after_final_manifest_or_source_change": true,
+    "publication_approval": false,
+    "redacted_report_sha256": "ffbab03a0bdc839cbbdaa422a1b4910eaeb61acdc1d4102dbdc40e8d643fc059",
+    "report_id": "original_validation_9df694c93ee9ef3809c33f451d04bf28",
+    "route_scenarios_passed": 13,
+    "route_scenarios_required": 13,
+    "selection": "roaring_fork_one_way_private_v1:one_way",
+    "source_commit": "111a4eb7cc8bb21ac1bbdd3418b1dbec4ca90637",
+    "status": "passed"
+  }
+}

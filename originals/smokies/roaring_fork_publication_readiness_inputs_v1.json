@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "evidence_id": "smokies_roaring_fork_publication_readiness_inputs_20260810_v1",
+  "kind": "original_publication_readiness_historical_inputs",
+  "source_checkpoint": {
+    "commit": "41aac223ab691d99ac59ecb29434668abb83426a",
+    "path": "docs/checkpoints/smokies-original-active-checkpoint.md",
+    "file_sha256": "287539d24483719c62fa5f1833b65a5a46b7512b190ccb427cd3cb113107ed26",
+    "sections": [
+      "Smokies product and access contract",
+      "S4Q Roaring Fork authenticated Android device-preview closeout",
+      "S4R Roaring Fork trusted route and long-form validation closeout"
+    ]
+  },
+  "private_state_at_s4r_readback": {
+    "observed_at": "2026-08-11T01:33:56Z",
+    "draft_revision": 2,
+    "profile_absent_base_manifest_sha256": "2fb77582811e28ef963f3018a8990a96612cfedee69f3b2329a73b87ac99d33a",
+    "profiled_manifest_sha256": "14d83293ba3b09aad00998668311447b5224f5172e641d35163de2865e3c9eb8",
+    "narration_profile_sha256": "f79b386031ca0faf6e07332e53ea037f957eb7d9871c4bbf05d5b0aff09c2af5",
+    "device_preview_evidence_sha256": "f17ac77a29718cef56ccb2556e44e86800d81482fd0e9cca18acb2537722f750",
+    "delivery_contract_sha256": "9081a647a7df0e59df4bb40506ba9bfa96c750536fb715ee31b3e9ee68ee20d6",
+    "current_asset_count": 20,
+    "narration_count": 13,
+    "artwork_count": 7,
+    "aggregate_asset_bytes": 239772665,
+    "published_version_count": 0,
+    "live_database_rechecked_by_publication_readiness_builder": false
+  },
+  "trusted_private_validation_at_s4r_readback": {
+    "source_commit": "111a4eb7cc8bb21ac1bbdd3418b1dbec4ca90637",
+    "report_id": "original_validation_9df694c93ee9ef3809c33f451d04bf28",
+    "redacted_report_sha256": "ffbab03a0bdc839cbbdaa422a1b4910eaeb61acdc1d4102dbdc40e8d643fc059",
+    "status": "passed",
+    "current": true,
+    "engine": "original-trigger-v3",
+    "selection": "roaring_fork_one_way_private_v1:one_way",
+    "route_scenarios_required": 13,
+    "route_scenarios_passed": 13,
+    "issues": [],
+    "publication_approval": false,
+    "live_report_rechecked_by_publication_readiness_builder": false
+  },
+  "prior_product_contract": {
+    "pack_scope": "one_premium_four_chapter_product",
+    "chapter_ids": [
+      "mountain_crossing",
+      "little_river_cades_cove",
+      "roaring_fork",
+      "foothills_parkway"
+    ],
+    "permanent_credit_price": 900,
+    "explorer_included": true,
+    "standalone_roaring_fork_public_product_approved": false,
+    "changing_scope_or_price_requires_separate_product_decision": true
+  },
+  "external_observations": {
+    "verification_level": "historical_external_observation_not_revalidated_by_builder",
+    "road_feed": {
+      "source_url": "https://www.nps.gov/grsm/park-alerts-grsm.json",
+      "observed_at": "2026-08-11T01:44:56.075769Z",
+      "rechecked_at": "2026-08-11T01:46:27.738573Z",
+      "expires_at": "2026-08-11T02:14:56.075769Z",
+      "response_sha256": "34e08ed1aa172b2ba9319568ea61f577dcf2c808163e9f7d0306d723c30ddd8e",
+      "etag": "W/\"f6fbc211d25dd1:0\"",
+      "last_modified": "Wed, 05 Aug 2026 20:58:14 GMT",
+      "record_count": 5,
+      "active_located_closure_count": 3,
+      "unlocated_closure_count": 0,
+      "roaring_fork_segment_intersection_count": 0,
+      "route_source_segment_count": 41,
+      "safe_statement": "The current NPS road check does not list a closure for this chapter.",
+      "not_a_safety_or_guaranteed_open_claim": true,
+      "evergreen_reuse_allowed": false,
+      "response_body_retained_in_repository": false
+    },
+    "current_cautions_page": {
+      "source_url": "https://www.nps.gov/grsm/planyourvisit/temproadclose.htm",
+      "observed_last_updated": "2026-08-06",
+      "checked_candidate_last_updated": "2026-07-31",
+      "checked_candidate_reviewed_at": "2026-08-04T00:00:00Z",
+      "requires_new_reviewed_candidate": true
+    }
+  },
+  "scope_limits": {
+    "database_accessed": false,
+    "production_mutation_performed": false,
+    "publication_authorized": false,
+    "publish_endpoint_exercised": false,
+    "cultural_outreach_performed": false,
+    "raw_admin_or_vehicle_identity_present": false
+  }
+}

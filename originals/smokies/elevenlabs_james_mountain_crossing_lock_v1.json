@@ -1,0 +1,1664 @@
+{
+  "aggregate": {
+    "base_cue_count": 10,
+    "base_entry_count": 28,
+    "base_story_count": 18,
+    "delivery_variant_count": 2,
+    "directional_override_count": 5,
+    "provider_request_count": 33
+  },
+  "authorization": {
+    "accepted_james_profile_reused": true,
+    "api_key_creation_authorized": false,
+    "chapter_render_authorized": false,
+    "database_mutation_authorized": false,
+    "exact_scripts_user_approved": false,
+    "ingestion_authorized": false,
+    "manifest_mutation_authorized": false,
+    "network_access_authorized": false,
+    "production_mutation_authorized": false,
+    "provider_credit_spend_authorized": false,
+    "provider_request_authorized": false,
+    "public_release_authorized": false,
+    "rerender_authorized": false,
+    "upload_authorized": false
+  },
+  "budget": {
+    "billing_unit": "provider_credits",
+    "cross_chapter_borrowing_allowed": false,
+    "dollar_cap_usd": "7.00",
+    "insufficient_included_credits_behavior": "stop_before_dispatch",
+    "key_quota_increment": 5000,
+    "max_assumed_usd_per_1000_characters": "0.10",
+    "normalized_character_count": 59801,
+    "paid_overage_authorized": false,
+    "payload_character_count": 59928,
+    "per_asset_contingency_percent": 10,
+    "projected_cost_usd": "6.00",
+    "projected_reserved_cost_usd": "6.60",
+    "proposed_one_day_api_key_credit_quota": 70000,
+    "renderer_character_cap": 66000,
+    "renderer_headroom_credits": 62,
+    "rerender_budget": 0,
+    "reserved_provider_credit_ceiling": 65938,
+    "unused_budget_transfer_allowed": false,
+    "word_count": 9499
+  },
+  "builder_effects": {
+    "database_accessed": false,
+    "media_files_created": false,
+    "network_accessed": false,
+    "provider_accessed": false,
+    "provider_credits_spent": 0,
+    "provider_requests_sent": 0
+  },
+  "chapter_id": "mountain_crossing",
+  "direction_delivery": {
+    "base_variant_id": "tn_to_nc",
+    "directional_override_count": 5,
+    "reviewed_variant_ids": [
+      "tn_to_nc",
+      "nc_to_tn"
+    ],
+    "variants": [
+      {
+        "directional_replacement_count": 0,
+        "entry_audio_request_map": [
+          {
+            "entry_id": "mc_story_01",
+            "provider_request_id": "mc_story_01__base"
+          },
+          {
+            "entry_id": "mc_story_02",
+            "provider_request_id": "mc_story_02__base"
+          },
+          {
+            "entry_id": "mc_story_03",
+            "provider_request_id": "mc_story_03__base"
+          },
+          {
+            "entry_id": "mc_story_04",
+            "provider_request_id": "mc_story_04__base"
+          },
+          {
+            "entry_id": "mc_story_05",
+            "provider_request_id": "mc_story_05__base"
+          },
+          {
+            "entry_id": "mc_story_06",
+            "provider_request_id": "mc_story_06__base"
+          },
+          {
+            "entry_id": "mc_story_07",
+            "provider_request_id": "mc_story_07__base"
+          },
+          {
+            "entry_id": "mc_story_08",
+            "provider_request_id": "mc_story_08__base"
+          },
+          {
+            "entry_id": "mc_story_09",
+            "provider_request_id": "mc_story_09__base"
+          },
+          {
+            "entry_id": "mc_story_10",
+            "provider_request_id": "mc_story_10__base"
+          },
+          {
+            "entry_id": "mc_story_11",
+            "provider_request_id": "mc_story_11__base"
+          },
+          {
+            "entry_id": "mc_story_12",
+            "provider_request_id": "mc_story_12__base"
+          },
+          {
+            "entry_id": "mc_story_13",
+            "provider_request_id": "mc_story_13__base"
+          },
+          {
+            "entry_id": "mc_story_14",
+            "provider_request_id": "mc_story_14__base"
+          },
+          {
+            "entry_id": "mc_story_15",
+            "provider_request_id": "mc_story_15__base"
+          },
+          {
+            "entry_id": "mc_story_16",
+            "provider_request_id": "mc_story_16__base"
+          },
+          {
+            "entry_id": "mc_story_17",
+            "provider_request_id": "mc_story_17__base"
+          },
+          {
+            "entry_id": "mc_story_18",
+            "provider_request_id": "mc_story_18__base"
+          },
+          {
+            "entry_id": "mc_cue_01",
+            "provider_request_id": "mc_cue_01__base"
+          },
+          {
+            "entry_id": "mc_cue_02",
+            "provider_request_id": "mc_cue_02__base"
+          },
+          {
+            "entry_id": "mc_cue_03",
+            "provider_request_id": "mc_cue_03__base"
+          },
+          {
+            "entry_id": "mc_cue_04",
+            "provider_request_id": "mc_cue_04__base"
+          },
+          {
+            "entry_id": "mc_cue_05",
+            "provider_request_id": "mc_cue_05__base"
+          },
+          {
+            "entry_id": "mc_cue_06",
+            "provider_request_id": "mc_cue_06__base"
+          },
+          {
+            "entry_id": "mc_cue_07",
+            "provider_request_id": "mc_cue_07__base"
+          },
+          {
+            "entry_id": "mc_cue_08",
+            "provider_request_id": "mc_cue_08__base"
+          },
+          {
+            "entry_id": "mc_cue_09",
+            "provider_request_id": "mc_cue_09__base"
+          },
+          {
+            "entry_id": "mc_cue_10",
+            "provider_request_id": "mc_cue_10__base"
+          }
+        ],
+        "entry_count": 28,
+        "reverse_pair_id": "mountain-crossing-nc-to-tn",
+        "route_spec_id": "mountain-crossing-tn-to-nc",
+        "variant_id": "tn_to_nc"
+      },
+      {
+        "directional_replacement_count": 5,
+        "entry_audio_request_map": [
+          {
+            "entry_id": "mc_story_01",
+            "provider_request_id": "mc_story_01__base"
+          },
+          {
+            "entry_id": "mc_story_02",
+            "provider_request_id": "mc_story_02__base"
+          },
+          {
+            "entry_id": "mc_story_03",
+            "provider_request_id": "mc_story_03__base"
+          },
+          {
+            "entry_id": "mc_story_04",
+            "provider_request_id": "mc_story_04__base"
+          },
+          {
+            "entry_id": "mc_story_05",
+            "provider_request_id": "mc_story_05__base"
+          },
+          {
+            "entry_id": "mc_story_06",
+            "provider_request_id": "mc_story_06__base"
+          },
+          {
+            "entry_id": "mc_story_07",
+            "provider_request_id": "mc_story_07__base"
+          },
+          {
+            "entry_id": "mc_story_08",
+            "provider_request_id": "mc_story_08__base"
+          },
+          {
+            "entry_id": "mc_story_09",
+            "provider_request_id": "mc_story_09__base"
+          },
+          {
+            "entry_id": "mc_story_10",
+            "provider_request_id": "mc_story_10__base"
+          },
+          {
+            "entry_id": "mc_story_11",
+            "provider_request_id": "mc_story_11__base"
+          },
+          {
+            "entry_id": "mc_story_12",
+            "provider_request_id": "mc_story_12__base"
+          },
+          {
+            "entry_id": "mc_story_13",
+            "provider_request_id": "mc_story_13__base"
+          },
+          {
+            "entry_id": "mc_story_14",
+            "provider_request_id": "mc_story_14__base"
+          },
+          {
+            "entry_id": "mc_story_15",
+            "provider_request_id": "mc_story_15__base"
+          },
+          {
+            "entry_id": "mc_story_16",
+            "provider_request_id": "mc_story_16__base"
+          },
+          {
+            "entry_id": "mc_story_17",
+            "provider_request_id": "mc_story_17__base"
+          },
+          {
+            "entry_id": "mc_story_18",
+            "provider_request_id": "mc_story_18__base"
+          },
+          {
+            "entry_id": "mc_cue_01",
+            "provider_request_id": "mc_cue_01__nc_to_tn"
+          },
+          {
+            "entry_id": "mc_cue_02",
+            "provider_request_id": "mc_cue_02__nc_to_tn"
+          },
+          {
+            "entry_id": "mc_cue_03",
+            "provider_request_id": "mc_cue_03__base"
+          },
+          {
+            "entry_id": "mc_cue_04",
+            "provider_request_id": "mc_cue_04__nc_to_tn"
+          },
+          {
+            "entry_id": "mc_cue_05",
+            "provider_request_id": "mc_cue_05__base"
+          },
+          {
+            "entry_id": "mc_cue_06",
+            "provider_request_id": "mc_cue_06__base"
+          },
+          {
+            "entry_id": "mc_cue_07",
+            "provider_request_id": "mc_cue_07__base"
+          },
+          {
+            "entry_id": "mc_cue_08",
+            "provider_request_id": "mc_cue_08__nc_to_tn"
+          },
+          {
+            "entry_id": "mc_cue_09",
+            "provider_request_id": "mc_cue_09__nc_to_tn"
+          },
+          {
+            "entry_id": "mc_cue_10",
+            "provider_request_id": "mc_cue_10__base"
+          }
+        ],
+        "entry_count": 28,
+        "reverse_pair_id": "mountain-crossing-tn-to-nc",
+        "route_spec_id": "mountain-crossing-nc-to-tn",
+        "variant_id": "nc_to_tn"
+      }
+    ]
+  },
+  "editorial_gate": {
+    "copy_or_direction_change_requires_new_lock": true,
+    "exact_hash_bound": true,
+    "script_review_status": "pending_combined_owner_review",
+    "source_status": "draft_review_required"
+  },
+  "generation_profile": {
+    "api_contract": "elevenlabs_text_to_speech_v1",
+    "language_code": "en",
+    "model_id": "eleven_multilingual_v2",
+    "output": {
+      "bitrate_kbps": 128,
+      "channels": 1,
+      "container": "mp3",
+      "format_id": "mp3_44100_128",
+      "lossless_or_wav_claimed": false,
+      "mime_type": "audio/mpeg",
+      "provider_native_lossy_source": true,
+      "sample_rate_hz": 44100,
+      "transcoding_for_delivery": false
+    },
+    "provider": "elevenlabs",
+    "provider_retention": {
+      "mode": "standard_logging",
+      "model_training_contribution_required": false,
+      "zero_retention_claimed": false
+    },
+    "voice_id": "EkK5I93UQWFDigLMpZcX",
+    "voice_metadata_contract": {
+      "custom_credit_multiplier": "not_reported_or_one",
+      "removal_state": "none",
+      "resolved_and_original_voice_id": "EkK5I93UQWFDigLMpZcX",
+      "sharing_status": "copied",
+      "voice_library_rate": "1",
+      "withdrawal_notice_period": "730"
+    },
+    "voice_name": "James - Husky, Engaging and Bold",
+    "voice_settings": {
+      "similarity_boost": 0.5,
+      "speed": 1.0,
+      "stability": 0.5,
+      "style": 0.1,
+      "use_speaker_boost": true
+    },
+    "voice_settings_source": "provider_preflight_exact_match_required"
+  },
+  "lock_id": "great_smoky_mountains_elevenlabs_james_mountain_crossing_lock_v1",
+  "lock_status": "review_proposal_render_and_spend_not_authorized",
+  "product_id": "great_smoky_mountains_ridges_rivers_living_memory",
+  "provider_request_contract": {
+    "attempts_per_asset": 1,
+    "automatic_rerender_count": 0,
+    "body_fields": [
+      "text_from_bound_source",
+      "model_id",
+      "language_code",
+      "voice_settings"
+    ],
+    "endpoint_contract": "/v1/text-to-speech/{voice_id}?output_format=mp3_44100_128",
+    "request_count": 33,
+    "safe_retry_only": "provider_confirmed_uncharged_429",
+    "stop_without_retry": [
+      "ambiguous_timeout",
+      "http_5xx",
+      "invalid_http_200_audio",
+      "uncertain_billing",
+      "process_interruption_after_dispatch"
+    ]
+  },
+  "requests": [
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "tn_to_nc",
+      "claim_ids": [
+        "mc_gateway_watershed"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "tn_to_nc",
+        "nc_to_tn"
+      ],
+      "entry_id": "mc_story_01",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 2697,
+      "normalized_transcript_sha256": "2af50f8253c5ff68af5a77cb2d5166fbc5d63c917cd7f425a7228b67ff9d9d8c",
+      "override_variant_id": null,
+      "payload_character_count": 2703,
+      "provider_request_id": "mc_story_01__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "988fc808bdddf5672f5525a21935ec641e6dbf14a243ff2299e4e0b52ff0fd66",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 2974,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_natural_features"
+      ],
+      "spend_authorized": false,
+      "stable_order": 1,
+      "title": "Sugarlands and the watershed",
+      "title_sha256": "9e4cb3f213fb33a0e1331775ad4acefb23477b0626391dffc5ebfa3ebb59f6b7",
+      "transcript_source": "originals/smokies/editorial_mountain_crossing_v1.json#/entries/0/transcript",
+      "word_count": 451
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "tn_to_nc",
+      "claim_ids": [
+        "mc_deep_geology"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "tn_to_nc",
+        "nc_to_tn"
+      ],
+      "entry_id": "mc_story_02",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 4410,
+      "normalized_transcript_sha256": "10783849f5a3394a5f9e79b241a46cd7c70687e3b37f8cc3b57c4993213b23e5",
+      "override_variant_id": null,
+      "payload_character_count": 4419,
+      "provider_request_id": "mc_story_02__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "f8eeeaeab269dec793b3769ce10882cc4f62880053ce73371b16e0b0af8ee693",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 4861,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_geology"
+      ],
+      "spend_authorized": false,
+      "stable_order": 2,
+      "title": "Mountains made from an ancient basin",
+      "title_sha256": "ee68db518a098649d56f0d82789f3b434ed16a724ced8095e1b6406c7a14b2da",
+      "transcript_source": "originals/smokies/editorial_mountain_crossing_v1.json#/entries/1/transcript",
+      "word_count": 681
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "tn_to_nc",
+      "claim_ids": [
+        "mc_rain_and_streams"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "tn_to_nc",
+        "nc_to_tn"
+      ],
+      "entry_id": "mc_story_03",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 2915,
+      "normalized_transcript_sha256": "6ae6ca0201d965927a6a5a07f7de1c6bcba0ac1bbd6ad71464f002fb25b2b984",
+      "override_variant_id": null,
+      "payload_character_count": 2922,
+      "provider_request_id": "mc_story_03__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "0e91d50cc35dd2b30f60e7c554e936570fe5c0d13217ec72521e3744039ff53d",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 3215,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_natural_features",
+        "nps_grsm_statistics"
+      ],
+      "spend_authorized": false,
+      "stable_order": 3,
+      "title": "Rain becomes a river",
+      "title_sha256": "50bc3932d422bede9330a3e99ebb6c044719b2555a1291b2e0c8dcdefce7ae46",
+      "transcript_source": "originals/smokies/editorial_mountain_crossing_v1.json#/entries/2/transcript",
+      "word_count": 484
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "tn_to_nc",
+      "claim_ids": [
+        "mc_forest_zones"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "tn_to_nc",
+        "nc_to_tn"
+      ],
+      "entry_id": "mc_story_04",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 2993,
+      "normalized_transcript_sha256": "d6297983ce8e88647f97d90525abda9c50311e53ee9c414747f194d5610f7a32",
+      "override_variant_id": null,
+      "payload_character_count": 3000,
+      "provider_request_id": "mc_story_04__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "e5a93400302164fe9af07243d810a0b10b187d9c6cfe0137667a26236d3abcfb",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 3301,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_vegetation"
+      ],
+      "spend_authorized": false,
+      "stable_order": 4,
+      "title": "Forests stacked by elevation",
+      "title_sha256": "72038e760b1fad85f70539c3c32002a38e27ccc4bc5295666cb66ad5c72c3bce",
+      "transcript_source": "originals/smokies/editorial_mountain_crossing_v1.json#/entries/3/transcript",
+      "word_count": 471
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "tn_to_nc",
+      "claim_ids": [
+        "mc_biodiversity"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "tn_to_nc",
+        "nc_to_tn"
+      ],
+      "entry_id": "mc_story_05",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 3134,
+      "normalized_transcript_sha256": "3d5e914559027de146d92c4e097f68159e00ceab0317ea807f36602c16740959",
+      "override_variant_id": null,
+      "payload_character_count": 3141,
+      "provider_request_id": "mc_story_05__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "53e348828c9b7ba95a78eba8d74520a91ea340938c918ed545051c9e2d75469c",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 3456,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_animals",
+        "nps_grsm_nature"
+      ],
+      "spend_authorized": false,
+      "stable_order": 5,
+      "title": "A compressed continent of life",
+      "title_sha256": "32855a06320ff2f4b790a88291c58c61a7bc3fab5f6ad2a8091be04f816932f4",
+      "transcript_source": "originals/smokies/editorial_mountain_crossing_v1.json#/entries/4/transcript",
+      "word_count": 496
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "tn_to_nc",
+      "claim_ids": [
+        "mc_road_engineering"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "tn_to_nc",
+        "nc_to_tn"
+      ],
+      "entry_id": "mc_story_06",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 2930,
+      "normalized_transcript_sha256": "92c792ee3c1b78f0249ce509ed6210f328e0a2229663cba05ffdbd5809f2a805",
+      "override_variant_id": null,
+      "payload_character_count": 2937,
+      "provider_request_id": "mc_story_06__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "a996ca1900427921dda97e5878a89a571e3960855d929bb3da3173157773334d",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 3231,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_newfound_gap_road"
+      ],
+      "spend_authorized": false,
+      "stable_order": 6,
+      "title": "Designing Newfound Gap Road",
+      "title_sha256": "78bcbea9961812756386cb39e65aee6ffb35d63f94aea9846771d7e47bbc8319",
+      "transcript_source": "originals/smokies/editorial_mountain_crossing_v1.json#/entries/5/transcript",
+      "word_count": 468
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "tn_to_nc",
+      "claim_ids": [
+        "mc_ccc_legacy"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "tn_to_nc",
+        "nc_to_tn"
+      ],
+      "entry_id": "mc_story_07",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 2833,
+      "normalized_transcript_sha256": "cd56e87d060ad311ac8a7038ccfd6b3fa09bc1052ced81198508e259f1ba56b1",
+      "override_variant_id": null,
+      "payload_character_count": 2840,
+      "provider_request_id": "mc_story_07__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "fe75b212b5d0897ec114eb1ec0cb81c6db80753b378e0f29ad94b1ce6511e861",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 3125,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_history_culture",
+        "nps_grsm_newfound_gap_road"
+      ],
+      "spend_authorized": false,
+      "stable_order": 7,
+      "title": "Stonework of the CCC",
+      "title_sha256": "06dd6a01ee9a0c54a9eaf25736bece3a9475f0b5dd6cef21a1a92d82842df805",
+      "transcript_source": "originals/smokies/editorial_mountain_crossing_v1.json#/entries/6/transcript",
+      "word_count": 455
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "tn_to_nc",
+      "claim_ids": [
+        "mc_segregated_landscape"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "tn_to_nc",
+        "nc_to_tn"
+      ],
+      "entry_id": "mc_story_08",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 2920,
+      "normalized_transcript_sha256": "704fa6651972f379436d0b2c257bfe8f843501ddc4c434f724359e402bcfdc46",
+      "override_variant_id": null,
+      "payload_character_count": 2927,
+      "provider_request_id": "mc_story_08__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "af43ad867c71ca060765b1c71f67e07c40ad7b451887b8f8b9c8fa31253fac7a",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 3220,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_segregation"
+      ],
+      "spend_authorized": false,
+      "stable_order": 8,
+      "title": "A park built in a segregated era",
+      "title_sha256": "1480f645a5b13d8d70010adb503dde1b72d20e2d04bd406a01d04f4208ab5a09",
+      "transcript_source": "originals/smokies/editorial_mountain_crossing_v1.json#/entries/7/transcript",
+      "word_count": 457
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "tn_to_nc",
+      "claim_ids": [
+        "mc_park_creation"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "tn_to_nc",
+        "nc_to_tn"
+      ],
+      "entry_id": "mc_story_09",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 2932,
+      "normalized_transcript_sha256": "ab67257f3a0b1453ad84f15c4f89dd8b97a9a86609b023c6a5c079f3d6944070",
+      "override_variant_id": null,
+      "payload_character_count": 2939,
+      "provider_request_id": "mc_story_09__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "44f2c8331e056d19c34b4391734d68cc41edf638d0a2cd9b2b388a96b73194e3",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 3233,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_people",
+        "nps_grsm_timeline"
+      ],
+      "spend_authorized": false,
+      "stable_order": 9,
+      "title": "Protection and displacement",
+      "title_sha256": "0bcd2d5d63333e8f7027693379d59b38328f471db619a2344b34e3eafde821ce",
+      "transcript_source": "originals/smokies/editorial_mountain_crossing_v1.json#/entries/8/transcript",
+      "word_count": 452
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "tn_to_nc",
+      "claim_ids": [
+        "mc_logging_recovery"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "tn_to_nc",
+        "nc_to_tn"
+      ],
+      "entry_id": "mc_story_10",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 2825,
+      "normalized_transcript_sha256": "04e52643a19cb6890a5c35ed2bba7957951b4f0fd0eb2afd3611b39cfac081d9",
+      "override_variant_id": null,
+      "payload_character_count": 2832,
+      "provider_request_id": "mc_story_10__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "accc22a1dfe7385d7ad2cb962073215ccfe7a6de4427c350e91ce359c35f5e03",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 3116,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_history_culture",
+        "nps_grsm_people"
+      ],
+      "spend_authorized": false,
+      "stable_order": 10,
+      "title": "Forest after the logging boom",
+      "title_sha256": "da2a30aa7cb0fb33847489cc140d5936f153347d7ae37c3469a89c1fb033023d",
+      "transcript_source": "originals/smokies/editorial_mountain_crossing_v1.json#/entries/9/transcript",
+      "word_count": 450
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "tn_to_nc",
+      "claim_ids": [
+        "mc_haze_and_pollution"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "tn_to_nc",
+        "nc_to_tn"
+      ],
+      "entry_id": "mc_story_11",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 2930,
+      "normalized_transcript_sha256": "2cc4dfa8347b8d6a2ebd23c5047d73258d10dd894cd0c3ef908c9b818de83967",
+      "override_variant_id": null,
+      "payload_character_count": 2937,
+      "provider_request_id": "mc_story_11__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "1b1712e484302dd627b89e1bb10ac3d73732e53a5087e0fbd061ff116ad5a376",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 3231,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_air_quality"
+      ],
+      "spend_authorized": false,
+      "stable_order": 11,
+      "title": "The blue view and the white veil",
+      "title_sha256": "b6db737743bdf0a027d98be9df47a0de0ebb1d4de810fbd9b6ba853aa5b1b37a",
+      "transcript_source": "originals/smokies/editorial_mountain_crossing_v1.json#/entries/10/transcript",
+      "word_count": 455
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "tn_to_nc",
+      "claim_ids": [
+        "mc_gap_context"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "tn_to_nc",
+        "nc_to_tn"
+      ],
+      "entry_id": "mc_story_12",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 2859,
+      "normalized_transcript_sha256": "332e3c90a5b75a68dae97e8fd3632518b67d7af1fbe750874ffa0bf7dbccc568",
+      "override_variant_id": null,
+      "payload_character_count": 2866,
+      "provider_request_id": "mc_story_12__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "28a4eb511c3ceaf28110f6deb16ce73e69e80b4979d16e11bc7169a6b5eb042e",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 3153,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_kuwohi_area"
+      ],
+      "spend_authorized": false,
+      "stable_order": 12,
+      "title": "The pass between two watersheds",
+      "title_sha256": "d0e2fbf54771568c079bddd970c9a5ee88ce006f953cb18904d8a487e20e63c2",
+      "transcript_source": "originals/smokies/editorial_mountain_crossing_v1.json#/entries/11/transcript",
+      "word_count": 474
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "tn_to_nc",
+      "claim_ids": [
+        "mc_high_country"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "tn_to_nc",
+        "nc_to_tn"
+      ],
+      "entry_id": "mc_story_13",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 2936,
+      "normalized_transcript_sha256": "89d6b05e65880fa0c7c8db659542b2206ecc7bbe861c6620053bcd8579d26d02",
+      "override_variant_id": null,
+      "payload_character_count": 2943,
+      "provider_request_id": "mc_story_13__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "5f8bbe6c47232ce8ba1987a05c0a2eb970061df95e0e2f9f1048c9f57d6e5806",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 3238,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_nature",
+        "nps_grsm_vegetation"
+      ],
+      "spend_authorized": false,
+      "stable_order": 13,
+      "title": "Life in the high country",
+      "title_sha256": "300235be7bf769720d89672ae4416a36016ba64e63d07ff5fd1d278ae8f32eda",
+      "transcript_source": "originals/smokies/editorial_mountain_crossing_v1.json#/entries/12/transcript",
+      "word_count": 463
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "tn_to_nc",
+      "claim_ids": [
+        "mc_kuwohi_name"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "tn_to_nc",
+        "nc_to_tn"
+      ],
+      "entry_id": "mc_story_14",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 2900,
+      "normalized_transcript_sha256": "3c89738575613cf53afbc2f4eb8eaeecbb4cd2ed7f65e4aa58172069a4ebc03c",
+      "override_variant_id": null,
+      "payload_character_count": 2907,
+      "provider_request_id": "mc_story_14__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "4df6fb7427e0e48064a00a51117bbf01d54373a7144f2a5c177d44e6552c2ca6",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 3198,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_kuwohi_restoration"
+      ],
+      "spend_authorized": false,
+      "stable_order": 14,
+      "title": "Restoring the name Kuwohi",
+      "title_sha256": "51339a7446525c6f1b3c31dd57ef9183ca8eec67b7abf48cb01107ce677f3d5a",
+      "transcript_source": "originals/smokies/editorial_mountain_crossing_v1.json#/entries/13/transcript",
+      "word_count": 463
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "tn_to_nc",
+      "claim_ids": [
+        "mc_kuwohi_public_record"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "tn_to_nc",
+        "nc_to_tn"
+      ],
+      "entry_id": "mc_story_15",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 3225,
+      "normalized_transcript_sha256": "14f1849cba6b55e6cf69f5e86360a4ab5d78455352df3195d756637dbbda3722",
+      "override_variant_id": null,
+      "payload_character_count": 3232,
+      "provider_request_id": "mc_story_15__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "ddde021f032738a4b4d7d6f95f845812e6ae3fb1334fddfc71718873c52a45dd",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 3556,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_cherokee",
+        "nps_grsm_kuwohi_restoration",
+        "nps_grsm_oconaluftee"
+      ],
+      "spend_authorized": false,
+      "stable_order": 15,
+      "title": "A living community beside the park",
+      "title_sha256": "be17ba485ccb8b3c5ed15026e3df5b5e56890efd2c24fe07019dc0a9444ea560",
+      "transcript_source": "originals/smokies/editorial_mountain_crossing_v1.json#/entries/14/transcript",
+      "word_count": 497
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "tn_to_nc",
+      "claim_ids": [
+        "mc_oconaluftee_valley"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "tn_to_nc",
+        "nc_to_tn"
+      ],
+      "entry_id": "mc_story_16",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 2892,
+      "normalized_transcript_sha256": "4deb8fa9ac2b44743426189c2df5315d592271ff5d2ef484e01ccfc46e2658ee",
+      "override_variant_id": null,
+      "payload_character_count": 2899,
+      "provider_request_id": "mc_story_16__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "bc7b54fdc62a4c4edba249e1f9a34c378f14686a9e56d5802d0cff151060e1de",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 3189,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_oconaluftee"
+      ],
+      "spend_authorized": false,
+      "stable_order": 16,
+      "title": "The Oconaluftee valley",
+      "title_sha256": "12623428445bfe512fb034570e6b11f27ded8bd0531e64719f15c6b1716ea4da",
+      "transcript_source": "originals/smokies/editorial_mountain_crossing_v1.json#/entries/15/transcript",
+      "word_count": 453
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "tn_to_nc",
+      "claim_ids": [
+        "mc_mountain_farm"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "tn_to_nc",
+        "nc_to_tn"
+      ],
+      "entry_id": "mc_story_17",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 2932,
+      "normalized_transcript_sha256": "e279874115d815c1553e46d40312710385f8ad698aabecef8d3eddba72901f8f",
+      "override_variant_id": null,
+      "payload_character_count": 2939,
+      "provider_request_id": "mc_story_17__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "70eeaf7145fae2a2983fef0e1fb05275554b7fab6465cfed33bfd478bc7e3211",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 3233,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_mountain_farm",
+        "nps_grsm_oconaluftee"
+      ],
+      "spend_authorized": false,
+      "stable_order": 17,
+      "title": "A farm museum made from many places",
+      "title_sha256": "4161a89079676e5e1b07735beeb880300d172f4244cbaa0f76aa861e233cfa4f",
+      "transcript_source": "originals/smokies/editorial_mountain_crossing_v1.json#/entries/16/transcript",
+      "word_count": 468
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "tn_to_nc",
+      "claim_ids": [
+        "mc_bear_country",
+        "mc_elk_restoration"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "tn_to_nc",
+        "nc_to_tn"
+      ],
+      "entry_id": "mc_story_18",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 2853,
+      "normalized_transcript_sha256": "06bd0e0996a3e8113ebe0c6fb5d0140b08897d869c54dbc53996ce3af7cbddfb",
+      "override_variant_id": null,
+      "payload_character_count": 2860,
+      "provider_request_id": "mc_story_18__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "26e0b190acf730c230819a78cb1e705224f8b72e891ea8d99125587eba981576",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 3147,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_animals",
+        "nps_grsm_black_bears",
+        "nps_grsm_elk"
+      ],
+      "spend_authorized": false,
+      "stable_order": 18,
+      "title": "Elk return to the valley",
+      "title_sha256": "87631c471056827dcf8da894669900911b2b762c0b2854863cdd43fae6c86d02",
+      "transcript_source": "originals/smokies/editorial_mountain_crossing_v1.json#/entries/17/transcript",
+      "word_count": 458
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "tn_to_nc",
+      "claim_ids": [
+        "mc_gap_context"
+      ],
+      "content_kind": "cue",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "tn_to_nc"
+      ],
+      "entry_id": "mc_cue_01",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 385,
+      "normalized_transcript_sha256": "f0e1577851f606969a05ff4a3350a80ce97495df30e71e54754f061356ebd6d2",
+      "override_variant_id": null,
+      "payload_character_count": 385,
+      "provider_request_id": "mc_cue_01__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "f0e1577851f606969a05ff4a3350a80ce97495df30e71e54754f061356ebd6d2",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 424,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_kuwohi_area"
+      ],
+      "spend_authorized": false,
+      "stable_order": 19,
+      "title": "Crossing orientation",
+      "title_sha256": "bd194252c9d68a643000bdfb2a12fc16934be1d49c742cf196596ccaadcfc6a0",
+      "transcript_source": "originals/smokies/editorial_mountain_crossing_v1.json#/entries/18/transcript",
+      "word_count": 59
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "tn_to_nc",
+      "claim_ids": [
+        "mc_gateway_watershed"
+      ],
+      "content_kind": "cue",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "tn_to_nc"
+      ],
+      "entry_id": "mc_cue_02",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 348,
+      "normalized_transcript_sha256": "21f1724d2426213983af726e36052b946d7c4a69e319166ae0b8c43b54bc03ab",
+      "override_variant_id": null,
+      "payload_character_count": 348,
+      "provider_request_id": "mc_cue_02__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "21f1724d2426213983af726e36052b946d7c4a69e319166ae0b8c43b54bc03ab",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 383,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_natural_features"
+      ],
+      "spend_authorized": false,
+      "stable_order": 20,
+      "title": "Watch the water",
+      "title_sha256": "b6fe49b94d99a8673bd555dca59db1976efd601263df110058867c682ea31940",
+      "transcript_source": "originals/smokies/editorial_mountain_crossing_v1.json#/entries/19/transcript",
+      "word_count": 57
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "tn_to_nc",
+      "claim_ids": [
+        "mc_deep_geology"
+      ],
+      "content_kind": "cue",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "tn_to_nc",
+        "nc_to_tn"
+      ],
+      "entry_id": "mc_cue_03",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 378,
+      "normalized_transcript_sha256": "a7e4736d0885ee1f97a121ff9c9f34e8e7c7483149cdcbd51bc7eefdb234d663",
+      "override_variant_id": null,
+      "payload_character_count": 378,
+      "provider_request_id": "mc_cue_03__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "a7e4736d0885ee1f97a121ff9c9f34e8e7c7483149cdcbd51bc7eefdb234d663",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 416,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_geology"
+      ],
+      "spend_authorized": false,
+      "stable_order": 21,
+      "title": "Rock at the roadside",
+      "title_sha256": "619c827b1e9be85665bdba633e124f0428b023907e7d3b2c7e2a72b0ee2f22fc",
+      "transcript_source": "originals/smokies/editorial_mountain_crossing_v1.json#/entries/20/transcript",
+      "word_count": 62
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "tn_to_nc",
+      "claim_ids": [
+        "mc_forest_zones"
+      ],
+      "content_kind": "cue",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "tn_to_nc"
+      ],
+      "entry_id": "mc_cue_04",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 383,
+      "normalized_transcript_sha256": "c1a604dcf17f8cf87d1ac4cea1f36a08a1b62ea49bb7aea6a6d050a1b83b9101",
+      "override_variant_id": null,
+      "payload_character_count": 383,
+      "provider_request_id": "mc_cue_04__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "c1a604dcf17f8cf87d1ac4cea1f36a08a1b62ea49bb7aea6a6d050a1b83b9101",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 422,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_vegetation"
+      ],
+      "spend_authorized": false,
+      "stable_order": 22,
+      "title": "Forest turning point",
+      "title_sha256": "9b0e2cf47c0468ecea416bfb877dafb91e14490dc12e1613bfe87af72064cd78",
+      "transcript_source": "originals/smokies/editorial_mountain_crossing_v1.json#/entries/21/transcript",
+      "word_count": 59
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "tn_to_nc",
+      "claim_ids": [
+        "mc_gap_context"
+      ],
+      "content_kind": "cue",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "tn_to_nc",
+        "nc_to_tn"
+      ],
+      "entry_id": "mc_cue_05",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 351,
+      "normalized_transcript_sha256": "d5ed1134c0ac7c77dd95f0555c60ab8dbbfa9923dfe4dbe391382fcbd0005a82",
+      "override_variant_id": null,
+      "payload_character_count": 351,
+      "provider_request_id": "mc_cue_05__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "d5ed1134c0ac7c77dd95f0555c60ab8dbbfa9923dfe4dbe391382fcbd0005a82",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 387,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_kuwohi_area"
+      ],
+      "spend_authorized": false,
+      "stable_order": 23,
+      "title": "Newfound Gap ahead",
+      "title_sha256": "1c51d6e196dd0129c0082919b755552c1a0ef901faede0c648c7f50f46067eec",
+      "transcript_source": "originals/smokies/editorial_mountain_crossing_v1.json#/entries/22/transcript",
+      "word_count": 61
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "tn_to_nc",
+      "claim_ids": [
+        "mc_high_country"
+      ],
+      "content_kind": "cue",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "tn_to_nc",
+        "nc_to_tn"
+      ],
+      "entry_id": "mc_cue_06",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 415,
+      "normalized_transcript_sha256": "3bce4aefb637b04bd44ba9a5eb9d0d2bcf8ef50827923bc65cd3eb5a19e58344",
+      "override_variant_id": null,
+      "payload_character_count": 415,
+      "provider_request_id": "mc_cue_06__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "3bce4aefb637b04bd44ba9a5eb9d0d2bcf8ef50827923bc65cd3eb5a19e58344",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 457,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_nature",
+        "nps_grsm_vegetation"
+      ],
+      "spend_authorized": false,
+      "stable_order": 24,
+      "title": "Kuwohi turn",
+      "title_sha256": "94f367b0d0913763b37e58c181ede1f4e56f2e064c33b8620153f3cf80fb259e",
+      "transcript_source": "originals/smokies/editorial_mountain_crossing_v1.json#/entries/23/transcript",
+      "word_count": 59
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "tn_to_nc",
+      "claim_ids": [
+        "mc_kuwohi_public_record"
+      ],
+      "content_kind": "cue",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "tn_to_nc",
+        "nc_to_tn"
+      ],
+      "entry_id": "mc_cue_07",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 348,
+      "normalized_transcript_sha256": "6611b51e476f9eb31a017fb4d4000a343f8bfb1c1b02dc11512b8945dc0e36ba",
+      "override_variant_id": null,
+      "payload_character_count": 348,
+      "provider_request_id": "mc_cue_07__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "6611b51e476f9eb31a017fb4d4000a343f8bfb1c1b02dc11512b8945dc0e36ba",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 383,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_cherokee",
+        "nps_grsm_kuwohi_restoration",
+        "nps_grsm_oconaluftee"
+      ],
+      "spend_authorized": false,
+      "stable_order": 25,
+      "title": "Name with care",
+      "title_sha256": "19a50cd6786fce0665daacc50e57c3bc99341c7618533b4f0807258657188eeb",
+      "transcript_source": "originals/smokies/editorial_mountain_crossing_v1.json#/entries/24/transcript",
+      "word_count": 58
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "tn_to_nc",
+      "claim_ids": [
+        "mc_forest_zones"
+      ],
+      "content_kind": "cue",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "tn_to_nc"
+      ],
+      "entry_id": "mc_cue_08",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 395,
+      "normalized_transcript_sha256": "f032aa3871578b1e60dd1c1aa11c3deaf527d70279965d983871924f2aae5d70",
+      "override_variant_id": null,
+      "payload_character_count": 395,
+      "provider_request_id": "mc_cue_08__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "f032aa3871578b1e60dd1c1aa11c3deaf527d70279965d983871924f2aae5d70",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 435,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_vegetation"
+      ],
+      "spend_authorized": false,
+      "stable_order": 26,
+      "title": "Descending forest",
+      "title_sha256": "6133a7c7c60b45bd63d7d110c5d335dbd77fada324ab3cb8c2a2fdf4d8cbd8f8",
+      "transcript_source": "originals/smokies/editorial_mountain_crossing_v1.json#/entries/25/transcript",
+      "word_count": 61
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "tn_to_nc",
+      "claim_ids": [
+        "mc_oconaluftee_valley"
+      ],
+      "content_kind": "cue",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "tn_to_nc"
+      ],
+      "entry_id": "mc_cue_09",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 391,
+      "normalized_transcript_sha256": "23e6ccc0de53ecb180f546f7ae79987758238e2791b02b12c931833baa6685d7",
+      "override_variant_id": null,
+      "payload_character_count": 391,
+      "provider_request_id": "mc_cue_09__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "23e6ccc0de53ecb180f546f7ae79987758238e2791b02b12c931833baa6685d7",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 431,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_oconaluftee"
+      ],
+      "spend_authorized": false,
+      "stable_order": 27,
+      "title": "Oconaluftee approach",
+      "title_sha256": "5bb069c9b3c872fdc68c221817f4743ba87c9be095f5b6398214e59ff33971ae",
+      "transcript_source": "originals/smokies/editorial_mountain_crossing_v1.json#/entries/26/transcript",
+      "word_count": 62
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "tn_to_nc",
+      "claim_ids": [
+        "mc_bear_country",
+        "mc_elk_restoration"
+      ],
+      "content_kind": "cue",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "tn_to_nc",
+        "nc_to_tn"
+      ],
+      "entry_id": "mc_cue_10",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 379,
+      "normalized_transcript_sha256": "c195eefde74e7e7e6c8a6826ee81706696b56e2409ad3bdc8f7839a5eb7104ed",
+      "override_variant_id": null,
+      "payload_character_count": 379,
+      "provider_request_id": "mc_cue_10__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "c195eefde74e7e7e6c8a6826ee81706696b56e2409ad3bdc8f7839a5eb7104ed",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 417,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_animals",
+        "nps_grsm_black_bears",
+        "nps_grsm_elk"
+      ],
+      "spend_authorized": false,
+      "stable_order": 28,
+      "title": "Wildlife distance",
+      "title_sha256": "4c1e00ca38d6bb8b463864b0d66573de0c0e23b3f13a078193c3e4eb1146d1ed",
+      "transcript_source": "originals/smokies/editorial_mountain_crossing_v1.json#/entries/27/transcript",
+      "word_count": 66
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "tn_to_nc",
+      "claim_ids": [
+        "mc_gap_context"
+      ],
+      "content_kind": "cue",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "nc_to_tn"
+      ],
+      "entry_id": "mc_cue_01",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 380,
+      "normalized_transcript_sha256": "b86b8b1cd7bdf268e5c39823d534992ed54e15c0fdba0eb0ae023f97f5e67df9",
+      "override_variant_id": "nc_to_tn",
+      "payload_character_count": 380,
+      "provider_request_id": "mc_cue_01__nc_to_tn",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "b86b8b1cd7bdf268e5c39823d534992ed54e15c0fdba0eb0ae023f97f5e67df9",
+      "render_authorized": false,
+      "request_kind": "directional_override",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 419,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_kuwohi_area"
+      ],
+      "spend_authorized": false,
+      "stable_order": 29,
+      "title": "Crossing orientation",
+      "title_sha256": "bd194252c9d68a643000bdfb2a12fc16934be1d49c742cf196596ccaadcfc6a0",
+      "transcript_source": "originals/smokies/editorial_mountain_crossing_v1.json#/entries/18/variant_overrides/0/transcript",
+      "word_count": 58
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "tn_to_nc",
+      "claim_ids": [
+        "mc_gateway_watershed"
+      ],
+      "content_kind": "cue",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "nc_to_tn"
+      ],
+      "entry_id": "mc_cue_02",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 386,
+      "normalized_transcript_sha256": "495fdcd6b85e8cf5bd706719f7bee12c81cc9885499b090e77560a0936b91ca9",
+      "override_variant_id": "nc_to_tn",
+      "payload_character_count": 386,
+      "provider_request_id": "mc_cue_02__nc_to_tn",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "495fdcd6b85e8cf5bd706719f7bee12c81cc9885499b090e77560a0936b91ca9",
+      "render_authorized": false,
+      "request_kind": "directional_override",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 425,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_natural_features"
+      ],
+      "spend_authorized": false,
+      "stable_order": 30,
+      "title": "Watch the water",
+      "title_sha256": "b6fe49b94d99a8673bd555dca59db1976efd601263df110058867c682ea31940",
+      "transcript_source": "originals/smokies/editorial_mountain_crossing_v1.json#/entries/19/variant_overrides/0/transcript",
+      "word_count": 63
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "tn_to_nc",
+      "claim_ids": [
+        "mc_forest_zones"
+      ],
+      "content_kind": "cue",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "nc_to_tn"
+      ],
+      "entry_id": "mc_cue_04",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 396,
+      "normalized_transcript_sha256": "8ec1ecdc7587a666e05531001862c1de38a4a7cb01d31b062e9b94ffc55b8694",
+      "override_variant_id": "nc_to_tn",
+      "payload_character_count": 396,
+      "provider_request_id": "mc_cue_04__nc_to_tn",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "8ec1ecdc7587a666e05531001862c1de38a4a7cb01d31b062e9b94ffc55b8694",
+      "render_authorized": false,
+      "request_kind": "directional_override",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 436,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_vegetation"
+      ],
+      "spend_authorized": false,
+      "stable_order": 31,
+      "title": "Forest turning point",
+      "title_sha256": "9b0e2cf47c0468ecea416bfb877dafb91e14490dc12e1613bfe87af72064cd78",
+      "transcript_source": "originals/smokies/editorial_mountain_crossing_v1.json#/entries/21/variant_overrides/0/transcript",
+      "word_count": 61
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "tn_to_nc",
+      "claim_ids": [
+        "mc_forest_zones"
+      ],
+      "content_kind": "cue",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "nc_to_tn"
+      ],
+      "entry_id": "mc_cue_08",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 368,
+      "normalized_transcript_sha256": "431beed19885a1db7bd1cd7a2242c0cbbe99a98f9bad298fedf0497fc235dfa1",
+      "override_variant_id": "nc_to_tn",
+      "payload_character_count": 368,
+      "provider_request_id": "mc_cue_08__nc_to_tn",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "431beed19885a1db7bd1cd7a2242c0cbbe99a98f9bad298fedf0497fc235dfa1",
+      "render_authorized": false,
+      "request_kind": "directional_override",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 405,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_vegetation"
+      ],
+      "spend_authorized": false,
+      "stable_order": 32,
+      "title": "Climbing forest",
+      "title_sha256": "2515ce8cb4778eedda0a2204b106b71e8ebaf0fa9ff8c6211f3cdd955900d71f",
+      "transcript_source": "originals/smokies/editorial_mountain_crossing_v1.json#/entries/25/variant_overrides/0/transcript",
+      "word_count": 57
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "tn_to_nc",
+      "claim_ids": [
+        "mc_oconaluftee_valley"
+      ],
+      "content_kind": "cue",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "nc_to_tn"
+      ],
+      "entry_id": "mc_cue_09",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 382,
+      "normalized_transcript_sha256": "95cb13414d2f35338c74134f4971a152482ca4732294abf6f03811ff0359129f",
+      "override_variant_id": "nc_to_tn",
+      "payload_character_count": 382,
+      "provider_request_id": "mc_cue_09__nc_to_tn",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "95cb13414d2f35338c74134f4971a152482ca4732294abf6f03811ff0359129f",
+      "render_authorized": false,
+      "request_kind": "directional_override",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 421,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_oconaluftee"
+      ],
+      "spend_authorized": false,
+      "stable_order": 33,
+      "title": "Oconaluftee departure",
+      "title_sha256": "5d8302880815fbff86d5c40eef89ccf49b24704673c0b40a3f1c3ff0742a3c7e",
+      "transcript_source": "originals/smokies/editorial_mountain_crossing_v1.json#/entries/26/variant_overrides/0/transcript",
+      "word_count": 60
+    }
+  ],
+  "schema_version": 1,
+  "source_files": [
+    {
+      "byte_count": 71637,
+      "path": "originals/smokies/editorial_mountain_crossing_v1.json",
+      "sha256": "4a7e0acf04075da914ef486b86210167ff4220b8ea901083bd4df75d8fe21c58"
+    },
+    {
+      "byte_count": 19132,
+      "path": "originals/smokies/elevenlabs_james_roaring_fork_lock_v1.json",
+      "sha256": "4f8b2d9df467de6af3d5622dac10caae7c165d924e36449de30d507812ba7e3b"
+    },
+    {
+      "byte_count": 9936,
+      "path": "originals/smokies/route_variants_v1.json",
+      "sha256": "49d55fa8819822b18af54983ea11893a661689102c14532a88ebacf2ec587f24"
+    },
+    {
+      "byte_count": 85708,
+      "path": "originals/smokies/source_dossiers_v1.json",
+      "sha256": "8eb22ca5110f0f9a4287b8f184624348c2a2ca2dbc36e27ef59fc022057ce18f"
+    }
+  ]
+}

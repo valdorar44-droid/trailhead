@@ -1,0 +1,288 @@
+{
+  "accepted_profile_baseline": {
+    "commercial_use_last_observed": true,
+    "fresh_authenticated_recheck_required": true,
+    "model_id": "eleven_multilingual_v2",
+    "output_format_id": "mp3_44100_128",
+    "plan_last_observed": "creator",
+    "point_in_time_only": true,
+    "production_lock": {
+      "byte_count": 19132,
+      "path": "originals/smokies/elevenlabs_james_roaring_fork_lock_v1.json",
+      "sha256": "4f8b2d9df467de6af3d5622dac10caae7c165d924e36449de30d507812ba7e3b"
+    },
+    "profile_evidence": {
+      "byte_count": 12212,
+      "path": "originals/smokies/roaring_fork_narration_profile_evidence_v1.json",
+      "sha256": "66cb0ed535470f5da239b3a089682153a1505ba434795225526f440202d60bf3"
+    },
+    "provider": "elevenlabs",
+    "provider_account_claims_redacted": {
+      "byte_count": 706,
+      "path": "originals/smokies/elevenlabs_james_account_claims_redacted_v1.json",
+      "sha256": "a25244c99f5a23db859579b59318155a243418f24ad8b5e0e93f268757bdacc1"
+    },
+    "terms_last_reviewed": {
+      "jurisdiction": "non_eea",
+      "reviewed_at": "2026-08-10",
+      "terms_id": "elevenlabs_terms_of_service_non_eea_2026-03-31",
+      "terms_url": "https://elevenlabs.io/terms-of-use",
+      "terms_version": "31 March 2026"
+    },
+    "voice_id": "EkK5I93UQWFDigLMpZcX",
+    "voice_name": "James - Husky, Engaging and Bold"
+  },
+  "authorization": {
+    "authenticated_provider_preflight_authorized": false,
+    "database_mutation_authorized": false,
+    "ingestion_authorized": false,
+    "manifest_mutation_authorized": false,
+    "narration_render_authorized": false,
+    "one_day_key_creation_authorized": false,
+    "owner_media_and_spend_checkpoint_complete": false,
+    "production_mutation_authorized": false,
+    "provider_credit_spend_authorized": false,
+    "provider_request_authorized": false,
+    "public_release_authorized": false,
+    "rerender_authorized": false,
+    "upload_authorized": false
+  },
+  "budget_isolation": {
+    "aggregate_informational_only_not_interchangeable": {
+      "dollar_caps_usd": "14.50",
+      "normalized_character_count": 125328,
+      "payload_character_count": 125595,
+      "proposed_one_day_key_credit_quotas": 145000,
+      "renderer_character_caps": 138300,
+      "reserved_provider_credit_ceiling": 138190,
+      "word_count": 19841
+    },
+    "chapter_budgets": [
+      {
+        "chapter_id": "foothills_parkway",
+        "cross_chapter_borrowing_allowed": false,
+        "dollar_cap_usd": "2.50",
+        "normalized_character_count": 21369,
+        "payload_character_count": 21408,
+        "proposed_one_day_api_key_credit_quota": 25000,
+        "provider_request_count": 16,
+        "render_authorized": false,
+        "renderer_character_cap": 23600,
+        "reserved_provider_credit_ceiling": 23557,
+        "spend_authorized": false,
+        "word_count": 3431
+      },
+      {
+        "chapter_id": "mountain_crossing",
+        "cross_chapter_borrowing_allowed": false,
+        "dollar_cap_usd": "7.00",
+        "normalized_character_count": 59801,
+        "payload_character_count": 59928,
+        "proposed_one_day_api_key_credit_quota": 70000,
+        "provider_request_count": 33,
+        "render_authorized": false,
+        "renderer_character_cap": 66000,
+        "reserved_provider_credit_ceiling": 65938,
+        "spend_authorized": false,
+        "word_count": 9499
+      },
+      {
+        "chapter_id": "little_river_cades_cove",
+        "cross_chapter_borrowing_allowed": false,
+        "dollar_cap_usd": "5.00",
+        "normalized_character_count": 44158,
+        "payload_character_count": 44259,
+        "proposed_one_day_api_key_credit_quota": 50000,
+        "provider_request_count": 23,
+        "render_authorized": false,
+        "renderer_character_cap": 48700,
+        "reserved_provider_credit_ceiling": 48695,
+        "spend_authorized": false,
+        "word_count": 6911
+      }
+    ],
+    "chapter_key_count": 3,
+    "cross_chapter_borrowing_allowed": false,
+    "key_expiry_hours": 24,
+    "key_permissions": [
+      "text_to_speech",
+      "voices_read",
+      "subscription_read"
+    ],
+    "paid_overage_authorized": false,
+    "policy": "three_independent_chapter_ledgers_and_one_day_keys",
+    "rerender_budget": 0,
+    "unused_budget_transfer_allowed": false
+  },
+  "builder_effects": {
+    "api_keys_created": 0,
+    "database_accessed": false,
+    "media_files_created": false,
+    "network_accessed": false,
+    "provider_accessed": false,
+    "provider_credits_spent": 0,
+    "provider_requests_sent": 0
+  },
+  "chapter_lock_bindings": [
+    {
+      "byte_count": 33701,
+      "chapter_id": "foothills_parkway",
+      "path": "originals/smokies/elevenlabs_james_foothills_parkway_lock_v1.json",
+      "provider_request_count": 16,
+      "render_authorized": false,
+      "sha256": "eac2d636c4c26fd55fbc4ebe7b7be25882ffd51e6064703924d96d89fa71c119",
+      "spend_authorized": false
+    },
+    {
+      "byte_count": 63724,
+      "chapter_id": "mountain_crossing",
+      "path": "originals/smokies/elevenlabs_james_mountain_crossing_lock_v1.json",
+      "provider_request_count": 33,
+      "render_authorized": false,
+      "sha256": "561a8a8bf62f534d485df0ebf523d13a9defd962af136240fd46e1ca5aacec25",
+      "spend_authorized": false
+    },
+    {
+      "byte_count": 44518,
+      "chapter_id": "little_river_cades_cove",
+      "path": "originals/smokies/elevenlabs_james_cades_cove_lock_v1.json",
+      "provider_request_count": 23,
+      "render_authorized": false,
+      "sha256": "6c6fecdaa85d91f4e29cd08ea9c46f20d404dba8ed72962390b8d8d8dc5b6a04",
+      "spend_authorized": false
+    }
+  ],
+  "direction_preflight": {
+    "all_directional_transcripts_hash_bound": true,
+    "full_product_variant_ids": [
+      {
+        "chapter_id": "mountain_crossing",
+        "route_spec_id": "mountain-crossing-tn-to-nc",
+        "variant_id": "tn_to_nc"
+      },
+      {
+        "chapter_id": "mountain_crossing",
+        "route_spec_id": "mountain-crossing-nc-to-tn",
+        "variant_id": "nc_to_tn"
+      },
+      {
+        "chapter_id": "little_river_cades_cove",
+        "route_spec_id": "little-river-cades-cove-loop",
+        "variant_id": "sugarlands_to_cades_cove_loop"
+      },
+      {
+        "chapter_id": "roaring_fork",
+        "route_spec_id": "roaring-fork-one-way",
+        "variant_id": "one_way"
+      },
+      {
+        "chapter_id": "foothills_parkway",
+        "route_spec_id": "foothills-parkway-west-to-east",
+        "variant_id": "west_to_east"
+      },
+      {
+        "chapter_id": "foothills_parkway",
+        "route_spec_id": "foothills-parkway-east-to-west",
+        "variant_id": "east_to_west"
+      }
+    ],
+    "new_batch_directional_replacements": [
+      {
+        "chapter_id": "foothills_parkway",
+        "entry_id": "fp_cue_01",
+        "provider_request_id": "fp_cue_01__east_to_west",
+        "raw_transcript_sha256": "395b65fd135d43ebfde1ad4b66962030fcf4a659ade759860c52f7576a322939",
+        "variant_id": "east_to_west"
+      },
+      {
+        "chapter_id": "foothills_parkway",
+        "entry_id": "fp_cue_05",
+        "provider_request_id": "fp_cue_05__east_to_west",
+        "raw_transcript_sha256": "1564cd72eab95fcb5f915ae1202099a88d2374449b7534f137ec83410292dfac",
+        "variant_id": "east_to_west"
+      },
+      {
+        "chapter_id": "foothills_parkway",
+        "entry_id": "fp_cue_07",
+        "provider_request_id": "fp_cue_07__east_to_west",
+        "raw_transcript_sha256": "62ef3e77f6adeb8612a82bd9011e40e33c6bcb236f562da45e3e490ef301beac",
+        "variant_id": "east_to_west"
+      },
+      {
+        "chapter_id": "mountain_crossing",
+        "entry_id": "mc_cue_01",
+        "provider_request_id": "mc_cue_01__nc_to_tn",
+        "raw_transcript_sha256": "b86b8b1cd7bdf268e5c39823d534992ed54e15c0fdba0eb0ae023f97f5e67df9",
+        "variant_id": "nc_to_tn"
+      },
+      {
+        "chapter_id": "mountain_crossing",
+        "entry_id": "mc_cue_02",
+        "provider_request_id": "mc_cue_02__nc_to_tn",
+        "raw_transcript_sha256": "495fdcd6b85e8cf5bd706719f7bee12c81cc9885499b090e77560a0936b91ca9",
+        "variant_id": "nc_to_tn"
+      },
+      {
+        "chapter_id": "mountain_crossing",
+        "entry_id": "mc_cue_04",
+        "provider_request_id": "mc_cue_04__nc_to_tn",
+        "raw_transcript_sha256": "8ec1ecdc7587a666e05531001862c1de38a4a7cb01d31b062e9b94ffc55b8694",
+        "variant_id": "nc_to_tn"
+      },
+      {
+        "chapter_id": "mountain_crossing",
+        "entry_id": "mc_cue_08",
+        "provider_request_id": "mc_cue_08__nc_to_tn",
+        "raw_transcript_sha256": "431beed19885a1db7bd1cd7a2242c0cbbe99a98f9bad298fedf0497fc235dfa1",
+        "variant_id": "nc_to_tn"
+      },
+      {
+        "chapter_id": "mountain_crossing",
+        "entry_id": "mc_cue_09",
+        "provider_request_id": "mc_cue_09__nc_to_tn",
+        "raw_transcript_sha256": "95cb13414d2f35338c74134f4971a152482ca4732294abf6f03811ff0359129f",
+        "variant_id": "nc_to_tn"
+      }
+    ],
+    "real_audio_duration_validation_required_after_render": true,
+    "replacement_count": 8,
+    "route_spec": {
+      "byte_count": 9936,
+      "path": "originals/smokies/route_variants_v1.json",
+      "sha256": "49d55fa8819822b18af54983ea11893a661689102c14532a88ebacf2ec587f24"
+    }
+  },
+  "fresh_authenticated_preflight_required": {
+    "insufficient_credit_behavior": "stop_without_cross_chapter_borrowing",
+    "must_match_before_any_provider_request": [
+      "active_creator_or_equivalent_paid_plan_with_commercial_use",
+      "non_beta_james_voice_identity_and_availability",
+      "exact_voice_model_settings_and_native_output_format",
+      "current_non_eea_terms_tuple_and_distribution_rights",
+      "available_included_credits_at_or_above_each_chapter_renderer_cap",
+      "paid_overage_disabled_or_not_used",
+      "one_separate_restricted_one_day_key_per_chapter",
+      "zero_existing_or_ambiguous_requests_in_each_chapter_ledger"
+    ],
+    "status": "not_performed_by_network_free_builder",
+    "terms_or_account_drift_behavior": "stop_for_fresh_owner_review",
+    "unknown_provider_response_behavior": "retain_reservation_stop_and_reconcile_without_retry"
+  },
+  "preflight_id": "great_smoky_mountains_elevenlabs_james_remaining_batch_preflight_v1",
+  "product_id": "great_smoky_mountains_ridges_rivers_living_memory",
+  "schema_version": 1,
+  "scope": {
+    "existing_accepted_roaring_fork_narration_count": 13,
+    "existing_roaring_fork_route_variant_count": 1,
+    "final_product_base_entry_count": 77,
+    "final_product_directional_replacement_count": 8,
+    "final_product_narration_asset_count": 85,
+    "full_product_route_variant_count": 6,
+    "new_base_entry_count": 64,
+    "new_batch_route_variant_count": 5,
+    "new_chapter_count": 3,
+    "new_directional_override_count": 8,
+    "new_provider_request_count": 72
+  },
+  "status": "network_free_review_ready_authenticated_preflight_not_run"
+}

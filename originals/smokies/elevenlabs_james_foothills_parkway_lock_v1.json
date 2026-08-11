@@ -1,0 +1,894 @@
+{
+  "aggregate": {
+    "base_cue_count": 7,
+    "base_entry_count": 13,
+    "base_story_count": 6,
+    "delivery_variant_count": 2,
+    "directional_override_count": 3,
+    "provider_request_count": 16
+  },
+  "authorization": {
+    "accepted_james_profile_reused": true,
+    "api_key_creation_authorized": false,
+    "chapter_render_authorized": false,
+    "database_mutation_authorized": false,
+    "exact_scripts_user_approved": true,
+    "ingestion_authorized": false,
+    "manifest_mutation_authorized": false,
+    "network_access_authorized": false,
+    "production_mutation_authorized": false,
+    "provider_credit_spend_authorized": false,
+    "provider_request_authorized": false,
+    "public_release_authorized": false,
+    "rerender_authorized": false,
+    "upload_authorized": false
+  },
+  "budget": {
+    "billing_unit": "provider_credits",
+    "cross_chapter_borrowing_allowed": false,
+    "dollar_cap_usd": "2.50",
+    "insufficient_included_credits_behavior": "stop_before_dispatch",
+    "key_quota_increment": 5000,
+    "max_assumed_usd_per_1000_characters": "0.10",
+    "normalized_character_count": 21369,
+    "paid_overage_authorized": false,
+    "payload_character_count": 21408,
+    "per_asset_contingency_percent": 10,
+    "projected_cost_usd": "2.15",
+    "projected_reserved_cost_usd": "2.36",
+    "proposed_one_day_api_key_credit_quota": 25000,
+    "renderer_character_cap": 23600,
+    "renderer_headroom_credits": 43,
+    "rerender_budget": 0,
+    "reserved_provider_credit_ceiling": 23557,
+    "unused_budget_transfer_allowed": false,
+    "word_count": 3431
+  },
+  "builder_effects": {
+    "database_accessed": false,
+    "media_files_created": false,
+    "network_accessed": false,
+    "provider_accessed": false,
+    "provider_credits_spent": 0,
+    "provider_requests_sent": 0
+  },
+  "chapter_id": "foothills_parkway",
+  "direction_delivery": {
+    "base_variant_id": "west_to_east",
+    "directional_override_count": 3,
+    "reviewed_variant_ids": [
+      "west_to_east",
+      "east_to_west"
+    ],
+    "variants": [
+      {
+        "directional_replacement_count": 0,
+        "entry_audio_request_map": [
+          {
+            "entry_id": "fp_story_01",
+            "provider_request_id": "fp_story_01__base"
+          },
+          {
+            "entry_id": "fp_story_02",
+            "provider_request_id": "fp_story_02__base"
+          },
+          {
+            "entry_id": "fp_story_03",
+            "provider_request_id": "fp_story_03__base"
+          },
+          {
+            "entry_id": "fp_story_04",
+            "provider_request_id": "fp_story_04__base"
+          },
+          {
+            "entry_id": "fp_story_05",
+            "provider_request_id": "fp_story_05__base"
+          },
+          {
+            "entry_id": "fp_story_06",
+            "provider_request_id": "fp_story_06__base"
+          },
+          {
+            "entry_id": "fp_cue_01",
+            "provider_request_id": "fp_cue_01__base"
+          },
+          {
+            "entry_id": "fp_cue_02",
+            "provider_request_id": "fp_cue_02__base"
+          },
+          {
+            "entry_id": "fp_cue_03",
+            "provider_request_id": "fp_cue_03__base"
+          },
+          {
+            "entry_id": "fp_cue_04",
+            "provider_request_id": "fp_cue_04__base"
+          },
+          {
+            "entry_id": "fp_cue_05",
+            "provider_request_id": "fp_cue_05__base"
+          },
+          {
+            "entry_id": "fp_cue_06",
+            "provider_request_id": "fp_cue_06__base"
+          },
+          {
+            "entry_id": "fp_cue_07",
+            "provider_request_id": "fp_cue_07__base"
+          }
+        ],
+        "entry_count": 13,
+        "reverse_pair_id": "foothills-parkway-east-to-west",
+        "route_spec_id": "foothills-parkway-west-to-east",
+        "variant_id": "west_to_east"
+      },
+      {
+        "directional_replacement_count": 3,
+        "entry_audio_request_map": [
+          {
+            "entry_id": "fp_story_01",
+            "provider_request_id": "fp_story_01__base"
+          },
+          {
+            "entry_id": "fp_story_02",
+            "provider_request_id": "fp_story_02__base"
+          },
+          {
+            "entry_id": "fp_story_03",
+            "provider_request_id": "fp_story_03__base"
+          },
+          {
+            "entry_id": "fp_story_04",
+            "provider_request_id": "fp_story_04__base"
+          },
+          {
+            "entry_id": "fp_story_05",
+            "provider_request_id": "fp_story_05__base"
+          },
+          {
+            "entry_id": "fp_story_06",
+            "provider_request_id": "fp_story_06__base"
+          },
+          {
+            "entry_id": "fp_cue_01",
+            "provider_request_id": "fp_cue_01__east_to_west"
+          },
+          {
+            "entry_id": "fp_cue_02",
+            "provider_request_id": "fp_cue_02__base"
+          },
+          {
+            "entry_id": "fp_cue_03",
+            "provider_request_id": "fp_cue_03__base"
+          },
+          {
+            "entry_id": "fp_cue_04",
+            "provider_request_id": "fp_cue_04__base"
+          },
+          {
+            "entry_id": "fp_cue_05",
+            "provider_request_id": "fp_cue_05__east_to_west"
+          },
+          {
+            "entry_id": "fp_cue_06",
+            "provider_request_id": "fp_cue_06__base"
+          },
+          {
+            "entry_id": "fp_cue_07",
+            "provider_request_id": "fp_cue_07__east_to_west"
+          }
+        ],
+        "entry_count": 13,
+        "reverse_pair_id": "foothills-parkway-west-to-east",
+        "route_spec_id": "foothills-parkway-east-to-west",
+        "variant_id": "east_to_west"
+      }
+    ]
+  },
+  "editorial_gate": {
+    "copy_or_direction_change_requires_new_lock": true,
+    "exact_hash_bound": true,
+    "script_review_status": "exact_scripts_user_approved",
+    "source_status": "draft_review_required"
+  },
+  "generation_profile": {
+    "api_contract": "elevenlabs_text_to_speech_v1",
+    "language_code": "en",
+    "model_id": "eleven_multilingual_v2",
+    "output": {
+      "bitrate_kbps": 128,
+      "channels": 1,
+      "container": "mp3",
+      "format_id": "mp3_44100_128",
+      "lossless_or_wav_claimed": false,
+      "mime_type": "audio/mpeg",
+      "provider_native_lossy_source": true,
+      "sample_rate_hz": 44100,
+      "transcoding_for_delivery": false
+    },
+    "provider": "elevenlabs",
+    "provider_retention": {
+      "mode": "standard_logging",
+      "model_training_contribution_required": false,
+      "zero_retention_claimed": false
+    },
+    "voice_id": "EkK5I93UQWFDigLMpZcX",
+    "voice_metadata_contract": {
+      "custom_credit_multiplier": "not_reported_or_one",
+      "removal_state": "none",
+      "resolved_and_original_voice_id": "EkK5I93UQWFDigLMpZcX",
+      "sharing_status": "copied",
+      "voice_library_rate": "1",
+      "withdrawal_notice_period": "730"
+    },
+    "voice_name": "James - Husky, Engaging and Bold",
+    "voice_settings": {
+      "similarity_boost": 0.5,
+      "speed": 1.0,
+      "stability": 0.5,
+      "style": 0.1,
+      "use_speaker_boost": true
+    },
+    "voice_settings_source": "provider_preflight_exact_match_required"
+  },
+  "lock_id": "great_smoky_mountains_elevenlabs_james_foothills_parkway_lock_v1",
+  "lock_status": "review_proposal_render_and_spend_not_authorized",
+  "product_id": "great_smoky_mountains_ridges_rivers_living_memory",
+  "provider_request_contract": {
+    "attempts_per_asset": 1,
+    "automatic_rerender_count": 0,
+    "body_fields": [
+      "text_from_bound_source",
+      "model_id",
+      "language_code",
+      "voice_settings"
+    ],
+    "endpoint_contract": "/v1/text-to-speech/{voice_id}?output_format=mp3_44100_128",
+    "request_count": 16,
+    "safe_retry_only": "provider_confirmed_uncharged_429",
+    "stop_without_retry": [
+      "ambiguous_timeout",
+      "http_5xx",
+      "invalid_http_200_audio",
+      "uncertain_billing",
+      "process_interruption_after_dispatch"
+    ]
+  },
+  "requests": [
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "west_to_east",
+      "claim_ids": [
+        "fp_scenic_corridor"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "west_to_east",
+        "east_to_west"
+      ],
+      "entry_id": "fp_story_01",
+      "exact_script_user_approved": true,
+      "narration_generated": false,
+      "normalized_character_count": 2703,
+      "normalized_transcript_sha256": "9ca5397f59653f37a92cc51f0ddbdd8144654b2f45d3c3f102c739eecb16a3fe",
+      "override_variant_id": null,
+      "payload_character_count": 2709,
+      "provider_request_id": "fp_story_01__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "48769cc73c2984673775b3bf96f714c7577152aa383c0c4162cb155187f8fbf2",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 2980,
+      "script_review_status": "exact_scripts_user_approved",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_foothills"
+      ],
+      "spend_authorized": false,
+      "stable_order": 1,
+      "title": "A parkway made for the view",
+      "title_sha256": "5af6c4380813a61cc199ca2498a66b09937b8740fbbc415433a4cb55e9fb7c1c",
+      "transcript_source": "originals/smokies/editorial_scripts_v1.json#/entries/0/transcript",
+      "word_count": 454
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "west_to_east",
+      "claim_ids": [
+        "fp_long_build"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "west_to_east",
+        "east_to_west"
+      ],
+      "entry_id": "fp_story_02",
+      "exact_script_user_approved": true,
+      "narration_generated": false,
+      "normalized_character_count": 2865,
+      "normalized_transcript_sha256": "54238f0f8b781aaab8a3cbb2332b38f237a32219b4d3ec849d3c2a0f955e0969",
+      "override_variant_id": null,
+      "payload_character_count": 2871,
+      "provider_request_id": "fp_story_02__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "36d1b5f218ad0dc0a7fe05827a40e4d7bbadbd85814ae503513b0f4efa987a01",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 3159,
+      "script_review_status": "exact_scripts_user_approved",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_foothills",
+        "nps_grsm_foothills_history"
+      ],
+      "spend_authorized": false,
+      "stable_order": 2,
+      "title": "The unfinished road",
+      "title_sha256": "c0281e20c5a87932c17b1a764a37e2a69855d574fe098bf313bdbab2e7c0972a",
+      "transcript_source": "originals/smokies/editorial_scripts_v1.json#/entries/1/transcript",
+      "word_count": 473
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "west_to_east",
+      "claim_ids": [
+        "fp_missing_link"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "west_to_east",
+        "east_to_west"
+      ],
+      "entry_id": "fp_story_03",
+      "exact_script_user_approved": true,
+      "narration_generated": false,
+      "normalized_character_count": 2818,
+      "normalized_transcript_sha256": "f2586d2b8c6d4add8e88bd38b9c2619d9e71dddd5161b2475519b279c94029f4",
+      "override_variant_id": null,
+      "payload_character_count": 2825,
+      "provider_request_id": "fp_story_03__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "fadd566208b133389f9005345337b39d12d8de1f195f2cbbe81b6159295cd6fd",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 3108,
+      "script_review_status": "exact_scripts_user_approved",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_missing_link_bridge"
+      ],
+      "spend_authorized": false,
+      "stable_order": 3,
+      "title": "Bridging the Missing Link",
+      "title_sha256": "0c46d2697d2c5e2cbaa679f58704c6a7d31ee60c261206d3161dbe1cac9009bd",
+      "transcript_source": "originals/smokies/editorial_scripts_v1.json#/entries/2/transcript",
+      "word_count": 473
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "west_to_east",
+      "claim_ids": [
+        "fp_geologic_view"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "west_to_east",
+        "east_to_west"
+      ],
+      "entry_id": "fp_story_04",
+      "exact_script_user_approved": true,
+      "narration_generated": false,
+      "normalized_character_count": 3131,
+      "normalized_transcript_sha256": "699b4037ab8dd4a8732df2b75ff0e6d27610b9d558c0eece94291de4b0218d0d",
+      "override_variant_id": null,
+      "payload_character_count": 3138,
+      "provider_request_id": "fp_story_04__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "0549301d81d4f9b17da862147e940782bfdd66d6871677b568a2e4cae7af814c",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 3452,
+      "script_review_status": "exact_scripts_user_approved",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_geology"
+      ],
+      "spend_authorized": false,
+      "stable_order": 4,
+      "title": "Reading the ridgelines",
+      "title_sha256": "d4410e3bb72381f63ec5fb988a2f18f297f1e5a82f31b5cc02b4093a4ac4f104",
+      "transcript_source": "originals/smokies/editorial_scripts_v1.json#/entries/3/transcript",
+      "word_count": 488
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "west_to_east",
+      "claim_ids": [
+        "fp_forest_mosaic"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "west_to_east",
+        "east_to_west"
+      ],
+      "entry_id": "fp_story_05",
+      "exact_script_user_approved": true,
+      "narration_generated": false,
+      "normalized_character_count": 3137,
+      "normalized_transcript_sha256": "345f1a64bbdc5ccc45e800fc35c514f3e981767676e1f907692e89ae8075d08c",
+      "override_variant_id": null,
+      "payload_character_count": 3144,
+      "provider_request_id": "fp_story_05__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "e6d89f51c14c3333e867e0cb204b78597d93123c12f3fd9a62fcccbe2bdc1795",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 3459,
+      "script_review_status": "exact_scripts_user_approved",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_statistics",
+        "nps_grsm_vegetation"
+      ],
+      "spend_authorized": false,
+      "stable_order": 5,
+      "title": "A forest mosaic from above",
+      "title_sha256": "6f58d0d018544cfde1d535dec3364e7e0e140bb5cd4fb8652565b9f5c267a369",
+      "transcript_source": "originals/smokies/editorial_scripts_v1.json#/entries/4/transcript",
+      "word_count": 483
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "west_to_east",
+      "claim_ids": [
+        "fp_air_monitoring"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "west_to_east",
+        "east_to_west"
+      ],
+      "entry_id": "fp_story_06",
+      "exact_script_user_approved": true,
+      "narration_generated": false,
+      "normalized_character_count": 2859,
+      "normalized_transcript_sha256": "20133e979528bf73df016b7fe5b1c9a6797486a7a8bbc4453650f6c754a81c9b",
+      "override_variant_id": null,
+      "payload_character_count": 2865,
+      "provider_request_id": "fp_story_06__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "2e64c4e31f03ebe54007f06749210b95e8b2f034a33b5d151537332241cf60e3",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 3152,
+      "script_review_status": "exact_scripts_user_approved",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_air_quality"
+      ],
+      "spend_authorized": false,
+      "stable_order": 6,
+      "title": "What the view says about the air",
+      "title_sha256": "75dcd4fb6d08d96e2f23c788c126d4d99ee9455decc327bb60566b6193bdffb1",
+      "transcript_source": "originals/smokies/editorial_scripts_v1.json#/entries/5/transcript",
+      "word_count": 452
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "west_to_east",
+      "claim_ids": [
+        "fp_scenic_corridor"
+      ],
+      "content_kind": "cue",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "west_to_east"
+      ],
+      "entry_id": "fp_cue_01",
+      "exact_script_user_approved": true,
+      "narration_generated": false,
+      "normalized_character_count": 407,
+      "normalized_transcript_sha256": "39eb2bfecfa2851aa19b32167adb7029c13182258cbe630a08328c5d7ef61c4d",
+      "override_variant_id": null,
+      "payload_character_count": 407,
+      "provider_request_id": "fp_cue_01__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "39eb2bfecfa2851aa19b32167adb7029c13182258cbe630a08328c5d7ef61c4d",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 448,
+      "script_review_status": "exact_scripts_user_approved",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_foothills"
+      ],
+      "spend_authorized": false,
+      "stable_order": 7,
+      "title": "Parkway orientation",
+      "title_sha256": "c3f85cdabc83a01ad111b9345783c0fa27add9084a7045c1233752ff45d8266a",
+      "transcript_source": "originals/smokies/editorial_scripts_v1.json#/entries/6/transcript",
+      "word_count": 65
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "west_to_east",
+      "claim_ids": [
+        "fp_geologic_view"
+      ],
+      "content_kind": "cue",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "west_to_east",
+        "east_to_west"
+      ],
+      "entry_id": "fp_cue_02",
+      "exact_script_user_approved": true,
+      "narration_generated": false,
+      "normalized_character_count": 363,
+      "normalized_transcript_sha256": "50cc89fa960f2896f4897ea1256388845ebc4e191c2a28b0e9c5bcf6d133b4f1",
+      "override_variant_id": null,
+      "payload_character_count": 363,
+      "provider_request_id": "fp_cue_02__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "50cc89fa960f2896f4897ea1256388845ebc4e191c2a28b0e9c5bcf6d133b4f1",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 400,
+      "script_review_status": "exact_scripts_user_approved",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_geology"
+      ],
+      "spend_authorized": false,
+      "stable_order": 8,
+      "title": "A long view",
+      "title_sha256": "cb80ce678e086a6912676ec8ebb8e22c429a2d6ef95979e8d8f80185c4a90608",
+      "transcript_source": "originals/smokies/editorial_scripts_v1.json#/entries/7/transcript",
+      "word_count": 59
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "west_to_east",
+      "claim_ids": [
+        "fp_air_monitoring"
+      ],
+      "content_kind": "cue",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "west_to_east",
+        "east_to_west"
+      ],
+      "entry_id": "fp_cue_03",
+      "exact_script_user_approved": true,
+      "narration_generated": false,
+      "normalized_character_count": 380,
+      "normalized_transcript_sha256": "3955b44ded4912c6726ce5037d06e2b1d5a23198aa1efd5ed7be8adca6ac02f0",
+      "override_variant_id": null,
+      "payload_character_count": 380,
+      "provider_request_id": "fp_cue_03__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "3955b44ded4912c6726ce5037d06e2b1d5a23198aa1efd5ed7be8adca6ac02f0",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 419,
+      "script_review_status": "exact_scripts_user_approved",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_air_quality"
+      ],
+      "spend_authorized": false,
+      "stable_order": 9,
+      "title": "Look Rock",
+      "title_sha256": "ede89445591457f0189af66f21208c6e049f9e906f6d7f0edca9afb1971e9f1c",
+      "transcript_source": "originals/smokies/editorial_scripts_v1.json#/entries/8/transcript",
+      "word_count": 57
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "west_to_east",
+      "claim_ids": [
+        "fp_forest_mosaic"
+      ],
+      "content_kind": "cue",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "west_to_east",
+        "east_to_west"
+      ],
+      "entry_id": "fp_cue_04",
+      "exact_script_user_approved": true,
+      "narration_generated": false,
+      "normalized_character_count": 357,
+      "normalized_transcript_sha256": "57494b47b2a41ea3eca334a9e902b10efd60de699a30be277838dab574830171",
+      "override_variant_id": null,
+      "payload_character_count": 357,
+      "provider_request_id": "fp_cue_04__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "57494b47b2a41ea3eca334a9e902b10efd60de699a30be277838dab574830171",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 393,
+      "script_review_status": "exact_scripts_user_approved",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_statistics",
+        "nps_grsm_vegetation"
+      ],
+      "spend_authorized": false,
+      "stable_order": 10,
+      "title": "Forest from the ridge",
+      "title_sha256": "18fcb368e7ef249bc75985eaa83aa20f66113bcbcc358aaa56602acb4a094a65",
+      "transcript_source": "originals/smokies/editorial_scripts_v1.json#/entries/9/transcript",
+      "word_count": 60
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "west_to_east",
+      "claim_ids": [
+        "fp_long_build"
+      ],
+      "content_kind": "cue",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "west_to_east"
+      ],
+      "entry_id": "fp_cue_05",
+      "exact_script_user_approved": true,
+      "narration_generated": false,
+      "normalized_character_count": 404,
+      "normalized_transcript_sha256": "55e5b68266498c13baca420a99480a31529c35d132dbcbec883b3bdbb529c7f1",
+      "override_variant_id": null,
+      "payload_character_count": 404,
+      "provider_request_id": "fp_cue_05__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "55e5b68266498c13baca420a99480a31529c35d132dbcbec883b3bdbb529c7f1",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 445,
+      "script_review_status": "exact_scripts_user_approved",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_foothills",
+        "nps_grsm_foothills_history"
+      ],
+      "spend_authorized": false,
+      "stable_order": 11,
+      "title": "Walland connection",
+      "title_sha256": "4ae292e6ed14d4eaf951120637c32d8b945951e175a5858d641984669da466de",
+      "transcript_source": "originals/smokies/editorial_scripts_v1.json#/entries/10/transcript",
+      "word_count": 62
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "west_to_east",
+      "claim_ids": [
+        "fp_missing_link"
+      ],
+      "content_kind": "cue",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "west_to_east",
+        "east_to_west"
+      ],
+      "entry_id": "fp_cue_06",
+      "exact_script_user_approved": true,
+      "narration_generated": false,
+      "normalized_character_count": 377,
+      "normalized_transcript_sha256": "cae6702b9820d943da22ccf77c37f45ac67738e139524da7474429e4c8e02c90",
+      "override_variant_id": null,
+      "payload_character_count": 377,
+      "provider_request_id": "fp_cue_06__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "cae6702b9820d943da22ccf77c37f45ac67738e139524da7474429e4c8e02c90",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 415,
+      "script_review_status": "exact_scripts_user_approved",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_missing_link_bridge"
+      ],
+      "spend_authorized": false,
+      "stable_order": 12,
+      "title": "Across the Missing Link",
+      "title_sha256": "4527346025ffcd98cbbf9bdde4eaaa6571c43b9609e9b634600de56cffb9fe28",
+      "transcript_source": "originals/smokies/editorial_scripts_v1.json#/entries/11/transcript",
+      "word_count": 61
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "west_to_east",
+      "claim_ids": [
+        "fp_scenic_corridor"
+      ],
+      "content_kind": "cue",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "west_to_east"
+      ],
+      "entry_id": "fp_cue_07",
+      "exact_script_user_approved": true,
+      "narration_generated": false,
+      "normalized_character_count": 387,
+      "normalized_transcript_sha256": "684e5befea32976be4c8f7cd354ddb76a80d0f6bee1fbed418b415a356e16194",
+      "override_variant_id": null,
+      "payload_character_count": 387,
+      "provider_request_id": "fp_cue_07__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "684e5befea32976be4c8f7cd354ddb76a80d0f6bee1fbed418b415a356e16194",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 426,
+      "script_review_status": "exact_scripts_user_approved",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_foothills"
+      ],
+      "spend_authorized": false,
+      "stable_order": 13,
+      "title": "Wears Valley end",
+      "title_sha256": "9255d6f75a037971d9a21dff88546841ff52694be79aaa0788cbd97bcbfa00de",
+      "transcript_source": "originals/smokies/editorial_scripts_v1.json#/entries/12/transcript",
+      "word_count": 60
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "west_to_east",
+      "claim_ids": [
+        "fp_scenic_corridor"
+      ],
+      "content_kind": "cue",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "east_to_west"
+      ],
+      "entry_id": "fp_cue_01",
+      "exact_script_user_approved": true,
+      "narration_generated": false,
+      "normalized_character_count": 407,
+      "normalized_transcript_sha256": "395b65fd135d43ebfde1ad4b66962030fcf4a659ade759860c52f7576a322939",
+      "override_variant_id": "east_to_west",
+      "payload_character_count": 407,
+      "provider_request_id": "fp_cue_01__east_to_west",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "395b65fd135d43ebfde1ad4b66962030fcf4a659ade759860c52f7576a322939",
+      "render_authorized": false,
+      "request_kind": "directional_override",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 448,
+      "script_review_status": "exact_scripts_user_approved",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_foothills"
+      ],
+      "spend_authorized": false,
+      "stable_order": 14,
+      "title": "Parkway orientation",
+      "title_sha256": "c3f85cdabc83a01ad111b9345783c0fa27add9084a7045c1233752ff45d8266a",
+      "transcript_source": "originals/smokies/editorial_scripts_v1.json#/entries/6/variant_overrides/0/transcript",
+      "word_count": 65
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "west_to_east",
+      "claim_ids": [
+        "fp_long_build"
+      ],
+      "content_kind": "cue",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "east_to_west"
+      ],
+      "entry_id": "fp_cue_05",
+      "exact_script_user_approved": true,
+      "narration_generated": false,
+      "normalized_character_count": 401,
+      "normalized_transcript_sha256": "1564cd72eab95fcb5f915ae1202099a88d2374449b7534f137ec83410292dfac",
+      "override_variant_id": "east_to_west",
+      "payload_character_count": 401,
+      "provider_request_id": "fp_cue_05__east_to_west",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "1564cd72eab95fcb5f915ae1202099a88d2374449b7534f137ec83410292dfac",
+      "render_authorized": false,
+      "request_kind": "directional_override",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 442,
+      "script_review_status": "exact_scripts_user_approved",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_foothills",
+        "nps_grsm_foothills_history"
+      ],
+      "spend_authorized": false,
+      "stable_order": 15,
+      "title": "Walland connection",
+      "title_sha256": "4ae292e6ed14d4eaf951120637c32d8b945951e175a5858d641984669da466de",
+      "transcript_source": "originals/smokies/editorial_scripts_v1.json#/entries/10/variant_overrides/0/transcript",
+      "word_count": 61
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "west_to_east",
+      "claim_ids": [
+        "fp_scenic_corridor"
+      ],
+      "content_kind": "cue",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "east_to_west"
+      ],
+      "entry_id": "fp_cue_07",
+      "exact_script_user_approved": true,
+      "narration_generated": false,
+      "normalized_character_count": 373,
+      "normalized_transcript_sha256": "62ef3e77f6adeb8612a82bd9011e40e33c6bcb236f562da45e3e490ef301beac",
+      "override_variant_id": "east_to_west",
+      "payload_character_count": 373,
+      "provider_request_id": "fp_cue_07__east_to_west",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "62ef3e77f6adeb8612a82bd9011e40e33c6bcb236f562da45e3e490ef301beac",
+      "render_authorized": false,
+      "request_kind": "directional_override",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 411,
+      "script_review_status": "exact_scripts_user_approved",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_foothills"
+      ],
+      "spend_authorized": false,
+      "stable_order": 16,
+      "title": "Chilhowee Lake end",
+      "title_sha256": "7ffca6ba2b589df599f27e0a565d5f8f817340539aebd9efccc169213c08dd5a",
+      "transcript_source": "originals/smokies/editorial_scripts_v1.json#/entries/12/variant_overrides/0/transcript",
+      "word_count": 58
+    }
+  ],
+  "schema_version": 1,
+  "source_files": [
+    {
+      "byte_count": 27077,
+      "path": "originals/smokies/editorial_scripts_v1.json",
+      "sha256": "28627001d9b3bbd129e812721064e1a0c8fc2122ec9371afa91657026b76d81e"
+    },
+    {
+      "byte_count": 19132,
+      "path": "originals/smokies/elevenlabs_james_roaring_fork_lock_v1.json",
+      "sha256": "4f8b2d9df467de6af3d5622dac10caae7c165d924e36449de30d507812ba7e3b"
+    },
+    {
+      "byte_count": 13151,
+      "path": "originals/smokies/foothills_parkway_approval_v1.json",
+      "sha256": "a301c702155512c66df60e819274271fc9a6001b398266be5d9a6329a82592bb"
+    },
+    {
+      "byte_count": 9936,
+      "path": "originals/smokies/route_variants_v1.json",
+      "sha256": "49d55fa8819822b18af54983ea11893a661689102c14532a88ebacf2ec587f24"
+    },
+    {
+      "byte_count": 85708,
+      "path": "originals/smokies/source_dossiers_v1.json",
+      "sha256": "8eb22ca5110f0f9a4287b8f184624348c2a2ca2dbc36e27ef59fc022057ce18f"
+    }
+  ]
+}

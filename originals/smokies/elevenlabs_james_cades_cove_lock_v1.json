@@ -1,0 +1,1132 @@
+{
+  "aggregate": {
+    "base_cue_count": 9,
+    "base_entry_count": 23,
+    "base_story_count": 14,
+    "delivery_variant_count": 1,
+    "directional_override_count": 0,
+    "provider_request_count": 23
+  },
+  "authorization": {
+    "accepted_james_profile_reused": true,
+    "api_key_creation_authorized": false,
+    "chapter_render_authorized": false,
+    "database_mutation_authorized": false,
+    "exact_scripts_user_approved": false,
+    "ingestion_authorized": false,
+    "manifest_mutation_authorized": false,
+    "network_access_authorized": false,
+    "production_mutation_authorized": false,
+    "provider_credit_spend_authorized": false,
+    "provider_request_authorized": false,
+    "public_release_authorized": false,
+    "rerender_authorized": false,
+    "upload_authorized": false
+  },
+  "budget": {
+    "billing_unit": "provider_credits",
+    "cross_chapter_borrowing_allowed": false,
+    "dollar_cap_usd": "5.00",
+    "insufficient_included_credits_behavior": "stop_before_dispatch",
+    "key_quota_increment": 5000,
+    "max_assumed_usd_per_1000_characters": "0.10",
+    "normalized_character_count": 44158,
+    "paid_overage_authorized": false,
+    "payload_character_count": 44259,
+    "per_asset_contingency_percent": 10,
+    "projected_cost_usd": "4.43",
+    "projected_reserved_cost_usd": "4.87",
+    "proposed_one_day_api_key_credit_quota": 50000,
+    "renderer_character_cap": 48700,
+    "renderer_headroom_credits": 5,
+    "rerender_budget": 0,
+    "reserved_provider_credit_ceiling": 48695,
+    "unused_budget_transfer_allowed": false,
+    "word_count": 6911
+  },
+  "builder_effects": {
+    "database_accessed": false,
+    "media_files_created": false,
+    "network_accessed": false,
+    "provider_accessed": false,
+    "provider_credits_spent": 0,
+    "provider_requests_sent": 0
+  },
+  "chapter_id": "little_river_cades_cove",
+  "direction_delivery": {
+    "base_variant_id": "sugarlands_to_cades_cove_loop",
+    "directional_override_count": 0,
+    "reviewed_variant_ids": [
+      "sugarlands_to_cades_cove_loop"
+    ],
+    "variants": [
+      {
+        "directional_replacement_count": 0,
+        "entry_audio_request_map": [
+          {
+            "entry_id": "cc_story_01",
+            "provider_request_id": "cc_story_01__base"
+          },
+          {
+            "entry_id": "cc_story_02",
+            "provider_request_id": "cc_story_02__base"
+          },
+          {
+            "entry_id": "cc_story_03",
+            "provider_request_id": "cc_story_03__base"
+          },
+          {
+            "entry_id": "cc_story_04",
+            "provider_request_id": "cc_story_04__base"
+          },
+          {
+            "entry_id": "cc_story_05",
+            "provider_request_id": "cc_story_05__base"
+          },
+          {
+            "entry_id": "cc_story_06",
+            "provider_request_id": "cc_story_06__base"
+          },
+          {
+            "entry_id": "cc_story_10",
+            "provider_request_id": "cc_story_10__base"
+          },
+          {
+            "entry_id": "cc_story_07",
+            "provider_request_id": "cc_story_07__base"
+          },
+          {
+            "entry_id": "cc_story_08",
+            "provider_request_id": "cc_story_08__base"
+          },
+          {
+            "entry_id": "cc_story_09",
+            "provider_request_id": "cc_story_09__base"
+          },
+          {
+            "entry_id": "cc_story_13",
+            "provider_request_id": "cc_story_13__base"
+          },
+          {
+            "entry_id": "cc_story_11",
+            "provider_request_id": "cc_story_11__base"
+          },
+          {
+            "entry_id": "cc_story_12",
+            "provider_request_id": "cc_story_12__base"
+          },
+          {
+            "entry_id": "cc_story_14",
+            "provider_request_id": "cc_story_14__base"
+          },
+          {
+            "entry_id": "cc_cue_01",
+            "provider_request_id": "cc_cue_01__base"
+          },
+          {
+            "entry_id": "cc_cue_02",
+            "provider_request_id": "cc_cue_02__base"
+          },
+          {
+            "entry_id": "cc_cue_03",
+            "provider_request_id": "cc_cue_03__base"
+          },
+          {
+            "entry_id": "cc_cue_04",
+            "provider_request_id": "cc_cue_04__base"
+          },
+          {
+            "entry_id": "cc_cue_05",
+            "provider_request_id": "cc_cue_05__base"
+          },
+          {
+            "entry_id": "cc_cue_06",
+            "provider_request_id": "cc_cue_06__base"
+          },
+          {
+            "entry_id": "cc_cue_07",
+            "provider_request_id": "cc_cue_07__base"
+          },
+          {
+            "entry_id": "cc_cue_08",
+            "provider_request_id": "cc_cue_08__base"
+          },
+          {
+            "entry_id": "cc_cue_09",
+            "provider_request_id": "cc_cue_09__base"
+          }
+        ],
+        "entry_count": 23,
+        "reverse_pair_id": null,
+        "route_spec_id": "little-river-cades-cove-loop",
+        "variant_id": "sugarlands_to_cades_cove_loop"
+      }
+    ]
+  },
+  "editorial_gate": {
+    "copy_or_direction_change_requires_new_lock": true,
+    "exact_hash_bound": true,
+    "script_review_status": "pending_combined_owner_review",
+    "source_status": "draft_review_required"
+  },
+  "generation_profile": {
+    "api_contract": "elevenlabs_text_to_speech_v1",
+    "language_code": "en",
+    "model_id": "eleven_multilingual_v2",
+    "output": {
+      "bitrate_kbps": 128,
+      "channels": 1,
+      "container": "mp3",
+      "format_id": "mp3_44100_128",
+      "lossless_or_wav_claimed": false,
+      "mime_type": "audio/mpeg",
+      "provider_native_lossy_source": true,
+      "sample_rate_hz": 44100,
+      "transcoding_for_delivery": false
+    },
+    "provider": "elevenlabs",
+    "provider_retention": {
+      "mode": "standard_logging",
+      "model_training_contribution_required": false,
+      "zero_retention_claimed": false
+    },
+    "voice_id": "EkK5I93UQWFDigLMpZcX",
+    "voice_metadata_contract": {
+      "custom_credit_multiplier": "not_reported_or_one",
+      "removal_state": "none",
+      "resolved_and_original_voice_id": "EkK5I93UQWFDigLMpZcX",
+      "sharing_status": "copied",
+      "voice_library_rate": "1",
+      "withdrawal_notice_period": "730"
+    },
+    "voice_name": "James - Husky, Engaging and Bold",
+    "voice_settings": {
+      "similarity_boost": 0.5,
+      "speed": 1.0,
+      "stability": 0.5,
+      "style": 0.1,
+      "use_speaker_boost": true
+    },
+    "voice_settings_source": "provider_preflight_exact_match_required"
+  },
+  "lock_id": "great_smoky_mountains_elevenlabs_james_cades_cove_lock_v1",
+  "lock_status": "review_proposal_render_and_spend_not_authorized",
+  "product_id": "great_smoky_mountains_ridges_rivers_living_memory",
+  "provider_request_contract": {
+    "attempts_per_asset": 1,
+    "automatic_rerender_count": 0,
+    "body_fields": [
+      "text_from_bound_source",
+      "model_id",
+      "language_code",
+      "voice_settings"
+    ],
+    "endpoint_contract": "/v1/text-to-speech/{voice_id}?output_format=mp3_44100_128",
+    "request_count": 23,
+    "safe_retry_only": "provider_confirmed_uncharged_429",
+    "stop_without_retry": [
+      "ambiguous_timeout",
+      "http_5xx",
+      "invalid_http_200_audio",
+      "uncertain_billing",
+      "process_interruption_after_dispatch"
+    ]
+  },
+  "requests": [
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "sugarlands_to_cades_cove_loop",
+      "claim_ids": [
+        "cc_little_river"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "sugarlands_to_cades_cove_loop"
+      ],
+      "entry_id": "cc_story_01",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 2871,
+      "normalized_transcript_sha256": "baefed0a316ae07a195819e5adeacd94e23aeb5e9fe3ef478325c48af259ac1c",
+      "override_variant_id": null,
+      "payload_character_count": 2878,
+      "provider_request_id": "cc_story_01__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "d57c36acec8f337ef06e8bdb7dcd4adcd9ed2d42899472c7c22b815cb5ed2cc7",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 3166,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_natural_features"
+      ],
+      "spend_authorized": false,
+      "stable_order": 1,
+      "title": "Following Little River",
+      "title_sha256": "e274d21fa075f0ec494645c75cf9dab13787d0dac50185341a60c268dc520782",
+      "transcript_source": "originals/smokies/editorial_cades_cove_v1.json#/entries/0/transcript",
+      "word_count": 459
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "sugarlands_to_cades_cove_loop",
+      "claim_ids": [
+        "cc_logging_corridor"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "sugarlands_to_cades_cove_loop"
+      ],
+      "entry_id": "cc_story_02",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 2987,
+      "normalized_transcript_sha256": "0f5934f63ef201a6fd3ff3241f0d68673681b57d0ae91a5b3d364e192b9aabd4",
+      "override_variant_id": null,
+      "payload_character_count": 2994,
+      "provider_request_id": "cc_story_02__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "1cf70b788279a3d9532a895cb385c26464b35e4f098c645833ef9ef6479c888a",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 3294,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_people",
+        "nps_grsm_timeline"
+      ],
+      "spend_authorized": false,
+      "stable_order": 2,
+      "title": "Rails, timber, and a changed valley",
+      "title_sha256": "33b18ac10966911b8315b7d09831b485a1951b3ac920f0521bb64b42f373ef50",
+      "transcript_source": "originals/smokies/editorial_cades_cove_v1.json#/entries/1/transcript",
+      "word_count": 452
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "sugarlands_to_cades_cove_loop",
+      "claim_ids": [
+        "cc_cove_geology"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "sugarlands_to_cades_cove_loop"
+      ],
+      "entry_id": "cc_story_03",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 2876,
+      "normalized_transcript_sha256": "b5d27d5ed7c61d622d05bdb1eebefa09f6e87984b172bbdbde859d18f0ba4c9a",
+      "override_variant_id": null,
+      "payload_character_count": 2883,
+      "provider_request_id": "cc_story_03__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "9b79a336643fd8ff4a60faa26ed64635a4ecd1c704fb86029c7c9365f2685749",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 3172,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_geology"
+      ],
+      "spend_authorized": false,
+      "stable_order": 3,
+      "title": "Why the cove opens wide",
+      "title_sha256": "0948635e425cadafa1330fa141616eff3b8878aba6f9a6730f36ac29e119ea42",
+      "transcript_source": "originals/smokies/editorial_cades_cove_v1.json#/entries/2/transcript",
+      "word_count": 450
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "sugarlands_to_cades_cove_loop",
+      "claim_ids": [
+        "cc_cherokee_public_record",
+        "cc_population",
+        "cc_settlement"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "sugarlands_to_cades_cove_loop"
+      ],
+      "entry_id": "cc_story_04",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 3204,
+      "normalized_transcript_sha256": "1761e20bd493d6fcd1f6e2226c8ed4ff6fe9439386253692893936b226291683",
+      "override_variant_id": null,
+      "payload_character_count": 3212,
+      "provider_request_id": "cc_story_04__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "a8ab53f208de591a6a65cc46d3f6966f023279f938decda8b53e26f9517db33e",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 3534,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_cades_cove",
+        "nps_grsm_cades_history",
+        "nps_grsm_cades_overlook",
+        "nps_grsm_timeline"
+      ],
+      "spend_authorized": false,
+      "stable_order": 4,
+      "title": "Before the farms",
+      "title_sha256": "4bbea23eb09d9d6ddf569108e4e301f46f8e03f3279aa79fb40b5ff1db1da763",
+      "transcript_source": "originals/smokies/editorial_cades_cove_v1.json#/entries/3/transcript",
+      "word_count": 491
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "sugarlands_to_cades_cove_loop",
+      "claim_ids": [
+        "cc_settlement"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "sugarlands_to_cades_cove_loop"
+      ],
+      "entry_id": "cc_story_05",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 2994,
+      "normalized_transcript_sha256": "3d1c50308a0a7fff0b76c2a69f2c5af351a1986ad51c63e6fa851583aa2f51c4",
+      "override_variant_id": null,
+      "payload_character_count": 3001,
+      "provider_request_id": "cc_story_05__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "4a1171be4ef5048a536a3967bd6d70436bcea032a58f239fc38dbd4b35bf91b1",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 3302,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_cades_history"
+      ],
+      "spend_authorized": false,
+      "stable_order": 5,
+      "title": "Building a valley community",
+      "title_sha256": "46c2c5183c97617f7696be6583de216de0d5071ba6c9dfac28137648d00708f8",
+      "transcript_source": "originals/smokies/editorial_cades_cove_v1.json#/entries/4/transcript",
+      "word_count": 456
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "sugarlands_to_cades_cove_loop",
+      "claim_ids": [
+        "cc_farming"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "sugarlands_to_cades_cove_loop"
+      ],
+      "entry_id": "cc_story_06",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 2909,
+      "normalized_transcript_sha256": "44e99e3cd49fb7285390cf78812ee78124a98402797e8f37c31f0a4ab8e7549a",
+      "override_variant_id": null,
+      "payload_character_count": 2917,
+      "provider_request_id": "cc_story_06__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "1e1c93941f0881215a1cd4019cb1e27e6eda536462728195442a962fd0937706",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 3209,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_cades_history"
+      ],
+      "spend_authorized": false,
+      "stable_order": 6,
+      "title": "The work behind a farm",
+      "title_sha256": "c118bc8d3db29be19799dda7ec23f5f8bba85cfd7cc035a2d5477311dc6ffac2",
+      "transcript_source": "originals/smokies/editorial_cades_cove_v1.json#/entries/5/transcript",
+      "word_count": 450
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "sugarlands_to_cades_cove_loop",
+      "claim_ids": [
+        "cc_john_oliver"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "sugarlands_to_cades_cove_loop"
+      ],
+      "entry_id": "cc_story_10",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 2850,
+      "normalized_transcript_sha256": "b05a8a5ba4f281252b1738637aa8ffbc5908d1bf27da60c79a6f4d7d0c144b35",
+      "override_variant_id": null,
+      "payload_character_count": 2857,
+      "provider_request_id": "cc_story_10__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "e4a1d91bf99a385efd85987e991c3bb85b269f648de60a9ed0460432f688920a",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 3143,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_cades_cove",
+        "nps_grsm_cades_history"
+      ],
+      "spend_authorized": false,
+      "stable_order": 7,
+      "title": "John Oliver's long argument",
+      "title_sha256": "66f3b900327f242de2c17d8b9e8e4eb7ffdebae2a5477560a3ed8ddfe9642102",
+      "transcript_source": "originals/smokies/editorial_cades_cove_v1.json#/entries/6/transcript",
+      "word_count": 460
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "sugarlands_to_cades_cove_loop",
+      "claim_ids": [
+        "cc_churches"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "sugarlands_to_cades_cove_loop"
+      ],
+      "entry_id": "cc_story_07",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 2957,
+      "normalized_transcript_sha256": "a0e11cc200850a9ade23f4158c1c90bba330e6aaf053ace633be5a51edfe864d",
+      "override_variant_id": null,
+      "payload_character_count": 2964,
+      "provider_request_id": "cc_story_07__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "07dea08d22739fafe3c3afd00dd6ecbab2941801f60462599a1795fe6264f22e",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 3261,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_cades_cove",
+        "nps_grsm_cades_history"
+      ],
+      "spend_authorized": false,
+      "stable_order": 8,
+      "title": "Churches and a divided community",
+      "title_sha256": "0df404b44548916f81f782b530ebd3a23eca4cf79435f23a1fa251e2d4fac37d",
+      "transcript_source": "originals/smokies/editorial_cades_cove_v1.json#/entries/7/transcript",
+      "word_count": 450
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "sugarlands_to_cades_cove_loop",
+      "claim_ids": [
+        "cc_population"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "sugarlands_to_cades_cove_loop"
+      ],
+      "entry_id": "cc_story_08",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 2988,
+      "normalized_transcript_sha256": "f476b36183e84e043228dfdcb20cfbd42d4f1249239242cb93e660121008fbfb",
+      "override_variant_id": null,
+      "payload_character_count": 2995,
+      "provider_request_id": "cc_story_08__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "6ab2e06a91e806b27d683dfd2c8ddf207af2001789c0eb66e41d2e848ccad4c1",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 3295,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_cades_history",
+        "nps_grsm_timeline"
+      ],
+      "spend_authorized": false,
+      "stable_order": 9,
+      "title": "A valley full of families",
+      "title_sha256": "2803cb062a5752d27a1eac858fee1c2e2c7ed9ea9fc3025d131027b94a648be8",
+      "transcript_source": "originals/smokies/editorial_cades_cove_v1.json#/entries/8/transcript",
+      "word_count": 453
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "sugarlands_to_cades_cove_loop",
+      "claim_ids": [
+        "cc_park_acquisition"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "sugarlands_to_cades_cove_loop"
+      ],
+      "entry_id": "cc_story_09",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 2959,
+      "normalized_transcript_sha256": "1c42b74d253edd5b7d8d0912a1fe8359405c1938693717267ff23f66cb31063e",
+      "override_variant_id": null,
+      "payload_character_count": 2966,
+      "provider_request_id": "cc_story_09__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "b126cbcfee225f3e9f9ec2bd926e4bd4856311a3239e80d5880d7274ebabc9d8",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 3263,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_cades_history",
+        "nps_grsm_people"
+      ],
+      "spend_authorized": false,
+      "stable_order": 10,
+      "title": "When the park arrived",
+      "title_sha256": "a681bebf016fff757efbf52f9f14408d426078985aabc87dfd7bd374c53a6cd1",
+      "transcript_source": "originals/smokies/editorial_cades_cove_v1.json#/entries/9/transcript",
+      "word_count": 463
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "sugarlands_to_cades_cove_loop",
+      "claim_ids": [
+        "cc_waterfall_landscape"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "sugarlands_to_cades_cove_loop"
+      ],
+      "entry_id": "cc_story_13",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 2759,
+      "normalized_transcript_sha256": "bb7d3a38ef1a72c529cc3cdca2427ec07115d42ba97e2d6fe62aa5244c0a4d83",
+      "override_variant_id": null,
+      "payload_character_count": 2766,
+      "provider_request_id": "cc_story_13__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "e726d2e6e72dd180cf817a7b439ca8db88a1d6d6d878c3f4598ef3ab235346d7",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 3043,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_geology",
+        "nps_grsm_natural_features"
+      ],
+      "spend_authorized": false,
+      "stable_order": 11,
+      "title": "A waterfall shaped by rock",
+      "title_sha256": "9c905303f61a64715b690372f14ec8aa1fdc155d7ea6b7657feed80a28898b0c",
+      "transcript_source": "originals/smokies/editorial_cades_cove_v1.json#/entries/10/transcript",
+      "word_count": 453
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "sugarlands_to_cades_cove_loop",
+      "claim_ids": [
+        "cc_cable_mill"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "sugarlands_to_cades_cove_loop"
+      ],
+      "entry_id": "cc_story_11",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 2829,
+      "normalized_transcript_sha256": "0da69558a5796b33472df3e104a659e858fe3c97637fa7535453cd519e410b9e",
+      "override_variant_id": null,
+      "payload_character_count": 2836,
+      "provider_request_id": "cc_story_11__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "365181142ce961ab66bdf5a6e83e1f77318afe7053ffd4412d9f389fac60cb4f",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 3120,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_cable_mill"
+      ],
+      "spend_authorized": false,
+      "stable_order": 12,
+      "title": "Water power at Cable Mill",
+      "title_sha256": "8581688b03904381578df88546989c90a5e114e2c455939de7588be959a6dc22",
+      "transcript_source": "originals/smokies/editorial_cades_cove_v1.json#/entries/11/transcript",
+      "word_count": 450
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "sugarlands_to_cades_cove_loop",
+      "claim_ids": [
+        "cc_general_store"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "sugarlands_to_cades_cove_loop"
+      ],
+      "entry_id": "cc_story_12",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 2777,
+      "normalized_transcript_sha256": "bafa543c8804b2a8ba4849d23763ba95cded21e187ee283abdabf348231f86ad",
+      "override_variant_id": null,
+      "payload_character_count": 2784,
+      "provider_request_id": "cc_story_12__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "80f4994e8877fe3529f47d880e587f0bc255f3377364bf6592a43d892c76e316",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 3063,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_general_stores"
+      ],
+      "spend_authorized": false,
+      "stable_order": 13,
+      "title": "The store beside the mill",
+      "title_sha256": "7cae34edb785f2f11c2cc280b3476ca25cd95d11855a2e50205ceebf6242cfa0",
+      "transcript_source": "originals/smokies/editorial_cades_cove_v1.json#/entries/12/transcript",
+      "word_count": 450
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "sugarlands_to_cades_cove_loop",
+      "claim_ids": [
+        "cc_wildlife"
+      ],
+      "content_kind": "story",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "sugarlands_to_cades_cove_loop"
+      ],
+      "entry_id": "cc_story_14",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 2861,
+      "normalized_transcript_sha256": "f7c10fb40628f3195545be0e16650e5e8da6cdc35125764068d453761ff0e818",
+      "override_variant_id": null,
+      "payload_character_count": 2869,
+      "provider_request_id": "cc_story_14__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "e9e87c27e8e9459e39a5fff10487d3483961bc8f06379d1f247900c74e03a01e",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 3156,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_black_bears",
+        "nps_grsm_cades_cove"
+      ],
+      "spend_authorized": false,
+      "stable_order": 14,
+      "title": "Wildlife in a worked landscape",
+      "title_sha256": "4897cbb86057bd55ada3d4ac6441a89bf88e7825db54063a8f6ea9be413603a5",
+      "transcript_source": "originals/smokies/editorial_cades_cove_v1.json#/entries/13/transcript",
+      "word_count": 456
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "sugarlands_to_cades_cove_loop",
+      "claim_ids": [
+        "cc_little_river"
+      ],
+      "content_kind": "cue",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "sugarlands_to_cades_cove_loop"
+      ],
+      "entry_id": "cc_cue_01",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 389,
+      "normalized_transcript_sha256": "78a250add499dbc75ea6bb1ac073068d18bdddddca3ed13a3a98c952aa52dc82",
+      "override_variant_id": null,
+      "payload_character_count": 389,
+      "provider_request_id": "cc_cue_01__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "78a250add499dbc75ea6bb1ac073068d18bdddddca3ed13a3a98c952aa52dc82",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 428,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_natural_features"
+      ],
+      "spend_authorized": false,
+      "stable_order": 15,
+      "title": "River road",
+      "title_sha256": "be7532b7cbd3c63ea0352a046be43898c2589639b5fe1b99100682a3df80e364",
+      "transcript_source": "originals/smokies/editorial_cades_cove_v1.json#/entries/14/transcript",
+      "word_count": 60
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "sugarlands_to_cades_cove_loop",
+      "claim_ids": [
+        "cc_little_river"
+      ],
+      "content_kind": "cue",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "sugarlands_to_cades_cove_loop"
+      ],
+      "entry_id": "cc_cue_02",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 355,
+      "normalized_transcript_sha256": "7a42631f1015184f89f7fd5f8a7116155f2038a71917ab963403760e2e3d0bac",
+      "override_variant_id": null,
+      "payload_character_count": 355,
+      "provider_request_id": "cc_cue_02__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "7a42631f1015184f89f7fd5f8a7116155f2038a71917ab963403760e2e3d0bac",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 391,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_natural_features"
+      ],
+      "spend_authorized": false,
+      "stable_order": 16,
+      "title": "Townsend Wye",
+      "title_sha256": "9042b29a9f0fb3468fe6ea62824b6d6b7ff911dfbc6d27c6f6ff3b44c91e307f",
+      "transcript_source": "originals/smokies/editorial_cades_cove_v1.json#/entries/15/transcript",
+      "word_count": 59
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "sugarlands_to_cades_cove_loop",
+      "claim_ids": [
+        "cc_loop_context"
+      ],
+      "content_kind": "cue",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "sugarlands_to_cades_cove_loop"
+      ],
+      "entry_id": "cc_cue_03",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 417,
+      "normalized_transcript_sha256": "c202e6f46888bc97356c2a7a037a415a59db0c8bce66557e4b581c2ab4d890ca",
+      "override_variant_id": null,
+      "payload_character_count": 417,
+      "provider_request_id": "cc_cue_03__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "c202e6f46888bc97356c2a7a037a415a59db0c8bce66557e4b581c2ab4d890ca",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 459,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_cades_cove"
+      ],
+      "spend_authorized": false,
+      "stable_order": 17,
+      "title": "One-way loop",
+      "title_sha256": "c0237d4e02c03b734a965fcf16e8adc8e091bf359fedd24cc6cd14484d391074",
+      "transcript_source": "originals/smokies/editorial_cades_cove_v1.json#/entries/16/transcript",
+      "word_count": 58
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "sugarlands_to_cades_cove_loop",
+      "claim_ids": [
+        "cc_john_oliver"
+      ],
+      "content_kind": "cue",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "sugarlands_to_cades_cove_loop"
+      ],
+      "entry_id": "cc_cue_04",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 347,
+      "normalized_transcript_sha256": "d24c0e72271a23776a4f8b9b3dfc8a4ba3da5f324c5b68276c8bf9b7292fe3ea",
+      "override_variant_id": null,
+      "payload_character_count": 347,
+      "provider_request_id": "cc_cue_04__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "d24c0e72271a23776a4f8b9b3dfc8a4ba3da5f324c5b68276c8bf9b7292fe3ea",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 382,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_cades_cove",
+        "nps_grsm_cades_history"
+      ],
+      "spend_authorized": false,
+      "stable_order": 18,
+      "title": "The first homesite",
+      "title_sha256": "27a52abcaecbc31f54228c501f36e2cb67c7b0e8bff37e5a42b2a95990f524b6",
+      "transcript_source": "originals/smokies/editorial_cades_cove_v1.json#/entries/17/transcript",
+      "word_count": 58
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "sugarlands_to_cades_cove_loop",
+      "claim_ids": [
+        "cc_churches"
+      ],
+      "content_kind": "cue",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "sugarlands_to_cades_cove_loop"
+      ],
+      "entry_id": "cc_cue_05",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 368,
+      "normalized_transcript_sha256": "a1e9c7df2c37fee19aabc044ea1da9c6a65b3b1a35bb219771f8a436ef737201",
+      "override_variant_id": null,
+      "payload_character_count": 368,
+      "provider_request_id": "cc_cue_05__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "a1e9c7df2c37fee19aabc044ea1da9c6a65b3b1a35bb219771f8a436ef737201",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 405,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_cades_cove",
+        "nps_grsm_cades_history"
+      ],
+      "spend_authorized": false,
+      "stable_order": 19,
+      "title": "Church row",
+      "title_sha256": "257595778dad992dccc80881af11cdf317323a0bec102311db7f6422d80450f2",
+      "transcript_source": "originals/smokies/editorial_cades_cove_v1.json#/entries/18/transcript",
+      "word_count": 51
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "sugarlands_to_cades_cove_loop",
+      "claim_ids": [
+        "cc_waterfall_landscape"
+      ],
+      "content_kind": "cue",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "sugarlands_to_cades_cove_loop"
+      ],
+      "entry_id": "cc_cue_06",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 337,
+      "normalized_transcript_sha256": "55c6f49d646263bc459baa46818460fd463ef3a387df8d1d974f66f9227d37c8",
+      "override_variant_id": null,
+      "payload_character_count": 337,
+      "provider_request_id": "cc_cue_06__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "55c6f49d646263bc459baa46818460fd463ef3a387df8d1d974f66f9227d37c8",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 371,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_geology",
+        "nps_grsm_natural_features"
+      ],
+      "spend_authorized": false,
+      "stable_order": 20,
+      "title": "Abrams Falls trailhead",
+      "title_sha256": "62739dcbb0c89509f489d9fc0eb5b28b4ee0881ad8f6861743715c641354ad7f",
+      "transcript_source": "originals/smokies/editorial_cades_cove_v1.json#/entries/19/transcript",
+      "word_count": 55
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "sugarlands_to_cades_cove_loop",
+      "claim_ids": [
+        "cc_cable_mill",
+        "cc_general_store"
+      ],
+      "content_kind": "cue",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "sugarlands_to_cades_cove_loop"
+      ],
+      "entry_id": "cc_cue_07",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 395,
+      "normalized_transcript_sha256": "f1292c2fbbaad5745d688ca11ceeb010f0ed0f120bc12ec623cb49cd859ed3d7",
+      "override_variant_id": null,
+      "payload_character_count": 395,
+      "provider_request_id": "cc_cue_07__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "f1292c2fbbaad5745d688ca11ceeb010f0ed0f120bc12ec623cb49cd859ed3d7",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 435,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_cable_mill",
+        "nps_grsm_general_stores"
+      ],
+      "spend_authorized": false,
+      "stable_order": 21,
+      "title": "Cable Mill stop",
+      "title_sha256": "4ad08dda85ef61c7b678e092f8f1e9af1eb179a2ebce3065aeb0724dd6fc9d26",
+      "transcript_source": "originals/smokies/editorial_cades_cove_v1.json#/entries/20/transcript",
+      "word_count": 58
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "sugarlands_to_cades_cove_loop",
+      "claim_ids": [
+        "cc_wildlife"
+      ],
+      "content_kind": "cue",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "sugarlands_to_cades_cove_loop"
+      ],
+      "entry_id": "cc_cue_08",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 338,
+      "normalized_transcript_sha256": "0d1eaa6a56c06da7d062e76fb627cd6c399ce76f5ebbdac05426bccceb3e4ae7",
+      "override_variant_id": null,
+      "payload_character_count": 338,
+      "provider_request_id": "cc_cue_08__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "0d1eaa6a56c06da7d062e76fb627cd6c399ce76f5ebbdac05426bccceb3e4ae7",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 372,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_black_bears",
+        "nps_grsm_cades_cove"
+      ],
+      "spend_authorized": false,
+      "stable_order": 22,
+      "title": "Fields and forest",
+      "title_sha256": "e776815388bfab887116948e99d07d9d0af79b61f1613c359df6ec89cd435041",
+      "transcript_source": "originals/smokies/editorial_cades_cove_v1.json#/entries/21/transcript",
+      "word_count": 59
+    },
+    {
+      "accepted_audio_sha256": null,
+      "base_variant_id": "sugarlands_to_cades_cove_loop",
+      "claim_ids": [
+        "cc_loop_context",
+        "cc_park_acquisition"
+      ],
+      "content_kind": "cue",
+      "cultural_gate": "not_required_public_record_factual",
+      "effective_variant_ids": [
+        "sugarlands_to_cades_cove_loop"
+      ],
+      "entry_id": "cc_cue_09",
+      "exact_script_user_approved": false,
+      "narration_generated": false,
+      "normalized_character_count": 391,
+      "normalized_transcript_sha256": "c625c5ef9c2fd4780dad2cd55e9856c741d098aa73cccac829367de16ea37f4c",
+      "override_variant_id": null,
+      "payload_character_count": 391,
+      "provider_request_id": "cc_cue_09__base",
+      "provider_request_sent": false,
+      "raw_transcript_sha256": "c625c5ef9c2fd4780dad2cd55e9856c741d098aa73cccac829367de16ea37f4c",
+      "render_authorized": false,
+      "request_kind": "base_entry",
+      "reservation_rule": "ceil_each_payload_character_count_times_1_10",
+      "reserved_provider_credit_ceiling": 431,
+      "script_review_status": "pending_combined_owner_review",
+      "source_gate": "source_verified_official_nps_public_record",
+      "source_ids": [
+        "nps_grsm_cades_cove",
+        "nps_grsm_cades_history",
+        "nps_grsm_people"
+      ],
+      "spend_authorized": false,
+      "stable_order": 23,
+      "title": "Completing the loop",
+      "title_sha256": "5c2e16c77b34dd2f876394d37fc98ef6dbdfe8ce89ad3030f73200b46bcf6c9c",
+      "transcript_source": "originals/smokies/editorial_cades_cove_v1.json#/entries/22/transcript",
+      "word_count": 60
+    }
+  ],
+  "schema_version": 1,
+  "source_files": [
+    {
+      "byte_count": 52892,
+      "path": "originals/smokies/editorial_cades_cove_v1.json",
+      "sha256": "1fedc6db4944bab671d7cfa0bacd2dda9670133d4165e27b3fe7b63ef8728845"
+    },
+    {
+      "byte_count": 19132,
+      "path": "originals/smokies/elevenlabs_james_roaring_fork_lock_v1.json",
+      "sha256": "4f8b2d9df467de6af3d5622dac10caae7c165d924e36449de30d507812ba7e3b"
+    },
+    {
+      "byte_count": 9936,
+      "path": "originals/smokies/route_variants_v1.json",
+      "sha256": "49d55fa8819822b18af54983ea11893a661689102c14532a88ebacf2ec587f24"
+    },
+    {
+      "byte_count": 85708,
+      "path": "originals/smokies/source_dossiers_v1.json",
+      "sha256": "8eb22ca5110f0f9a4287b8f184624348c2a2ca2dbc36e27ef59fc022057ce18f"
+    }
+  ]
+}

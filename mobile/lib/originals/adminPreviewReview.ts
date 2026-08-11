@@ -26,6 +26,22 @@ export type OriginalAdminPreviewRenderableReviewEntry = OriginalAdminPreviewRevi
   artwork_uri: string;
 };
 
+export type OriginalAdminDraftPreviewSelection = {
+  chapter_id: string;
+  chapter_sequence: number;
+  chapter_title: string;
+  variant_id: string;
+  variant_sequence: number;
+  variant_title: string;
+  direction: string;
+  is_default: boolean;
+};
+
+export type OriginalAdminDraftPreviewPlan = {
+  schema_version: 1 | 2 | 3;
+  selections: OriginalAdminDraftPreviewSelection[];
+};
+
 type OriginalAdminPreviewLocalAsset = {
   id: string;
   kind: string;
@@ -43,6 +59,140 @@ export function originalAdminPreviewSelectionRequired(
   manifest: Pick<OriginalManifest, 'schema_version'>,
 ) {
   return manifest.schema_version !== 1;
+}
+
+function draftRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${label} must be an object.`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function draftString(value: unknown, label: string) {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error(`${label} is required.`);
+  }
+  return value.trim();
+}
+
+function draftSequence(value: unknown, label: string) {
+  if (!Number.isInteger(value) || Number(value) < 1) {
+    throw new Error(`${label} must be a positive integer.`);
+  }
+  return Number(value);
+}
+
+/**
+ * Project only the chapter/variant identities needed to enter a private draft
+ * preview. The admin list already carries the server-normalized draft; this
+ * parser deliberately drops transcripts, assets, and all other private data.
+ */
+export function originalAdminDraftPreviewPlan(input: unknown): OriginalAdminDraftPreviewPlan {
+  const manifest = draftRecord(input, 'Original admin draft manifest');
+  const schemaVersion = manifest.schema_version;
+  if (schemaVersion === 1) return { schema_version: 1, selections: [] };
+  if (schemaVersion !== 2 && schemaVersion !== 3) {
+    throw new Error('Original admin draft manifest schema_version must be 1, 2, or 3.');
+  }
+  if (!Array.isArray(manifest.chapters) || manifest.chapters.length === 0) {
+    throw new Error('Original admin draft manifest chapters are required.');
+  }
+  const chapterIds = new Set<string>();
+  const chapterSequences = new Set<number>();
+  const selectionKeys = new Set<string>();
+  const selections: OriginalAdminDraftPreviewSelection[] = [];
+  manifest.chapters.forEach((chapterValue, chapterIndex) => {
+    const chapter = draftRecord(chapterValue, `Original admin draft chapter ${chapterIndex + 1}`);
+    const chapterId = draftString(chapter.id, `Original admin draft chapter ${chapterIndex + 1} id`);
+    if (chapterIds.has(chapterId)) throw new Error(`Original admin draft chapter ${chapterId} is duplicated.`);
+    chapterIds.add(chapterId);
+    const chapterSequence = draftSequence(
+      chapter.sequence,
+      `Original admin draft chapter ${chapterId} sequence`,
+    );
+    if (chapterSequences.has(chapterSequence)) {
+      throw new Error(`Original admin draft chapter sequence ${chapterSequence} is duplicated.`);
+    }
+    chapterSequences.add(chapterSequence);
+    const chapterTitle = draftString(chapter.title, `Original admin draft chapter ${chapterId} title`);
+    const defaultVariantId = draftString(
+      chapter.default_variant_id,
+      `Original admin draft chapter ${chapterId} default_variant_id`,
+    );
+    if (!Array.isArray(chapter.variants) || chapter.variants.length === 0) {
+      throw new Error(`Original admin draft chapter ${chapterId} variants are required.`);
+    }
+    let defaultVariantCount = 0;
+    const variantSequences = new Set<number>();
+    chapter.variants.forEach((variantValue, variantIndex) => {
+      const variant = draftRecord(
+        variantValue,
+        `Original admin draft chapter ${chapterId} variant ${variantIndex + 1}`,
+      );
+      const variantId = draftString(
+        variant.id,
+        `Original admin draft chapter ${chapterId} variant ${variantIndex + 1} id`,
+      );
+      const selectionKey = `${chapterId}:${variantId}`;
+      if (selectionKeys.has(selectionKey)) {
+        throw new Error(`Original admin draft selection ${selectionKey} is duplicated.`);
+      }
+      selectionKeys.add(selectionKey);
+      const route = draftRecord(variant.route, `Original admin draft selection ${selectionKey} route`);
+      const variantSequence = draftSequence(
+        variant.sequence,
+        `Original admin draft selection ${selectionKey} sequence`,
+      );
+      if (variantSequences.has(variantSequence)) {
+        throw new Error(
+          `Original admin draft chapter ${chapterId} variant sequence ${variantSequence} is duplicated.`,
+        );
+      }
+      variantSequences.add(variantSequence);
+      const isDefault = variantId === defaultVariantId;
+      if (isDefault) defaultVariantCount += 1;
+      selections.push({
+        chapter_id: chapterId,
+        chapter_sequence: chapterSequence,
+        chapter_title: chapterTitle,
+        variant_id: variantId,
+        variant_sequence: variantSequence,
+        variant_title: draftString(variant.title, `Original admin draft selection ${selectionKey} title`),
+        direction: draftString(route.direction, `Original admin draft selection ${selectionKey} direction`),
+        is_default: isDefault,
+      });
+    });
+    if (defaultVariantCount !== 1) {
+      throw new Error(`Original admin draft chapter ${chapterId} must have exactly one default variant.`);
+    }
+  });
+  selections.sort((left, right) => (
+    left.chapter_sequence - right.chapter_sequence
+    || left.variant_sequence - right.variant_sequence
+    || left.chapter_id.localeCompare(right.chapter_id)
+    || left.variant_id.localeCompare(right.variant_id)
+  ));
+  return { schema_version: schemaVersion, selections };
+}
+
+export function originalAdminDraftPreviewRouteParams(
+  draftId: string,
+  schemaVersion: 1 | 2 | 3,
+  selection?: Pick<OriginalAdminDraftPreviewSelection, 'chapter_id' | 'variant_id'>,
+) {
+  const id = draftString(draftId, 'Original admin draft id');
+  if (schemaVersion === 1) {
+    if (selection) throw new Error('A V1 Original admin draft cannot use a chapter selection.');
+    return { id };
+  }
+  if (!selection) {
+    throw new Error(`OriginalManifestV${schemaVersion} admin preview requires a chapter and direction.`);
+  }
+  return {
+    id,
+    chapter: draftString(selection.chapter_id, 'Original admin draft chapter id'),
+    variant: draftString(selection.variant_id, 'Original admin draft variant id'),
+  };
 }
 
 export function originalAdminPreviewExitAction(

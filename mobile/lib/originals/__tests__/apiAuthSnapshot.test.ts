@@ -208,6 +208,30 @@ async function main() {
     const full = await apiModule.originalsApi.manifest(manifest.pack_id, manifest.version, undefined, null);
     assert.equal(full.schema_version, 2, 'the acquired manifest parser accepts the complete union bundle');
 
+    responseBody = {
+      items: [{
+        id: manifest.pack_id,
+        slug: 'great-smoky-mountains-ridges-rivers-living-memory',
+        title: manifest.title,
+        status: 'draft',
+        draft_revision: 3,
+        updated_at: 123,
+        original_manifest: manifest,
+      }],
+    };
+    const adminDrafts = await apiModule.originalsApi.adminDrafts();
+    assert.equal(adminDrafts.items[0]?.schema_version, 2);
+    assert.deepEqual(
+      adminDrafts.items[0]?.preview_selections.map(selection => (
+        `${selection.chapter_id}:${selection.variant_id}`
+      )),
+      ['mountain-crossing:eastbound', 'mountain-crossing:westbound'],
+      'the admin API projects exact preview selections before the catalog renders them',
+    );
+    assert.equal('original_manifest' in (adminDrafts.items[0] as object), false);
+    assert.equal(requests.at(-1)?.url, 'https://trailhead.test/api/admin/originals');
+    assert.equal(requests.at(-1)?.headers.Authorization, 'Bearer later-account-token');
+
     const binding = {
       schema_version: 1 as const,
       binding_id: 'ovb_test_binding_12345678901234567890',

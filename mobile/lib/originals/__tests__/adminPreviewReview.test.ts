@@ -4,6 +4,8 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import {
+  originalAdminDraftPreviewPlan,
+  originalAdminDraftPreviewRouteParams,
   originalAdminPreviewExitAction,
   originalAdminPreviewRenderableReviewEntries,
   originalAdminPreviewReviewEntries,
@@ -17,6 +19,10 @@ const source = JSON.parse(readFileSync(resolve(
   here,
   '../../../../originals/smokies/roaring_fork_private_manifest_v3.json',
 ), 'utf8')) as Omit<OriginalManifestV3, 'pack_id' | 'version' | 'manifest_id'>;
+const completeManifest = JSON.parse(readFileSync(resolve(
+  here,
+  '../../../../originals/smokies/smokies_complete_private_manifest_v3.json',
+), 'utf8')) as unknown;
 const manifest = validateOriginalManifestV3({
   ...source,
   pack_id: 'great_smoky_mountains_ridges_rivers_living_memory',
@@ -34,6 +40,64 @@ assert.equal(
   originalAdminPreviewSelectionRequired({ schema_version: 3 }),
   true,
   'Manifest V3 private preview cannot proceed without an explicit chapter and direction',
+);
+
+const completePreviewPlan = originalAdminDraftPreviewPlan(completeManifest);
+assert.equal(completePreviewPlan.schema_version, 3);
+assert.deepEqual(
+  completePreviewPlan.selections.map(selection => ({
+    key: `${selection.chapter_id}:${selection.variant_id}`,
+    label: `${selection.chapter_title} — ${selection.variant_title}`,
+    default: selection.is_default,
+  })),
+  [
+    { key: 'mountain_crossing:tn_to_nc', label: 'Mountain Crossing — Sugarlands to Cherokee', default: true },
+    { key: 'mountain_crossing:nc_to_tn', label: 'Mountain Crossing — Cherokee to Sugarlands', default: false },
+    { key: 'little_river_cades_cove:sugarlands_to_cades_cove_loop', label: 'Little River and Cades Cove — Sugarlands, Little River and Cades Cove', default: true },
+    { key: 'roaring_fork:one_way', label: 'Roaring Fork Motor Nature Trail — Roaring Fork Motor Nature Trail', default: true },
+    { key: 'foothills_parkway:west_to_east', label: 'Foothills Parkway — Chilhowee Lake to Wears Valley', default: true },
+    { key: 'foothills_parkway:east_to_west', label: 'Foothills Parkway — Wears Valley to Chilhowee Lake', default: false },
+  ],
+  'the admin draft plan exposes all six exact chapter and direction selections',
+);
+assert.deepEqual(originalAdminDraftPreviewPlan({ schema_version: 1 }).selections, []);
+assert.deepEqual(originalAdminDraftPreviewRouteParams('legacy-draft', 1), { id: 'legacy-draft' });
+assert.deepEqual(
+  completePreviewPlan.selections.map(selection => (
+    originalAdminDraftPreviewRouteParams('smokies-draft', 3, selection)
+  )),
+  completePreviewPlan.selections.map(selection => ({
+    id: 'smokies-draft',
+    chapter: selection.chapter_id,
+    variant: selection.variant_id,
+  })),
+  'all six admin choices preserve their exact chapter and variant route parameters',
+);
+assert.throws(
+  () => originalAdminDraftPreviewRouteParams('smokies-draft', 3),
+  /requires a chapter and direction/,
+);
+assert.throws(
+  () => originalAdminDraftPreviewRouteParams('legacy-draft', 1, completePreviewPlan.selections[0]),
+  /V1 Original admin draft cannot use a chapter selection/,
+);
+const missingChaptersManifest = structuredClone(completeManifest) as any;
+missingChaptersManifest.chapters = [];
+assert.throws(
+  () => originalAdminDraftPreviewPlan(missingChaptersManifest),
+  /chapters are required/,
+);
+const duplicateSelectionManifest = structuredClone(completeManifest) as any;
+duplicateSelectionManifest.chapters[0].variants.push(duplicateSelectionManifest.chapters[0].variants[0]);
+assert.throws(
+  () => originalAdminDraftPreviewPlan(duplicateSelectionManifest),
+  /selection .* is duplicated/,
+);
+const duplicateSequenceManifest = structuredClone(completeManifest) as any;
+duplicateSequenceManifest.chapters[0].variants[1].sequence = duplicateSequenceManifest.chapters[0].variants[0].sequence;
+assert.throws(
+  () => originalAdminDraftPreviewPlan(duplicateSequenceManifest),
+  /variant sequence .* is duplicated/,
 );
 
 const adminEntries = originalAdminPreviewReviewEntries(

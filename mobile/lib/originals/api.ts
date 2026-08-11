@@ -8,6 +8,10 @@ import {
   validateOriginalManifestPreview,
 } from './manifestV2';
 import { getOriginalPreviewToken } from './previewAccess';
+import {
+  originalAdminDraftPreviewPlan,
+  type OriginalAdminDraftPreviewSelection,
+} from './adminPreviewReview';
 import type {
   OriginalAcquisition,
   OriginalCatalogResponse,
@@ -134,7 +138,58 @@ export type OriginalAdminDraftSummary = {
   status: string;
   draft_revision: number;
   updated_at?: number;
+  schema_version: 1 | 2 | 3;
+  preview_selections: OriginalAdminDraftPreviewSelection[];
 };
+
+function validateOriginalAdminDraftsResponse(input: unknown): { items: OriginalAdminDraftSummary[] } {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new OriginalManifestError('Original admin drafts response must be an object.');
+  }
+  const items = (input as { items?: unknown }).items;
+  if (!Array.isArray(items)) {
+    throw new OriginalManifestError('Original admin drafts response items must be an array.');
+  }
+  return {
+    items: items.map((value, index) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        throw new OriginalManifestError(`Original admin draft ${index + 1} must be an object.`);
+      }
+      const draft = value as Record<string, unknown>;
+      const requiredString = (field: 'id' | 'slug' | 'title' | 'status') => {
+        const result = draft[field];
+        if (typeof result !== 'string' || !result.trim()) {
+          throw new OriginalManifestError(`Original admin draft ${index + 1} ${field} is required.`);
+        }
+        return result.trim();
+      };
+      if (!Number.isInteger(draft.draft_revision) || Number(draft.draft_revision) < 1) {
+        throw new OriginalManifestError(`Original admin draft ${index + 1} revision is invalid.`);
+      }
+      if (draft.updated_at != null && (!Number.isInteger(draft.updated_at) || Number(draft.updated_at) < 0)) {
+        throw new OriginalManifestError(`Original admin draft ${index + 1} updated_at is invalid.`);
+      }
+      let previewPlan: ReturnType<typeof originalAdminDraftPreviewPlan>;
+      try {
+        previewPlan = originalAdminDraftPreviewPlan(draft.original_manifest);
+      } catch (error) {
+        throw new OriginalManifestError(
+          error instanceof Error ? error.message : `Original admin draft ${index + 1} manifest is invalid.`,
+        );
+      }
+      return {
+        id: requiredString('id'),
+        slug: requiredString('slug'),
+        title: requiredString('title'),
+        status: requiredString('status'),
+        draft_revision: Number(draft.draft_revision),
+        ...(draft.updated_at != null ? { updated_at: Number(draft.updated_at) } : {}),
+        schema_version: previewPlan.schema_version,
+        preview_selections: previewPlan.selections,
+      };
+    }),
+  };
+}
 
 export const originalsApi = {
   adminPreviewToken(expiresInSeconds = 3_600, signal?: AbortSignal) {
@@ -146,11 +201,12 @@ export const originalsApi = {
     });
   },
 
-  adminDrafts(signal?: AbortSignal) {
-    return originalsRequest<{ items: OriginalAdminDraftSummary[] }>('/api/admin/originals', {
+  async adminDrafts(signal?: AbortSignal) {
+    const response = await originalsRequest<unknown>('/api/admin/originals', {
       signal,
       requireAuth: true,
     });
+    return validateOriginalAdminDraftsResponse(response);
   },
 
   async adminPreviewManifest(

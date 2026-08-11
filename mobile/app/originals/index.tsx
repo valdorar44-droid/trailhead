@@ -4,7 +4,11 @@ import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/lib/design';
-import { originalsApi, type OriginalAdminDraftSummary } from '@/lib/originals';
+import {
+  originalAdminDraftPreviewRouteParams,
+  originalsApi,
+  type OriginalAdminDraftSummary,
+} from '@/lib/originals';
 import { useStore } from '@/lib/store';
 import OriginalCard from '@/components/originals/OriginalCard';
 import { listOriginals } from '@/components/originals/originalsUiService';
@@ -134,22 +138,53 @@ export default function OriginalsCatalogScreen() {
                 <Text style={[styles.draftBody, { color: C.text2 }]}>No saved Studio drafts are available for device testing yet.</Text>
               </View>
             ) : drafts.map(draft => (
-              <TouchableOpacity
-                key={draft.id}
-                accessibilityRole="button"
-                accessibilityLabel={`Test Studio draft ${draft.title}`}
-                onPress={() => router.push({ pathname: '/originals/preview', params: { id: draft.id } } as any)}
-                style={[styles.draftRow, { borderTopColor: C.border }]}
-              >
+              <View key={draft.id} style={[styles.draftRow, { borderTopColor: C.border }]}>
                 <View style={styles.draftCopy}>
                   <Text style={[styles.draftTitle, { color: C.text }]}>{draft.title}</Text>
                   <Text style={[styles.draftMeta, { color: C.text3 }]}>REVISION {draft.draft_revision} · UNPUBLISHED DEVICE TEST</Text>
+                  {draft.preview_selections.length ? (
+                    <View style={styles.draftSelections}>
+                      <Text style={[styles.draftSelectionPrompt, { color: C.text2 }]}>Choose a chapter and direction</Text>
+                      {draft.preview_selections.map(selection => (
+                        <TouchableOpacity
+                          key={`${selection.chapter_id}:${selection.variant_id}`}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Test ${draft.title}, ${selection.chapter_title}, ${selection.variant_title}`}
+                          onPress={() => router.push({
+                            pathname: '/originals/preview',
+                            params: originalAdminDraftPreviewRouteParams(
+                              draft.id,
+                              draft.schema_version,
+                              selection,
+                            ),
+                          } as any)}
+                          style={[styles.draftSelection, { borderColor: C.border, backgroundColor: C.s2 }]}
+                        >
+                          <View style={styles.draftSelectionCopy}>
+                            <Text style={[styles.draftSelectionChapter, { color: C.text3 }]}>{selection.chapter_title}</Text>
+                            <Text style={[styles.draftSelectionTitle, { color: C.text }]}>{selection.variant_title}</Text>
+                          </View>
+                          <Ionicons name="arrow-forward" size={14} color={C.orange} />
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  ) : null}
                 </View>
-                <View style={[styles.draftAction, { backgroundColor: C.orange }] }>
-                  <Text style={styles.draftActionText}>Test</Text>
-                  <Ionicons name="arrow-forward" size={14} color="#FFFFFF" />
-                </View>
-              </TouchableOpacity>
+                {draft.schema_version === 1 ? (
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel={`Test Studio draft ${draft.title}`}
+                    onPress={() => router.push({
+                      pathname: '/originals/preview',
+                      params: originalAdminDraftPreviewRouteParams(draft.id, draft.schema_version),
+                    } as any)}
+                    style={[styles.draftAction, { backgroundColor: C.orange }]}
+                  >
+                    <Text style={styles.draftActionText}>Test</Text>
+                    <Ionicons name="arrow-forward" size={14} color="#FFFFFF" />
+                  </TouchableOpacity>
+                ) : null}
+              </View>
             ))}
           </View>
         ) : null}
@@ -226,12 +261,18 @@ const styles = StyleSheet.create({
   draftLoadingState: { minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: 10 },
   draftLoadingText: { marginTop: 0 },
   draftRetry: { alignSelf: 'flex-start', minHeight: 44, marginTop: 10, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', gap: 6 },
-  draftRow: { minHeight: 64, marginTop: 12, paddingTop: 12, borderTopWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  draftRow: { minHeight: 64, marginTop: 12, paddingTop: 12, borderTopWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
   draftCopy: { flex: 1, minWidth: 0 },
   draftTitle: { fontSize: 12.5, lineHeight: 17, fontWeight: '900' },
   draftMeta: { marginTop: 3, fontSize: 8, lineHeight: 11, fontWeight: '800', letterSpacing: 0.35 },
   draftAction: { minWidth: 72, minHeight: 44, borderRadius: 12, paddingHorizontal: 11, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4 },
   draftActionText: { color: '#FFFFFF', fontSize: 10, fontWeight: '900' },
+  draftSelections: { marginTop: 12, gap: 8 },
+  draftSelectionPrompt: { fontSize: 10, lineHeight: 15, fontWeight: '800' },
+  draftSelection: { minHeight: 52, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9, flexDirection: 'row', alignItems: 'center', gap: 9 },
+  draftSelectionCopy: { flex: 1, minWidth: 0 },
+  draftSelectionChapter: { fontSize: 8, lineHeight: 11, fontWeight: '900', letterSpacing: 0.35, textTransform: 'uppercase' },
+  draftSelectionTitle: { marginTop: 2, fontSize: 11, lineHeight: 15, fontWeight: '900' },
   loading: { minHeight: 210, alignItems: 'center', justifyContent: 'center', gap: 10 },
   loadingText: { fontSize: 12, fontWeight: '700' },
   list: { gap: 15 },

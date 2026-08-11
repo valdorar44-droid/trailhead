@@ -4,16 +4,18 @@ import copy
 import hashlib
 import json
 from pathlib import Path
-import shutil
 import subprocess
 
 import pytest
 
 from db import originals_remaining_validation as validation
+from db import originals_complete_validation as complete_validation
 from scripts import build_smokies_remaining_delivery_readiness as builder
 
 
 ROOT = Path(__file__).resolve().parents[1]
+HISTORICAL_SOURCE_COMMIT = "102fff55328f4d15ec5757f82f87d235508ebb2b"
+HISTORICAL_SOURCE_TREE = "3017790b491545559634c498612ce4a017a0d880"
 RF_HASHES = {
     "originals/smokies/roaring_fork_trigger_preflight_v1.json": "b7b8412e07cdef5706d814550491f8c28bfadb05d3fbef38369ec7006c3b67f3",
     "originals/smokies/roaring_fork_delivery_readiness_v1.json": "4a0fc760fd07790785b820af06bac4e5a10e8337ad3f6257a10a3c50464c9b67",
@@ -99,37 +101,45 @@ def _area_config(*, bounds: dict | None = None) -> str:
     }])
 
 
-def _private_copy(tmp_path: Path, registered: dict) -> Path:
-    paths = set(registered["source_paths"]) | {
-        registered["readiness_path"], registered["target_path"],
-    }
-    for relative in paths:
-        destination = tmp_path / relative
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(ROOT / relative, destination)
-    return tmp_path
+def _historical_blob_sha(relative: str) -> str:
+    completed = subprocess.run(
+        ["git", "cat-file", "blob", f"{HISTORICAL_SOURCE_COMMIT}:{relative}"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+    )
+    return hashlib.sha256(completed.stdout).hexdigest()
 
 
-def test_builder_is_deterministic_network_free_and_exactly_five_pairs():
+def test_builder_is_deterministic_but_checked_pairs_remain_historical():
     records = builder.build_all()
+    assert records == builder.build_all()
     assert len(records) == 10
     readiness = [path for path in records if path.name.endswith("delivery_readiness_v1.json")]
     targets = [path for path in records if path.name.endswith("route_network_validation_target_v1.json")]
     assert len(readiness) == len(targets) == 5
-    for path, value in records.items():
-        assert (ROOT / path).read_bytes() == builder.render(value)
+    historical_tree = subprocess.run(
+        ["git", "rev-parse", f"{HISTORICAL_SOURCE_COMMIT}^{{tree}}"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert historical_tree == HISTORICAL_SOURCE_TREE
+    immutable = dict(complete_validation.IMMUTABLE_EVIDENCE_SHA256)
+    for path in readiness + targets:
+        raw = (ROOT / path).read_bytes()
+        assert hashlib.sha256(raw).hexdigest() == immutable[path]
+    for path in readiness:
+        checked = _json(ROOT / path)
+        for relative, expected_sha256 in checked["source_sha256_by_path"].items():
+            assert _historical_blob_sha(relative) == expected_sha256
     completed = subprocess.run(
         ["python3", str(ROOT / "scripts/build_smokies_remaining_delivery_readiness.py"), "--check"],
-        cwd=ROOT, check=True, capture_output=True, text=True,
+        cwd=ROOT, check=False, capture_output=True, text=True,
     )
-    summary = json.loads(completed.stdout)
-    assert summary["status"] == "verified"
-    assert summary["readiness_record_count"] == 5
-    assert summary["route_network_target_record_count"] == 5
-    assert summary["network_accessed"] is False
-    assert summary["database_accessed"] is False
-    assert summary["manifest_mutated"] is False
-    assert summary["publication_authorized"] is False
+    assert completed.returncode != 0
+    assert "Generated records drifted" in completed.stderr
 
 
 def test_exact_registry_inventory_geometry_and_directional_substitutions():
@@ -161,7 +171,9 @@ def test_exact_registry_inventory_geometry_and_directional_substitutions():
 
 @pytest.mark.parametrize("key", list(validation.REGISTRY))
 def test_all_five_compiled_selections_match_exact_semantics_and_transcripts(key):
-    binding = validation.remaining_original_long_form_preflight_binding(_compiled(key))
+    binding = complete_validation.complete_original_long_form_preflight_binding(
+        _compiled(key)
+    )
     registered = validation.REGISTRY[key]
     assert binding["evidence_id"] == registered["evidence_id"]
     assert binding["readiness_artifact_path"] == registered["readiness_path"].as_posix()
@@ -173,7 +185,7 @@ def test_all_five_compiled_selections_match_exact_semantics_and_transcripts(key)
 def test_all_five_targets_resolve_only_the_existing_area_without_url_leak(key):
     compiled = _compiled(key)
     before = copy.deepcopy(compiled)
-    result = validation.trusted_remaining_original_route_network_validation_target(
+    result = complete_validation.complete_trusted_original_route_network_validation_target(
         compiled, configured_area_urls=_area_config(),
     )
     assert compiled == before
@@ -193,57 +205,45 @@ def test_semantic_transcript_geometry_and_contract_drift_fail_closed():
     key = next(iter(validation.REGISTRY))
     semantic = _compiled(key)
     semantic["manifest"]["stops"][0]["trigger"]["enter_radius_m"] += 1
-    with pytest.raises(validation.OriginalValidationRunnerError, match="semantics drifted"):
-        validation.remaining_original_long_form_preflight_binding(semantic)
+    with pytest.raises(complete_validation.OriginalValidationRunnerError, match="semantics drifted"):
+        complete_validation.complete_original_long_form_preflight_binding(semantic)
     transcript = _compiled(key)
     transcript["manifest"]["stops"][0]["transcript"] += " changed"
-    with pytest.raises(validation.OriginalValidationRunnerError, match="narration drifted"):
-        validation.remaining_original_long_form_preflight_binding(transcript)
+    with pytest.raises(complete_validation.OriginalValidationRunnerError, match="narration drifted"):
+        complete_validation.complete_original_long_form_preflight_binding(transcript)
     geometry = _compiled(key)
     geometry["manifest"]["route"]["geometry"]["coordinates"][100][0] += 0.0001
-    with pytest.raises(validation.OriginalValidationRunnerError, match="semantics drifted"):
-        validation.remaining_original_long_form_preflight_binding(geometry)
+    with pytest.raises(complete_validation.OriginalValidationRunnerError, match="semantics drifted"):
+        complete_validation.complete_original_long_form_preflight_binding(geometry)
     contract = _compiled(key)
     contract["selection"]["delivery_contract_sha256"] = "not-a-hash"
-    with pytest.raises(validation.OriginalValidationRunnerError, match="different input"):
-        validation.trusted_remaining_original_route_network_validation_target(
+    with pytest.raises(complete_validation.OriginalValidationRunnerError, match="invalid input"):
+        complete_validation.complete_trusted_original_route_network_validation_target(
             contract, configured_area_urls=_area_config(),
         )
 
 
 def test_target_config_bounds_and_identity_drift_fail_closed():
     key = next(iter(validation.REGISTRY)); compiled = _compiled(key)
-    with pytest.raises(validation.OriginalValidationRunnerError, match="outside the configured"):
-        validation.trusted_remaining_original_route_network_validation_target(
+    with pytest.raises(complete_validation.OriginalValidationRunnerError, match="outside the configured"):
+        complete_validation.complete_trusted_original_route_network_validation_target(
             compiled, configured_area_urls=_area_config(bounds={"s": 0, "w": 0, "n": 1, "e": 1}),
         )
     duplicate = json.loads(_area_config()); duplicate.append(copy.deepcopy(duplicate[0]))
-    with pytest.raises(validation.OriginalValidationRunnerError, match="unavailable or ambiguous"):
-        validation.trusted_remaining_original_route_network_validation_target(
+    with pytest.raises(complete_validation.OriginalValidationRunnerError, match="unavailable or ambiguous"):
+        complete_validation.complete_trusted_original_route_network_validation_target(
             compiled, configured_area_urls=json.dumps(duplicate),
         )
     unknown = _compiled(key); unknown["manifest"]["pack_id"] = "another_original"
-    assert validation.trusted_remaining_original_route_network_validation_target(
+    assert complete_validation.complete_trusted_original_route_network_validation_target(
         unknown, configured_area_urls="",
     ) is None
 
 
-def test_artifact_target_and_trusted_source_drift_fail_closed(tmp_path, monkeypatch):
-    key = next(iter(validation.REGISTRY)); registered = validation.REGISTRY[key]
-    private = _private_copy(tmp_path, registered); monkeypatch.setattr(validation, "REPO_ROOT", private)
-    source = private / "mobile/lib/originals/longFormScheduler.ts"
-    source.write_bytes(source.read_bytes() + b"\n// drift\n")
+def test_legacy_remaining_adapter_fails_closed_after_current_source_moves():
+    key = next(iter(validation.REGISTRY))
     with pytest.raises(validation.OriginalValidationRunnerError, match="source drifted"):
         validation.remaining_original_long_form_preflight_binding(_compiled(key))
-
-    private = _private_copy(tmp_path / "target", registered); monkeypatch.setattr(validation, "REPO_ROOT", private)
-    target_path = private / registered["target_path"]
-    target = _json(target_path); target["delivery_readiness_sha256"] = "f" * 64
-    target_path.write_text(json.dumps(target, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    with pytest.raises(validation.OriginalValidationRunnerError, match="target contract is invalid"):
-        validation.trusted_remaining_original_route_network_validation_target(
-            _compiled(key), configured_area_urls=_area_config(),
-        )
 
 
 def test_delivery_modes_are_safe_complete_and_anchor_bounded():

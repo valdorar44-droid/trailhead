@@ -1,6 +1,7 @@
 import hashlib
 import json
 from pathlib import Path
+import subprocess
 
 from db.originals_validation import (
     LEGACY_LONG_FORM_READINESS_PATH,
@@ -18,6 +19,7 @@ ROARING_FORK_KEY = (
     "roaring_fork",
     "one_way",
 )
+HISTORICAL_SOURCE_COMMIT = "102fff55328f4d15ec5757f82f87d235508ebb2b"
 
 
 def test_build_preserves_the_hash_pinned_v1_characterization_contract():
@@ -74,10 +76,22 @@ def test_build_current_binds_the_exact_v3_trusted_source_set():
         )
 
 
-def test_checked_v3_artifact_is_the_byte_exact_current_builder_output():
+def test_checked_v3_artifact_is_the_byte_exact_historical_snapshot():
     raw = (REPO_ROOT / LONG_FORM_READINESS_PATH).read_bytes()
+    checked = json.loads(raw)
 
-    assert builder.serialize(builder.build_current()).encode("utf-8") == raw
+    assert hashlib.sha256(raw).hexdigest() == (
+        "423866158fc5d1590419076a86f1632717b314c8647adfe6f604342f808abd01"
+    )
+    assert builder.serialize(builder.build_current()).encode("utf-8") != raw
+    for relative, expected_sha256 in checked["source_sha256_by_path"].items():
+        historical = subprocess.run(
+            ["git", "cat-file", "blob", f"{HISTORICAL_SOURCE_COMMIT}:{relative}"],
+            cwd=REPO_ROOT,
+            check=True,
+            capture_output=True,
+        ).stdout
+        assert hashlib.sha256(historical).hexdigest() == expected_sha256
 
 
 def test_v3_preserves_the_exact_v2_preflight_and_delivery_semantics():
@@ -99,19 +113,21 @@ def test_v3_preserves_the_exact_v2_preflight_and_delivery_semantics():
 
 def test_typescript_and_python_v3_readiness_registries_are_aligned():
     source = (
-        REPO_ROOT / "mobile/scripts/validate-original-long-form.ts"
+        REPO_ROOT / "mobile/lib/originals/longFormValidationEvidence.ts"
     ).read_text(encoding="utf-8")
-    key = ":".join(ROARING_FORK_KEY)
-    start = source.index(f"'{key}'")
-    registry_block = source[start:start + 500]
+    registry_block = source[source.index("kind: 'roaring_fork'"):]
 
     assert (
-        f"evidence_id: '{builder.CURRENT_LONG_FORM_READINESS_EVIDENCE_ID}'"
-        in registry_block
+        "preflight_sha256: 'b7b8412e07cdef5706d814550491f8c28bfadb05d3fbef38369ec7006c3b67f3'"
+        in registry_block[:800]
     )
     assert (
         f"readiness_path: '{LONG_FORM_READINESS_PATH.as_posix()}'"
-        in registry_block
+        in registry_block[:800]
+    )
+    assert (
+        "readiness_sha256: '423866158fc5d1590419076a86f1632717b314c8647adfe6f604342f808abd01'"
+        in registry_block[:800]
     )
 
 

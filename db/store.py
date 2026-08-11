@@ -8,17 +8,20 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from config.settings import settings
 from db.originals_validation import (
     OriginalValidationRunnerError,
-    normalize_original_long_form_validation_output,
     normalize_original_validation_output,
     original_long_form_audio_binding,
-    original_long_form_preflight_binding,
     original_route_geometry_sha256,
-    run_originals_long_form_validation_cli,
     run_originals_validation_cli,
-    trusted_original_route_network_validation_target,
-    trusted_originals_long_form_validator_source_sha256,
     trusted_originals_validator_source_sha256,
     validate_original_route_network,
+)
+from db.originals_complete_validation import (
+    complete_original_long_form_preflight_binding,
+    complete_trusted_original_route_network_validation_target,
+    normalize_complete_original_long_form_validation_output,
+    require_complete_original_validation_selection_inventory,
+    run_complete_originals_long_form_validation_cli,
+    trusted_complete_originals_long_form_validator_source_sha256,
 )
 from db.original_manifest_v2 import (
     compile_original_manifest_v2_selection,
@@ -16699,14 +16702,19 @@ def _original_validation_material(manifest: dict, draft_revision: int) -> dict:
     assets_sha256 = _original_validation_hash(assets)
     validator_source_sha256 = trusted_originals_validator_source_sha256()
     long_form_validator_source_sha256 = (
-        trusted_originals_long_form_validator_source_sha256()
+        trusted_complete_originals_long_form_validator_source_sha256()
         if int(manifest.get("schema_version") or 0) == 3
         else None
     )
     validation_selections = []
     long_form_preflight_bindings: list[dict] = []
-    for item in _compiled_original_validation_selections(manifest):
-        route_network_target = trusted_original_route_network_validation_target(
+    compiled_selection_items = _compiled_original_validation_selections(manifest)
+    require_complete_original_validation_selection_inventory(
+        manifest,
+        compiled_selection_items,
+    )
+    for item in compiled_selection_items:
+        route_network_target = complete_trusted_original_route_network_validation_target(
             item,
             configured_area_urls=settings.valhalla_area_urls,
         )
@@ -16728,7 +16736,7 @@ def _original_validation_material(manifest: dict, draft_revision: int) -> dict:
             selection["audio_binding_sha256"] = original_long_form_audio_binding(
                 item["long_form_compiled"]
             )["binding_sha256"]
-            preflight_binding = original_long_form_preflight_binding(
+            preflight_binding = complete_original_long_form_preflight_binding(
                 item["long_form_compiled"]
             )
             long_form_preflight_bindings.append({
@@ -17093,7 +17101,7 @@ def _execute_original_validation_selection(
     manifest = selection_item["manifest"]
     route_network_target = None
     if expected_route_network_target is not None:
-        route_network_target = trusted_original_route_network_validation_target(
+        route_network_target = complete_trusted_original_route_network_validation_target(
             selection_item,
             configured_area_urls=settings.valhalla_area_urls,
         )
@@ -17168,11 +17176,11 @@ def _execute_original_validation_selection(
             raise OriginalValidationRunnerError(
                 "Trusted long-form validator source binding is missing"
             )
-        raw_delivery = (long_form_runner or run_originals_long_form_validation_cli)(
+        raw_delivery = (long_form_runner or run_complete_originals_long_form_validation_cli)(
             selection_item["long_form_compiled"],
             expected_validator_source_sha256=long_form_validator_source_sha256,
         )
-        delivery_validation = normalize_original_long_form_validation_output(
+        delivery_validation = normalize_complete_original_long_form_validation_output(
             raw_delivery,
             compiled=selection_item["long_form_compiled"],
             expected_validator_source_sha256=long_form_validator_source_sha256,
@@ -17282,6 +17290,15 @@ def execute_authored_original_virtual_validation_run(
         pack_id = row["pack_id"]
         if row["status"] != "running":
             return _original_validation_report_from_row(row)
+        persisted_manifest = _decode_pack_json(row["manifest_json"], None)
+        if not isinstance(persisted_manifest, dict):
+            raise OriginalValidationRunnerError(
+                "Persisted validation manifest is unavailable"
+            )
+        require_complete_original_validation_selection_inventory(
+            persisted_manifest,
+            _compiled_original_validation_selections(persisted_manifest),
+        )
         claimed = db.execute(
             """UPDATE authored_original_validation_reports SET status='executing'
                WHERE id=? AND status='running'""",
@@ -17323,7 +17340,7 @@ def execute_authored_original_virtual_validation_run(
         execute_network = route_network_validator or validate_original_route_network
         execute = runner or run_originals_validation_cli
         execute_long_form = (
-            long_form_runner or run_originals_long_form_validation_cli
+            long_form_runner or run_complete_originals_long_form_validation_cli
         )
         selection_items = _compiled_original_validation_selections(manifest)
         material_selections = {

@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from db import originals_validation as validation
+from db import originals_complete_validation as complete_validation
 from db import original_manifest_v3 as manifest_v3
 from db import store
 from db.original_manifest_v3 import (
@@ -16,11 +17,13 @@ from db.original_manifest_v3 import (
 from db.originals_validation import (
     ORIGINAL_LONG_FORM_VALIDATION_GATES,
     OriginalValidationRunnerError,
-    normalize_original_long_form_validation_output,
     original_long_form_audio_binding,
-    original_long_form_preflight_binding,
-    run_originals_long_form_validation_cli,
-    trusted_originals_long_form_validator_source_sha256,
+)
+from db.originals_complete_validation import (
+    complete_original_long_form_preflight_binding as original_long_form_preflight_binding,
+    normalize_complete_original_long_form_validation_output as normalize_original_long_form_validation_output,
+    run_complete_originals_long_form_validation_cli as run_originals_long_form_validation_cli,
+    trusted_complete_originals_long_form_validator_source_sha256 as trusted_originals_long_form_validator_source_sha256,
 )
 from tests.test_original_manifest_v3 import _normalize, _passthrough_v1, _v3_manifest
 
@@ -908,7 +911,7 @@ def test_v3_normalizer_rejects_selectable_publication_parity_drift(
 def test_store_accepts_delivery_contract_only_from_separate_long_form_runner():
     item = _validation_item()
     source_hash = store.trusted_originals_validator_source_sha256()
-    long_source_hash = store.trusted_originals_long_form_validator_source_sha256()
+    long_source_hash = store.trusted_complete_originals_long_form_validator_source_sha256()
     def passing_hard_runner(compiled, **kwargs):
         report = store.run_originals_validation_cli(compiled, **kwargs)
         for scenario in report["scenarios"]:
@@ -921,7 +924,7 @@ def test_store_accepts_delivery_contract_only_from_separate_long_form_runner():
     result = store._execute_original_validation_selection(
         item,
         runner=passing_hard_runner,
-        long_form_runner=store.run_originals_long_form_validation_cli,
+        long_form_runner=store.run_complete_originals_long_form_validation_cli,
         route_network_validator=lambda compiled, **_kwargs: {
             "geometry_sha256": store.original_route_geometry_sha256(
                 compiled["route"]["geometry"]["coordinates"],
@@ -951,10 +954,14 @@ def test_store_uses_the_hash_bound_rf_validation_target_without_reporting_its_ur
     monkeypatch,
 ):
     item = _validation_item()
-    item.pop("long_form_compiled")
-    item.pop("delivery_contract_sha256")
     item["selection"]["delivery_contract_sha256"] = (
         "9081a647a7df0e59df4bb40506ba9bfa96c750536fb715ee31b3e9ee68ee20d6"
+    )
+    item["long_form_compiled"]["selection"]["delivery_contract_sha256"] = (
+        item["selection"]["delivery_contract_sha256"]
+    )
+    item["long_form_compiled"]["selectable"]["delivery_contract_sha256"] = (
+        item["selection"]["delivery_contract_sha256"]
     )
     coordinates = item["manifest"]["route"]["geometry"]["coordinates"]
     target_url = "https://south-tn.internal.test"
@@ -969,7 +976,7 @@ def test_store_uses_the_hash_bound_rf_validation_target_without_reporting_its_ur
         },
     }])
     monkeypatch.setattr(store.settings, "valhalla_area_urls", configured)
-    expected = validation.trusted_original_route_network_validation_target(
+    expected = complete_validation.complete_trusted_original_route_network_validation_target(
         item,
         configured_area_urls=configured,
     )
@@ -987,8 +994,12 @@ def test_store_uses_the_hash_bound_rf_validation_target_without_reporting_its_ur
     result = store._execute_original_validation_selection(
         item,
         runner=store.run_originals_validation_cli,
+        long_form_runner=store.run_complete_originals_long_form_validation_cli,
         route_network_validator=network_validator,
         validator_source_sha256=store.trusted_originals_validator_source_sha256(),
+        long_form_validator_source_sha256=(
+            store.trusted_complete_originals_long_form_validator_source_sha256()
+        ),
         expected_route_network_target=expected["evidence"],
     )
 
@@ -1018,10 +1029,10 @@ def test_hard_only_route_result_can_never_synthesize_delivery_validation():
 def test_store_rejects_long_form_source_hash_drift_even_after_hard_pass():
     item = _validation_item()
     source_hash = store.trusted_originals_validator_source_sha256()
-    real_long_hash = store.trusted_originals_long_form_validator_source_sha256()
+    real_long_hash = store.trusted_complete_originals_long_form_validator_source_sha256()
 
     def drifted_runner(compiled, **_kwargs):
-        report = store.run_originals_long_form_validation_cli(
+        report = store.run_complete_originals_long_form_validation_cli(
             compiled,
             expected_validator_source_sha256=real_long_hash,
         )

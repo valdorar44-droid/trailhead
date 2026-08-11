@@ -6,6 +6,10 @@ import {
   ORIGINAL_LONG_FORM_SCHEDULER_DEFAULTS,
   validateOriginalLongFormSelection,
 } from '../lib/originals/longFormScheduler';
+import {
+  checkedOriginalLongFormEvidence,
+  ORIGINAL_LONG_FORM_IMMUTABLE_EVIDENCE,
+} from '../lib/originals/longFormValidationEvidence';
 import { projectPointToOriginalRoute } from '../lib/originals/routeProjection';
 import type {
   OriginalCompiledChapterManifestV3,
@@ -41,15 +45,11 @@ type OriginalLongFormPreflightBindingV1 = {
   product_id: string;
   chapter_id: string;
   variant_id: string;
-  artifact_path: string;
-  artifact_sha256: string;
   readiness_artifact_path: string;
   readiness_artifact_sha256: string;
   readiness_source_set_sha256: string;
-  input_bindings_sha256: string;
-  s3g_runtime_source_baseline_sha256: string;
   semantic_contract_sha256: string;
-};
+} & Record<string, unknown>;
 
 type OriginalLongFormValidationInputV1 = OriginalCompiledChapterManifestV3 & {
   audio_evidence: {
@@ -116,16 +116,25 @@ function sha256Bytes(value: Buffer | string) {
   return createHash('sha256').update(value).digest('hex');
 }
 
-const CHECKED_DELIVERY_EVIDENCE = new Map([
-  [
-    'great_smoky_mountains_ridges_rivers_living_memory:roaring_fork:one_way',
-    {
-      evidence_id: 'smokies_roaring_fork_delivery_v3',
-      artifact_path: 'originals/smokies/roaring_fork_trigger_preflight_v1.json',
-      readiness_path: 'originals/smokies/roaring_fork_delivery_readiness_v3.json',
-    },
-  ],
-]);
+function immutableDeliveryEvidence() {
+  const loaded = new Map<string, { bytes: Buffer; value: JsonRecord }>();
+  for (const row of ORIGINAL_LONG_FORM_IMMUTABLE_EVIDENCE) {
+    if (loaded.has(row.path)) {
+      throw new Error('Checked long-form immutable evidence path is duplicated.');
+    }
+    const bytes = readFileSync(row.path);
+    if (sha256Bytes(bytes) !== row.sha256) {
+      throw new Error(`Checked long-form immutable evidence drifted: ${row.path}`);
+    }
+    const value = JSON.parse(bytes.toString('utf8')) as unknown;
+    assertRecord(value, `Checked long-form immutable evidence ${row.path}`);
+    loaded.set(row.path, { bytes, value });
+  }
+  if (loaded.size !== 15) {
+    throw new Error('Checked long-form immutable evidence inventory is incomplete.');
+  }
+  return loaded;
+}
 
 function checkedDeliverySemantics(
   preflight: JsonRecord,
@@ -297,23 +306,42 @@ function compiledDeliverySemantics(compiled: OriginalLongFormValidationInputV1) 
   };
 }
 
-function verifiedS3gPreflightBinding(
+function historicalSourceMap(value: unknown, label: string) {
+  assertRecord(value, label);
+  if (
+    !Object.keys(value).length
+    || Object.entries(value).some(([path, hash]) => (
+      !path
+      || path.startsWith('/')
+      || path.split('/').includes('..')
+      || !SHA256_RE.test(String(hash ?? ''))
+    ))
+  ) throw new Error(`${label} is invalid.`);
+  return value;
+}
+
+function verifiedRoaringForkPreflightBinding(
   compiled: OriginalLongFormValidationInputV1,
+  registry: ReturnType<typeof checkedOriginalLongFormEvidence>,
+  immutable: Map<string, { bytes: Buffer; value: JsonRecord }>,
 ): OriginalLongFormPreflightBindingV1 {
-  const productId = String(compiled.manifest.pack_id ?? '').trim();
-  const chapterId = compiled.selection.chapter_id;
-  const variantId = compiled.selection.variant_id;
-  const registry = CHECKED_DELIVERY_EVIDENCE.get(`${productId}:${chapterId}:${variantId}`);
-  if (!registry) {
-    throw new Error('No checked long-form delivery evidence is registered for this chapter variant.');
+  if (!registry.preflight_path || !registry.preflight_sha256) {
+    throw new Error('Roaring Fork checked preflight registration is incomplete.');
   }
-  const artifactPath = registry.artifact_path;
-  const bytes = readFileSync(artifactPath);
-  const preflight = JSON.parse(bytes.toString('utf8')) as JsonRecord;
+  const preflightRow = immutable.get(registry.preflight_path);
+  const readinessRow = immutable.get(registry.readiness_path);
+  if (!preflightRow || !readinessRow) {
+    throw new Error('Roaring Fork checked delivery evidence is unavailable.');
+  }
+  const preflight = preflightRow.value;
+  const readiness = readinessRow.value;
   assertRecord(preflight.runtime_capacity, 'S3G preflight runtime_capacity');
   assertRecord(preflight.input_bindings, 'S3G preflight input_bindings');
   const runtime = preflight.runtime_capacity;
   const inputs = preflight.input_bindings;
+  const productId = String(compiled.manifest.pack_id ?? '').trim();
+  const chapterId = compiled.selection.chapter_id;
+  const variantId = compiled.selection.variant_id;
   if (
     preflight.schema_version !== 2
     || preflight.authoring_only !== true
@@ -332,35 +360,35 @@ function verifiedS3gPreflightBinding(
   ] as const) {
     const sourcePath = String(inputs[pathKey] ?? '').trim();
     const expected = String(inputs[hashKey] ?? '').trim().toLowerCase();
-    if (!sourcePath || !SHA256_RE.test(expected) || sha256Bytes(readFileSync(sourcePath)) !== expected) {
-      throw new Error(`S3G long-form preflight input ${pathKey} drifted.`);
-    }
+    if (
+      !sourcePath
+      || sourcePath.startsWith('/')
+      || sourcePath.split('/').includes('..')
+      || !SHA256_RE.test(expected)
+      || sha256Bytes(readFileSync(sourcePath)) !== expected
+    ) throw new Error(`S3G long-form preflight input ${pathKey} drifted.`);
   }
-  assertRecord(runtime.source_sha256_by_path, 'S3G runtime source baseline');
-  const frozenSources = runtime.source_sha256_by_path;
-  if (
-    !Object.keys(frozenSources).length
-    || Object.entries(frozenSources).some(([path, hash]) => (
-      !path || !SHA256_RE.test(String(hash ?? ''))
-    ))
-  ) throw new Error('S3G long-form runtime source baseline is invalid.');
-  const readinessBytes = readFileSync(registry.readiness_path);
-  const readiness = JSON.parse(readinessBytes.toString('utf8')) as JsonRecord;
-  assertRecord(readiness.source_sha256_by_path, 'Checked consumer readiness source set');
+  const frozenSources = historicalSourceMap(
+    runtime.source_sha256_by_path,
+    'S3G runtime source baseline',
+  );
+  const readinessSources = historicalSourceMap(
+    readiness.source_sha256_by_path,
+    'Checked consumer readiness historical source set',
+  );
   assertRecord(
     readiness.stopped_availability_radius_m_by_id,
     'Checked stopped-story radius evidence',
   );
-  const readinessSources = readiness.source_sha256_by_path;
   const stoppedRadiusById = readiness.stopped_availability_radius_m_by_id;
   if (
     readiness.schema_version !== 1
     || readiness.kind !== 'original_long_form_consumer_readiness'
-    || readiness.evidence_id !== registry.evidence_id
+    || readiness.evidence_id !== 'smokies_roaring_fork_delivery_v3'
     || readiness.product_id !== productId
     || readiness.chapter_id !== chapterId
     || readiness.variant_id !== variantId
-    || readiness.preflight_sha256 !== sha256Bytes(bytes)
+    || readiness.preflight_sha256 !== registry.preflight_sha256
     || readiness.consumer_delivery_modes_supported !== true
     || readiness.consumer_runtime_status !== 'ready_for_real_audio_validation'
     || readiness.real_audio_required !== true
@@ -368,14 +396,7 @@ function verifiedS3gPreflightBinding(
     || sha256Json(readiness.gates) !== sha256Json(ORIGINAL_LONG_FORM_VALIDATION_GATES)
     || Object.keys(stoppedRadiusById).length !== 1
     || stoppedRadiusById.rf_story_06 !== 250
-    || !Object.keys(readinessSources).length
   ) throw new Error('Checked long-form consumer readiness contract is invalid.');
-  for (const [sourcePath, sourceHash] of Object.entries(readinessSources)) {
-    if (!sourcePath || !SHA256_RE.test(String(sourceHash ?? ''))
-      || sha256Bytes(readFileSync(sourcePath)) !== sourceHash) {
-      throw new Error(`Checked long-form consumer readiness source drifted: ${sourcePath}`);
-    }
-  }
   const expectedSemantics = checkedDeliverySemantics(preflight, stoppedRadiusById);
   const actualSemantics = compiledDeliverySemantics(compiled);
   const semanticHash = sha256Json(expectedSemantics);
@@ -387,19 +408,115 @@ function verifiedS3gPreflightBinding(
   );
   return {
     schema_version: 1,
-    evidence_id: registry.evidence_id,
+    evidence_id: 'smokies_roaring_fork_delivery_v3',
     product_id: productId,
     chapter_id: chapterId,
     variant_id: variantId,
-    artifact_path: artifactPath,
-    artifact_sha256: sha256Bytes(bytes),
+    artifact_path: registry.preflight_path,
+    artifact_sha256: registry.preflight_sha256,
     readiness_artifact_path: registry.readiness_path,
-    readiness_artifact_sha256: sha256Bytes(readinessBytes),
+    readiness_artifact_sha256: registry.readiness_sha256,
     readiness_source_set_sha256: sha256Json(readinessSources),
     input_bindings_sha256: sha256Json(inputs),
     s3g_runtime_source_baseline_sha256: sha256Json(frozenSources),
     semantic_contract_sha256: semanticHash,
   };
+}
+
+function verifiedRemainingPreflightBinding(
+  compiled: OriginalLongFormValidationInputV1,
+  registry: ReturnType<typeof checkedOriginalLongFormEvidence>,
+  immutable: Map<string, { bytes: Buffer; value: JsonRecord }>,
+): OriginalLongFormPreflightBindingV1 {
+  const readinessRow = immutable.get(registry.readiness_path);
+  if (!readinessRow) throw new Error('Checked remaining delivery readiness is unavailable.');
+  const readiness = readinessRow.value;
+  const productId = String(compiled.manifest.pack_id ?? '').trim();
+  const chapterId = compiled.selection.chapter_id;
+  const variantId = compiled.selection.variant_id;
+  assertRecord(readiness.expected_delivery_semantics, 'Checked remaining delivery semantics');
+  assertRecord(readiness.narration_binding, 'Checked remaining narration binding');
+  const semantics = readiness.expected_delivery_semantics;
+  const narration = readiness.narration_binding;
+  const readinessSources = historicalSourceMap(
+    readiness.source_sha256_by_path,
+    'Checked remaining readiness historical source set',
+  );
+  if (
+    readiness.schema_version !== 1
+    || readiness.kind !== 'original_checked_long_form_delivery_readiness'
+    || readiness.product_id !== productId
+    || readiness.chapter_id !== chapterId
+    || readiness.variant_id !== variantId
+    || readiness.consumer_delivery_modes_supported !== true
+    || readiness.consumer_runtime_status !== 'ready_for_real_audio_validation'
+    || readiness.real_audio_required !== true
+    || readiness.authoring_estimates_accepted !== false
+    || readiness.publication_authorized !== false
+    || sha256Json(readiness.gates) !== sha256Json(ORIGINAL_LONG_FORM_VALIDATION_GATES)
+    || readiness.delivery_semantics_sha256 !== sha256Json(semantics)
+  ) throw new Error('Checked remaining delivery readiness contract is invalid.');
+  const actualSemantics = compiledDeliverySemantics(compiled);
+  const semanticHash = sha256Json(semantics);
+  if (sha256Json(actualSemantics) !== semanticHash) {
+    throw new Error('Compiled remaining long-form delivery semantics drifted from checked evidence.');
+  }
+  if (!Array.isArray(narration.effective_requests)) {
+    throw new Error('Checked remaining narration request set is invalid.');
+  }
+  const expectedTranscripts = new Map<string, string>();
+  for (const [index, request] of narration.effective_requests.entries()) {
+    assertRecord(request, `Checked remaining narration request ${index}`);
+    const itemId = stableId(request.entry_id, `Checked remaining narration request ${index} entry_id`);
+    const transcriptHash = String(request.transcript_sha256 ?? '').trim().toLowerCase();
+    if (expectedTranscripts.has(itemId) || !SHA256_RE.test(transcriptHash)) {
+      throw new Error('Checked remaining narration identity is duplicated or invalid.');
+    }
+    expectedTranscripts.set(itemId, transcriptHash);
+  }
+  const actualItems = [...compiled.manifest.stops, ...compiled.selectable.items];
+  if (actualItems.length !== expectedTranscripts.size) {
+    throw new Error('Compiled remaining narration coverage drifted from checked evidence.');
+  }
+  const seen = new Set<string>();
+  for (const item of actualItems) {
+    if (seen.has(item.id)) throw new Error('Compiled remaining narration identity is duplicated.');
+    seen.add(item.id);
+    if (sha256Bytes(String(item.transcript)) !== expectedTranscripts.get(item.id)) {
+      throw new Error('Compiled remaining effective narration drifted from checked evidence.');
+    }
+  }
+  const requestSetHash = String(narration.effective_request_set_sha256 ?? '').trim().toLowerCase();
+  if (!SHA256_RE.test(requestSetHash) || requestSetHash !== sha256Json(narration.effective_requests)) {
+    throw new Error('Checked remaining narration request set hash is invalid.');
+  }
+  return {
+    schema_version: 1,
+    evidence_id: String(readiness.evidence_id),
+    product_id: productId,
+    chapter_id: chapterId,
+    variant_id: variantId,
+    readiness_artifact_path: registry.readiness_path,
+    readiness_artifact_sha256: registry.readiness_sha256,
+    readiness_source_set_sha256: sha256Json(readinessSources),
+    semantic_contract_sha256: semanticHash,
+    narration_request_set_sha256: requestSetHash,
+    real_audio_validation_required: true,
+    publication_authorized: false,
+  };
+}
+
+function verifiedCompletePreflightBinding(
+  compiled: OriginalLongFormValidationInputV1,
+): OriginalLongFormPreflightBindingV1 {
+  const productId = String(compiled.manifest.pack_id ?? '').trim();
+  const chapterId = compiled.selection.chapter_id;
+  const variantId = compiled.selection.variant_id;
+  const registry = checkedOriginalLongFormEvidence(productId, chapterId, variantId);
+  const immutable = immutableDeliveryEvidence();
+  return registry.kind === 'roaring_fork'
+    ? verifiedRoaringForkPreflightBinding(compiled, registry, immutable)
+    : verifiedRemainingPreflightBinding(compiled, registry, immutable);
 }
 
 function validateSelectablePlan(value: unknown): OriginalSelectablePlaybackPlanV1 {
@@ -904,7 +1021,7 @@ export function runOriginalLongFormDeliveryValidation(input: ValidatorInput) {
     throw new Error('An expected narration binding hash is required.');
   }
   const compiled = validateCompiled(input.compiled);
-  const preflight = verifiedS3gPreflightBinding(compiled);
+  const preflight = verifiedCompletePreflightBinding(compiled);
   const suppliedPreflightHash = sha256Json(input.options?.preflight);
   const verifiedPreflightHash = sha256Json(preflight);
   if (suppliedPreflightHash !== verifiedPreflightHash) {

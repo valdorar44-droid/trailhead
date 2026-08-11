@@ -15,6 +15,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
+import subprocess
 import sys
 from typing import Any, Callable
 
@@ -254,6 +255,48 @@ def _file_sha(relative: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _historical_blob_sha(relative: Path) -> str:
+    """Hash one source exactly as recorded by the readiness source commit."""
+
+    if relative.is_absolute() or ".." in relative.parts:
+        raise CandidateBuildError(
+            f"Historical readiness source path is invalid: {relative}"
+        )
+    try:
+        completed = subprocess.run(
+            ["git", "cat-file", "blob", f"{SOURCE_COMMIT}:{relative.as_posix()}"],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+        )
+    except OSError as exc:
+        raise CandidateBuildError(
+            "Historical readiness source commit is unavailable"
+        ) from exc
+    if completed.returncode != 0:
+        raise CandidateBuildError(
+            f"Historical readiness source is unavailable: {relative}"
+        )
+    return hashlib.sha256(completed.stdout).hexdigest()
+
+
+def _assert_historical_source_revision() -> None:
+    try:
+        completed = subprocess.run(
+            ["git", "rev-parse", f"{SOURCE_COMMIT}^{{tree}}"],
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError as exc:
+        raise CandidateBuildError(
+            "Historical readiness source revision is unavailable"
+        ) from exc
+    if completed.returncode != 0 or completed.stdout.strip() != SOURCE_TREE:
+        raise CandidateBuildError("Historical readiness source revision drifted")
+
+
 def _render(value: dict[str, Any]) -> bytes:
     return (
         json.dumps(value, indent=2, sort_keys=True, ensure_ascii=False) + "\n"
@@ -419,6 +462,7 @@ def _asset_path(asset_id: str, sha256: str) -> str:
 def _validate_readiness_pairs(
     source_bindings: dict[str, dict[str, Any]],
 ) -> dict[tuple[str, str], tuple[dict[str, Any], dict[str, Any]]]:
+    _assert_historical_source_revision()
     result = {}
     for row in VARIANT_ROWS:
         key = (row["chapter_id"], row["variant_id"])
@@ -447,9 +491,9 @@ def _validate_readiness_pairs(
             "source_sha256_by_path", {}
         ).items():
             path = Path(str(transitive_path))
-            if _file_sha(path) != transitive_sha:
+            if _historical_blob_sha(path) != transitive_sha:
                 raise CandidateBuildError(
-                    f"Readiness transitive input drifted: {transitive_path}"
+                    f"Readiness historical transitive input drifted: {transitive_path}"
                 )
         if (
             target.get("schema_version") != 2

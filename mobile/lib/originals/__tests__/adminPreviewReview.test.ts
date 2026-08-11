@@ -7,6 +7,7 @@ import {
   originalAdminPreviewExitAction,
   originalAdminPreviewRenderableReviewEntries,
   originalAdminPreviewReviewEntries,
+  originalAdminPreviewSelectionRequired,
 } from '../adminPreviewReview';
 import { compileOriginalManifestV3, validateOriginalManifestV3 } from '../manifestV3';
 import type { OriginalManifestV3 } from '../types';
@@ -26,6 +27,14 @@ const compiled = compileOriginalManifestV3(manifest, {
   chapter_id: 'roaring_fork',
   variant_id: 'one_way',
 });
+
+assert.equal(originalAdminPreviewSelectionRequired({ schema_version: 1 }), false);
+assert.equal(originalAdminPreviewSelectionRequired({ schema_version: 2 }), true);
+assert.equal(
+  originalAdminPreviewSelectionRequired({ schema_version: 3 }),
+  true,
+  'Manifest V3 private preview cannot proceed without an explicit chapter and direction',
+);
 
 const adminEntries = originalAdminPreviewReviewEntries(
   compiled.manifest,

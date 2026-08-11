@@ -1,4 +1,5 @@
 import type {
+  OriginalManifest,
   OriginalManifestV1,
   OriginalSelectablePlaybackItemV1,
   OriginalSelectablePlaybackPlanV1,
@@ -37,6 +38,12 @@ export type OriginalAdminPreviewExitSurface =
   | 'end_test'
   | 'completion_exit'
   | 'privilege_loss';
+
+export function originalAdminPreviewSelectionRequired(
+  manifest: Pick<OriginalManifest, 'schema_version'>,
+) {
+  return manifest.schema_version !== 1;
+}
 
 export function originalAdminPreviewExitAction(
   _surface: OriginalAdminPreviewExitSurface,

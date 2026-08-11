@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '@/lib/design';
 import {
   originalAccessStore,
+  originalAdminPreviewSelectionRequired,
   originalBundleStore,
   originalsApi,
   saveOriginalPrivateReviewCleanupIdentity,
@@ -59,7 +60,7 @@ export default function OriginalDraftPreviewScreen() {
         ? { chapter_id: chapter, variant_id: variant }
         : undefined;
       const manifest = await originalsApi.adminPreviewManifest(id, selection);
-      if (manifest.schema_version === 2 && !selection) {
+      if (originalAdminPreviewSelectionRequired(manifest) && !selection) {
         throw new Error('Choose a chapter and direction before opening this draft test.');
       }
       if (!active) return;

@@ -1,0 +1,274 @@
+{
+  "artifact_id": "smokies_union_offline_map_estimate_20260811_v1",
+  "candidate_binding": {
+    "candidate_manifest": {
+      "byte_count": 3768450,
+      "path": "originals/smokies/smokies_complete_private_manifest_v3.json",
+      "sha256": "d2cfa5aeb0116359326f682fb49d59ee156157f9efbfb8e8a53f99e830ca54eb"
+    },
+    "candidate_offline_map_estimated_bytes": 0,
+    "content_asset_bytes": 458155200,
+    "content_asset_count": 98,
+    "content_asset_rows_sha256": "d8a0178b8529556cd83d9a0fa409ac42ce79fd145789e8c66e8c576da9080597",
+    "manifest_estimated_bytes_mutated": false,
+    "product_id": "great_smoky_mountains_ridges_rivers_living_memory"
+  },
+  "estimators": {
+    "maplibre_fallback": {
+      "bytes_per_tile": 22000,
+      "estimated_bytes": 213074000,
+      "minimum_tile_bytes": 256000,
+      "renderer": "maplibre",
+      "source_max_zoom": 15,
+      "style_bytes": 1500000,
+      "style_uri": "https://tiles.gettrailhead.app/api/style.json",
+      "tile_bytes": 211574000,
+      "tile_template": "https://tiles.gettrailhead.app/api/tiles/{z}/{x}/{y}.pbf",
+      "zoom_16_counted_as_conservative_requested_range": true
+    },
+    "rnmapbox_release_path": {
+      "bytes_per_tile": 18000,
+      "estimated_bytes": 177606000,
+      "minimum_tile_bytes": 256000,
+      "renderer": "rnmapbox",
+      "style_bytes": 4500000,
+      "style_id": "outdoors",
+      "style_revision": "style-421a681154019ec8",
+      "style_revision_semantics": "sha256_prefix_of_style_uri_not_provider_resource_revision",
+      "style_uri": "mapbox://styles/mapbox/outdoors-v12",
+      "tile_bytes": 173106000
+    },
+    "secondary_mobile_area_picker_display": {
+      "canonical_for_manifest_estimated_bytes": false,
+      "display_estimated_mb": 173,
+      "high_detail_mb_per_tile": 0.018,
+      "minimum_display_mb": 6
+    },
+    "selection": {
+      "estimated_bytes": 213074000,
+      "selected_renderer_ceiling": "maplibre_fallback",
+      "strategy": "maximum_of_repository_supported_native_renderer_estimates",
+      "unit": "bytes"
+    }
+  },
+  "evidence_scope": {
+    "actual_installed_bytes_measured": false,
+    "device_or_download_evidence": false,
+    "estimate_only": true,
+    "network_free": true,
+    "provider_resource_snapshot_obtained": false,
+    "style_or_tile_download_performed": false,
+    "suitable_for_final_offline_bundle_review_without_device_evidence": false
+  },
+  "gates": {
+    "android_build_compatible": false,
+    "android_build_started": false,
+    "database_accessed": false,
+    "database_mutation_performed": false,
+    "deployment_performed": false,
+    "device_download_performed": false,
+    "dual_platform_private_preview_accepted": false,
+    "ios_build_compatible": false,
+    "ios_build_started": false,
+    "network_accessed": false,
+    "offline_bundle_reviewed": false,
+    "production_mutation_performed": false,
+    "publication_authorization_present": false,
+    "publication_performed": false,
+    "trusted_validation_performed": false
+  },
+  "kind": "network_free_union_offline_map_estimate",
+  "limits": {
+    "backend_tile_count_limit": 350000,
+    "backend_tile_count_limit_passed": true,
+    "maplibre_native_tile_limit": 1000000,
+    "maplibre_native_tile_limit_passed": true,
+    "mobile_area_item_limit": 260000,
+    "mobile_area_item_limit_passed": true,
+    "mobile_area_mb_limit": 4200,
+    "mobile_area_mb_limit_passed": true
+  },
+  "next_required_evidence": {
+    "android_signed_build_download": true,
+    "exact_renderer_and_style_recorded_per_platform": true,
+    "installed_pack_restart_recovery": true,
+    "installed_size_upper_bound_no_greater_than_estimate": true,
+    "ios_signed_build_download": true,
+    "owner_dual_platform_acceptance": true,
+    "raw_completed_resource_size_preferred": true,
+    "scoped_deletion_and_recovered_space": true
+  },
+  "prior_roaring_fork_evidence": {
+    "historical_estimated_bytes": 0,
+    "historical_tile_count": 91,
+    "offline_bundle_reviewed": false,
+    "reused_as_union_size_evidence": false
+  },
+  "privacy": {
+    "absolute_local_paths_serialized": false,
+    "account_or_device_identifier_serialized": false,
+    "api_key_or_access_token_serialized": false,
+    "raw_provider_response_serialized": false
+  },
+  "schema_version": 1,
+  "source_bindings": {
+    "cloudflare/wrangler-worker/src/worker.js": {
+      "byte_count": 52990,
+      "path": "cloudflare/wrangler-worker/src/worker.js",
+      "sha256": "e9bc17ddaafa1b6b2cf162bdb633cbe2f1f6a973dd79e495ea91fd23266db3ae"
+    },
+    "dashboard/offline_bundles_v2.py": {
+      "byte_count": 58922,
+      "path": "dashboard/offline_bundles_v2.py",
+      "sha256": "5d8d4d35c29d477408206f64b66b3cd1d65b98400dcb70ab70a350b9c6e5cbca"
+    },
+    "mobile/app/(tabs)/map.tsx": {
+      "byte_count": 1734754,
+      "path": "mobile/app/(tabs)/map.tsx",
+      "sha256": "09c5c4ee9e329077fcbcb3b91f05051d33ca83f64ff1329b1e42bb7cbee3006d"
+    },
+    "mobile/components/NativeMap/offlineManager.ts": {
+      "byte_count": 13822,
+      "path": "mobile/components/NativeMap/offlineManager.ts",
+      "sha256": "f1b06c6c6736498e57de3be81c2f43c237dcc45773208beadd3d69604cf70d5d"
+    },
+    "mobile/components/NativeMap/offlinePackStatus.ts": {
+      "byte_count": 3330,
+      "path": "mobile/components/NativeMap/offlinePackStatus.ts",
+      "sha256": "50d497a0b4e84873197e68ea4820ddccccb14510b54ebc3effd639f5277cbd81"
+    },
+    "mobile/lib/originals/bundleStore.ts": {
+      "byte_count": 31267,
+      "path": "mobile/lib/originals/bundleStore.ts",
+      "sha256": "1f3a60cd9131cdd69560e09dbf42cf755911f5adff8884ba7e7764f3e36c4765"
+    },
+    "mobile/lib/originals/expoFileAdapter.ts": {
+      "byte_count": 2790,
+      "path": "mobile/lib/originals/expoFileAdapter.ts",
+      "sha256": "5ef85c3e3fc3ebf32ad178f7dd9fd4ac1680838023f74e1b0f2e4537fdf67a9d"
+    },
+    "mobile/lib/originals/mapAdapter.ts": {
+      "byte_count": 9779,
+      "path": "mobile/lib/originals/mapAdapter.ts",
+      "sha256": "3a77508b919049a1426437fa8e91c69c4af41fdb4ba292ec64d2bd86f5ab4c51"
+    },
+    "mobile/lib/originals/mapPresentation.ts": {
+      "byte_count": 1337,
+      "path": "mobile/lib/originals/mapPresentation.ts",
+      "sha256": "2d1b4bc06cf8e2fe267eb1b8f6812402dc0d4ea5bb7dfd36f9aa9240dcda8f63"
+    },
+    "originals/smokies/roaring_fork_private_manifest_v3.json": {
+      "byte_count": 171413,
+      "path": "originals/smokies/roaring_fork_private_manifest_v3.json",
+      "sha256": "7e9cab7e0325c6124a2605c83867929780f575e5814c7fdc634c091a9c351467"
+    },
+    "originals/smokies/roaring_fork_publication_readiness_v1.json": {
+      "byte_count": 12875,
+      "path": "originals/smokies/roaring_fork_publication_readiness_v1.json",
+      "sha256": "81317b0bcdb052f1b9396fbe861aec20db3b72a9bd3f745ab5d88618ad58a199"
+    },
+    "originals/smokies/smokies_complete_private_manifest_v3.json": {
+      "byte_count": 3768450,
+      "path": "originals/smokies/smokies_complete_private_manifest_v3.json",
+      "sha256": "d2cfa5aeb0116359326f682fb49d59ee156157f9efbfb8e8a53f99e830ca54eb"
+    }
+  },
+  "status": "network_free_estimate_ready_for_device_review",
+  "storage": {
+    "content_asset_bytes": 458155200,
+    "estimated_complete_bundle_bytes": 671229200,
+    "generic_offline_v2_map_only_reserve": {
+      "folded_into_manifest_estimated_bytes": false,
+      "maplibre_required_storage_bytes": 230119921,
+      "multiplier": 1.08,
+      "rnmapbox_required_storage_bytes": 191814480,
+      "semantics": "separate_generic_offline_v2_required_storage_reserve"
+    },
+    "original_runtime_free_space_multiplier": 1.1,
+    "required_free_space_bytes": 738352120,
+    "selected_offline_map_estimated_bytes": 213074000,
+    "unit": "bytes"
+  },
+  "union_region": {
+    "bounds": {
+      "east": -83.2988839,
+      "north": 35.7277845,
+      "south": 35.4843999,
+      "west": -84.01001532735944
+    },
+    "covered_route_and_reference_coordinate_count": 35150,
+    "exact_bounds_changed_or_padded": false,
+    "max_zoom": 16,
+    "min_zoom": 10,
+    "per_zoom_tiles": [
+      {
+        "east_x": 275,
+        "north_y": 403,
+        "south_y": 403,
+        "tile_count": 3,
+        "west_x": 273,
+        "zoom": 10
+      },
+      {
+        "east_x": 550,
+        "north_y": 806,
+        "south_y": 807,
+        "tile_count": 10,
+        "west_x": 546,
+        "zoom": 11
+      },
+      {
+        "east_x": 1100,
+        "north_y": 1612,
+        "south_y": 1615,
+        "tile_count": 36,
+        "west_x": 1092,
+        "zoom": 12
+      },
+      {
+        "east_x": 2200,
+        "north_y": 3224,
+        "south_y": 3231,
+        "tile_count": 136,
+        "west_x": 2184,
+        "zoom": 13
+      },
+      {
+        "east_x": 4400,
+        "north_y": 6449,
+        "south_y": 6462,
+        "tile_count": 462,
+        "west_x": 4368,
+        "zoom": 14
+      },
+      {
+        "east_x": 8801,
+        "north_y": 12898,
+        "south_y": 12925,
+        "tile_count": 1820,
+        "west_x": 8737,
+        "zoom": 15
+      },
+      {
+        "east_x": 17603,
+        "north_y": 25796,
+        "south_y": 25850,
+        "tile_count": 7150,
+        "west_x": 17474,
+        "zoom": 16
+      }
+    ],
+    "region_id": "smokies_ridges_rivers_living_memory_union_private_v1",
+    "tile_enumeration": "inclusive_web_mercator_xyz_integer_ranges",
+    "total_tile_count": 9617,
+    "variant_count": 6,
+    "variant_ids": [
+      "mountain_crossing:tn_to_nc",
+      "mountain_crossing:nc_to_tn",
+      "little_river_cades_cove:sugarlands_to_cades_cove_loop",
+      "roaring_fork:one_way",
+      "foothills_parkway:west_to_east",
+      "foothills_parkway:east_to_west"
+    ]
+  }
+}

@@ -49,6 +49,18 @@ from db.originals_vehicle_binding import (
     original_vehicle_profile_sha256,
 )
 from db.originals_cultural_review import cultural_dossier_binding
+from db.originals_smokies_final_readiness import (
+    EXPECTED_AFTER_DRAFT_REVISION as SMOKIES_FINAL_AFTER_REVISION,
+    EXPECTED_BEFORE_DRAFT_REVISION as SMOKIES_FINAL_BEFORE_REVISION,
+    FINALIZATION_REVIEW_PATH as SMOKIES_FINALIZATION_REVIEW_PATH,
+    PRODUCT_ID as SMOKIES_FINAL_PRODUCT_ID,
+    SmokiesFinalReadinessError,
+    allowed_change_contract as smokies_final_allowed_change_contract,
+    build_final_manifest as build_smokies_final_manifest,
+    load_finalization_review_artifact as load_smokies_finalization_review_artifact,
+    load_historical_validation_contract as load_smokies_historical_validation_contract,
+    sha256 as smokies_final_sha256,
+)
 
 # Report expiry by type (seconds)
 EXPIRY_BY_TYPE = {
@@ -1584,6 +1596,54 @@ def init_db():
                  AND published_version IS NOT NULL AND response_json IS NOT NULL)
             )
         );
+        CREATE TABLE IF NOT EXISTS authored_original_smokies_final_readiness_receipts_v1 (
+            pack_id                       TEXT PRIMARY KEY REFERENCES authored_trip_packs(id) ON DELETE CASCADE,
+            before_revision               INTEGER NOT NULL CHECK(before_revision = 4),
+            after_revision                INTEGER NOT NULL CHECK(after_revision = 5),
+            before_manifest_sha256        TEXT NOT NULL,
+            after_manifest_sha256         TEXT NOT NULL,
+            validation_metadata_sha256    TEXT NOT NULL,
+            validation_report_count       INTEGER NOT NULL CHECK(validation_report_count >= 0),
+            finalization_review_sha256    TEXT NOT NULL,
+            route_evidence_sha256         TEXT NOT NULL,
+            admin_user_id                 INTEGER NOT NULL REFERENCES users(id),
+            idempotency_key_sha256        TEXT NOT NULL UNIQUE,
+            request_sha256                TEXT NOT NULL UNIQUE,
+            receipt_json                  TEXT NOT NULL,
+            receipt_sha256                TEXT NOT NULL,
+            created_at                    INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS authored_original_smokies_dual_platform_preview_receipts_v1 (
+            receipt_id                              TEXT PRIMARY KEY,
+            pack_id                                 TEXT NOT NULL UNIQUE,
+            draft_revision                          INTEGER NOT NULL CHECK(draft_revision = 5),
+            manifest_sha256                         TEXT NOT NULL,
+            assets_sha256                           TEXT NOT NULL,
+            validation_input_sha256                 TEXT NOT NULL,
+            before_validation_metadata_sha256       TEXT NOT NULL,
+            after_validation_metadata_sha256        TEXT NOT NULL,
+            evidence_sha256                         TEXT NOT NULL,
+            evidence_file_sha256                    TEXT NOT NULL,
+            compatibility_freeze_sha256             TEXT NOT NULL,
+            source_commit                           TEXT NOT NULL,
+            source_tree                             TEXT NOT NULL,
+            android_build_identity_sha256           TEXT NOT NULL,
+            android_preview_evidence_sha256         TEXT NOT NULL,
+            ios_build_identity_sha256               TEXT NOT NULL,
+            ios_preview_evidence_sha256             TEXT NOT NULL,
+            historical_validation_report_count     INTEGER NOT NULL
+                                                        CHECK(historical_validation_report_count = 1),
+            full_bundle_validation_report_count    INTEGER NOT NULL
+                                                        CHECK(full_bundle_validation_report_count = 0),
+            validation_report_inventory_sha256     TEXT NOT NULL,
+            admin_user_id                           INTEGER NOT NULL REFERENCES users(id),
+            idempotency_key_sha256                  TEXT NOT NULL UNIQUE,
+            request_sha256                          TEXT NOT NULL UNIQUE,
+            receipt_json                            TEXT NOT NULL,
+            receipt_sha256                          TEXT NOT NULL,
+            created_at                              INTEGER NOT NULL,
+            FOREIGN KEY(pack_id) REFERENCES authored_trip_packs(id) ON DELETE RESTRICT
+        );
         CREATE TABLE IF NOT EXISTS authored_original_feedback_tokens (
             id          TEXT PRIMARY KEY,
             pack_id     TEXT NOT NULL,
@@ -1980,6 +2040,8 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_authored_original_validation_latest ON authored_original_validation_reports(pack_id,started_at DESC,id DESC)",
         "CREATE INDEX IF NOT EXISTS idx_authored_original_validation_binding ON authored_original_validation_reports(pack_id,draft_revision,manifest_sha256,assets_sha256,status)",
         "CREATE INDEX IF NOT EXISTS idx_authored_original_release_authorizations_pack ON authored_original_release_authorizations_v1(pack_id,status,expires_at)",
+        "CREATE INDEX IF NOT EXISTS idx_authored_original_smokies_final_readiness_admin ON authored_original_smokies_final_readiness_receipts_v1(admin_user_id,created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_authored_original_smokies_dual_platform_preview_admin ON authored_original_smokies_dual_platform_preview_receipts_v1(admin_user_id,created_at)",
         "CREATE INDEX IF NOT EXISTS idx_authored_original_feedback_issuance_ip ON authored_original_feedback_token_issuances(pack_id,version,ip_subject_hmac,created_at)",
         "CREATE INDEX IF NOT EXISTS idx_authored_original_feedback_issuance_install ON authored_original_feedback_token_issuances(pack_id,version,install_subject_hmac,created_at) WHERE install_subject_hmac IS NOT NULL",
         "CREATE INDEX IF NOT EXISTS idx_authored_original_feedback_issuance_created ON authored_original_feedback_token_issuances(created_at)",
@@ -2533,6 +2595,54 @@ def init_db():
                  AND published_version IS NOT NULL AND response_json IS NOT NULL)
             )
         )""",
+        """CREATE TABLE IF NOT EXISTS authored_original_smokies_final_readiness_receipts_v1 (
+            pack_id                       TEXT PRIMARY KEY REFERENCES authored_trip_packs(id) ON DELETE CASCADE,
+            before_revision               INTEGER NOT NULL CHECK(before_revision = 4),
+            after_revision                INTEGER NOT NULL CHECK(after_revision = 5),
+            before_manifest_sha256        TEXT NOT NULL,
+            after_manifest_sha256         TEXT NOT NULL,
+            validation_metadata_sha256    TEXT NOT NULL,
+            validation_report_count       INTEGER NOT NULL CHECK(validation_report_count >= 0),
+            finalization_review_sha256    TEXT NOT NULL,
+            route_evidence_sha256         TEXT NOT NULL,
+            admin_user_id                 INTEGER NOT NULL REFERENCES users(id),
+            idempotency_key_sha256        TEXT NOT NULL UNIQUE,
+            request_sha256                TEXT NOT NULL UNIQUE,
+            receipt_json                  TEXT NOT NULL,
+            receipt_sha256                TEXT NOT NULL,
+            created_at                    INTEGER NOT NULL
+        )""",
+        """CREATE TABLE IF NOT EXISTS authored_original_smokies_dual_platform_preview_receipts_v1 (
+            receipt_id                              TEXT PRIMARY KEY,
+            pack_id                                 TEXT NOT NULL UNIQUE,
+            draft_revision                          INTEGER NOT NULL CHECK(draft_revision = 5),
+            manifest_sha256                         TEXT NOT NULL,
+            assets_sha256                           TEXT NOT NULL,
+            validation_input_sha256                 TEXT NOT NULL,
+            before_validation_metadata_sha256       TEXT NOT NULL,
+            after_validation_metadata_sha256        TEXT NOT NULL,
+            evidence_sha256                         TEXT NOT NULL,
+            evidence_file_sha256                    TEXT NOT NULL,
+            compatibility_freeze_sha256             TEXT NOT NULL,
+            source_commit                           TEXT NOT NULL,
+            source_tree                             TEXT NOT NULL,
+            android_build_identity_sha256           TEXT NOT NULL,
+            android_preview_evidence_sha256         TEXT NOT NULL,
+            ios_build_identity_sha256               TEXT NOT NULL,
+            ios_preview_evidence_sha256             TEXT NOT NULL,
+            historical_validation_report_count     INTEGER NOT NULL
+                                                        CHECK(historical_validation_report_count = 1),
+            full_bundle_validation_report_count    INTEGER NOT NULL
+                                                        CHECK(full_bundle_validation_report_count = 0),
+            validation_report_inventory_sha256     TEXT NOT NULL,
+            admin_user_id                           INTEGER NOT NULL REFERENCES users(id),
+            idempotency_key_sha256                  TEXT NOT NULL UNIQUE,
+            request_sha256                          TEXT NOT NULL UNIQUE,
+            receipt_json                            TEXT NOT NULL,
+            receipt_sha256                          TEXT NOT NULL,
+            created_at                              INTEGER NOT NULL,
+            FOREIGN KEY(pack_id) REFERENCES authored_trip_packs(id) ON DELETE RESTRICT
+        )""",
         """CREATE TABLE IF NOT EXISTS authored_original_feedback_tokens (
             id          TEXT PRIMARY KEY,
             pack_id     TEXT NOT NULL,
@@ -2647,6 +2757,8 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_authored_trip_pack_acquisition_entitlement ON authored_trip_pack_acquisition_requests(entitlement_id)",
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_authored_original_assets_current ON authored_original_assets(pack_id,asset_id) WHERE is_current=1",
         "CREATE INDEX IF NOT EXISTS idx_authored_original_release_authorizations_pack ON authored_original_release_authorizations_v1(pack_id,status,expires_at)",
+        "CREATE INDEX IF NOT EXISTS idx_authored_original_smokies_final_readiness_admin ON authored_original_smokies_final_readiness_receipts_v1(admin_user_id,created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_authored_original_smokies_dual_platform_preview_admin ON authored_original_smokies_dual_platform_preview_receipts_v1(admin_user_id,created_at)",
         "ALTER TABLE authored_original_assets ADD COLUMN media_metadata_json TEXT NOT NULL DEFAULT '{}'",
         "ALTER TABLE authored_original_assets ADD COLUMN transcript_sha256 TEXT",
         "ALTER TABLE authored_original_assets ADD COLUMN generator_metadata_json TEXT NOT NULL DEFAULT '{}'",
@@ -18807,6 +18919,730 @@ def _original_v3_release_final_readiness_contract(manifest: object) -> dict:
     }
 
 
+class OriginalSmokiesFinalReadinessConflictError(ValueError):
+    """The exact rev4 -> rev5 final-readiness transition could not be proven."""
+
+
+_SMOKIES_HISTORICAL_REPORT_ID = (
+    "original_validation_9df694c93ee9ef3809c33f451d04bf28"
+)
+_SMOKIES_HISTORICAL_PROFILED_MANIFEST_SHA256 = (
+    "14d83293ba3b09aad00998668311447b5224f5172e641d35163de2865e3c9eb8"
+)
+_SMOKIES_RF_SELECTION_KEY = "roaring_fork_one_way_private_v1:one_way"
+_SMOKIES_RF_DELIVERY_CONTRACT_SHA256 = (
+    "9081a647a7df0e59df4bb40506ba9bfa96c750536fb715ee31b3e9ee68ee20d6"
+)
+_SMOKIES_HISTORICAL_REDACTED_REPORT_SHA256 = (
+    "ffbab03a0bdc839cbbdaa422a1b4910eaeb61acdc1d4102dbdc40e8d643fc059"
+)
+_SMOKIES_HISTORICAL_CONTRACT_SHA256 = (
+    "b876df36599184650b75e4ec31d4498dff75a333996afe2a47233f05d384c59e"
+)
+_SMOKIES_HISTORICAL_TARGET_ID = "south_tn"
+_SMOKIES_HISTORICAL_TARGET_BINDING_SHA256 = (
+    "41a00c67ed83bafe7355d4e1858710df38e780c2a514641e269103fdcea9104e"
+)
+_SMOKIES_HISTORICAL_TARGET_EVIDENCE_SHA256 = (
+    "2fded0c644b73a36c2efe45a0f64e6e0add551b9c5f2b81c42e73fd276a7a703"
+)
+_SMOKIES_HISTORICAL_BASE_MANIFEST_PATH = (
+    _Path(__file__).resolve().parents[1]
+    / "originals"
+    / "smokies"
+    / "roaring_fork_private_manifest_v3.json"
+)
+_SMOKIES_HISTORICAL_PROFILE_PATH = (
+    _Path(__file__).resolve().parents[1]
+    / "originals"
+    / "smokies"
+    / "roaring_fork_narration_profile_v2.json"
+)
+
+
+def _smokies_historical_validation_inventory(
+    rows: list[sqlite3.Row], history: dict,
+) -> dict:
+    """Prove the sole preserved report is the exact historical RF pass."""
+    if (
+        not isinstance(history, dict)
+        or _original_validation_hash(history)
+        != _SMOKIES_HISTORICAL_CONTRACT_SHA256
+        or history.get("report_id") != _SMOKIES_HISTORICAL_REPORT_ID
+        or history.get("redacted_report_sha256")
+        != _SMOKIES_HISTORICAL_REDACTED_REPORT_SHA256
+    ):
+        raise OriginalSmokiesFinalReadinessConflictError(
+            "Smokies historical RF validation contract drifted"
+        )
+    if len(rows) != 1:
+        raise OriginalSmokiesFinalReadinessConflictError(
+            "Smokies validation history is not the exact one-report history"
+        )
+    row = dict(rows[0])
+    if (
+        row.get("id") != _SMOKIES_HISTORICAL_REPORT_ID
+        or row.get("pack_id") != SMOKIES_FINAL_PRODUCT_ID
+        or row.get("draft_revision") != history["expected_draft_revision"]
+        or row.get("manifest_sha256")
+        != _SMOKIES_HISTORICAL_PROFILED_MANIFEST_SHA256
+        or row.get("suite_version") != history["expected_suite_version"]
+        or row.get("engine_version") != history["engine"]
+        or row.get("status") != history["status"]
+        or row.get("passed") != 1
+        or row.get("worker_pid") is not None
+        or not isinstance(row.get("completed_at"), int)
+    ):
+        raise OriginalSmokiesFinalReadinessConflictError(
+            "Smokies historical RF validation identity drifted"
+        )
+    try:
+        summary = json.loads(str(row.get("summary_json")))
+        scenarios = json.loads(str(row.get("scenarios_json")))
+        issues = json.loads(str(row.get("issues_json")))
+        report_manifest = json.loads(str(row.get("manifest_json")))
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise OriginalSmokiesFinalReadinessConflictError(
+            "Smokies historical RF validation payload is invalid"
+        ) from exc
+    if not isinstance(report_manifest, dict):
+        raise OriginalSmokiesFinalReadinessConflictError(
+            "Smokies historical RF validation manifest is invalid"
+        )
+    try:
+        historical_base_manifest = json.loads(
+            _SMOKIES_HISTORICAL_BASE_MANIFEST_PATH.read_text(encoding="utf-8")
+        )
+        historical_profile = json.loads(
+            _SMOKIES_HISTORICAL_PROFILE_PATH.read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        raise OriginalSmokiesFinalReadinessConflictError(
+            "Smokies historical RF manifest source is unavailable"
+        ) from exc
+    if not isinstance(historical_base_manifest, dict):
+        raise OriginalSmokiesFinalReadinessConflictError(
+            "Smokies historical RF manifest source is invalid"
+        )
+    if _original_validation_hash(historical_profile) != (
+        "f79b386031ca0faf6e07332e53ea037f957eb7d9871c4bbf05d5b0aff09c2af5"
+    ):
+        raise OriginalSmokiesFinalReadinessConflictError(
+            "Smokies historical RF narration profile drifted"
+        )
+    historical_base_manifest["narration_profile"] = historical_profile
+    if (
+        _original_validation_hash(report_manifest)
+        != _SMOKIES_HISTORICAL_PROFILED_MANIFEST_SHA256
+        or report_manifest != historical_base_manifest
+    ):
+        raise OriginalSmokiesFinalReadinessConflictError(
+            "Smokies historical RF validation manifest drifted"
+        )
+    expected_delivery = (
+        f"{_SMOKIES_RF_SELECTION_KEY}:"
+        f"{_SMOKIES_RF_DELIVERY_CONTRACT_SHA256}"
+    )
+    try:
+        redacted_report = _original_validation_report_from_row(
+            row,
+            current_material={
+                key: row[key]
+                for key in (
+                    "draft_revision", "manifest_sha256", "assets_sha256",
+                    "input_sha256", "validator_source_sha256",
+                )
+            },
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise OriginalSmokiesFinalReadinessConflictError(
+            "Smokies historical RF redacted report is invalid"
+        ) from exc
+    if (
+        not isinstance(summary, dict)
+        or summary.get("required") != history["route_scenarios_required"]
+        or summary.get("passed") != history["route_scenarios_passed"]
+        or summary.get("failed") != 0
+        or summary.get("selection_count") != 1
+        or summary.get("selections_passed") != 1
+        or summary.get("selections_failed") != 0
+        or summary.get("validated_selections") != [_SMOKIES_RF_SELECTION_KEY]
+        or summary.get("validated_delivery_contracts") != [expected_delivery]
+        or not isinstance(scenarios, list)
+        or len(scenarios) != 1
+        or not isinstance(scenarios[0], dict)
+        or scenarios[0].get("selection_key") != _SMOKIES_RF_SELECTION_KEY
+        or scenarios[0].get("passed") is not True
+        or scenarios[0].get("issues") != []
+        or issues != history["issues"]
+        or redacted_report.get("current") is not True
+        or _original_validation_hash(redacted_report)
+        != _SMOKIES_HISTORICAL_REDACTED_REPORT_SHA256
+    ):
+        raise OriginalSmokiesFinalReadinessConflictError(
+            "Smokies historical RF validation semantics drifted"
+        )
+    material = {
+        "schema_version": 1,
+        "report_id": row["id"],
+        "pack_id": row["pack_id"],
+        "draft_revision": row["draft_revision"],
+        "manifest_sha256": row["manifest_sha256"],
+        "assets_sha256": row["assets_sha256"],
+        "input_sha256": row["input_sha256"],
+        "validator_source_sha256": row["validator_source_sha256"],
+        "suite_version": row["suite_version"],
+        "engine_version": row["engine_version"],
+        "status": row["status"],
+        "passed": bool(row["passed"]),
+        "summary_sha256": _original_validation_hash(summary),
+        "scenarios_sha256": _original_validation_hash(scenarios),
+        "issues_sha256": _original_validation_hash(issues),
+        "started_by": row["started_by"],
+        "started_at": row["started_at"],
+        "completed_at": row["completed_at"],
+        "redacted_report_sha256": _SMOKIES_HISTORICAL_REDACTED_REPORT_SHA256,
+    }
+    return {
+        "historical_report_count": 1,
+        "full_bundle_report_count": 0,
+        "inventory": [material],
+        "inventory_sha256": _original_validation_hash([material]),
+    }
+
+
+def finalize_authored_original_smokies_full_bundle_readiness(
+    pack_id: str,
+    *,
+    expected_draft_revision: int,
+    expected_manifest_sha256: str,
+    expected_validation_metadata_sha256: str,
+    admin_user_id: int,
+    idempotency_key: str,
+    finalization_review_artifact_path: _Path,
+    private_receipt_parent_identity_sha256: str,
+) -> dict:
+    """CAS-finalize only the exact public-only fields of the Smokies draft.
+
+    The reviewed readiness and publication route artifacts are server files,
+    never caller-supplied JSON.  The operation is a single BEGIN IMMEDIATE
+    update from revision 4 to 5 and deliberately leaves all downstream gates
+    false.  The exact canonical receipt is inserted in the same transaction;
+    only its exact administrator/key/request may replay it after a crash.
+    """
+    pack_id = _validate_canonical_id(pack_id, "Original id")
+    if pack_id != SMOKIES_FINAL_PRODUCT_ID:
+        raise OriginalSmokiesFinalReadinessConflictError(
+            "Smokies final-readiness CAS is not configured for this Original"
+        )
+    if (
+        isinstance(expected_draft_revision, bool)
+        or expected_draft_revision != SMOKIES_FINAL_BEFORE_REVISION
+    ):
+        raise ValueError("Smokies final-readiness CAS requires exact rev4")
+    if (
+        not isinstance(expected_manifest_sha256, str)
+        or re.fullmatch(r"[a-f0-9]{64}", expected_manifest_sha256) is None
+        or not isinstance(expected_validation_metadata_sha256, str)
+        or re.fullmatch(
+            r"[a-f0-9]{64}", expected_validation_metadata_sha256
+        ) is None
+    ):
+        raise ValueError("Smokies final-readiness expected hashes are invalid")
+    if (
+        isinstance(admin_user_id, bool)
+        or not isinstance(admin_user_id, int)
+        or admin_user_id < 1
+    ):
+        raise ValueError("Smokies final-readiness administrator id is invalid")
+    clean_key = str(idempotency_key or "").strip()
+    if re.fullmatch(r"[A-Za-z0-9_.:-]{16,160}", clean_key) is None:
+        raise ValueError("Smokies final-readiness idempotency key is invalid")
+    if (
+        not isinstance(private_receipt_parent_identity_sha256, str)
+        or re.fullmatch(
+            r"[a-f0-9]{64}", private_receipt_parent_identity_sha256
+        ) is None
+    ):
+        raise ValueError("Smokies private receipt-parent binding is invalid")
+    artifact_path = _Path(finalization_review_artifact_path).resolve()
+    if artifact_path != _Path(SMOKIES_FINALIZATION_REVIEW_PATH).resolve():
+        raise OriginalSmokiesFinalReadinessConflictError(
+            "Smokies finalization review is not the registered server artifact"
+        )
+    try:
+        finalization_review, route_evidence, artifact_binding = (
+            load_smokies_finalization_review_artifact(artifact_path)
+        )
+        historical_validation, historical_validation_binding = (
+            load_smokies_historical_validation_contract()
+        )
+    except SmokiesFinalReadinessError as exc:
+        raise OriginalSmokiesFinalReadinessConflictError(str(exc)) from exc
+    if (
+        finalization_review["expected_before_manifest_sha256"]
+        != expected_manifest_sha256
+    ):
+        raise OriginalSmokiesFinalReadinessConflictError(
+            "Smokies finalization review does not bind the exact rev4 manifest"
+        )
+    finalization_review_contract_sha256 = smokies_final_sha256(
+        finalization_review
+    )
+    idempotency_key_sha256 = hashlib.sha256(clean_key.encode("utf-8")).hexdigest()
+    request = {
+        "schema_version": 1,
+        "pack_id": pack_id,
+        "expected_before_revision": SMOKIES_FINAL_BEFORE_REVISION,
+        "expected_after_revision": SMOKIES_FINAL_AFTER_REVISION,
+        "expected_before_manifest_sha256": expected_manifest_sha256,
+        "expected_validation_metadata_sha256": (
+            expected_validation_metadata_sha256
+        ),
+        "expected_historical_validation_report_count": 1,
+        "expected_full_bundle_validation_report_count": 0,
+        "historical_validation_contract_sha256": (
+            historical_validation_binding[
+                "historical_validation_contract_sha256"
+            ]
+        ),
+        "historical_validation_source_sha256": historical_validation_binding[
+            "historical_validation_source_sha256"
+        ],
+        "finalization_review_artifact_sha256": artifact_binding[
+            "artifact_sha256"
+        ],
+        "finalization_review_contract_sha256": (
+            finalization_review_contract_sha256
+        ),
+        "route_evidence_artifact_sha256": artifact_binding[
+            "route_evidence_sha256"
+        ],
+        "route_evidence_canonical_sha256": artifact_binding[
+            "route_evidence_canonical_sha256"
+        ],
+        "admin_user_id": admin_user_id,
+        "idempotency_key_sha256": idempotency_key_sha256,
+        "private_receipt_parent_identity_sha256": (
+            private_receipt_parent_identity_sha256
+        ),
+    }
+    request_sha256 = _original_validation_hash(request)
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        admin = db.execute(
+            "SELECT is_admin FROM users WHERE id=?", (admin_user_id,),
+        ).fetchone()
+        if not admin or not bool(admin["is_admin"]):
+            raise PermissionError("Smokies final-readiness CAS requires an admin")
+        stored = db.execute(
+            """SELECT *
+               FROM authored_original_smokies_final_readiness_receipts_v1
+               WHERE pack_id=?""",
+            (pack_id,),
+        ).fetchone()
+        if stored:
+            stored = dict(stored)
+            expected_stored = {
+                "before_revision": SMOKIES_FINAL_BEFORE_REVISION,
+                "after_revision": SMOKIES_FINAL_AFTER_REVISION,
+                "before_manifest_sha256": expected_manifest_sha256,
+                "validation_metadata_sha256": (
+                    expected_validation_metadata_sha256
+                ),
+                "validation_report_count": 1,
+                "finalization_review_sha256": artifact_binding[
+                    "artifact_sha256"
+                ],
+                "route_evidence_sha256": artifact_binding[
+                    "route_evidence_sha256"
+                ],
+                "admin_user_id": admin_user_id,
+                "idempotency_key_sha256": idempotency_key_sha256,
+                "request_sha256": request_sha256,
+            }
+            for field, expected in expected_stored.items():
+                if stored.get(field) != expected:
+                    raise OriginalSmokiesFinalReadinessConflictError(
+                        "Smokies final-readiness receipt replay input drifted"
+                    )
+            try:
+                stored_receipt = json.loads(stored["receipt_json"])
+            except (TypeError, json.JSONDecodeError) as exc:
+                raise OriginalSmokiesFinalReadinessConflictError(
+                    "Smokies stored final-readiness receipt is invalid"
+                ) from exc
+            if (
+                not isinstance(stored_receipt, dict)
+                or _original_validation_hash(stored_receipt)
+                != stored["receipt_sha256"]
+                or stored_receipt.get("request_sha256") != request_sha256
+            ):
+                raise OriginalSmokiesFinalReadinessConflictError(
+                    "Smokies stored final-readiness receipt drifted"
+                )
+            pack = db.execute(
+                """SELECT status,current_published_version,draft_revision,
+                          draft_original_manifest_json,draft_validation_metadata
+                   FROM authored_trip_packs
+                   WHERE id=? AND content_kind='original_drive'""",
+                (pack_id,),
+            ).fetchone()
+            if not pack:
+                raise ValueError("Trailhead Original not found")
+            current_manifest = _decode_pack_json(
+                pack["draft_original_manifest_json"], None,
+            )
+            current_validation = _decode_pack_json(
+                pack["draft_validation_metadata"], None,
+            )
+            report_inventory = _smokies_historical_validation_inventory(
+                db.execute(
+                    """SELECT * FROM authored_original_validation_reports
+                       WHERE pack_id=? ORDER BY id""",
+                    (pack_id,),
+                ).fetchall(),
+                historical_validation,
+            )
+            published_version_count = int(db.execute(
+                "SELECT COUNT(*) FROM authored_trip_pack_versions WHERE pack_id=?",
+                (pack_id,),
+            ).fetchone()[0])
+            release_authorization_count = int(db.execute(
+                "SELECT COUNT(*) FROM authored_original_release_authorizations_v1 WHERE pack_id=?",
+                (pack_id,),
+            ).fetchone()[0])
+            if (
+                pack["status"] != "draft"
+                or pack["current_published_version"] is not None
+                or published_version_count != 0
+                or release_authorization_count != 0
+                or int(pack["draft_revision"]) != SMOKIES_FINAL_AFTER_REVISION
+                or _original_validation_hash(current_manifest)
+                != stored["after_manifest_sha256"]
+                or _original_validation_hash(current_validation)
+                != expected_validation_metadata_sha256
+                or stored_receipt.get(
+                    "validation_report_inventory_sha256_after"
+                ) != report_inventory["inventory_sha256"]
+            ):
+                raise OriginalSmokiesFinalReadinessConflictError(
+                    "Smokies final-readiness replay database state drifted"
+                )
+            db.commit()
+            return {"receipt": stored_receipt, "replayed": True}
+        pack = db.execute(
+            """SELECT * FROM authored_trip_packs
+               WHERE id=? AND content_kind='original_drive'""",
+            (pack_id,),
+        ).fetchone()
+        if not pack:
+            raise ValueError("Trailhead Original not found")
+        raw_pack = dict(pack)
+        published_version_count = int(db.execute(
+            "SELECT COUNT(*) FROM authored_trip_pack_versions WHERE pack_id=?",
+            (pack_id,),
+        ).fetchone()[0])
+        release_authorization_count = int(db.execute(
+            "SELECT COUNT(*) FROM authored_original_release_authorizations_v1 WHERE pack_id=?",
+            (pack_id,),
+        ).fetchone()[0])
+        if (
+            raw_pack.get("status") != "draft"
+            or raw_pack.get("current_published_version") is not None
+            or published_version_count != 0
+            or release_authorization_count != 0
+        ):
+            raise OriginalSmokiesFinalReadinessConflictError(
+                "Smokies final-readiness CAS requires an unpublished private draft"
+            )
+        current_revision = int(raw_pack["draft_revision"])
+        current_manifest = _decode_pack_json(
+            raw_pack.get("draft_original_manifest_json"), None,
+        )
+        current_validation = _decode_pack_json(
+            raw_pack.get("draft_validation_metadata"), None,
+        )
+        if not isinstance(current_manifest, dict) or not isinstance(
+            current_validation, dict
+        ):
+            raise OriginalSmokiesFinalReadinessConflictError(
+                "Smokies rev4 draft state is invalid"
+            )
+        current_manifest_sha256 = _original_validation_hash(current_manifest)
+        current_validation_sha256 = _original_validation_hash(current_validation)
+        report_inventory = _smokies_historical_validation_inventory(
+            db.execute(
+                """SELECT * FROM authored_original_validation_reports
+                   WHERE pack_id=? ORDER BY id""",
+                (pack_id,),
+            ).fetchall(),
+            historical_validation,
+        )
+        if current_validation_sha256 != expected_validation_metadata_sha256:
+            raise OriginalSmokiesFinalReadinessConflictError(
+                "Smokies validation state changed before final-readiness CAS"
+            )
+        if (
+            current_revision != SMOKIES_FINAL_BEFORE_REVISION
+            or current_manifest_sha256 != expected_manifest_sha256
+        ):
+            raise RevisionConflictError(current_revision)
+        final_manifest = build_smokies_final_manifest(
+            current_manifest,
+            finalization_review,
+            content_projection=_original_v3_release_content_projection(
+                current_manifest
+            ),
+            route_evidence_document=route_evidence,
+        )
+        final_manifest_sha256 = _original_validation_hash(final_manifest)
+        allowed_changes = smokies_final_allowed_change_contract(
+            current_manifest, final_manifest,
+        )
+        allowed_changes_sha256 = _original_validation_hash(allowed_changes)
+        profile_sha256 = _original_validation_hash(
+            current_manifest.get("narration_profile")
+        )
+        operational_bindings_sha256 = _original_validation_hash([
+            {
+                "chapter_id": chapter.get("id"),
+                "operational_readiness": chapter.get("operational_readiness"),
+                "operational_sources": chapter.get("operational_sources"),
+            }
+            for chapter in current_manifest.get("chapters") or []
+        ])
+        # Finalization must not smuggle in downstream acceptance.
+        for key in (
+            "authenticated_device_preview_complete",
+            "dual_platform_private_preview_complete",
+            "trusted_publication_validation_complete",
+            "public_release",
+        ):
+            if current_validation.get(key) is not False:
+                raise OriginalSmokiesFinalReadinessConflictError(
+                    f"Smokies downstream gate {key} is not false"
+                )
+        normalized, final_manifest_json = _normalize_original_manifest(
+            pack_id,
+            raw_pack["draft_title"],
+            final_manifest,
+            publishing=False,
+            route_evidence_document=route_evidence,
+        )
+        if normalized != final_manifest:
+            raise OriginalSmokiesFinalReadinessConflictError(
+                "Smokies final manifest is not canonical"
+            )
+        now = int(time.time())
+        updated = db.execute(
+            """UPDATE authored_trip_packs
+               SET draft_original_manifest_json=?,draft_revision=draft_revision+1,
+                   updated_by=?,updated_at=?
+               WHERE id=? AND draft_revision=? AND status='draft'
+                 AND current_published_version IS NULL
+                 AND NOT EXISTS (
+                   SELECT 1 FROM authored_trip_pack_versions WHERE pack_id=?
+                 )
+                 AND NOT EXISTS (
+                   SELECT 1 FROM authored_original_release_authorizations_v1
+                   WHERE pack_id=?
+                 )""",
+            (
+                final_manifest_json,
+                admin_user_id,
+                now,
+                pack_id,
+                SMOKIES_FINAL_BEFORE_REVISION,
+                pack_id,
+                pack_id,
+            ),
+        )
+        if updated.rowcount != 1:
+            refreshed = db.execute(
+                "SELECT draft_revision FROM authored_trip_packs WHERE id=?",
+                (pack_id,),
+            ).fetchone()
+            raise RevisionConflictError(
+                int(refreshed["draft_revision"])
+                if refreshed else SMOKIES_FINAL_BEFORE_REVISION
+            )
+        after_validation = _decode_pack_json(
+            db.execute(
+                "SELECT draft_validation_metadata FROM authored_trip_packs WHERE id=?",
+                (pack_id,),
+            ).fetchone()[0],
+            None,
+        )
+        after_report_inventory = _smokies_historical_validation_inventory(
+            db.execute(
+                """SELECT * FROM authored_original_validation_reports
+                   WHERE pack_id=? ORDER BY id""",
+                (pack_id,),
+            ).fetchall(),
+            historical_validation,
+        )
+        if (
+            after_validation != current_validation
+            or after_report_inventory != report_inventory
+        ):
+            raise OriginalSmokiesFinalReadinessConflictError(
+                "Smokies validation/report state changed during readiness CAS"
+            )
+        after_pack = db.execute(
+            """SELECT status,current_published_version,draft_revision,
+                      draft_original_manifest_json
+               FROM authored_trip_packs WHERE id=?""",
+            (pack_id,),
+        ).fetchone()
+        if (
+            not after_pack
+            or after_pack["status"] != "draft"
+            or after_pack["current_published_version"] is not None
+            or int(after_pack["draft_revision"])
+            != SMOKIES_FINAL_AFTER_REVISION
+            or _original_validation_hash(_decode_pack_json(
+                after_pack["draft_original_manifest_json"], None,
+            )) != final_manifest_sha256
+            or int(db.execute(
+                "SELECT COUNT(*) FROM authored_trip_pack_versions WHERE pack_id=?",
+                (pack_id,),
+            ).fetchone()[0]) != 0
+            or int(db.execute(
+                "SELECT COUNT(*) FROM authored_original_release_authorizations_v1 WHERE pack_id=?",
+                (pack_id,),
+            ).fetchone()[0]) != 0
+        ):
+            raise OriginalSmokiesFinalReadinessConflictError(
+                "Smokies final-readiness CAS readback drifted"
+            )
+        receipt = {
+            "schema_version": 1,
+            "kind": "smokies_full_bundle_final_readiness_cas_receipt",
+            "status": "verified_final_readiness_cas",
+            "receipt_id": "smokies_full_bundle_final_readiness_cas_receipt_v1",
+            "pack_id": pack_id,
+            "product_id": pack_id,
+            "before_revision": SMOKIES_FINAL_BEFORE_REVISION,
+            "after_revision": SMOKIES_FINAL_AFTER_REVISION,
+            "before_manifest_sha256": expected_manifest_sha256,
+            "after_manifest_sha256": final_manifest_sha256,
+            "content_projection_sha256": finalization_review[
+                "content_projection_sha256"
+            ],
+            "historical_validation": {
+                "contract": historical_validation,
+                **historical_validation_binding,
+            },
+            "historical_validation_report_count_before": 1,
+            "historical_validation_report_count_after": 1,
+            "full_bundle_validation_report_count_before": 0,
+            "full_bundle_validation_report_count_after": 0,
+            "validation_report_inventory_sha256_before": report_inventory[
+                "inventory_sha256"
+            ],
+            "validation_report_inventory_sha256_after": (
+                after_report_inventory["inventory_sha256"]
+            ),
+            "finalization_review": {
+                "artifact_byte_count": artifact_binding[
+                    "artifact_byte_count"
+                ],
+                "artifact_sha256": artifact_binding["artifact_sha256"],
+                "contract": finalization_review,
+                "contract_sha256": finalization_review_contract_sha256,
+            },
+            "route_evidence": {
+                "evidence_id": finalization_review["route_evidence"][
+                    "evidence_id"
+                ],
+                "binding": finalization_review["route_evidence"],
+                "binding_sha256": _original_validation_hash(
+                    finalization_review["route_evidence"]
+                ),
+                "artifact_byte_count": artifact_binding[
+                    "route_evidence_byte_count"
+                ],
+                "artifact_sha256": artifact_binding[
+                    "route_evidence_sha256"
+                ],
+                "canonical_sha256": artifact_binding[
+                    "route_evidence_canonical_sha256"
+                ],
+            },
+            "offline_map_estimated_bytes": finalization_review[
+                "offline_map_estimated_bytes"
+            ],
+            "review": finalization_review["review"],
+            "profile_sha256_before": profile_sha256,
+            "profile_sha256_after": profile_sha256,
+            "operational_bindings_sha256_before": (
+                operational_bindings_sha256
+            ),
+            "operational_bindings_sha256_after": operational_bindings_sha256,
+            "admin_user_id": admin_user_id,
+            "idempotency_key_sha256": idempotency_key_sha256,
+            "request": request,
+            "request_sha256": request_sha256,
+            "validation_metadata_before": current_validation,
+            "validation_metadata_before_sha256": current_validation_sha256,
+            "validation_metadata_after": current_validation,
+            "validation_metadata_after_sha256": current_validation_sha256,
+            "allowed_change_contract": allowed_changes,
+            "allowed_change_contract_sha256": allowed_changes_sha256,
+            "cas_completed_at_unix": now,
+            "idempotent_replay_safe": True,
+            "effects": {
+                "database_accessed": True,
+                "database_mutated": True,
+                "network_accessed": False,
+                "provider_accessed": False,
+                "provider_mutated": False,
+                "publication_performed": False,
+                "public_release": False,
+            },
+        }
+        receipt_json = json.dumps(
+            receipt,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        receipt_sha256 = _original_validation_hash(receipt)
+        db.execute(
+            """INSERT INTO authored_original_smokies_final_readiness_receipts_v1
+               (pack_id,before_revision,after_revision,before_manifest_sha256,
+                after_manifest_sha256,validation_metadata_sha256,
+                validation_report_count,finalization_review_sha256,
+                route_evidence_sha256,admin_user_id,idempotency_key_sha256,
+                request_sha256,receipt_json,receipt_sha256,created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                pack_id,
+                SMOKIES_FINAL_BEFORE_REVISION,
+                SMOKIES_FINAL_AFTER_REVISION,
+                expected_manifest_sha256,
+                final_manifest_sha256,
+                current_validation_sha256,
+                1,
+                artifact_binding["artifact_sha256"],
+                artifact_binding["route_evidence_sha256"],
+                admin_user_id,
+                idempotency_key_sha256,
+                request_sha256,
+                receipt_json,
+                receipt_sha256,
+                now,
+            ),
+        )
+        db.commit()
+        return {"receipt": receipt, "replayed": False}
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 def _original_v3_release_catalog_inventory_db(
     db: sqlite3.Connection,
     *,

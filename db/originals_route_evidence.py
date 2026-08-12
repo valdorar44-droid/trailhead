@@ -21,8 +21,22 @@ DEFAULT_SMOKIES_ROUTE_EVIDENCE = (
     / "official_route_evidence_v1.json"
 )
 
+# This additive publication artifact is intentionally absent until the
+# field-drive and source-review checkpoint has produced and independently
+# reviewed it. Registration makes the eventual identity explicit without
+# weakening the historical, blocked evidence record above.
+SMOKIES_PUBLICATION_ROUTE_EVIDENCE = (
+    Path(__file__).resolve().parents[1]
+    / "originals"
+    / "smokies"
+    / "official_route_evidence_publication_v1.json"
+)
+
 _REGISTERED_EVIDENCE = {
     "smokies-official-routes-2026-v1": DEFAULT_SMOKIES_ROUTE_EVIDENCE,
+    "smokies-official-routes-2026-publication-v1": (
+        SMOKIES_PUBLICATION_ROUTE_EVIDENCE
+    ),
 }
 _BINDING_KEYS = {
     "schema_version",
@@ -33,6 +47,17 @@ _BINDING_KEYS = {
     "source_snapshot_sha256",
 }
 _SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
+_SMOKIES_PUBLICATION_REVIEW_BINDING_KEYS = {
+    "technical_field_drive_evidence_sha256",
+    "source_review_evidence_sha256",
+    "vehicle_source_policy_sha256",
+}
+_SMOKIES_PUBLICATION_EVIDENCE_ID = (
+    "smokies-official-routes-2026-publication-v1"
+)
+_SMOKIES_PUBLICATION_VEHICLE_SOURCE_POLICY_SHA256 = (
+    "17b9eea045ac2369e7679f5fbec3291cca46374b004165f15087ceb4bded7a21"
+)
 
 
 class OriginalRouteEvidenceError(ValueError):
@@ -116,6 +141,73 @@ def load_registered_route_evidence(evidence_id: str) -> dict:
     return _object(payload, "Registered Original route evidence")
 
 
+def validate_smokies_publication_route_evidence_document(value: object) -> dict:
+    """Require the additive publication record to change only reviewed gates.
+
+    The accepted route artifact remains the immutable geometry/source baseline.
+    Its publication successor may only clear the three known blockers and add
+    the exact field-drive, source-review, and reviewed-policy hash envelope.
+    """
+    evidence = dict(_object(value, "Smokies publication route evidence"))
+    try:
+        historical = _object(
+            json.loads(DEFAULT_SMOKIES_ROUTE_EVIDENCE.read_text(encoding="utf-8")),
+            "Historical Smokies route evidence",
+        )
+    except (OSError, json.JSONDecodeError) as exc:
+        raise OriginalRouteEvidenceError(
+            "Historical Smokies route evidence could not be loaded"
+        ) from exc
+    expected_keys = set(historical) | {
+        "evidence_id",
+        "publication_review_bindings",
+    }
+    if set(evidence) != expected_keys:
+        raise OriginalRouteEvidenceError(
+            "Smokies publication route evidence fields are invalid"
+        )
+    bindings = _object(
+        evidence.get("publication_review_bindings"),
+        "Smokies publication route review bindings",
+    )
+    if set(bindings) != _SMOKIES_PUBLICATION_REVIEW_BINDING_KEYS:
+        raise OriginalRouteEvidenceError(
+            "Smokies publication route review binding fields are invalid"
+        )
+    for key in sorted(_SMOKIES_PUBLICATION_REVIEW_BINDING_KEYS):
+        bindings[key] = _sha256(
+            bindings.get(key),
+            f"Smokies publication route review {key}",
+        )
+    if (
+        bindings["vehicle_source_policy_sha256"]
+        != _SMOKIES_PUBLICATION_VEHICLE_SOURCE_POLICY_SHA256
+    ):
+        raise OriginalRouteEvidenceError(
+            "Smokies publication route reviewed vehicle/source policy drifted"
+        )
+    if evidence.get("evidence_id") != _SMOKIES_PUBLICATION_EVIDENCE_ID:
+        raise OriginalRouteEvidenceError(
+            "Smokies publication route evidence identity drifted"
+        )
+    if (
+        evidence.get("publication_status") != "ready_for_publication"
+        or evidence.get("publication_blockers") != []
+    ):
+        raise OriginalRouteEvidenceError(
+            "Smokies publication route evidence is blocked"
+        )
+    for key, historical_value in historical.items():
+        if key in {"publication_status", "publication_blockers"}:
+            continue
+        if evidence.get(key) != historical_value:
+            raise OriginalRouteEvidenceError(
+                f"Smokies publication route evidence {key} drifted"
+            )
+    evidence["publication_review_bindings"] = bindings
+    return evidence
+
+
 def _variant_key(value: dict, label: str) -> tuple[str, str]:
     chapter_id = str(value.get("chapter_id") or "").strip()
     variant_id = str(value.get("variant_id") or "").strip()
@@ -139,6 +231,14 @@ def validate_manifest_route_evidence(
         else load_registered_route_evidence(binding["evidence_id"]),
         "Registered Original route evidence",
     )
+    if binding.get("evidence_id") == _SMOKIES_PUBLICATION_EVIDENCE_ID:
+        evidence = validate_smokies_publication_route_evidence_document(evidence)
+    if evidence.get("evidence_id") is not None and (
+        evidence.get("evidence_id") != binding.get("evidence_id")
+    ):
+        raise OriginalRouteEvidenceError(
+            "Registered Original route evidence document identity drifted"
+        )
     if evidence.get("schema_version") != 1 or evidence.get("kind") != (
         "trailhead_original_official_route_evidence"
     ):

@@ -216,9 +216,9 @@ def _files(tmp_path: Path) -> dict[str, Path]:
             "simulator": False,
             "eas_project_id": "92c016d2-6e63-480e-a483-a6898d7e77d5",
             "native_fingerprint_id": (
-                "11111111-1111-4111-8111-111111111111"
+                "019ff4ef-9b6c-785a-9416-cc13c240cfce"
                 if platform == "android"
-                else "22222222-2222-4222-8222-222222222222"
+                else "019ff4f0-140a-75f2-8fb3-54d153b044be"
             ),
             "native_fingerprint_hash": ("5" if platform == "android" else "6") * 40,
             "build_artifact_sha256": ("7" if platform == "android" else "8") * 64,
@@ -605,7 +605,7 @@ def test_apply_changes_only_three_validation_fields_and_replays(configured: dict
         assert details["source_commit"] == "a" * 40
         assert details["source_tree"] == "b" * 40
         assert re.fullmatch(
-            r"[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}",
+            r"[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}",
             details["native_fingerprint_id"],
         )
         assert re.fullmatch(r"[a-f0-9]{40}", details["native_fingerprint_hash"])
@@ -887,6 +887,11 @@ def test_private_platform_record_drift_stops_before_database(
         (
             "native_fingerprint_id",
             "1111111-1111-4111-8111-111111111111",
+            "native fingerprint id",
+        ),
+        (
+            "native_fingerprint_id",
+            "11111111-1111-0111-8111-111111111111",
             "native fingerprint id",
         ),
         ("native_fingerprint_hash", None, "build identity fields"),

@@ -351,6 +351,15 @@ def test_prebuild_record_keeps_every_external_gate_and_effect_false(
         "environment": "physical",
         "physical_device": True,
     }
+    build_schema = result["required_future_builds"]["build_identity_record_schema"]
+    assert "native_fingerprint_sha256" not in build_schema["required_exact_fields"]
+    assert build_schema["required_exact_fields"][-3:] == [
+        "native_fingerprint_id", "native_fingerprint_hash", "build_artifact_sha256",
+    ]
+    assert build_schema["native_fingerprint_id_required"] is True
+    assert build_schema["native_fingerprint_id_format"] == "canonical_uuid"
+    assert build_schema["native_fingerprint_hash_required"] is True
+    assert build_schema["native_fingerprint_hash_format"] == "lowercase_sha1_hex_40"
     assert result["checkpoint_m_migration_evidence"] == {
         "commit": builder.CHECKPOINT_M_COMMIT,
         "tree": builder.CHECKPOINT_M_TREE,

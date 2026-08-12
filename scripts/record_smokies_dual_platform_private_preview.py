@@ -110,6 +110,13 @@ PLATFORM_KEYS = {
     "android": ("android_build_identity", "android_preview_evidence"),
     "ios": ("ios_build_identity", "ios_preview_evidence"),
 }
+BUILD_IDENTITY_FIELDS = (
+    "schema_version", "kind", "status", "product_id", "platform",
+    "source_revision", "build_id", "app_version", "build_number",
+    "runtime_version", "channel", "distribution", "signed", "simulator",
+    "eas_project_id", "native_fingerprint_id", "native_fingerprint_hash",
+    "build_artifact_sha256",
+)
 
 
 class DualPlatformPreviewMarkerError(RuntimeError):
@@ -170,6 +177,26 @@ def _safe_sha(value: object, label: str) -> str:
     return value
 
 
+def _canonical_uuid(value: object, label: str) -> str:
+    _require(
+        isinstance(value, str)
+        and re.fullmatch(
+            r"[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}",
+            value,
+        ) is not None,
+        f"{label} is invalid",
+    )
+    return value
+
+
+def _native_fingerprint_hash(value: object, label: str) -> str:
+    _require(
+        isinstance(value, str) and re.fullmatch(r"[a-f0-9]{40}", value) is not None,
+        f"{label} is invalid",
+    )
+    return value
+
+
 def _source_revision(value: object, label: str) -> dict[str, str]:
     _require(
         isinstance(value, dict) and set(value) == {"commit", "tree"},
@@ -220,9 +247,17 @@ def _load_compatibility_freeze() -> dict[str, Any]:
     preview_schema = future.get("private_preview_evidence_record_schema")
     _require(
         isinstance(build_schema, dict)
+        and build_schema.get("schema_version") == 1
+        and build_schema.get("required_exact_fields") == list(BUILD_IDENTITY_FIELDS)
         and (build_schema.get("fixed_values") or {}).get("source_revision") == revision
         and (build_schema.get("fixed_values") or {}).get("kind")
         == "trailhead_signed_mobile_build_identity"
+        and build_schema.get("native_fingerprint_id_required") is True
+        and build_schema.get("native_fingerprint_id_format") == "canonical_uuid"
+        and build_schema.get("native_fingerprint_hash_required") is True
+        and build_schema.get("native_fingerprint_hash_format")
+        == "lowercase_sha1_hex_40"
+        and "native_fingerprint_sha256_required" not in build_schema
         and isinstance(preview_schema, dict)
         and (preview_schema.get("fixed_values") or {}).get("source_revision") == revision
         and (preview_schema.get("fixed_values") or {}).get("kind")
@@ -577,13 +612,10 @@ def _validated_platform_files(
             f"{platform} preview evidence hash does not match the envelope",
         )
         build = _load_json(paths[build_key])
-        required_build_fields = {
-            "schema_version", "kind", "status", "product_id", "platform",
-            "source_revision", "build_id", "app_version", "build_number",
-            "runtime_version", "channel", "distribution", "signed", "simulator",
-            "eas_project_id", "native_fingerprint_sha256", "build_artifact_sha256",
-        }
-        _require(set(build) == required_build_fields, f"{platform} build identity fields are invalid")
+        _require(
+            set(build) == set(BUILD_IDENTITY_FIELDS),
+            f"{platform} build identity fields are invalid",
+        )
         source = _source_revision(build.get("source_revision"), f"{platform} build source")
         runtime = "native-1.0.12-android.1" if platform == "android" else "native-1.0.12-ios.1"
         build_id = build.get("build_id")
@@ -608,8 +640,11 @@ def _validated_platform_files(
             and build.get("eas_project_id") == "92c016d2-6e63-480e-a483-a6898d7e77d5",
             f"{platform} build identity is not the exact signed preview candidate",
         )
-        native_fingerprint = _safe_sha(
-            build.get("native_fingerprint_sha256"), f"{platform} native fingerprint",
+        native_fingerprint_id = _canonical_uuid(
+            build.get("native_fingerprint_id"), f"{platform} native fingerprint id",
+        )
+        native_fingerprint_hash = _native_fingerprint_hash(
+            build.get("native_fingerprint_hash"), f"{platform} native fingerprint hash",
         )
         build_artifact = _safe_sha(
             build.get("build_artifact_sha256"), f"{platform} signed build artifact",
@@ -706,7 +741,8 @@ def _validated_platform_files(
             "build_id": build_id,
             "build_number": build_number,
             "runtime_version": runtime,
-            "native_fingerprint_sha256": native_fingerprint,
+            "native_fingerprint_id": native_fingerprint_id,
+            "native_fingerprint_hash": native_fingerprint_hash,
             "build_artifact_sha256": build_artifact,
             "preview_completed_at": completed_at,
             "installed_map_bytes": offline["installed_map_bytes"],

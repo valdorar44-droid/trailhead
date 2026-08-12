@@ -643,7 +643,8 @@ def _build_artifact(
                     "schema_version", "kind", "status", "product_id", "platform",
                     "source_revision", "build_id", "app_version", "build_number",
                     "runtime_version", "channel", "distribution", "signed", "simulator",
-                    "eas_project_id", "native_fingerprint_sha256", "build_artifact_sha256",
+                    "eas_project_id", "native_fingerprint_id", "native_fingerprint_hash",
+                    "build_artifact_sha256",
                 ],
                 "fixed_values": {
                     "kind": "trailhead_signed_mobile_build_identity",
@@ -662,7 +663,10 @@ def _build_artifact(
                     "ios": {"runtime_version": IOS_RUNTIME},
                 },
                 "provider_build_id_required": True,
-                "native_fingerprint_sha256_required": True,
+                "native_fingerprint_id_required": True,
+                "native_fingerprint_id_format": "canonical_uuid",
+                "native_fingerprint_hash_required": True,
+                "native_fingerprint_hash_format": "lowercase_sha1_hex_40",
                 "build_artifact_sha256_required": True,
             },
             "private_preview_evidence_record_schema": {

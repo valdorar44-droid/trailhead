@@ -4,6 +4,7 @@ import copy
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import re
 import sqlite3
 
 import pytest
@@ -151,10 +152,16 @@ def _compatibility(tmp_path: Path) -> Path:
             "source_tree": "b" * 40,
             "same_source_commit": True,
             "build_identity_record_schema": {
+                "schema_version": 1,
+                "required_exact_fields": list(marker.BUILD_IDENTITY_FIELDS),
                 "fixed_values": {
                     "source_revision": {"commit": "a" * 40, "tree": "b" * 40},
                     "kind": "trailhead_signed_mobile_build_identity",
-                }
+                },
+                "native_fingerprint_id_required": True,
+                "native_fingerprint_id_format": "canonical_uuid",
+                "native_fingerprint_hash_required": True,
+                "native_fingerprint_hash_format": "lowercase_sha1_hex_40",
             },
             "private_preview_evidence_record_schema": {
                 "fixed_values": {
@@ -208,7 +215,12 @@ def _files(tmp_path: Path) -> dict[str, Path]:
             "signed": True,
             "simulator": False,
             "eas_project_id": "92c016d2-6e63-480e-a483-a6898d7e77d5",
-            "native_fingerprint_sha256": ("5" if platform == "android" else "6") * 64,
+            "native_fingerprint_id": (
+                "11111111-1111-4111-8111-111111111111"
+                if platform == "android"
+                else "22222222-2222-4222-8222-222222222222"
+            ),
+            "native_fingerprint_hash": ("5" if platform == "android" else "6") * 40,
             "build_artifact_sha256": ("7" if platform == "android" else "8") * 64,
         }
         build_key = f"{platform}_build_identity"
@@ -592,6 +604,11 @@ def test_apply_changes_only_three_validation_fields_and_replays(configured: dict
         assert details["platform"] == platform
         assert details["source_commit"] == "a" * 40
         assert details["source_tree"] == "b" * 40
+        assert re.fullmatch(
+            r"[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}",
+            details["native_fingerprint_id"],
+        )
+        assert re.fullmatch(r"[a-f0-9]{40}", details["native_fingerprint_hash"])
     assert receipt["operation"] == "validation_metadata_only_revision_preserving_cas"
     assert receipt["counts"] == marker.EXPECTED_COUNTS
     assert receipt["manifest_sha256"] == MANIFEST_SHA
@@ -862,6 +879,59 @@ def test_private_platform_record_drift_stops_before_database(
         )
 
 
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("native_fingerprint_id", None, "build identity fields"),
+        ("native_fingerprint_id", "NOT-A-UUID", "native fingerprint id"),
+        (
+            "native_fingerprint_id",
+            "1111111-1111-4111-8111-111111111111",
+            "native fingerprint id",
+        ),
+        ("native_fingerprint_hash", None, "build identity fields"),
+        ("native_fingerprint_hash", "g" * 40, "native fingerprint hash"),
+        ("native_fingerprint_hash", "5" * 39, "native fingerprint hash"),
+    ],
+)
+def test_native_fingerprint_identity_is_exact_and_fails_before_database(
+    configured: dict,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: str | None,
+    message: str,
+) -> None:
+    build_path = configured["files"]["android_build_identity"]
+    build = json.loads(build_path.read_text(encoding="utf-8"))
+    if value is None:
+        build.pop(field)
+    else:
+        build[field] = value
+    _write_private_json(build_path, build)
+
+    preview_path = configured["files"]["android_preview_evidence"]
+    preview = json.loads(preview_path.read_text(encoding="utf-8"))
+    preview["build_identity_sha256"] = marker._sha256_path(build_path)
+    _write_private_json(preview_path, preview)
+
+    envelope = copy.deepcopy(configured["evidence"])
+    envelope["platforms"][0]["build_identity_sha256"] = marker._sha256_path(
+        build_path
+    )
+    envelope["platforms"][0]["preview_evidence_sha256"] = marker._sha256_path(
+        preview_path
+    )
+    _write_private_json(configured["evidence_path"], envelope)
+    monkeypatch.setattr(
+        marker.store, "_conn", lambda: pytest.fail("bad fingerprint reached database"),
+    )
+    with pytest.raises(marker.DualPlatformPreviewMarkerError, match=message):
+        marker.apply_private(
+            configured["evidence_path"], configured["receipt"], configured["files"],
+            IDEMPOTENCY_KEY,
+        )
+
+
 def test_compatibility_freeze_must_bind_exact_current_marker_source(
     configured: dict, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -874,6 +944,27 @@ def test_compatibility_freeze_must_bind_exact_current_marker_source(
         marker.store, "_conn", lambda: pytest.fail("drifted compatibility reached database"),
     )
     with pytest.raises(marker.DualPlatformPreviewMarkerError, match="Source changed"):
+        marker.apply_private(
+            configured["evidence_path"], configured["receipt"], configured["files"],
+            IDEMPOTENCY_KEY,
+        )
+
+
+def test_compatibility_freeze_must_require_truthful_fingerprint_fields(
+    configured: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    compatibility = json.loads(configured["compatibility"].read_text(encoding="utf-8"))
+    schema = compatibility["required_future_builds"]["build_identity_record_schema"]
+    schema["required_exact_fields"][-2] = "native_fingerprint_sha256"
+    schema["native_fingerprint_hash_format"] = "lowercase_sha256_hex_64"
+    _write_private_json(configured["compatibility"], compatibility)
+    monkeypatch.setattr(
+        marker.store, "_conn", lambda: pytest.fail("false fingerprint schema reached database"),
+    )
+    with pytest.raises(
+        marker.DualPlatformPreviewMarkerError,
+        match="Compatibility private evidence schemas drifted",
+    ):
         marker.apply_private(
             configured["evidence_path"], configured["receipt"], configured["files"],
             IDEMPOTENCY_KEY,

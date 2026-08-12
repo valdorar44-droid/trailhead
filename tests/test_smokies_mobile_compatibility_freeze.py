@@ -20,9 +20,11 @@ sys.modules[SPEC.name] = builder
 SPEC.loader.exec_module(builder)
 
 
-def test_default_dry_run_is_zero_effect_and_artifact_absent(
+def test_default_dry_run_is_zero_effect_and_never_mutates_artifact(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    output = ROOT / builder.OUTPUT_PATH
+    before = output.read_bytes() if output.exists() else None
     monkeypatch.setattr(
         builder, "_git", lambda *_args, **_kwargs: pytest.fail("dry run accessed Git"),
     )
@@ -37,7 +39,8 @@ def test_default_dry_run_is_zero_effect_and_artifact_absent(
     assert result["device_accessed"] is False
     assert result["publication_performed"] is False
     assert result["output_present_required_now"] is False
-    assert not (ROOT / builder.OUTPUT_PATH).exists()
+    after = output.read_bytes() if output.exists() else None
+    assert after == before
 
 
 def test_source_commit_and_tree_are_explicit_and_checkpoint_m_ancestry_is_required(

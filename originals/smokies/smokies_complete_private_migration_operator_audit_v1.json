@@ -1,14 +1,30 @@
 {
   "audit_contract_binding": {
-    "byte_count": 2045,
+    "byte_count": 3793,
     "path": "originals/smokies/smokies_complete_private_migration_operator_audit_contract_v1.json",
-    "sha256": "8bd1277e3032e8e1f56e13631718c2809dfe04898a8730b669d746139ffa9e91"
+    "sha256": "95e7c73a7468bc797d48fbe03c73bc914dcceae53e56d894d03b1469f867c142"
   },
   "bindings": {
+    "complete_private_candidate_builder": {
+      "byte_count": 62330,
+      "path": "scripts/build_smokies_complete_private_candidate.py",
+      "sha256": "7b287d30a661841f4476b3c32dfdfc2165637048fc9c5aef5af0bfbcaf97d1a1"
+    },
+    "complete_validation_dispatcher": {
+      "byte_count": 52625,
+      "path": "db/originals_complete_validation.py",
+      "sha256": "6e68f243a0ee1776cfdc9dfa5b1ebb393c18cdffb01a97071bcc14fa3d5104c6"
+    },
+    "complete_validator_source_closure": {
+      "framing": "for each repo-relative path sorted by POSIX path: utf8(path) + NUL + ascii(decimal_byte_count) + NUL + raw_bytes + NUL",
+      "path_count": 174,
+      "schema_version": 1,
+      "sha256": "b01033dcdf155370688c5fd4ce1e9264d670505b1958b7135b1724e39d52235f"
+    },
     "db_store": {
-      "byte_count": 1092550,
+      "byte_count": 1093381,
       "path": "db/store.py",
-      "sha256": "67d25b92ada63d172eca69d0fe556eaf82d04e726dd6fd53dc31097c1c519b4f"
+      "sha256": "3f1468b4b20f1a4518e194f1fd82ba943d6a5e03d2f03c09d73370819d98c97b"
     },
     "manifest_v3_normalizer": {
       "byte_count": 46624,
@@ -16,24 +32,34 @@
       "sha256": "850df80086d336a3a3652d73a1e0eda403e89f06b241c2a710bcb6cbf38e53de"
     },
     "migration_operator": {
-      "byte_count": 126542,
+      "byte_count": 188287,
       "path": "scripts/migrate_smokies_complete_private.py",
-      "sha256": "d3f4b658411a9cceb348571e0a6be9ae557b7f2c1de7c6a7779fdf51b4c7c5b8"
+      "sha256": "505f8b769dfe61e8b15af0bf52630de616f2987a9eb2ab283561891c804036d9"
     },
     "migration_operator_tests": {
-      "byte_count": 73024,
+      "byte_count": 141423,
       "path": "tests/test_smokies_complete_private_migration.py",
-      "sha256": "4a84cf1b8b8063bc63e5840c8e687e2799046ff2db215d9b0db1665b38ed7777"
+      "sha256": "3f11d35d285e4ea79fdcb4dfb73428a94e5e0bdb34bd6b20559b030d7d21bcba"
     },
     "migration_packet": {
-      "byte_count": 5803004,
+      "byte_count": 5838967,
       "path": "originals/smokies/smokies_complete_private_migration_packet_v1.json",
-      "sha256": "d6cd8545ee68b3a93681c0e8ba4c3ee3bacd65ffd442c92dbc3e385585f4eec8"
+      "sha256": "d2f7ca0b587e67c2f8e9164a4d8f66663e6ac1f1a509af50989e04dcf84f4920"
+    },
+    "mobile_long_form_evidence_registry": {
+      "byte_count": 7676,
+      "path": "mobile/lib/originals/longFormValidationEvidence.ts",
+      "sha256": "c6d5f3ea1b358b12cb5b01ce18c93891540e9504fb9606fbd8f3bbc704671c3a"
+    },
+    "mobile_long_form_validator": {
+      "byte_count": 45314,
+      "path": "mobile/scripts/validate-original-long-form.ts",
+      "sha256": "e632c9637428f21c93aabaa4e7ffc7439809a4fc83646dd0cc1d2b45785b7482"
     },
     "packet_builder": {
-      "byte_count": 42695,
+      "byte_count": 51009,
       "path": "scripts/build_smokies_complete_private_migration.py",
-      "sha256": "e61e3955107380814d2259944620423a5fda81dba25e9f88e0c9a2a87a31d232"
+      "sha256": "e912ab62b0df8513bc57cb5010f6adbd3a4f0d61786b4be4c7e8baabebc2101d"
     },
     "roaring_fork_import_operator": {
       "byte_count": 49032,
@@ -41,32 +67,66 @@
       "sha256": "6cac2f3841cf3af12eb48aaba6e2a7108d1aafddbc7b5a4762a194189d6c5bce"
     },
     "source_commit_and_tree": {
-      "commit": "a4ef35366eaecdb762e316036a54e47436c71b1a",
-      "tree": "9d45a61f6dad1266497cb6564a7334a4255da6b5"
+      "commit": "4d24fe44a02bbf957c8200399612151f84a1e83a",
+      "tree": "9393a7a0049f8c0f4eef60d18ca5579d9f9aeef4"
     },
     "sqlite_backup_operator": {
       "byte_count": 3542,
       "path": "scripts/backup_sqlite.py",
       "sha256": "85491c0e16b84a5ea9c42ed1f669521b5d9b10628a6bedbb23ae96790d566bcf"
+    },
+    "v3_release_guard_audit": {
+      "byte_count": 6880,
+      "p0_count": 0,
+      "p1_count": 0,
+      "path": "originals/smokies/smokies_v3_release_guard_audit_v1.json",
+      "runtime_source_commit_and_tree": {
+        "commit": "4d24fe44a02bbf957c8200399612151f84a1e83a",
+        "tree": "9393a7a0049f8c0f4eef60d18ca5579d9f9aeef4"
+      },
+      "sha256": "bf401385db767549063cb626b95693253fc6626d146ec109b0ae31a48777cbf8",
+      "status": "independent_audit_passed"
     }
   },
   "checks": {
+    "active_filesystem_destructive_call_scan": {
+      "active_calls": 0,
+      "status": "passed"
+    },
+    "active_network_call_scan": {
+      "active_calls": 0,
+      "status": "passed"
+    },
     "deterministic_packet_builder": {
+      "consecutive_checks_passed": 2,
       "status": "passed"
     },
     "exact_eight_suite_regression": {
-      "passed": 144,
+      "passed": 181,
       "skipped": 2,
       "status": "passed",
       "subtests_passed": 27
     },
     "focused_migration_regression": {
-      "passed": 49,
-      "status": "passed"
+      "collected": 86,
+      "passed": 86,
+      "status": "passed_within_exact_eight_suite"
+    },
+    "operator_locked_dry_run": {
+      "database_accessed": false,
+      "external_media_accessed": false,
+      "network_accessed": false,
+      "provider_accessed": false,
+      "status": "dry_run_verified_live_apply_locked",
+      "writes_performed": false
     },
     "privacy_and_absolute_path_scan": {
       "serialized_absolute_filesystem_paths": 0,
       "serialized_secrets": 0,
+      "status": "passed"
+    },
+    "transitive_source_closure_recomputation": {
+      "path_count": 174,
       "status": "passed"
     },
     "whitespace_and_syntax": {

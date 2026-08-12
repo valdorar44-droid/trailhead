@@ -12,8 +12,11 @@ from __future__ import annotations
 import argparse
 import copy
 from contextlib import contextmanager
+from contextvars import ContextVar
+import ctypes
 from dataclasses import dataclass
 from datetime import datetime, timezone
+import errno
 import fcntl
 import hashlib
 import json
@@ -25,13 +28,17 @@ import sqlite3
 import stat
 import sys
 import time
-import uuid
 from typing import Any, Iterator
 
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+
+_PINNED_DIRECTORIES: ContextVar[
+    dict[str, tuple[int, tuple[int, int]]]
+] = ContextVar("smokies_complete_private_pinned_directories", default={})
 
 from db import store  # noqa: E402
 from scripts import backup_sqlite  # noqa: E402
@@ -94,6 +101,41 @@ def _inode_identity(path: Path) -> tuple[int, int]:
     return int(info.st_dev), int(info.st_ino)
 
 
+def _filesystem_identity_sha256(identity: tuple[int, int]) -> str:
+    """Bind a runtime inode without serializing raw device or inode values."""
+    return _canonical_sha256(
+        {"st_dev": int(identity[0]), "st_ino": int(identity[1])}
+    )
+
+
+def _assert_pinned_regular_file_path(
+    path: Path,
+    descriptor: int,
+    expected_identity: tuple[int, int],
+    *,
+    label: str,
+    commit_uncertain: bool = False,
+) -> None:
+    try:
+        held = os.fstat(descriptor)
+        lexical = path.lstat()
+    except OSError as exc:
+        error_type = ReportCommitUncertainError if commit_uncertain else FullBundleMigrationError
+        raise error_type(f"{label} identity is unavailable") from exc
+    safe = (
+        stat.S_ISREG(held.st_mode)
+        and held.st_nlink == 1
+        and stat.S_ISREG(lexical.st_mode)
+        and not stat.S_ISLNK(lexical.st_mode)
+        and lexical.st_nlink == 1
+        and (int(held.st_dev), int(held.st_ino)) == expected_identity
+        and (int(lexical.st_dev), int(lexical.st_ino)) == expected_identity
+    )
+    if not safe:
+        error_type = ReportCommitUncertainError if commit_uncertain else FullBundleMigrationError
+        raise error_type(f"{label} identity changed")
+
+
 def _read_json(path: Path, label: str) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
@@ -121,6 +163,824 @@ def _lstat_or_none(path: Path) -> os.stat_result | None:
         raise FullBundleMigrationError("filesystem identity is unavailable") from exc
 
 
+def _pretty_json_bytes(value: Any) -> bytes:
+    return (
+        json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    ).encode("utf-8")
+
+
+def _assert_anchored_parent(
+    path: Path, parent_descriptor: int, expected_identity: tuple[int, int], label: str
+) -> None:
+    try:
+        descriptor_info = os.fstat(parent_descriptor)
+        lexical_info = path.parent.lstat()
+    except OSError as exc:
+        raise FullBundleMigrationError(f"{label} parent identity is unavailable") from exc
+    if (
+        not stat.S_ISDIR(descriptor_info.st_mode)
+        or stat.S_ISLNK(lexical_info.st_mode)
+        or not stat.S_ISDIR(lexical_info.st_mode)
+        or (int(descriptor_info.st_dev), int(descriptor_info.st_ino))
+        != expected_identity
+        or (int(lexical_info.st_dev), int(lexical_info.st_ino))
+        != expected_identity
+    ):
+        raise FullBundleMigrationError(f"{label} parent identity changed")
+
+
+@contextmanager
+def _pin_directory(
+    directory: Path, label: str
+) -> Iterator[tuple[int, tuple[int, int]]]:
+    if not directory.is_absolute():
+        raise FullBundleMigrationError(f"{label} must be absolute")
+    flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(directory, flags)
+    except OSError as exc:
+        raise FullBundleMigrationError(f"{label} is unsafe") from exc
+    try:
+        info = os.fstat(descriptor)
+        lexical = directory.lstat()
+        identity = (int(info.st_dev), int(info.st_ino))
+        if (
+            not stat.S_ISDIR(info.st_mode)
+            or stat.S_ISLNK(lexical.st_mode)
+            or not stat.S_ISDIR(lexical.st_mode)
+            or (int(lexical.st_dev), int(lexical.st_ino)) != identity
+        ):
+            raise FullBundleMigrationError(f"{label} identity changed")
+        current = dict(_PINNED_DIRECTORIES.get())
+        key = str(directory)
+        if key in current:
+            raise FullBundleMigrationError(f"{label} is already pinned")
+        current[key] = (descriptor, identity)
+        token = _PINNED_DIRECTORIES.set(current)
+        try:
+            yield descriptor, identity
+            final = directory.lstat()
+            if (
+                stat.S_ISLNK(final.st_mode)
+                or not stat.S_ISDIR(final.st_mode)
+                or (int(final.st_dev), int(final.st_ino)) != identity
+                or (int(os.fstat(descriptor).st_dev), int(os.fstat(descriptor).st_ino))
+                != identity
+            ):
+                raise ReportCommitUncertainError(
+                    f"{label} retargeted during the migration"
+                )
+        finally:
+            _PINNED_DIRECTORIES.reset(token)
+    finally:
+        os.close(descriptor)
+
+
+@contextmanager
+def _pin_regular_file(
+    path: Path, label: str
+) -> Iterator[tuple[int, tuple[int, int]]]:
+    flags = os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise FullBundleMigrationError(f"{label} is unsafe") from exc
+    try:
+        info = os.fstat(descriptor)
+        lexical = path.lstat()
+        identity = (int(info.st_dev), int(info.st_ino))
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or info.st_nlink != 1
+            or stat.S_ISLNK(lexical.st_mode)
+            or not stat.S_ISREG(lexical.st_mode)
+            or (int(lexical.st_dev), int(lexical.st_ino)) != identity
+        ):
+            raise FullBundleMigrationError(f"{label} identity changed")
+        yield descriptor, identity
+        final = path.lstat()
+        held = os.fstat(descriptor)
+        if (
+            stat.S_ISLNK(final.st_mode)
+            or not stat.S_ISREG(final.st_mode)
+            or (int(final.st_dev), int(final.st_ino)) != identity
+            or (int(held.st_dev), int(held.st_ino)) != identity
+        ):
+            raise ReportCommitUncertainError(
+                f"{label} retargeted during the migration"
+            )
+    finally:
+        os.close(descriptor)
+
+
+@contextmanager
+def _open_anchored_parent(
+    path: Path, label: str
+) -> Iterator[tuple[int, tuple[int, int]]]:
+    if not path.is_absolute():
+        raise FullBundleMigrationError(f"{label} path must be absolute")
+    pinned = _PINNED_DIRECTORIES.get().get(str(path.parent))
+    if pinned is not None:
+        descriptor = os.dup(pinned[0])
+    else:
+        flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            descriptor = os.open(path.parent, flags)
+        except OSError as exc:
+            raise FullBundleMigrationError(f"{label} parent is unsafe") from exc
+    try:
+        info = os.fstat(descriptor)
+        identity = (int(info.st_dev), int(info.st_ino))
+        _assert_anchored_parent(path, descriptor, identity, label)
+        yield descriptor, identity
+        _assert_anchored_parent(path, descriptor, identity, label)
+    finally:
+        os.close(descriptor)
+
+
+def _read_regular_at(
+    parent_descriptor: int, name: str, *, label: str
+) -> tuple[bytes, os.stat_result]:
+    try:
+        first = os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
+    except OSError as exc:
+        raise FullBundleMigrationError(f"{label} is unavailable") from exc
+    parent_info = os.fstat(parent_descriptor)
+    if (
+        stat.S_ISLNK(first.st_mode)
+        or not stat.S_ISREG(first.st_mode)
+        or first.st_nlink != 1
+        or stat.S_IMODE(first.st_mode) != 0o600
+        or first.st_uid != os.geteuid()
+        or first.st_dev != parent_info.st_dev
+    ):
+        raise FullBundleMigrationError(f"{label} is not an owned immutable file")
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(name, flags, dir_fd=parent_descriptor)
+    except OSError as exc:
+        raise FullBundleMigrationError(f"{label} raced before open") from exc
+    try:
+        opened = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or opened.st_nlink != 1
+            or stat.S_IMODE(opened.st_mode) != 0o600
+            or opened.st_uid != os.geteuid()
+            or (opened.st_dev, opened.st_ino) != (first.st_dev, first.st_ino)
+        ):
+            raise FullBundleMigrationError(f"{label} identity raced")
+        with os.fdopen(descriptor, "rb", closefd=False) as handle:
+            payload = handle.read()
+    finally:
+        os.close(descriptor)
+    current = os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
+    if (
+        current.st_nlink != 1
+        or (current.st_dev, current.st_ino) != (first.st_dev, first.st_ino)
+    ):
+        raise FullBundleMigrationError(f"{label} identity raced after read")
+    return payload, current
+
+
+def _lstat_at_or_none(
+    path: Path,
+    parent_descriptor: int,
+    parent_identity: tuple[int, int],
+    *,
+    label: str,
+) -> os.stat_result | None:
+    _assert_anchored_parent(path, parent_descriptor, parent_identity, label)
+    try:
+        info = os.stat(
+            path.name, dir_fd=parent_descriptor, follow_symlinks=False
+        )
+    except FileNotFoundError:
+        info = None
+    except OSError as exc:
+        raise FullBundleMigrationError(f"{label} identity is unavailable") from exc
+    _assert_anchored_parent(path, parent_descriptor, parent_identity, label)
+    return info
+
+
+def _read_json_at(
+    path: Path,
+    parent_descriptor: int,
+    parent_identity: tuple[int, int],
+    *,
+    label: str,
+) -> dict[str, Any]:
+    _assert_anchored_parent(path, parent_descriptor, parent_identity, label)
+    payload, _info = _read_regular_at(
+        parent_descriptor, path.name, label=label
+    )
+    value = _decode_canonical_json(payload, label=label)
+    _assert_anchored_parent(path, parent_descriptor, parent_identity, label)
+    return value
+
+
+def _link_unnamed_file_at(
+    source_descriptor: int,
+    parent_descriptor: int,
+    destination_name: str,
+    *,
+    label: str,
+) -> str:
+    """Install an O_TMPFILE inode with Linux's two documented linkat forms."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    linkat = getattr(libc, "linkat", None)
+    if linkat is None:
+        raise FullBundleMigrationError(f"{label} linkat is unavailable")
+    linkat.argtypes = [
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_int,
+        ctypes.c_char_p,
+        ctypes.c_int,
+    ]
+    linkat.restype = ctypes.c_int
+    destination = os.fsencode(destination_name)
+    ctypes.set_errno(0)
+    if linkat(source_descriptor, b"", parent_descriptor, destination, 0x1000) == 0:
+        return "linkat_at_empty_path"
+    direct_error = ctypes.get_errno()
+    if direct_error == errno.EEXIST:
+        raise FileExistsError(destination_name)
+    if direct_error not in {
+        errno.EACCES,
+        errno.EINVAL,
+        errno.ENOENT,
+        errno.ENOSYS,
+        errno.EOPNOTSUPP,
+        errno.EPERM,
+    }:
+        raise FullBundleMigrationError(
+            f"{label} direct anonymous link failed"
+        ) from OSError(direct_error, os.strerror(direct_error))
+    proc_source = f"/proc/self/fd/{source_descriptor}"
+    try:
+        source_info = os.fstat(source_descriptor)
+        proc_info = os.stat(proc_source, follow_symlinks=True)
+    except OSError as exc:
+        raise FullBundleMigrationError(
+            f"{label} procfd anonymous link source is unavailable"
+        ) from exc
+    if (source_info.st_dev, source_info.st_ino) != (proc_info.st_dev, proc_info.st_ino):
+        raise FullBundleMigrationError(f"{label} procfd anonymous link source drifted")
+    ctypes.set_errno(0)
+    if linkat(-100, os.fsencode(proc_source), parent_descriptor, destination, 0x400) == 0:
+        return "proc_self_fd_linkat_symlink_follow"
+    fallback_error = ctypes.get_errno()
+    if fallback_error == errno.EEXIST:
+        raise FileExistsError(destination_name)
+    raise FullBundleMigrationError(
+        f"{label} anonymous create-only linking is unsupported"
+    ) from OSError(fallback_error, os.strerror(fallback_error))
+
+
+def _install_immutable_bytes_at(
+    path: Path,
+    payload: bytes,
+    *,
+    label: str,
+    parent_descriptor: int,
+    parent_identity: tuple[int, int],
+) -> None:
+    """Create one nlink=1 immutable file through one already pinned parent."""
+    _assert_anchored_parent(path, parent_descriptor, parent_identity, label)
+    try:
+        existing, _info = _read_regular_at(
+            parent_descriptor, path.name, label=f"existing {label}"
+        )
+    except FullBundleMigrationError:
+        try:
+            os.stat(
+                path.name,
+                dir_fd=parent_descriptor,
+                follow_symlinks=False,
+            )
+        except FileNotFoundError:
+            existing = None
+        else:
+            raise
+    if existing is not None:
+        if existing != payload:
+            raise FullBundleMigrationError(
+                f"refusing to replace different immutable {label}"
+            )
+        try:
+            os.fsync(parent_descriptor)
+        except OSError as exc:
+            raise ReportCommitUncertainError(
+                f"existing {label} directory sync was not confirmed"
+            ) from exc
+        _assert_anchored_parent(path, parent_descriptor, parent_identity, label)
+        return
+    anonymous_flag = getattr(os, "O_TMPFILE", 0)
+    if not anonymous_flag:
+        raise FullBundleMigrationError(f"{label} O_TMPFILE is unavailable")
+    try:
+        descriptor = os.open(
+            ".",
+            os.O_RDWR | anonymous_flag | getattr(os, "O_CLOEXEC", 0),
+            0o600,
+            dir_fd=parent_descriptor,
+        )
+    except OSError as exc:
+        raise FullBundleMigrationError(f"{label} O_TMPFILE is unsupported") from exc
+    try:
+        os.fchmod(descriptor, 0o600)
+        offset = 0
+        while offset < len(payload):
+            written = os.write(descriptor, payload[offset:])
+            if written <= 0:
+                raise FullBundleMigrationError(f"{label} anonymous write failed")
+            offset += written
+        os.fsync(descriptor)
+        anonymous_info = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(anonymous_info.st_mode)
+            or anonymous_info.st_nlink != 0
+            or stat.S_IMODE(anonymous_info.st_mode) != 0o600
+            or anonymous_info.st_uid != os.geteuid()
+            or anonymous_info.st_dev != parent_identity[0]
+        ):
+            raise FullBundleMigrationError(f"{label} anonymous inode is unsafe")
+        try:
+            _link_unnamed_file_at(
+                descriptor,
+                parent_descriptor,
+                path.name,
+                label=label,
+            )
+        except FileExistsError as exc:
+            raise FullBundleMigrationError(
+                f"{label} raced at create-only installation"
+            ) from exc
+        installed_payload, installed_info = _read_regular_at(
+            parent_descriptor, path.name, label=f"installed {label}"
+        )
+        if (
+            installed_payload != payload
+            or (installed_info.st_dev, installed_info.st_ino)
+            != (anonymous_info.st_dev, anonymous_info.st_ino)
+            or installed_info.st_nlink != 1
+        ):
+            raise ReportCommitUncertainError(
+                f"{label} installation identity was not confirmed"
+            )
+        try:
+            os.fsync(parent_descriptor)
+        except OSError as exc:
+            raise ReportCommitUncertainError(
+                f"{label} installation sync was not confirmed"
+            ) from exc
+        _assert_anchored_parent(path, parent_descriptor, parent_identity, label)
+    finally:
+        os.close(descriptor)
+
+
+def _install_immutable_bytes(path: Path, payload: bytes, *, label: str) -> None:
+    """Create one nlink=1 immutable file with no named temp or overwrite path."""
+    with _open_anchored_parent(path, label) as (
+        parent_descriptor,
+        parent_identity,
+    ):
+        _install_immutable_bytes_at(
+            path,
+            payload,
+            label=label,
+            parent_descriptor=parent_descriptor,
+            parent_identity=parent_identity,
+        )
+
+
+def _decode_canonical_json(payload: bytes, *, label: str) -> dict[str, Any]:
+    try:
+        value = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise FullBundleMigrationError(f"{label} is invalid JSON") from exc
+    if not isinstance(value, dict) or _pretty_json_bytes(value) != payload:
+        raise FullBundleMigrationError(f"{label} is not canonical JSON")
+    return value
+
+
+JOURNAL_CHAIN_FRAMING = "trailhead-smokies-private-journal-chain-v1"
+
+
+def _journal_inventory_digest(
+    records: list[tuple[str, int, str, bytes]],
+) -> tuple[str, int]:
+    digest = hashlib.sha256()
+    digest.update(JOURNAL_CHAIN_FRAMING.encode("ascii") + b"\x00")
+    for kind, sequence, name, payload in records:
+        header = _canonical_bytes(
+            {"kind": kind, "sequence": sequence, "name": name, "bytes": len(payload)}
+        )
+        digest.update(len(header).to_bytes(8, "big"))
+        digest.update(header)
+        digest.update(len(payload).to_bytes(8, "big"))
+        digest.update(payload)
+    return digest.hexdigest(), len(records)
+
+
+def _journal_terminal_document(
+    journal_path: Path,
+    *,
+    sequence: int,
+    head_sha256: str,
+    head_document: dict[str, Any],
+    ancestry_sha256: str,
+    ancestry_entry_count: int,
+) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "kind": "original_full_bundle_private_migration_journal_terminal",
+        "journal_file_name": journal_path.name,
+        "sequence": sequence,
+        "head_sha256": head_sha256,
+        "chain_framing": JOURNAL_CHAIN_FRAMING,
+        "ancestry_sha256": ancestry_sha256,
+        "ancestry_entry_count": ancestry_entry_count,
+        "packet_sha256": head_document.get("packet_sha256"),
+        "database_inode_identity_sha256": head_document.get(
+            "database_inode_identity_sha256"
+        ),
+        "predecessor_history_sha256": head_document.get(
+            "predecessor_history_sha256"
+        ),
+        "state": head_document.get("state"),
+        "terminal_status": (
+            "committed_target"
+            if head_document.get("state") == "database_committed"
+            else "predecessor_recovered"
+        ),
+    }
+
+
+def _assert_journal_document_shape(document: dict[str, Any]) -> None:
+    expected_keys = {
+        "schema_version",
+        "packet_id",
+        "packet_sha256",
+        "target_id",
+        "database_path_sha256",
+        "database_inode_identity_sha256",
+        "asset_root_path_sha256",
+        "narration_root_path_sha256",
+        "artwork_root_path_sha256",
+        "backup_manifest_sha256",
+        "operator_audit_sha256",
+        "predecessor_history_sha256",
+        "expected_before_revision",
+        "expected_after_revision",
+        "legacy_forbidden_staging_relative_path",
+        "state",
+        "destinations",
+    }
+    if set(document) != expected_keys or document.get("schema_version") != 1:
+        raise FullBundleMigrationError("migration journal document shape drifted")
+    if document.get("packet_id") != packet_builder.PACKET_ID:
+        raise FullBundleMigrationError("migration journal packet id drifted")
+    for key in (
+        "packet_sha256",
+        "database_path_sha256",
+        "database_inode_identity_sha256",
+        "asset_root_path_sha256",
+        "narration_root_path_sha256",
+        "artwork_root_path_sha256",
+        "backup_manifest_sha256",
+        "operator_audit_sha256",
+        "predecessor_history_sha256",
+    ):
+        if not isinstance(document.get(key), str) or not re.fullmatch(
+            r"[a-f0-9]{64}", document[key]
+        ):
+            raise FullBundleMigrationError(f"migration journal {key} is invalid")
+    if (
+        not isinstance(document.get("target_id"), str)
+        or not document["target_id"]
+        or document.get("legacy_forbidden_staging_relative_path")
+        != STAGING_DIR_NAME
+        or document.get("state")
+        not in {"planned", "files_promoted", "database_committed"}
+    ):
+        raise FullBundleMigrationError("migration journal fixed fields are invalid")
+    for key in ("expected_before_revision", "expected_after_revision"):
+        value = document.get(key)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+            raise FullBundleMigrationError(f"migration journal {key} is invalid")
+    destinations = document.get("destinations")
+    if not isinstance(destinations, list) or len(destinations) != 78:
+        raise FullBundleMigrationError("migration journal destination count drifted")
+    row_keys = {
+        "asset_id",
+        "relative_path",
+        "sha256",
+        "bytes",
+        "existed_before",
+        "ownership_state",
+        "preexisting_st_dev",
+        "preexisting_st_ino",
+        "operator_created_st_dev",
+        "operator_created_st_ino",
+    }
+    asset_ids: set[str] = set()
+    for row in destinations:
+        if not isinstance(row, dict) or set(row) != row_keys:
+            raise FullBundleMigrationError("migration journal destination shape drifted")
+        asset_id = row.get("asset_id")
+        relative_path = row.get("relative_path")
+        sha256 = row.get("sha256")
+        byte_count = row.get("bytes")
+        if (
+            not isinstance(asset_id, str)
+            or not re.fullmatch(r"[a-z0-9][a-z0-9_-]{1,119}", asset_id)
+            or asset_id in asset_ids
+            or not isinstance(relative_path, str)
+            or Path(relative_path).is_absolute()
+            or ".." in Path(relative_path).parts
+            or not isinstance(sha256, str)
+            or not re.fullmatch(r"[a-f0-9]{64}", sha256)
+            or isinstance(byte_count, bool)
+            or not isinstance(byte_count, int)
+            or byte_count < 1
+            or not isinstance(row.get("existed_before"), bool)
+        ):
+            raise FullBundleMigrationError("migration journal destination is invalid")
+        asset_ids.add(asset_id)
+        ownership = row.get("ownership_state")
+        preexisting = (row.get("preexisting_st_dev"), row.get("preexisting_st_ino"))
+        created = (
+            row.get("operator_created_st_dev"),
+            row.get("operator_created_st_ino"),
+        )
+        valid_pair = lambda pair: all(
+            isinstance(value, int) and not isinstance(value, bool) and value >= 0
+            for value in pair
+        )
+        if ownership == "preexisting":
+            valid = row["existed_before"] and valid_pair(preexisting) and created == (None, None)
+        elif ownership == "operator_created":
+            valid = not row["existed_before"] and preexisting == (None, None) and valid_pair(created)
+        elif ownership in {
+            "unclaimed",
+            "raced_exact",
+            "external_collision",
+            "external_absent",
+        }:
+            valid = not row["existed_before"] and preexisting == (None, None) and created == (None, None)
+        else:
+            valid = False
+        if not valid:
+            raise FullBundleMigrationError("migration journal ownership proof is invalid")
+
+
+def _assert_journal_transition(
+    prior: dict[str, Any], current: dict[str, Any], *, prior_was_terminal: bool
+) -> None:
+    _assert_journal_document_shape(prior)
+    _assert_journal_document_shape(current)
+    if prior.get("state") == "database_committed":
+        raise FullBundleMigrationError(
+            "migration journal cannot transition after a committed target"
+        )
+    immutable_top = set(prior) - {"state", "destinations"}
+    if prior_was_terminal:
+        immutable_top.remove("backup_manifest_sha256")
+    for key in immutable_top:
+        if current.get(key) != prior.get(key):
+            raise FullBundleMigrationError(
+                f"migration journal transition changed immutable field {key}"
+            )
+    prior_rows = prior["destinations"]
+    current_rows = current["destinations"]
+    static_row_fields = ("asset_id", "relative_path", "sha256", "bytes")
+    for prior_row, current_row in zip(prior_rows, current_rows, strict=True):
+        if any(current_row[key] != prior_row[key] for key in static_row_fields):
+            raise FullBundleMigrationError(
+                "migration journal transition changed destination identity"
+            )
+    if prior_was_terminal:
+        if current.get("state") != "planned":
+            raise FullBundleMigrationError(
+                "migration journal restart must begin in planned state"
+            )
+        for row in current_rows:
+            if row["existed_before"]:
+                valid = row["ownership_state"] == "preexisting"
+            else:
+                valid = row["ownership_state"] == "unclaimed"
+            if not valid:
+                raise FullBundleMigrationError(
+                    "migration journal restart presence snapshot is invalid"
+                )
+        return
+    allowed_states = {
+        "planned": {"planned", "files_promoted"},
+        "files_promoted": {"files_promoted", "database_committed"},
+    }
+    if current["state"] not in allowed_states[prior["state"]]:
+        raise FullBundleMigrationError("migration journal state transition is invalid")
+    changed_rows = [
+        (before, after)
+        for before, after in zip(prior_rows, current_rows, strict=True)
+        if before != after
+    ]
+    if current["state"] != prior["state"]:
+        if changed_rows:
+            raise FullBundleMigrationError(
+                "migration journal state and ownership changed together"
+            )
+        return
+    if len(changed_rows) != 1:
+        raise FullBundleMigrationError(
+            "migration journal ownership transition must change one row"
+        )
+    before, after = changed_rows[0]
+    allowed_ownership = {
+        "unclaimed": {
+            "operator_created",
+            "raced_exact",
+            "external_collision",
+            "external_absent",
+        },
+        "operator_created": {
+            "raced_exact",
+            "external_collision",
+            "external_absent",
+        },
+        "raced_exact": {"external_collision", "external_absent"},
+        "external_collision": {"raced_exact", "external_absent"},
+        "external_absent": {"raced_exact", "external_collision"},
+    }
+    if after["ownership_state"] not in allowed_ownership.get(
+        before["ownership_state"], set()
+    ):
+        raise FullBundleMigrationError(
+            "migration journal ownership transition is invalid"
+        )
+
+
+def _load_journal_chain(journal_path: Path) -> dict[str, Any] | None:
+    """Read the retained base/transition/terminal chain under one dirfd."""
+    with _open_anchored_parent(journal_path, "migration journal") as (
+        parent_descriptor,
+        _parent_identity,
+    ):
+        names = sorted(os.listdir(parent_descriptor))
+        prefix = journal_path.name + "."
+        related = [name for name in names if name.startswith(prefix)]
+        base_present = journal_path.name in names
+        if not base_present:
+            if related:
+                raise FullBundleMigrationError(
+                    "orphan migration journal chain entries exist without a base"
+                )
+            return None
+        base_payload, _base_info = _read_regular_at(
+            parent_descriptor, journal_path.name, label="migration journal base"
+        )
+        base_document = _decode_canonical_json(
+            base_payload, label="migration journal base"
+        )
+        _assert_journal_document_shape(base_document)
+        transition_pattern = re.compile(
+            rf"{re.escape(journal_path.name)}\.transition-"
+            rf"([0-9]{{6}})-([a-f0-9]{{64}})-([a-f0-9]{{64}})\.json\Z"
+        )
+        terminal_pattern = re.compile(
+            rf"{re.escape(journal_path.name)}\.terminal-"
+            rf"([0-9]{{6}})-([a-f0-9]{{64}})\.json\Z"
+        )
+        transitions: dict[int, tuple[str, str, str]] = {}
+        terminals: dict[int, tuple[str, str]] = {}
+        for name in related:
+            transition_match = transition_pattern.fullmatch(name)
+            terminal_match = terminal_pattern.fullmatch(name)
+            if transition_match:
+                sequence = int(transition_match.group(1))
+                if sequence == 0 or sequence in transitions:
+                    raise FullBundleMigrationError(
+                        "migration journal transition sequence is duplicated"
+                    )
+                transitions[sequence] = (
+                    name,
+                    transition_match.group(2),
+                    transition_match.group(3),
+                )
+            elif terminal_match:
+                sequence = int(terminal_match.group(1))
+                if sequence in terminals:
+                    raise FullBundleMigrationError(
+                        "migration journal terminal sequence is duplicated"
+                    )
+                terminals[sequence] = (name, terminal_match.group(2))
+            else:
+                raise FullBundleMigrationError(
+                    "migration journal chain contains an unknown entry"
+                )
+        if transitions and sorted(transitions) != list(
+            range(1, max(transitions) + 1)
+        ):
+            raise FullBundleMigrationError("migration journal transition chain has a gap")
+        documents: dict[int, dict[str, Any]] = {0: base_document}
+        payloads: dict[int, bytes] = {0: base_payload}
+        hashes: dict[int, str] = {0: hashlib.sha256(base_payload).hexdigest()}
+        for sequence in sorted(transitions):
+            name, prior_sha256, claimed_sha256 = transitions[sequence]
+            if prior_sha256 != hashes[sequence - 1]:
+                raise FullBundleMigrationError(
+                    "migration journal transition prior hash drifted"
+                )
+            payload, _info = _read_regular_at(
+                parent_descriptor,
+                name,
+                label=f"migration journal transition {sequence}",
+            )
+            actual_sha256 = hashlib.sha256(payload).hexdigest()
+            if actual_sha256 != claimed_sha256:
+                raise FullBundleMigrationError(
+                    "migration journal transition content hash drifted"
+                )
+            documents[sequence] = _decode_canonical_json(
+                payload, label=f"migration journal transition {sequence}"
+            )
+            _assert_journal_transition(
+                documents[sequence - 1],
+                documents[sequence],
+                prior_was_terminal=(sequence - 1 in terminals),
+            )
+            payloads[sequence] = payload
+            hashes[sequence] = actual_sha256
+        maximum_sequence = max(documents)
+        terminal_payloads: dict[int, bytes] = {}
+        terminal_decoded: dict[int, dict[str, Any]] = {}
+        for sequence, (name, claimed_head_sha256) in sorted(terminals.items()):
+            if sequence not in documents or claimed_head_sha256 != hashes[sequence]:
+                raise FullBundleMigrationError(
+                    "migration journal terminal references an unknown head"
+                )
+            payload, _info = _read_regular_at(
+                parent_descriptor,
+                name,
+                label=f"migration journal terminal {sequence}",
+            )
+            terminal_payloads[sequence] = payload
+            terminal_decoded[sequence] = _decode_canonical_json(
+                payload, label=f"migration journal terminal {sequence}"
+            )
+
+        inventory: list[tuple[str, int, str, bytes]] = [
+            ("base", 0, journal_path.name, base_payload)
+        ]
+        terminal_documents: dict[int, dict[str, Any]] = {}
+        for sequence in range(maximum_sequence + 1):
+            if sequence:
+                inventory.append(
+                    (
+                        "transition",
+                        sequence,
+                        transitions[sequence][0],
+                        payloads[sequence],
+                    )
+                )
+            if sequence not in terminals:
+                continue
+            name, _claimed_head_sha256 = terminals[sequence]
+            marker = terminal_decoded[sequence]
+            ancestry_sha256, ancestry_entry_count = _journal_inventory_digest(
+                inventory
+            )
+            expected_marker = _journal_terminal_document(
+                journal_path,
+                sequence=sequence,
+                head_sha256=hashes[sequence],
+                head_document=documents[sequence],
+                ancestry_sha256=ancestry_sha256,
+                ancestry_entry_count=ancestry_entry_count,
+            )
+            if marker != expected_marker:
+                raise FullBundleMigrationError(
+                    "migration journal terminal binding drifted"
+                )
+            terminal_documents[sequence] = marker
+            inventory.append(
+                ("terminal", sequence, name, terminal_payloads[sequence])
+            )
+        inventory_sha256, inventory_entry_count = _journal_inventory_digest(inventory)
+        return {
+            "sequence": maximum_sequence,
+            "document": documents[maximum_sequence],
+            "payload": payloads[maximum_sequence],
+            "head_sha256": hashes[maximum_sequence],
+            "head_terminal": terminal_documents.get(maximum_sequence),
+            "terminals": terminal_documents,
+            "inventory_sha256": inventory_sha256,
+            "inventory_entry_count": inventory_entry_count,
+        }
+
+
 def _write_json_atomic(
     path: Path,
     value: dict[str, Any],
@@ -128,284 +988,197 @@ def _write_json_atomic(
     create_only: bool,
     expected_prior: dict[str, Any] | None = None,
 ) -> None:
+    """Create immutable JSON, or append one immutable journal transition."""
     if not path.is_absolute():
         raise FullBundleMigrationError("operator output paths must be absolute")
     if create_only and expected_prior is not None:
         raise FullBundleMigrationError("create-only output cannot have a prior value")
     if not create_only and expected_prior is None:
         raise FullBundleMigrationError(
-            "mutable operator output requires an exact prior value"
+            "journal transition requires an exact prior value"
         )
-    payload = (
-        json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
-    ).encode("utf-8")
-    prior_payload = (
-        None
-        if expected_prior is None
-        else (
-            json.dumps(
-                expected_prior, ensure_ascii=False, indent=2, sort_keys=True
-            )
-            + "\n"
-        ).encode("utf-8")
+    payload = _pretty_json_bytes(value)
+    if create_only:
+        _install_immutable_bytes(path, payload, label="operator output")
+        if path.name == JOURNAL_FILE_NAME:
+            chain = _load_journal_chain(path)
+            if chain is None or chain["sequence"] != 0 or chain["payload"] != payload:
+                raise ReportCommitUncertainError(
+                    "migration journal base installation was not confirmed"
+                )
+        return
+    if path.name != JOURNAL_FILE_NAME:
+        raise FullBundleMigrationError(
+            "only the migration journal supports append-only transitions"
+        )
+    chain = _load_journal_chain(path)
+    if chain is None:
+        raise FullBundleMigrationError("migration journal transition has no base")
+    prior_payload = _pretty_json_bytes(expected_prior)
+    if chain["payload"] != prior_payload:
+        raise FullBundleMigrationError(
+            "migration journal head differs from its exact prior value"
+        )
+    if chain["payload"] == payload:
+        return
+    sequence = int(chain["sequence"]) + 1
+    prior_sha256 = str(chain["head_sha256"])
+    next_sha256 = hashlib.sha256(payload).hexdigest()
+    transition_path = path.with_name(
+        f"{path.name}.transition-{sequence:06d}-{prior_sha256}-{next_sha256}.json"
     )
-    parent_flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
-    try:
-        parent_descriptor = os.open(path.parent, parent_flags)
-    except OSError as exc:
-        raise FullBundleMigrationError("operator output parent is unsafe") from exc
-    temporary_name = f".{path.name}.{uuid.uuid4().hex}.tmp"
-    temporary_created = False
-    try:
-        parent_info = os.fstat(parent_descriptor)
-        lexical_parent_info = path.parent.lstat()
-        if (
-            not stat.S_ISDIR(parent_info.st_mode)
-            or stat.S_ISLNK(lexical_parent_info.st_mode)
-            or not stat.S_ISDIR(lexical_parent_info.st_mode)
-            or (parent_info.st_dev, parent_info.st_ino)
-            != (lexical_parent_info.st_dev, lexical_parent_info.st_ino)
-        ):
-            raise FullBundleMigrationError("operator output parent identity changed")
-
-        try:
-            existing_info = os.stat(
-                path.name, dir_fd=parent_descriptor, follow_symlinks=False
-            )
-        except FileNotFoundError:
-            existing_info = None
-        if existing_info is not None:
-            if not stat.S_ISREG(existing_info.st_mode) or existing_info.st_nlink != 1:
-                raise FullBundleMigrationError("existing operator output is unsafe")
-            read_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-            existing_descriptor = os.open(
-                path.name, read_flags, dir_fd=parent_descriptor
-            )
-            try:
-                opened_info = os.fstat(existing_descriptor)
-                if (opened_info.st_dev, opened_info.st_ino) != (
-                    existing_info.st_dev,
-                    existing_info.st_ino,
-                ):
-                    raise FullBundleMigrationError("existing operator output raced")
-                with os.fdopen(existing_descriptor, "rb", closefd=False) as handle:
-                    existing = handle.read()
-            finally:
-                os.close(existing_descriptor)
-            if existing == payload:
-                return
-            if create_only:
-                raise FullBundleMigrationError(
-                    "refusing to replace different immutable output"
-                )
-            if existing != prior_payload:
-                raise FullBundleMigrationError(
-                    "mutable operator output differs from its exact prior value"
-                )
-        elif not create_only:
-            raise FullBundleMigrationError("mutable operator output disappeared")
-
-        descriptor = os.open(
-            temporary_name,
-            os.O_WRONLY
-            | os.O_CREAT
-            | os.O_EXCL
-            | getattr(os, "O_NOFOLLOW", 0),
-            0o600,
-            dir_fd=parent_descriptor,
+    _install_immutable_bytes(
+        transition_path, payload, label="migration journal transition"
+    )
+    reloaded = _load_journal_chain(path)
+    if (
+        reloaded is None
+        or reloaded["sequence"] != sequence
+        or reloaded["payload"] != payload
+        or reloaded["head_sha256"] != next_sha256
+    ):
+        raise ReportCommitUncertainError(
+            "migration journal transition installation was not confirmed"
         )
-        temporary_created = True
-        try:
-            os.fchmod(descriptor, 0o600)
-            with os.fdopen(descriptor, "wb", closefd=False) as handle:
-                handle.write(payload)
-                handle.flush()
-                os.fsync(handle.fileno())
-            temporary_info = os.fstat(descriptor)
-        finally:
-            os.close(descriptor)
-
-        if create_only:
-            try:
-                os.link(
-                    temporary_name,
-                    path.name,
-                    src_dir_fd=parent_descriptor,
-                    dst_dir_fd=parent_descriptor,
-                    follow_symlinks=False,
-                )
-            except FileExistsError as exc:
-                raise FullBundleMigrationError(
-                    "immutable output raced after create-only preflight"
-                ) from exc
-        else:
-            current_info = os.stat(
-                path.name, dir_fd=parent_descriptor, follow_symlinks=False
-            )
-            if (current_info.st_dev, current_info.st_ino) != (
-                existing_info.st_dev,
-                existing_info.st_ino,
-            ):
-                raise FullBundleMigrationError(
-                    "mutable operator output raced before replacement"
-                )
-            current_descriptor = os.open(
-                path.name,
-                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
-                dir_fd=parent_descriptor,
-            )
-            try:
-                opened_current_info = os.fstat(current_descriptor)
-                if (opened_current_info.st_dev, opened_current_info.st_ino) != (
-                    current_info.st_dev,
-                    current_info.st_ino,
-                ):
-                    raise FullBundleMigrationError(
-                        "mutable operator output raced during replacement"
-                    )
-                with os.fdopen(
-                    current_descriptor, "rb", closefd=False
-                ) as current_handle:
-                    current_payload = current_handle.read()
-            finally:
-                os.close(current_descriptor)
-            if current_payload != prior_payload:
-                raise FullBundleMigrationError(
-                    "mutable operator output content raced before replacement"
-                )
-            os.replace(
-                temporary_name,
-                path.name,
-                src_dir_fd=parent_descriptor,
-                dst_dir_fd=parent_descriptor,
-            )
-            temporary_created = False
-        installed_info = os.stat(
-            path.name, dir_fd=parent_descriptor, follow_symlinks=False
-        )
-        if (
-            not stat.S_ISREG(installed_info.st_mode)
-            or (installed_info.st_dev, installed_info.st_ino)
-            != (temporary_info.st_dev, temporary_info.st_ino)
-        ):
-            raise ReportCommitUncertainError(
-                "output installation completed but identity was not confirmed"
-            )
-        if create_only:
-            os.unlink(temporary_name, dir_fd=parent_descriptor)
-            temporary_created = False
-        try:
-            os.fsync(parent_descriptor)
-        except Exception as exc:
-            raise ReportCommitUncertainError(
-                "output replacement completed but directory sync was not confirmed"
-            ) from exc
-        try:
-            final_parent_info = path.parent.lstat()
-        except OSError as exc:
-            raise ReportCommitUncertainError(
-                "output replacement completed but lexical parent disappeared"
-            ) from exc
-        if (
-            stat.S_ISLNK(final_parent_info.st_mode)
-            or not stat.S_ISDIR(final_parent_info.st_mode)
-            or (final_parent_info.st_dev, final_parent_info.st_ino)
-            != (parent_info.st_dev, parent_info.st_ino)
-        ):
-            raise ReportCommitUncertainError(
-                "output replacement completed but lexical parent retargeted"
-            )
-    finally:
-        if temporary_created:
-            try:
-                os.unlink(temporary_name, dir_fd=parent_descriptor)
-            except FileNotFoundError:
-                pass
-        os.close(parent_descriptor)
 
 
 def _retire_json_document(
     path: Path, value: dict[str, Any], *, label: str
 ) -> None:
-    """Remove one exact operator document without following a raced name."""
-    if not path.is_absolute():
-        raise FullBundleMigrationError(f"{label} path must be absolute")
-    expected = (
-        json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
-    ).encode("utf-8")
-    parent_flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
-    try:
-        parent_descriptor = os.open(path.parent, parent_flags)
-    except OSError as exc:
-        raise FullBundleMigrationError(f"{label} parent is unsafe") from exc
-    try:
-        parent_info = os.fstat(parent_descriptor)
-        lexical_parent_info = path.parent.lstat()
-        if (
-            not stat.S_ISDIR(parent_info.st_mode)
-            or stat.S_ISLNK(lexical_parent_info.st_mode)
-            or not stat.S_ISDIR(lexical_parent_info.st_mode)
-            or (parent_info.st_dev, parent_info.st_ino)
-            != (lexical_parent_info.st_dev, lexical_parent_info.st_ino)
-        ):
-            raise FullBundleMigrationError(f"{label} parent identity changed")
-        try:
-            first_info = os.stat(
-                path.name, dir_fd=parent_descriptor, follow_symlinks=False
-            )
-        except FileNotFoundError as exc:
-            raise FullBundleMigrationError(f"{label} disappeared before retirement") from exc
-        if (
-            stat.S_ISLNK(first_info.st_mode)
-            or not stat.S_ISREG(first_info.st_mode)
-            or first_info.st_nlink != 1
-        ):
-            raise FullBundleMigrationError(f"{label} is unsafe at retirement")
-        descriptor = os.open(
-            path.name,
-            os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
-            dir_fd=parent_descriptor,
+    """Append an immutable terminal marker; journal evidence is never deleted."""
+    if path.name != JOURNAL_FILE_NAME:
+        raise FullBundleMigrationError(f"{label} cannot be retired by this operator")
+    chain = _load_journal_chain(path)
+    if chain is None or chain["payload"] != _pretty_json_bytes(value):
+        raise FullBundleMigrationError(f"{label} head drifted before terminal marker")
+    if chain["head_terminal"] is not None:
+        return
+    marker = _journal_terminal_document(
+        path,
+        sequence=int(chain["sequence"]),
+        head_sha256=str(chain["head_sha256"]),
+        head_document=chain["document"],
+        ancestry_sha256=str(chain["inventory_sha256"]),
+        ancestry_entry_count=int(chain["inventory_entry_count"]),
+    )
+    terminal_path = path.with_name(
+        f"{path.name}.terminal-{int(chain['sequence']):06d}-"
+        f"{chain['head_sha256']}.json"
+    )
+    _install_immutable_bytes(
+        terminal_path,
+        _pretty_json_bytes(marker),
+        label="migration journal terminal",
+    )
+    reloaded = _load_journal_chain(path)
+    if reloaded is None or reloaded["head_terminal"] != marker:
+        raise ReportCommitUncertainError(
+            f"{label} terminal installation was not confirmed"
         )
-        try:
-            opened_info = os.fstat(descriptor)
-            if (opened_info.st_dev, opened_info.st_ino) != (
-                first_info.st_dev,
-                first_info.st_ino,
-            ):
-                raise FullBundleMigrationError(f"{label} raced before retirement")
-            with os.fdopen(descriptor, "rb", closefd=False) as handle:
-                actual = handle.read()
-        finally:
-            os.close(descriptor)
-        if actual != expected:
-            raise FullBundleMigrationError(f"{label} content drifted before retirement")
-        current_info = os.stat(
-            path.name, dir_fd=parent_descriptor, follow_symlinks=False
-        )
-        if (current_info.st_dev, current_info.st_ino) != (
-            opened_info.st_dev,
-            opened_info.st_ino,
-        ):
-            raise FullBundleMigrationError(f"{label} raced during retirement")
-        os.unlink(path.name, dir_fd=parent_descriptor)
-        os.fsync(parent_descriptor)
-        try:
-            final_parent_info = path.parent.lstat()
-        except OSError as exc:
-            raise ReportCommitUncertainError(
-                f"{label} retirement completed but lexical parent disappeared"
-            ) from exc
-        if (
-            stat.S_ISLNK(final_parent_info.st_mode)
-            or not stat.S_ISDIR(final_parent_info.st_mode)
-            or (final_parent_info.st_dev, final_parent_info.st_ino)
-            != (parent_info.st_dev, parent_info.st_ino)
-        ):
-            raise ReportCommitUncertainError(
-                f"{label} retirement completed but lexical parent retargeted"
-            )
-    finally:
-        os.close(parent_descriptor)
+
+
+def _journal_terminal_binding(path: Path) -> dict[str, Any]:
+    chain = _load_journal_chain(path)
+    if chain is None or chain["head_terminal"] is None:
+        raise FullBundleMigrationError("migration journal head is not terminal")
+    sequence = int(chain["sequence"])
+    head_sha256 = str(chain["head_sha256"])
+    name = f"{path.name}.terminal-{sequence:06d}-{head_sha256}.json"
+    marker_payload = _pretty_json_bytes(chain["head_terminal"])
+    return {
+        "chain_framing": JOURNAL_CHAIN_FRAMING,
+        "journal_file_name": path.name,
+        "terminal_file_name": name,
+        "sequence": sequence,
+        "head_sha256": head_sha256,
+        "database_inode_identity_sha256": chain["head_terminal"][
+            "database_inode_identity_sha256"
+        ],
+        "ancestry_sha256": chain["head_terminal"]["ancestry_sha256"],
+        "ancestry_entry_count": chain["head_terminal"][
+            "ancestry_entry_count"
+        ],
+        "terminal_sha256": hashlib.sha256(marker_payload).hexdigest(),
+        "closed_inventory_sha256": chain["inventory_sha256"],
+        "closed_inventory_entry_count": chain["inventory_entry_count"],
+    }
+
+
+def _json_create_capability_marker_path(
+    parent: Path, *, role: str, packet_sha256: str
+) -> Path:
+    return parent / (
+        f".smokies-complete-private-json-create-capability-v1-"
+        f"{role}-{packet_sha256[:16]}.json"
+    )
+
+
+def _ensure_json_create_capability(
+    parent: Path, *, role: str, packet_sha256: str
+) -> Path:
+    """Retain one exact marker proving anonymous create-only support on this parent."""
+    info = parent.lstat()
+    if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode):
+        raise FullBundleMigrationError(f"{role} capability parent is unsafe")
+    marker = _json_create_capability_marker_path(
+        parent, role=role, packet_sha256=packet_sha256
+    )
+    value = {
+        "schema_version": 1,
+        "kind": "original_full_bundle_private_json_create_capability",
+        "packet_sha256": packet_sha256,
+        "role": role,
+        "parent_path_sha256": _path_identity(parent),
+        "parent_st_dev": int(info.st_dev),
+        "parent_st_ino": int(info.st_ino),
+        "contract": "otmpfile_linkat_at_empty_path_or_procfd_symlink_follow_v1",
+        "named_temporary_files_used": False,
+        "overwrite_permitted": False,
+    }
+    _install_immutable_bytes(
+        marker, _pretty_json_bytes(value), label=f"{role} capability marker"
+    )
+    return marker
+
+
+def _ensure_json_create_capability_at(
+    parent: Path,
+    *,
+    role: str,
+    packet_sha256: str,
+    parent_descriptor: int,
+    parent_identity: tuple[int, int],
+) -> Path:
+    """Retain a capability marker through one already pinned parent dirfd."""
+    marker = _json_create_capability_marker_path(
+        parent, role=role, packet_sha256=packet_sha256
+    )
+    _assert_anchored_parent(
+        marker, parent_descriptor, parent_identity, f"{role} capability"
+    )
+    value = {
+        "schema_version": 1,
+        "kind": "original_full_bundle_private_json_create_capability",
+        "packet_sha256": packet_sha256,
+        "role": role,
+        "parent_path_sha256": _path_identity(parent),
+        "parent_st_dev": parent_identity[0],
+        "parent_st_ino": parent_identity[1],
+        "contract": "otmpfile_linkat_at_empty_path_or_procfd_symlink_follow_v1",
+        "named_temporary_files_used": False,
+        "overwrite_permitted": False,
+    }
+    _install_immutable_bytes_at(
+        marker,
+        _pretty_json_bytes(value),
+        label=f"{role} capability marker",
+        parent_descriptor=parent_descriptor,
+        parent_identity=parent_identity,
+    )
+    _assert_anchored_parent(
+        marker, parent_descriptor, parent_identity, f"{role} capability"
+    )
+    return marker
 
 
 def _assert_file(path: Path, label: str) -> Path:
@@ -572,6 +1345,19 @@ def _validate_operator_audit(
     findings = audit.get("findings")
     if findings != contract["required_artifact"]["required_findings"]:
         raise FullBundleMigrationError("operator audit findings are not zero and independent")
+    closure = packet.get("trusted_complete_validator_source_closure")
+    if not isinstance(closure, dict):
+        raise FullBundleMigrationError(
+            "complete trusted-validator source closure is missing"
+        )
+    closure_binding = {
+        key: closure.get(key)
+        for key in ("schema_version", "framing", "path_count", "sha256")
+    }
+    if contract.get("complete_validator_source_closure") != closure_binding:
+        raise FullBundleMigrationError(
+            "complete trusted-validator source closure drifted"
+        )
     expected_bindings = {
         "migration_packet": {
             "path": str(packet_builder.PACKET_PATH),
@@ -582,6 +1368,22 @@ def _validate_operator_audit(
         "migration_operator": _source_binding(OPERATOR_PATH),
         "migration_operator_tests": _source_binding(TEST_PATH),
         "db_store": packet["source_bindings"][str(packet_builder.STORE_PATH)],
+        "complete_private_candidate_builder": packet["source_bindings"][
+            str(packet_builder.CANDIDATE_BUILDER_PATH)
+        ],
+        "complete_validation_dispatcher": packet["source_bindings"][
+            str(packet_builder.COMPLETE_VALIDATION_PATH)
+        ],
+        "mobile_long_form_validator": packet["source_bindings"][
+            str(packet_builder.MOBILE_LONG_FORM_VALIDATOR_PATH)
+        ],
+        "mobile_long_form_evidence_registry": packet["source_bindings"][
+            str(packet_builder.MOBILE_LONG_FORM_EVIDENCE_REGISTRY_PATH)
+        ],
+        "complete_validator_source_closure": closure_binding,
+        "v3_release_guard_audit": packet[
+            "v3_release_guard_independent_audit"
+        ],
         "roaring_fork_import_operator": packet["source_bindings"][
             str(packet_builder.RF_IMPORT_OPERATOR_PATH)
         ],
@@ -763,14 +1565,82 @@ def _validate_backup(
     return manifest, backup
 
 
-def _connect(path: Path, *, readonly: bool = False) -> sqlite3.Connection:
-    if readonly:
+def _assert_pinned_database_connection(
+    connection: sqlite3.Connection,
+    db_path: Path,
+    pinned_descriptor: int,
+    expected_identity: tuple[int, int],
+    *,
+    commit_uncertain: bool = False,
+) -> None:
+    _assert_pinned_regular_file_path(
+        db_path,
+        pinned_descriptor,
+        expected_identity,
+        label="configured SQLite database",
+        commit_uncertain=commit_uncertain,
+    )
+    held = os.fstat(pinned_descriptor)
+    database_rows = connection.execute("PRAGMA database_list").fetchall()
+    main_rows = [row for row in database_rows if str(row[1]) == "main"]
+    try:
+        opened_path = Path(str(main_rows[0][2])).resolve(strict=True)
+        opened_info = opened_path.stat()
+    except (IndexError, OSError) as exc:
+        error_type = ReportCommitUncertainError if commit_uncertain else FullBundleMigrationError
+        raise error_type(
+            "pinned SQLite main database identity is unavailable"
+        ) from exc
+    if (
+        (int(held.st_dev), int(held.st_ino)) != expected_identity
+        or (int(opened_info.st_dev), int(opened_info.st_ino))
+        != expected_identity
+    ):
+        error_type = ReportCommitUncertainError if commit_uncertain else FullBundleMigrationError
+        raise error_type(
+            "SQLite connection is not bound to the pinned database inode"
+        )
+
+
+def _connect(
+    path: Path,
+    *,
+    readonly: bool = False,
+    pinned_descriptor: int | None = None,
+    expected_identity: tuple[int, int] | None = None,
+) -> sqlite3.Connection:
+    if (pinned_descriptor is None) != (expected_identity is None):
+        raise FullBundleMigrationError(
+            "database pin descriptor and identity must be supplied together"
+        )
+    if pinned_descriptor is not None:
+        held = os.fstat(pinned_descriptor)
+        if (
+            not stat.S_ISREG(held.st_mode)
+            or held.st_nlink != 1
+            or (int(held.st_dev), int(held.st_ino)) != expected_identity
+        ):
+            raise FullBundleMigrationError("pinned database identity drifted")
+        mode = "ro" if readonly else "rw"
+        target = f"file:/proc/self/fd/{pinned_descriptor}?mode={mode}"
+        connection = sqlite3.connect(target, uri=True, timeout=30)
+    elif readonly:
         connection = sqlite3.connect(
             path.as_uri() + "?mode=ro&immutable=1", uri=True, timeout=30
         )
-        connection.execute("PRAGMA query_only=ON")
     else:
         connection = sqlite3.connect(str(path), timeout=30)
+    if pinned_descriptor is not None:
+        try:
+            _assert_pinned_database_connection(
+                connection, path, pinned_descriptor, expected_identity
+            )
+        except FullBundleMigrationError:
+            connection.close()
+            raise
+    if readonly:
+        connection.execute("PRAGMA query_only=ON")
+    else:
         journal_mode = str(connection.execute("PRAGMA journal_mode").fetchone()[0])
         if journal_mode.lower() != "wal":
             connection.close()
@@ -779,6 +1649,14 @@ def _connect(path: Path, *, readonly: bool = False) -> sqlite3.Connection:
             )
         connection.execute("PRAGMA foreign_keys=ON")
         connection.execute("PRAGMA busy_timeout=30000")
+    if pinned_descriptor is not None:
+        try:
+            _assert_pinned_database_connection(
+                connection, path, pinned_descriptor, expected_identity
+            )
+        except FullBundleMigrationError:
+            connection.close()
+            raise
     connection.row_factory = sqlite3.Row
     return connection
 
@@ -856,11 +1734,32 @@ def _history_binding_from_file(
     *,
     packet_sha256: str,
     kind: str,
+    parent_descriptor: int | None = None,
+    parent_identity: tuple[int, int] | None = None,
 ) -> str | None:
-    if _lstat_or_none(path) is None:
-        return None
-    exact = _assert_file(path, f"existing {kind}")
-    payload = _read_json(exact, f"existing {kind}")
+    if kind == "migration journal":
+        chain = _load_journal_chain(path)
+        if chain is None:
+            return None
+        payload = chain["document"]
+    else:
+        if parent_descriptor is None or parent_identity is None:
+            raise FullBundleMigrationError(
+                "migration receipt requires its pinned parent identity"
+            )
+        if _lstat_at_or_none(
+            path,
+            parent_descriptor,
+            parent_identity,
+            label=f"existing {kind}",
+        ) is None:
+            return None
+        payload = _read_json_at(
+            path,
+            parent_descriptor,
+            parent_identity,
+            label=f"existing {kind}",
+        )
     if payload.get("packet_sha256") != packet_sha256:
         if kind == "migration receipt":
             raise FullBundleMigrationError(
@@ -941,7 +1840,10 @@ def _open_asset_destination_parent(
     flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
     descriptors: list[int] = []
     try:
-        root_descriptor = os.open(asset_root, flags)
+        pinned = _PINNED_DIRECTORIES.get().get(str(asset_root))
+        root_descriptor = (
+            os.dup(pinned[0]) if pinned is not None else os.open(asset_root, flags)
+        )
         descriptors.append(root_descriptor)
         root_info = os.fstat(root_descriptor)
         lexical_root_info = asset_root.lstat()
@@ -1026,24 +1928,78 @@ def _verified_asset_destination(
     )
     with _open_asset_destination_parent(asset_root, destination, create=False) as parent_fd:
         try:
-            descriptor_info = os.stat(
-                destination.name, dir_fd=parent_fd, follow_symlinks=False
+            descriptor = os.open(
+                destination.name,
+                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=parent_fd,
             )
-            lexical_info = destination.lstat()
         except OSError as exc:
             raise FullBundleMigrationError("asset destination is unavailable") from exc
-        if (
-            not stat.S_ISREG(descriptor_info.st_mode)
-            or descriptor_info.st_dev != asset_root.lstat().st_dev
-            or stat.S_ISLNK(lexical_info.st_mode)
-            or not stat.S_ISREG(lexical_info.st_mode)
-            or (descriptor_info.st_dev, descriptor_info.st_ino)
-            != (lexical_info.st_dev, lexical_info.st_ino)
-        ):
-            raise FullBundleMigrationError("asset destination identity changed")
-    verified = _assert_file(destination, f"asset destination {spec['asset_id']}")
-    if verified != destination:
-        raise FullBundleMigrationError("asset destination resolved through a symlink")
+        try:
+            opened = os.fstat(descriptor)
+            root_info = asset_root.lstat()
+            lexical_info = destination.lstat()
+            if (
+                not stat.S_ISREG(opened.st_mode)
+                or opened.st_nlink != 1
+                or stat.S_IMODE(opened.st_mode) != 0o600
+                or opened.st_uid != os.geteuid()
+                or opened.st_dev != root_info.st_dev
+                or stat.S_ISLNK(lexical_info.st_mode)
+                or not stat.S_ISREG(lexical_info.st_mode)
+                or (opened.st_dev, opened.st_ino)
+                != (lexical_info.st_dev, lexical_info.st_ino)
+                or opened.st_size != int(spec["bytes"])
+                or _sha256_descriptor(descriptor) != spec["sha256"]
+            ):
+                raise FullBundleMigrationError(
+                    "asset destination identity or bytes changed"
+                )
+            current = os.stat(
+                destination.name, dir_fd=parent_fd, follow_symlinks=False
+            )
+            lexical_after = destination.lstat()
+            opened_after = os.fstat(descriptor)
+            if (
+                opened_after.st_nlink != 1
+                or stat.S_IMODE(opened_after.st_mode) != 0o600
+                or opened_after.st_uid != os.geteuid()
+                or (opened_after.st_dev, opened_after.st_ino)
+                != (opened.st_dev, opened.st_ino)
+                or (current.st_dev, current.st_ino)
+                != (opened.st_dev, opened.st_ino)
+                or current.st_nlink != 1
+                or stat.S_IMODE(current.st_mode) != 0o600
+                or current.st_uid != os.geteuid()
+                or (lexical_after.st_dev, lexical_after.st_ino)
+                != (opened.st_dev, opened.st_ino)
+            ):
+                raise FullBundleMigrationError(
+                    "asset destination identity raced after verification"
+                )
+            if entry is not None:
+                ownership = entry.get("ownership_state")
+                if ownership == "preexisting":
+                    expected_identity = (
+                        entry.get("preexisting_st_dev"),
+                        entry.get("preexisting_st_ino"),
+                    )
+                elif ownership == "operator_created":
+                    expected_identity = (
+                        entry.get("operator_created_st_dev"),
+                        entry.get("operator_created_st_ino"),
+                    )
+                else:
+                    expected_identity = None
+                if expected_identity is not None and expected_identity != (
+                    int(opened.st_dev),
+                    int(opened.st_ino),
+                ):
+                    raise FullBundleMigrationError(
+                        "asset destination ownership identity drifted"
+                    )
+        finally:
+            os.close(descriptor)
     return destination
 
 
@@ -1551,9 +2507,12 @@ def _journal_document(
     backup_manifest_sha256: str,
     audit_sha256: str,
     predecessor_history_sha256: str,
+    database_inode_identity_sha256: str,
 ) -> dict[str, Any]:
     if not re.fullmatch(r"[a-f0-9]{64}", predecessor_history_sha256):
         raise FullBundleMigrationError("predecessor history binding is invalid")
+    if not re.fullmatch(r"[a-f0-9]{64}", database_inode_identity_sha256):
+        raise FullBundleMigrationError("database inode identity binding is invalid")
     destinations = []
     for spec in packet["assets"]["new"]:
         destination = _asset_destination(spec, asset_root)
@@ -1591,6 +2550,7 @@ def _journal_document(
         "packet_sha256": packet_sha256,
         "target_id": target["id"],
         "database_path_sha256": _path_identity(db_path),
+        "database_inode_identity_sha256": database_inode_identity_sha256,
         "asset_root_path_sha256": _path_identity(asset_root),
         "narration_root_path_sha256": _path_identity(narration_root),
         "artwork_root_path_sha256": _path_identity(artwork_root),
@@ -1599,7 +2559,7 @@ def _journal_document(
         "predecessor_history_sha256": predecessor_history_sha256,
         "expected_before_revision": packet["predecessor"]["draft_revision"],
         "expected_after_revision": packet["migration_draft"]["expected_after_revision"],
-        "staging_relative_path": STAGING_DIR_NAME,
+        "legacy_forbidden_staging_relative_path": STAGING_DIR_NAME,
         "state": "planned",
         "destinations": destinations,
     }
@@ -1607,28 +2567,42 @@ def _journal_document(
 
 @contextmanager
 def _exclusive_lock(asset_root: Path) -> Iterator[None]:
-    lock_path = asset_root / LOCK_FILE_NAME
-    flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
+    pinned = _PINNED_DIRECTORIES.get().get(str(asset_root))
+    if pinned is None:
+        raise FullBundleMigrationError("migration lock requires the pinned asset root")
+    descriptor = os.dup(pinned[0])
+    identity = pinned[1]
     try:
-        descriptor = os.open(lock_path, flags, 0o600)
-    except OSError as exc:
-        raise FullBundleMigrationError("migration lock path is unsafe") from exc
-    info = os.fstat(descriptor)
-    if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
-        os.close(descriptor)
-        raise FullBundleMigrationError("migration lock must be one regular file")
-    handle = os.fdopen(descriptor, "a+", encoding="utf-8")
-    try:
+        held = os.fstat(descriptor)
+        if (
+            not stat.S_ISDIR(held.st_mode)
+            or (int(held.st_dev), int(held.st_ino)) != identity
+        ):
+            raise FullBundleMigrationError("pinned migration lock identity drifted")
         try:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
-            raise FullBundleMigrationError("another full-bundle migration is active") from exc
-        yield
-    finally:
+            raise FullBundleMigrationError(
+                "another full-bundle migration is active"
+            ) from exc
         try:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            _assert_anchored_parent(
+                asset_root / ".migration-lock-anchor",
+                descriptor,
+                identity,
+                "migration lock",
+            )
+            yield
+            _assert_anchored_parent(
+                asset_root / ".migration-lock-anchor",
+                descriptor,
+                identity,
+                "migration lock",
+            )
         finally:
-            handle.close()
+            fcntl.flock(descriptor, fcntl.LOCK_UN)
+    finally:
+        os.close(descriptor)
 
 
 def _destination_from_journal(entry: dict[str, Any], asset_root: Path) -> Path:
@@ -1678,55 +2652,48 @@ def _remove_unreferenced_created(
             "operator_created",
             "raced_exact",
             "external_collision",
+            "external_absent",
         }:
             raise FullBundleMigrationError("rollback ownership state is invalid")
         current_info = _lstat_or_none(destination)
         if current_info is None:
             if state == "preexisting":
                 raise FullBundleMigrationError("preexisting destination disappeared")
+            if state != "external_absent":
+                prior_document = copy.deepcopy(journal_document)
+                entry["ownership_state"] = "external_absent"
+                entry["operator_created_st_dev"] = None
+                entry["operator_created_st_ino"] = None
+                if journal_path is not None and journal_document is not None:
+                    _write_json_atomic(
+                        journal_path,
+                        journal_document,
+                        create_only=False,
+                        expected_prior=prior_document,
+                    )
             continue
         destination = _verified_asset_destination(
             spec, asset_root, entry=entry
         )
+        verified_info = destination.lstat()
         exact = (
-            destination.stat().st_size != int(entry["bytes"])
+            verified_info.st_size != int(entry["bytes"])
             or _sha256_path(destination) != entry["sha256"]
         ) is False
-        owned_identity = (
-            entry.get("operator_created_st_dev"),
-            entry.get("operator_created_st_ino"),
-        )
-        current_identity = (int(current_info.st_dev), int(current_info.st_ino))
-        if state == "operator_created" and owned_identity == current_identity:
-            if not exact:
-                raise FullBundleMigrationError(
-                    "rollback refused drifted operator-owned destination bytes"
-                )
-            if _storage_reference_count(connection, destination) == 0:
-                with _open_asset_destination_parent(
-                    asset_root, destination, create=False
-                ) as parent_fd:
-                    anchored = os.stat(
-                        destination.name,
-                        dir_fd=parent_fd,
-                        follow_symlinks=False,
-                    )
-                    if (int(anchored.st_dev), int(anchored.st_ino)) != current_identity:
-                        raise FullBundleMigrationError(
-                            "rollback destination retargeted before unlink"
-                        )
-                    os.unlink(destination.name, dir_fd=parent_fd)
-                    os.fsync(parent_fd)
-            continue
-
-        # Prior absence never proves ownership. A name created outside this
-        # operator, or an operator-created inode replaced before recovery, is
-        # preserved. Exact bytes can become preexisting on the next safe retry;
-        # corrupt bytes remain untouched and block progress.
+        # No pathname is ever deleted during rollback. Exact unreferenced bytes
+        # are immutable content-addressed retry material; corrupt or foreign
+        # bytes are preserved and stop the operator.
         if not exact:
             prior_document = copy.deepcopy(journal_document)
-            entry["ownership_state"] = "external_collision"
-            if journal_path is not None and journal_document is not None:
+            if entry["ownership_state"] != "external_collision":
+                entry["ownership_state"] = "external_collision"
+                entry["operator_created_st_dev"] = None
+                entry["operator_created_st_ino"] = None
+            if (
+                journal_path is not None
+                and journal_document is not None
+                and prior_document != journal_document
+            ):
                 _write_json_atomic(
                     journal_path,
                     journal_document,
@@ -1736,6 +2703,53 @@ def _remove_unreferenced_created(
             raise FullBundleMigrationError(
                 "rollback preserved an unowned drifted destination"
             )
+        if _storage_reference_count(connection, destination) != 0:
+            raise FullBundleMigrationError(
+                "rollback destination is unexpectedly referenced by the database"
+            )
+        # Re-open and re-hash after the database-reference query.  Nothing is
+        # ever unlinked here, but the journal must not claim an owned/exact
+        # destination if another actor replaced the name at that boundary.
+        try:
+            reverified = _verified_asset_destination(
+                spec, asset_root, entry=entry
+            )
+            reverified_info = reverified.lstat()
+            reverified_exact = (
+                reverified_info.st_size == int(entry["bytes"])
+                and _sha256_path(reverified) == entry["sha256"]
+            )
+        except FullBundleMigrationError:
+            reverified_info = None
+            reverified_exact = False
+        identity_changed = reverified_info is None or (
+            int(reverified_info.st_dev), int(reverified_info.st_ino)
+        ) != (int(verified_info.st_dev), int(verified_info.st_ino))
+        if identity_changed:
+            if state == "preexisting":
+                raise FullBundleMigrationError(
+                    "preexisting destination identity changed during rollback"
+                )
+            prior_document = copy.deepcopy(journal_document)
+            entry["ownership_state"] = (
+                "raced_exact" if reverified_exact else "external_collision"
+            )
+            entry["operator_created_st_dev"] = None
+            entry["operator_created_st_ino"] = None
+            if journal_path is not None and journal_document is not None:
+                _write_json_atomic(
+                    journal_path,
+                    journal_document,
+                    create_only=False,
+                    expected_prior=prior_document,
+                )
+            if not reverified_exact:
+                raise FullBundleMigrationError(
+                    "rollback preserved a destination replacement"
+                )
+            continue
+        if state in {"preexisting", "raced_exact"}:
+            continue
         prior_document = copy.deepcopy(journal_document)
         entry["ownership_state"] = "raced_exact"
         entry["operator_created_st_dev"] = None
@@ -1750,22 +2764,25 @@ def _remove_unreferenced_created(
 
 
 def _clean_staging(staging: Path, prepared: list[PreparedAsset]) -> None:
-    if _lstat_or_none(staging) is None:
-        return
-    if staging.is_symlink() or not staging.is_dir():
-        raise FullBundleMigrationError("staging path is unsafe")
-    expected = {
-        f"{item.spec['asset_id']}-{item.spec['sha256']}"
-        + (".mp3" if item.spec["kind"] == "narration" else ".png")
-        for item in prepared
-    }
-    for child in staging.iterdir():
-        if child.name not in expected:
-            raise FullBundleMigrationError("staging directory contains an unknown file")
-        child = _assert_file(child, "staged file")
-        child.unlink()
-    staging.rmdir()
-    _fsync_directory(staging.parent)
+    with _open_anchored_parent(staging, "legacy named staging") as (
+        parent_descriptor,
+        _parent_identity,
+    ):
+        try:
+            os.stat(
+                staging.name,
+                dir_fd=parent_descriptor,
+                follow_symlinks=False,
+            )
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            raise FullBundleMigrationError(
+                "legacy named staging identity is unavailable"
+            ) from exc
+    raise FullBundleMigrationError(
+        "legacy named staging exists; no destructive cleanup is permitted"
+    )
 
 
 def _recover_journal(
@@ -1777,14 +2794,21 @@ def _recover_journal(
     prepared: list[PreparedAsset],
     packet: dict[str, Any],
     backup_snapshot: dict[str, Any],
+    db_descriptor: int,
+    db_identity: tuple[int, int],
+    require_target: bool = False,
 ) -> str | None:
-    if _lstat_or_none(journal_path) is None:
+    chain = _load_journal_chain(journal_path)
+    if chain is None:
         staging = asset_root / STAGING_DIR_NAME
-        if _lstat_or_none(staging) is not None:
-            raise FullBundleMigrationError("orphan staging exists without a journal")
+        try:
+            _clean_staging(staging, prepared)
+        except FullBundleMigrationError as exc:
+            raise FullBundleMigrationError(
+                "orphan staging exists without a journal"
+            ) from exc
         return None
-    journal_path = _assert_file(journal_path, "migration journal")
-    journal = _read_json(journal_path, "migration journal")
+    journal = copy.deepcopy(chain["document"])
     for key, expected in expected_journal.items():
         if key in {"state", "destinations", "backup_manifest_sha256"}:
             continue
@@ -1836,7 +2860,12 @@ def _recover_journal(
                 and preexisting_identity == (None, None)
                 and valid_int_pair(created_identity)
             )
-        elif ownership in {"unclaimed", "raced_exact", "external_collision"}:
+        elif ownership in {
+            "unclaimed",
+            "raced_exact",
+            "external_collision",
+            "external_absent",
+        }:
             valid = (
                 row["existed_before"] is False
                 and preexisting_identity == (None, None)
@@ -1848,9 +2877,16 @@ def _recover_journal(
             raise FullBundleMigrationError("migration journal ownership proof is invalid")
     if journal.get("state") not in {"planned", "files_promoted", "database_committed"}:
         raise FullBundleMigrationError("migration journal state is invalid")
-    connection = _connect(db_path)
+    connection = _connect(
+        db_path,
+        pinned_descriptor=db_descriptor,
+        expected_identity=db_identity,
+    )
     try:
         connection.execute("BEGIN IMMEDIATE")
+        _assert_pinned_database_connection(
+            connection, db_path, db_descriptor, db_identity
+        )
         state, _snapshot = _classify_state(
             connection,
             packet,
@@ -1862,12 +2898,22 @@ def _recover_journal(
         )
         if state == "target":
             _clean_staging(asset_root / STAGING_DIR_NAME, prepared)
+            _assert_pinned_database_connection(
+                connection, db_path, db_descriptor, db_identity
+            )
             connection.commit()
+            _assert_pinned_database_connection(
+                connection, db_path, db_descriptor, db_identity
+            )
             # Carry the exact validated on-disk document forward so the next
             # state transition compares against its real prior bytes.
             expected_journal.clear()
             expected_journal.update(copy.deepcopy(journal))
             return "committed_target_recovered"
+        if require_target:
+            raise FullBundleMigrationError(
+                "existing receipt journal recovery requires the exact target"
+            )
         _remove_unreferenced_created(
             connection,
             list(actual_destinations),
@@ -1877,10 +2923,18 @@ def _recover_journal(
             journal_document=journal,
         )
         _clean_staging(asset_root / STAGING_DIR_NAME, prepared)
+        _assert_pinned_database_connection(
+            connection, db_path, db_descriptor, db_identity
+        )
         connection.commit()
+        _assert_pinned_database_connection(
+            connection, db_path, db_descriptor, db_identity
+        )
         _retire_json_document(
             journal_path, journal, label="migration journal"
         )
+        expected_journal.clear()
+        expected_journal.update(copy.deepcopy(journal))
         return "partial_files_rolled_back"
     except Exception:
         connection.rollback()
@@ -1899,10 +2953,19 @@ def _rollback_pre_database_action_failure(
     packet: dict[str, Any],
     backup_snapshot: dict[str, Any],
     predecessor_history_sha256: str,
+    db_descriptor: int,
+    db_identity: tuple[int, int],
 ) -> str:
-    connection = _connect(db_path)
+    connection = _connect(
+        db_path,
+        pinned_descriptor=db_descriptor,
+        expected_identity=db_identity,
+    )
     try:
         connection.execute("BEGIN IMMEDIATE")
+        _assert_pinned_database_connection(
+            connection, db_path, db_descriptor, db_identity
+        )
         state, _snapshot = _classify_state(
             connection,
             packet,
@@ -1911,7 +2974,13 @@ def _rollback_pre_database_action_failure(
             expected_predecessor_history_sha256=predecessor_history_sha256,
         )
         if state == "target":
+            _assert_pinned_database_connection(
+                connection, db_path, db_descriptor, db_identity
+            )
             connection.commit()
+            _assert_pinned_database_connection(
+                connection, db_path, db_descriptor, db_identity
+            )
             return "target_journal_retained"
         _remove_unreferenced_created(
             connection,
@@ -1922,7 +2991,13 @@ def _rollback_pre_database_action_failure(
             journal_document=journal_document,
         )
         _clean_staging(asset_root / STAGING_DIR_NAME, prepared)
+        _assert_pinned_database_connection(
+            connection, db_path, db_descriptor, db_identity
+        )
         connection.commit()
+        _assert_pinned_database_connection(
+            connection, db_path, db_descriptor, db_identity
+        )
     except Exception:
         connection.rollback()
         raise
@@ -1934,6 +3009,127 @@ def _rollback_pre_database_action_failure(
     return "predecessor_files_rolled_back"
 
 
+def _sha256_descriptor(descriptor: int) -> str:
+    digest = hashlib.sha256()
+    original_offset = os.lseek(descriptor, 0, os.SEEK_CUR)
+    try:
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    finally:
+        os.lseek(descriptor, original_offset, os.SEEK_SET)
+    return digest.hexdigest()
+
+
+def _install_asset_create_only(
+    item: PreparedAsset, asset_root: Path, destination: Path
+) -> os.stat_result:
+    """Stream accepted bytes into an anonymous inode and link once, never delete."""
+    with _open_asset_destination_parent(
+        asset_root, destination, create=True
+    ) as parent_descriptor:
+        parent_info = os.fstat(parent_descriptor)
+        parent_identity = (int(parent_info.st_dev), int(parent_info.st_ino))
+        try:
+            os.stat(destination.name, dir_fd=parent_descriptor, follow_symlinks=False)
+        except FileNotFoundError:
+            pass
+        else:
+            raise FileExistsError(destination.name)
+        anonymous_flag = getattr(os, "O_TMPFILE", 0)
+        if not anonymous_flag:
+            raise FullBundleMigrationError("asset O_TMPFILE is unavailable")
+        try:
+            descriptor = os.open(
+                ".",
+                os.O_RDWR | anonymous_flag | getattr(os, "O_CLOEXEC", 0),
+                0o600,
+                dir_fd=parent_descriptor,
+            )
+        except OSError as exc:
+            raise FullBundleMigrationError("asset O_TMPFILE is unsupported") from exc
+        try:
+            os.fchmod(descriptor, 0o600)
+            with item.source_path.open("rb") as source:
+                for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                    offset = 0
+                    while offset < len(chunk):
+                        written = os.write(descriptor, chunk[offset:])
+                        if written <= 0:
+                            raise FullBundleMigrationError(
+                                "anonymous asset write failed"
+                            )
+                        offset += written
+            os.fsync(descriptor)
+            anonymous_info = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(anonymous_info.st_mode)
+                or anonymous_info.st_nlink != 0
+                or stat.S_IMODE(anonymous_info.st_mode) != 0o600
+                or anonymous_info.st_uid != os.geteuid()
+                or anonymous_info.st_dev != asset_root.lstat().st_dev
+                or anonymous_info.st_size != int(item.spec["bytes"])
+                or _sha256_descriptor(descriptor) != item.spec["sha256"]
+            ):
+                raise FullBundleMigrationError(
+                    f"anonymous asset verification failed: {item.spec['asset_id']}"
+                )
+            _link_unnamed_file_at(
+                descriptor,
+                parent_descriptor,
+                destination.name,
+                label=f"asset {item.spec['asset_id']}",
+            )
+            opened = os.open(
+                destination.name,
+                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=parent_descriptor,
+            )
+            try:
+                installed_info = os.fstat(opened)
+                if (
+                    not stat.S_ISREG(installed_info.st_mode)
+                    or installed_info.st_nlink != 1
+                    or stat.S_IMODE(installed_info.st_mode) != 0o600
+                    or (installed_info.st_dev, installed_info.st_ino)
+                    != (anonymous_info.st_dev, anonymous_info.st_ino)
+                    or installed_info.st_size != int(item.spec["bytes"])
+                    or _sha256_descriptor(opened) != item.spec["sha256"]
+                ):
+                    raise ReportCommitUncertainError(
+                        f"asset installation was not confirmed: {item.spec['asset_id']}"
+                    )
+            finally:
+                os.close(opened)
+            try:
+                lexical_parent = destination.parent.lstat()
+                lexical_file = destination.lstat()
+            except OSError as exc:
+                raise ReportCommitUncertainError(
+                    f"asset destination retargeted: {item.spec['asset_id']}"
+                ) from exc
+            if (
+                stat.S_ISLNK(lexical_parent.st_mode)
+                or not stat.S_ISDIR(lexical_parent.st_mode)
+                or (int(lexical_parent.st_dev), int(lexical_parent.st_ino))
+                != parent_identity
+                or stat.S_ISLNK(lexical_file.st_mode)
+                or not stat.S_ISREG(lexical_file.st_mode)
+                or (int(lexical_file.st_dev), int(lexical_file.st_ino))
+                != (int(installed_info.st_dev), int(installed_info.st_ino))
+            ):
+                raise ReportCommitUncertainError(
+                    f"asset destination retargeted: {item.spec['asset_id']}"
+                )
+            os.fsync(parent_descriptor)
+            return installed_info
+        finally:
+            os.close(descriptor)
+
+
 def _stage_and_promote(
     prepared: list[PreparedAsset],
     asset_root: Path,
@@ -1942,6 +3138,7 @@ def _stage_and_promote(
     journal_path: Path,
     journal_document: dict[str, Any],
 ) -> list[Path]:
+    """Create content-addressed destinations directly; retain all exact bytes."""
     if journal_document.get("destinations") is not journal_destinations:
         raise FullBundleMigrationError("promotion journal document is not authoritative")
     entries = {str(row.get("asset_id") or ""): row for row in journal_destinations}
@@ -1953,19 +3150,14 @@ def _stage_and_promote(
         destination = _journal_destination_for_spec(entry, item.spec, asset_root)
         _assert_planned_asset_ancestry(asset_root, destination)
         if entry.get("ownership_state") == "preexisting":
-            destination = _verified_asset_destination(
-                item.spec, asset_root, entry=entry
-            )
-            info = destination.lstat()
+            existing = _verified_asset_destination(item.spec, asset_root, entry=entry)
+            info = existing.lstat()
             if (
                 entry.get("existed_before") is not True
                 or (int(info.st_dev), int(info.st_ino))
-                != (
-                    entry.get("preexisting_st_dev"),
-                    entry.get("preexisting_st_ino"),
-                )
-                or destination.stat().st_size != int(item.spec["bytes"])
-                or _sha256_path(destination) != item.spec["sha256"]
+                != (entry.get("preexisting_st_dev"), entry.get("preexisting_st_ino"))
+                or info.st_size != int(item.spec["bytes"])
+                or _sha256_path(existing) != item.spec["sha256"]
             ):
                 raise FullBundleMigrationError(
                     f"preexisting destination drifted: {item.spec['asset_id']}"
@@ -1977,166 +3169,79 @@ def _stage_and_promote(
         ):
             raise FullBundleMigrationError("promotion journal ownership state is invalid")
         pending.append(item)
-    if not pending:
-        return []
     required = sum(int(item.spec["bytes"]) for item in pending) + 128 * 1024 * 1024
     if shutil.disk_usage(asset_root).free < required:
-        raise FullBundleMigrationError("asset volume lacks safe staging capacity")
-    staging = asset_root / STAGING_DIR_NAME
-    if _lstat_or_none(staging) is not None:
-        raise FullBundleMigrationError("staging path already exists")
-    staging.mkdir(mode=0o700)
-    _fsync_directory(asset_root)
-    staged: list[tuple[PreparedAsset, Path]] = []
+        raise FullBundleMigrationError("asset volume lacks safe create-only capacity")
     created: list[Path] = []
-    try:
-        for item in pending:
-            suffix = ".mp3" if item.spec["kind"] == "narration" else ".png"
-            target = staging / f"{item.spec['asset_id']}-{item.spec['sha256']}{suffix}"
-            descriptor = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            with os.fdopen(descriptor, "wb") as output, item.source_path.open("rb") as source:
-                shutil.copyfileobj(source, output, length=1024 * 1024)
-                output.flush()
-                os.fsync(output.fileno())
-            if target.stat().st_size != int(item.spec["bytes"]) or _sha256_path(target) != item.spec["sha256"]:
-                raise FullBundleMigrationError(
-                    f"staged asset verification failed: {item.spec['asset_id']}"
-                )
-            staged.append((item, target))
-        _fsync_directory(staging)
-
-        for item, staged_path in staged:
-            entry = entries[str(item.spec["asset_id"])]
-            destination = _journal_destination_for_spec(entry, item.spec, asset_root)
-            staged_info = staged_path.lstat()
-            if (
-                stat.S_ISLNK(staged_info.st_mode)
-                or not stat.S_ISREG(staged_info.st_mode)
-                or staged_info.st_nlink != 1
-            ):
-                raise FullBundleMigrationError(
-                    f"staged asset identity is unsafe: {item.spec['asset_id']}"
-                )
-            with _open_asset_destination_parent(
-                asset_root, destination, create=True
-            ) as parent_fd:
-                linked = False
-                try:
-                    os.link(
-                        staged_path,
-                        destination.name,
-                        dst_dir_fd=parent_fd,
-                        follow_symlinks=False,
-                    )
-                    linked = True
-                    linked_info = os.stat(
-                        destination.name,
-                        dir_fd=parent_fd,
-                        follow_symlinks=False,
-                    )
-                    try:
-                        lexical_parent_info = destination.parent.lstat()
-                        descriptor_parent_info = os.fstat(parent_fd)
-                        lexical_file_info = destination.lstat()
-                    except OSError as exc:
-                        raise FullBundleMigrationError(
-                            f"asset destination retargeted during promotion: {item.spec['asset_id']}"
-                        ) from exc
-                    if (
-                        (linked_info.st_dev, linked_info.st_ino)
-                        != (staged_info.st_dev, staged_info.st_ino)
-                        or (descriptor_parent_info.st_dev, descriptor_parent_info.st_ino)
-                        != (lexical_parent_info.st_dev, lexical_parent_info.st_ino)
-                        or stat.S_ISLNK(lexical_parent_info.st_mode)
-                        or (linked_info.st_dev, linked_info.st_ino)
-                        != (lexical_file_info.st_dev, lexical_file_info.st_ino)
-                        or stat.S_ISLNK(lexical_file_info.st_mode)
-                    ):
-                        raise FullBundleMigrationError(
-                            f"asset destination retargeted during promotion: {item.spec['asset_id']}"
-                        )
-                    os.fsync(parent_fd)
-                except FileExistsError:
-                    prior_document = copy.deepcopy(journal_document)
-                    try:
-                        collision = _verified_asset_destination(
-                            item.spec, asset_root, entry=entry
-                        )
-                        collision_exact = (
-                            collision.stat().st_size == int(item.spec["bytes"])
-                            and _sha256_path(collision) == item.spec["sha256"]
-                        )
-                    except FullBundleMigrationError:
-                        collision_exact = False
-                    entry["ownership_state"] = (
-                        "raced_exact" if collision_exact else "external_collision"
-                    )
-                    entry["operator_created_st_dev"] = None
-                    entry["operator_created_st_ino"] = None
-                    _write_json_atomic(
-                        journal_path,
-                        journal_document,
-                        create_only=False,
-                        expected_prior=prior_document,
-                    )
-                    raise FullBundleMigrationError(
-                        f"create-only destination raced after journal: {item.spec['asset_id']}"
-                    )
-                except Exception:
-                    if linked:
-                        try:
-                            current_info = os.stat(
-                                destination.name,
-                                dir_fd=parent_fd,
-                                follow_symlinks=False,
-                            )
-                        except FileNotFoundError:
-                            current_info = None
-                        except OSError:
-                            current_info = False
-                        if current_info is not None and current_info is not False and (
-                            current_info.st_dev,
-                            current_info.st_ino,
-                        ) == (staged_info.st_dev, staged_info.st_ino):
-                            os.unlink(destination.name, dir_fd=parent_fd)
-                            os.fsync(parent_fd)
-                        elif current_info is not None:
-                            prior_document = copy.deepcopy(journal_document)
-                            entry["ownership_state"] = "external_collision"
-                            entry["operator_created_st_dev"] = None
-                            entry["operator_created_st_ino"] = None
-                            _write_json_atomic(
-                                journal_path,
-                                journal_document,
-                                create_only=False,
-                                expected_prior=prior_document,
-                            )
-                    raise
+    for item in pending:
+        entry = entries[str(item.spec["asset_id"])]
+        destination = _journal_destination_for_spec(entry, item.spec, asset_root)
+        try:
+            installed_info = _install_asset_create_only(item, asset_root, destination)
+        except FileExistsError:
             prior_document = copy.deepcopy(journal_document)
-            entry["ownership_state"] = "operator_created"
-            entry["operator_created_st_dev"] = int(linked_info.st_dev)
-            entry["operator_created_st_ino"] = int(linked_info.st_ino)
+            try:
+                collision = _verified_asset_destination(
+                    item.spec, asset_root, entry=entry
+                )
+                collision_exact = (
+                    collision.stat().st_size == int(item.spec["bytes"])
+                    and _sha256_path(collision) == item.spec["sha256"]
+                )
+            except FullBundleMigrationError:
+                collision_exact = False
+            entry["ownership_state"] = (
+                "raced_exact" if collision_exact else "external_collision"
+            )
+            entry["operator_created_st_dev"] = None
+            entry["operator_created_st_ino"] = None
             _write_json_atomic(
                 journal_path,
                 journal_document,
                 create_only=False,
                 expected_prior=prior_document,
             )
-            _verified_asset_destination(item.spec, asset_root, entry=entry)
-            created.append(destination)
-            staged_path.unlink()
-        staging.rmdir()
-        _fsync_directory(asset_root)
-        return created
-    except Exception:
-        # The caller removes promoted files only while holding a database write
-        # lock and only after proving that no row references them.
-        if staging.exists() and staging.is_dir() and not staging.is_symlink():
-            for child in staging.iterdir():
-                if child.is_file() and not child.is_symlink():
-                    child.unlink()
-            staging.rmdir()
-        raise
+            raise FullBundleMigrationError(
+                f"create-only destination raced after journal: {item.spec['asset_id']}"
+            )
+        except Exception:
+            if _lstat_or_none(destination) is not None:
+                prior_document = copy.deepcopy(journal_document)
+                try:
+                    collision = _verified_asset_destination(
+                        item.spec, asset_root, entry=entry
+                    )
+                    collision_exact = (
+                        collision.stat().st_size == int(item.spec["bytes"])
+                        and _sha256_path(collision) == item.spec["sha256"]
+                    )
+                except FullBundleMigrationError:
+                    collision_exact = False
+                entry["ownership_state"] = (
+                    "raced_exact" if collision_exact else "external_collision"
+                )
+                entry["operator_created_st_dev"] = None
+                entry["operator_created_st_ino"] = None
+                _write_json_atomic(
+                    journal_path,
+                    journal_document,
+                    create_only=False,
+                    expected_prior=prior_document,
+                )
+            raise
+        prior_document = copy.deepcopy(journal_document)
+        entry["ownership_state"] = "operator_created"
+        entry["operator_created_st_dev"] = int(installed_info.st_dev)
+        entry["operator_created_st_ino"] = int(installed_info.st_ino)
+        _write_json_atomic(
+            journal_path,
+            journal_document,
+            create_only=False,
+            expected_prior=prior_document,
+        )
+        _verified_asset_destination(item.spec, asset_root, entry=entry)
+        created.append(destination)
+    return created
 
 
 def _insert_new_assets(
@@ -2351,6 +3456,7 @@ def _report(
     recovered: str | None,
     verification: dict[str, Any],
     predecessor_history_sha256: str,
+    journal_terminal: dict[str, Any],
 ) -> dict[str, Any]:
     draft = packet["migration_draft"]
     attestation = packet["post_migration_phases"]["license_attestation"]
@@ -2359,6 +3465,9 @@ def _report(
         "packet_sha256": packet_sha256,
         "target_id": target["id"],
         "database_path_sha256": target["database_path_sha256"],
+        "database_inode_identity_sha256": target[
+            "database_inode_identity_sha256"
+        ],
         "asset_root_path_sha256": target["asset_root_path_sha256"],
         "after_revision": draft["expected_after_revision"],
     }
@@ -2379,9 +3488,13 @@ def _report(
             "committed_narration_count": 85,
             "committed_image_count": 13,
             "manifest_canonical_sha256": draft["original_manifest_canonical_sha256"],
+            "database_inode_identity_sha256": target[
+                "database_inode_identity_sha256"
+            ],
             "profile_present": False,
             "roaring_fork_existing_rows_preserved": True,
             "predecessor_history_sha256": predecessor_history_sha256,
+            "journal_terminal": copy.deepcopy(journal_terminal),
             "published_version_count": 0,
         },
         "verification": verification,
@@ -2568,383 +3681,710 @@ def apply_private(
         raise FullBundleMigrationError("report path must be absolute")
     report_parent = _assert_directory(report_path.parent, "report parent")
     report_path = report_parent / report_path.name
-    report_info = _lstat_or_none(report_path)
-    if report_info is not None and (
-        stat.S_ISLNK(report_info.st_mode)
-        or not stat.S_ISREG(report_info.st_mode)
-        or report_info.st_nlink != 1
+    with _pin_regular_file(db_path, "database") as (
+        db_descriptor,
+        pinned_db_identity,
     ):
-        raise FullBundleMigrationError("existing migration receipt is unsafe")
-    db_wal_path = Path(str(db_path) + "-wal")
-    db_shm_path = Path(str(db_path) + "-shm")
-    reserved = {
-        db_path,
-        db_wal_path,
-        db_shm_path,
-        operator_audit_path,
-        backup_manifest_path.resolve(strict=True),
-        backup_path,
-        *(ROOT / path for path in (packet_builder.PACKET_PATH, packet_builder.AUDIT_CONTRACT_PATH)),
-        *(item.source_path for item in prepared),
-    }
-    if (
-        report_path in reserved
-        or report_path == asset_root
-        or asset_root in report_path.parents
-        or report_path == narration_root
-        or narration_root in report_path.parents
-        or report_path == artwork_root
-        or artwork_root in report_path.parents
-    ):
-        raise FullBundleMigrationError("report path collides with protected state")
-    identity_inputs = {
-        "database": db_path,
-        "backup manifest": backup_manifest_path.resolve(strict=True),
-        "SQLite backup": backup_path,
-        "operator audit": operator_audit_path,
-    }
-    if report_info is not None:
-        identity_inputs["existing migration receipt"] = report_path
-    _assert_distinct_file_identities(identity_inputs)
-
-    journal_path = asset_root / JOURNAL_FILE_NAME
-    created: list[Path] = []
-    inserted = 0
-    committed = False
-    migration_result = "not_started"
-    recovered: str | None = None
-    with _exclusive_lock(asset_root):
-        if _inode_identity(db_path) != db_identity or _inode_identity(asset_root) != asset_root_identity:
-            raise FullBundleMigrationError("database or asset-root identity changed")
-        _assert_wal_sidecars_safe(db_path)
-        # Revalidate immutable prerequisites after acquiring the process lock.
-        _validate_backup(
-            backup_manifest_path,
-            expected_manifest_sha256=expected_backup_manifest_sha256,
-            db_path=db_path,
-            asset_root=asset_root,
-        )
-        current_packet, current_contract, current_packet_sha256 = _load_exact_packet()
-        if (
-            current_packet_sha256 != packet_sha256
-            or current_packet != packet
-            or current_contract != contract
+        if pinned_db_identity != db_identity:
+            raise FullBundleMigrationError("database identity changed before pin")
+        database_inode_identity_sha256 = _filesystem_identity_sha256(db_identity)
+        target = copy.deepcopy(target)
+        target["database_inode_identity_sha256"] = database_inode_identity_sha256
+        with _pin_directory(asset_root, "asset root") as (
+            asset_root_descriptor,
+            pinned_asset_root_identity,
         ):
-            raise FullBundleMigrationError("migration packet changed after preflight")
-        current_audit = _validate_operator_audit(
-            operator_audit_path, packet, contract, packet_sha256
-        )
-        if current_audit != audit:
-            raise FullBundleMigrationError("operator audit changed after preflight")
-        receipt_history = _history_binding_from_file(
-            report_path,
-            packet_sha256=packet_sha256,
-            kind="migration receipt",
-        )
-        journal_history = _history_binding_from_file(
-            journal_path,
-            packet_sha256=packet_sha256,
-            kind="migration journal",
-        )
-        if (
-            receipt_history is not None
-            and journal_history is not None
-            and receipt_history != journal_history
-        ):
-            raise FullBundleMigrationError(
-                "receipt and journal predecessor-history bindings disagree"
-            )
-        persisted_history = receipt_history or journal_history
-        if backup_state == "predecessor":
-            backup_history = _predecessor_history_sha256(backup_snapshot, packet)
-            if persisted_history is not None and persisted_history != backup_history:
-                raise FullBundleMigrationError(
-                    "persisted history differs from the locked predecessor backup"
-                )
-            predecessor_history_sha256 = backup_history
-        else:
-            if persisted_history is None:
-                raise FullBundleMigrationError(
-                    "target replay requires a predecessor-bound journal or receipt"
-                )
-            predecessor_history_sha256 = persisted_history
-
-        if _lstat_or_none(report_path) is not None:
-            _assert_file(report_path, "existing migration receipt")
-            report_state_connection = _connect(db_path)
-            try:
-                report_state_connection.execute("BEGIN IMMEDIATE")
-                report_state, _report_snapshot = _classify_state(
-                    report_state_connection,
-                    packet,
-                    asset_root,
-                    backup_snapshot=backup_snapshot,
-                    expected_predecessor_history_sha256=(
-                        predecessor_history_sha256
-                    ),
-                )
-                report_state_connection.commit()
-            except Exception:
-                report_state_connection.rollback()
-                raise
-            finally:
-                report_state_connection.close()
-            if report_state != "target":
-                raise FullBundleMigrationError(
-                    "an existing receipt cannot authorize a predecessor migration"
-                )
-            existing_receipt = _read_json(
-                report_path, "existing migration receipt"
-            )
-            expected_receipt = _report(
-                packet,
-                packet_sha256,
-                target=target,
-                backup_manifest=backup_manifest,
-                backup_manifest_sha256=expected_backup_manifest_sha256,
-                audit=audit,
-                migration_result="replayed_exact_target",
-                inserted_assets=0,
-                created_files=0,
-                recovered=None,
-                verification=_verification_from_snapshot(_report_snapshot),
-                predecessor_history_sha256=predecessor_history_sha256,
-            )
-            _validate_existing_receipt(existing_receipt, expected_receipt)
-            return existing_receipt
-        expected_journal = _journal_document(
-            packet,
-            packet_sha256,
-            target=target,
-            db_path=db_path,
-            asset_root=asset_root,
-            narration_root=narration_root,
-            artwork_root=artwork_root,
-            backup_manifest_sha256=expected_backup_manifest_sha256,
-            audit_sha256=audit["artifact_sha256"],
-            predecessor_history_sha256=predecessor_history_sha256,
-        )
-        recovered = _recover_journal(
-            journal_path,
-            expected_journal,
-            db_path=db_path,
-            asset_root=asset_root,
-            prepared=prepared,
-            packet=packet,
-            backup_snapshot=backup_snapshot,
-        )
-        if recovered != "committed_target_recovered":
-            if recovered == "partial_files_rolled_back":
-                # Recovery may have removed files created by the interrupted run;
-                # rebuild the presence flags before starting the new run.
-                expected_journal = _journal_document(
-                    packet,
-                    packet_sha256,
-                    target=target,
-                    db_path=db_path,
-                    asset_root=asset_root,
-                    narration_root=narration_root,
-                    artwork_root=artwork_root,
-                    backup_manifest_sha256=expected_backup_manifest_sha256,
-                    audit_sha256=audit["artifact_sha256"],
-                    predecessor_history_sha256=predecessor_history_sha256,
-                )
-            _write_json_atomic(journal_path, expected_journal, create_only=True)
-            try:
-                created = _stage_and_promote(
-                    prepared,
-                    asset_root,
-                    expected_journal["destinations"],
-                    journal_path=journal_path,
-                    journal_document=expected_journal,
-                )
-                prior_journal = copy.deepcopy(expected_journal)
-                expected_journal["state"] = "files_promoted"
-                _write_json_atomic(
-                    journal_path,
-                    expected_journal,
-                    create_only=False,
-                    expected_prior=prior_journal,
-                )
-            except Exception:
-                connection = _connect(db_path)
-                try:
-                    connection.execute("BEGIN IMMEDIATE")
-                    _remove_unreferenced_created(
-                        connection,
-                        expected_journal["destinations"],
-                        asset_root,
-                        packet["assets"]["new"],
-                        journal_path=journal_path,
-                        journal_document=expected_journal,
-                    )
-                    connection.commit()
-                except Exception:
-                    connection.rollback()
-                    raise
-                finally:
-                    connection.close()
-                _retire_json_document(
-                    journal_path, expected_journal, label="migration journal"
-                )
-                raise
-
-        # Asset verification and promotion can be lengthy. Recheck the backup,
-        # frozen sources, audit, and path identities at the actual DB action time.
-        try:
-            _validate_backup(
-                backup_manifest_path,
-                expected_manifest_sha256=expected_backup_manifest_sha256,
-                db_path=db_path,
-                asset_root=asset_root,
-            )
-            if _inode_identity(db_path) != db_identity or _inode_identity(asset_root) != asset_root_identity:
-                raise FullBundleMigrationError("database or asset-root identity changed at action time")
-            _assert_wal_sidecars_safe(db_path)
-            current_packet, current_contract, current_packet_sha256 = _load_exact_packet()
-            if (
-                current_packet_sha256 != packet_sha256
-                or current_packet != packet
-                or current_contract != contract
-                or _validate_operator_audit(
-                    operator_audit_path, packet, contract, packet_sha256
-                )
-                != audit
+            if pinned_asset_root_identity != asset_root_identity:
+                raise FullBundleMigrationError("asset-root identity changed before pin")
+            with _open_anchored_parent(report_path, "migration receipt") as (
+                report_parent_descriptor,
+                report_parent_identity,
             ):
-                raise FullBundleMigrationError("frozen migration authority drifted at action time")
-            action_identity_inputs = copy.deepcopy(identity_inputs)
-            if _lstat_or_none(report_path) is not None:
-                action_identity_inputs["existing migration receipt"] = report_path
-            _assert_distinct_file_identities(action_identity_inputs)
-        except Exception:
-            if _lstat_or_none(journal_path) is not None:
-                _rollback_pre_database_action_failure(
-                    journal_path=journal_path,
-                    journal_document=expected_journal,
-                    db_path=db_path,
-                    asset_root=asset_root,
-                    prepared=prepared,
-                    packet=packet,
-                    backup_snapshot=backup_snapshot,
-                    predecessor_history_sha256=predecessor_history_sha256,
+                report_info = _lstat_at_or_none(
+                    report_path,
+                    report_parent_descriptor,
+                    report_parent_identity,
+                    label="migration receipt",
                 )
-            raise
-        connection = _connect(db_path)
-        try:
-            # The integrity read above may itself consume the last seconds of a
-            # backup's lifetime. Recheck at the actual lock acquisition edge.
-            _assert_backup_fresh(backup_manifest)
-        except Exception:
-            connection.close()
-            if _lstat_or_none(journal_path) is not None:
-                _rollback_pre_database_action_failure(
-                    journal_path=journal_path,
-                    journal_document=expected_journal,
-                    db_path=db_path,
-                    asset_root=asset_root,
-                    prepared=prepared,
-                    packet=packet,
-                    backup_snapshot=backup_snapshot,
-                    predecessor_history_sha256=predecessor_history_sha256,
+                if report_info is not None and (
+                    stat.S_ISLNK(report_info.st_mode)
+                    or not stat.S_ISREG(report_info.st_mode)
+                    or report_info.st_nlink != 1
+                    or stat.S_IMODE(report_info.st_mode) != 0o600
+                    or report_info.st_uid != os.geteuid()
+                ):
+                    raise FullBundleMigrationError("existing migration receipt is unsafe")
+                asset_capability_marker = _json_create_capability_marker_path(
+                    asset_root, role="journal", packet_sha256=packet_sha256
                 )
-            raise
-        try:
-            connection.execute("BEGIN IMMEDIATE")
-            # BEGIN IMMEDIATE may wait for another writer. The backup must still
-            # be fresh after the write lock is actually held, before any change.
-            try:
-                _assert_backup_fresh(backup_manifest)
-            except Exception:
-                connection.rollback()
-                connection.close()
-                connection = None
-                if _lstat_or_none(journal_path) is not None:
-                    _rollback_pre_database_action_failure(
-                        journal_path=journal_path,
-                        journal_document=expected_journal,
+                report_capability_marker = _json_create_capability_marker_path(
+                    report_parent, role="receipt", packet_sha256=packet_sha256
+                )
+                db_wal_path = Path(str(db_path) + "-wal")
+                db_shm_path = Path(str(db_path) + "-shm")
+                reserved = {
+                    db_path,
+                    db_wal_path,
+                    db_shm_path,
+                    operator_audit_path,
+                    backup_manifest_path.resolve(strict=True),
+                    backup_path,
+                    *(ROOT / path for path in (packet_builder.PACKET_PATH, packet_builder.AUDIT_CONTRACT_PATH)),
+                    *(item.source_path for item in prepared),
+                    asset_capability_marker,
+                    report_capability_marker,
+                }
+                if (
+                    report_path in reserved
+                    or report_path == asset_root
+                    or asset_root in report_path.parents
+                    or report_path == narration_root
+                    or narration_root in report_path.parents
+                    or report_path == artwork_root
+                    or artwork_root in report_path.parents
+                ):
+                    raise FullBundleMigrationError("report path collides with protected state")
+                identity_inputs = {
+                    "database": db_path,
+                    "backup manifest": backup_manifest_path.resolve(strict=True),
+                    "SQLite backup": backup_path,
+                    "operator audit": operator_audit_path,
+                }
+                if report_info is not None:
+                    identity_inputs["existing migration receipt"] = report_path
+                _assert_distinct_file_identities(identity_inputs)
+                # These retained markers are the fail-closed capability proof. They are
+                # created before the lock, staging, journal, database, or receipt can move.
+                _ensure_json_create_capability(
+                    asset_root, role="journal", packet_sha256=packet_sha256
+                )
+                _ensure_json_create_capability_at(
+                    report_parent,
+                    role="receipt",
+                    packet_sha256=packet_sha256,
+                    parent_descriptor=report_parent_descriptor,
+                    parent_identity=report_parent_identity,
+                )
+                _assert_anchored_parent(
+                    report_path,
+                    report_parent_descriptor,
+                    report_parent_identity,
+                    "migration receipt",
+                )
+
+                journal_path = asset_root / JOURNAL_FILE_NAME
+                created: list[Path] = []
+                inserted = 0
+                committed = False
+                migration_result = "not_started"
+                recovered: str | None = None
+                with _exclusive_lock(asset_root):
+                    _assert_anchored_parent(
+                        report_path,
+                        report_parent_descriptor,
+                        report_parent_identity,
+                        "migration receipt",
+                    )
+                    if _inode_identity(db_path) != db_identity or _inode_identity(asset_root) != asset_root_identity:
+                        raise FullBundleMigrationError("database or asset-root identity changed")
+                    _assert_wal_sidecars_safe(db_path)
+                    # Revalidate immutable prerequisites after acquiring the process lock.
+                    _validate_backup(
+                        backup_manifest_path,
+                        expected_manifest_sha256=expected_backup_manifest_sha256,
+                        db_path=db_path,
+                        asset_root=asset_root,
+                    )
+                    current_packet, current_contract, current_packet_sha256 = _load_exact_packet()
+                    if (
+                        current_packet_sha256 != packet_sha256
+                        or current_packet != packet
+                        or current_contract != contract
+                    ):
+                        raise FullBundleMigrationError("migration packet changed after preflight")
+                    current_audit = _validate_operator_audit(
+                        operator_audit_path, packet, contract, packet_sha256
+                    )
+                    if current_audit != audit:
+                        raise FullBundleMigrationError("operator audit changed after preflight")
+                    receipt_history = _history_binding_from_file(
+                        report_path,
+                        packet_sha256=packet_sha256,
+                        kind="migration receipt",
+                        parent_descriptor=report_parent_descriptor,
+                        parent_identity=report_parent_identity,
+                    )
+                    journal_history = _history_binding_from_file(
+                        journal_path,
+                        packet_sha256=packet_sha256,
+                        kind="migration journal",
+                    )
+                    if (
+                        receipt_history is not None
+                        and journal_history is not None
+                        and receipt_history != journal_history
+                    ):
+                        raise FullBundleMigrationError(
+                            "receipt and journal predecessor-history bindings disagree"
+                        )
+                    persisted_history = receipt_history or journal_history
+                    if backup_state == "predecessor":
+                        backup_history = _predecessor_history_sha256(backup_snapshot, packet)
+                        if persisted_history is not None and persisted_history != backup_history:
+                            raise FullBundleMigrationError(
+                                "persisted history differs from the locked predecessor backup"
+                            )
+                        predecessor_history_sha256 = backup_history
+                    else:
+                        if persisted_history is None:
+                            raise FullBundleMigrationError(
+                                "target replay requires a predecessor-bound journal or receipt"
+                            )
+                        predecessor_history_sha256 = persisted_history
+
+                    expected_journal = _journal_document(
+                        packet,
+                        packet_sha256,
+                        target=target,
+                        db_path=db_path,
+                        asset_root=asset_root,
+                        narration_root=narration_root,
+                        artwork_root=artwork_root,
+                        backup_manifest_sha256=expected_backup_manifest_sha256,
+                        audit_sha256=audit["artifact_sha256"],
+                        predecessor_history_sha256=predecessor_history_sha256,
+                        database_inode_identity_sha256=database_inode_identity_sha256,
+                    )
+
+                    if _lstat_at_or_none(
+                        report_path,
+                        report_parent_descriptor,
+                        report_parent_identity,
+                        label="existing migration receipt",
+                    ) is not None:
+                        report_state_connection = _connect(
+                            db_path,
+                            pinned_descriptor=db_descriptor,
+                            expected_identity=db_identity,
+                        )
+                        try:
+                            report_state_connection.execute("BEGIN IMMEDIATE")
+                            _assert_pinned_database_connection(
+                                report_state_connection,
+                                db_path,
+                                db_descriptor,
+                                db_identity,
+                            )
+                            report_state, _report_snapshot = _classify_state(
+                                report_state_connection,
+                                packet,
+                                asset_root,
+                                backup_snapshot=backup_snapshot,
+                                expected_predecessor_history_sha256=(
+                                    predecessor_history_sha256
+                                ),
+                            )
+                            _assert_pinned_database_connection(
+                                report_state_connection,
+                                db_path,
+                                db_descriptor,
+                                db_identity,
+                            )
+                            report_state_connection.commit()
+                            _assert_pinned_database_connection(
+                                report_state_connection,
+                                db_path,
+                                db_descriptor,
+                                db_identity,
+                                commit_uncertain=True,
+                            )
+                        except Exception:
+                            report_state_connection.rollback()
+                            raise
+                        finally:
+                            report_state_connection.close()
+                        if report_state != "target":
+                            raise FullBundleMigrationError(
+                                "an existing receipt cannot authorize a predecessor migration"
+                            )
+                        _assert_pinned_regular_file_path(
+                            db_path,
+                            db_descriptor,
+                            db_identity,
+                            label="configured SQLite database before existing receipt read",
+                            commit_uncertain=True,
+                        )
+                        existing_receipt = _read_json_at(
+                            report_path,
+                            report_parent_descriptor,
+                            report_parent_identity,
+                            label="existing migration receipt",
+                        )
+                        existing_chain = _load_journal_chain(journal_path)
+                        if (
+                            existing_chain is None
+                            or existing_chain["document"].get("state") != "database_committed"
+                            or existing_chain["head_terminal"] is None
+                        ):
+                            raise FullBundleMigrationError(
+                                "existing receipt requires an exact terminal journal head"
+                            )
+                        existing_terminal = _journal_terminal_binding(journal_path)
+                        expected_receipt = _report(
+                            packet,
+                            packet_sha256,
+                            target=target,
+                            backup_manifest=backup_manifest,
+                            backup_manifest_sha256=expected_backup_manifest_sha256,
+                            audit=audit,
+                            migration_result="replayed_exact_target",
+                            inserted_assets=0,
+                            created_files=0,
+                            recovered=None,
+                            verification=_verification_from_snapshot(_report_snapshot),
+                            predecessor_history_sha256=predecessor_history_sha256,
+                            journal_terminal=existing_terminal,
+                        )
+                        _validate_existing_receipt(existing_receipt, expected_receipt)
+                        receipt_journal_recovery = _recover_journal(
+                            journal_path,
+                            expected_journal,
+                            db_path=db_path,
+                            asset_root=asset_root,
+                            prepared=prepared,
+                            packet=packet,
+                            backup_snapshot=backup_snapshot,
+                            db_descriptor=db_descriptor,
+                            db_identity=db_identity,
+                            require_target=True,
+                        )
+                        if receipt_journal_recovery != "committed_target_recovered":
+                            raise FullBundleMigrationError(
+                                "existing receipt journal recovery contradicted target state"
+                            )
+                        if _journal_terminal_binding(journal_path) != existing_terminal:
+                            raise FullBundleMigrationError(
+                                "existing receipt journal terminal changed during recovery"
+                            )
+                        _assert_anchored_parent(
+                            report_path,
+                            report_parent_descriptor,
+                            report_parent_identity,
+                            "existing migration receipt",
+                        )
+                        _assert_pinned_regular_file_path(
+                            db_path,
+                            db_descriptor,
+                            db_identity,
+                            label="configured SQLite database before existing receipt return",
+                            commit_uncertain=True,
+                        )
+                        return existing_receipt
+                    recovered = _recover_journal(
+                        journal_path,
+                        expected_journal,
                         db_path=db_path,
                         asset_root=asset_root,
                         prepared=prepared,
                         packet=packet,
                         backup_snapshot=backup_snapshot,
-                        predecessor_history_sha256=predecessor_history_sha256,
+                        db_descriptor=db_descriptor,
+                        db_identity=db_identity,
                     )
-                raise
-            migration_result, inserted, _revision = _apply_database_locked(
-                connection,
-                packet,
-                asset_root=asset_root,
-                admin_user_id=admin_user_id,
-                backup_snapshot=backup_snapshot,
-                journal_destinations=expected_journal["destinations"],
-                predecessor_history_sha256=predecessor_history_sha256,
-            )
-            connection.commit()
-            committed = True
-        except Exception:
-            if connection is not None:
-                connection.rollback()
-            raise
-        finally:
-            if connection is not None:
-                connection.close()
+                    if recovered != "committed_target_recovered":
+                        if recovered == "partial_files_rolled_back":
+                            # Recovery may have removed files created by the interrupted run;
+                            # rebuild the presence flags before starting the new run.
+                            recovered_head = copy.deepcopy(expected_journal)
+                            expected_journal = _journal_document(
+                                packet,
+                                packet_sha256,
+                                target=target,
+                                db_path=db_path,
+                                asset_root=asset_root,
+                                narration_root=narration_root,
+                                artwork_root=artwork_root,
+                                backup_manifest_sha256=expected_backup_manifest_sha256,
+                                audit_sha256=audit["artifact_sha256"],
+                                predecessor_history_sha256=predecessor_history_sha256,
+                                database_inode_identity_sha256=database_inode_identity_sha256,
+                            )
+                            _write_json_atomic(
+                                journal_path,
+                                expected_journal,
+                                create_only=False,
+                                expected_prior=recovered_head,
+                            )
+                        else:
+                            _write_json_atomic(journal_path, expected_journal, create_only=True)
+                        try:
+                            created = _stage_and_promote(
+                                prepared,
+                                asset_root,
+                                expected_journal["destinations"],
+                                journal_path=journal_path,
+                                journal_document=expected_journal,
+                            )
+                            prior_journal = copy.deepcopy(expected_journal)
+                            expected_journal["state"] = "files_promoted"
+                            _write_json_atomic(
+                                journal_path,
+                                expected_journal,
+                                create_only=False,
+                                expected_prior=prior_journal,
+                            )
+                        except Exception:
+                            connection = _connect(
+                                db_path,
+                                pinned_descriptor=db_descriptor,
+                                expected_identity=db_identity,
+                            )
+                            try:
+                                connection.execute("BEGIN IMMEDIATE")
+                                _assert_pinned_database_connection(
+                                    connection,
+                                    db_path,
+                                    db_descriptor,
+                                    db_identity,
+                                )
+                                _remove_unreferenced_created(
+                                    connection,
+                                    expected_journal["destinations"],
+                                    asset_root,
+                                    packet["assets"]["new"],
+                                    journal_path=journal_path,
+                                    journal_document=expected_journal,
+                                )
+                                _assert_pinned_database_connection(
+                                    connection,
+                                    db_path,
+                                    db_descriptor,
+                                    db_identity,
+                                )
+                                connection.commit()
+                                _assert_pinned_database_connection(
+                                    connection,
+                                    db_path,
+                                    db_descriptor,
+                                    db_identity,
+                                    commit_uncertain=True,
+                                )
+                            except Exception:
+                                connection.rollback()
+                                raise
+                            finally:
+                                connection.close()
+                            _retire_json_document(
+                                journal_path, expected_journal, label="migration journal"
+                            )
+                            raise
 
-        prior_journal = copy.deepcopy(expected_journal)
-        expected_journal["state"] = "database_committed"
-        _write_json_atomic(
-            journal_path,
-            expected_journal,
-            create_only=False,
-            expected_prior=prior_journal,
-        )
-        verify_connection = _connect(db_path)
-        try:
-            verification_snapshot = _assert_target_state(
-                verify_connection,
-                packet,
-                asset_root,
-                backup_rf_snapshot=backup_snapshot,
-                expected_predecessor_history_sha256=predecessor_history_sha256,
-            )
-        finally:
-            verify_connection.close()
-        verification = _verification_from_snapshot(verification_snapshot)
-        report = _report(
-            packet,
-            packet_sha256,
-            target=target,
-            backup_manifest=backup_manifest,
-            backup_manifest_sha256=expected_backup_manifest_sha256,
-            audit=audit,
-            migration_result=migration_result,
-            inserted_assets=inserted,
-            created_files=len(created),
-            recovered=recovered,
-            verification=verification,
-            predecessor_history_sha256=predecessor_history_sha256,
-        )
-        if _lstat_or_none(report_path) is not None:
-            existing_path = _assert_file(report_path, "existing migration receipt")
-            existing = _read_json(existing_path, "existing migration receipt")
-            _validate_existing_receipt(existing, report)
-            _retire_json_document(
-                journal_path, expected_journal, label="migration journal"
-            )
-            return existing
-        try:
-            _write_json_atomic(report_path, report, create_only=True)
-        except Exception:
-            # A committed database is never blindly compensated after releasing
-            # its write lock. The exact journal is retained for verified replay.
-            raise
-        _retire_json_document(
-            journal_path, expected_journal, label="migration journal"
-        )
-        return report
+                    # Asset verification and promotion can be lengthy. Recheck the backup,
+                    # frozen sources, audit, and path identities at the actual DB action time.
+                    try:
+                        _validate_backup(
+                            backup_manifest_path,
+                            expected_manifest_sha256=expected_backup_manifest_sha256,
+                            db_path=db_path,
+                            asset_root=asset_root,
+                        )
+                        if _inode_identity(db_path) != db_identity or _inode_identity(asset_root) != asset_root_identity:
+                            raise FullBundleMigrationError("database or asset-root identity changed at action time")
+                        _assert_wal_sidecars_safe(db_path)
+                        current_packet, current_contract, current_packet_sha256 = _load_exact_packet()
+                        if (
+                            current_packet_sha256 != packet_sha256
+                            or current_packet != packet
+                            or current_contract != contract
+                            or _validate_operator_audit(
+                                operator_audit_path, packet, contract, packet_sha256
+                            )
+                            != audit
+                        ):
+                            raise FullBundleMigrationError("frozen migration authority drifted at action time")
+                        action_identity_inputs = copy.deepcopy(identity_inputs)
+                        if _lstat_at_or_none(
+                            report_path,
+                            report_parent_descriptor,
+                            report_parent_identity,
+                            label="migration receipt action edge",
+                        ) is not None:
+                            action_identity_inputs["existing migration receipt"] = report_path
+                        _assert_distinct_file_identities(action_identity_inputs)
+                        _assert_anchored_parent(
+                            report_path,
+                            report_parent_descriptor,
+                            report_parent_identity,
+                            "migration receipt action edge",
+                        )
+                    except Exception:
+                        if _load_journal_chain(journal_path) is not None:
+                            _rollback_pre_database_action_failure(
+                                journal_path=journal_path,
+                                journal_document=expected_journal,
+                                db_path=db_path,
+                                asset_root=asset_root,
+                                prepared=prepared,
+                                packet=packet,
+                                backup_snapshot=backup_snapshot,
+                                predecessor_history_sha256=predecessor_history_sha256,
+                                db_descriptor=db_descriptor,
+                                db_identity=db_identity,
+                            )
+                        raise
+                    connection = _connect(
+                        db_path,
+                        pinned_descriptor=db_descriptor,
+                        expected_identity=db_identity,
+                    )
+                    _assert_pinned_regular_file_path(
+                        db_path,
+                        db_descriptor,
+                        db_identity,
+                        label="configured SQLite database before write lock",
+                    )
+                    try:
+                        # The integrity read above may itself consume the last seconds of a
+                        # backup's lifetime. Recheck at the actual lock acquisition edge.
+                        _assert_backup_fresh(backup_manifest)
+                    except Exception:
+                        connection.close()
+                        if _load_journal_chain(journal_path) is not None:
+                            _rollback_pre_database_action_failure(
+                                journal_path=journal_path,
+                                journal_document=expected_journal,
+                                db_path=db_path,
+                                asset_root=asset_root,
+                                prepared=prepared,
+                                packet=packet,
+                                backup_snapshot=backup_snapshot,
+                                predecessor_history_sha256=predecessor_history_sha256,
+                                db_descriptor=db_descriptor,
+                                db_identity=db_identity,
+                            )
+                        raise
+                    try:
+                        connection.execute("BEGIN IMMEDIATE")
+                        _assert_pinned_database_connection(
+                            connection, db_path, db_descriptor, db_identity
+                        )
+                        _assert_anchored_parent(
+                            report_path,
+                            report_parent_descriptor,
+                            report_parent_identity,
+                            "migration receipt database edge",
+                        )
+                        # BEGIN IMMEDIATE may wait for another writer. The backup must still
+                        # be fresh after the write lock is actually held, before any change.
+                        try:
+                            _assert_backup_fresh(backup_manifest)
+                        except Exception:
+                            connection.rollback()
+                            connection.close()
+                            connection = None
+                            if _load_journal_chain(journal_path) is not None:
+                                _rollback_pre_database_action_failure(
+                                    journal_path=journal_path,
+                                    journal_document=expected_journal,
+                                    db_path=db_path,
+                                    asset_root=asset_root,
+                                    prepared=prepared,
+                                    packet=packet,
+                                    backup_snapshot=backup_snapshot,
+                                    predecessor_history_sha256=predecessor_history_sha256,
+                                    db_descriptor=db_descriptor,
+                                    db_identity=db_identity,
+                                )
+                            raise
+                        _assert_pinned_database_connection(
+                            connection, db_path, db_descriptor, db_identity
+                        )
+                        migration_result, inserted, _revision = _apply_database_locked(
+                            connection,
+                            packet,
+                            asset_root=asset_root,
+                            admin_user_id=admin_user_id,
+                            backup_snapshot=backup_snapshot,
+                            journal_destinations=expected_journal["destinations"],
+                            predecessor_history_sha256=predecessor_history_sha256,
+                        )
+                        _assert_pinned_database_connection(
+                            connection, db_path, db_descriptor, db_identity
+                        )
+                        connection.commit()
+                        committed = True
+                        _assert_pinned_database_connection(
+                            connection, db_path, db_descriptor, db_identity,
+                            commit_uncertain=True,
+                        )
+                    except Exception:
+                        if connection is not None:
+                            connection.rollback()
+                        raise
+                    finally:
+                        if connection is not None:
+                            connection.close()
 
-    # This branch is unreachable, but retains the safety intent for static audits.
-    if not committed:
-        raise FullBundleMigrationError("migration did not commit")
+                    _assert_pinned_regular_file_path(
+                        db_path,
+                        db_descriptor,
+                        db_identity,
+                        label="configured SQLite database after commit",
+                        commit_uncertain=True,
+                    )
+                    prior_journal = copy.deepcopy(expected_journal)
+                    expected_journal["state"] = "database_committed"
+                    _write_json_atomic(
+                        journal_path,
+                        expected_journal,
+                        create_only=False,
+                        expected_prior=prior_journal,
+                    )
+                    _assert_pinned_regular_file_path(
+                        db_path,
+                        db_descriptor,
+                        db_identity,
+                        label="configured SQLite database after commit journal",
+                        commit_uncertain=True,
+                    )
+                    verify_connection = _connect(
+                        db_path,
+                        pinned_descriptor=db_descriptor,
+                        expected_identity=db_identity,
+                    )
+                    try:
+                        verification_snapshot = _assert_target_state(
+                            verify_connection,
+                            packet,
+                            asset_root,
+                            backup_rf_snapshot=backup_snapshot,
+                            expected_predecessor_history_sha256=predecessor_history_sha256,
+                        )
+                        _assert_pinned_database_connection(
+                            verify_connection, db_path, db_descriptor, db_identity,
+                            commit_uncertain=True,
+                        )
+                    finally:
+                        verify_connection.close()
+                    verification = _verification_from_snapshot(verification_snapshot)
+                    _assert_pinned_regular_file_path(
+                        db_path,
+                        db_descriptor,
+                        db_identity,
+                        label="configured SQLite database before journal terminal",
+                        commit_uncertain=True,
+                    )
+                    _retire_json_document(
+                        journal_path, expected_journal, label="migration journal"
+                    )
+                    journal_terminal = _journal_terminal_binding(journal_path)
+                    _assert_pinned_regular_file_path(
+                        db_path,
+                        db_descriptor,
+                        db_identity,
+                        label="configured SQLite database after journal terminal",
+                        commit_uncertain=True,
+                    )
+                    report = _report(
+                        packet,
+                        packet_sha256,
+                        target=target,
+                        backup_manifest=backup_manifest,
+                        backup_manifest_sha256=expected_backup_manifest_sha256,
+                        audit=audit,
+                        migration_result=migration_result,
+                        inserted_assets=inserted,
+                        created_files=len(created),
+                        recovered=recovered,
+                        verification=verification,
+                        predecessor_history_sha256=predecessor_history_sha256,
+                        journal_terminal=journal_terminal,
+                    )
+                    if _lstat_at_or_none(
+                        report_path,
+                        report_parent_descriptor,
+                        report_parent_identity,
+                        label="migration receipt commit edge",
+                    ) is not None:
+                        _assert_pinned_regular_file_path(
+                            db_path,
+                            db_descriptor,
+                            db_identity,
+                            label="configured SQLite database before receipt read",
+                            commit_uncertain=True,
+                        )
+                        existing = _read_json_at(
+                            report_path,
+                            report_parent_descriptor,
+                            report_parent_identity,
+                            label="existing migration receipt",
+                        )
+                        _validate_existing_receipt(existing, report)
+                        _assert_anchored_parent(
+                            report_path,
+                            report_parent_descriptor,
+                            report_parent_identity,
+                            "existing migration receipt return",
+                        )
+                        _assert_pinned_regular_file_path(
+                            db_path,
+                            db_descriptor,
+                            db_identity,
+                            label="configured SQLite database before receipt return",
+                            commit_uncertain=True,
+                        )
+                        return existing
+                    _assert_pinned_regular_file_path(
+                        db_path,
+                        db_descriptor,
+                        db_identity,
+                        label="configured SQLite database before receipt install",
+                        commit_uncertain=True,
+                    )
+                    try:
+                        _install_immutable_bytes_at(
+                            report_path,
+                            _pretty_json_bytes(report),
+                            label="migration receipt",
+                            parent_descriptor=report_parent_descriptor,
+                            parent_identity=report_parent_identity,
+                        )
+                    except Exception:
+                        # A committed database is never blindly compensated after releasing
+                        # its write lock. The exact journal is retained for verified replay.
+                        raise
+                    _assert_pinned_regular_file_path(
+                        db_path,
+                        db_descriptor,
+                        db_identity,
+                        label="configured SQLite database after receipt install",
+                        commit_uncertain=True,
+                    )
+                    installed_report = _read_json_at(
+                        report_path,
+                        report_parent_descriptor,
+                        report_parent_identity,
+                        label="installed migration receipt",
+                    )
+                    _validate_existing_receipt(installed_report, report)
+                    _assert_anchored_parent(
+                        report_path,
+                        report_parent_descriptor,
+                        report_parent_identity,
+                        "installed migration receipt return",
+                    )
+                    _assert_pinned_regular_file_path(
+                        db_path,
+                        db_descriptor,
+                        db_identity,
+                        label="configured SQLite database before success return",
+                        commit_uncertain=True,
+                    )
+                    return report
+
+                # This branch is unreachable, but retains the safety intent for static audits.
+                if not committed:
+                    raise FullBundleMigrationError("migration did not commit")
 
 
 def _parser() -> argparse.ArgumentParser:

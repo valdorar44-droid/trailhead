@@ -22,6 +22,11 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from db.store import _validate_trip_pack_fields  # noqa: E402
+from db.originals_complete_validation import (  # noqa: E402
+    OriginalValidationRunnerError,
+    trusted_complete_originals_long_form_validator_source_paths,
+    trusted_complete_originals_long_form_validator_source_sha256,
+)
 from scripts import build_smokies_complete_private_candidate as candidate_builder  # noqa: E402
 
 
@@ -29,8 +34,8 @@ PRODUCT_ID = "great_smoky_mountains_ridges_rivers_living_memory"
 PACKET_ID = "smokies_complete_private_migration_20260811_v1"
 AUDIT_CONTRACT_ID = "smokies_complete_private_migration_operator_audit_contract_v1"
 MIGRATION_BASE_SOURCE_REVISION = {
-    "commit": "a4ef35366eaecdb762e316036a54e47436c71b1a",
-    "tree": "9d45a61f6dad1266497cb6564a7334a4255da6b5",
+    "commit": "4d24fe44a02bbf957c8200399612151f84a1e83a",
+    "tree": "9393a7a0049f8c0f4eef60d18ca5579d9f9aeef4",
 }
 PRIVATE_CANDIDATE_COMMIT_REVISION = {
     "commit": "6acfb31d80294f0d90e559a080c11af138c6a559",
@@ -65,11 +70,29 @@ RF_READINESS_INPUTS_PATH = Path(
 POSTPURCHASE_PREFLIGHT_PATH = Path(
     "originals/smokies/elevenlabs_james_remaining_postpurchase_preflight_v2.json"
 )
+RELEASE_GUARD_AUDIT_PATH = Path(
+    "originals/smokies/smokies_v3_release_guard_audit_v1.json"
+)
 RF_IMPORT_OPERATOR_PATH = Path("scripts/import_smokies_roaring_fork_private.py")
 BACKUP_OPERATOR_PATH = Path("scripts/backup_sqlite.py")
 MANIFEST_NORMALIZER_PATH = Path("db/original_manifest_v3.py")
 STORE_PATH = Path("db/store.py")
 CANDIDATE_BUILDER_PATH = Path("scripts/build_smokies_complete_private_candidate.py")
+COMPLETE_VALIDATION_PATH = Path("db/originals_complete_validation.py")
+MOBILE_LONG_FORM_VALIDATOR_PATH = Path(
+    "mobile/scripts/validate-original-long-form.ts"
+)
+MOBILE_LONG_FORM_EVIDENCE_REGISTRY_PATH = Path(
+    "mobile/lib/originals/longFormValidationEvidence.ts"
+)
+EXPECTED_COMPLETE_VALIDATOR_SOURCE_PATH_COUNT = 174
+EXPECTED_COMPLETE_VALIDATOR_SOURCE_SHA256 = (
+    "b01033dcdf155370688c5fd4ce1e9264d670505b1958b7135b1724e39d52235f"
+)
+COMPLETE_VALIDATOR_SOURCE_FRAMING = (
+    "for each repo-relative path sorted by POSIX path: "
+    "utf8(path) + NUL + ascii(decimal_byte_count) + NUL + raw_bytes + NUL"
+)
 
 # Store is intentionally pinned to the exact working-tree source settled by the
 # release-guard slice. Any later store change makes this packet stale and blocks
@@ -87,11 +110,15 @@ EXPECTED_SOURCE_SHA256 = {
     str(RF_PROFILE_EVIDENCE_PATH): "66cb0ed535470f5da239b3a089682153a1505ba434795225526f440202d60bf3",
     str(RF_READINESS_INPUTS_PATH): "555c4282a39b7f1affbcd7481645bba14649235df1d693883dd0a461b41879ec",
     str(POSTPURCHASE_PREFLIGHT_PATH): "161257f717e4c2ae3d344f295c6f2ec8b4ce5febd819e167086ed97f68f57a29",
+    str(RELEASE_GUARD_AUDIT_PATH): "bf401385db767549063cb626b95693253fc6626d146ec109b0ae31a48777cbf8",
     str(RF_IMPORT_OPERATOR_PATH): "6cac2f3841cf3af12eb48aaba6e2a7108d1aafddbc7b5a4762a194189d6c5bce",
     str(BACKUP_OPERATOR_PATH): "85491c0e16b84a5ea9c42ed1f669521b5d9b10628a6bedbb23ae96790d566bcf",
     str(MANIFEST_NORMALIZER_PATH): "850df80086d336a3a3652d73a1e0eda403e89f06b241c2a710bcb6cbf38e53de",
-    str(STORE_PATH): "67d25b92ada63d172eca69d0fe556eaf82d04e726dd6fd53dc31097c1c519b4f",
-    str(CANDIDATE_BUILDER_PATH): "c8c57b2d61776b393270b50479442743d6bc99daa9df7bff7180bb961bb6b98d",
+    str(STORE_PATH): "3f1468b4b20f1a4518e194f1fd82ba943d6a5e03d2f03c09d73370819d98c97b",
+    str(CANDIDATE_BUILDER_PATH): "7b287d30a661841f4476b3c32dfdfc2165637048fc9c5aef5af0bfbcaf97d1a1",
+    str(COMPLETE_VALIDATION_PATH): "6e68f243a0ee1776cfdc9dfa5b1ebb393c18cdffb01a97071bcc14fa3d5104c6",
+    str(MOBILE_LONG_FORM_VALIDATOR_PATH): "e632c9637428f21c93aabaa4e7ffc7439809a4fc83646dd0cc1d2b45785b7482",
+    str(MOBILE_LONG_FORM_EVIDENCE_REGISTRY_PATH): "c6d5f3ea1b358b12cb5b01ce18c93891540e9504fb9606fbd8f3bbc704671c3a",
 }
 
 EXPECTED_PREDECESSOR = {
@@ -198,6 +225,80 @@ def _checked_sources() -> dict[str, dict[str, Any]]:
             "byte_count": _path(relative).stat().st_size,
         }
     return rows
+
+
+def _checked_complete_validator_closure() -> dict[str, Any]:
+    """Bind every current backend/mobile validation dependency byte-for-byte."""
+    try:
+        paths = trusted_complete_originals_long_form_validator_source_paths()
+        reported_sha256 = (
+            trusted_complete_originals_long_form_validator_source_sha256()
+        )
+    except (OSError, OriginalValidationRunnerError) as exc:
+        raise MigrationPacketBuildError(
+            "complete trusted-validator source closure is unavailable"
+        ) from exc
+    normalized = tuple(Path(path) for path in paths)
+    expected_order = tuple(sorted(normalized, key=lambda item: item.as_posix()))
+    if (
+        len(normalized) != EXPECTED_COMPLETE_VALIDATOR_SOURCE_PATH_COUNT
+        or normalized != expected_order
+        or len(set(normalized)) != len(normalized)
+        or any(path.is_absolute() or ".." in path.parts for path in normalized)
+    ):
+        raise MigrationPacketBuildError(
+            "complete trusted-validator source inventory drifted"
+        )
+    required_entrypoints = {
+        STORE_PATH,
+        COMPLETE_VALIDATION_PATH,
+        MOBILE_LONG_FORM_VALIDATOR_PATH,
+        MOBILE_LONG_FORM_EVIDENCE_REGISTRY_PATH,
+    }
+    if not required_entrypoints.issubset(set(normalized)):
+        raise MigrationPacketBuildError(
+            "complete trusted-validator source entrypoints are missing"
+        )
+
+    digest = hashlib.sha256()
+    entries: list[dict[str, Any]] = []
+    for relative in normalized:
+        absolute = _path(relative)
+        try:
+            payload = absolute.read_bytes()
+        except OSError as exc:
+            raise MigrationPacketBuildError(
+                f"complete trusted-validator source is unavailable: {relative}"
+            ) from exc
+        relative_posix = relative.as_posix()
+        digest.update(relative_posix.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(str(len(payload)).encode("ascii"))
+        digest.update(b"\0")
+        digest.update(payload)
+        digest.update(b"\0")
+        entries.append(
+            {
+                "path": relative_posix,
+                "byte_count": len(payload),
+                "sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        )
+    calculated_sha256 = digest.hexdigest()
+    if (
+        reported_sha256 != calculated_sha256
+        or calculated_sha256 != EXPECTED_COMPLETE_VALIDATOR_SOURCE_SHA256
+    ):
+        raise MigrationPacketBuildError(
+            "complete trusted-validator source hash drifted"
+        )
+    return {
+        "schema_version": 1,
+        "framing": COMPLETE_VALIDATOR_SOURCE_FRAMING,
+        "path_count": len(entries),
+        "sha256": calculated_sha256,
+        "paths": entries,
+    }
 
 
 def _normalized_draft(
@@ -485,7 +586,14 @@ def _existing_rf_assets(
     return sorted(rows, key=lambda row: str(row["asset_id"]))
 
 
-def _audit_contract(source_bindings: dict[str, dict[str, Any]]) -> dict[str, Any]:
+def _audit_contract(
+    source_bindings: dict[str, dict[str, Any]],
+    complete_validator_closure: dict[str, Any],
+) -> dict[str, Any]:
+    closure_binding = {
+        key: copy.deepcopy(complete_validator_closure[key])
+        for key in ("schema_version", "framing", "path_count", "sha256")
+    }
     return {
         "schema_version": 1,
         "contract_id": AUDIT_CONTRACT_ID,
@@ -501,6 +609,12 @@ def _audit_contract(source_bindings: dict[str, dict[str, Any]]) -> dict[str, Any
                 "migration_operator",
                 "migration_operator_tests",
                 "db_store",
+                "complete_private_candidate_builder",
+                "complete_validation_dispatcher",
+                "mobile_long_form_validator",
+                "mobile_long_form_evidence_registry",
+                "complete_validator_source_closure",
+                "v3_release_guard_audit",
                 "roaring_fork_import_operator",
                 "sqlite_backup_operator",
                 "manifest_v3_normalizer",
@@ -517,11 +631,17 @@ def _audit_contract(source_bindings: dict[str, dict[str, Any]]) -> dict[str, Any
             key: source_bindings[key]
             for key in (
                 str(STORE_PATH),
+                str(CANDIDATE_BUILDER_PATH),
+                str(COMPLETE_VALIDATION_PATH),
+                str(MOBILE_LONG_FORM_VALIDATOR_PATH),
+                str(MOBILE_LONG_FORM_EVIDENCE_REGISTRY_PATH),
+                str(RELEASE_GUARD_AUDIT_PATH),
                 str(RF_IMPORT_OPERATOR_PATH),
                 str(BACKUP_OPERATOR_PATH),
                 str(MANIFEST_NORMALIZER_PATH),
             )
         },
+        "complete_validator_source_closure": closure_binding,
         "audit_state": {
             "independent_audit_artifact_created": False,
             "independent_audit_passed": False,
@@ -539,6 +659,7 @@ def _audit_contract(source_bindings: dict[str, dict[str, Any]]) -> dict[str, Any
 
 def build_bundle() -> tuple[dict[str, Any], dict[str, Any]]:
     source_bindings = _checked_sources()
+    complete_validator_closure = _checked_complete_validator_closure()
     candidate = _read_json(CANDIDATE_PATH)
     manifest = _read_json(MANIFEST_PATH)
     profile_template = _read_json(PROFILE_TEMPLATE_PATH)
@@ -551,6 +672,7 @@ def build_bundle() -> tuple[dict[str, Any], dict[str, Any]]:
     rf_profile_evidence = _read_json(RF_PROFILE_EVIDENCE_PATH)
     readiness_inputs = _read_json(RF_READINESS_INPUTS_PATH)
     provider_preflight = _read_json(POSTPURCHASE_PREFLIGHT_PATH)
+    release_guard_audit = _read_json(RELEASE_GUARD_AUDIT_PATH)
     rf_draft = rf_packet.get("draft")
     if not isinstance(rf_draft, dict):
         raise MigrationPacketBuildError("Roaring Fork predecessor draft is missing")
@@ -649,6 +771,34 @@ def build_bundle() -> tuple[dict[str, Any], dict[str, Any]]:
         != TERMS_TUPLE["terms_url"]
     ):
         raise MigrationPacketBuildError("reviewed non-EEA terms tuple drifted")
+    release_guard_bindings = release_guard_audit.get("bindings", {})
+    if (
+        release_guard_audit.get("kind")
+        != "original_v3_single_use_release_guard_independent_audit"
+        or release_guard_audit.get("status") != "independent_audit_passed"
+        or release_guard_audit.get("product_id") != PRODUCT_ID
+        or release_guard_audit.get("findings")
+        != {
+            "audit_artifact_created_by_auditor": True,
+            "author_source_files_edited_by_auditor": 0,
+            "p0_count": 0,
+            "p1_count": 0,
+        }
+        or release_guard_bindings.get("source_revision")
+        != MIGRATION_BASE_SOURCE_REVISION
+        or release_guard_bindings.get("store") != source_bindings[str(STORE_PATH)]
+        or release_guard_bindings.get("private_candidate", {}).get("artifact")
+        != source_bindings[str(CANDIDATE_PATH)]
+        or release_guard_bindings.get("all_six_dispatch_closure", {}).get(
+            "path_count"
+        )
+        != complete_validator_closure["path_count"]
+        or release_guard_bindings.get("all_six_dispatch_closure", {}).get(
+            "framed_sha256"
+        )
+        != complete_validator_closure["sha256"]
+    ):
+        raise MigrationPacketBuildError("V3 release-guard audit binding drifted")
     rf_attestation_terms = rf_profile_evidence.get("common_license_terms", {})
     if any(rf_attestation_terms.get(key) != TERMS_TUPLE[key] for key in TERMS_TUPLE):
         raise MigrationPacketBuildError("Roaring Fork attestation terms drifted")
@@ -690,7 +840,7 @@ def build_bundle() -> tuple[dict[str, Any], dict[str, Any]]:
         for row in manifest["assets"]
         if row["kind"] == "narration"
     }
-    audit_contract = _audit_contract(source_bindings)
+    audit_contract = _audit_contract(source_bindings, complete_validator_closure)
     audit_contract_bytes = _render(audit_contract)
 
     policy_tuple = provider_preflight["terms_gate"]["policy_tuple"]
@@ -720,6 +870,16 @@ def build_bundle() -> tuple[dict[str, Any], dict[str, Any]]:
         ),
         "candidate_source_revision": copy.deepcopy(candidate["source_revision"]),
         "source_bindings": source_bindings,
+        "trusted_complete_validator_source_closure": complete_validator_closure,
+        "v3_release_guard_independent_audit": {
+            **copy.deepcopy(source_bindings[str(RELEASE_GUARD_AUDIT_PATH)]),
+            "status": release_guard_audit["status"],
+            "p0_count": release_guard_audit["findings"]["p0_count"],
+            "p1_count": release_guard_audit["findings"]["p1_count"],
+            "runtime_source_commit_and_tree": copy.deepcopy(
+                MIGRATION_BASE_SOURCE_REVISION
+            ),
+        },
         "operator_audit_contract": {
             "path": str(AUDIT_CONTRACT_PATH),
             "byte_count": len(audit_contract_bytes),
@@ -844,12 +1004,31 @@ def build_bundle() -> tuple[dict[str, Any], dict[str, Any]]:
                 "create_only": True,
                 "overwrite_allowed": False,
                 "rerender_allowed": False,
-                "staging_and_destination_same_volume_required": True,
-                "rollback_journal_required_before_first_copy": True,
+                "anonymous_inode_created_on_destination_filesystem": True,
+                "anonymous_inode_fsynced_before_no_replace_link": True,
+                "linked_destination_nlink_must_equal_one": True,
+                "every_destination_uid_mode_device_and_inode_reverified": True,
+                "asset_root_inode_pinned_for_every_traversal": True,
+                "nested_parent_loss_journaled_as_external_absent": True,
+                "named_staging_used": False,
+                "unexpected_named_staging_preserved_and_rejected": True,
+                "append_only_journal_required_before_first_asset_link": True,
+                "journal_chain_and_terminals_retained": True,
+                "receipt_binds_cumulative_journal_inventory": True,
+                "rollback_deletes_content_addressed_bytes": False,
+                "exact_unreferenced_bytes_retained_for_replay": True,
+                "foreign_or_corrupt_replacement_preserved_and_rejected": True,
             },
         },
         "database_transaction": {
             "begin_mode": "BEGIN IMMEDIATE",
+            "asset_root_directory_inode_flocked_for_process_lifetime": True,
+            "replaceable_lock_path_used": False,
+            "database_inode_pinned_through_procfd": True,
+            "database_lexical_path_rechecked_at_every_action_and_receipt_edge": True,
+            "database_inode_identity_redacted_hash_bound_in_journal_terminal_receipt": True,
+            "postcommit_database_path_drift_is_commit_uncertain_without_success_receipt": True,
+            "report_parent_directory_inode_pinned_through_receipt_return": True,
             "same_volume_verified_backup_required": True,
             "backup_max_age_seconds": 900,
             "backup_relevant_state_must_equal_locked_live_predecessor": True,

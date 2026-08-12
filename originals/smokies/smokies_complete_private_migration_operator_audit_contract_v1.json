@@ -11,6 +11,12 @@
     "production_mutation_performed": false,
     "publication_performed": false
   },
+  "complete_validator_source_closure": {
+    "framing": "for each repo-relative path sorted by POSIX path: utf8(path) + NUL + ascii(decimal_byte_count) + NUL + raw_bytes + NUL",
+    "path_count": 174,
+    "schema_version": 1,
+    "sha256": "b01033dcdf155370688c5fd4ce1e9264d670505b1958b7135b1724e39d52235f"
+  },
   "contract_id": "smokies_complete_private_migration_operator_audit_contract_v1",
   "kind": "original_private_migration_operator_audit_contract",
   "product_id": "great_smoky_mountains_ridges_rivers_living_memory",
@@ -22,6 +28,12 @@
       "migration_operator",
       "migration_operator_tests",
       "db_store",
+      "complete_private_candidate_builder",
+      "complete_validation_dispatcher",
+      "mobile_long_form_validator",
+      "mobile_long_form_evidence_registry",
+      "complete_validator_source_closure",
+      "v3_release_guard_audit",
       "roaring_fork_import_operator",
       "sqlite_backup_operator",
       "manifest_v3_normalizer",
@@ -43,15 +55,40 @@
       "path": "db/original_manifest_v3.py",
       "sha256": "850df80086d336a3a3652d73a1e0eda403e89f06b241c2a710bcb6cbf38e53de"
     },
+    "db/originals_complete_validation.py": {
+      "byte_count": 52625,
+      "path": "db/originals_complete_validation.py",
+      "sha256": "6e68f243a0ee1776cfdc9dfa5b1ebb393c18cdffb01a97071bcc14fa3d5104c6"
+    },
     "db/store.py": {
-      "byte_count": 1092550,
+      "byte_count": 1093381,
       "path": "db/store.py",
-      "sha256": "67d25b92ada63d172eca69d0fe556eaf82d04e726dd6fd53dc31097c1c519b4f"
+      "sha256": "3f1468b4b20f1a4518e194f1fd82ba943d6a5e03d2f03c09d73370819d98c97b"
+    },
+    "mobile/lib/originals/longFormValidationEvidence.ts": {
+      "byte_count": 7676,
+      "path": "mobile/lib/originals/longFormValidationEvidence.ts",
+      "sha256": "c6d5f3ea1b358b12cb5b01ce18c93891540e9504fb9606fbd8f3bbc704671c3a"
+    },
+    "mobile/scripts/validate-original-long-form.ts": {
+      "byte_count": 45314,
+      "path": "mobile/scripts/validate-original-long-form.ts",
+      "sha256": "e632c9637428f21c93aabaa4e7ffc7439809a4fc83646dd0cc1d2b45785b7482"
+    },
+    "originals/smokies/smokies_v3_release_guard_audit_v1.json": {
+      "byte_count": 6880,
+      "path": "originals/smokies/smokies_v3_release_guard_audit_v1.json",
+      "sha256": "bf401385db767549063cb626b95693253fc6626d146ec109b0ae31a48777cbf8"
     },
     "scripts/backup_sqlite.py": {
       "byte_count": 3542,
       "path": "scripts/backup_sqlite.py",
       "sha256": "85491c0e16b84a5ea9c42ed1f669521b5d9b10628a6bedbb23ae96790d566bcf"
+    },
+    "scripts/build_smokies_complete_private_candidate.py": {
+      "byte_count": 62330,
+      "path": "scripts/build_smokies_complete_private_candidate.py",
+      "sha256": "7b287d30a661841f4476b3c32dfdfc2165637048fc9c5aef5af0bfbcaf97d1a1"
     },
     "scripts/import_smokies_roaring_fork_private.py": {
       "byte_count": 49032,

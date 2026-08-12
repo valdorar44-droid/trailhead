@@ -425,6 +425,43 @@ class CompleteAccountDeletionTests(unittest.TestCase):
                 now,
             ),
         )
+        db.execute(
+            """INSERT INTO authored_original_smokies_final_readiness_receipts_v1
+               (pack_id,before_revision,after_revision,before_manifest_sha256,
+                after_manifest_sha256,validation_metadata_sha256,
+                validation_report_count,finalization_review_sha256,
+                route_evidence_sha256,admin_user_id,idempotency_key_sha256,
+                request_sha256,receipt_json,receipt_sha256,created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                "original-feedback-pack", 4, 5, "1" * 64, "2" * 64,
+                "3" * 64, 1, "4" * 64, "5" * 64, self.user,
+                "6" * 64, "7" * 64, '{"audit":"retained"}', "8" * 64, now,
+            ),
+        )
+        db.execute(
+            """INSERT INTO authored_original_smokies_dual_platform_preview_receipts_v1
+               (receipt_id,pack_id,draft_revision,manifest_sha256,assets_sha256,
+                validation_input_sha256,before_validation_metadata_sha256,
+                after_validation_metadata_sha256,evidence_sha256,
+                evidence_file_sha256,compatibility_freeze_sha256,source_commit,
+                source_tree,android_build_identity_sha256,
+                android_preview_evidence_sha256,ios_build_identity_sha256,
+                ios_preview_evidence_sha256,historical_validation_report_count,
+                full_bundle_validation_report_count,
+                validation_report_inventory_sha256,admin_user_id,
+                idempotency_key_sha256,request_sha256,receipt_json,
+                receipt_sha256,created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                "preview-receipt-delete-test", "original-feedback-pack", 5,
+                "9" * 64, "a" * 64, "b" * 64, "c" * 64, "d" * 64,
+                "e" * 64, "f" * 64, "1" * 64, "2" * 40, "3" * 40,
+                "4" * 64, "5" * 64, "6" * 64, "7" * 64, 1, 0,
+                "8" * 64, self.user, "9" * 64, "a" * 64,
+                '{"audit":"retained"}', "b" * 64, now,
+            ),
+        )
         db.commit()
         db.close()
 
@@ -486,6 +523,22 @@ class CompleteAccountDeletionTests(unittest.TestCase):
         ).fetchone()
         self.assertIsNone(pack["created_by"])
         self.assertIsNone(pack["updated_by"])
+        final_readiness_receipt = db.execute(
+            """SELECT admin_user_id,receipt_sha256
+               FROM authored_original_smokies_final_readiness_receipts_v1
+               WHERE pack_id='original-feedback-pack'"""
+        ).fetchone()
+        self.assertIsNotNone(final_readiness_receipt)
+        self.assertIsNone(final_readiness_receipt["admin_user_id"])
+        self.assertEqual(final_readiness_receipt["receipt_sha256"], "8" * 64)
+        preview_receipt = db.execute(
+            """SELECT admin_user_id,receipt_sha256
+               FROM authored_original_smokies_dual_platform_preview_receipts_v1
+               WHERE pack_id='original-feedback-pack'"""
+        ).fetchone()
+        self.assertIsNotNone(preview_receipt)
+        self.assertIsNone(preview_receipt["admin_user_id"])
+        self.assertEqual(preview_receipt["receipt_sha256"], "b" * 64)
         self.assertEqual(db.execute("PRAGMA foreign_key_check").fetchall(), [])
         db.close()
 

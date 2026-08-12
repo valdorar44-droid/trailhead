@@ -342,7 +342,7 @@ def _create_database(path: Path, *, revision: int = 5) -> None:
           historical_validation_report_count INTEGER NOT NULL,
           full_bundle_validation_report_count INTEGER NOT NULL,
           validation_report_inventory_sha256 TEXT NOT NULL,
-          admin_user_id INTEGER NOT NULL REFERENCES users(id),
+          admin_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
           idempotency_key_sha256 TEXT NOT NULL,
           request_sha256 TEXT NOT NULL,
           receipt_json TEXT NOT NULL,

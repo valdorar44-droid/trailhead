@@ -20,6 +20,23 @@ sys.modules[SPEC.name] = builder
 SPEC.loader.exec_module(builder)
 
 
+def test_eas_archive_requires_exact_commit_and_frozen_native_config_bytes() -> None:
+    eas = json.loads((ROOT / "mobile/eas.json").read_text(encoding="utf-8"))
+    assert eas["cli"] == {
+        "version": "21.0.2",
+        "appVersionSource": "remote",
+        "requireCommit": True,
+    }
+    for relative in (
+        "mobile/android/app/src/main/AndroidManifest.xml",
+        "mobile/android/app/src/main/res/values/strings.xml",
+        "mobile/ios/Trailhead/Supporting/Expo.plist",
+    ):
+        payload = (ROOT / relative).read_bytes()
+        assert payload
+        assert not payload.endswith(b"\n")
+
+
 def test_default_dry_run_is_zero_effect_and_never_mutates_artifact(
     capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -617,12 +617,23 @@ def _build73_nonreuse(commit: str) -> dict[str, Any]:
 def _mobile_identity(commit: str) -> dict[str, Any]:
     config = _blob(commit, "mobile/app.config.js").decode("utf-8")
     eas = _json_blob(commit, "mobile/eas.json")
+    for path in (
+        "mobile/android/app/src/main/AndroidManifest.xml",
+        "mobile/android/app/src/main/res/values/strings.xml",
+        "mobile/ios/Trailhead/Supporting/Expo.plist",
+    ):
+        payload = _blob(commit, path)
+        _require(
+            payload and not payload.endswith(b"\n"),
+            f"EAS native config byte normalization is not frozen: {path}",
+        )
     _require(f"runtimeVersion: '{ANDROID_RUNTIME}'" in config, "Android runtime drifted")
     _require(f"runtimeVersion: '{IOS_RUNTIME}'" in config, "iOS runtime drifted")
     _require(EAS_PROJECT_ID in config, "EAS project identity drifted")
     preview = (eas.get("build") or {}).get("preview") or {}
     _require(
         (eas.get("cli") or {}).get("version") == "21.0.2"
+        and (eas.get("cli") or {}).get("requireCommit") is True
         and preview.get("distribution") == "internal"
         and preview.get("channel") == "preview"
         and (preview.get("ios") or {}).get("simulator") is False,

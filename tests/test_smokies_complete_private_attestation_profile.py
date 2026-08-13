@@ -505,6 +505,158 @@ def test_historical_report_inventory_drift_stops_before_profile() -> None:
     assert adapter.profile_calls == 0
 
 
+def test_live_query_hashes_the_exact_shared_verified_historical_row(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    packet = copy.deepcopy(PACKET)
+    draft = packet["migration_draft"]
+    phase = packet["post_migration_phases"]["narration_profile_cas"]
+    new_ids = set(
+        packet["post_migration_phases"]["license_attestation"]["asset_sha256"]
+    )
+    existing_ids = set(packet["predecessor"]["existing_asset_sha256"])
+    narration_ids = set(phase["expected_narration_sha256"])
+    terms = packet["post_migration_phases"]["license_attestation"]["terms_tuple"]
+    assets = []
+    for index, (asset_id, asset_sha256) in enumerate(
+        sorted(phase["expected_asset_sha256"].items())
+    ):
+        metadata = {}
+        if asset_id in narration_ids:
+            metadata = (
+                {"license_status": "unverified"}
+                if asset_id in new_ids
+                else {
+                    "license_status": "attested",
+                    "license_attestation": {
+                        **terms,
+                        "attested_at": _timestamp(index),
+                        "attested_by_admin_user_id": ADMIN_ID,
+                    },
+                }
+            )
+        assets.append({
+            "asset_id": asset_id,
+            "sha256": asset_sha256,
+            "kind": "narration" if asset_id in narration_ids else "image",
+            "generator_metadata_json": json.dumps(metadata, sort_keys=True),
+        })
+    historical_contract = packet["predecessor"]["permitted_validation_history"]
+    historical_row = {
+        "id": historical_contract["report_id"],
+        "pack_id": operator.PRODUCT_ID,
+        "draft_revision": 2,
+        "manifest_sha256": historical_contract["expected_manifest_sha256"],
+        "assets_sha256": historical_contract["expected_assets_sha256"],
+        "input_sha256": historical_contract["expected_input_sha256"],
+        "validator_source_sha256": historical_contract[
+            "expected_validator_source_sha256"
+        ],
+        "manifest_json": "{}",
+        "suite_version": historical_contract["expected_suite_version"],
+        "engine_version": historical_contract["engine"],
+        "status": "passed",
+        "passed": 1,
+        "summary_json": "{}",
+        "scenarios_json": "[]",
+        "issues_json": "[]",
+        "started_by": 3,
+        "worker_pid": 16,
+        "started_at": 1786412026,
+        "completed_at": 1786412036,
+    }
+    pack = {
+        "id": operator.PRODUCT_ID,
+        "status": "draft",
+        "current_published_version": None,
+        "draft_revision": 3,
+        "created_by": 3,
+        "created_at": 1786410000,
+        "draft_original_manifest_json": draft["original_manifest_json"],
+        "draft_validation_metadata": draft["validation_metadata_json"],
+        **{
+            key: value for key, value in {
+                "slug": draft["slug"], "draft_title": draft["title"],
+                "draft_summary": draft["summary"],
+                "draft_price_credits": draft["price_credits"],
+                "draft_coverage_region": draft["coverage_region"],
+                "draft_public_metadata": draft["public_metadata_json"],
+                "draft_template_json": draft["template_json"],
+            }.items()
+        },
+    }
+
+    class Result:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def fetchone(self):
+            return self.rows[0]
+
+        def fetchall(self):
+            return self.rows
+
+    class Connection:
+        row_factory = None
+
+        def execute(self, sql, params=()):
+            del params
+            normalized = " ".join(sql.split())
+            if "FROM authored_trip_packs" in normalized:
+                return Result([pack])
+            if "COUNT(*) FROM authored_original_assets" in normalized:
+                return Result([(98,)])
+            if "FROM authored_original_assets" in normalized:
+                return Result(assets)
+            if "FROM authored_original_validation_reports" in normalized:
+                return Result([historical_row])
+            if "COUNT(*) FROM authored_trip_pack_versions" in normalized:
+                return Result([(0,)])
+            if "COUNT(*) FROM authored_original_release_authorizations_v1" in normalized:
+                return Result([(0,)])
+            raise AssertionError(normalized)
+
+    seen = {}
+    inventory_sha256 = "f" * 64
+
+    def shared_verifier(rows, contract):
+        seen["rows"] = copy.deepcopy(rows)
+        seen["contract"] = copy.deepcopy(contract)
+        return {
+            "historical_report_count": 1,
+            "full_bundle_report_count": 0,
+            "inventory": [{"report_id": historical_row["id"]}],
+            "inventory_sha256": inventory_sha256,
+        }
+
+    monkeypatch.setattr(
+        store, "_smokies_historical_validation_inventory", shared_verifier,
+    )
+    predecessor = {
+        "schema_version": 1,
+        "pack_immutable_history": {
+            "id": pack["id"], "created_by": pack["created_by"],
+            "created_at": pack["created_at"],
+        },
+        "roaring_fork_asset_rows": sorted(
+            [row for row in assets if row["asset_id"] in existing_ids],
+            key=lambda row: (row["asset_id"], row["sha256"]),
+        ),
+        "validation_reports": [historical_row],
+        "published_versions": [],
+        "release_authorizations": [],
+    }
+    state = operator._query_live_state(
+        Connection(), packet, Path("/unused"), ADMIN_ID,
+        operator.canonical_sha256(predecessor), verify_files=False,
+    )
+    assert seen == {"rows": [historical_row], "contract": historical_contract}
+    assert state["historical_report_row_sha256"] == operator.canonical_sha256(
+        historical_row
+    )
+    assert state["historical_report_inventory_sha256"] == inventory_sha256
+
+
 def test_journal_claim_without_database_attestation_is_conflict() -> None:
     adapter = FakeAdapter()
     journal = FakeJournal()

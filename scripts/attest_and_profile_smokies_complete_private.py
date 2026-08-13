@@ -1056,6 +1056,7 @@ def _query_live_state(
         is not None,
         "historical validation report canonical inventory drifted",
     )
+    historical = reports[0]
 
     manifest = _decode_column(pack.get("draft_original_manifest_json"), "draft manifest")
     _require(manifest.get("schema_version") == 3, "draft manifest schema drifted")

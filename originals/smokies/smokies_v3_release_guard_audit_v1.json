@@ -1,0 +1,352 @@
+{
+  "bindings": {
+    "all_six_dispatch_closure": {
+      "framed_sha256": "936101eb75655763165276fe34e0529a6cdd205d3f8c51b3249d6cc54cbc8e8b",
+      "framing": "for each repo-relative path sorted by POSIX path: utf8(path) + NUL + ascii(decimal_byte_count) + NUL + raw_bytes + NUL",
+      "path_count": 174,
+      "selection_keys": [
+        "great_smoky_mountains_ridges_rivers_living_memory:mountain_crossing:tn_to_nc",
+        "great_smoky_mountains_ridges_rivers_living_memory:mountain_crossing:nc_to_tn",
+        "great_smoky_mountains_ridges_rivers_living_memory:little_river_cades_cove:sugarlands_to_cades_cove_loop",
+        "great_smoky_mountains_ridges_rivers_living_memory:roaring_fork:one_way",
+        "great_smoky_mountains_ridges_rivers_living_memory:foothills_parkway:west_to_east",
+        "great_smoky_mountains_ridges_rivers_living_memory:foothills_parkway:east_to_west"
+      ]
+    },
+    "checkpoint_m_migration_evidence": {
+      "commit": "a533852ceeba4f2d3b625bcce04135a2936705e5",
+      "historical_immutable": true,
+      "independent_audit": {
+        "byte_count": 6988,
+        "git_blob_sha1": "b634f21433e8a474d60cced1cf0df3c08af742e2",
+        "path": "originals/smokies/smokies_complete_private_migration_operator_audit_v1.json",
+        "sha256": "de9aeba099d7cd0704175316c39ac4ddbbea6fd4022146da471cd6b855b4d3e2"
+      },
+      "local_legacy_migration_files_may_not_substitute": true,
+      "packet": {
+        "byte_count": 5839615,
+        "git_blob_sha1": "6aeeb3b5f2d9adb5dc58e6f5f12a606e4cba7ede",
+        "path": "originals/smokies/smokies_complete_private_migration_packet_v1.json",
+        "sha256": "1aabc64e7be8369cd963c752029aa8f6a80402c8df5ac0c92f072fb0a891c53e"
+      },
+      "source_tree_isolated_from_final_source": true,
+      "tree": "eea0c936baf5ea2504f034608c84618a57c41d19"
+    },
+    "complete_validation_dispatcher": {
+      "byte_count": 52625,
+      "git_blob_sha1": "79cc32b8bad3105c4783f666989687da1165a8f7",
+      "path": "db/originals_complete_validation.py",
+      "sha256": "6e68f243a0ee1776cfdc9dfa5b1ebb393c18cdffb01a97071bcc14fa3d5104c6"
+    },
+    "complete_validation_dispatcher_tests": {
+      "byte_count": 21041,
+      "git_blob_sha1": "b973d0ca31c36da9cbbde0cd59f35c8c41ca61c4",
+      "path": "tests/test_originals_complete_validation.py",
+      "sha256": "3e93b68d34ccd4d8fd51a1ded2298b4efb7ddfeb0ad1f17f84a0afd86859e99f"
+    },
+    "dashboard_server": {
+      "byte_count": 1750620,
+      "git_blob_sha1": "9d1e1f32666b0ede94fff87fea91bd9ebe9542dd",
+      "path": "dashboard/server.py",
+      "sha256": "77d7f3e6dec5f2d845aff6487b78d1251079588827144316452434901075785a"
+    },
+    "discovery_pack_bridge_tests": {
+      "byte_count": 6621,
+      "git_blob_sha1": "20fa91d474848e8c84a36798ac2f71cfcb626c2f",
+      "path": "tests/test_discovery_pack_bridge.py",
+      "sha256": "8aa53d8eaa04e055dd95dd3ddf146a5acc3d0778778abf73594f53be856cf91a"
+    },
+    "dual_platform_preview_marker": {
+      "byte_count": 60144,
+      "git_blob_sha1": "5a9493931b6860a44b002f7062db3b2dc8d20405",
+      "path": "scripts/record_smokies_dual_platform_private_preview.py",
+      "sha256": "ebac75ad7f61629676582808e4442fbbdbea1aff69b6c482dcb96af22b3c5819"
+    },
+    "dual_platform_preview_marker_tests": {
+      "byte_count": 43268,
+      "git_blob_sha1": "415f69fb10df7a6e603aa37f4a01f3fc151bb1e9",
+      "path": "tests/test_smokies_dual_platform_private_preview_marker.py",
+      "sha256": "5ec53a9882a3b96a42f127bd482e6f8760935802e0739c09740b478e2d25eb94"
+    },
+    "final_readiness_builder": {
+      "byte_count": 33581,
+      "git_blob_sha1": "fecc8d04f33ad3da456abe8d97fae647d0486dee",
+      "path": "scripts/build_smokies_full_bundle_final_readiness.py",
+      "sha256": "7a4e19bcb0469bc0483b2998ed48eeb54b2d6ef12caf4ffd074f6ce2061eda50"
+    },
+    "final_readiness_builder_tests": {
+      "byte_count": 26175,
+      "git_blob_sha1": "698fc4a42255a2449732502e0b3112ffc7c0fb73",
+      "path": "tests/test_smokies_full_bundle_final_readiness.py",
+      "sha256": "9ca7609bd6cd91945e4d90662dfd4537e9ada04596fc7e0683b0e5753a5cf369"
+    },
+    "final_readiness_cas_tests": {
+      "byte_count": 44588,
+      "git_blob_sha1": "9625327accb9eb8de9fca890111b726b0aeaf8a3",
+      "path": "tests/test_smokies_full_bundle_final_readiness_cas.py",
+      "sha256": "70bb54eaeb92eb27d296b9591446269ef7b8b611e96d4f6a1508d52fde2029a0"
+    },
+    "historical_validation_contract_loader": {
+      "byte_count": 25393,
+      "git_blob_sha1": "f45630abf1be02235000c7b8229730a7c1b40dae",
+      "path": "db/originals_smokies_final_readiness.py",
+      "sha256": "ea4269652b0689bc1ccb52f124fc15462b143536638bc38ddb80d364e3611733"
+    },
+    "mobile_compatibility_builder": {
+      "byte_count": 38064,
+      "git_blob_sha1": "c4034e9d989be984a72f8100270a5c8910954187",
+      "path": "scripts/build_smokies_mobile_compatibility_freeze.py",
+      "sha256": "ea1ae670f8a4a87c9bb1321026df956fc3b02134e5a15d66acc7d5774b90010e"
+    },
+    "mobile_compatibility_builder_tests": {
+      "byte_count": 23544,
+      "git_blob_sha1": "613d9f16b6bce814ba5266de6ece414432ec6f44",
+      "path": "tests/test_smokies_mobile_compatibility_freeze.py",
+      "sha256": "d45791fd05a27ceeafc1aa6dd479aa4b1819e7eea74177a5fa14c9edeaa3f575"
+    },
+    "post_migration_profile_operator": {
+      "byte_count": 71562,
+      "git_blob_sha1": "30b7100f182bda4275dd527af43d0b0178396860",
+      "path": "scripts/attest_and_profile_smokies_complete_private.py",
+      "sha256": "0998660773f6e8524e139ffd9611e9cbd6f565aae150521516932e65de5ca519"
+    },
+    "post_migration_profile_operator_tests": {
+      "byte_count": 23690,
+      "git_blob_sha1": "b22f2eafcc7b23777d96527098d8a11c455db744",
+      "path": "tests/test_smokies_complete_private_attestation_profile.py",
+      "sha256": "6ce931a409dee9fe1033f7227ffc56b9a5f384ffd396148c5abfe4905652fa6a"
+    },
+    "prior_core_release_audit": {
+      "artifact": {
+        "byte_count": 12326,
+        "git_blob_sha1": "f4fd526ff6a3c0c5b7011818bf3f183b96a20c52",
+        "path": "originals/smokies/smokies_v3_release_guard_audit_v1.json",
+        "sha256": "5a7e5c9fc3b7b4aeeb885b30ab46ee478bb552da24052e6d2e936218de0a4eef"
+      },
+      "artifact_commit": "086ab3a108937c7c65443e11678a8774087c657d",
+      "audited_source_revision": {
+        "commit": "9b71a3d856b574a248739ee0fe12c76b3dc0fb86",
+        "tree": "3a229cf5adb024337641345af2c7e2bb1380c9f1"
+      },
+      "historical_immutable": true
+    },
+    "private_candidate_artifact": {
+      "byte_count": 20090,
+      "git_blob_sha1": "9e4629778cc47ddcd97609beb761956160e60001",
+      "path": "originals/smokies/smokies_complete_private_candidate_v1.json",
+      "sha256": "ee01f78dcb43ec9a3b9d02e1cd6e0271675f033dbc9ed6fb18ce2562b4cb0aee"
+    },
+    "private_manifest_artifact": {
+      "byte_count": 3768450,
+      "git_blob_sha1": "a76237abf254119e85d2fd06d0c42e91dfa280b6",
+      "path": "originals/smokies/smokies_complete_private_manifest_v3.json",
+      "sha256": "d2cfa5aeb0116359326f682fb49d59ee156157f9efbfb8e8a53f99e830ca54eb"
+    },
+    "release_authorization_tests": {
+      "byte_count": 66107,
+      "git_blob_sha1": "225aa32506c9bf4c69ee5b952f438e3e193fbcf3",
+      "path": "tests/test_original_v3_release_authorization.py",
+      "sha256": "99819e8c2460723129c19a5a9f97ddb172d267d13be3e8fcf557e72463c7a402"
+    },
+    "source_revision": {
+      "commit": "1153920aeb50bca32924239c451d1e7f86d8c517",
+      "tree": "0e3b40e3e11c7e7c453570e7cbd67060cbf59ee0"
+    },
+    "store": {
+      "byte_count": 1133392,
+      "git_blob_sha1": "077a7ba07953ced8998719980ad94e2ffc80adbe",
+      "path": "db/store.py",
+      "sha256": "e4b842616d2d376a73dfc76b5e99a871ed17379be55e84981c2a7df3082feaab"
+    },
+    "strict_validation_create_tests": {
+      "byte_count": 13030,
+      "git_blob_sha1": "625b43da3a348ba76e5eb8a2d9392a61361cdfce",
+      "path": "tests/test_original_validation_strict_create.py",
+      "sha256": "cb94a276ff6292d763f9790d618b76e39a5962f449a36a2db2cfe24608dbcf63"
+    }
+  },
+  "checks": {
+    "audited_delta_lineage": {
+      "broad_author_gate_rerun": false,
+      "compatibility_binding_delta": {
+        "focused_passed": 20,
+        "independent_audit": "GO",
+        "p0_count": 0,
+        "p1_count": 0,
+        "source_commit": "1153920aeb50bca32924239c451d1e7f86d8c517",
+        "source_tree": "0e3b40e3e11c7e7c453570e7cbd67060cbf59ee0"
+      },
+      "discovery_test_isolation_delta": {
+        "focused_passed": 5,
+        "independent_audit": "GO",
+        "p0_count": 0,
+        "p1_count": 0,
+        "source_commit": "86374d30af7f6ba2035b37dfbe36532dd914c55e",
+        "source_tree": "187060191923fcbf847eb2373936ea8bbec87338"
+      },
+      "prepreview_gate_rerun": false,
+      "prior_core_audit": {
+        "artifact_commit": "086ab3a108937c7c65443e11678a8774087c657d",
+        "artifact_sha256": "5a7e5c9fc3b7b4aeeb885b30ab46ee478bb552da24052e6d2e936218de0a4eef",
+        "p0_count": 0,
+        "p1_count": 0,
+        "source_commit": "9b71a3d856b574a248739ee0fe12c76b3dc0fb86",
+        "source_tree": "3a229cf5adb024337641345af2c7e2bb1380c9f1"
+      },
+      "status": "passed"
+    },
+    "author_gate_evidence": {
+      "passed": 309,
+      "rerun_by_independent_auditor": false,
+      "status": "passed",
+      "subtests_passed": 27
+    },
+    "bounded_targeted_adversarial_audit": {
+      "author_gate_not_duplicated": true,
+      "failed": 0,
+      "passed": 43,
+      "scope": [
+        "exact immutable historical Roaring Fork report identity and semantics",
+        "profile and preview delegation to the shared verifier",
+        "isolated commit-qualified M2 evidence and local-M1 substitution rejection",
+        "exact 174-path trusted-validation closure",
+        "redaction, privacy, default-lock, and zero-effect dry runs"
+      ],
+      "status": "passed"
+    },
+    "compatibility_release_support_binding": {
+      "builder_sha256": "ea1ae670f8a4a87c9bb1321026df956fc3b02134e5a15d66acc7d5774b90010e",
+      "builder_tests_sha256": "d45791fd05a27ceeafc1aa6dd479aa4b1819e7eea74177a5fa14c9edeaa3f575",
+      "discovery_tests_sha256": "8aa53d8eaa04e055dd95dd3ddf146a5acc3d0778778abf73594f53be856cf91a",
+      "focused_assertion_present": true,
+      "generated_complete_release_support_row_required": true,
+      "required_source_path": "tests/test_discovery_pack_bridge.py",
+      "required_source_path_present": true,
+      "status": "passed"
+    },
+    "default_locked_dry_runs": {
+      "database_accessed": false,
+      "dual_platform_preview_marker": "dry_run_dual_platform_private_preview_evidence_required",
+      "mobile_compatibility_builder": "dry_run_clean_source_commit_and_tree_required",
+      "network_accessed": false,
+      "post_migration_profile": "dry_run_live_apply_locked",
+      "provider_accessed": false,
+      "publication_performed": false,
+      "status": "passed",
+      "writes_performed": false
+    },
+    "fail_closed_and_privacy": {
+      "absolute_private_paths_serialized": false,
+      "credentials_or_session_material_serialized": false,
+      "exact_apply_sentinels_preserved": true,
+      "local_migration_evidence_fallback_allowed": false,
+      "source_media_or_historical_artifacts_mutated": false,
+      "status": "passed"
+    },
+    "frozen_source_identity": {
+      "audited_moving_files": false,
+      "author_source_or_test_edits_by_auditor": 0,
+      "commit": "1153920aeb50bca32924239c451d1e7f86d8c517",
+      "pushed_origin_equal": true,
+      "status": "passed",
+      "tree": "0e3b40e3e11c7e7c453570e7cbd67060cbf59ee0"
+    },
+    "immutable_historical_roaring_fork_report": {
+      "assets_sha256": "1c4c945fe594089bb6147f15251a097818ea5b4093e193c22c93751cf811fc32",
+      "completed_at": 1786412036,
+      "input_sha256": "81815b5cca2e6cb19a0cc1e75208d73b3ce01683d3660ea2095c7a553d1fba0a",
+      "manifest_sha256": "b6f730d17922f7b38361d08e9bc97bde1d340a0c42d9b455802fca708585d725",
+      "mutation_matrix_rejected": [
+        "extra report",
+        "summary",
+        "report identity",
+        "manifest",
+        "assets",
+        "input",
+        "validator source",
+        "null worker pid",
+        "other worker pid",
+        "started by",
+        "started at",
+        "completed at",
+        "selection key",
+        "top-level selection count",
+        "nested scenario count",
+        "historical contract"
+      ],
+      "nested_scenario_count": 13,
+      "redacted_report_sha256": "ffbab03a0bdc839cbbdaa422a1b4910eaeb61acdc1d4102dbdc40e8d643fc059",
+      "report_id": "original_validation_9df694c93ee9ef3809c33f451d04bf28",
+      "selection_key": "roaring_fork_one_way_private_v1:one_way",
+      "selection_result_count": 1,
+      "started_at": 1786412026,
+      "started_by": 3,
+      "status": "passed",
+      "validator_source_sha256": "cd045f33f6908235f5393dfeca54ae3317855dbb9f716bbd283fceff5be415a1",
+      "worker_pid": 16
+    },
+    "isolated_checkpoint_m2": {
+      "exact_commit_and_tree_rehashed": true,
+      "final_source_contains_distinct_legacy_m1_bytes": true,
+      "legacy_m1_substitution_rejected": true,
+      "packet_and_audit_loaded_with_git_show": true,
+      "status": "passed"
+    },
+    "shared_historical_verifier": {
+      "dual_platform_preview_marker_delegates": true,
+      "duplicate_null_pid_assumption_removed": true,
+      "later_profiled_manifest_substitution_rejected": true,
+      "post_migration_profile_delegates": true,
+      "status": "passed",
+      "store_verifier": "db.store._smokies_historical_validation_inventory"
+    },
+    "trusted_validation_closure": {
+      "count_drift_rejected": true,
+      "framed_sha256": "936101eb75655763165276fe34e0529a6cdd205d3f8c51b3249d6cc54cbc8e8b",
+      "path_count": 174,
+      "recomputed_from_exact_committed_bytes": true,
+      "status": "passed"
+    }
+  },
+  "contract_id": "smokies_v3_release_guard_audit_v1",
+  "effects": {
+    "database_accessed": false,
+    "database_mutated": false,
+    "deployment_performed": false,
+    "device_accessed": false,
+    "external_media_accessed": false,
+    "live_database_accessed": false,
+    "live_database_mutated": false,
+    "mobile_build_performed": false,
+    "network_accessed": false,
+    "production_mutation_performed": false,
+    "provider_accessed": false,
+    "publication_performed": false,
+    "trusted_validation_performed": false,
+    "upload_performed": false
+  },
+  "findings": {
+    "audit_artifact_created_by_auditor": true,
+    "author_source_files_edited_by_auditor": 0,
+    "author_test_files_edited_by_auditor": 0,
+    "p0_count": 0,
+    "p1_count": 0
+  },
+  "kind": "original_v3_single_use_release_guard_independent_audit",
+  "product_contract": {
+    "base_entries": 77,
+    "chapters": 4,
+    "directional_replacements": 8,
+    "explorer_included": true,
+    "images": 13,
+    "narration_assets": 85,
+    "offline_map_regions": 1,
+    "permanent_earned_credit_price": 900,
+    "standalone_chapter_products": 0,
+    "total_content_assets": 98,
+    "variants": 6
+  },
+  "product_id": "great_smoky_mountains_ridges_rivers_living_memory",
+  "schema_version": 1,
+  "status": "independent_audit_passed"
+}

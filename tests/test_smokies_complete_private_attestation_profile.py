@@ -376,6 +376,37 @@ def test_main_default_is_locked(capsys: pytest.CaptureFixture[str]) -> None:
     assert payload["status"] == "dry_run_live_apply_locked"
 
 
+def test_sealed_packet_derives_exact_85_transcript_bindings() -> None:
+    transcript_map = operator._sealed_narration_transcript_sha256(PACKET)
+    expected_ids = set(PACKET["post_migration_phases"]["narration_profile_cas"][
+        "expected_narration_sha256"
+    ])
+    assert len(transcript_map) == 85
+    assert set(transcript_map) == expected_ids
+    assert all(len(value) == 64 for value in transcript_map.values())
+
+    missing = copy.deepcopy(PACKET)
+    row = next(
+        item for item in missing["assets"]["new"]
+        if item.get("kind") == "narration"
+    )
+    missing["assets"]["new"].remove(row)
+    with pytest.raises(
+        operator.SmokiesPostMigrationError,
+        match="match all 85 narrations",
+    ):
+        operator._sealed_narration_transcript_sha256(missing)
+
+    duplicate = copy.deepcopy(PACKET)
+    row = next(
+        item for item in duplicate["assets"]["new"]
+        if item.get("kind") == "narration"
+    )
+    duplicate["assets"]["existing_roaring_fork"].append(copy.deepcopy(row))
+    with pytest.raises(operator.SmokiesPostMigrationError, match="duplicated"):
+        operator._sealed_narration_transcript_sha256(duplicate)
+
+
 def test_wrong_sentinel_stops_before_path_or_database_access(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

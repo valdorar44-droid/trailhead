@@ -3,6 +3,7 @@ import copy
 from datetime import datetime, timezone
 import hashlib
 import json
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -14,6 +15,15 @@ from db import store
 
 
 ROOT = Path(__file__).resolve().parents[1]
+M3_COMMIT = "00e8b76daffaebd492c68e2f3416646fb8f327d6"
+M3_PACKET_PATH = "originals/smokies/smokies_complete_private_migration_packet_v1.json"
+M3_PACKET_BYTES = 5_840_841
+M3_PACKET_SHA256 = (
+    "2c764008c2180db607ea51085c01b6fef0fd28fb436d5aace8970d3319a62c0c"
+)
+M3_TRANSCRIPT_MAP_SHA256 = (
+    "76d9c82b1518e27889e40fd0e62a5d77c17d3e697ea25e3d8a05d1b7dc5233f3"
+)
 
 
 def _exact_product_contract() -> dict:
@@ -91,6 +101,24 @@ def _publication_ready_manifest_and_route_evidence() -> tuple[dict, dict]:
     return manifest, route_evidence
 
 
+def _sealed_m3_transcript_map() -> dict[str, str]:
+    payload = subprocess.check_output(
+        ["git", "show", f"{M3_COMMIT}:{M3_PACKET_PATH}"], cwd=ROOT,
+    )
+    assert len(payload) == M3_PACKET_BYTES
+    assert hashlib.sha256(payload).hexdigest() == M3_PACKET_SHA256
+    packet = json.loads(payload)
+    result = {
+        row["asset_id"]: row["transcript_sha256"]
+        for group in ("new", "existing_roaring_fork")
+        for row in packet["assets"][group]
+        if row.get("kind") == "narration"
+    }
+    assert len(result) == 85
+    assert store._original_validation_hash(result) == M3_TRANSCRIPT_MAP_SHA256
+    return result
+
+
 def _publication_verified_assets(manifest: dict) -> dict[str, dict]:
     narration_bindings: dict[str, tuple[str, float]] = {}
     for story in manifest["stories"]:
@@ -101,6 +129,9 @@ def _publication_verified_assets(manifest: dict) -> dict[str, dict]:
             narration_bindings[override["audio_asset_id"]] = (
                 override["transcript"], float(override["audio_duration_s"]),
             )
+    sealed_transcripts = _sealed_m3_transcript_map()
+    assert len(narration_bindings) == 85
+    assert set(sealed_transcripts) == set(narration_bindings)
     profile = manifest["narration_profile"]
     commercial = profile["commercial_license"]
     attested_at = datetime.now(timezone.utc).replace(
@@ -122,9 +153,7 @@ def _publication_verified_assets(manifest: dict) -> dict[str, dict]:
             })
         else:
             transcript, duration_s = narration_bindings[asset["id"]]
-            row["transcript_sha256"] = store.original_transcript_sha256(
-                transcript
-            )
+            row["transcript_sha256"] = sealed_transcripts[asset["id"]]
             row["media_metadata_json"] = json.dumps({
                 "format": "mp3",
                 "sample_rate_hz": 44_100,

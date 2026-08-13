@@ -42,6 +42,9 @@ PROFILE_TEMPLATE_PATH = ROOT / "originals/smokies/smokies_pack_narration_profile
 RECEIPT_NAME = "smokies_full_bundle_post_migration_profile_receipt_v1.json"
 JOURNAL_HEADER_NAME = "000000-header-v1.json"
 MAX_TERMS_OBSERVATION_AGE_SECONDS = 900
+SEALED_M3_TRANSCRIPT_MAP_SHA256 = (
+    "76d9c82b1518e27889e40fd0e62a5d77c17d3e697ea25e3d8a05d1b7dc5233f3"
+)
 
 
 class SmokiesPostMigrationError(ValueError):
@@ -580,6 +583,54 @@ def dry_run() -> dict[str, Any]:
     }
 
 
+def _sealed_narration_transcript_sha256(
+    packet: dict[str, Any],
+) -> dict[str, str]:
+    """Derive the exact 85-row transcript contract only from sealed M3 assets."""
+    assets = packet.get("assets")
+    _require(isinstance(assets, dict), "migration packet assets are missing")
+    result: dict[str, str] = {}
+    for group in ("new", "existing_roaring_fork"):
+        rows = assets.get(group)
+        _require(isinstance(rows, list), f"migration packet {group} assets are missing")
+        for row in rows:
+            _require(isinstance(row, dict), f"migration packet {group} asset is invalid")
+            if row.get("kind") != "narration":
+                continue
+            asset_id = row.get("asset_id")
+            transcript_sha256 = row.get("transcript_sha256")
+            _require(
+                isinstance(asset_id, str)
+                and re.fullmatch(r"[a-z0-9_]{3,120}", asset_id) is not None,
+                f"migration packet {group} narration id is invalid",
+            )
+            _require(
+                isinstance(transcript_sha256, str)
+                and re.fullmatch(r"[a-f0-9]{64}", transcript_sha256) is not None,
+                f"migration packet narration transcript sha256 is invalid: {asset_id}",
+            )
+            _require(
+                asset_id not in result,
+                f"migration packet narration transcript is duplicated: {asset_id}",
+            )
+            result[asset_id] = transcript_sha256
+    expected_narrations = packet.get("post_migration_phases", {}).get(
+        "narration_profile_cas", {}
+    ).get("expected_narration_sha256")
+    _require(
+        isinstance(expected_narrations, dict)
+        and len(result) == 85
+        and set(result) == set(expected_narrations),
+        "migration packet transcript bindings must match all 85 narrations",
+    )
+    canonical = {asset_id: result[asset_id] for asset_id in sorted(result)}
+    _require(
+        canonical_sha256(canonical) == SEALED_M3_TRANSCRIPT_MAP_SHA256,
+        "migration packet transcript binding aggregate drifted",
+    )
+    return canonical
+
+
 def _validate_packet(
     packet: dict[str, Any], packet_sha256: str, args: argparse.Namespace
 ) -> None:
@@ -604,6 +655,7 @@ def _validate_packet(
     )
     terms = packet["post_migration_phases"]["license_attestation"]
     profile = packet["post_migration_phases"]["narration_profile_cas"]
+    _sealed_narration_transcript_sha256(packet)
     _require(
         terms.get("asset_count") == 72
         and terms.get("expected_draft_revision") == 3,
@@ -1323,6 +1375,9 @@ class DatabaseAdapter:
                     "expected_validation_metadata_sha256"
                 ],
                 expected_asset_sha256=phase["expected_asset_sha256"],
+                expected_transcript_sha256=(
+                    _sealed_narration_transcript_sha256(self.packet)
+                ),
                 expected_redacted_license_attestation_sha256=redacted,
                 narration_profile=profile,
                 admin_user_id=self.admin_user_id,

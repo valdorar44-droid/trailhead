@@ -12212,6 +12212,22 @@ ORIGINAL_V3_RELEASE_TARGET_PRIVATE_MANIFEST_OBJECT_SHA256 = (
 ORIGINAL_V3_RELEASE_TARGET_CONTENT_PROJECTION_SHA256 = (
     "35414d27e5a26dcfc5ef352f94322ca1fc88d17a4977c16b32ebd53f0bcdaf16"
 )
+_SMOKIES_M3_BASE_MANIFEST_SHA256 = (
+    "ee122cd320010e10ab80bfbae3abe8ccc7ccfc15eddbfe369c54e124ce8126dc"
+)
+_SMOKIES_M3_ASSET_MAP_SHA256 = (
+    "7cbc324b876c640e0448a57fde491393991dbc247d79e4901af57e7009a02c27"
+)
+_SMOKIES_M3_NARRATION_ASSET_MAP_SHA256 = (
+    "4944d8c91804ce9e43d6f5901f25466099ad60a814b97e0a7f93e9b1afaf4501"
+)
+_SMOKIES_M3_ROW_TRANSCRIPT_MAP_SHA256 = (
+    "76d9c82b1518e27889e40fd0e62a5d77c17d3e697ea25e3d8a05d1b7dc5233f3"
+)
+_SMOKIES_M3_NORMALIZED_TRANSCRIPT_MAP_SHA256 = (
+    "e683ee88126e803f54b2b73634b09b2cabd22dc13d26433ff1829d87ea2548af"
+)
+_SMOKIES_M3_TRANSCRIPT_DOMAIN_MISMATCH_COUNT = 38
 ORIGINAL_V3_RELEASE_TARGET_CHAPTER_VARIANTS = (
     ("mountain_crossing", ("tn_to_nc", "nc_to_tn")),
     (
@@ -12724,6 +12740,145 @@ def original_transcript_sha256(transcript: object) -> str:
     if not normalized:
         raise ValueError("Original narration transcript is required")
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _original_transcript_sha256_matches(
+    stored_sha256: object,
+    transcript: object,
+    *,
+    sealed_expected_sha256: str | None = None,
+) -> bool:
+    """Match generic raw/legacy hashes, or one preverified sealed exact hash."""
+    stored = str(stored_sha256 or "")
+    if re.fullmatch(r"[a-f0-9]{64}", stored) is None:
+        return False
+    if sealed_expected_sha256 is not None:
+        return stored == sealed_expected_sha256
+    raw = str(transcript or "")
+    if not raw.strip():
+        return False
+    return stored in {
+        hashlib.sha256(raw.encode("utf-8")).hexdigest(),
+        original_transcript_sha256(raw),
+    }
+
+
+def _original_narration_usage_transcript_map(manifest: dict) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for story in manifest.get("stories") or []:
+        usages = [(story.get("audio_asset_id"), story.get("transcript"))]
+        usages.extend(
+            (override.get("audio_asset_id"), override.get("transcript"))
+            for override in story.get("variant_overrides") or []
+        )
+        for raw_asset_id, transcript in usages:
+            asset_id = str(raw_asset_id or "")
+            digest = original_transcript_sha256(transcript)
+            if asset_id in result and result[asset_id] != digest:
+                raise ValueError(
+                    f"Original narration {asset_id} has conflicting transcript usages"
+                )
+            result[asset_id] = digest
+    return result
+
+
+def _sealed_smokies_m3_transcript_map(
+    pack_id: str,
+    manifest: dict,
+    verified_assets: dict[str, dict],
+    *,
+    expected_transcript_sha256: dict[str, str] | None = None,
+) -> dict[str, str] | None:
+    """Verify the all-or-nothing dual-domain M3 transcript contract."""
+    manifest_assets = {
+        str(asset.get("id") or ""): asset
+        for asset in manifest.get("assets") or []
+        if isinstance(asset, dict)
+    }
+    row_assets = {
+        str(asset_id): dict(row)
+        for asset_id, row in verified_assets.items()
+        if isinstance(row, dict)
+    }
+    full_bundle_looking = (
+        pack_id == ORIGINAL_V3_RELEASE_TARGET_PACK_ID
+        and (
+            manifest.get("title") == ORIGINAL_V3_RELEASE_TARGET_TITLE
+            or len(manifest_assets) > 20
+            or len(row_assets) > 20
+        )
+    )
+    if not full_bundle_looking:
+        return None
+    if manifest.get("schema_version") != 3:
+        raise ValueError("Smokies sealed transcript contract requires Manifest V3")
+    asset_map = {
+        asset_id: str(asset.get("sha256") or "")
+        for asset_id, asset in manifest_assets.items()
+    }
+    row_asset_map = {
+        asset_id: str(row.get("sha256") or row.get("asset_sha256") or "")
+        for asset_id, row in row_assets.items()
+    }
+    narration_asset_map = {
+        asset_id: sha256
+        for asset_id, sha256 in asset_map.items()
+        if manifest_assets[asset_id].get("kind") == "narration"
+    }
+    row_transcript_map = {
+        asset_id: str(row.get("transcript_sha256") or "")
+        for asset_id, row in row_assets.items()
+        if row.get("kind") == "narration"
+    }
+    normalized_transcript_map = _original_narration_usage_transcript_map(manifest)
+    if (
+        len(manifest_assets) != 98
+        or len(row_assets) != 98
+        or set(manifest_assets) != set(row_assets)
+        or row_asset_map != asset_map
+        or len(narration_asset_map) != 85
+        or len(row_transcript_map) != 85
+        or set(narration_asset_map) != set(row_transcript_map)
+        or set(row_transcript_map) != set(normalized_transcript_map)
+        or _original_validation_hash(asset_map) != _SMOKIES_M3_ASSET_MAP_SHA256
+        or _original_validation_hash(narration_asset_map)
+        != _SMOKIES_M3_NARRATION_ASSET_MAP_SHA256
+        or _original_validation_hash(row_transcript_map)
+        != _SMOKIES_M3_ROW_TRANSCRIPT_MAP_SHA256
+        or _original_validation_hash(normalized_transcript_map)
+        != _SMOKIES_M3_NORMALIZED_TRANSCRIPT_MAP_SHA256
+        or sum(
+            row_transcript_map[asset_id] != normalized_transcript_map[asset_id]
+            for asset_id in row_transcript_map
+        ) != _SMOKIES_M3_TRANSCRIPT_DOMAIN_MISMATCH_COUNT
+    ):
+        raise ValueError("Smokies sealed M3 transcript aggregate changed")
+    if expected_transcript_sha256 is not None and (
+        expected_transcript_sha256 != row_transcript_map
+        or _original_validation_hash(expected_transcript_sha256)
+        != _SMOKIES_M3_ROW_TRANSCRIPT_MAP_SHA256
+    ):
+        raise ValueError("Smokies caller transcript map changed from sealed M3")
+    profile = manifest.get("narration_profile")
+    if profile is None:
+        base_identity = copy.deepcopy(manifest)
+        for generated_key in ("manifest_id", "pack_id", "version"):
+            base_identity.pop(generated_key, None)
+        identity_matches = (
+            _original_validation_hash(base_identity)
+            == _SMOKIES_M3_BASE_MANIFEST_SHA256
+        )
+    else:
+        identity_matches = (
+            isinstance(profile, dict)
+            and profile.get("schema_version") == 2
+            and _original_validation_hash(
+                _original_v3_release_content_projection(manifest)
+            ) == ORIGINAL_V3_RELEASE_TARGET_CONTENT_PROJECTION_SHA256
+        )
+    if not identity_matches:
+        raise ValueError("Smokies sealed M3 manifest identity changed")
+    return row_transcript_map
 
 
 def _probe_original_mp3(data: bytes) -> dict:
@@ -13801,6 +13956,7 @@ def _validate_original_narration_profile_bindings_locked(
     normalized_base: dict,
     normalized_profile: dict,
     expected_narration_sha256: dict[str, str],
+    expected_transcript_sha256: dict[str, str] | None = None,
 ) -> list[dict]:
     """Revalidate the complete profile binding while the caller owns a write lock."""
     narration_rows = db.execute(
@@ -13810,6 +13966,20 @@ def _validate_original_narration_profile_bindings_locked(
         (pack_id,),
     ).fetchall()
     current_by_id = {str(row["asset_id"]): dict(row) for row in narration_rows}
+    all_current_rows = db.execute(
+        """SELECT * FROM authored_original_assets
+           WHERE pack_id=? AND is_current=1 ORDER BY asset_id""",
+        (pack_id,),
+    ).fetchall()
+    try:
+        sealed_transcripts = _sealed_smokies_m3_transcript_map(
+            pack_id,
+            normalized_base,
+            {str(row["asset_id"]): dict(row) for row in all_current_rows},
+            expected_transcript_sha256=expected_transcript_sha256,
+        )
+    except ValueError as exc:
+        raise OriginalNarrationProfileConflictError(pack_id, str(exc)) from exc
     if set(current_by_id) != set(expected_narration_sha256):
         raise OriginalNarrationProfileConflictError(
             pack_id, "the current narration asset membership changed",
@@ -13878,7 +14048,14 @@ def _validate_original_narration_profile_bindings_locked(
         )
         transcript_sha256 = str(row.get("transcript_sha256") or "")
         for usage_id, usage in usages[asset_id]:
-            if transcript_sha256 != original_transcript_sha256(usage.get("transcript")):
+            if not _original_transcript_sha256_matches(
+                transcript_sha256,
+                usage.get("transcript"),
+                sealed_expected_sha256=(
+                    sealed_transcripts.get(asset_id)
+                    if sealed_transcripts is not None else None
+                ),
+            ):
                 raise OriginalNarrationProfileConflictError(
                     pack_id, f"reviewed transcript binding changed for {usage_id}",
                 )
@@ -14004,6 +14181,7 @@ def apply_authored_original_narration_profile_v2(
     expected_redacted_license_attestation_sha256: dict[str, str],
     narration_profile: dict,
     admin_user_id: int,
+    expected_transcript_sha256: dict[str, str] | None = None,
 ) -> dict:
     """CAS-bind one strict V2 narration profile to an existing V3 draft.
 
@@ -14043,6 +14221,24 @@ def apply_authored_original_narration_profile_v2(
         clean_expected_assets[asset_id] = sha256
     if not clean_expected_assets:
         raise ValueError("Original narration profile requires asset sha256 bindings")
+    if expected_transcript_sha256 is not None and not isinstance(
+        expected_transcript_sha256, dict
+    ):
+        raise ValueError("Original transcript sha256 bindings must be an object")
+    clean_expected_transcripts: dict[str, str] = {}
+    for asset_id, sha256 in (expected_transcript_sha256 or {}).items():
+        if not isinstance(asset_id, str):
+            raise ValueError("Original transcript asset ids must be strings")
+        clean_asset_id = _validate_canonical_id(
+            asset_id, "Original transcript asset id",
+        )
+        if clean_asset_id != asset_id:
+            raise ValueError("Original transcript asset ids must be canonical")
+        if not isinstance(sha256, str) or not re.fullmatch(r"[a-f0-9]{64}", sha256):
+            raise ValueError(
+                f"Original narration {asset_id} transcript sha256 is invalid"
+            )
+        clean_expected_transcripts[asset_id] = sha256
     if not isinstance(expected_redacted_license_attestation_sha256, dict):
         raise ValueError(
             "Original redacted license attestation sha256 bindings must be an object"
@@ -14157,11 +14353,15 @@ def apply_authored_original_narration_profile_v2(
         if (
             not narration_ids
             or set(clean_expected_attestations) != narration_ids
+            or (
+                expected_transcript_sha256 is not None
+                and set(clean_expected_transcripts) != narration_ids
+            )
             or not narration_ids.issubset(clean_expected_assets)
         ):
             raise OriginalNarrationProfileConflictError(
                 pack_id,
-                "license attestation bindings must match manifest narration membership",
+                "transcript and license bindings must match manifest narration membership",
             )
         clean_expected = {
             asset_id: clean_expected_assets[asset_id]
@@ -14224,6 +14424,20 @@ def apply_authored_original_narration_profile_v2(
             (pack_id,),
         ).fetchall()
         current_by_id = {str(row["asset_id"]): dict(row) for row in narration_rows}
+        all_current_rows = db.execute(
+            """SELECT * FROM authored_original_assets
+               WHERE pack_id=? AND is_current=1 ORDER BY asset_id""",
+            (pack_id,),
+        ).fetchall()
+        try:
+            sealed_transcripts = _sealed_smokies_m3_transcript_map(
+                pack_id,
+                normalized_base,
+                {str(row["asset_id"]): dict(row) for row in all_current_rows},
+                expected_transcript_sha256=clean_expected_transcripts,
+            )
+        except ValueError as exc:
+            raise OriginalNarrationProfileConflictError(pack_id, str(exc)) from exc
         if set(current_by_id) != set(clean_expected):
             raise OriginalNarrationProfileConflictError(
                 pack_id, "the current narration asset membership changed",
@@ -14293,10 +14507,15 @@ def apply_authored_original_narration_profile_v2(
             )
             transcript_sha256 = str(row.get("transcript_sha256") or "")
             for usage_id, usage in usages[asset_id]:
-                usage_transcript_sha256 = original_transcript_sha256(
-                    usage.get("transcript")
+                sealed_expected = (
+                    sealed_transcripts.get(asset_id)
+                    if sealed_transcripts is not None else None
                 )
-                if transcript_sha256 != usage_transcript_sha256:
+                if not _original_transcript_sha256_matches(
+                    transcript_sha256,
+                    usage.get("transcript"),
+                    sealed_expected_sha256=sealed_expected,
+                ):
                     raise OriginalNarrationProfileConflictError(
                         pack_id, f"reviewed transcript binding changed for {usage_id}",
                     )
@@ -15889,7 +16108,9 @@ def _normalize_original_manifest_v1(
             if not narration["mime_type"].startswith("audio/"):
                 raise ValueError(f"Original stop {stop['id']} narration must be an audio upload")
             verified_narration = verified_assets.get(stop["audio_asset_id"])
-            if not verified_narration or verified_narration.get("transcript_sha256") != original_transcript_sha256(stop["transcript"]):
+            if not verified_narration or not _original_transcript_sha256_matches(
+                verified_narration.get("transcript_sha256"), stop["transcript"],
+            ):
                 raise ValueError(f"Original stop {stop['id']} narration does not match its reviewed transcript")
             generator_metadata = _decode_pack_json(
                 verified_narration.get("generator_metadata_json"), {},
@@ -15989,6 +16210,38 @@ def _normalize_original_manifest(
             route_evidence_document=route_evidence_document,
         )
     if schema_version == 3:
+        validation_assets = verified_assets
+        if publishing and isinstance(verified_assets, dict):
+            sealed_transcripts = _sealed_smokies_m3_transcript_map(
+                pack_id, manifest, verified_assets,
+            )
+            normalized_transcripts = _original_narration_usage_transcript_map(
+                manifest
+            )
+            validation_assets = copy.deepcopy(verified_assets)
+            usages: dict[str, object] = {}
+            for story in manifest.get("stories") or []:
+                usages[str(story.get("audio_asset_id") or "")] = story.get(
+                    "transcript"
+                )
+                for override in story.get("variant_overrides") or []:
+                    usages[str(override.get("audio_asset_id") or "")] = (
+                        override.get("transcript")
+                    )
+            for asset_id, transcript_sha256 in normalized_transcripts.items():
+                row = validation_assets.get(asset_id)
+                if not isinstance(row, dict) or not _original_transcript_sha256_matches(
+                    row.get("transcript_sha256"),
+                    usages.get(asset_id),
+                    sealed_expected_sha256=(
+                        sealed_transcripts.get(asset_id)
+                        if sealed_transcripts is not None else None
+                    ),
+                ):
+                    raise ValueError(
+                        f"Original narration {asset_id} transcript binding changed"
+                    )
+                row["transcript_sha256"] = transcript_sha256
         return normalize_original_manifest_v3(
             manifest,
             pack_id=pack_id,
@@ -15996,7 +16249,7 @@ def _normalize_original_manifest(
             version=version,
             normalize_v1=_normalize_original_manifest_v1,
             publishing=publishing,
-            verified_assets=verified_assets,
+            verified_assets=validation_assets,
             validated_selections=validated_selections,
             validated_delivery_contracts=validated_delivery_contracts,
             route_evidence_document=route_evidence_document,
@@ -16332,6 +16585,9 @@ def _bind_authored_original_preview_assets(
     include_validation_audio_evidence: bool = False,
 ) -> dict:
     """Bind immutable uploads to authored narrative items and private validation evidence."""
+    sealed_transcripts = _sealed_smokies_m3_transcript_map(
+        pack_id, manifest, verified_assets,
+    )
     assets_by_id = {asset["id"]: asset for asset in manifest["assets"]}
     for asset in manifest["assets"]:
         verified = verified_assets.get(asset["id"])
@@ -16394,13 +16650,22 @@ def _bind_authored_original_preview_assets(
         narration_id = item["audio_asset_id"]
         narration = assets_by_id.get(narration_id)
         verified_narration = verified_assets.get(narration_id)
-        transcript_sha256 = original_transcript_sha256(item["transcript"])
+        stored_transcript_sha256 = (
+            verified_narration.get("transcript_sha256")
+            if verified_narration else None
+        )
         if (
             not narration
             or narration["kind"] != "narration"
             or not verified_narration
-            or verified_narration.get("transcript_sha256")
-            != transcript_sha256
+            or not _original_transcript_sha256_matches(
+                stored_transcript_sha256,
+                item["transcript"],
+                sealed_expected_sha256=(
+                    sealed_transcripts.get(narration_id)
+                    if sealed_transcripts is not None else None
+                ),
+            )
         ):
             raise ValueError(
                 f"Original {narrative_label} {usage_id} narration does not match its current transcript"
@@ -16472,7 +16737,7 @@ def _bind_authored_original_preview_assets(
                 "kind": "narration",
                 "asset_sha256": narration["sha256"],
                 "asset_bytes": int(narration["bytes"]),
-                "transcript_sha256": transcript_sha256,
+                "transcript_sha256": stored_transcript_sha256,
                 "probed_duration_ms": int(math.floor(
                     verified_duration * 1000 + 0.5
                 )),
@@ -16658,6 +16923,14 @@ def _compiled_original_validation_selections(manifest: dict) -> list[dict]:
         )
     ):
         raise ValueError("Original V3 validation asset evidence identities are invalid")
+    sealed_transcripts = (
+        _sealed_smokies_m3_transcript_map(
+            str(compile_manifest.get("pack_id") or ""),
+            compile_manifest,
+            validation_assets,
+        )
+        if schema_version == 3 else None
+    )
     selections: list[dict] = []
     for chapter in compile_manifest.get("chapters") or []:
         validation = chapter.get("validation_selection") or {}
@@ -16703,8 +16976,14 @@ def _compiled_original_validation_selections(manifest: dict) -> list[dict]:
                     if (
                         not asset_evidence
                         or asset_evidence.get("kind") != "narration"
-                        or asset_evidence.get("transcript_sha256")
-                        != original_transcript_sha256(narrative.get("transcript"))
+                        or not _original_transcript_sha256_matches(
+                            asset_evidence.get("transcript_sha256"),
+                            narrative.get("transcript"),
+                            sealed_expected_sha256=(
+                                sealed_transcripts.get(audio_asset_id)
+                                if sealed_transcripts is not None else None
+                            ),
+                        )
                     ):
                         raise ValueError(
                             f"Original V3 item {item_id} narration publication evidence is incomplete"

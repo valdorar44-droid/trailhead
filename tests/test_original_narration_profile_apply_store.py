@@ -4,9 +4,11 @@ import hashlib
 import json
 from pathlib import Path
 import struct
+import subprocess
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 import zlib
 
 from config.settings import settings
@@ -56,6 +58,7 @@ class OriginalNarrationProfileApplyStoreTests(unittest.TestCase):
         stories_by_audio = {
             story["audio_asset_id"]: story for story in self.manifest["stories"]
         }
+        self.stories_by_audio = stories_by_audio
         narration_assets = sorted(
             (
                 asset
@@ -66,6 +69,12 @@ class OriginalNarrationProfileApplyStoreTests(unittest.TestCase):
         )
         self.expected_sha256 = {}
         self.expected_asset_sha256 = {}
+        self.expected_transcript_sha256 = {
+            asset["id"]: store.original_transcript_sha256(
+                stories_by_audio[asset["id"]]["transcript"]
+            )
+            for asset in narration_assets
+        }
         self.audio_paths = {}
         for index, asset in enumerate(narration_assets, start=1):
             data = self._mp3_bytes(index)
@@ -202,9 +211,7 @@ class OriginalNarrationProfileApplyStoreTests(unittest.TestCase):
                 path.stat().st_size,
                 self.expected_sha256[asset_id],
                 self.admin,
-                transcript_sha256=store.original_transcript_sha256(
-                    story["transcript"]
-                ),
+                transcript_sha256=self.expected_transcript_sha256[asset_id],
                 generator_metadata=generator,
             )
             store.attest_authored_original_generator_license(
@@ -515,6 +522,175 @@ class OriginalNarrationProfileApplyStoreTests(unittest.TestCase):
         with self.assertRaises(store.OriginalNarrationProfileConflictError):
             self._apply(expected_asset_sha256=stale_assets)
         self.assertEqual(self._pack_row(), before)
+
+    def test_legacy_normalized_transcript_binding_remains_valid(self) -> None:
+        transcript = "Raw\n  UTF-8 transcript"
+        self.assertTrue(store._original_transcript_sha256_matches(
+            hashlib.sha256(transcript.encode("utf-8")).hexdigest(), transcript,
+        ))
+        self.assertTrue(store._original_transcript_sha256_matches(
+            store.original_transcript_sha256(transcript), transcript,
+        ))
+        result = self._apply()
+        self.assertEqual(result["after_draft_revision"], 2)
+
+    @staticmethod
+    def _sealed_m3_fixture() -> tuple[dict, dict, dict]:
+        payload = subprocess.check_output(
+            [
+                "git", "show",
+                "00e8b76daffaebd492c68e2f3416646fb8f327d6:"
+                "originals/smokies/smokies_complete_private_migration_packet_v1.json",
+            ],
+            cwd=Path(__file__).resolve().parents[1],
+        )
+        packet = json.loads(payload)
+        manifest = json.loads(packet["migration_draft"]["original_manifest_json"])
+        rows = {
+            row["asset_id"]: {
+                "kind": row["kind"],
+                "sha256": row["sha256"],
+                "transcript_sha256": row.get("transcript_sha256"),
+            }
+            for group in ("new", "existing_roaring_fork")
+            for row in packet["assets"][group]
+        }
+        transcript_map = {
+            asset_id: row["transcript_sha256"]
+            for asset_id, row in rows.items()
+            if row["kind"] == "narration"
+        }
+        return manifest, rows, transcript_map
+
+    def test_sealed_m3_dual_domain_contract_is_all_or_nothing(self) -> None:
+        manifest, rows, transcript_map = self._sealed_m3_fixture()
+        sealed = store._sealed_smokies_m3_transcript_map(
+            store.ORIGINAL_V3_RELEASE_TARGET_PACK_ID,
+            manifest,
+            rows,
+            expected_transcript_sha256=transcript_map,
+        )
+        normalized = store._original_narration_usage_transcript_map(manifest)
+        self.assertEqual(sealed, transcript_map)
+        self.assertEqual(len(sealed), 85)
+        self.assertEqual(
+            sum(sealed[key] != normalized[key] for key in sealed), 38,
+        )
+
+        drifted_rows = copy.deepcopy(rows)
+        drifted_rows[sorted(transcript_map)[0]]["transcript_sha256"] = "f" * 64
+        with self.assertRaisesRegex(ValueError, "aggregate"):
+            store._sealed_smokies_m3_transcript_map(
+                store.ORIGINAL_V3_RELEASE_TARGET_PACK_ID, manifest, drifted_rows,
+            )
+        missing_rows = copy.deepcopy(rows)
+        missing_rows.pop(sorted(missing_rows)[0])
+        with self.assertRaisesRegex(ValueError, "aggregate"):
+            store._sealed_smokies_m3_transcript_map(
+                store.ORIGINAL_V3_RELEASE_TARGET_PACK_ID, manifest, missing_rows,
+            )
+        wrong_manifest = copy.deepcopy(manifest)
+        wrong_manifest["stories"][0]["transcript"] += " drift"
+        with self.assertRaisesRegex(ValueError, "aggregate"):
+            store._sealed_smokies_m3_transcript_map(
+                store.ORIGINAL_V3_RELEASE_TARGET_PACK_ID, wrong_manifest, rows,
+            )
+        self.assertIsNone(store._sealed_smokies_m3_transcript_map(
+            "different_original", manifest, rows,
+        ))
+
+    def test_sealed_publish_validation_copy_does_not_mutate_rows(self) -> None:
+        manifest, rows, _ = self._sealed_m3_fixture()
+        before = copy.deepcopy(rows)
+
+        def fake_normalize(_manifest, **kwargs):
+            normalized = store._original_narration_usage_transcript_map(_manifest)
+            supplied = kwargs["verified_assets"]
+            self.assertEqual(
+                {
+                    key: value["transcript_sha256"]
+                    for key, value in supplied.items()
+                    if value["kind"] == "narration"
+                },
+                normalized,
+            )
+            return copy.deepcopy(_manifest), json.dumps(_manifest)
+
+        with patch.object(store, "normalize_original_manifest_v3", fake_normalize):
+            store._normalize_original_manifest(
+                store.ORIGINAL_V3_RELEASE_TARGET_PACK_ID,
+                manifest["title"],
+                manifest,
+                publishing=True,
+                verified_assets=rows,
+            )
+        self.assertEqual(rows, before)
+
+    def test_sealed_contract_accepts_only_allowed_rev5_maturation(self) -> None:
+        manifest, rows, transcript_map = self._sealed_m3_fixture()
+        profile_path = (
+            Path(__file__).resolve().parents[1]
+            / "originals/smokies/smokies_pack_narration_profile_v2.json"
+        )
+        manifest["narration_profile"] = json.loads(
+            profile_path.read_text(encoding="utf-8")
+        )
+        manifest["narration_profile"]["commercial_license"]["verified_at"] = (
+            "2026-08-13T00:00:00Z"
+        )
+        manifest["review"] = {
+            "editorial_status": "approved",
+            "field_drive_completed_at": "2026-08-13T01:00:00Z",
+            "source_review_completed_at": "2026-08-13T01:00:00Z",
+        }
+        manifest["offline_map"]["estimated_bytes"] = 213_074_000
+        manifest["route_evidence"] = {"sealed_final_binding": True}
+        roaring_fork = next(
+            chapter for chapter in manifest["chapters"]
+            if chapter["id"] == "roaring_fork"
+        )
+        roaring_fork["safety"]["disclaimers"][0] = (
+            "This tour does not replace current NPS information."
+        )
+        roaring_fork["access"]["accessibility_notes"] = (
+            "Accessibility and stop conditions require a current NPS check; "
+            "this tour makes no parking or access guarantee."
+        )
+        self.assertEqual(
+            store._sealed_smokies_m3_transcript_map(
+                store.ORIGINAL_V3_RELEASE_TARGET_PACK_ID,
+                manifest,
+                rows,
+                expected_transcript_sha256=transcript_map,
+            ),
+            transcript_map,
+        )
+        manifest["stories"][0]["title"] += " drift"
+        with self.assertRaisesRegex(ValueError, "identity"):
+            store._sealed_smokies_m3_transcript_map(
+                store.ORIGINAL_V3_RELEASE_TARGET_PACK_ID, manifest, rows,
+            )
+
+    def test_manifest_text_drift_remains_base_hash_bound(self) -> None:
+        manifest = json.loads(self._pack_row()["draft_original_manifest_json"])
+        manifest["stories"][0]["transcript"] += " Drifted."
+        db = store._conn()
+        db.execute(
+            "UPDATE authored_trip_packs SET draft_original_manifest_json=? WHERE id=?",
+            (
+                json.dumps(manifest, separators=(",", ":"), sort_keys=True),
+                self.pack_id,
+            ),
+        )
+        db.commit()
+        db.close()
+        drifted = self._pack_row()
+        with self.assertRaisesRegex(
+            store.OriginalNarrationProfileConflictError,
+            "base manifest hash",
+        ):
+            self._apply()
+        self.assertEqual(self._pack_row(), drifted)
 
     def test_validation_metadata_hash_is_cas_bound_for_apply_and_replay(self) -> None:
         drifted = copy.deepcopy(self.original_validation_metadata)

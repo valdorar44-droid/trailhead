@@ -104,6 +104,7 @@ REQUIRED_SOURCE_PATHS = {
     "tests/test_smokies_complete_private_attestation_profile.py",
     "tests/test_smokies_dual_platform_private_preview_marker.py",
     "tests/test_smokies_mobile_compatibility_freeze.py",
+    "tests/test_discovery_pack_bridge.py",
     RELEASE_AUDIT_PATH,
     *IMMUTABLE_PINNED_ARTIFACTS,
 }

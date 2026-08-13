@@ -258,6 +258,11 @@ def test_source_set_requires_all_gate_families_and_complete_mobile_tree(
     assert source_sets["complete_release_support_source"]["scope"] == (
         "all_tracked_mobile_paths_plus_backend_and_evidence_dependencies"
     )
+    release_paths = {
+        row["path"]
+        for row in source_sets["complete_release_support_source"]["rows"]
+    }
+    assert "tests/test_discovery_pack_bridge.py" in release_paths
     for family in source_sets["gate_families"].values():
         assert family["required_for_signed_candidate"] is True
         assert family["executed_by_this_builder"] is False

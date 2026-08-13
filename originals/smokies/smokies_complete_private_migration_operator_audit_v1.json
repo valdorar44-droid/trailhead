@@ -32,19 +32,19 @@
       "sha256": "850df80086d336a3a3652d73a1e0eda403e89f06b241c2a710bcb6cbf38e53de"
     },
     "migration_operator": {
-      "byte_count": 188287,
+      "byte_count": 191565,
       "path": "scripts/migrate_smokies_complete_private.py",
-      "sha256": "505f8b769dfe61e8b15af0bf52630de616f2987a9eb2ab283561891c804036d9"
+      "sha256": "c7365077f153538c0425a755d4f67bf1f999205fd58bfb584c81c428cf36e4a8"
     },
     "migration_operator_tests": {
-      "byte_count": 141423,
+      "byte_count": 148683,
       "path": "tests/test_smokies_complete_private_migration.py",
-      "sha256": "3f11d35d285e4ea79fdcb4dfb73428a94e5e0bdb34bd6b20559b030d7d21bcba"
+      "sha256": "e77f14708076f54e9c634b939937339f23333bc993a43a8b53de99b65d4a4d74"
     },
     "migration_packet": {
-      "byte_count": 5838967,
+      "byte_count": 5839615,
       "path": "originals/smokies/smokies_complete_private_migration_packet_v1.json",
-      "sha256": "d2f7ca0b587e67c2f8e9164a4d8f66663e6ac1f1a509af50989e04dcf84f4920"
+      "sha256": "1aabc64e7be8369cd963c752029aa8f6a80402c8df5ac0c92f072fb0a891c53e"
     },
     "mobile_long_form_evidence_registry": {
       "byte_count": 7676,
@@ -57,9 +57,9 @@
       "sha256": "e632c9637428f21c93aabaa4e7ffc7439809a4fc83646dd0cc1d2b45785b7482"
     },
     "packet_builder": {
-      "byte_count": 51009,
+      "byte_count": 51917,
       "path": "scripts/build_smokies_complete_private_migration.py",
-      "sha256": "e912ab62b0df8513bc57cb5010f6adbd3a4f0d61786b4be4c7e8baabebc2101d"
+      "sha256": "c10e11807da034a8fcd774e1f42249ddb4979d3c12d0d1cf07a87551e0a0a5b8"
     },
     "roaring_fork_import_operator": {
       "byte_count": 49032,
@@ -102,15 +102,32 @@
       "status": "passed"
     },
     "exact_eight_suite_regression": {
+      "inherited_from_audit_sha256": "28bd4356804994cf48323788335f95d8c99566cbc0c87001340ea709be632188",
       "passed": 181,
       "skipped": 2,
-      "status": "passed",
+      "status": "inherited_prior_independent_evidence",
       "subtests_passed": 27
     },
     "focused_migration_regression": {
-      "collected": 86,
-      "passed": 86,
-      "status": "passed_within_exact_eight_suite"
+      "collected": 101,
+      "duration_seconds": 720.62,
+      "passed": 101,
+      "status": "author_bounded_execution_passed"
+    },
+    "historical_report_contract": {
+      "assets_sha256": "1c4c945fe594089bb6147f15251a097818ea5b4093e193c22c93751cf811fc32",
+      "completed_at": 1786412036,
+      "input_sha256": "81815b5cca2e6cb19a0cc1e75208d73b3ce01683d3660ea2095c7a553d1fba0a",
+      "manifest_distinct_from_current_pack": true,
+      "manifest_sha256": "b6f730d17922f7b38361d08e9bc97bde1d340a0c42d9b455802fca708585d725",
+      "nested_scenario_count": 13,
+      "report_id": "original_validation_9df694c93ee9ef3809c33f451d04bf28",
+      "selection_result_count": 1,
+      "started_at": 1786412026,
+      "started_by": 3,
+      "status": "exact_packet_and_fail_closed_operator_review_passed",
+      "validator_source_sha256": "cd045f33f6908235f5393dfeca54ae3317855dbb9f716bbd283fceff5be415a1",
+      "worker_pid": 16
     },
     "operator_locked_dry_run": {
       "database_accessed": false,
@@ -125,8 +142,16 @@
       "serialized_secrets": 0,
       "status": "passed"
     },
+    "targeted_historical_report_regression": {
+      "collected": 15,
+      "deselected": 86,
+      "duration_seconds": 8.58,
+      "passed": 15,
+      "status": "independent_bounded_execution_passed"
+    },
     "transitive_source_closure_recomputation": {
       "path_count": 174,
+      "path_hash_mismatches": 0,
       "status": "passed"
     },
     "whitespace_and_syntax": {

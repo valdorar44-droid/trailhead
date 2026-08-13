@@ -922,6 +922,24 @@ def build_bundle() -> tuple[dict[str, Any], dict[str, Any]]:
                 "expected_report_count": 1,
                 "expected_suite_version": "originals_virtual_route_v3",
                 "expected_draft_revision": 2,
+                "expected_worker_pid": 16,
+                "expected_manifest_sha256": (
+                    "b6f730d17922f7b38361d08e9bc97bde1d340a0c42d9b455802fca708585d725"
+                ),
+                "expected_assets_sha256": (
+                    "1c4c945fe594089bb6147f15251a097818ea5b4093e193c22c93751cf811fc32"
+                ),
+                "expected_input_sha256": (
+                    "81815b5cca2e6cb19a0cc1e75208d73b3ce01683d3660ea2095c7a553d1fba0a"
+                ),
+                "expected_validator_source_sha256": (
+                    "cd045f33f6908235f5393dfeca54ae3317855dbb9f716bbd283fceff5be415a1"
+                ),
+                "expected_started_by": 3,
+                "expected_started_at": 1786412026,
+                "expected_completed_at": 1786412036,
+                "expected_selection_result_count": 1,
+                "expected_nested_scenario_count": 13,
                 "readback_observed_at": readiness_inputs[
                     "private_state_at_s4r_readback"
                 ]["observed_at"],

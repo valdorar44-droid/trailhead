@@ -2150,15 +2150,58 @@ def _assert_independent_rf_history(
     ):
         raise FullBundleMigrationError("historical validation report membership drifted")
     report = reports[0]
+    integer_contract = {
+        key: permitted.get(key)
+        for key in (
+            "expected_draft_revision",
+            "expected_worker_pid",
+            "expected_started_by",
+            "expected_started_at",
+            "expected_completed_at",
+            "expected_selection_result_count",
+            "expected_nested_scenario_count",
+        )
+    }
+    if any(
+        isinstance(value, bool) or not isinstance(value, int)
+        for value in integer_contract.values()
+    ):
+        raise FullBundleMigrationError(
+            "historical validation integer contract drifted"
+        )
+    hash_contract = {
+        key: permitted.get(key)
+        for key in (
+            "expected_manifest_sha256",
+            "expected_assets_sha256",
+            "expected_input_sha256",
+            "expected_validator_source_sha256",
+            "redacted_report_sha256",
+        )
+    }
+    if any(
+        not isinstance(value, str) or not re.fullmatch(r"[a-f0-9]{64}", value)
+        for value in hash_contract.values()
+    ):
+        raise FullBundleMigrationError("historical validation hash contract drifted")
     expected_report = {
         "id": permitted["report_id"],
         "pack_id": packet_builder.PRODUCT_ID,
-        "draft_revision": int(permitted["expected_draft_revision"]),
+        "draft_revision": integer_contract["expected_draft_revision"],
+        "manifest_sha256": hash_contract["expected_manifest_sha256"],
+        "assets_sha256": hash_contract["expected_assets_sha256"],
+        "input_sha256": hash_contract["expected_input_sha256"],
+        "validator_source_sha256": hash_contract[
+            "expected_validator_source_sha256"
+        ],
         "suite_version": permitted["expected_suite_version"],
         "engine_version": permitted["engine"],
         "status": permitted["status"],
         "passed": 1,
-        "worker_pid": None,
+        "started_by": integer_contract["expected_started_by"],
+        "worker_pid": integer_contract["expected_worker_pid"],
+        "started_at": integer_contract["expected_started_at"],
+        "completed_at": integer_contract["expected_completed_at"],
     }
     if any(report.get(key) != value for key, value in expected_report.items()):
         raise FullBundleMigrationError("historical validation report facts drifted")
@@ -2170,14 +2213,49 @@ def _assert_independent_rf_history(
         scenarios = json.loads(str(report.get("scenarios_json")))
     except (TypeError, json.JSONDecodeError) as exc:
         raise FullBundleMigrationError("historical validation report JSON drifted") from exc
+    try:
+        redacted_report = store._original_validation_report_from_row(
+            report,
+            current_material={
+                "draft_revision": integer_contract["expected_draft_revision"],
+                "manifest_sha256": hash_contract["expected_manifest_sha256"],
+                "assets_sha256": hash_contract["expected_assets_sha256"],
+                "input_sha256": hash_contract["expected_input_sha256"],
+                "validator_source_sha256": hash_contract[
+                    "expected_validator_source_sha256"
+                ],
+            },
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise FullBundleMigrationError(
+            "historical validation redacted report drifted"
+        ) from exc
+    selection_result = scenarios[0] if isinstance(scenarios, list) and scenarios else None
+    nested_scenarios = (
+        selection_result.get("scenarios")
+        if isinstance(selection_result, dict)
+        else None
+    )
     if (
-        report.get("manifest_sha256")
-        != predecessor["profiled_manifest_canonical_sha256"]
-        or _canonical_sha256(report_manifest)
-        != predecessor["profiled_manifest_canonical_sha256"]
+        _canonical_sha256(report_manifest)
+        != hash_contract["expected_manifest_sha256"]
         or issues != permitted["issues"]
         or not isinstance(scenarios, list)
-        or len(scenarios) != int(permitted["route_scenarios_required"])
+        or len(scenarios)
+        != integer_contract["expected_selection_result_count"]
+        or not isinstance(selection_result, dict)
+        or selection_result.get("selection_key") != permitted["selection"]
+        or selection_result.get("passed") is not True
+        or selection_result.get("issues") != permitted["issues"]
+        or not isinstance(nested_scenarios, list)
+        or len(nested_scenarios)
+        != integer_contract["expected_nested_scenario_count"]
+        or integer_contract["expected_nested_scenario_count"]
+        != int(permitted["route_scenarios_required"])
+        or integer_contract["expected_nested_scenario_count"]
+        != int(permitted["route_scenarios_passed"])
+        or _canonical_sha256(redacted_report)
+        != hash_contract["redacted_report_sha256"]
     ):
         raise FullBundleMigrationError("historical validation report payload drifted")
     report_started = report.get("started_at")

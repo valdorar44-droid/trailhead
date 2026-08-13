@@ -226,6 +226,22 @@ def _synthetic_environment(
     import_completed_at = datetime.fromtimestamp(now + 4, timezone.utc).isoformat(
         timespec="seconds"
     ).replace("+00:00", "Z")
+    historical_manifest_sha256 = _canonical_sha(predecessor_manifest)
+    historical_assets_sha256 = "1" * 64
+    historical_input_sha256 = "2" * 64
+    historical_validator_source_sha256 = "3" * 64
+    historical_started_at = now + 1
+    historical_completed_at = now + 2
+    historical_scenarios = [
+        {
+            "selection_key": "roaring_fork_one_way_private_v1:one_way",
+            "passed": True,
+            "issues": [],
+            "scenarios": [
+                {"passed": True, "index": index} for index in range(13)
+            ],
+        }
+    ]
     connection = sqlite3.connect(database)
     try:
         connection.execute(
@@ -345,25 +361,43 @@ def _synthetic_environment(
                 report_id,
                 builder.PRODUCT_ID,
                 2,
-                _canonical_sha(predecessor_manifest),
-                "1" * 64,
-                "2" * 64,
-                "3" * 64,
+                historical_manifest_sha256,
+                historical_assets_sha256,
+                historical_input_sha256,
+                historical_validator_source_sha256,
                 _json(predecessor_manifest),
                 "originals_virtual_route_v3",
                 "original-trigger-v3",
                 "passed",
                 1,
                 _json({"selection": "roaring_fork_one_way_private_v1:one_way"}),
-                _json([{"passed": True, "index": index} for index in range(13)]),
+                _json(historical_scenarios),
                 "[]",
                 admin["id"],
-                None,
-                now + 1,
-                now + 2,
+                16,
+                historical_started_at,
+                historical_completed_at,
             ),
         )
         connection.commit()
+        connection.row_factory = sqlite3.Row
+        historical_report_row = connection.execute(
+            "SELECT * FROM authored_original_validation_reports WHERE id=?",
+            (report_id,),
+        ).fetchone()
+        assert historical_report_row is not None
+        historical_redacted_report_sha256 = _canonical_sha(
+            store._original_validation_report_from_row(
+                historical_report_row,
+                current_material={
+                    "draft_revision": 2,
+                    "manifest_sha256": historical_manifest_sha256,
+                    "assets_sha256": historical_assets_sha256,
+                    "input_sha256": historical_input_sha256,
+                    "validator_source_sha256": historical_validator_source_sha256,
+                },
+            )
+        )
     finally:
         connection.close()
 
@@ -462,7 +496,7 @@ def _synthetic_environment(
             },
             "permitted_validation_history": {
                 "report_id": report_id,
-                "redacted_report_sha256": "4" * 64,
+                "redacted_report_sha256": historical_redacted_report_sha256,
                 "status": "passed",
                 "current": True,
                 "engine": "original-trigger-v3",
@@ -474,6 +508,18 @@ def _synthetic_environment(
                 "expected_report_count": 1,
                 "expected_suite_version": "originals_virtual_route_v3",
                 "expected_draft_revision": 2,
+                "expected_worker_pid": 16,
+                "expected_manifest_sha256": historical_manifest_sha256,
+                "expected_assets_sha256": historical_assets_sha256,
+                "expected_input_sha256": historical_input_sha256,
+                "expected_validator_source_sha256": (
+                    historical_validator_source_sha256
+                ),
+                "expected_started_by": admin["id"],
+                "expected_started_at": historical_started_at,
+                "expected_completed_at": historical_completed_at,
+                "expected_selection_result_count": 1,
+                "expected_nested_scenario_count": 13,
                 "readback_observed_at": datetime.fromtimestamp(
                     now + 100, timezone.utc
                 ).isoformat(timespec="seconds").replace("+00:00", "Z"),
@@ -719,6 +765,44 @@ def test_real_packet_is_deterministic_exact_and_fail_closed() -> None:
         builder.PRIVATE_CANDIDATE_COMMIT_REVISION
     )
     assert packet["candidate_source_revision"] == builder.EXPECTED_CANDIDATE_SOURCE_REVISION
+    historical = packet["predecessor"]["permitted_validation_history"]
+    assert {
+        key: historical[key]
+        for key in (
+            "expected_worker_pid",
+            "expected_manifest_sha256",
+            "expected_assets_sha256",
+            "expected_input_sha256",
+            "expected_validator_source_sha256",
+            "expected_started_by",
+            "expected_started_at",
+            "expected_completed_at",
+            "expected_selection_result_count",
+            "expected_nested_scenario_count",
+        )
+    } == {
+        "expected_worker_pid": 16,
+        "expected_manifest_sha256": (
+            "b6f730d17922f7b38361d08e9bc97bde1d340a0c42d9b455802fca708585d725"
+        ),
+        "expected_assets_sha256": (
+            "1c4c945fe594089bb6147f15251a097818ea5b4093e193c22c93751cf811fc32"
+        ),
+        "expected_input_sha256": (
+            "81815b5cca2e6cb19a0cc1e75208d73b3ce01683d3660ea2095c7a553d1fba0a"
+        ),
+        "expected_validator_source_sha256": (
+            "cd045f33f6908235f5393dfeca54ae3317855dbb9f716bbd283fceff5be415a1"
+        ),
+        "expected_started_by": 3,
+        "expected_started_at": 1786412026,
+        "expected_completed_at": 1786412036,
+        "expected_selection_result_count": 1,
+        "expected_nested_scenario_count": 13,
+    }
+    assert historical["expected_manifest_sha256"] != (
+        packet["predecessor"]["profiled_manifest_canonical_sha256"]
+    )
     closure = packet["trusted_complete_validator_source_closure"]
     assert closure["schema_version"] == 1
     assert closure["framing"] == builder.COMPLETE_VALIDATOR_SOURCE_FRAMING
@@ -879,6 +963,107 @@ def test_complete_validator_closure_and_historical_evidence_are_exact() -> None:
         "manifest_v3_normalizer",
         "source_commit_and_tree",
     ]
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "worker_pid_missing",
+        "worker_pid_changed",
+        "manifest_sha256",
+        "assets_sha256",
+        "input_sha256",
+        "validator_source_sha256",
+        "manifest_json",
+        "summary_json",
+        "selection_key",
+        "selection_result_count",
+        "nested_scenario_count",
+        "nested_scenario_payload",
+        "started_by",
+        "started_at",
+        "completed_at",
+    ],
+)
+def test_historical_report_exact_facts_and_nested_shape_fail_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+) -> None:
+    environment = _synthetic_environment(tmp_path, monkeypatch, f"history_{case}")
+    packet = environment["packet"]
+    connection = sqlite3.connect(environment["database"])
+    connection.row_factory = sqlite3.Row
+    try:
+        report = dict(
+            connection.execute(
+                "SELECT * FROM authored_original_validation_reports WHERE id=?",
+                (packet["predecessor"]["permitted_validation_history"]["report_id"],),
+            ).fetchone()
+        )
+        if case == "worker_pid_missing":
+            column, value = "worker_pid", None
+        elif case == "worker_pid_changed":
+            column, value = "worker_pid", 17
+        elif case in {
+            "manifest_sha256",
+            "assets_sha256",
+            "input_sha256",
+            "validator_source_sha256",
+        }:
+            column, value = case, "0" * 64
+        elif case == "manifest_json":
+            column, value = "manifest_json", _json(
+                {"schema_version": 3, "title": "historical drift"}
+            )
+        elif case == "summary_json":
+            column, value = "summary_json", "{}"
+        elif case in {
+            "selection_key",
+            "selection_result_count",
+            "nested_scenario_count",
+            "nested_scenario_payload",
+        }:
+            scenarios = json.loads(report["scenarios_json"])
+            if case == "selection_key":
+                scenarios[0]["selection_key"] = "wrong:selection"
+            elif case == "selection_result_count":
+                scenarios.append(copy.deepcopy(scenarios[0]))
+            elif case == "nested_scenario_count":
+                scenarios[0]["scenarios"] = scenarios[0]["scenarios"][:-1]
+            else:
+                scenarios[0]["scenarios"][0]["passed"] = False
+            column, value = "scenarios_json", _json(scenarios)
+        elif case == "started_by":
+            column, value = "started_by", int(environment["admin"]["id"]) + 1
+        elif case == "started_at":
+            column, value = "started_at", int(report["started_at"]) + 1
+        else:
+            column, value = "completed_at", int(report["completed_at"]) + 1
+        connection.execute(
+            f"UPDATE authored_original_validation_reports SET {column}=? WHERE id=?",
+            (value, report["id"]),
+        )
+        connection.commit()
+        before = operator._db_snapshot(connection)
+        rf_rows = {
+            row["asset_id"]: row
+            for row in before["assets"]
+            if row["asset_id"]
+            in packet["predecessor"]["existing_asset_sha256"]
+        }
+        with pytest.raises(
+            operator.FullBundleMigrationError,
+            match="historical validation report",
+        ):
+            operator._assert_independent_rf_history(before, packet, rf_rows)
+        after = operator._db_snapshot(connection)
+        assert after == before
+        assert after["pack"]["draft_revision"] == 2
+        assert len(after["assets"]) == 20
+        assert len(after["validation_reports"]) == 1
+    finally:
+        connection.close()
 
 
 def test_builder_fails_on_transitive_source_drift(monkeypatch: pytest.MonkeyPatch) -> None:

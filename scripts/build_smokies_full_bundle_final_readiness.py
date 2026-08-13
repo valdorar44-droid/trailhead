@@ -17,6 +17,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import subprocess
 import sys
 from typing import Any
 
@@ -40,26 +41,41 @@ HISTORICAL_REPORT_ID = (
 HISTORICAL_REPORT_REDACTED_SHA256 = (
     "ffbab03a0bdc839cbbdaa422a1b4910eaeb61acdc1d4102dbdc40e8d643fc059"
 )
-CHECKPOINT_M_COMMIT = "a533852ceeba4f2d3b625bcce04135a2936705e5"
-CHECKPOINT_M_TREE = "eea0c936baf5ea2504f034608c84618a57c41d19"
+CHECKPOINT_M_COMMIT = "00e8b76daffaebd492c68e2f3416646fb8f327d6"
+CHECKPOINT_M_TREE = "8bdfec92208a93b05c919feef046f4f43899e6cd"
 CHECKPOINT_M_PACKET = {
     "path": "originals/smokies/smokies_complete_private_migration_packet_v1.json",
-    "byte_count": 5_839_615,
-    "git_blob_sha1": "6aeeb3b5f2d9adb5dc58e6f5f12a606e4cba7ede",
-    "sha256": "1aabc64e7be8369cd963c752029aa8f6a80402c8df5ac0c92f072fb0a891c53e",
+    "byte_count": 5_840_841,
+    "git_blob_sha1": "f1f9205380a86e362dc27a4eb56c52f760435168",
+    "sha256": "2c764008c2180db607ea51085c01b6fef0fd28fb436d5aace8970d3319a62c0c",
 }
 CHECKPOINT_M_AUDIT = {
     "path": "originals/smokies/smokies_complete_private_migration_operator_audit_v1.json",
-    "byte_count": 6_988,
-    "git_blob_sha1": "b634f21433e8a474d60cced1cf0df3c08af742e2",
-    "sha256": "de9aeba099d7cd0704175316c39ac4ddbbea6fd4022146da471cd6b855b4d3e2",
+    "byte_count": 7_827,
+    "git_blob_sha1": "f606a265ec1351e557c84d5c96f5626d074cc6e8",
+    "sha256": "c0d3ead8aa66ce6edb0ce8c932fcb2368e7eca1c47cda929327cb2c0765fa32e",
 }
 CHECKPOINT_M_AUDIT_BINDINGS_SHA256 = (
-    "c7a548aae4fb3d74b1f3a16b68218250f52c27b120325da37c94db8e94a9ce5a"
+    "e5f36c48ceb3589ac3fdf78e8c1c54ae9422152faad1f803f169d3b99eb98c2b"
 )
 CHECKPOINT_M_RUNTIME_SOURCE = {
     "commit": "4d24fe44a02bbf957c8200399612151f84a1e83a",
     "tree": "9393a7a0049f8c0f4eef60d18ca5579d9f9aeef4",
+}
+M3_HISTORICAL_VALIDATION_JOURNAL = {
+    "redacted_operator_report_path_sha256": (
+        "db4e1621926c4267a96a0f56294a31acb943f490f496898af44138be26a3684f"
+    ),
+    "redacted_operator_report_byte_count": 6090,
+    "redacted_operator_report_file_sha256": (
+        "ffbab03a0bdc839cbbdaa422a1b4910eaeb61acdc1d4102dbdc40e8d643fc059"
+    ),
+    "redacted_operator_report_canonical_sha256": (
+        "368fdffed960744954f709643ea4c9ac33c995302b54179167eff27c32f5567f"
+    ),
+    "redacted_store_report_canonical_sha256": (
+        "a9dd8583e1c50869f1de75fe124e5a8590be6b33a5ace5a71ddae974174b3503"
+    ),
 }
 MOBILE_COMPATIBILITY_PATH = (
     "originals/smokies/smokies_mobile_compatibility_freeze_v1.json"
@@ -141,6 +157,66 @@ def _git_oid(value: object, label: str) -> str:
     clean = str(value or "")
     _require(GIT_OID_RE.fullmatch(clean) is not None, f"{label} is invalid")
     return clean
+
+
+def _git(*args: str, binary: bool = False) -> bytes | str:
+    try:
+        payload = subprocess.check_output(["git", *args], cwd=ROOT)
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise FinalReadinessBuildError(
+            "commit-qualified checkpoint-M evidence is unavailable"
+        ) from exc
+    return payload if binary else payload.decode("utf-8")
+
+
+def _checkpoint_m_git_evidence() -> None:
+    tree = str(_git("rev-parse", f"{CHECKPOINT_M_COMMIT}^{{tree}}"))
+    _require(tree.strip() == CHECKPOINT_M_TREE, "checkpoint-M tree drifted")
+    documents: dict[str, dict[str, Any]] = {}
+    for binding in (CHECKPOINT_M_PACKET, CHECKPOINT_M_AUDIT):
+        path = binding["path"]
+        payload = _git("show", f"{CHECKPOINT_M_COMMIT}:{path}", binary=True)
+        _require(isinstance(payload, bytes), "checkpoint-M bytes are unavailable")
+        _require(
+            len(payload) == binding["byte_count"]
+            and hashlib.sha256(payload).hexdigest() == binding["sha256"]
+            and str(_git("rev-parse", f"{CHECKPOINT_M_COMMIT}:{path}")).strip()
+            == binding["git_blob_sha1"],
+            f"checkpoint-M commit-qualified evidence drifted: {path}",
+        )
+        try:
+            document = json.loads(payload)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise FinalReadinessBuildError(
+                f"checkpoint-M evidence is invalid JSON: {path}"
+            ) from exc
+        _require(isinstance(document, dict), "checkpoint-M evidence is invalid")
+        documents[path] = document
+    packet = documents[CHECKPOINT_M_PACKET["path"]]
+    audit = documents[CHECKPOINT_M_AUDIT["path"]]
+    permitted = (packet.get("predecessor") or {}).get(
+        "permitted_validation_history"
+    )
+    _require(
+        isinstance(permitted, dict)
+        and all(
+            permitted.get(key) == value
+            for key, value in M3_HISTORICAL_VALIDATION_JOURNAL.items()
+        )
+        and permitted.get("redacted_report_sha256")
+        == M3_HISTORICAL_VALIDATION_JOURNAL[
+            "redacted_operator_report_file_sha256"
+        ],
+        "checkpoint-M historical journal binding drifted",
+    )
+    _require(
+        audit.get("status") == "independent_audit_passed"
+        and (audit.get("findings") or {}).get("p0_count") == 0
+        and (audit.get("findings") or {}).get("p1_count") == 0
+        and _canonical_sha256(audit.get("bindings"))
+        == CHECKPOINT_M_AUDIT_BINDINGS_SHA256,
+        "checkpoint-M independent audit drifted",
+    )
 
 
 def _utc_second(value: object, label: str) -> str:
@@ -233,6 +309,7 @@ def build(
     final_readiness_cas_receipt: Path,
     dual_platform_marker: Path,
 ) -> dict[str, Any]:
+    _checkpoint_m_git_evidence()
     post_profile, post_profile_raw = _load_input(
         post_migration_profile_receipt, "post-migration profile receipt"
     )
@@ -328,7 +405,27 @@ def build(
             migration_bindings["private_migration_receipt"].get("byte_count"),
             int,
         )
-        and migration_bindings["private_migration_receipt"]["byte_count"] > 0,
+        and migration_bindings["private_migration_receipt"]["byte_count"] > 0
+        and migration_bindings["private_migration_receipt"].get(
+            "historical_validation_operator_report"
+        )
+        == {
+            "path_sha256": M3_HISTORICAL_VALIDATION_JOURNAL[
+                "redacted_operator_report_path_sha256"
+            ],
+            "byte_count": M3_HISTORICAL_VALIDATION_JOURNAL[
+                "redacted_operator_report_byte_count"
+            ],
+            "file_sha256": M3_HISTORICAL_VALIDATION_JOURNAL[
+                "redacted_operator_report_file_sha256"
+            ],
+            "canonical_sha256": M3_HISTORICAL_VALIDATION_JOURNAL[
+                "redacted_operator_report_canonical_sha256"
+            ],
+            "store_report_canonical_sha256": M3_HISTORICAL_VALIDATION_JOURNAL[
+                "redacted_store_report_canonical_sha256"
+            ],
+        },
         "post-migration checkpoint-M bindings drifted",
     )
     rev4_manifest_sha256 = _sha256(

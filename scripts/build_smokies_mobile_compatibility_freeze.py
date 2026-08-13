@@ -34,8 +34,8 @@ OUTPUT_PATH = Path("originals/smokies/smokies_mobile_compatibility_freeze_v1.jso
 RELEASE_AUDIT_PATH = "originals/smokies/smokies_v3_release_guard_audit_v1.json"
 ARTIFACT_ID = "smokies_mobile_compatibility_freeze_20260811_v1"
 PRODUCT_ID = "great_smoky_mountains_ridges_rivers_living_memory"
-CHECKPOINT_M_COMMIT = "a533852ceeba4f2d3b625bcce04135a2936705e5"
-CHECKPOINT_M_TREE = "eea0c936baf5ea2504f034608c84618a57c41d19"
+CHECKPOINT_M_COMMIT = "00e8b76daffaebd492c68e2f3416646fb8f327d6"
+CHECKPOINT_M_TREE = "8bdfec92208a93b05c919feef046f4f43899e6cd"
 ANDROID_BUILD_73_SOURCE = "e8bd03013024f7d43f790d8ee309f2c72b8f1b81"
 ANDROID_BUILD_73_VERSION = "1.0.12"
 ANDROID_BUILD_73_NUMBER = "73"
@@ -77,12 +77,27 @@ IMMUTABLE_PINNED_ARTIFACTS = {
 }
 CHECKPOINT_M_MIGRATION_ARTIFACTS = {
     "originals/smokies/smokies_complete_private_migration_packet_v1.json": (
-        5_839_615,
-        "1aabc64e7be8369cd963c752029aa8f6a80402c8df5ac0c92f072fb0a891c53e",
+        5_840_841,
+        "2c764008c2180db607ea51085c01b6fef0fd28fb436d5aace8970d3319a62c0c",
     ),
     "originals/smokies/smokies_complete_private_migration_operator_audit_v1.json": (
-        6_988,
-        "de9aeba099d7cd0704175316c39ac4ddbbea6fd4022146da471cd6b855b4d3e2",
+        7_827,
+        "c0d3ead8aa66ce6edb0ce8c932fcb2368e7eca1c47cda929327cb2c0765fa32e",
+    ),
+}
+M3_HISTORICAL_VALIDATION_JOURNAL = {
+    "redacted_operator_report_path_sha256": (
+        "db4e1621926c4267a96a0f56294a31acb943f490f496898af44138be26a3684f"
+    ),
+    "redacted_operator_report_byte_count": 6090,
+    "redacted_operator_report_file_sha256": (
+        "ffbab03a0bdc839cbbdaa422a1b4910eaeb61acdc1d4102dbdc40e8d643fc059"
+    ),
+    "redacted_operator_report_canonical_sha256": (
+        "368fdffed960744954f709643ea4c9ac33c995302b54179167eff27c32f5567f"
+    ),
+    "redacted_store_report_canonical_sha256": (
+        "a9dd8583e1c50869f1de75fe124e5a8590be6b33a5ace5a71ddae974174b3503"
     ),
 }
 REQUIRED_SOURCE_PATHS = {
@@ -433,6 +448,21 @@ def _pinned_artifacts(commit: str) -> dict[str, dict[str, Any]]:
             for key in ("path", "byte_count", "sha256")
         },
         "Checkpoint M historical migration binding is incomplete",
+    )
+    permitted = (packet.get("predecessor") or {}).get(
+        "permitted_validation_history"
+    )
+    _require(
+        isinstance(permitted, dict)
+        and all(
+            permitted.get(key) == value
+            for key, value in M3_HISTORICAL_VALIDATION_JOURNAL.items()
+        )
+        and permitted.get("redacted_report_sha256")
+        == M3_HISTORICAL_VALIDATION_JOURNAL[
+            "redacted_operator_report_file_sha256"
+        ],
+        "Checkpoint M historical validation journal binding drifted",
     )
     return result
 

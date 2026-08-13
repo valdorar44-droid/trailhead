@@ -168,22 +168,13 @@ def _install_synthetic_historical_contract(monkeypatch, db) -> tuple[dict, dict]
         "SELECT * FROM authored_original_validation_reports WHERE id=?",
         (store._SMOKIES_HISTORICAL_REPORT_ID,),
     ).fetchone())
-    redacted = store._original_validation_report_from_row(
-        row,
-        current_material={
-            key: row[key]
-            for key in (
-                "draft_revision",
-                "manifest_sha256",
-                "assets_sha256",
-                "input_sha256",
-                "validator_source_sha256",
-            )
-        },
-    )
-    redacted_sha256 = _sha(redacted)
+    summary = json.loads(row["summary_json"])
+    scenarios = json.loads(row["scenarios_json"])
+    issues = json.loads(row["issues_json"])
+    redacted_sha256 = _sha({"fixture": "synthetic historical journal bytes"})
     history, binding = _historical_validation_contract()
     history["redacted_report_sha256"] = redacted_sha256
+    history["redacted_operator_report_file_sha256"] = redacted_sha256
     history["expected_manifest_sha256"] = row["manifest_sha256"]
     history["expected_assets_sha256"] = row["assets_sha256"]
     history["expected_input_sha256"] = row["input_sha256"]
@@ -194,6 +185,45 @@ def _install_synthetic_historical_contract(monkeypatch, db) -> tuple[dict, dict]
     history["expected_started_by"] = row["started_by"]
     history["expected_started_at"] = row["started_at"]
     history["expected_completed_at"] = row["completed_at"]
+    history["summary_sha256"] = _sha(summary)
+    history["scenarios_sha256"] = _sha(scenarios)
+    history["issues_sha256"] = _sha(issues)
+    store_report = {
+        "schema_version": 1,
+        "report_type": "OriginalRouteValidationReportV1",
+        "id": row["id"],
+        "pack_id": row["pack_id"],
+        "draft_revision": row["draft_revision"],
+        "manifest_sha256": row["manifest_sha256"],
+        "assets_sha256": row["assets_sha256"],
+        "input_sha256": row["input_sha256"],
+        "validator_source_sha256": row["validator_source_sha256"],
+        "suite_version": row["suite_version"],
+        "engine_version": row["engine_version"],
+        "status": row["status"],
+        "passed": True,
+        "current": True,
+        "started_at": row["started_at"],
+        "completed_at": row["completed_at"],
+        "summary_sha256": history["summary_sha256"],
+        "scenarios_sha256": history["scenarios_sha256"],
+        "issues_sha256": history["issues_sha256"],
+        "pass_contract": {
+            "selection_key": history["selection"],
+            "route_scenario_count": history["expected_nested_scenario_count"],
+            "route_scenario_ids_sha256": history[
+                "route_scenario_ids_sha256"
+            ],
+            "delivery_contract_sha256": history[
+                "delivery_contract_sha256"
+            ],
+            "target_id": history["target_id"],
+            "target_binding_sha256": history["target_binding_sha256"],
+            "target_evidence_sha256": history["target_evidence_sha256"],
+        },
+    }
+    history["redacted_store_report_canonical_sha256"] = _sha(store_report)
+    assert ready.expected_historical_validation_store_report(history) == store_report
     binding["historical_validation_contract_sha256"] = _sha(history)
     monkeypatch.setattr(
         store, "_SMOKIES_HISTORICAL_REPORT_MANIFEST_SHA256",
@@ -272,6 +302,22 @@ def test_historical_validation_contract_is_exact_source_bound():
     assert history["expected_nested_scenario_count"] == 13
     assert store._SMOKIES_HISTORICAL_REDACTED_REPORT_SHA256 == (
         "ffbab03a0bdc839cbbdaa422a1b4910eaeb61acdc1d4102dbdc40e8d643fc059"
+    )
+    assert history["redacted_operator_report_file_sha256"] == (
+        history["redacted_report_sha256"]
+    )
+    assert history["redacted_operator_report_byte_count"] == 6090
+    assert history["redacted_operator_report_canonical_sha256"] == (
+        "368fdffed960744954f709643ea4c9ac33c995302b54179167eff27c32f5567f"
+    )
+    assert history["redacted_store_report_canonical_sha256"] == (
+        "a9dd8583e1c50869f1de75fe124e5a8590be6b33a5ace5a71ddae974174b3503"
+    )
+    assert ready.sha256(
+        ready.expected_historical_validation_store_report(history)
+    ) == history["redacted_store_report_canonical_sha256"]
+    assert history["redacted_store_report_canonical_sha256"] != (
+        history["redacted_operator_report_file_sha256"]
     )
 
 

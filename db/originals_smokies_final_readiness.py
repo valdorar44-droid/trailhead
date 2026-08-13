@@ -129,6 +129,7 @@ _PUBLICATION_REVIEW_BINDING_KEYS = {
 }
 _HISTORICAL_VALIDATION_KEYS = {
     "current",
+    "delivery_contract_sha256",
     "engine",
     "expected_draft_revision",
     "expected_worker_pid",
@@ -144,18 +145,30 @@ _HISTORICAL_VALIDATION_KEYS = {
     "expected_report_count",
     "expected_suite_version",
     "issues",
+    "issues_sha256",
     "live_report_rechecked_by_publication_readiness_builder",
     "publication_approval",
     "readback_observed_at",
     "redacted_report_sha256",
+    "redacted_operator_report_byte_count",
+    "redacted_operator_report_canonical_sha256",
+    "redacted_operator_report_file_sha256",
+    "redacted_operator_report_path_sha256",
+    "redacted_store_report_canonical_sha256",
     "report_id",
+    "route_scenario_ids_sha256",
     "route_scenarios_passed",
     "route_scenarios_required",
     "selection",
+    "scenarios_sha256",
     "source_commit",
     "source_path",
     "source_sha256",
     "status",
+    "summary_sha256",
+    "target_binding_sha256",
+    "target_evidence_sha256",
+    "target_id",
 }
 
 
@@ -302,6 +315,41 @@ def load_historical_validation_contract() -> tuple[dict[str, Any], dict[str, Any
         "expected_completed_at": 1786412036,
         "expected_selection_result_count": 1,
         "expected_nested_scenario_count": 13,
+        "delivery_contract_sha256": (
+            "9081a647a7df0e59df4bb40506ba9bfa96c750536fb715ee31b3e9ee68ee20d6"
+        ),
+        "issues_sha256": (
+            "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        ),
+        "redacted_operator_report_byte_count": 6090,
+        "redacted_operator_report_canonical_sha256": (
+            "368fdffed960744954f709643ea4c9ac33c995302b54179167eff27c32f5567f"
+        ),
+        "redacted_operator_report_file_sha256": (
+            "ffbab03a0bdc839cbbdaa422a1b4910eaeb61acdc1d4102dbdc40e8d643fc059"
+        ),
+        "redacted_operator_report_path_sha256": (
+            "db4e1621926c4267a96a0f56294a31acb943f490f496898af44138be26a3684f"
+        ),
+        "redacted_store_report_canonical_sha256": (
+            "a9dd8583e1c50869f1de75fe124e5a8590be6b33a5ace5a71ddae974174b3503"
+        ),
+        "route_scenario_ids_sha256": (
+            "9edf543ba393121a86699f205813c58fba30e09b687f89659a1f7a7a5bde6511"
+        ),
+        "scenarios_sha256": (
+            "09ee939488a9f41d781aa4bded9058f88852d3a9ab1d08b73802308b333fc248"
+        ),
+        "summary_sha256": (
+            "c8a49951221c454da8462c26dcbbcb2962af8bfe3ce0875d24927b2b21d0ef6f"
+        ),
+        "target_binding_sha256": (
+            "41a00c67ed83bafe7355d4e1858710df38e780c2a514641e269103fdcea9104e"
+        ),
+        "target_evidence_sha256": (
+            "2fded0c644b73a36c2efe45a0f64e6e0add551b9c5f2b81c42e73fd276a7a703"
+        ),
+        "target_id": "south_tn",
         "readback_observed_at": private_state.get("observed_at"),
         "source_path": (
             "originals/smokies/"
@@ -319,6 +367,15 @@ def load_historical_validation_contract() -> tuple[dict[str, Any], dict[str, Any
         != "original_validation_9df694c93ee9ef3809c33f451d04bf28"
         or history.get("redacted_report_sha256")
         != "ffbab03a0bdc839cbbdaa422a1b4910eaeb61acdc1d4102dbdc40e8d643fc059"
+        or history.get("redacted_operator_report_file_sha256")
+        != history.get("redacted_report_sha256")
+        or history.get("redacted_operator_report_byte_count") != 6090
+        or history.get("redacted_operator_report_canonical_sha256")
+        != "368fdffed960744954f709643ea4c9ac33c995302b54179167eff27c32f5567f"
+        or history.get("redacted_operator_report_path_sha256")
+        != "db4e1621926c4267a96a0f56294a31acb943f490f496898af44138be26a3684f"
+        or history.get("redacted_store_report_canonical_sha256")
+        != "a9dd8583e1c50869f1de75fe124e5a8590be6b33a5ace5a71ddae974174b3503"
         or history.get("expected_report_count") != 1
         or history.get("expected_draft_revision") != 2
         or history.get("expected_worker_pid") != 16
@@ -335,6 +392,21 @@ def load_historical_validation_contract() -> tuple[dict[str, Any], dict[str, Any
         or history.get("expected_completed_at") != 1786412036
         or history.get("expected_selection_result_count") != 1
         or history.get("expected_nested_scenario_count") != 13
+        or history.get("summary_sha256")
+        != "c8a49951221c454da8462c26dcbbcb2962af8bfe3ce0875d24927b2b21d0ef6f"
+        or history.get("scenarios_sha256")
+        != "09ee939488a9f41d781aa4bded9058f88852d3a9ab1d08b73802308b333fc248"
+        or history.get("issues_sha256")
+        != "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        or history.get("route_scenario_ids_sha256")
+        != "9edf543ba393121a86699f205813c58fba30e09b687f89659a1f7a7a5bde6511"
+        or history.get("delivery_contract_sha256")
+        != "9081a647a7df0e59df4bb40506ba9bfa96c750536fb715ee31b3e9ee68ee20d6"
+        or history.get("target_id") != "south_tn"
+        or history.get("target_binding_sha256")
+        != "41a00c67ed83bafe7355d4e1858710df38e780c2a514641e269103fdcea9104e"
+        or history.get("target_evidence_sha256")
+        != "2fded0c644b73a36c2efe45a0f64e6e0add551b9c5f2b81c42e73fd276a7a703"
         or history.get("expected_suite_version") != "originals_virtual_route_v3"
         or history.get("engine") != "original-trigger-v3"
         or history.get("status") != "passed"
@@ -351,11 +423,54 @@ def load_historical_validation_contract() -> tuple[dict[str, Any], dict[str, Any
         raise SmokiesFinalReadinessError(
             "Smokies immutable historical validation contract drifted"
         )
+    expected_historical_validation_store_report(history)
     return history, {
         "historical_validation_source_byte_count": len(raw),
         "historical_validation_source_sha256": hashlib.sha256(raw).hexdigest(),
         "historical_validation_contract_sha256": sha256(history),
     }
+
+
+def expected_historical_validation_store_report(
+    history: dict[str, Any],
+) -> dict[str, Any]:
+    """Return the exact safe DB-report projection nested in the S4R journal."""
+    pass_contract = {
+        "selection_key": history["selection"],
+        "route_scenario_count": history["expected_nested_scenario_count"],
+        "route_scenario_ids_sha256": history["route_scenario_ids_sha256"],
+        "delivery_contract_sha256": history["delivery_contract_sha256"],
+        "target_id": history["target_id"],
+        "target_binding_sha256": history["target_binding_sha256"],
+        "target_evidence_sha256": history["target_evidence_sha256"],
+    }
+    report = {
+        "schema_version": 1,
+        "report_type": "OriginalRouteValidationReportV1",
+        "id": history["report_id"],
+        "pack_id": PRODUCT_ID,
+        "draft_revision": history["expected_draft_revision"],
+        "manifest_sha256": history["expected_manifest_sha256"],
+        "assets_sha256": history["expected_assets_sha256"],
+        "input_sha256": history["expected_input_sha256"],
+        "validator_source_sha256": history["expected_validator_source_sha256"],
+        "suite_version": history["expected_suite_version"],
+        "engine_version": history["engine"],
+        "status": history["status"],
+        "passed": True,
+        "current": True,
+        "started_at": history["expected_started_at"],
+        "completed_at": history["expected_completed_at"],
+        "summary_sha256": history["summary_sha256"],
+        "scenarios_sha256": history["scenarios_sha256"],
+        "issues_sha256": history["issues_sha256"],
+        "pass_contract": pass_contract,
+    }
+    if sha256(report) != history["redacted_store_report_canonical_sha256"]:
+        raise SmokiesFinalReadinessError(
+            "Smokies historical safe store-report binding drifted"
+        )
+    return report
 
 
 def validate_finalization_review_artifact(

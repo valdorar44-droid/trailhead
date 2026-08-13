@@ -522,6 +522,16 @@ def test_pinned_artifact_source_size_hash_and_status_drift_fail_closed(
                 "commit": "4d24fe44a02bbf957c8200399612151f84a1e83a",
                 "tree": "9393a7a0049f8c0f4eef60d18ca5579d9f9aeef4",
             },
+            "predecessor": {
+                "permitted_validation_history": {
+                    **copy.deepcopy(builder.M3_HISTORICAL_VALIDATION_JOURNAL),
+                    "redacted_report_sha256": (
+                        builder.M3_HISTORICAL_VALIDATION_JOURNAL[
+                            "redacted_operator_report_file_sha256"
+                        ]
+                    ),
+                },
+            },
         },
     }
     monkeypatch.setattr(

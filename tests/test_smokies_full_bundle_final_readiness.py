@@ -106,6 +106,25 @@ def evidence(tmp_path: Path) -> dict[str, Path]:
                 "receipt_id": "private_migration_v1",
                 "sha256": "8" * 64,
                 "byte_count": 1200,
+                "historical_validation_operator_report": {
+                    "path_sha256": builder.M3_HISTORICAL_VALIDATION_JOURNAL[
+                        "redacted_operator_report_path_sha256"
+                    ],
+                    "byte_count": builder.M3_HISTORICAL_VALIDATION_JOURNAL[
+                        "redacted_operator_report_byte_count"
+                    ],
+                    "file_sha256": builder.M3_HISTORICAL_VALIDATION_JOURNAL[
+                        "redacted_operator_report_file_sha256"
+                    ],
+                    "canonical_sha256": builder.M3_HISTORICAL_VALIDATION_JOURNAL[
+                        "redacted_operator_report_canonical_sha256"
+                    ],
+                    "store_report_canonical_sha256": (
+                        builder.M3_HISTORICAL_VALIDATION_JOURNAL[
+                            "redacted_store_report_canonical_sha256"
+                        ]
+                    ),
+                },
             },
             "source_revision": copy.deepcopy(builder.CHECKPOINT_M_RUNTIME_SOURCE),
             "target": {"id": "private"},

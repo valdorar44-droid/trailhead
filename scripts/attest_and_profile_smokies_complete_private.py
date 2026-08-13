@@ -614,6 +614,19 @@ def _validate_packet(
         and profile.get("expected_after_revision") == 4,
         "profile CAS revisions drifted",
     )
+    try:
+        historical_contract, _historical_binding = (
+            store.load_smokies_historical_validation_contract()
+        )
+    except (ValueError, OSError) as exc:
+        raise SmokiesPostMigrationError(
+            "shared historical validation contract is unavailable"
+        ) from exc
+    _require(
+        packet.get("predecessor", {}).get("permitted_validation_history")
+        == historical_contract,
+        "M3 historical validation contract drifted",
+    )
     actual = {
         "new narration map": canonical_sha256(terms["asset_sha256"]),
         "all asset map": canonical_sha256(profile["expected_asset_sha256"]),
@@ -637,6 +650,10 @@ def _validate_audit(
 ) -> dict[str, Any]:
     audit_sha = sha256_bytes(payload)
     _require(audit_sha == args.expected_audit_sha256, "migration audit sha256 drifted")
+    _require(
+        len(payload) == args.expected_audit_byte_count,
+        "migration audit byte count drifted",
+    )
     _require(audit.get("schema_version") == 1, "migration audit schema drifted")
     _require(
         audit.get("kind") == "original_private_migration_operator_audit"
@@ -697,6 +714,16 @@ def _validate_migration_receipt(
         receipt.get("source_revision") == packet["source_revision"],
         "migration receipt source drifted",
     )
+    _require(
+        receipt.get("operator_audit")
+        == {
+            "artifact_sha256": args.expected_audit_sha256,
+            "artifact_byte_count": args.expected_audit_byte_count,
+            "bindings_sha256": args.expected_audit_bindings_sha256,
+            "independent_audit_passed": True,
+        },
+        "migration receipt independent-audit binding drifted",
+    )
     target = receipt.get("target")
     _require(isinstance(target, dict), "migration receipt target is missing")
     _require(target.get("id") == args.target_id == TARGET_ID, "private target id drifted")
@@ -749,6 +776,23 @@ def _validate_migration_receipt(
         ),
         "private migration predecessor-history binding is missing",
     )
+    permitted = packet["predecessor"]["permitted_validation_history"]
+    historical_operator_report = {
+        "path_sha256": permitted["redacted_operator_report_path_sha256"],
+        "byte_count": permitted["redacted_operator_report_byte_count"],
+        "file_sha256": permitted["redacted_operator_report_file_sha256"],
+        "canonical_sha256": permitted[
+            "redacted_operator_report_canonical_sha256"
+        ],
+        "store_report_canonical_sha256": permitted[
+            "redacted_store_report_canonical_sha256"
+        ],
+    }
+    _require(
+        receipt.get("historical_validation_operator_report")
+        == historical_operator_report,
+        "private migration historical journal binding drifted",
+    )
     effects = receipt.get("effects")
     _require(
         isinstance(effects, dict)
@@ -765,6 +809,7 @@ def _validate_migration_receipt(
         "predecessor_history_sha256": migration.get(
             "predecessor_history_sha256"
         ),
+        "historical_validation_operator_report": historical_operator_report,
     }
 
 
@@ -1715,6 +1760,11 @@ def apply(args: argparse.Namespace) -> dict[str, Any]:
         isinstance(args.admin_user_id, int) and args.admin_user_id > 0,
         "admin user id is required",
     )
+    _require(
+        isinstance(args.expected_audit_byte_count, int)
+        and args.expected_audit_byte_count > 0,
+        "migration audit byte count is required",
+    )
 
     db_path = _outside_repo(Path(str(args.database or "")), "configured SQLite database")
     asset_root = _outside_repo(Path(str(args.asset_root or "")), "configured asset root")
@@ -1722,10 +1772,10 @@ def apply(args: argparse.Namespace) -> dict[str, Any]:
         Path(str(args.migration_receipt or "")), "private migration receipt"
     )
     migration_packet_path = _outside_repo(
-        Path(str(args.migration_packet or "")), "immutable M2 migration packet"
+        Path(str(args.migration_packet or "")), "immutable M3 migration packet"
     )
     migration_audit_path = _outside_repo(
-        Path(str(args.migration_audit or "")), "immutable M2 migration audit"
+        Path(str(args.migration_audit or "")), "immutable M3 migration audit"
     )
     terms_path = _outside_repo(
         Path(str(args.terms_observation or "")), "private terms observation"
@@ -1743,10 +1793,10 @@ def apply(args: argparse.Namespace) -> dict[str, Any]:
     _validate_sqlite_sidecars(db_path)
 
     with _pinned_file(
-        migration_packet_path, "immutable M2 migration packet", private=True
+        migration_packet_path, "immutable M3 migration packet", private=True
     ) as packet_pin, \
         _pinned_file(
-            migration_audit_path, "immutable M2 migration audit", private=True
+            migration_audit_path, "immutable M3 migration audit", private=True
         ) as audit_pin, \
         _pinned_file(PROFILE_TEMPLATE_PATH, "profile template", private=False) as template_pin, \
         _pinned_file(migration_receipt_path, "private migration receipt", private=True) as migration_pin, \
@@ -1865,6 +1915,7 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--receipt")
     result.add_argument("--expected-packet-sha256")
     result.add_argument("--expected-audit-sha256")
+    result.add_argument("--expected-audit-byte-count", type=int)
     result.add_argument("--expected-audit-bindings-sha256")
     result.add_argument("--expected-migration-receipt-sha256")
     result.add_argument("--expected-terms-observation-sha256")

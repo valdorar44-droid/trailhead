@@ -57,6 +57,7 @@ from db.originals_smokies_final_readiness import (
     SmokiesFinalReadinessError,
     allowed_change_contract as smokies_final_allowed_change_contract,
     build_final_manifest as build_smokies_final_manifest,
+    expected_historical_validation_store_report as expected_smokies_historical_validation_store_report,
     load_finalization_review_artifact as load_smokies_finalization_review_artifact,
     load_historical_validation_contract as load_smokies_historical_validation_contract,
     sha256 as smokies_final_sha256,
@@ -19040,22 +19041,38 @@ def _smokies_historical_validation_inventory(
         f"{_SMOKIES_RF_DELIVERY_CONTRACT_SHA256}"
     )
     try:
-        redacted_report = _original_validation_report_from_row(
-            row,
-            current_material={
-                "draft_revision": history["expected_draft_revision"],
-                "manifest_sha256": history["expected_manifest_sha256"],
-                "assets_sha256": history["expected_assets_sha256"],
-                "input_sha256": history["expected_input_sha256"],
-                "validator_source_sha256": history[
-                    "expected_validator_source_sha256"
-                ],
-            },
+        expected_store_report = expected_smokies_historical_validation_store_report(
+            history
         )
     except (KeyError, TypeError, ValueError) as exc:
         raise OriginalSmokiesFinalReadinessConflictError(
-            "Smokies historical RF redacted report is invalid"
+            "Smokies historical RF safe store report is invalid"
         ) from exc
+    summary_sha256 = _original_validation_hash(summary)
+    scenarios_sha256 = _original_validation_hash(scenarios)
+    issues_sha256 = _original_validation_hash(issues)
+    actual_store_report = {
+        "schema_version": 1,
+        "report_type": "OriginalRouteValidationReportV1",
+        "id": row["id"],
+        "pack_id": row["pack_id"],
+        "draft_revision": row["draft_revision"],
+        "manifest_sha256": row["manifest_sha256"],
+        "assets_sha256": row["assets_sha256"],
+        "input_sha256": row["input_sha256"],
+        "validator_source_sha256": row["validator_source_sha256"],
+        "suite_version": row["suite_version"],
+        "engine_version": row["engine_version"],
+        "status": row["status"],
+        "passed": bool(row["passed"]),
+        "current": True,
+        "started_at": row["started_at"],
+        "completed_at": row["completed_at"],
+        "summary_sha256": summary_sha256,
+        "scenarios_sha256": scenarios_sha256,
+        "issues_sha256": issues_sha256,
+        "pass_contract": copy.deepcopy(expected_store_report["pass_contract"]),
+    }
     if (
         not isinstance(summary, dict)
         or summary.get("required") != history["route_scenarios_required"]
@@ -19076,9 +19093,12 @@ def _smokies_historical_validation_inventory(
         or len(scenarios[0]["scenarios"])
         != history["expected_nested_scenario_count"]
         or issues != history["issues"]
-        or redacted_report.get("current") is not True
-        or _original_validation_hash(redacted_report)
-        != _SMOKIES_HISTORICAL_REDACTED_REPORT_SHA256
+        or summary_sha256 != history["summary_sha256"]
+        or scenarios_sha256 != history["scenarios_sha256"]
+        or issues_sha256 != history["issues_sha256"]
+        or actual_store_report != expected_store_report
+        or _original_validation_hash(actual_store_report)
+        != history["redacted_store_report_canonical_sha256"]
     ):
         raise OriginalSmokiesFinalReadinessConflictError(
             "Smokies historical RF validation semantics drifted"
@@ -19098,13 +19118,28 @@ def _smokies_historical_validation_inventory(
         "passed": bool(row["passed"]),
         "worker_pid": row["worker_pid"],
         "manifest_json_sha256": _original_validation_hash(report_manifest),
-        "summary_sha256": _original_validation_hash(summary),
-        "scenarios_sha256": _original_validation_hash(scenarios),
-        "issues_sha256": _original_validation_hash(issues),
+        "summary_sha256": summary_sha256,
+        "scenarios_sha256": scenarios_sha256,
+        "issues_sha256": issues_sha256,
         "started_by": row["started_by"],
         "started_at": row["started_at"],
         "completed_at": row["completed_at"],
         "redacted_report_sha256": _SMOKIES_HISTORICAL_REDACTED_REPORT_SHA256,
+        "redacted_operator_report_path_sha256": history[
+            "redacted_operator_report_path_sha256"
+        ],
+        "redacted_operator_report_byte_count": history[
+            "redacted_operator_report_byte_count"
+        ],
+        "redacted_operator_report_file_sha256": history[
+            "redacted_operator_report_file_sha256"
+        ],
+        "redacted_operator_report_canonical_sha256": history[
+            "redacted_operator_report_canonical_sha256"
+        ],
+        "redacted_store_report_canonical_sha256": history[
+            "redacted_store_report_canonical_sha256"
+        ],
     }
     return {
         "historical_report_count": 1,

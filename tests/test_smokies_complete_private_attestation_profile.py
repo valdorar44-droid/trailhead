@@ -14,23 +14,23 @@ from db import store
 from scripts import attest_and_profile_smokies_complete_private as operator
 
 
-M2_COMMIT = "a533852ceeba4f2d3b625bcce04135a2936705e5"
-M2_PACKET_PATH = (
+M3_COMMIT = "00e8b76daffaebd492c68e2f3416646fb8f327d6"
+M3_PACKET_PATH = (
     "originals/smokies/smokies_complete_private_migration_packet_v1.json"
 )
-M2_AUDIT_PATH = (
+M3_AUDIT_PATH = (
     "originals/smokies/smokies_complete_private_migration_operator_audit_v1.json"
 )
 
 
-def _m2_blob(path: str) -> bytes:
+def _m3_blob(path: str) -> bytes:
     return subprocess.check_output(
-        ["git", "show", f"{M2_COMMIT}:{path}"], cwd=operator.ROOT,
+        ["git", "show", f"{M3_COMMIT}:{path}"], cwd=operator.ROOT,
     )
 
 
-PACKET_PAYLOAD = _m2_blob(M2_PACKET_PATH)
-AUDIT_PAYLOAD = _m2_blob(M2_AUDIT_PATH)
+PACKET_PAYLOAD = _m3_blob(M3_PACKET_PATH)
+AUDIT_PAYLOAD = _m3_blob(M3_AUDIT_PATH)
 PACKET = json.loads(PACKET_PAYLOAD)
 AUDIT = json.loads(AUDIT_PAYLOAD)
 TEMPLATE = json.loads(operator.PROFILE_TEMPLATE_PATH.read_text(encoding="utf-8"))
@@ -266,11 +266,33 @@ class FakeReceipt:
 
 
 def _bindings() -> operator.ExecutionBindings:
+    permitted = PACKET["predecessor"]["permitted_validation_history"]
     return operator.ExecutionBindings(
         packet_sha256="4" * 64,
         packet_byte_count=123,
         audit={"sha256": "5" * 64, "byte_count": 456, "bindings_sha256": "6" * 64},
-        migration_receipt={"receipt_id": "private_migration", "sha256": "7" * 64, "byte_count": 789},
+        migration_receipt={
+            "receipt_id": "private_migration",
+            "sha256": "7" * 64,
+            "byte_count": 789,
+            "historical_validation_operator_report": {
+                "path_sha256": permitted[
+                    "redacted_operator_report_path_sha256"
+                ],
+                "byte_count": permitted[
+                    "redacted_operator_report_byte_count"
+                ],
+                "file_sha256": permitted[
+                    "redacted_operator_report_file_sha256"
+                ],
+                "canonical_sha256": permitted[
+                    "redacted_operator_report_canonical_sha256"
+                ],
+                "store_report_canonical_sha256": permitted[
+                    "redacted_store_report_canonical_sha256"
+                ],
+            },
+        },
         terms_observation={
             "sha256": "8" * 64,
             "byte_count": 321,
@@ -591,15 +613,135 @@ def test_actual_frozen_packet_expectations_are_self_consistent() -> None:
         ],
         expected_terms_policy_sha256=terms["terms_policy_sha256"],
         expected_audit_sha256=operator.sha256_bytes(AUDIT_PAYLOAD),
+        expected_audit_byte_count=len(AUDIT_PAYLOAD),
         expected_audit_bindings_sha256=operator.canonical_sha256(AUDIT["bindings"]),
     )
     operator._validate_packet(PACKET, operator.sha256_bytes(PACKET_PAYLOAD), args)
     operator._validate_audit(
         AUDIT, AUDIT_PAYLOAD, args.expected_packet_sha256, args
     )
+    permitted = PACKET["predecessor"]["permitted_validation_history"]
+    assert permitted["redacted_operator_report_byte_count"] == 6090
+    assert permitted["redacted_operator_report_file_sha256"] == (
+        "ffbab03a0bdc839cbbdaa422a1b4910eaeb61acdc1d4102dbdc40e8d643fc059"
+    )
+    assert permitted["redacted_operator_report_canonical_sha256"] == (
+        "368fdffed960744954f709643ea4c9ac33c995302b54179167eff27c32f5567f"
+    )
+    assert permitted["redacted_store_report_canonical_sha256"] == (
+        "a9dd8583e1c50869f1de75fe124e5a8590be6b33a5ace5a71ddae974174b3503"
+    )
 
 
-def test_source_tree_migration_files_cannot_substitute_for_isolated_m2() -> None:
+def test_private_migration_receipt_binds_exact_m3_historical_journal(
+    tmp_path: Path,
+) -> None:
+    database = tmp_path / "trailhead.db"
+    database.write_bytes(b"pinned database identity")
+    asset_root = tmp_path / "assets"
+    asset_root.mkdir()
+    info = database.stat()
+    identity = (int(info.st_dev), int(info.st_ino))
+    packet = copy.deepcopy(PACKET)
+    packet["configured_target_binding"] = {
+        "target_id": operator.TARGET_ID,
+        "database_path_sha256": operator.path_identity(database),
+        "asset_root_path_sha256": operator.path_identity(asset_root),
+        "raw_database_or_asset_root_path_serialized": False,
+    }
+    permitted = packet["predecessor"]["permitted_validation_history"]
+    journal_binding = {
+        "path_sha256": permitted["redacted_operator_report_path_sha256"],
+        "byte_count": permitted["redacted_operator_report_byte_count"],
+        "file_sha256": permitted["redacted_operator_report_file_sha256"],
+        "canonical_sha256": permitted[
+            "redacted_operator_report_canonical_sha256"
+        ],
+        "store_report_canonical_sha256": permitted[
+            "redacted_store_report_canonical_sha256"
+        ],
+    }
+    packet_sha256 = "a" * 64
+    receipt = {
+        "schema_version": 1,
+        "kind": "original_full_bundle_private_migration_receipt",
+        "status": "verified_configured_private_migration",
+        "receipt_id": "private_migration_v1",
+        "packet_sha256": packet_sha256,
+        "source_revision": copy.deepcopy(packet["source_revision"]),
+        "operator_audit": {
+            "artifact_sha256": operator.sha256_bytes(AUDIT_PAYLOAD),
+            "artifact_byte_count": len(AUDIT_PAYLOAD),
+            "bindings_sha256": operator.canonical_sha256(AUDIT["bindings"]),
+            "independent_audit_passed": True,
+        },
+        "target": {
+            "id": operator.TARGET_ID,
+            "database_path_sha256": operator.path_identity(database),
+            "database_inode_identity_sha256": operator.filesystem_identity_sha256(
+                identity
+            ),
+            "asset_root_path_sha256": operator.path_identity(asset_root),
+        },
+        "historical_validation_operator_report": journal_binding,
+        "migration": {
+            "before_revision": 2,
+            "after_revision": 3,
+            "committed_asset_count": 98,
+            "committed_narration_count": 85,
+            "committed_image_count": 13,
+            "profile_present": False,
+            "roaring_fork_existing_rows_preserved": True,
+            "published_version_count": 0,
+            "predecessor_history_sha256": "b" * 64,
+        },
+        "effects": {
+            "attestations_written": 0,
+            "narration_profile_applied": False,
+            "trusted_validation_performed": False,
+            "publication_performed": False,
+        },
+    }
+    payload = operator.canonical_bytes(receipt)
+    args = SimpleNamespace(
+        expected_migration_receipt_sha256=operator.sha256_bytes(payload),
+        expected_audit_sha256=operator.sha256_bytes(AUDIT_PAYLOAD),
+        expected_audit_byte_count=len(AUDIT_PAYLOAD),
+        expected_audit_bindings_sha256=operator.canonical_sha256(
+            AUDIT["bindings"]
+        ),
+        target_id=operator.TARGET_ID,
+    )
+    result = operator._validate_migration_receipt(
+        receipt,
+        payload,
+        packet,
+        packet_sha256,
+        database,
+        identity,
+        asset_root,
+        args,
+    )
+    assert result["historical_validation_operator_report"] == journal_binding
+
+    drifted = copy.deepcopy(receipt)
+    drifted["historical_validation_operator_report"]["file_sha256"] = "0" * 64
+    drifted_payload = operator.canonical_bytes(drifted)
+    args.expected_migration_receipt_sha256 = operator.sha256_bytes(drifted_payload)
+    with pytest.raises(operator.SmokiesPostMigrationError, match="journal binding"):
+        operator._validate_migration_receipt(
+            drifted,
+            drifted_payload,
+            packet,
+            packet_sha256,
+            database,
+            identity,
+            asset_root,
+            args,
+        )
+
+
+def test_source_tree_migration_files_cannot_substitute_for_isolated_m3() -> None:
     local_packet = (
         operator.ROOT
         / "originals/smokies/smokies_complete_private_migration_packet_v1.json"
@@ -611,6 +753,6 @@ def test_source_tree_migration_files_cannot_substitute_for_isolated_m2() -> None
     assert local_packet.read_bytes() != PACKET_PAYLOAD
     assert local_audit.read_bytes() != AUDIT_PAYLOAD
     with pytest.raises(operator.SmokiesPostMigrationError, match="outside"):
-        operator._outside_repo(local_packet, "immutable M2 migration packet")
+        operator._outside_repo(local_packet, "immutable M3 migration packet")
     with pytest.raises(operator.SmokiesPostMigrationError, match="outside"):
-        operator._outside_repo(local_audit, "immutable M2 migration audit")
+        operator._outside_repo(local_audit, "immutable M3 migration audit")

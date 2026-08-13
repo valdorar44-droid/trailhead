@@ -22,8 +22,13 @@ def _camp(camp_id: str, name: str, lat: float, lng: float, source: str = "osm") 
 class DiscoveryPackBridgeTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         server._discovery_pack_cache.clear()
+        self._trailhead_camps = patch.object(
+            server, "_trailhead_dispersed_camps", return_value=[]
+        )
+        self._trailhead_camps.start()
 
     def tearDown(self):
+        self._trailhead_camps.stop()
         server._discovery_pack_cache.clear()
 
     def test_regions_for_bounds_prefers_intersecting_state(self):

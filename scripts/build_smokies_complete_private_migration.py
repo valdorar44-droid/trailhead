@@ -31,7 +31,7 @@ from scripts import build_smokies_complete_private_candidate as candidate_builde
 
 
 PRODUCT_ID = "great_smoky_mountains_ridges_rivers_living_memory"
-PACKET_ID = "smokies_complete_private_migration_20260811_v1"
+PACKET_ID = "smokies_complete_private_migration_20260813_v2"
 AUDIT_CONTRACT_ID = "smokies_complete_private_migration_operator_audit_contract_v1"
 MIGRATION_BASE_SOURCE_REVISION = {
     "commit": "4d24fe44a02bbf957c8200399612151f84a1e83a",
@@ -88,6 +88,43 @@ MOBILE_LONG_FORM_EVIDENCE_REGISTRY_PATH = Path(
 EXPECTED_COMPLETE_VALIDATOR_SOURCE_PATH_COUNT = 174
 EXPECTED_COMPLETE_VALIDATOR_SOURCE_SHA256 = (
     "b01033dcdf155370688c5fd4ce1e9264d670505b1958b7135b1724e39d52235f"
+)
+HISTORICAL_RF_OPERATOR_REPORT_PATH = (
+    "/data/originals/reports/roaring-fork-trusted-validation-v1.json"
+)
+HISTORICAL_RF_OPERATOR_REPORT_PATH_SHA256 = (
+    "db4e1621926c4267a96a0f56294a31acb943f490f496898af44138be26a3684f"
+)
+HISTORICAL_RF_OPERATOR_REPORT_BYTE_COUNT = 6090
+HISTORICAL_RF_OPERATOR_REPORT_FILE_SHA256 = (
+    "ffbab03a0bdc839cbbdaa422a1b4910eaeb61acdc1d4102dbdc40e8d643fc059"
+)
+HISTORICAL_RF_OPERATOR_REPORT_CANONICAL_SHA256 = (
+    "368fdffed960744954f709643ea4c9ac33c995302b54179167eff27c32f5567f"
+)
+HISTORICAL_RF_STORE_REPORT_CANONICAL_SHA256 = (
+    "a9dd8583e1c50869f1de75fe124e5a8590be6b33a5ace5a71ddae974174b3503"
+)
+HISTORICAL_RF_SUMMARY_SHA256 = (
+    "c8a49951221c454da8462c26dcbbcb2962af8bfe3ce0875d24927b2b21d0ef6f"
+)
+HISTORICAL_RF_SCENARIOS_SHA256 = (
+    "09ee939488a9f41d781aa4bded9058f88852d3a9ab1d08b73802308b333fc248"
+)
+HISTORICAL_RF_ISSUES_SHA256 = (
+    "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+)
+HISTORICAL_RF_ROUTE_SCENARIO_IDS_SHA256 = (
+    "9edf543ba393121a86699f205813c58fba30e09b687f89659a1f7a7a5bde6511"
+)
+HISTORICAL_RF_DELIVERY_CONTRACT_SHA256 = (
+    "9081a647a7df0e59df4bb40506ba9bfa96c750536fb715ee31b3e9ee68ee20d6"
+)
+HISTORICAL_RF_TARGET_BINDING_SHA256 = (
+    "41a00c67ed83bafe7355d4e1858710df38e780c2a514641e269103fdcea9104e"
+)
+HISTORICAL_RF_TARGET_EVIDENCE_SHA256 = (
+    "2fded0c644b73a36c2efe45a0f64e6e0add551b9c5f2b81c42e73fd276a7a703"
 )
 COMPLETE_VALIDATOR_SOURCE_FRAMING = (
     "for each repo-relative path sorted by POSIX path: "
@@ -919,6 +956,37 @@ def build_bundle() -> tuple[dict[str, Any], dict[str, Any]]:
             },
             "permitted_validation_history": {
                 **copy.deepcopy(expected_historical_report),
+                "redacted_operator_report_path_sha256": (
+                    HISTORICAL_RF_OPERATOR_REPORT_PATH_SHA256
+                ),
+                "redacted_operator_report_byte_count": (
+                    HISTORICAL_RF_OPERATOR_REPORT_BYTE_COUNT
+                ),
+                "redacted_operator_report_file_sha256": (
+                    HISTORICAL_RF_OPERATOR_REPORT_FILE_SHA256
+                ),
+                "redacted_operator_report_canonical_sha256": (
+                    HISTORICAL_RF_OPERATOR_REPORT_CANONICAL_SHA256
+                ),
+                "redacted_store_report_canonical_sha256": (
+                    HISTORICAL_RF_STORE_REPORT_CANONICAL_SHA256
+                ),
+                "summary_sha256": HISTORICAL_RF_SUMMARY_SHA256,
+                "scenarios_sha256": HISTORICAL_RF_SCENARIOS_SHA256,
+                "issues_sha256": HISTORICAL_RF_ISSUES_SHA256,
+                "route_scenario_ids_sha256": (
+                    HISTORICAL_RF_ROUTE_SCENARIO_IDS_SHA256
+                ),
+                "delivery_contract_sha256": (
+                    HISTORICAL_RF_DELIVERY_CONTRACT_SHA256
+                ),
+                "target_id": "south_tn",
+                "target_binding_sha256": (
+                    HISTORICAL_RF_TARGET_BINDING_SHA256
+                ),
+                "target_evidence_sha256": (
+                    HISTORICAL_RF_TARGET_EVIDENCE_SHA256
+                ),
                 "expected_report_count": 1,
                 "expected_suite_version": "originals_virtual_route_v3",
                 "expected_draft_revision": 2,

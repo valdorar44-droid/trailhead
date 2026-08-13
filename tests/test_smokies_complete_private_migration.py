@@ -232,13 +232,19 @@ def _synthetic_environment(
     historical_validator_source_sha256 = "3" * 64
     historical_started_at = now + 1
     historical_completed_at = now + 2
+    historical_summary = {
+        "selection": "roaring_fork_one_way_private_v1:one_way"
+    }
+    historical_issues: list[dict] = []
+    historical_scenario_ids = [f"scenario_{index:02d}" for index in range(13)]
     historical_scenarios = [
         {
             "selection_key": "roaring_fork_one_way_private_v1:one_way",
             "passed": True,
             "issues": [],
             "scenarios": [
-                {"passed": True, "index": index} for index in range(13)
+                {"id": scenario_id, "passed": True}
+                for scenario_id in historical_scenario_ids
             ],
         }
     ]
@@ -370,9 +376,9 @@ def _synthetic_environment(
                 "original-trigger-v3",
                 "passed",
                 1,
-                _json({"selection": "roaring_fork_one_way_private_v1:one_way"}),
+                _json(historical_summary),
                 _json(historical_scenarios),
-                "[]",
+                _json(historical_issues),
                 admin["id"],
                 16,
                 historical_started_at,
@@ -386,20 +392,80 @@ def _synthetic_environment(
             (report_id,),
         ).fetchone()
         assert historical_report_row is not None
-        historical_redacted_report_sha256 = _canonical_sha(
-            store._original_validation_report_from_row(
-                historical_report_row,
-                current_material={
-                    "draft_revision": 2,
-                    "manifest_sha256": historical_manifest_sha256,
-                    "assets_sha256": historical_assets_sha256,
-                    "input_sha256": historical_input_sha256,
-                    "validator_source_sha256": historical_validator_source_sha256,
-                },
-            )
-        )
     finally:
         connection.close()
+
+    historical_delivery_contract_sha256 = "4" * 64
+    historical_target_binding_sha256 = "5" * 64
+    historical_target_evidence_sha256 = "6" * 64
+    historical_store_report = {
+        "schema_version": 1,
+        "report_type": "OriginalRouteValidationReportV1",
+        "id": report_id,
+        "pack_id": builder.PRODUCT_ID,
+        "draft_revision": 2,
+        "manifest_sha256": historical_manifest_sha256,
+        "assets_sha256": historical_assets_sha256,
+        "input_sha256": historical_input_sha256,
+        "validator_source_sha256": historical_validator_source_sha256,
+        "suite_version": "originals_virtual_route_v3",
+        "engine_version": "original-trigger-v3",
+        "status": "passed",
+        "passed": True,
+        "current": True,
+        "started_at": historical_started_at,
+        "completed_at": historical_completed_at,
+        "summary_sha256": _canonical_sha(historical_summary),
+        "scenarios_sha256": _canonical_sha(historical_scenarios),
+        "issues_sha256": _canonical_sha(historical_issues),
+        "pass_contract": {
+            "selection_key": "roaring_fork_one_way_private_v1:one_way",
+            "route_scenario_count": 13,
+            "route_scenario_ids_sha256": _canonical_sha(
+                historical_scenario_ids
+            ),
+            "delivery_contract_sha256": historical_delivery_contract_sha256,
+            "target_id": "south_tn",
+            "target_binding_sha256": historical_target_binding_sha256,
+            "target_evidence_sha256": historical_target_evidence_sha256,
+        },
+    }
+    historical_identity = {
+        "draft_revision": 2,
+        "material_identity": {
+            "draft_revision": 2,
+            "manifest_sha256": historical_manifest_sha256,
+            "assets_sha256": historical_assets_sha256,
+            "input_sha256": historical_input_sha256,
+            "validator_source_sha256": historical_validator_source_sha256,
+        },
+    }
+    historical_journal = {
+        "schema_version": 1,
+        "kind": "roaring_fork_trusted_validation_operator_report",
+        "target_id": "isolated-target",
+        "origin": "apply",
+        "state": "completed",
+        "validation_report_id": report_id,
+        "identity": historical_identity,
+        "preflight": {
+            "global_active_report_count": 0,
+            "target_report_count": 0,
+        },
+        "report": historical_store_report,
+        "post_validation": {
+            "identity": historical_identity,
+            "global_active_report_count": 0,
+            "target_report_count": 1,
+        },
+    }
+    historical_journal_payload = _pretty_json_bytes(historical_journal)
+    historical_rf_operator_report = (
+        tmp_path / "roaring-fork-trusted-validation-v1.json"
+    )
+    historical_rf_operator_report.write_bytes(historical_journal_payload)
+    historical_rf_operator_report.chmod(0o644)
+    historical_redacted_report_sha256 = _sha(historical_journal_payload)
 
     new: list[dict] = []
     for index in range(78):
@@ -497,6 +563,33 @@ def _synthetic_environment(
             "permitted_validation_history": {
                 "report_id": report_id,
                 "redacted_report_sha256": historical_redacted_report_sha256,
+                "redacted_operator_report_path_sha256": operator._path_identity(
+                    historical_rf_operator_report.resolve()
+                ),
+                "redacted_operator_report_byte_count": len(
+                    historical_journal_payload
+                ),
+                "redacted_operator_report_file_sha256": (
+                    historical_redacted_report_sha256
+                ),
+                "redacted_operator_report_canonical_sha256": _canonical_sha(
+                    historical_journal
+                ),
+                "redacted_store_report_canonical_sha256": _canonical_sha(
+                    historical_store_report
+                ),
+                "summary_sha256": _canonical_sha(historical_summary),
+                "scenarios_sha256": _canonical_sha(historical_scenarios),
+                "issues_sha256": _canonical_sha(historical_issues),
+                "route_scenario_ids_sha256": _canonical_sha(
+                    historical_scenario_ids
+                ),
+                "delivery_contract_sha256": (
+                    historical_delivery_contract_sha256
+                ),
+                "target_id": "south_tn",
+                "target_binding_sha256": historical_target_binding_sha256,
+                "target_evidence_sha256": historical_target_evidence_sha256,
                 "status": "passed",
                 "current": True,
                 "engine": "original-trigger-v3",
@@ -604,6 +697,7 @@ def _synthetic_environment(
         "asset_root": asset_root,
         "narration_root": narration_root,
         "artwork_root": artwork_root,
+        "historical_rf_operator_report": historical_rf_operator_report,
         "packet": packet,
         "contract": {"contract_id": builder.AUDIT_CONTRACT_ID},
         "packet_sha256": "d" * 64,
@@ -676,6 +770,9 @@ def _apply_args(environment: dict) -> dict:
         "asset_root": environment["asset_root"],
         "narration_root": environment["narration_root"],
         "artwork_root": environment["artwork_root"],
+        "historical_rf_operator_report_path": environment[
+            "historical_rf_operator_report"
+        ],
         "backup_manifest_path": environment["backup_manifest_path"],
         "expected_backup_manifest_sha256": environment["backup_manifest_sha256"],
         "operator_audit_path": environment["audit"],
@@ -708,6 +805,11 @@ def _patch_synthetic_apply(
     monkeypatch: pytest.MonkeyPatch, environment: dict
 ) -> None:
     environment["audit"].write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(
+        builder,
+        "HISTORICAL_RF_OPERATOR_REPORT_PATH",
+        str(environment["historical_rf_operator_report"].resolve()),
+    )
     monkeypatch.setattr(
         operator,
         "_load_exact_packet",
@@ -803,6 +905,64 @@ def test_real_packet_is_deterministic_exact_and_fail_closed() -> None:
     assert historical["expected_manifest_sha256"] != (
         packet["predecessor"]["profiled_manifest_canonical_sha256"]
     )
+    assert {
+        key: historical[key]
+        for key in (
+            "redacted_report_sha256",
+            "redacted_operator_report_path_sha256",
+            "redacted_operator_report_byte_count",
+            "redacted_operator_report_file_sha256",
+            "redacted_operator_report_canonical_sha256",
+            "redacted_store_report_canonical_sha256",
+            "summary_sha256",
+            "scenarios_sha256",
+            "issues_sha256",
+            "route_scenario_ids_sha256",
+            "delivery_contract_sha256",
+            "target_id",
+            "target_binding_sha256",
+            "target_evidence_sha256",
+        )
+    } == {
+        "redacted_report_sha256": (
+            "ffbab03a0bdc839cbbdaa422a1b4910eaeb61acdc1d4102dbdc40e8d643fc059"
+        ),
+        "redacted_operator_report_path_sha256": (
+            "db4e1621926c4267a96a0f56294a31acb943f490f496898af44138be26a3684f"
+        ),
+        "redacted_operator_report_byte_count": 6090,
+        "redacted_operator_report_file_sha256": (
+            "ffbab03a0bdc839cbbdaa422a1b4910eaeb61acdc1d4102dbdc40e8d643fc059"
+        ),
+        "redacted_operator_report_canonical_sha256": (
+            "368fdffed960744954f709643ea4c9ac33c995302b54179167eff27c32f5567f"
+        ),
+        "redacted_store_report_canonical_sha256": (
+            "a9dd8583e1c50869f1de75fe124e5a8590be6b33a5ace5a71ddae974174b3503"
+        ),
+        "summary_sha256": (
+            "c8a49951221c454da8462c26dcbbcb2962af8bfe3ce0875d24927b2b21d0ef6f"
+        ),
+        "scenarios_sha256": (
+            "09ee939488a9f41d781aa4bded9058f88852d3a9ab1d08b73802308b333fc248"
+        ),
+        "issues_sha256": (
+            "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+        ),
+        "route_scenario_ids_sha256": (
+            "9edf543ba393121a86699f205813c58fba30e09b687f89659a1f7a7a5bde6511"
+        ),
+        "delivery_contract_sha256": (
+            "9081a647a7df0e59df4bb40506ba9bfa96c750536fb715ee31b3e9ee68ee20d6"
+        ),
+        "target_id": "south_tn",
+        "target_binding_sha256": (
+            "41a00c67ed83bafe7355d4e1858710df38e780c2a514641e269103fdcea9104e"
+        ),
+        "target_evidence_sha256": (
+            "2fded0c644b73a36c2efe45a0f64e6e0add551b9c5f2b81c42e73fd276a7a703"
+        ),
+    }
     closure = packet["trusted_complete_validator_source_closure"]
     assert closure["schema_version"] == 1
     assert closure["framing"] == builder.COMPLETE_VALIDATOR_SOURCE_FRAMING
@@ -1064,6 +1224,89 @@ def test_historical_report_exact_facts_and_nested_shape_fail_closed(
         assert len(after["validation_reports"]) == 1
     finally:
         connection.close()
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["raw_bytes", "nested_report", "mode", "hardlink", "wrong_path"],
+)
+def test_historical_operator_journal_is_file_and_semantics_bound(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    case: str,
+) -> None:
+    environment = _synthetic_environment(tmp_path, monkeypatch, f"journal_{case}")
+    packet = environment["packet"]
+    path = environment["historical_rf_operator_report"]
+    monkeypatch.setattr(
+        builder,
+        "HISTORICAL_RF_OPERATOR_REPORT_PATH",
+        str(path.resolve()),
+    )
+    expected = operator._assert_historical_rf_operator_report(
+        path.resolve(), packet
+    )
+    assert expected == {
+        "path_sha256": operator._path_identity(path.resolve()),
+        "byte_count": path.stat().st_size,
+        "file_sha256": operator._sha256_path(path),
+        "canonical_sha256": packet["predecessor"][
+            "permitted_validation_history"
+        ]["redacted_operator_report_canonical_sha256"],
+        "store_report_canonical_sha256": packet["predecessor"][
+            "permitted_validation_history"
+        ]["redacted_store_report_canonical_sha256"],
+    }
+    if case == "raw_bytes":
+        path.write_bytes(path.read_bytes() + b"\n")
+    elif case == "nested_report":
+        document = json.loads(path.read_bytes())
+        document["report"]["current"] = False
+        payload = _pretty_json_bytes(document)
+        path.write_bytes(payload)
+        history = packet["predecessor"]["permitted_validation_history"]
+        history["redacted_report_sha256"] = _sha(payload)
+        history["redacted_operator_report_file_sha256"] = _sha(payload)
+        history["redacted_operator_report_byte_count"] = len(payload)
+        history["redacted_operator_report_canonical_sha256"] = _canonical_sha(
+            document
+        )
+    elif case == "mode":
+        path.chmod(0o600)
+    elif case == "hardlink":
+        os.link(path, tmp_path / "foreign-hardlink.json")
+    else:
+        path = tmp_path / "wrong-historical-report.json"
+        path.write_bytes(
+            environment["historical_rf_operator_report"].read_bytes()
+        )
+        path.chmod(0o644)
+    with pytest.raises(operator.FullBundleMigrationError, match="historical"):
+        operator._assert_historical_rf_operator_report(path.resolve(), packet)
+
+
+def test_historical_operator_journal_drift_stops_before_all_durable_effects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    environment = _synthetic_environment(tmp_path, monkeypatch, "journal_apply")
+    _patch_synthetic_apply(monkeypatch, environment)
+    path = environment["historical_rf_operator_report"]
+    path.write_bytes(path.read_bytes() + b"\n")
+    with pytest.raises(
+        operator.FullBundleMigrationError,
+        match="historical validation journal bytes drifted",
+    ):
+        operator.apply_private(**_apply_args(environment))
+    assert _draft_revision(environment) == 2
+    assert not environment["report"].exists()
+    assert not list(
+        environment["asset_root"].glob(f"{operator.JOURNAL_FILE_NAME}*")
+    )
+    assert not any(
+        operator._asset_destination(spec, environment["asset_root"].resolve()).exists()
+        for spec in environment["packet"]["assets"]["new"]
+    )
 
 
 def test_builder_fails_on_transitive_source_drift(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1519,6 +1762,15 @@ def test_preexisting_exact_asset_requires_single_link_owner_mode_and_device(
     elif unsafe == "mode":
         destination.chmod(0o644)
     else:
+        historical_binding = operator._assert_historical_rf_operator_report(
+            env["historical_rf_operator_report"].resolve(),
+            env["packet"],
+        )
+        monkeypatch.setattr(
+            operator,
+            "_assert_historical_rf_operator_report",
+            lambda *_args, **_kwargs: copy.deepcopy(historical_binding),
+        )
         monkeypatch.setattr(operator.os, "geteuid", lambda: os.getuid() + 1)
     with pytest.raises(operator.FullBundleMigrationError, match="identity or bytes changed"):
         operator.apply_private(**_apply_args(env))

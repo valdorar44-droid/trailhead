@@ -92,6 +92,27 @@ def _sha256_path(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _historical_rf_operator_report_path(packet: dict[str, Any]) -> Path:
+    """Return only the exact absolute S4R journal path bound by the packet."""
+    history = packet.get("predecessor", {}).get("permitted_validation_history")
+    raw = packet_builder.HISTORICAL_RF_OPERATOR_REPORT_PATH
+    path = Path(str(raw))
+    bound_path_sha256 = (
+        history.get("redacted_operator_report_path_sha256")
+        if isinstance(history, dict)
+        else None
+    )
+    if bound_path_sha256 != _path_identity(path):
+        raise FullBundleMigrationError("historical validation journal path drifted")
+    if not path.is_absolute():
+        raise FullBundleMigrationError("historical validation journal path is not absolute")
+    return path
+
+
+def _historical_rf_operator_report_path_sha256(packet: dict[str, Any]) -> str:
+    return _path_identity(_historical_rf_operator_report_path(packet))
+
+
 def _path_identity(path: Path) -> str:
     return hashlib.sha256(str(path).encode("utf-8")).hexdigest()
 
@@ -341,6 +362,80 @@ def _read_regular_at(
     ):
         raise FullBundleMigrationError(f"{label} identity raced after read")
     return payload, current
+
+
+def _read_historical_rf_operator_report_bytes(path: Path) -> bytes:
+    """Read the immutable S4R journal without following or racing its name."""
+    with _open_anchored_parent(path, "historical RF operator report") as (
+        parent_descriptor,
+        parent_identity,
+    ):
+        first = _lstat_at_or_none(
+            path,
+            parent_descriptor,
+            parent_identity,
+            label="historical RF operator report",
+        )
+        parent_info = os.fstat(parent_descriptor)
+        if (
+            first is None
+            or stat.S_ISLNK(first.st_mode)
+            or not stat.S_ISREG(first.st_mode)
+            or first.st_nlink != 1
+            or stat.S_IMODE(first.st_mode) != 0o644
+            or first.st_uid != os.geteuid()
+            or first.st_dev != parent_info.st_dev
+        ):
+            raise FullBundleMigrationError(
+                "historical RF operator report is not an owned immutable file"
+            )
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        try:
+            descriptor = os.open(path.name, flags, dir_fd=parent_descriptor)
+        except OSError as exc:
+            raise FullBundleMigrationError(
+                "historical RF operator report raced before open"
+            ) from exc
+        try:
+            opened = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(opened.st_mode)
+                or opened.st_nlink != 1
+                or stat.S_IMODE(opened.st_mode) != 0o644
+                or opened.st_uid != os.geteuid()
+                or (opened.st_dev, opened.st_ino)
+                != (first.st_dev, first.st_ino)
+            ):
+                raise FullBundleMigrationError(
+                    "historical RF operator report identity raced"
+                )
+            with os.fdopen(descriptor, "rb", closefd=False) as handle:
+                payload = handle.read()
+            final_opened = os.fstat(descriptor)
+        finally:
+            os.close(descriptor)
+        current = os.stat(
+            path.name, dir_fd=parent_descriptor, follow_symlinks=False
+        )
+        _assert_anchored_parent(
+            path,
+            parent_descriptor,
+            parent_identity,
+            "historical RF operator report",
+        )
+        if (
+            current.st_nlink != 1
+            or stat.S_IMODE(current.st_mode) != 0o644
+            or current.st_uid != os.geteuid()
+            or (current.st_dev, current.st_ino)
+            != (first.st_dev, first.st_ino)
+            or (final_opened.st_dev, final_opened.st_ino)
+            != (first.st_dev, first.st_ino)
+        ):
+            raise FullBundleMigrationError(
+                "historical RF operator report identity raced after read"
+            )
+        return payload
 
 
 def _lstat_at_or_none(
@@ -2073,6 +2168,158 @@ def _assert_existing_rf_assets(
     return current
 
 
+def _expected_historical_rf_store_report(
+    permitted: dict[str, Any],
+) -> dict[str, Any]:
+    pass_contract = {
+        "selection_key": permitted["selection"],
+        "route_scenario_count": permitted["expected_nested_scenario_count"],
+        "route_scenario_ids_sha256": permitted["route_scenario_ids_sha256"],
+        "delivery_contract_sha256": permitted["delivery_contract_sha256"],
+        "target_id": permitted["target_id"],
+        "target_binding_sha256": permitted["target_binding_sha256"],
+        "target_evidence_sha256": permitted["target_evidence_sha256"],
+    }
+    report = {
+        "schema_version": 1,
+        "report_type": "OriginalRouteValidationReportV1",
+        "id": permitted["report_id"],
+        "pack_id": packet_builder.PRODUCT_ID,
+        "draft_revision": permitted["expected_draft_revision"],
+        "manifest_sha256": permitted["expected_manifest_sha256"],
+        "assets_sha256": permitted["expected_assets_sha256"],
+        "input_sha256": permitted["expected_input_sha256"],
+        "validator_source_sha256": permitted[
+            "expected_validator_source_sha256"
+        ],
+        "suite_version": permitted["expected_suite_version"],
+        "engine_version": permitted["engine"],
+        "status": permitted["status"],
+        "passed": True,
+        "current": True,
+        "started_at": permitted["expected_started_at"],
+        "completed_at": permitted["expected_completed_at"],
+        "summary_sha256": permitted["summary_sha256"],
+        "scenarios_sha256": permitted["scenarios_sha256"],
+        "issues_sha256": permitted["issues_sha256"],
+        "pass_contract": pass_contract,
+    }
+    expected_sha256 = permitted.get("redacted_store_report_canonical_sha256")
+    if (
+        not isinstance(expected_sha256, str)
+        or not re.fullmatch(r"[a-f0-9]{64}", expected_sha256)
+        or _canonical_sha256(report) != expected_sha256
+    ):
+        raise FullBundleMigrationError(
+            "historical validation store-report binding drifted"
+        )
+    return report
+
+
+def _assert_historical_rf_operator_report(
+    path: Path,
+    packet: dict[str, Any],
+) -> dict[str, Any]:
+    expected_path = _historical_rf_operator_report_path(packet)
+    if path != expected_path:
+        raise FullBundleMigrationError("historical validation journal path drifted")
+    permitted = packet.get("predecessor", {}).get("permitted_validation_history")
+    if not isinstance(permitted, dict):
+        raise FullBundleMigrationError("historical validation evidence is missing")
+    payload = _read_historical_rf_operator_report_bytes(path)
+    expected_bytes = permitted.get("redacted_operator_report_byte_count")
+    file_sha256 = hashlib.sha256(payload).hexdigest()
+    expected_file_sha256 = permitted.get(
+        "redacted_operator_report_file_sha256"
+    )
+    if (
+        isinstance(expected_bytes, bool)
+        or not isinstance(expected_bytes, int)
+        or expected_bytes != len(payload)
+        or expected_file_sha256 != permitted.get("redacted_report_sha256")
+        or file_sha256 != expected_file_sha256
+    ):
+        raise FullBundleMigrationError(
+            "historical validation journal bytes drifted"
+        )
+    try:
+        document = json.loads(payload)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise FullBundleMigrationError(
+            "historical validation journal JSON drifted"
+        ) from exc
+    expected_document_sha256 = permitted.get(
+        "redacted_operator_report_canonical_sha256"
+    )
+    expected_report = _expected_historical_rf_store_report(permitted)
+    if (
+        not isinstance(document, dict)
+        or set(document)
+        != {
+            "schema_version",
+            "kind",
+            "target_id",
+            "origin",
+            "state",
+            "validation_report_id",
+            "identity",
+            "preflight",
+            "report",
+            "post_validation",
+        }
+        or document.get("schema_version") != 1
+        or document.get("kind")
+        != "roaring_fork_trusted_validation_operator_report"
+        or document.get("target_id")
+        != packet["configured_target_binding"]["target_id"]
+        or document.get("origin") != "apply"
+        or document.get("state") != "completed"
+        or document.get("validation_report_id") != permitted["report_id"]
+        or document.get("preflight")
+        != {"global_active_report_count": 0, "target_report_count": 0}
+        or document.get("report") != expected_report
+        or not isinstance(document.get("identity"), dict)
+        or document.get("identity", {}).get("draft_revision")
+        != permitted["expected_draft_revision"]
+        or document.get("identity", {}).get("material_identity", {}).get(
+            "manifest_sha256"
+        )
+        != permitted["expected_manifest_sha256"]
+        or document.get("identity", {}).get("material_identity", {}).get(
+            "assets_sha256"
+        )
+        != permitted["expected_assets_sha256"]
+        or document.get("identity", {}).get("material_identity", {}).get(
+            "input_sha256"
+        )
+        != permitted["expected_input_sha256"]
+        or document.get("identity", {}).get("material_identity", {}).get(
+            "validator_source_sha256"
+        )
+        != permitted["expected_validator_source_sha256"]
+        or document.get("post_validation")
+        != {
+            "identity": document.get("identity"),
+            "global_active_report_count": 0,
+            "target_report_count": 1,
+        }
+        or not isinstance(expected_document_sha256, str)
+        or _canonical_sha256(document) != expected_document_sha256
+    ):
+        raise FullBundleMigrationError(
+            "historical validation journal semantics drifted"
+        )
+    return {
+        "path_sha256": _path_identity(path),
+        "byte_count": len(payload),
+        "file_sha256": file_sha256,
+        "canonical_sha256": expected_document_sha256,
+        "store_report_canonical_sha256": permitted[
+            "redacted_store_report_canonical_sha256"
+        ],
+    }
+
+
 def _canonical_utc_epoch(raw: Any, label: str) -> int:
     if not isinstance(raw, str) or not raw.endswith("Z"):
         raise FullBundleMigrationError(f"{label} must be canonical UTC")
@@ -2160,6 +2407,7 @@ def _assert_independent_rf_history(
             "expected_completed_at",
             "expected_selection_result_count",
             "expected_nested_scenario_count",
+            "redacted_operator_report_byte_count",
         )
     }
     if any(
@@ -2177,6 +2425,16 @@ def _assert_independent_rf_history(
             "expected_input_sha256",
             "expected_validator_source_sha256",
             "redacted_report_sha256",
+            "redacted_operator_report_file_sha256",
+            "redacted_operator_report_canonical_sha256",
+            "redacted_store_report_canonical_sha256",
+            "summary_sha256",
+            "scenarios_sha256",
+            "issues_sha256",
+            "route_scenario_ids_sha256",
+            "delivery_contract_sha256",
+            "target_binding_sha256",
+            "target_evidence_sha256",
         )
     }
     if any(
@@ -2184,6 +2442,14 @@ def _assert_independent_rf_history(
         for value in hash_contract.values()
     ):
         raise FullBundleMigrationError("historical validation hash contract drifted")
+    if (
+        permitted.get("target_id") != "south_tn"
+        or hash_contract["redacted_report_sha256"]
+        != hash_contract["redacted_operator_report_file_sha256"]
+    ):
+        raise FullBundleMigrationError(
+            "historical validation journal contract drifted"
+        )
     expected_report = {
         "id": permitted["report_id"],
         "pack_id": packet_builder.PRODUCT_ID,
@@ -2209,27 +2475,12 @@ def _assert_independent_rf_history(
         report_manifest = _decode_object(
             report.get("manifest_json"), "historical validation manifest"
         )
+        summary = json.loads(str(report.get("summary_json")))
         issues = json.loads(str(report.get("issues_json")))
         scenarios = json.loads(str(report.get("scenarios_json")))
     except (TypeError, json.JSONDecodeError) as exc:
         raise FullBundleMigrationError("historical validation report JSON drifted") from exc
-    try:
-        redacted_report = store._original_validation_report_from_row(
-            report,
-            current_material={
-                "draft_revision": integer_contract["expected_draft_revision"],
-                "manifest_sha256": hash_contract["expected_manifest_sha256"],
-                "assets_sha256": hash_contract["expected_assets_sha256"],
-                "input_sha256": hash_contract["expected_input_sha256"],
-                "validator_source_sha256": hash_contract[
-                    "expected_validator_source_sha256"
-                ],
-            },
-        )
-    except (KeyError, TypeError, ValueError) as exc:
-        raise FullBundleMigrationError(
-            "historical validation redacted report drifted"
-        ) from exc
+    expected_store_report = _expected_historical_rf_store_report(permitted)
     selection_result = scenarios[0] if isinstance(scenarios, list) and scenarios else None
     nested_scenarios = (
         selection_result.get("scenarios")
@@ -2239,6 +2490,10 @@ def _assert_independent_rf_history(
     if (
         _canonical_sha256(report_manifest)
         != hash_contract["expected_manifest_sha256"]
+        or not isinstance(summary, dict)
+        or _canonical_sha256(summary) != permitted["summary_sha256"]
+        or _canonical_sha256(scenarios) != permitted["scenarios_sha256"]
+        or _canonical_sha256(issues) != permitted["issues_sha256"]
         or issues != permitted["issues"]
         or not isinstance(scenarios, list)
         or len(scenarios)
@@ -2254,8 +2509,8 @@ def _assert_independent_rf_history(
         != int(permitted["route_scenarios_required"])
         or integer_contract["expected_nested_scenario_count"]
         != int(permitted["route_scenarios_passed"])
-        or _canonical_sha256(redacted_report)
-        != hash_contract["redacted_report_sha256"]
+        or _canonical_sha256(expected_store_report)
+        != permitted["redacted_store_report_canonical_sha256"]
     ):
         raise FullBundleMigrationError("historical validation report payload drifted")
     report_started = report.get("started_at")
@@ -3535,6 +3790,7 @@ def _report(
     verification: dict[str, Any],
     predecessor_history_sha256: str,
     journal_terminal: dict[str, Any],
+    historical_operator_report_binding: dict[str, Any],
 ) -> dict[str, Any]:
     draft = packet["migration_draft"]
     attestation = packet["post_migration_phases"]["license_attestation"]
@@ -3559,6 +3815,9 @@ def _report(
         "source_revision": packet["source_revision"],
         "target": target,
         "operator_audit": audit,
+        "historical_validation_operator_report": copy.deepcopy(
+            historical_operator_report_binding
+        ),
         "migration": {
             "before_revision": packet["predecessor"]["draft_revision"],
             "after_revision": draft["expected_after_revision"],
@@ -3672,6 +3931,7 @@ def apply_private(
     asset_root: Path,
     narration_root: Path,
     artwork_root: Path,
+    historical_rf_operator_report_path: Path,
     backup_manifest_path: Path,
     expected_backup_manifest_sha256: str,
     operator_audit_path: Path,
@@ -3709,6 +3969,16 @@ def apply_private(
     asset_root = _assert_directory(asset_root, "asset root")
     narration_root = _assert_directory(narration_root, "accepted narration root")
     artwork_root = _assert_directory(artwork_root, "accepted artwork root")
+    historical_rf_operator_report_path = _assert_file(
+        historical_rf_operator_report_path,
+        "historical RF operator report",
+    )
+    if historical_rf_operator_report_path != _historical_rf_operator_report_path(packet):
+        raise FullBundleMigrationError("historical validation journal path drifted")
+    historical_operator_report_binding = _assert_historical_rf_operator_report(
+        historical_rf_operator_report_path,
+        packet,
+    )
     db_identity = _inode_identity(db_path)
     asset_root_identity = _inode_identity(asset_root)
     _assert_disjoint_paths(
@@ -3717,6 +3987,7 @@ def apply_private(
             "asset root": asset_root,
             "accepted narration root": narration_root,
             "accepted artwork root": artwork_root,
+            "historical RF operator report": historical_rf_operator_report_path,
             "repository": ROOT.resolve(strict=True),
         }
     )
@@ -3746,6 +4017,7 @@ def apply_private(
             "SQLite backup": backup_path,
             "accepted narration root": narration_root,
             "accepted artwork root": artwork_root,
+            "historical RF operator report": historical_rf_operator_report_path,
             "repository": ROOT.resolve(strict=True),
         }
     )
@@ -3807,6 +4079,7 @@ def apply_private(
                     operator_audit_path,
                     backup_manifest_path.resolve(strict=True),
                     backup_path,
+                    historical_rf_operator_report_path,
                     *(ROOT / path for path in (packet_builder.PACKET_PATH, packet_builder.AUDIT_CONTRACT_PATH)),
                     *(item.source_path for item in prepared),
                     asset_capability_marker,
@@ -3827,6 +4100,9 @@ def apply_private(
                     "backup manifest": backup_manifest_path.resolve(strict=True),
                     "SQLite backup": backup_path,
                     "operator audit": operator_audit_path,
+                    "historical RF operator report": (
+                        historical_rf_operator_report_path
+                    ),
                 }
                 if report_info is not None:
                     identity_inputs["existing migration receipt"] = report_path
@@ -3885,6 +4161,16 @@ def apply_private(
                     )
                     if current_audit != audit:
                         raise FullBundleMigrationError("operator audit changed after preflight")
+                    if (
+                        _assert_historical_rf_operator_report(
+                            historical_rf_operator_report_path,
+                            packet,
+                        )
+                        != historical_operator_report_binding
+                    ):
+                        raise FullBundleMigrationError(
+                            "historical validation journal changed after preflight"
+                        )
                     receipt_history = _history_binding_from_file(
                         report_path,
                         packet_sha256=packet_sha256,
@@ -4022,6 +4308,9 @@ def apply_private(
                             verification=_verification_from_snapshot(_report_snapshot),
                             predecessor_history_sha256=predecessor_history_sha256,
                             journal_terminal=existing_terminal,
+                            historical_operator_report_binding=(
+                                historical_operator_report_binding
+                            ),
                         )
                         _validate_existing_receipt(existing_receipt, expected_receipt)
                         receipt_journal_recovery = _recover_journal(
@@ -4178,6 +4467,11 @@ def apply_private(
                                 operator_audit_path, packet, contract, packet_sha256
                             )
                             != audit
+                            or _assert_historical_rf_operator_report(
+                                historical_rf_operator_report_path,
+                                packet,
+                            )
+                            != historical_operator_report_binding
                         ):
                             raise FullBundleMigrationError("frozen migration authority drifted at action time")
                         action_identity_inputs = copy.deepcopy(identity_inputs)
@@ -4325,6 +4619,16 @@ def apply_private(
                         label="configured SQLite database after commit journal",
                         commit_uncertain=True,
                     )
+                    if (
+                        _assert_historical_rf_operator_report(
+                            historical_rf_operator_report_path,
+                            packet,
+                        )
+                        != historical_operator_report_binding
+                    ):
+                        raise ReportCommitUncertainError(
+                            "historical validation journal changed after database commit"
+                        )
                     verify_connection = _connect(
                         db_path,
                         pinned_descriptor=db_descriptor,
@@ -4377,6 +4681,9 @@ def apply_private(
                         verification=verification,
                         predecessor_history_sha256=predecessor_history_sha256,
                         journal_terminal=journal_terminal,
+                        historical_operator_report_binding=(
+                            historical_operator_report_binding
+                        ),
                     )
                     if _lstat_at_or_none(
                         report_path,
@@ -4472,6 +4779,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--asset-root", type=Path)
     parser.add_argument("--remaining-audio-root", type=Path)
     parser.add_argument("--remaining-artwork-root", type=Path)
+    parser.add_argument("--historical-rf-operator-report", type=Path)
     parser.add_argument("--backup-manifest", type=Path)
     parser.add_argument("--expected-backup-manifest-sha256")
     parser.add_argument("--operator-audit", type=Path)
@@ -4512,6 +4820,7 @@ def main(argv: list[str] | None = None) -> int:
             "asset-root",
             "remaining-audio-root",
             "remaining-artwork-root",
+            "historical-rf-operator-report",
             "backup-manifest",
             "expected-backup-manifest-sha256",
             "operator-audit",
@@ -4538,6 +4847,9 @@ def main(argv: list[str] | None = None) -> int:
         asset_root=args.asset_root,
         narration_root=args.remaining_audio_root,
         artwork_root=args.remaining_artwork_root,
+        historical_rf_operator_report_path=(
+            args.historical_rf_operator_report
+        ),
         backup_manifest_path=args.backup_manifest,
         expected_backup_manifest_sha256=args.expected_backup_manifest_sha256,
         operator_audit_path=args.operator_audit,

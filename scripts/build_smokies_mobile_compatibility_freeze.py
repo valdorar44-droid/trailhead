@@ -598,17 +598,47 @@ def _build73_nonreuse(commit: str) -> dict[str, Any]:
     new_android = str(_git("rev-parse", f"{commit}:mobile/android")).strip()
     old_ios = str(_git("rev-parse", f"{ANDROID_BUILD_73_SOURCE}:mobile/ios")).strip()
     new_ios = str(_git("rev-parse", f"{commit}:mobile/ios")).strip()
-    _require(old_android == new_android and old_ios == new_ios, "Native tree comparison drifted")
+    normalized_native_paths = (
+        "mobile/android/app/src/main/AndroidManifest.xml",
+        "mobile/android/app/src/main/res/values/strings.xml",
+        "mobile/ios/Trailhead/Supporting/Expo.plist",
+    )
+    normalization = []
+    for path in normalized_native_paths:
+        before = _blob(ANDROID_BUILD_73_SOURCE, path)
+        after = _blob(commit, path)
+        _require(
+            before.endswith(b"\n") and after == before[:-1],
+            f"Build-73 native normalization drifted: {path}",
+        )
+        normalization.append({
+            "path": path,
+            "change": "remove_terminal_lf",
+            "before_sha256": hashlib.sha256(before).hexdigest(),
+            "after_sha256": hashlib.sha256(after).hexdigest(),
+        })
+    changed_native_paths = str(_git(
+        "diff", "--name-only", ANDROID_BUILD_73_SOURCE, commit,
+        "--", "mobile/android", "mobile/ios",
+    )).splitlines()
+    _require(
+        changed_native_paths == list(normalized_native_paths),
+        "Build-73 native path inventory drifted",
+    )
+    _require(old_android != new_android and old_ios != new_ios, "Native tree normalization was not bound")
     return {
         "reuse": False,
         "signed_android_build_source_commit": ANDROID_BUILD_73_SOURCE,
         "app_version": ANDROID_BUILD_73_VERSION,
         "build_number": ANDROID_BUILD_73_NUMBER,
         "runtime_version": ANDROID_RUNTIME,
-        "android_native_tree_unchanged": True,
+        "android_native_tree_unchanged": False,
+        "android_native_tree_before": old_android,
         "android_native_tree": new_android,
-        "ios_native_tree_unchanged": True,
+        "ios_native_tree_unchanged": False,
+        "ios_native_tree_before": old_ios,
         "ios_native_tree": new_ios,
+        "native_byte_normalization": normalization,
         "dependency_field_changes": changes,
         "reason": "repository_native_ota_validator_rejects_dependency_field_changes",
     }

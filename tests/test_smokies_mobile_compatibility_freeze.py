@@ -344,7 +344,7 @@ def test_union_storage_math_and_one_byte_js_precision_note(
     assert "one byte above" in result["javascript_precision_note"]
 
 
-def test_build73_nonreuse_is_exact_dependency_drift_despite_native_tree_equality(
+def test_build73_nonreuse_binds_dependency_drift_and_exact_native_normalization(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     old = {"dependencies": {"react": "x"}}
@@ -353,16 +353,30 @@ def test_build73_nonreuse_is_exact_dependency_drift_despite_native_tree_equality
             "react": "x", "@noble/ed25519": "3.1.0", "@noble/hashes": "2.2.0",
         }
     }
-    monkeypatch.setattr(
-        builder, "_blob",
-        lambda commit, path: json.dumps(old if commit == builder.ANDROID_BUILD_73_SOURCE else new).encode(),
-    )
-    monkeypatch.setattr(builder, "_git", lambda *_args, **_kwargs: "native-tree\n")
+    native_before = {
+        "mobile/android/app/src/main/AndroidManifest.xml": b"manifest\n",
+        "mobile/android/app/src/main/res/values/strings.xml": b"strings\n",
+        "mobile/ios/Trailhead/Supporting/Expo.plist": b"plist\n",
+    }
+    def fake_blob(commit: str, path: str) -> bytes:
+        if path == "mobile/package.json":
+            return json.dumps(old if commit == builder.ANDROID_BUILD_73_SOURCE else new).encode()
+        before = native_before[path]
+        return before if commit == builder.ANDROID_BUILD_73_SOURCE else before[:-1]
+    monkeypatch.setattr(builder, "_blob", fake_blob)
+    def fake_git(*args: str, **_kwargs: object) -> str:
+        if args[0] == "diff":
+            return "\n".join(native_before) + "\n"
+        value = args[1]
+        return ("old-tree\n" if value.startswith(builder.ANDROID_BUILD_73_SOURCE) else "new-tree\n")
+    monkeypatch.setattr(builder, "_git", fake_git)
     result = builder._build73_nonreuse("a" * 40)
     assert result["reuse"] is False
     assert result["signed_android_build_source_commit"] == builder.ANDROID_BUILD_73_SOURCE
-    assert result["android_native_tree_unchanged"] is True
-    assert result["ios_native_tree_unchanged"] is True
+    assert result["android_native_tree_unchanged"] is False
+    assert result["ios_native_tree_unchanged"] is False
+    assert [row["path"] for row in result["native_byte_normalization"]] == list(native_before)
+    assert all(row["change"] == "remove_terminal_lf" for row in result["native_byte_normalization"])
     assert result["dependency_field_changes"] == [
         {"section": "dependencies", "name": "@noble/ed25519", "from": None, "to": "3.1.0"},
         {"section": "dependencies", "name": "@noble/hashes", "from": None, "to": "2.2.0"},

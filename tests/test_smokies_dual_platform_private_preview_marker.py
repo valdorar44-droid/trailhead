@@ -66,7 +66,7 @@ def _historical_report() -> tuple[dict, str, str]:
     manifest = {"schema_version": 3, "title": "Historical Roaring Fork"}
     manifest_sha = marker._canonical_sha256(manifest)
     row = {
-        "id": marker.HISTORICAL_REPORT_ID,
+        "id": marker.store._SMOKIES_HISTORICAL_REPORT_ID,
         "pack_id": marker.PRODUCT_ID,
         "draft_revision": 2,
         "manifest_sha256": manifest_sha,
@@ -99,12 +99,16 @@ def _historical_report() -> tuple[dict, str, str]:
                 "selection_key": marker.store._SMOKIES_RF_SELECTION_KEY,
                 "passed": True,
                 "issues": [],
+                "scenarios": [
+                    {"scenario_id": f"scenario_{index}"}
+                    for index in range(13)
+                ],
             }],
             separators=(",", ":"), sort_keys=True,
         ),
         "issues_json": "[]",
         "started_by": ADMIN_ID,
-        "worker_pid": None,
+        "worker_pid": 16,
         "started_at": 1_754_876_000,
         "completed_at": 1_754_876_100,
     }
@@ -399,15 +403,16 @@ def configured(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict:
     tmp_path.chmod(0o700)
     database = tmp_path / "trailhead.db"
     _create_database(database)
-    _historical, historical_manifest_sha, historical_redacted_sha = _historical_report()
-    monkeypatch.setattr(
-        marker, "HISTORICAL_REPORT_MANIFEST_SHA256", historical_manifest_sha,
-    )
-    monkeypatch.setattr(
-        marker, "HISTORICAL_REPORT_REDACTED_SHA256", historical_redacted_sha,
+    historical, _historical_manifest_sha, historical_redacted_sha = (
+        _historical_report()
     )
     inventory_calls: list[tuple[list[dict], dict]] = []
-    historical_contract = {"schema_version": 1, "fixture": "exact_history"}
+    historical_contract = {
+        "schema_version": 1,
+        "fixture": "exact_history",
+        "report_id": historical["id"],
+        "redacted_report_sha256": historical_redacted_sha,
+    }
     monkeypatch.setattr(
         marker.store,
         "load_smokies_historical_validation_contract",
@@ -417,16 +422,27 @@ def configured(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict:
     def canonical_inventory(rows: list[sqlite3.Row], history: dict) -> dict:
         inventory_calls.append(([dict(row) for row in rows], copy.deepcopy(history)))
         assert history == historical_contract
+        if len(rows) != 1:
+            raise marker.store.OriginalSmokiesFinalReadinessConflictError(
+                "fixture report inventory drifted"
+            )
         scenarios = json.loads(str(dict(rows[0])["scenarios_json"]))
         assert scenarios == [{
             "selection_key": marker.store._SMOKIES_RF_SELECTION_KEY,
             "passed": True,
             "issues": [],
+            "scenarios": [
+                {"scenario_id": f"scenario_{index}"}
+                for index in range(13)
+            ],
         }]
         return {
             "historical_report_count": 1,
             "full_bundle_report_count": 0,
-            "inventory": [{"report_id": marker.HISTORICAL_REPORT_ID}],
+            "inventory": [{
+                "report_id": historical["id"],
+                "redacted_report_sha256": historical_redacted_sha,
+            }],
             "inventory_sha256": "c" * 64,
         }
 
@@ -491,6 +507,7 @@ def configured(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> dict:
         "receipt": (tmp_path / "receipt.json").resolve(),
         "compatibility": compatibility,
         "inventory_calls": inventory_calls,
+        "historical_contract": historical_contract,
     }
 
 
@@ -576,14 +593,16 @@ def test_apply_changes_only_three_validation_fields_and_replays(configured: dict
     assert report_state == receipt["request"]["validation_report_state"]
     assert report_state["historical_report_count"] == 1
     assert report_state["full_bundle_report_count"] == 0
-    assert report_state["historical_report_id"] == marker.HISTORICAL_REPORT_ID
+    assert report_state["historical_report_id"] == (
+        marker.store._SMOKIES_HISTORICAL_REPORT_ID
+    )
     assert report_state["historical_redacted_report_sha256"] == (
-        marker.HISTORICAL_REPORT_REDACTED_SHA256
+        configured["historical_contract"]["redacted_report_sha256"]
     )
     assert report_state["inventory_sha256"] == "c" * 64
     assert configured["inventory_calls"]
     assert all(
-        history == {"schema_version": 1, "fixture": "exact_history"}
+        history == configured["historical_contract"]
         for _rows, history in configured["inventory_calls"]
     )
     assert durable["historical_validation_report_count"] == 1
@@ -807,7 +826,7 @@ def test_snapshot_drift_fails_before_write(configured: dict, mutation: str) -> N
                       engine_version,status,passed,summary_json,scenarios_json,
                       issues_json,started_by,worker_pid,started_at,completed_at
                FROM authored_original_validation_reports WHERE id=?""",
-            ("new_full_bundle_report", marker.HISTORICAL_REPORT_ID),
+            ("new_full_bundle_report", marker.store._SMOKIES_HISTORICAL_REPORT_ID),
         )
     elif mutation == "authorization":
         db.execute("INSERT INTO authored_original_release_authorizations_v1 VALUES (?)", (marker.PRODUCT_ID,))

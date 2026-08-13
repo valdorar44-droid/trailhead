@@ -31,10 +31,11 @@ from db.originals_complete_validation import (
     trusted_complete_originals_long_form_validator_source_sha256,
 )
 OUTPUT_PATH = Path("originals/smokies/smokies_mobile_compatibility_freeze_v1.json")
+RELEASE_AUDIT_PATH = "originals/smokies/smokies_v3_release_guard_audit_v1.json"
 ARTIFACT_ID = "smokies_mobile_compatibility_freeze_20260811_v1"
 PRODUCT_ID = "great_smoky_mountains_ridges_rivers_living_memory"
-CHECKPOINT_M_COMMIT = "55ffb762335544224fd1b421e1df7c4c27f07f00"
-CHECKPOINT_M_TREE = "fc152bfb6be4a2f61a8d16fc06f55d92b900d88c"
+CHECKPOINT_M_COMMIT = "a533852ceeba4f2d3b625bcce04135a2936705e5"
+CHECKPOINT_M_TREE = "eea0c936baf5ea2504f034608c84618a57c41d19"
 ANDROID_BUILD_73_SOURCE = "e8bd03013024f7d43f790d8ee309f2c72b8f1b81"
 ANDROID_BUILD_73_VERSION = "1.0.12"
 ANDROID_BUILD_73_NUMBER = "73"
@@ -76,12 +77,12 @@ IMMUTABLE_PINNED_ARTIFACTS = {
 }
 CHECKPOINT_M_MIGRATION_ARTIFACTS = {
     "originals/smokies/smokies_complete_private_migration_packet_v1.json": (
-        5_838_967,
-        "d2f7ca0b587e67c2f8e9164a4d8f66663e6ac1f1a509af50989e04dcf84f4920",
+        5_839_615,
+        "1aabc64e7be8369cd963c752029aa8f6a80402c8df5ac0c92f072fb0a891c53e",
     ),
     "originals/smokies/smokies_complete_private_migration_operator_audit_v1.json": (
-        5_779,
-        "28bd4356804994cf48323788335f95d8c99566cbc0c87001340ea709be632188",
+        6_988,
+        "de9aeba099d7cd0704175316c39ac4ddbbea6fd4022146da471cd6b855b4d3e2",
     ),
 }
 REQUIRED_SOURCE_PATHS = {
@@ -103,8 +104,8 @@ REQUIRED_SOURCE_PATHS = {
     "tests/test_smokies_complete_private_attestation_profile.py",
     "tests/test_smokies_dual_platform_private_preview_marker.py",
     "tests/test_smokies_mobile_compatibility_freeze.py",
+    RELEASE_AUDIT_PATH,
     *IMMUTABLE_PINNED_ARTIFACTS,
-    *CHECKPOINT_M_MIGRATION_ARTIFACTS,
 }
 
 GATE_FAMILIES = {
@@ -202,11 +203,6 @@ def _commit_identity(commit: str, tree: str) -> None:
     actual_commit = str(_git("rev-parse", f"{commit}^{{commit}}")).strip()
     actual_tree = str(_git("rev-parse", f"{commit}^{{tree}}")).strip()
     _require(actual_commit == commit and actual_tree == tree, "Source commit or tree drifted")
-    ancestry = subprocess.run(
-        ["git", "merge-base", "--is-ancestor", CHECKPOINT_M_COMMIT, commit],
-        cwd=ROOT,
-    )
-    _require(ancestry.returncode == 0, "Source does not descend from Checkpoint M")
     _require(
         str(_git("rev-parse", f"{CHECKPOINT_M_COMMIT}^{{tree}}")).strip()
         == CHECKPOINT_M_TREE,
@@ -389,7 +385,7 @@ def _pinned_artifacts(commit: str) -> dict[str, dict[str, Any]]:
     for path, (expected_bytes, expected_sha) in sorted(
         CHECKPOINT_M_MIGRATION_ARTIFACTS.items()
     ):
-        row = _blob_row(commit, path)
+        row = _blob_row(CHECKPOINT_M_COMMIT, path)
         _require(
             row["byte_count"] == expected_bytes and row["sha256"] == expected_sha,
             f"Checkpoint-M migration evidence drifted: {path}",
@@ -400,7 +396,10 @@ def _pinned_artifacts(commit: str) -> dict[str, dict[str, Any]]:
     _require(candidate.get("status") == "complete_private_candidate_owner_dual_platform_preview_required", "Candidate state drifted")
     media = _json_blob(commit, "originals/smokies/remaining_media_acceptance_v1.json")
     _require("owner_accepted" in str(media.get("status") or ""), "Media acceptance state drifted")
-    migration = _json_blob(commit, "originals/smokies/smokies_complete_private_migration_operator_audit_v1.json")
+    migration = _json_blob(
+        CHECKPOINT_M_COMMIT,
+        "originals/smokies/smokies_complete_private_migration_operator_audit_v1.json",
+    )
     _require(migration.get("status") == "independent_audit_passed", "Migration audit is not passed")
     _require(
         isinstance(migration.get("findings"), dict)
@@ -415,7 +414,10 @@ def _pinned_artifacts(commit: str) -> dict[str, dict[str, Any]]:
         ,
         "Migration audit reports an external effect",
     )
-    packet = _json_blob(commit, "originals/smokies/smokies_complete_private_migration_packet_v1.json")
+    packet = _json_blob(
+        CHECKPOINT_M_COMMIT,
+        "originals/smokies/smokies_complete_private_migration_packet_v1.json",
+    )
     _require(
         packet.get("status") == "network_and_database_free_plan_live_apply_locked"
         and packet.get("source_revision") == {
@@ -432,6 +434,57 @@ def _pinned_artifacts(commit: str) -> dict[str, dict[str, Any]]:
         "Checkpoint M historical migration binding is incomplete",
     )
     return result
+
+
+def _release_audit(commit: str, validator: dict[str, Any]) -> dict[str, Any]:
+    audit = _json_blob(commit, RELEASE_AUDIT_PATH)
+    findings = audit.get("findings") or {}
+    effects = audit.get("effects") or {}
+    bindings = audit.get("bindings") or {}
+    closure = bindings.get("all_six_dispatch_closure") or {}
+    _require(
+        audit.get("status") == "independent_audit_passed"
+        and findings.get("p0_count") == 0
+        and findings.get("p1_count") == 0,
+        "Current source release-guard audit is not passed",
+    )
+    _require(
+        isinstance(effects, dict)
+        and all(
+            value is False
+            for key, value in effects.items()
+            if key != "ephemeral_test_databases_used"
+        ),
+        "Current source release-guard audit reports an external effect",
+    )
+    _require(
+        closure.get("path_count") == EXPECTED_TRUSTED_VALIDATION_PATH_COUNT
+        and closure.get("framed_sha256") == validator["sha256"],
+        "Current source release-guard validator closure drifted",
+    )
+    source_revision = bindings.get("source_revision") or {}
+    _commit_identity(
+        str(source_revision.get("commit") or ""),
+        str(source_revision.get("tree") or ""),
+    )
+    _assert_path_bindings_current(
+        source_revision["commit"], bindings, label="audited release-guard source"
+    )
+    _assert_path_bindings_current(commit, bindings, label="release-guard audit")
+    _require(
+        subprocess.run(
+            ["git", "merge-base", "--is-ancestor", source_revision["commit"], commit],
+            cwd=ROOT,
+        ).returncode == 0,
+        "Release-guard audit source is not an ancestor of final source S",
+    )
+    return {
+        **_blob_row(commit, RELEASE_AUDIT_PATH),
+        "audited_source_revision": copy.deepcopy(source_revision),
+        "p0_count": 0,
+        "p1_count": 0,
+        "status": "independent_audit_passed",
+    }
 
 
 def _candidate_contract(commit: str) -> dict[str, Any]:
@@ -567,6 +620,7 @@ def _build_artifact(
     artifacts = _pinned_artifacts(commit)
     validator = _trusted_validation_closure(commit)
     source_sets["trusted_validation_closure"] = validator
+    release_audit = _release_audit(commit, validator)
     return {
         "schema_version": 1,
         "artifact_id": ARTIFACT_ID,
@@ -606,6 +660,7 @@ def _build_artifact(
             "historical_immutable": True,
             "executed_later_from_isolated_checkpoint_m": True,
         },
+        "renewed_release_guard_audit": release_audit,
         "candidate_contract": _candidate_contract(commit),
         "product_counts": {
             "chapter_count": EXPECTED_COUNTS["chapters"],

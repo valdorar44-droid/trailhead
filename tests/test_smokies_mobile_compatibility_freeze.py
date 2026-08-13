@@ -43,7 +43,7 @@ def test_default_dry_run_is_zero_effect_and_never_mutates_artifact(
     assert after == before
 
 
-def test_source_commit_and_tree_are_explicit_and_checkpoint_m_ancestry_is_required(
+def test_source_commit_and_tree_are_explicit_and_checkpoint_m_is_isolated(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     with pytest.raises(builder.MobileCompatibilityBuildError, match="source commit"):
@@ -61,13 +61,8 @@ def test_source_commit_and_tree_are_explicit_and_checkpoint_m_ancestry_is_requir
         raise AssertionError(args)
 
     monkeypatch.setattr(builder, "_git", fake_git)
-    monkeypatch.setattr(
-        builder.subprocess,
-        "run",
-        lambda *_args, **_kwargs: type("Result", (), {"returncode": 1})(),
-    )
-    with pytest.raises(builder.MobileCompatibilityBuildError, match="descend"):
-        builder._commit_identity("a" * 40, "b" * 40)
+    builder._commit_identity("a" * 40, "b" * 40)
+    assert not any(call[:2] == ("merge-base", "--is-ancestor") for call in calls)
     assert calls
 
 
@@ -180,6 +175,60 @@ def test_current_s_validator_closure_requires_exact_174_paths(
         match="closure inventory is invalid",
     ):
         builder._trusted_validation_closure("a" * 40)
+
+
+def test_release_audit_is_current_source_bound_and_closure_exact(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    audited_commit, audited_tree, final_commit = "8" * 40, "7" * 40, "9" * 40
+    bindings = {
+        "source_revision": {"commit": audited_commit, "tree": audited_tree},
+        "all_six_dispatch_closure": {
+            "path_count": 174,
+            "framed_sha256": "6" * 64,
+        },
+        "store": {"path": "db/store.py", "byte_count": 1, "sha256": "5" * 64},
+    }
+    audit = {
+        "status": "independent_audit_passed",
+        "findings": {"p0_count": 0, "p1_count": 0},
+        "effects": {"network_accessed": False, "publication_performed": False},
+        "bindings": bindings,
+    }
+    monkeypatch.setattr(builder, "_json_blob", lambda *_args: copy.deepcopy(audit))
+    monkeypatch.setattr(
+        builder, "_blob_row", lambda *_args: {
+            "path": builder.RELEASE_AUDIT_PATH,
+            "byte_count": 10,
+            "git_blob_sha1": "4" * 40,
+            "sha256": "3" * 64,
+        },
+    )
+    identity_calls: list[tuple[str, str]] = []
+    binding_calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        builder, "_commit_identity",
+        lambda commit, tree: identity_calls.append((commit, tree)),
+    )
+    monkeypatch.setattr(
+        builder, "_assert_path_bindings_current",
+        lambda commit, _bindings, *, label: binding_calls.append((commit, label)),
+    )
+    monkeypatch.setattr(
+        builder.subprocess, "run",
+        lambda *_args, **_kwargs: type("Result", (), {"returncode": 0})(),
+    )
+    result = builder._release_audit(
+        final_commit, {"path_count": 174, "sha256": "6" * 64},
+    )
+    assert identity_calls == [(audited_commit, audited_tree)]
+    assert {call[0] for call in binding_calls} == {audited_commit, final_commit}
+    assert result["audited_source_revision"] == bindings["source_revision"]
+    audit["bindings"]["all_six_dispatch_closure"]["framed_sha256"] = "0" * 64
+    with pytest.raises(builder.MobileCompatibilityBuildError, match="closure"):
+        builder._release_audit(
+            final_commit, {"path_count": 174, "sha256": "6" * 64},
+        )
 
 
 def test_source_set_requires_all_gate_families_and_complete_mobile_tree(
@@ -332,6 +381,17 @@ def test_prebuild_record_keeps_every_external_gate_and_effect_false(
         "framing": "path NUL byte-count NUL bytes NUL",
     }
     monkeypatch.setattr(builder, "_trusted_validation_closure", lambda _commit: closure)
+    release_audit = {
+        "path": builder.RELEASE_AUDIT_PATH,
+        "byte_count": 3,
+        "git_blob_sha1": "4" * 40,
+        "sha256": "5" * 64,
+        "audited_source_revision": {"commit": "9" * 40, "tree": "8" * 40},
+        "p0_count": 0,
+        "p1_count": 0,
+        "status": "independent_audit_passed",
+    }
+    monkeypatch.setattr(builder, "_release_audit", lambda *_args: release_audit)
     result = builder._build_artifact("a" * 40, "b" * 40)
     assert result["kind"] == "smokies_mobile_compatibility_freeze"
     assert result["status"] == (
@@ -376,6 +436,7 @@ def test_prebuild_record_keeps_every_external_gate_and_effect_false(
         "historical_immutable": True,
         "executed_later_from_isolated_checkpoint_m": True,
     }
+    assert result["renewed_release_guard_audit"] == release_audit
     assert result["product_counts"] == {
         "chapter_count": 4,
         "variant_count": 6,
@@ -418,7 +479,13 @@ def test_pinned_artifact_source_size_hash_and_status_drift_fail_closed(
             "sha256": immutable[1] if immutable else hashlib.sha256(path.encode()).hexdigest(),
         }
 
-    monkeypatch.setattr(builder, "_blob_row", row)
+    row_calls: list[tuple[str, str]] = []
+
+    def recorded_row(commit: str, path: str) -> dict:
+        row_calls.append((commit, path))
+        return row(commit, path)
+
+    monkeypatch.setattr(builder, "_blob_row", recorded_row)
     monkeypatch.setattr(builder, "_assert_path_bindings_current", lambda *_args, **_kwargs: None)
     store = {key: row("x", "db/store.py")[key] for key in ("byte_count", "path", "sha256")}
     values = {
@@ -460,6 +527,14 @@ def test_pinned_artifact_source_size_hash_and_status_drift_fail_closed(
     assert set(result) == (
         set(builder.IMMUTABLE_PINNED_ARTIFACTS)
         | set(builder.CHECKPOINT_M_MIGRATION_ARTIFACTS)
+    )
+    assert all(
+        (builder.CHECKPOINT_M_COMMIT, path) in row_calls
+        for path in builder.CHECKPOINT_M_MIGRATION_ARTIFACTS
+    )
+    assert all(
+        ("a" * 40, path) in row_calls
+        for path in builder.IMMUTABLE_PINNED_ARTIFACTS
     )
     original = builder.IMMUTABLE_PINNED_ARTIFACTS[
         "originals/smokies/smokies_union_offline_map_estimate_v1.json"

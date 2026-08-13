@@ -161,8 +161,8 @@ def evidence(tmp_path: Path) -> dict[str, Path]:
             "framing": "path NUL byte-count NUL bytes NUL",
         },
         "checkpoint_m_migration_evidence": {
-            "commit": "55ffb762335544224fd1b421e1df7c4c27f07f00",
-            "tree": "fc152bfb6be4a2f61a8d16fc06f55d92b900d88c",
+            "commit": builder.CHECKPOINT_M_COMMIT,
+            "tree": builder.CHECKPOINT_M_TREE,
             "packet": copy.deepcopy(builder.CHECKPOINT_M_PACKET),
             "independent_audit": {
                 **copy.deepcopy(builder.CHECKPOINT_M_AUDIT),

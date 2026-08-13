@@ -18926,18 +18926,28 @@ class OriginalSmokiesFinalReadinessConflictError(ValueError):
 _SMOKIES_HISTORICAL_REPORT_ID = (
     "original_validation_9df694c93ee9ef3809c33f451d04bf28"
 )
-_SMOKIES_HISTORICAL_PROFILED_MANIFEST_SHA256 = (
-    "14d83293ba3b09aad00998668311447b5224f5172e641d35163de2865e3c9eb8"
+_SMOKIES_HISTORICAL_REPORT_MANIFEST_SHA256 = (
+    "b6f730d17922f7b38361d08e9bc97bde1d340a0c42d9b455802fca708585d725"
 )
+_SMOKIES_HISTORICAL_ASSETS_SHA256 = (
+    "1c4c945fe594089bb6147f15251a097818ea5b4093e193c22c93751cf811fc32"
+)
+_SMOKIES_HISTORICAL_INPUT_SHA256 = (
+    "81815b5cca2e6cb19a0cc1e75208d73b3ce01683d3660ea2095c7a553d1fba0a"
+)
+_SMOKIES_HISTORICAL_VALIDATOR_SOURCE_SHA256 = (
+    "cd045f33f6908235f5393dfeca54ae3317855dbb9f716bbd283fceff5be415a1"
+)
+_SMOKIES_HISTORICAL_WORKER_PID = 16
+_SMOKIES_HISTORICAL_STARTED_BY = 3
+_SMOKIES_HISTORICAL_STARTED_AT = 1786412026
+_SMOKIES_HISTORICAL_COMPLETED_AT = 1786412036
 _SMOKIES_RF_SELECTION_KEY = "roaring_fork_one_way_private_v1:one_way"
 _SMOKIES_RF_DELIVERY_CONTRACT_SHA256 = (
     "9081a647a7df0e59df4bb40506ba9bfa96c750536fb715ee31b3e9ee68ee20d6"
 )
 _SMOKIES_HISTORICAL_REDACTED_REPORT_SHA256 = (
     "ffbab03a0bdc839cbbdaa422a1b4910eaeb61acdc1d4102dbdc40e8d643fc059"
-)
-_SMOKIES_HISTORICAL_CONTRACT_SHA256 = (
-    "b876df36599184650b75e4ec31d4498dff75a333996afe2a47233f05d384c59e"
 )
 _SMOKIES_HISTORICAL_TARGET_ID = "south_tn"
 _SMOKIES_HISTORICAL_TARGET_BINDING_SHA256 = (
@@ -18946,28 +18956,22 @@ _SMOKIES_HISTORICAL_TARGET_BINDING_SHA256 = (
 _SMOKIES_HISTORICAL_TARGET_EVIDENCE_SHA256 = (
     "2fded0c644b73a36c2efe45a0f64e6e0add551b9c5f2b81c42e73fd276a7a703"
 )
-_SMOKIES_HISTORICAL_BASE_MANIFEST_PATH = (
-    _Path(__file__).resolve().parents[1]
-    / "originals"
-    / "smokies"
-    / "roaring_fork_private_manifest_v3.json"
-)
-_SMOKIES_HISTORICAL_PROFILE_PATH = (
-    _Path(__file__).resolve().parents[1]
-    / "originals"
-    / "smokies"
-    / "roaring_fork_narration_profile_v2.json"
-)
-
-
 def _smokies_historical_validation_inventory(
     rows: list[sqlite3.Row], history: dict,
 ) -> dict:
     """Prove the sole preserved report is the exact historical RF pass."""
+    try:
+        canonical_history, _canonical_binding = (
+            load_smokies_historical_validation_contract()
+        )
+    except (ValueError, OSError) as exc:
+        raise OriginalSmokiesFinalReadinessConflictError(
+            "Smokies historical RF validation contract is unavailable"
+        ) from exc
     if (
         not isinstance(history, dict)
         or _original_validation_hash(history)
-        != _SMOKIES_HISTORICAL_CONTRACT_SHA256
+        != _original_validation_hash(canonical_history)
         or history.get("report_id") != _SMOKIES_HISTORICAL_REPORT_ID
         or history.get("redacted_report_sha256")
         != _SMOKIES_HISTORICAL_REDACTED_REPORT_SHA256
@@ -18985,13 +18989,28 @@ def _smokies_historical_validation_inventory(
         or row.get("pack_id") != SMOKIES_FINAL_PRODUCT_ID
         or row.get("draft_revision") != history["expected_draft_revision"]
         or row.get("manifest_sha256")
-        != _SMOKIES_HISTORICAL_PROFILED_MANIFEST_SHA256
+        != _SMOKIES_HISTORICAL_REPORT_MANIFEST_SHA256
+        or row.get("manifest_sha256") != history["expected_manifest_sha256"]
+        or row.get("assets_sha256") != _SMOKIES_HISTORICAL_ASSETS_SHA256
+        or row.get("assets_sha256") != history["expected_assets_sha256"]
+        or row.get("input_sha256") != _SMOKIES_HISTORICAL_INPUT_SHA256
+        or row.get("input_sha256") != history["expected_input_sha256"]
+        or row.get("validator_source_sha256")
+        != _SMOKIES_HISTORICAL_VALIDATOR_SOURCE_SHA256
+        or row.get("validator_source_sha256")
+        != history["expected_validator_source_sha256"]
         or row.get("suite_version") != history["expected_suite_version"]
         or row.get("engine_version") != history["engine"]
         or row.get("status") != history["status"]
         or row.get("passed") != 1
-        or row.get("worker_pid") is not None
-        or not isinstance(row.get("completed_at"), int)
+        or row.get("worker_pid") != _SMOKIES_HISTORICAL_WORKER_PID
+        or row.get("worker_pid") != history["expected_worker_pid"]
+        or row.get("started_by") != _SMOKIES_HISTORICAL_STARTED_BY
+        or row.get("started_by") != history["expected_started_by"]
+        or row.get("started_at") != _SMOKIES_HISTORICAL_STARTED_AT
+        or row.get("started_at") != history["expected_started_at"]
+        or row.get("completed_at") != _SMOKIES_HISTORICAL_COMPLETED_AT
+        or row.get("completed_at") != history["expected_completed_at"]
     ):
         raise OriginalSmokiesFinalReadinessConflictError(
             "Smokies historical RF validation identity drifted"
@@ -19009,32 +19028,9 @@ def _smokies_historical_validation_inventory(
         raise OriginalSmokiesFinalReadinessConflictError(
             "Smokies historical RF validation manifest is invalid"
         )
-    try:
-        historical_base_manifest = json.loads(
-            _SMOKIES_HISTORICAL_BASE_MANIFEST_PATH.read_text(encoding="utf-8")
-        )
-        historical_profile = json.loads(
-            _SMOKIES_HISTORICAL_PROFILE_PATH.read_text(encoding="utf-8")
-        )
-    except (OSError, json.JSONDecodeError) as exc:
-        raise OriginalSmokiesFinalReadinessConflictError(
-            "Smokies historical RF manifest source is unavailable"
-        ) from exc
-    if not isinstance(historical_base_manifest, dict):
-        raise OriginalSmokiesFinalReadinessConflictError(
-            "Smokies historical RF manifest source is invalid"
-        )
-    if _original_validation_hash(historical_profile) != (
-        "f79b386031ca0faf6e07332e53ea037f957eb7d9871c4bbf05d5b0aff09c2af5"
-    ):
-        raise OriginalSmokiesFinalReadinessConflictError(
-            "Smokies historical RF narration profile drifted"
-        )
-    historical_base_manifest["narration_profile"] = historical_profile
     if (
         _original_validation_hash(report_manifest)
-        != _SMOKIES_HISTORICAL_PROFILED_MANIFEST_SHA256
-        or report_manifest != historical_base_manifest
+        != _SMOKIES_HISTORICAL_REPORT_MANIFEST_SHA256
     ):
         raise OriginalSmokiesFinalReadinessConflictError(
             "Smokies historical RF validation manifest drifted"
@@ -19047,11 +19043,13 @@ def _smokies_historical_validation_inventory(
         redacted_report = _original_validation_report_from_row(
             row,
             current_material={
-                key: row[key]
-                for key in (
-                    "draft_revision", "manifest_sha256", "assets_sha256",
-                    "input_sha256", "validator_source_sha256",
-                )
+                "draft_revision": history["expected_draft_revision"],
+                "manifest_sha256": history["expected_manifest_sha256"],
+                "assets_sha256": history["expected_assets_sha256"],
+                "input_sha256": history["expected_input_sha256"],
+                "validator_source_sha256": history[
+                    "expected_validator_source_sha256"
+                ],
             },
         )
     except (KeyError, TypeError, ValueError) as exc:
@@ -19069,11 +19067,14 @@ def _smokies_historical_validation_inventory(
         or summary.get("validated_selections") != [_SMOKIES_RF_SELECTION_KEY]
         or summary.get("validated_delivery_contracts") != [expected_delivery]
         or not isinstance(scenarios, list)
-        or len(scenarios) != 1
+        or len(scenarios) != history["expected_selection_result_count"]
         or not isinstance(scenarios[0], dict)
         or scenarios[0].get("selection_key") != _SMOKIES_RF_SELECTION_KEY
         or scenarios[0].get("passed") is not True
         or scenarios[0].get("issues") != []
+        or not isinstance(scenarios[0].get("scenarios"), list)
+        or len(scenarios[0]["scenarios"])
+        != history["expected_nested_scenario_count"]
         or issues != history["issues"]
         or redacted_report.get("current") is not True
         or _original_validation_hash(redacted_report)
@@ -19095,6 +19096,8 @@ def _smokies_historical_validation_inventory(
         "engine_version": row["engine_version"],
         "status": row["status"],
         "passed": bool(row["passed"]),
+        "worker_pid": row["worker_pid"],
+        "manifest_json_sha256": _original_validation_hash(report_manifest),
         "summary_sha256": _original_validation_hash(summary),
         "scenarios_sha256": _original_validation_hash(scenarios),
         "issues_sha256": _original_validation_hash(issues),

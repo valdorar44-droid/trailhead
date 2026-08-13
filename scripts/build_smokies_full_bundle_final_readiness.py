@@ -40,18 +40,22 @@ HISTORICAL_REPORT_ID = (
 HISTORICAL_REPORT_REDACTED_SHA256 = (
     "ffbab03a0bdc839cbbdaa422a1b4910eaeb61acdc1d4102dbdc40e8d643fc059"
 )
+CHECKPOINT_M_COMMIT = "a533852ceeba4f2d3b625bcce04135a2936705e5"
+CHECKPOINT_M_TREE = "eea0c936baf5ea2504f034608c84618a57c41d19"
 CHECKPOINT_M_PACKET = {
     "path": "originals/smokies/smokies_complete_private_migration_packet_v1.json",
-    "byte_count": 5_838_967,
-    "sha256": "d2f7ca0b587e67c2f8e9164a4d8f66663e6ac1f1a509af50989e04dcf84f4920",
+    "byte_count": 5_839_615,
+    "git_blob_sha1": "6aeeb3b5f2d9adb5dc58e6f5f12a606e4cba7ede",
+    "sha256": "1aabc64e7be8369cd963c752029aa8f6a80402c8df5ac0c92f072fb0a891c53e",
 }
 CHECKPOINT_M_AUDIT = {
     "path": "originals/smokies/smokies_complete_private_migration_operator_audit_v1.json",
-    "byte_count": 5_779,
-    "sha256": "28bd4356804994cf48323788335f95d8c99566cbc0c87001340ea709be632188",
+    "byte_count": 6_988,
+    "git_blob_sha1": "b634f21433e8a474d60cced1cf0df3c08af742e2",
+    "sha256": "de9aeba099d7cd0704175316c39ac4ddbbea6fd4022146da471cd6b855b4d3e2",
 }
 CHECKPOINT_M_AUDIT_BINDINGS_SHA256 = (
-    "7d06cc44203eb55f4a6f9abf622e7d62a52368737c3bb6fb94dbd5ed76807074"
+    "c7a548aae4fb3d74b1f3a16b68218250f52c27b120325da37c94db8e94a9ce5a"
 )
 CHECKPOINT_M_RUNTIME_SOURCE = {
     "commit": "4d24fe44a02bbf957c8200399612151f84a1e83a",
@@ -483,9 +487,9 @@ def build(
     checkpoint_tree = _git_oid(checkpoint_m.get("tree"), "checkpoint-M tree")
     _require(
         checkpoint_commit
-        == "55ffb762335544224fd1b421e1df7c4c27f07f00"
+        == CHECKPOINT_M_COMMIT
         and checkpoint_tree
-        == "fc152bfb6be4a2f61a8d16fc06f55d92b900d88c",
+        == CHECKPOINT_M_TREE,
         "checkpoint-M source identity drifted",
     )
     _require(

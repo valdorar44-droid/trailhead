@@ -102,19 +102,15 @@ def _historical_validation_contract() -> tuple[dict, dict]:
 
 
 def _insert_historical_validation_report(db, *, admin_id: int, now: int) -> None:
-    report_manifest = json.loads((
-        ROOT / "originals/smokies/roaring_fork_private_manifest_v3.json"
-    ).read_text(encoding="utf-8"))
-    report_manifest["narration_profile"] = json.loads((
-        ROOT / "originals/smokies/roaring_fork_narration_profile_v2.json"
-    ).read_text(encoding="utf-8"))
+    report_manifest = {"schema_version": 3, "fixture": "historical_report"}
+    report_manifest_sha256 = store._original_validation_hash(report_manifest)
     report = {
         "schema_version": 1,
         "report_type": "OriginalRouteValidationReportV1",
         "id": store._SMOKIES_HISTORICAL_REPORT_ID,
         "pack_id": ready.PRODUCT_ID,
         "draft_revision": 2,
-        "manifest_sha256": store._SMOKIES_HISTORICAL_PROFILED_MANIFEST_SHA256,
+        "manifest_sha256": report_manifest_sha256,
         "assets_sha256": "1" * 64,
         "input_sha256": "2" * 64,
         "validator_source_sha256": "3" * 64,
@@ -139,6 +135,10 @@ def _insert_historical_validation_report(db, *, admin_id: int, now: int) -> None
             "selection_key": store._SMOKIES_RF_SELECTION_KEY,
             "passed": True,
             "issues": [],
+            "scenarios": [
+                {"scenario_id": f"scenario_{index}"}
+                for index in range(13)
+            ],
         }],
         "issues": [],
     }
@@ -156,7 +156,7 @@ def _insert_historical_validation_report(db, *, admin_id: int, now: int) -> None
                 json.dumps(report_manifest), report["suite_version"],
                 report["engine_version"],
             report["status"], 1, json.dumps(report["summary"]),
-            json.dumps(report["scenarios"]), "[]", admin_id, None,
+            json.dumps(report["scenarios"]), "[]", admin_id, 16,
             now + 1, now + 2,
         ),
     )
@@ -184,12 +184,44 @@ def _install_synthetic_historical_contract(monkeypatch, db) -> tuple[dict, dict]
     redacted_sha256 = _sha(redacted)
     history, binding = _historical_validation_contract()
     history["redacted_report_sha256"] = redacted_sha256
+    history["expected_manifest_sha256"] = row["manifest_sha256"]
+    history["expected_assets_sha256"] = row["assets_sha256"]
+    history["expected_input_sha256"] = row["input_sha256"]
+    history["expected_validator_source_sha256"] = row[
+        "validator_source_sha256"
+    ]
+    history["expected_worker_pid"] = row["worker_pid"]
+    history["expected_started_by"] = row["started_by"]
+    history["expected_started_at"] = row["started_at"]
+    history["expected_completed_at"] = row["completed_at"]
     binding["historical_validation_contract_sha256"] = _sha(history)
+    monkeypatch.setattr(
+        store, "_SMOKIES_HISTORICAL_REPORT_MANIFEST_SHA256",
+        row["manifest_sha256"],
+    )
+    monkeypatch.setattr(
+        store, "_SMOKIES_HISTORICAL_ASSETS_SHA256", row["assets_sha256"]
+    )
+    monkeypatch.setattr(
+        store, "_SMOKIES_HISTORICAL_INPUT_SHA256", row["input_sha256"]
+    )
+    monkeypatch.setattr(
+        store, "_SMOKIES_HISTORICAL_VALIDATOR_SOURCE_SHA256",
+        row["validator_source_sha256"],
+    )
+    monkeypatch.setattr(store, "_SMOKIES_HISTORICAL_WORKER_PID", row["worker_pid"])
+    monkeypatch.setattr(store, "_SMOKIES_HISTORICAL_STARTED_BY", row["started_by"])
+    monkeypatch.setattr(store, "_SMOKIES_HISTORICAL_STARTED_AT", row["started_at"])
+    monkeypatch.setattr(
+        store, "_SMOKIES_HISTORICAL_COMPLETED_AT", row["completed_at"]
+    )
     monkeypatch.setattr(
         store, "_SMOKIES_HISTORICAL_REDACTED_REPORT_SHA256", redacted_sha256
     )
     monkeypatch.setattr(
-        store, "_SMOKIES_HISTORICAL_CONTRACT_SHA256", _sha(history)
+        store,
+        "load_smokies_historical_validation_contract",
+        lambda: (copy.deepcopy(history), copy.deepcopy(binding)),
     )
     return history, binding
 
@@ -232,7 +264,12 @@ def test_historical_validation_contract_is_exact_source_bound():
         ready.HISTORICAL_VALIDATION_SOURCE_SHA256
     )
     assert binding["historical_validation_contract_sha256"] == _sha(history)
-    assert store._SMOKIES_HISTORICAL_CONTRACT_SHA256 == _sha(history)
+    assert history["expected_worker_pid"] == 16
+    assert history["expected_manifest_sha256"] == (
+        "b6f730d17922f7b38361d08e9bc97bde1d340a0c42d9b455802fca708585d725"
+    )
+    assert history["expected_selection_result_count"] == 1
+    assert history["expected_nested_scenario_count"] == 13
     assert store._SMOKIES_HISTORICAL_REDACTED_REPORT_SHA256 == (
         "ffbab03a0bdc839cbbdaa422a1b4910eaeb61acdc1d4102dbdc40e8d643fc059"
     )
@@ -605,6 +642,14 @@ def test_store_cas_synthetic_rev4_to_rev5_and_idempotent_replay(
         "assets",
         "input",
         "validator",
+        "worker_null",
+        "worker_other",
+        "started_by",
+        "started_at",
+        "completed_at",
+        "selection",
+        "top_level_count",
+        "nested_count",
         "historical_contract",
     ],
 )
@@ -680,6 +725,46 @@ def test_cas_rejects_historical_validation_inventory_drift(
                 SET {column}=? WHERE id=?""",
             ("0" * 64, store._SMOKIES_HISTORICAL_REPORT_ID),
         )
+    elif mutation in {"worker_null", "worker_other"}:
+        db.execute(
+            """UPDATE authored_original_validation_reports
+               SET worker_pid=? WHERE id=?""",
+            (
+                None if mutation == "worker_null" else 17,
+                store._SMOKIES_HISTORICAL_REPORT_ID,
+            ),
+        )
+    elif mutation in {"started_by", "started_at", "completed_at"}:
+        column = mutation
+        if mutation == "started_by":
+            db.execute(
+                """INSERT INTO users
+                   (id,email,username,password_hash,is_admin,created_at)
+                   VALUES (2,'other@example.test','other','x',1,?)""",
+                (now,),
+            )
+        db.execute(
+            f"""UPDATE authored_original_validation_reports
+                SET {column}={column}+1 WHERE id=?""",
+            (store._SMOKIES_HISTORICAL_REPORT_ID,),
+        )
+    elif mutation in {"selection", "top_level_count", "nested_count"}:
+        scenarios = json.loads(db.execute(
+            """SELECT scenarios_json FROM authored_original_validation_reports
+               WHERE id=?""",
+            (store._SMOKIES_HISTORICAL_REPORT_ID,),
+        ).fetchone()[0])
+        if mutation == "selection":
+            scenarios[0]["selection_key"] = "wrong:selection"
+        elif mutation == "top_level_count":
+            scenarios = []
+        else:
+            scenarios[0]["scenarios"] = scenarios[0]["scenarios"][:-1]
+        db.execute(
+            """UPDATE authored_original_validation_reports
+               SET scenarios_json=? WHERE id=?""",
+            (json.dumps(scenarios), store._SMOKIES_HISTORICAL_REPORT_ID),
+        )
     rows = db.execute(
         """SELECT * FROM authored_original_validation_reports
            WHERE pack_id=? ORDER BY id""",
@@ -688,8 +773,15 @@ def test_cas_rejects_historical_validation_inventory_drift(
     history = copy.deepcopy(synthetic_history)
     if mutation == "historical_contract":
         history["source_commit"] = "0" * 40
+    before = [dict(row) for row in rows]
     with pytest.raises(store.OriginalSmokiesFinalReadinessConflictError):
         store._smokies_historical_validation_inventory(rows, history)
+    after = [dict(row) for row in db.execute(
+        """SELECT * FROM authored_original_validation_reports
+           WHERE pack_id=? ORDER BY id""",
+        (ready.PRODUCT_ID,),
+    ).fetchall()]
+    assert after == before
     db.close()
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,7 +14,25 @@ from db import store
 from scripts import attest_and_profile_smokies_complete_private as operator
 
 
-PACKET = json.loads(operator.PACKET_PATH.read_text(encoding="utf-8"))
+M2_COMMIT = "a533852ceeba4f2d3b625bcce04135a2936705e5"
+M2_PACKET_PATH = (
+    "originals/smokies/smokies_complete_private_migration_packet_v1.json"
+)
+M2_AUDIT_PATH = (
+    "originals/smokies/smokies_complete_private_migration_operator_audit_v1.json"
+)
+
+
+def _m2_blob(path: str) -> bytes:
+    return subprocess.check_output(
+        ["git", "show", f"{M2_COMMIT}:{path}"], cwd=operator.ROOT,
+    )
+
+
+PACKET_PAYLOAD = _m2_blob(M2_PACKET_PATH)
+AUDIT_PAYLOAD = _m2_blob(M2_AUDIT_PATH)
+PACKET = json.loads(PACKET_PAYLOAD)
+AUDIT = json.loads(AUDIT_PAYLOAD)
 TEMPLATE = json.loads(operator.PROFILE_TEMPLATE_PATH.read_text(encoding="utf-8"))
 ADMIN_ID = 314159
 
@@ -554,11 +573,10 @@ def test_materialization_changes_only_verified_at() -> None:
 
 
 def test_actual_frozen_packet_expectations_are_self_consistent() -> None:
-    audit = json.loads(operator.AUDIT_PATH.read_text(encoding="utf-8"))
     terms = PACKET["post_migration_phases"]["license_attestation"]
     profile = PACKET["post_migration_phases"]["narration_profile_cas"]
     args = SimpleNamespace(
-        expected_packet_sha256=operator.sha256_path(operator.PACKET_PATH),
+        expected_packet_sha256=operator.sha256_bytes(PACKET_PAYLOAD),
         expected_source_commit=PACKET["source_revision"]["commit"],
         expected_source_tree=PACKET["source_revision"]["tree"],
         expected_new_narration_map_sha256=operator.canonical_sha256(
@@ -572,11 +590,27 @@ def test_actual_frozen_packet_expectations_are_self_consistent() -> None:
             "expected_validation_metadata_sha256"
         ],
         expected_terms_policy_sha256=terms["terms_policy_sha256"],
-        expected_audit_sha256=operator.sha256_path(operator.AUDIT_PATH),
-        expected_audit_bindings_sha256=operator.canonical_sha256(audit["bindings"]),
+        expected_audit_sha256=operator.sha256_bytes(AUDIT_PAYLOAD),
+        expected_audit_bindings_sha256=operator.canonical_sha256(AUDIT["bindings"]),
     )
-    payload = operator.PACKET_PATH.read_bytes()
-    operator._validate_packet(PACKET, operator.sha256_bytes(payload), args)
+    operator._validate_packet(PACKET, operator.sha256_bytes(PACKET_PAYLOAD), args)
     operator._validate_audit(
-        audit, operator.AUDIT_PATH.read_bytes(), args.expected_packet_sha256, args
+        AUDIT, AUDIT_PAYLOAD, args.expected_packet_sha256, args
     )
+
+
+def test_source_tree_migration_files_cannot_substitute_for_isolated_m2() -> None:
+    local_packet = (
+        operator.ROOT
+        / "originals/smokies/smokies_complete_private_migration_packet_v1.json"
+    )
+    local_audit = (
+        operator.ROOT
+        / "originals/smokies/smokies_complete_private_migration_operator_audit_v1.json"
+    )
+    assert local_packet.read_bytes() != PACKET_PAYLOAD
+    assert local_audit.read_bytes() != AUDIT_PAYLOAD
+    with pytest.raises(operator.SmokiesPostMigrationError, match="outside"):
+        operator._outside_repo(local_packet, "immutable M2 migration packet")
+    with pytest.raises(operator.SmokiesPostMigrationError, match="outside"):
+        operator._outside_repo(local_audit, "immutable M2 migration audit")

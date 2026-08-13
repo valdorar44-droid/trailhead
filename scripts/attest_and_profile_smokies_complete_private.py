@@ -38,8 +38,6 @@ from db import store  # noqa: E402
 PRODUCT_ID = "great_smoky_mountains_ridges_rivers_living_memory"
 TARGET_ID = "railway.trailhead.production.private"
 APPLY_SENTINEL = "ATTEST_AND_PROFILE_PRIVATE_SMOKIES_FULL_BUNDLE"
-PACKET_PATH = ROOT / "originals/smokies/smokies_complete_private_migration_packet_v1.json"
-AUDIT_PATH = ROOT / "originals/smokies/smokies_complete_private_migration_operator_audit_v1.json"
 PROFILE_TEMPLATE_PATH = ROOT / "originals/smokies/smokies_pack_narration_profile_v2.json"
 RECEIPT_NAME = "smokies_full_bundle_post_migration_profile_receipt_v1.json"
 JOURNAL_HEADER_NAME = "000000-header-v1.json"
@@ -993,26 +991,6 @@ def _query_live_state(
         len(reports) == permitted.get("expected_report_count") == 1,
         "historical validation report membership drifted",
     )
-    historical = reports[0]
-    report_facts = {
-        "id": permitted["report_id"],
-        "pack_id": PRODUCT_ID,
-        "draft_revision": permitted["expected_draft_revision"],
-        "suite_version": permitted["expected_suite_version"],
-        "engine_version": permitted["engine"],
-        "status": permitted["status"],
-        "passed": 1,
-        "worker_pid": None,
-    }
-    _require(
-        all(historical.get(key) == value for key, value in report_facts.items()),
-        "historical validation report facts drifted",
-    )
-    _require(
-        historical.get("manifest_sha256")
-        == packet["predecessor"]["profiled_manifest_canonical_sha256"],
-        "historical validation report manifest drifted",
-    )
     try:
         historical_inventory = store._smokies_historical_validation_inventory(
             reports, permitted
@@ -1743,6 +1721,12 @@ def apply(args: argparse.Namespace) -> dict[str, Any]:
     migration_receipt_path = _outside_repo(
         Path(str(args.migration_receipt or "")), "private migration receipt"
     )
+    migration_packet_path = _outside_repo(
+        Path(str(args.migration_packet or "")), "immutable M2 migration packet"
+    )
+    migration_audit_path = _outside_repo(
+        Path(str(args.migration_audit or "")), "immutable M2 migration audit"
+    )
     terms_path = _outside_repo(
         Path(str(args.terms_observation or "")), "private terms observation"
     )
@@ -1758,8 +1742,12 @@ def apply(args: argparse.Namespace) -> dict[str, Any]:
     _require(asset_root.is_dir() and not asset_root.is_symlink(), "asset root is unsafe")
     _validate_sqlite_sidecars(db_path)
 
-    with _pinned_file(PACKET_PATH, "migration packet", private=False) as packet_pin, \
-        _pinned_file(AUDIT_PATH, "migration audit", private=False) as audit_pin, \
+    with _pinned_file(
+        migration_packet_path, "immutable M2 migration packet", private=True
+    ) as packet_pin, \
+        _pinned_file(
+            migration_audit_path, "immutable M2 migration audit", private=True
+        ) as audit_pin, \
         _pinned_file(PROFILE_TEMPLATE_PATH, "profile template", private=False) as template_pin, \
         _pinned_file(migration_receipt_path, "private migration receipt", private=True) as migration_pin, \
         _pinned_file(terms_path, "private terms observation", private=True) as terms_pin, \
@@ -1869,6 +1857,8 @@ def parser() -> argparse.ArgumentParser:
     result.add_argument("--asset-root")
     result.add_argument("--target-id")
     result.add_argument("--admin-user-id", type=int)
+    result.add_argument("--migration-packet")
+    result.add_argument("--migration-audit")
     result.add_argument("--migration-receipt")
     result.add_argument("--terms-observation")
     result.add_argument("--journal-dir")

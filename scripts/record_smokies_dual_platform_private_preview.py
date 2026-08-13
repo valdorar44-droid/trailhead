@@ -40,13 +40,6 @@ EXPECTED_DRAFT_REVISION = 5
 APPLY_SENTINEL = "RECORD_SMOKIES_DUAL_PLATFORM_PRIVATE_PREVIEW"
 RECEIPT_ID = "smokies_dual_platform_private_preview_marker_20260811_v1"
 RECEIPT_TABLE = "authored_original_smokies_dual_platform_preview_receipts_v1"
-HISTORICAL_REPORT_ID = "original_validation_9df694c93ee9ef3809c33f451d04bf28"
-HISTORICAL_REPORT_REDACTED_SHA256 = (
-    "ffbab03a0bdc839cbbdaa422a1b4910eaeb61acdc1d4102dbdc40e8d643fc059"
-)
-HISTORICAL_REPORT_MANIFEST_SHA256 = (
-    "14d83293ba3b09aad00998668311447b5224f5172e641d35163de2865e3c9eb8"
-)
 RECEIPT_COLUMNS = (
     "receipt_id", "pack_id", "draft_revision", "manifest_sha256",
     "assets_sha256", "validation_input_sha256",
@@ -488,56 +481,12 @@ def _historical_validation_inventory(db: sqlite3.Connection) -> dict[str, Any]:
         "SELECT * FROM authored_original_validation_reports WHERE pack_id=? ORDER BY id",
         (PRODUCT_ID,),
     ).fetchall()
-    _require(len(rows) == 1, "Historical validation report membership drifted")
-    row = dict(rows[0])
-    _require(
-        row.get("id") == HISTORICAL_REPORT_ID
-        and row.get("pack_id") == PRODUCT_ID
-        and row.get("draft_revision") == 2
-        and row.get("suite_version") == "originals_virtual_route_v3"
-        and row.get("engine_version") == "original-trigger-v3"
-        and row.get("status") == "passed"
-        and row.get("passed") == 1
-        and row.get("worker_pid") is None,
-        "Historical validation report identity drifted",
-    )
     try:
-        manifest = _decode_object(
-            row.get("manifest_json"), "Historical validation manifest",
-        )
-        redacted = store._original_validation_report_from_row(
-            row,
-            current_material={
-                key: row[key]
-                for key in (
-                    "draft_revision", "manifest_sha256", "assets_sha256",
-                    "input_sha256", "validator_source_sha256",
-                )
-            },
-        )
-    except (TypeError, KeyError, ValueError, json.JSONDecodeError) as exc:
-        raise DualPlatformPreviewMarkerError(
-            "Historical validation report payload drifted"
-        ) from exc
-    _require(
-        _canonical_sha256(manifest) == HISTORICAL_REPORT_MANIFEST_SHA256
-        and row.get("manifest_sha256") == HISTORICAL_REPORT_MANIFEST_SHA256
-        and redacted.get("current") is True
-        and _canonical_sha256(redacted) == HISTORICAL_REPORT_REDACTED_SHA256,
-        "Historical Roaring Fork validation evidence drifted",
-    )
-    try:
-        history, _history_binding = (
-            store.load_smokies_historical_validation_contract()
-        )
+        history, _history_binding = store.load_smokies_historical_validation_contract()
         canonical_inventory = store._smokies_historical_validation_inventory(
             rows, history
         )
-    except (
-        store.OriginalSmokiesFinalReadinessConflictError,
-        KeyError,
-        TypeError,
-    ) as exc:
+    except (ValueError, KeyError, TypeError) as exc:
         raise DualPlatformPreviewMarkerError(
             "Historical validation report canonical inventory drifted"
         ) from exc
@@ -546,6 +495,10 @@ def _historical_validation_inventory(db: sqlite3.Connection) -> dict[str, Any]:
         and canonical_inventory.get("full_bundle_report_count") == 0
         and isinstance(canonical_inventory.get("inventory"), list)
         and len(canonical_inventory["inventory"]) == 1
+        and canonical_inventory["inventory"][0].get("report_id")
+        == history.get("report_id")
+        and canonical_inventory["inventory"][0].get("redacted_report_sha256")
+        == history.get("redacted_report_sha256")
         and _safe_sha(
             canonical_inventory.get("inventory_sha256"),
             "Historical validation report inventory sha256",
@@ -555,8 +508,8 @@ def _historical_validation_inventory(db: sqlite3.Connection) -> dict[str, Any]:
     return {
         "historical_report_count": 1,
         "full_bundle_report_count": 0,
-        "historical_report_id": HISTORICAL_REPORT_ID,
-        "historical_redacted_report_sha256": HISTORICAL_REPORT_REDACTED_SHA256,
+        "historical_report_id": history["report_id"],
+        "historical_redacted_report_sha256": history["redacted_report_sha256"],
         "inventory_sha256": canonical_inventory["inventory_sha256"],
     }
 

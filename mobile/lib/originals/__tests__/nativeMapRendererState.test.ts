@@ -55,10 +55,30 @@ async function main() {
     'the Original pack binds RNMapbox to its approved offline style',
   );
   assert.match(adapter, /pack_id: mapPackReference\(renderer, name\)/);
+  assert.match(adapter, /bytes: exact\.completedResourceSize/);
+  assert.doesNotMatch(
+    adapter,
+    /Math\.round\((?:ready|pack|progress)\.sizeMb \* 1_048_576\)/,
+    'exact native bytes are never reconstructed from display megabytes',
+  );
   assert.match(adapter, /reference\.renderer && reference\.renderer !== activeRenderer/);
   assert.match(adapter, /pack\.renderer === renderer/);
+  assert.match(adapter, /async inspectStrict\(packId\)/);
+  assert.match(adapter, /mapPackReference\(reference\.renderer, reference\.name\) !== packId/);
+  assert.match(
+    adapter,
+    /inspectInstalledPackStrict\(\s*reference\.name,\s*reference\.renderer,\s*\)/,
+    'strict inspection remains bound to the persisted renderer and logical name',
+  );
+  assert.match(adapter, /installed\.completedResourceSize <= 0/);
   assert.match(adapter, /deletePack\(name, 'maplibre'\)/);
   assert.match(adapter, /deletePack\(name, 'rnmapbox'\)/);
+
+  const manager = readFileSync('components/NativeMap/offlineManager.ts', 'utf8');
+  assert.match(manager, /async function inspectInstalledPackStrict/);
+  assert.match(manager, /const nativeName = physicalPackName\(name, renderer\)/);
+  assert.match(manager, /installedOfflinePackStatusStrict\(packs \?\? \[\], nativeName\)/);
+  assert.match(manager, /completedResourceSize,/);
 
   const map = readFileSync('app/(tabs)/map.tsx', 'utf8');
   assert.match(map, /setActiveNativeMapRenderer\(renderer\)/);

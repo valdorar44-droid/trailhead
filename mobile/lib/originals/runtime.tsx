@@ -17,7 +17,11 @@ import {
   setCarOriginalDrive,
 } from '../carIntegration';
 import { originalsApi } from './api';
-import { originalAdminPreviewReviewEntries } from './adminPreviewReview';
+import {
+  originalAdminPreviewReviewEntries,
+  originalPrivateFieldSafeDiagnostic,
+  type OriginalPrivateFieldSafeDiagnostic,
+} from './adminPreviewReview';
 import { registerOriginalsAccountDepartureStopper } from './accountCleanup';
 import {
   type OriginalAccessStore,
@@ -74,11 +78,15 @@ import {
 import { stopHeadlessOriginalRuntime } from './headlessRuntime';
 import { originalOwnerScopeForAccount, originalRestoreScopeIsCurrent } from './ownership';
 import {
+  consumeOriginalPrivateFieldReviewRecovery,
   clearOriginalPrivateReviewCleanupIdentityStrict,
   clearOriginalPreviewAccessStrict,
   getOriginalPrivateReviewCleanupIdentity,
+  getOriginalPrivateReviewCleanupIdentityForCleanup,
   getOriginalPreviewToken,
   saveOriginalPrivateReviewCleanupIdentity,
+  type OriginalPrivateFieldReviewIdentityV2,
+  type OriginalPrivateReviewCleanupRecord,
   type OriginalPrivateReviewCleanupIdentityV1,
 } from './previewAccess';
 import {
@@ -204,6 +212,8 @@ export type OriginalsAdminRuntimeValue = {
   privateReviewMode: OriginalPrivateReviewMode;
   privateReviewActive: boolean;
   privateReviewCleanupPending: boolean;
+  privateReviewRecoveryChecked: boolean;
+  privateFieldDiagnostic: OriginalPrivateFieldSafeDiagnostic | null;
   startSimulation: (
     manifest: OriginalManifest,
     selection?: OriginalChapterSelectionV2,
@@ -224,27 +234,51 @@ type OriginalPrivateReviewIdentity = {
   packId: string;
   version: number;
   manifestId: string;
+  fieldBinding?: {
+    chapterId: string;
+    variantId: string;
+    validationSelectionId: string;
+    deliveryContractSha256: string;
+  };
 };
 
 function storedPrivateReviewIdentity(
   identity: OriginalPrivateReviewIdentity,
-): OriginalPrivateReviewCleanupIdentityV1 {
-  return {
+): OriginalPrivateReviewCleanupIdentityV1 | OriginalPrivateFieldReviewIdentityV2 {
+  const base: OriginalPrivateReviewCleanupIdentityV1 = {
     owner_scope: identity.ownerScope,
     pack_id: identity.packId,
     version: identity.version,
     manifest_id: identity.manifestId,
   };
+  return identity.fieldBinding
+    ? {
+      ...base,
+      review_mode: 'field',
+      chapter_id: identity.fieldBinding.chapterId,
+      variant_id: identity.fieldBinding.variantId,
+      validation_selection_id: identity.fieldBinding.validationSelectionId,
+      delivery_contract_sha256: identity.fieldBinding.deliveryContractSha256,
+    }
+    : base;
 }
 
 function runtimePrivateReviewIdentity(
-  identity: OriginalPrivateReviewCleanupIdentityV1,
+  identity: OriginalPrivateReviewCleanupRecord,
 ): OriginalPrivateReviewIdentity {
   return {
     ownerScope: identity.owner_scope,
     packId: identity.pack_id,
     version: identity.version,
     manifestId: identity.manifest_id,
+    ...(identity.schema_version === 2 ? {
+      fieldBinding: {
+        chapterId: identity.chapter_id,
+        variantId: identity.variant_id,
+        validationSelectionId: identity.validation_selection_id,
+        deliveryContractSha256: identity.delivery_contract_sha256,
+      },
+    } : {}),
   };
 }
 
@@ -255,7 +289,52 @@ function samePrivateReviewIdentity(
   return left.ownerScope === right.ownerScope
     && left.packId === right.packId
     && left.version === right.version
+    && left.manifestId === right.manifestId
+    && Boolean(left.fieldBinding) === Boolean(right.fieldBinding)
+    && (!left.fieldBinding || !right.fieldBinding || (
+      left.fieldBinding.chapterId === right.fieldBinding.chapterId
+      && left.fieldBinding.variantId === right.fieldBinding.variantId
+      && left.fieldBinding.validationSelectionId === right.fieldBinding.validationSelectionId
+      && left.fieldBinding.deliveryContractSha256.toLowerCase()
+        === right.fieldBinding.deliveryContractSha256.toLowerCase()
+    ));
+}
+
+function samePrivateReviewCleanupTarget(
+  left: OriginalPrivateReviewIdentity,
+  right: OriginalPrivateReviewIdentity,
+) {
+  return left.ownerScope === right.ownerScope
+    && left.packId === right.packId
+    && left.version === right.version
     && left.manifestId === right.manifestId;
+}
+
+function privateFieldReviewIdentity(
+  ownerScope: OriginalOwnerScope,
+  manifest: Pick<OriginalManifestV1, 'pack_id' | 'version' | 'manifest_id'>,
+  selection: {
+    chapter_id: string;
+    variant_id: string;
+    validation_selection_id: string;
+    delivery_contract_sha256?: string;
+  } | undefined,
+): OriginalPrivateReviewIdentity {
+  if (!selection?.delivery_contract_sha256) {
+    throw new Error('Private field recovery requires the exact V3 delivery selection.');
+  }
+  return {
+    ownerScope,
+    packId: manifest.pack_id,
+    version: manifest.version,
+    manifestId: manifest.manifest_id,
+    fieldBinding: {
+      chapterId: selection.chapter_id,
+      variantId: selection.variant_id,
+      validationSelectionId: selection.validation_selection_id,
+      deliveryContractSha256: selection.delivery_contract_sha256,
+    },
+  };
 }
 
 type OriginalsRuntimeDependencies = {
@@ -293,6 +372,7 @@ export function OriginalsRuntimeProvider({
   dependencies?: OriginalsRuntimeDependencies;
 }) {
   const userId = useStore(state => state.user?.id ?? null);
+  const authHydrated = useStore(state => state.authHydrated);
   const [state, setState] = useState<OriginalsRuntimeState>('idle');
   const [session, setSession] = useState<OriginalSessionV1 | null>(null);
   const [manifest, setManifest] = useState<OriginalManifestV1 | null>(null);
@@ -305,6 +385,8 @@ export function OriginalsRuntimeProvider({
   const [privateReviewMode, setPrivateReviewMode] = useState<OriginalPrivateReviewMode>(null);
   const [privateReviewActive, setPrivateReviewActive] = useState(false);
   const [privateReviewCleanupPending, setPrivateReviewCleanupPending] = useState(false);
+  const [privateReviewRecoveryChecked, setPrivateReviewRecoveryChecked] = useState(false);
+  const [privateFieldDiagnostic, setPrivateFieldDiagnostic] = useState<OriginalPrivateFieldSafeDiagnostic | null>(null);
   const [lastTriggerEvaluation, setLastTriggerEvaluation] = useState<OriginalTriggerEvaluation | null>(null);
   const [audioPlaybackState, setAudioPlaybackState] = useState<OriginalAudioPlaybackState | null>(null);
 
@@ -325,6 +407,7 @@ export function OriginalsRuntimeProvider({
   const privateReviewModeRef = useRef<OriginalPrivateReviewMode>(null);
   const privateReviewIdentityRef = useRef<OriginalPrivateReviewIdentity | null>(null);
   const privateReviewCleanupIdentityRef = useRef<OriginalPrivateReviewIdentity | null>(null);
+  const privateReviewRecoveryIdentityRef = useRef<OriginalPrivateReviewIdentity | null>(null);
   const lastTriggerEvaluationRef = useRef<OriginalTriggerEvaluation | null>(null);
   const stoppingRef = useRef(false);
   const stopTourPromiseRef = useRef<Promise<void> | null>(null);
@@ -1012,6 +1095,7 @@ export function OriginalsRuntimeProvider({
     };
     try {
       requireActiveActivation();
+      if (reviewMode === 'field' && mountedRef.current) setPrivateFieldDiagnostic(null);
       if (privateReviewCleanupIdentityRef.current) {
         throw new Error('Finish removing the pending private review before starting another Original.');
       }
@@ -1053,14 +1137,53 @@ export function OriginalsRuntimeProvider({
       if (reviewMode === 'field' && !exactPrivateReview) {
         throw new Error('The exact unpublished admin preview is required for a private field review.');
       }
-      const privateReviewIdentity: OriginalPrivateReviewIdentity | null = exactPrivateReview
-        ? {
-          ownerScope,
-          packId: cleanManifest.pack_id,
-          version: cleanManifest.version,
-          manifestId: cleanManifest.manifest_id,
+      let privateReviewIdentity: OriginalPrivateReviewIdentity | null = null;
+      let nextPrivateFieldDiagnostic: OriginalPrivateFieldSafeDiagnostic | null = null;
+      if (exactPrivateReview) {
+        privateReviewIdentity = reviewMode === 'field'
+          ? privateFieldReviewIdentity(ownerScope, cleanManifest, resolved.selection)
+          : {
+            ownerScope,
+            packId: cleanManifest.pack_id,
+            version: cleanManifest.version,
+            manifestId: cleanManifest.manifest_id,
+          };
+        if (reviewMode === 'field') {
+          const durable = await getOriginalPrivateReviewCleanupIdentity();
+          requireActiveActivation();
+          if (!durable || !samePrivateReviewIdentity(runtimePrivateReviewIdentity(durable), privateReviewIdentity)) {
+            throw new Error('The exact private review cleanup identity is not ready.');
+          }
+          if (
+            durable.schema_version !== 2
+            || !['acquiring', 'recovery_consumed'].includes(durable.recovery_state)
+          ) throw new Error('The one-time private field recovery state is not ready.');
+          if (
+            durable.recovery_state === 'recovery_consumed'
+            && (
+              !privateReviewRecoveryIdentityRef.current
+              || !samePrivateReviewIdentity(
+                privateReviewRecoveryIdentityRef.current,
+                privateReviewIdentity,
+              )
+            )
+          ) throw new Error('The one-time private field recovery was not claimed by this launch.');
+          const inspection = await dependencies.bundles.inspectPrivatePreview(
+            ownerScope,
+            cleanManifest.pack_id,
+            cleanManifest.version,
+            cleanManifest.manifest_id,
+          );
+          requireActiveActivation();
+          nextPrivateFieldDiagnostic = originalPrivateFieldSafeDiagnostic(inspection, {
+            isAdmin: Boolean(useStore.getState().user?.is_admin),
+            privateField: true,
+          });
+          if (!nextPrivateFieldDiagnostic) {
+            throw new Error('The exact private field verification diagnostic is unavailable.');
+          }
         }
-        : null;
+      }
       const existing = restart || privateReview
         ? null
         : await dependencies.sessions.load(
@@ -1098,6 +1221,7 @@ export function OriginalsRuntimeProvider({
       privateReviewModeRef.current = reviewMode;
       privateReviewIdentityRef.current = privateReviewIdentity;
       privateReviewCleanupIdentityRef.current = null;
+      privateReviewRecoveryIdentityRef.current = null;
       lastTriggerEvaluationRef.current = null;
       manifestRef.current = cleanManifest;
       selectablePlanRef.current = resolved.source_schema_version === 3
@@ -1114,6 +1238,7 @@ export function OriginalsRuntimeProvider({
         setPrivateReviewMode(reviewMode);
         setPrivateReviewActive(Boolean(privateReviewIdentity));
         setPrivateReviewCleanupPending(false);
+        setPrivateFieldDiagnostic(nextPrivateFieldDiagnostic);
         setLastTriggerEvaluation(null);
         setAudioPlaybackState(null);
         setState('tracking');
@@ -1162,6 +1287,7 @@ export function OriginalsRuntimeProvider({
           setSimulation(false);
           setPrivateReviewMode(null);
           setPrivateReviewActive(false);
+          setPrivateFieldDiagnostic(null);
           setLastTriggerEvaluation(null);
           setAudioPlaybackState(null);
           setState('idle');
@@ -1194,6 +1320,7 @@ export function OriginalsRuntimeProvider({
           setSimulation(false);
           setPrivateReviewMode(null);
           setPrivateReviewActive(false);
+          setPrivateFieldDiagnostic(null);
         }
       }
       throw caught;
@@ -1517,6 +1644,7 @@ export function OriginalsRuntimeProvider({
           setSimulation(false);
           setPrivateReviewMode(null);
           setPrivateReviewActive(false);
+          setPrivateFieldDiagnostic(null);
           if (!privateReviewCleanupIdentityRef.current) {
             setPrivateReviewCleanupPending(false);
           }
@@ -1636,7 +1764,7 @@ export function OriginalsRuntimeProvider({
         throw new Error('Sign in to the account that opened this private review to clean it up.');
       }
       const currentScope = originalOwnerScopeForAccount(currentUser.id);
-      const durableIdentity = await getOriginalPrivateReviewCleanupIdentity();
+      const durableIdentity = await getOriginalPrivateReviewCleanupIdentityForCleanup();
       let identity = durableIdentity
         ? runtimePrivateReviewIdentity(durableIdentity)
         : privateReviewCleanupIdentityRef.current;
@@ -1647,10 +1775,15 @@ export function OriginalsRuntimeProvider({
         if (
           durableIdentity
           && privateReviewCleanupIdentityRef.current
-          && !samePrivateReviewIdentity(identity, privateReviewCleanupIdentityRef.current)
+          && !samePrivateReviewCleanupTarget(identity, privateReviewCleanupIdentityRef.current)
         ) throw new Error('The pending private review cleanup identity changed; nothing was removed.');
         if (!durableIdentity) {
-          await saveOriginalPrivateReviewCleanupIdentity(storedPrivateReviewIdentity(identity));
+          if (identity.fieldBinding) {
+            throw new Error('The durable private field cleanup identity is missing; nothing was removed.');
+          }
+          await saveOriginalPrivateReviewCleanupIdentity(
+            storedPrivateReviewIdentity(identity) as OriginalPrivateReviewCleanupIdentityV1,
+          );
         }
       } else {
         const active = sessionRef.current;
@@ -1683,12 +1816,19 @@ export function OriginalsRuntimeProvider({
           throw new Error('The active bundle is not the exact private preview; nothing was removed.');
         }
         identity = activeIdentity;
-        await saveOriginalPrivateReviewCleanupIdentity(storedPrivateReviewIdentity(identity));
+        if (identity.fieldBinding) {
+          throw new Error('The durable private field cleanup identity is missing; nothing was removed.');
+        }
+        await saveOriginalPrivateReviewCleanupIdentity(
+          storedPrivateReviewIdentity(identity) as OriginalPrivateReviewCleanupIdentityV1,
+        );
       }
       privateReviewCleanupIdentityRef.current = identity;
+      privateReviewRecoveryIdentityRef.current = null;
       if (mountedRef.current) {
         setPrivateReviewActive(false);
         setPrivateReviewCleanupPending(true);
+        setPrivateFieldDiagnostic(null);
       }
       await clearOriginalPreviewAccessStrict();
       if (privateReviewModeRef.current != null || sessionRef.current) await stopTour();
@@ -1707,9 +1847,11 @@ export function OriginalsRuntimeProvider({
       await clearOriginalPrivateReviewCleanupIdentityStrict(storedPrivateReviewIdentity(identity));
       privateReviewCleanupIdentityRef.current = null;
       privateReviewIdentityRef.current = null;
+      privateReviewRecoveryIdentityRef.current = null;
       if (mountedRef.current) {
         setPrivateReviewActive(false);
         setPrivateReviewCleanupPending(false);
+        setPrivateFieldDiagnostic(null);
       }
     })();
     privateReviewCleanupPromiseRef.current = operation;
@@ -1723,12 +1865,13 @@ export function OriginalsRuntimeProvider({
   }, [dependencies.access, dependencies.bundles, stopTour]);
 
   const stopForAccountDeparture = useCallback(async () => {
-    const durablePrivateReview = await getOriginalPrivateReviewCleanupIdentity().catch(() => null);
+    const durablePrivateReview = await getOriginalPrivateReviewCleanupIdentityForCleanup();
     if (
       durablePrivateReview
       || privateReviewModeRef.current != null
       || privateReviewIdentityRef.current
       || privateReviewCleanupIdentityRef.current
+      || privateReviewRecoveryIdentityRef.current
     ) {
       await endPrivateReview();
       return;
@@ -1742,30 +1885,124 @@ export function OriginalsRuntimeProvider({
   );
 
   useEffect(() => {
+    if (!authHydrated) return undefined;
+    setPrivateReviewRecoveryChecked(false);
     let cancelled = false;
-    void getOriginalPrivateReviewCleanupIdentity().then(async pending => {
+    void (async () => {
+      let cleanupOnly = false;
+      let pending: OriginalPrivateReviewCleanupRecord | null;
+      try {
+        pending = await getOriginalPrivateReviewCleanupIdentity();
+      } catch {
+        pending = await getOriginalPrivateReviewCleanupIdentityForCleanup();
+        cleanupOnly = true;
+      }
       if (cancelled || !pending) return;
       const currentUser = useStore.getState().user;
       if (
         currentUser?.id == null
         || originalOwnerScopeForAccount(currentUser.id) !== pending.owner_scope
       ) return;
+      const cleanup = async (identity: OriginalPrivateReviewIdentity) => {
+        if (cancelled) return;
+        const latestUser = useStore.getState().user;
+        if (
+          latestUser?.id == null
+          || originalOwnerScopeForAccount(latestUser.id) !== identity.ownerScope
+        ) return;
+        privateReviewRecoveryIdentityRef.current = null;
+        privateReviewCleanupIdentityRef.current = identity;
+        if (mountedRef.current) {
+          setPrivateReviewActive(false);
+          setPrivateReviewCleanupPending(true);
+          setPrivateFieldDiagnostic(null);
+        }
+        await endPrivateReview();
+      };
       const identity = runtimePrivateReviewIdentity(pending);
-      privateReviewCleanupIdentityRef.current = identity;
-      if (mountedRef.current) {
-        setPrivateReviewActive(false);
-        setPrivateReviewCleanupPending(true);
+      if (
+        cleanupOnly
+        || pending.schema_version !== 2
+        || pending.recovery_state !== 'recoverable_once'
+        || !currentUser.is_admin
+        || !useStore.getState().token
+      ) {
+        await cleanup(identity);
+        return;
       }
-      await endPrivateReview();
-    }).catch(caught => {
+
+      // The durable lease is consumed before access, bundle, manifest, or map
+      // recovery awaits. This launch only quarantines bytes; it never resumes.
+      const consumed = await consumeOriginalPrivateFieldReviewRecovery(
+        storedPrivateReviewIdentity(identity) as OriginalPrivateFieldReviewIdentityV2,
+      );
+      const consumedIdentity = runtimePrivateReviewIdentity(consumed);
+      try {
+        const access = await dependencies.access.get(
+          consumedIdentity.ownerScope,
+          consumedIdentity.packId,
+          consumedIdentity.version,
+        );
+        const localManifest = await dependencies.bundles.loadManifest(
+          consumedIdentity.ownerScope,
+          consumedIdentity.packId,
+          consumedIdentity.version,
+          true,
+        );
+        const latest = useStore.getState();
+        if (
+          cancelled
+          || latest.user?.id == null
+          || originalOwnerScopeForAccount(latest.user.id) !== consumedIdentity.ownerScope
+        ) return;
+        if (
+          !latest.user.is_admin
+          || !latest.token
+          || access?.access_type !== 'admin_preview'
+          || access.manifest_id !== consumedIdentity.manifestId
+          || !localManifest
+          || localManifest.manifest_id !== consumedIdentity.manifestId
+        ) throw new Error('The quarantined private field review identity is no longer exact.');
+        const binding = consumedIdentity.fieldBinding;
+        if (!binding) throw new Error('The quarantined private field selection is missing.');
+        const resolved = resolveOriginalManifestForPlayback(localManifest, {
+          chapter_id: binding.chapterId,
+          variant_id: binding.variantId,
+        });
+        const verifiedIdentity = privateFieldReviewIdentity(
+          consumedIdentity.ownerScope,
+          resolved.manifest,
+          resolved.selection,
+        );
+        if (!samePrivateReviewIdentity(verifiedIdentity, consumedIdentity)) {
+          throw new Error('The quarantined private field selection no longer matches the verified bundle.');
+        }
+        privateReviewRecoveryIdentityRef.current = consumedIdentity;
+        privateReviewCleanupIdentityRef.current = null;
+        if (mountedRef.current) {
+          setPrivateReviewActive(false);
+          setPrivateReviewCleanupPending(false);
+          setPrivateFieldDiagnostic(null);
+          setError(null);
+          setState('idle');
+        }
+      } catch (caught) {
+        await cleanup(consumedIdentity);
+        if (!cancelled && mountedRef.current && privateReviewCleanupIdentityRef.current) {
+          throw caught;
+        }
+      }
+    })().catch(caught => {
       if (cancelled || !mountedRef.current) return;
       setError(caught instanceof Error
         ? caught.message
         : 'The pending private review cleanup needs attention.');
       setState('error');
+    }).finally(() => {
+      if (!cancelled && mountedRef.current) setPrivateReviewRecoveryChecked(true);
     });
     return () => { cancelled = true; };
-  }, [endPrivateReview, userId]);
+  }, [authHydrated, dependencies.access, dependencies.bundles, endPrivateReview, userId]);
 
   const skipCurrentStory = useCallback(async () => {
     const active = sessionRef.current;
@@ -2442,6 +2679,8 @@ export function OriginalsRuntimeProvider({
     privateReviewMode,
     privateReviewActive,
     privateReviewCleanupPending,
+    privateReviewRecoveryChecked,
+    privateFieldDiagnostic,
     startSimulation: (value, selection) => {
       if (!useStore.getState().user?.is_admin) {
         return Promise.reject(new Error('The Virtual Drive Lab is available only to Trailhead admins.'));
@@ -2478,6 +2717,8 @@ export function OriginalsRuntimeProvider({
     endPrivateReview,
     privateReviewActive,
     privateReviewCleanupPending,
+    privateReviewRecoveryChecked,
+    privateFieldDiagnostic,
     privateReviewMode,
     reviewPreviewStory,
     skipSimulationCue,

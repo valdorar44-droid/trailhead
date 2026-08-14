@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import {
   installedOfflinePackStatus,
+  installedOfflinePackStatusStrict,
   installedOfflinePackStatuses,
   mapLibreOfflinePackBounds,
   offlineStyleCoversBounds,
@@ -15,7 +16,7 @@ async function main() {
       receiver = this;
       return {
         percentage: 100,
-        completedResourceSize: 2.45 * 1_048_576,
+        completedResourceSize: 2_569_012,
       };
     },
   };
@@ -24,6 +25,7 @@ async function main() {
     name: 'trailhead-original:moab:1000000001',
     percentage: 100,
     complete: true,
+    completedResourceSize: 2_569_012,
     sizeMb: 2.5,
   });
   assert.equal(receiver, nativePack, 'MapLibre status() must retain its OfflinePack receiver');
@@ -35,6 +37,7 @@ async function main() {
     name: 'in-progress',
     percentage: 72.4,
     complete: false,
+    completedResourceSize: 1_048_576,
     sizeMb: 1,
   });
 
@@ -43,6 +46,50 @@ async function main() {
     nativePack,
   ]);
   assert.deepEqual(isolated.map(pack => pack.name), ['trailhead-original:moab:1000000001']);
+
+  const physicalName = 'trailhead-legacy-rnmapbox-trailhead-original:moab:1000000001';
+  const exactBytes = 213_073_997;
+  assert.deepEqual(await installedOfflinePackStatusStrict([
+    { name: 'trailhead-original:moab:1000000001', status: { percentage: 100, completedResourceSize: 1 } },
+    { name: physicalName, status: { percentage: 100, completedResourceSize: exactBytes } },
+  ], physicalName), {
+    name: physicalName,
+    percentage: 100,
+    complete: true,
+    completedResourceSize: exactBytes,
+    sizeMb: 203.2,
+  }, 'strict inspection preserves the raw native integer instead of reconstructing rounded MB');
+  await assert.rejects(
+    installedOfflinePackStatusStrict([], physicalName),
+    /missing/,
+  );
+  await assert.rejects(
+    installedOfflinePackStatusStrict([
+      { name: physicalName, status: { percentage: 100, completedResourceSize: exactBytes } },
+      { name: physicalName, status: { percentage: 100, completedResourceSize: exactBytes } },
+    ], physicalName),
+    /duplicated/,
+  );
+  await assert.rejects(
+    installedOfflinePackStatusStrict([
+      { name: physicalName, status: { percentage: 99.9, completedResourceSize: exactBytes } },
+    ], physicalName),
+    /incomplete/,
+  );
+  await assert.rejects(
+    installedOfflinePackStatusStrict([
+      { name: physicalName, status: { percentage: 100, completedResourceSize: exactBytes + 0.5 } },
+    ], physicalName),
+    /safe integer/,
+  );
+  await assert.rejects(
+    installedOfflinePackStatusStrict([{
+      name: physicalName,
+      status: async () => { throw new Error('native strict status failed'); },
+    }], physicalName),
+    /native strict status failed/,
+    'strict inspection propagates native status errors',
+  );
 
   assert.deepEqual(
     mapLibreOfflinePackBounds([[-110.95, 38.3], [-109.7, 38.75]]),

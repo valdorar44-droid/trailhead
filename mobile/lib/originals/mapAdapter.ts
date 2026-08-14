@@ -18,6 +18,12 @@ export type OriginalPreparedMap = {
   bytes: number;
 };
 
+export type OriginalInspectedMap = {
+  pack_id: string;
+  ready: true;
+  bytes: number;
+};
+
 export type OriginalOfflineMapAdapter = {
   prepare(
     map: OriginalOfflineMapV1,
@@ -30,6 +36,7 @@ export type OriginalOfflineMapAdapter = {
     },
   ): Promise<OriginalPreparedMap>;
   isReady?(packId: string): Promise<boolean>;
+  inspectStrict?(packId: string): Promise<OriginalInspectedMap>;
   remove?(packId: string): Promise<void>;
   removeStrict?(packId: string): Promise<void>;
 };
@@ -82,10 +89,11 @@ export const expoOriginalOfflineMapAdapter: OriginalOfflineMapAdapter = {
     const installed = await manager.getInstalledPacks(renderer);
     const ready = installed.find(pack => pack.name === name && pack.complete);
     if (ready) {
+      const exact = await manager.inspectInstalledPackStrict(name, renderer);
       return {
         pack_id: mapPackReference(renderer, name),
         ready: true,
-        bytes: Math.round(ready.sizeMb * 1_048_576),
+        bytes: exact.completedResourceSize,
       };
     }
     let settled = false;
@@ -136,7 +144,7 @@ export const expoOriginalOfflineMapAdapter: OriginalOfflineMapAdapter = {
               watchdog,
               pack ? {
                 percentage: pack.percentage,
-                receivedBytes: Math.round(pack.sizeMb * 1_048_576),
+                receivedBytes: pack.completedResourceSize,
                 complete: pack.complete,
               } : null,
               Date.now(),
@@ -150,10 +158,17 @@ export const expoOriginalOfflineMapAdapter: OriginalOfflineMapAdapter = {
               });
             }
             if (observation.complete && pack) {
+              const exact = await manager.inspectInstalledPackStrict(name, renderer).catch(error => {
+                finish(() => reject(error instanceof Error
+                  ? error
+                  : new Error('The exact offline map could not be verified.')));
+                return null;
+              });
+              if (!exact) return;
               finish(() => resolve({
                 pack_id: mapPackReference(renderer, name),
                 ready: true,
-                bytes: Math.round(pack.sizeMb * 1_048_576),
+                bytes: exact.completedResourceSize,
               }));
               return;
             }
@@ -196,10 +211,9 @@ export const expoOriginalOfflineMapAdapter: OriginalOfflineMapAdapter = {
           config.mapbox_token,
           progress => reportProgress(
             progress.percentage,
-            Math.round(progress.sizeMb * 1_048_576),
+            progress.completedResourceSize,
           ),
           () => {
-            reportProgress(100, map.estimated_bytes);
             void verifyInstalledPack();
           },
           message => finish(() => reject(new Error(message))),
@@ -227,6 +241,33 @@ export const expoOriginalOfflineMapAdapter: OriginalOfflineMapAdapter = {
       && pack.name === reference.name
       && pack.complete
     ));
+  },
+
+  async inspectStrict(packId) {
+    const manager = await import('@/components/NativeMap/offlineManager');
+    const reference = parseMapPackReference(packId);
+    if (!reference.renderer || mapPackReference(reference.renderer, reference.name) !== packId) {
+      throw new Error('The private preview offline map is not bound to one exact native identity.');
+    }
+    if (typeof manager.inspectInstalledPackStrict !== 'function') {
+      throw new Error('Exact native offline map inspection is unavailable on this device.');
+    }
+    const installed = await manager.inspectInstalledPackStrict(
+      reference.name,
+      reference.renderer,
+    );
+    if (
+      installed.renderer !== reference.renderer
+      || installed.name !== reference.name
+      || !installed.complete
+      || !Number.isSafeInteger(installed.completedResourceSize)
+      || installed.completedResourceSize <= 0
+    ) throw new Error('The private preview offline map could not be verified exactly.');
+    return {
+      pack_id: packId,
+      ready: true,
+      bytes: installed.completedResourceSize,
+    };
   },
 
   async remove(packId) {

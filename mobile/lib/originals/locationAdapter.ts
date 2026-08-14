@@ -18,6 +18,13 @@ export type OriginalLocationAdapter = {
   start(
     onLocation: (sample: OriginalLocationSample) => void | Promise<void>,
   ): Promise<{ stop: () => Promise<void>; permission: OriginalPermissionState }>;
+  /**
+   * Admin-only unpublished field review. This is intentionally foreground
+   * only: it never starts the persistent task or reads/writes its queue.
+   */
+  startPrivateForeground(
+    onLocation: (sample: OriginalLocationSample) => void | Promise<void>,
+  ): Promise<{ stop: () => Promise<void>; permission: OriginalPermissionState }>;
   /** Stops a previously persisted native task even when no JS callback is attached. */
   stopActive(): Promise<void>;
 };
@@ -134,10 +141,39 @@ if (Platform.OS !== 'web' && !TaskManager.isTaskDefined(ORIGINALS_LOCATION_TASK)
 
 export function createExpoOriginalLocationAdapter(): OriginalLocationAdapter {
   let foregroundSubscription: Location.LocationSubscription | null = null;
+  let privateForegroundSubscription: {
+    generation: number;
+    subscription: Location.LocationSubscription;
+  } | null = null;
   let generation = 0;
+  let privateGeneration = 0;
+
+  const stopPrivateForeground = async () => {
+    privateGeneration += 1;
+    const active = privateForegroundSubscription;
+    privateForegroundSubscription = null;
+    active?.subscription.remove();
+  };
+
+  const stopExactPrivateForeground = (
+    activeGeneration: number,
+    subscription: Location.LocationSubscription,
+  ) => async () => {
+    if (
+      privateForegroundSubscription?.generation === activeGeneration
+      && privateForegroundSubscription.subscription === subscription
+    ) {
+      privateGeneration += 1;
+      privateForegroundSubscription = null;
+    }
+    // Removing this captured subscription is safe and idempotent even after a
+    // newer start has replaced it; never dereference the shared current slot.
+    subscription.remove();
+  };
 
   const stopInternal = async (clearQueuedSamples: boolean) => {
     generation += 1;
+    await stopPrivateForeground();
     foregroundSubscription?.remove();
     foregroundSubscription = null;
     if (Platform.OS !== 'web') {
@@ -158,6 +194,53 @@ export function createExpoOriginalLocationAdapter(): OriginalLocationAdapter {
     },
 
     stopActive: stop,
+
+    async startPrivateForeground(onLocation) {
+      await stopPrivateForeground();
+      const activeGeneration = privateGeneration;
+      if (foregroundSubscription || taskLocationHandler) {
+        throw new Error('End the active Original before starting a private field review.');
+      }
+      if (Platform.OS !== 'web') {
+        const backgroundActive = await Location.hasStartedLocationUpdatesAsync(
+          ORIGINALS_LOCATION_TASK,
+        ).catch(() => true);
+        if (backgroundActive) {
+          throw new Error('End the active Original before starting a private field review.');
+        }
+      }
+      const existing = await Location.getForegroundPermissionsAsync();
+      const foreground = existing.status === 'granted'
+        ? existing
+        : await Location.requestForegroundPermissionsAsync();
+      if (foreground.status !== 'granted') {
+        return { stop: async () => {}, permission: 'denied' };
+      }
+      let subscription: Location.LocationSubscription;
+      try {
+        subscription = await Location.watchPositionAsync(
+          {
+            accuracy: Location.Accuracy.BestForNavigation,
+            timeInterval: 1_000,
+            distanceInterval: 10,
+            mayShowUserSettingsDialog: true,
+          },
+          value => {
+            if (activeGeneration !== privateGeneration) return;
+            void Promise.resolve(onLocation(locationSample(value))).catch(() => {});
+          },
+        );
+      } catch (error) { throw error; }
+      if (activeGeneration !== privateGeneration) {
+        subscription.remove();
+        throw new Error('Private field location start was cancelled.');
+      }
+      privateForegroundSubscription = { generation: activeGeneration, subscription };
+      return {
+        stop: stopExactPrivateForeground(activeGeneration, subscription),
+        permission: 'foreground',
+      };
+    },
 
     async start(onLocation) {
       // Preserve samples written by a cold/headless task until the callback is

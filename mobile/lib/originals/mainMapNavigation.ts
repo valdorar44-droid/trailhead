@@ -16,6 +16,9 @@ export function originalStartDestination(packId: string, version: number): Origi
   };
 }
 
-export function consumerOriginalPlayerShouldRedirect(simulate: string | null | undefined) {
-  return simulate !== '1';
+export function consumerOriginalPlayerShouldRedirect(
+  simulate: string | null | undefined,
+  privateField?: string | null,
+) {
+  return simulate !== '1' && privateField !== '1';
 }

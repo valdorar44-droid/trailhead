@@ -205,6 +205,7 @@ async function main() {
     __originalsRuntimeCarSyncCount?: number;
     __originalsRuntimeCarClearCount?: number;
     __originalsRuntimeHeadlessStopCount?: number;
+    __originalsRuntimeAccountDepartureStopper?: (() => Promise<void>) | null;
     __originalsRuntimeAppStateListener?: ((state: string) => void) | null;
   };
   globals.__originalsRuntimeAuthState = { user: { id: 'admin-preview', is_admin: true }, token: 'admin-token' };
@@ -228,7 +229,9 @@ async function main() {
   let guestClaimCount = 0;
   let entitlementWriteCount = 0;
   let locationStartCount = 0;
+  let privateLocationStartCount = 0;
   let locationStopCount = 0;
+  let privateLocationStopCount = 0;
   let locationStopActiveCount = 0;
   let audioStopCount = 0;
   let audioUnloadCount = 0;
@@ -242,6 +245,9 @@ async function main() {
   let audioGetStateOverride: (() => Promise<typeof audioState>) | null = null;
   let failNextSessionSave = false;
   let locationCallback: ((sample: Record<string, unknown>) => Promise<void> | void) | null = null;
+  let privateLocationCallback: ((sample: Record<string, unknown>) => Promise<void> | void) | null = null;
+  let privateLocationPermission: 'foreground' | 'denied' = 'foreground';
+  let failPrivateLocationStart = false;
   let activeStoredSession: Record<string, any> | null = null;
   let storedSessions: Record<string, any>[] = [];
   let accessOverride: (() => Promise<Record<string, unknown>>) | null = null;
@@ -360,6 +366,21 @@ async function main() {
         locationStartCount += 1;
         locationCallback = onLocation;
         return { permission: 'granted', stop: async () => { locationStopCount += 1; locationCallback = null; } };
+      },
+      async startPrivateForeground(onLocation: (sample: Record<string, unknown>) => Promise<void> | void) {
+        privateLocationStartCount += 1;
+        if (failPrivateLocationStart) {
+          failPrivateLocationStart = false;
+          throw new Error('Injected private foreground location start failure.');
+        }
+        if (privateLocationPermission === 'denied') {
+          return { permission: 'denied', stop: async () => { privateLocationStopCount += 1; } };
+        }
+        privateLocationCallback = onLocation;
+        return {
+          permission: 'foreground',
+          stop: async () => { privateLocationStopCount += 1; privateLocationCallback = null; },
+        };
       },
       async stopActive() { locationStopActiveCount += 1; locationCallback = null; },
     },
@@ -507,6 +528,137 @@ async function main() {
   assert.equal(globals.__originalsRuntimeCarSyncCount, 0, 'synthetic lab activity never replaces the real Android Auto route');
   assert.equal(globals.__originalsRuntimeCarClearCount, 0, 'ending the lab never clears the real Android Auto route');
 
+  const fieldSessionSavesBefore = sessionSaveCount;
+  const fieldSetActiveBefore = setActiveCount;
+  const fieldPublicLocationStartsBefore = locationStartCount;
+  const fieldStopActiveBefore = locationStopActiveCount;
+  const fieldHeadlessStopsBefore = globals.__originalsRuntimeHeadlessStopCount ?? 0;
+  const fieldCarSyncBefore = globals.__originalsRuntimeCarSyncCount ?? 0;
+  const fieldCarClearBefore = globals.__originalsRuntimeCarClearCount ?? 0;
+  const fieldAnalyticsBefore = globals.__originalsRuntimeAnalyticsCount ?? 0;
+  const fieldPreviewClearsBefore = globals.__originalsRuntimePreviewClearCount ?? 0;
+  globals.__originalsRuntimeAuthState = { user: { id: 'non-admin' }, token: 'user-token' };
+  await assert.rejects(
+    adminRuntime!.startPrivateFieldDrive(manifest),
+    /only to Trailhead admins/i,
+  );
+  assert.equal(privateLocationStartCount, 0, 'non-admin field review fails before foreground GPS');
+  globals.__originalsRuntimeAuthState = { user: { id: 'admin-preview', is_admin: true }, token: 'admin-token' };
+  await act(async () => { await adminRuntime!.startPrivateFieldDrive(manifest); });
+  assert.equal(adminRuntime!.privateReviewMode, 'field');
+  assert.equal((runtime as unknown as Runtime).simulation, false, 'field review never enables synthetic controls');
+  assert.equal(privateLocationStartCount, 1, 'field review starts the dedicated foreground-only adapter');
+  assert.equal(locationStartCount, fieldPublicLocationStartsBefore, 'field review never starts the public/background adapter');
+  assert.ok(privateLocationCallback, 'field review attaches only its ephemeral foreground callback');
+
+  await act(async () => {
+    await privateLocationCallback!({
+      lat: 0,
+      lng: 0.0045,
+      accuracy_m: 10,
+      heading_deg: 90,
+      speed_mps: 10,
+      timestamp_ms: 10_000,
+    });
+    await privateLocationCallback!({
+      lat: 0,
+      lng: 0.0045,
+      accuracy_m: 10,
+      heading_deg: 90,
+      speed_mps: 10,
+      timestamp_ms: 13_100,
+    });
+  });
+  await act(async () => { await runtime!.pauseTour(); });
+  assert.equal(privateLocationStopCount, 1, 'pausing a field review stops its foreground watcher');
+  await act(async () => { await runtime!.resumeTour(); });
+  assert.equal(privateLocationStartCount, 2, 'resuming a field review restarts only foreground-private GPS');
+  assert.equal(locationStartCount, fieldPublicLocationStartsBefore);
+  assert.ok(globals.__originalsRuntimeAccountDepartureStopper);
+  await act(async () => { await globals.__originalsRuntimeAccountDepartureStopper!(); });
+  assert.equal(sessionSaveCount, fieldSessionSavesBefore, 'field review writes no session history');
+  assert.equal(setActiveCount, fieldSetActiveBefore, 'field review never replaces durable active progress');
+  assert.equal(locationStopActiveCount, fieldStopActiveBefore, 'field review teardown never touches the headless/background adapter');
+  assert.equal(globals.__originalsRuntimeHeadlessStopCount, fieldHeadlessStopsBefore, 'field review teardown never enters headless runtime');
+  assert.equal(globals.__originalsRuntimeCarSyncCount, fieldCarSyncBefore, 'field review never publishes car state');
+  assert.equal(globals.__originalsRuntimeCarClearCount, fieldCarClearBefore, 'field review never clears an unrelated car state');
+  assert.equal(globals.__originalsRuntimeAnalyticsCount, fieldAnalyticsBefore, 'field samples and narration emit zero release analytics');
+  assert.equal(globals.__originalsRuntimePreviewClearCount, fieldPreviewClearsBefore + 1, 'account departure closes the private preview credential');
+  assert.deepEqual(removedPrivateBundleIdentity, [
+    'account:admin-preview',
+    manifest.pack_id,
+    manifest.version,
+    manifest.manifest_id,
+  ], 'account departure removes only the exact private field-review bundle');
+  assert.equal(adminRuntime!.privateReviewMode, null);
+  globals.__originalsRuntimePreviewClearCount = 0;
+  removedPrivateBundleIdentity = null;
+  removedPrivateAccessIdentity = null;
+  playCount = 0;
+
+  const fieldStartsBeforeGates = privateLocationStartCount;
+  accessOverride = async () => ({
+    owner_scope: 'account:admin-preview',
+    access_type: 'admin_preview',
+    manifest_id: 'wrong-private-manifest',
+  });
+  await act(async () => {
+    await assert.rejects(
+      adminRuntime!.startPrivateFieldDrive(manifest),
+      /Restore or acquire|exact unpublished admin preview/i,
+    );
+  });
+  assert.equal(privateLocationStartCount, fieldStartsBeforeGates, 'manifest mismatch fails before foreground GPS');
+
+  accessOverride = async () => ({
+    owner_scope: 'account:admin-preview',
+    access_type: 'admin_preview',
+    manifest_id: manifest.manifest_id,
+  });
+  verifyOverride = async () => false;
+  await act(async () => {
+    await assert.rejects(
+      adminRuntime!.startPrivateFieldDrive(manifest),
+      /downloading and verifying/i,
+    );
+  });
+  assert.equal(privateLocationStartCount, fieldStartsBeforeGates, 'unverified private bundle fails before foreground GPS');
+  verifyOverride = null;
+
+  await act(async () => {
+    await assert.rejects(
+      adminRuntime!.startPrivateFieldDrive(originalManifestV3(), {
+        chapter_id: 'not-a-chapter',
+        variant_id: 'not-a-variant',
+      }),
+      /selection|chapter|variant/i,
+    );
+  });
+  assert.equal(privateLocationStartCount, fieldStartsBeforeGates, 'selection mismatch fails before foreground GPS');
+
+  privateLocationPermission = 'denied';
+  await act(async () => {
+    await assert.rejects(
+      adminRuntime!.startPrivateFieldDrive(manifest),
+      /Location permission is required/i,
+    );
+  });
+  assert.equal((runtime as unknown as Runtime).session, null, 'permission denial discards the ephemeral private session');
+  assert.equal(adminRuntime!.privateReviewMode, null);
+  assert.equal(sessionSaveCount, fieldSessionSavesBefore, 'permission denial cannot persist a private session');
+  privateLocationPermission = 'foreground';
+
+  failPrivateLocationStart = true;
+  await act(async () => {
+    await assert.rejects(
+      adminRuntime!.startPrivateFieldDrive(manifest),
+      /Injected private foreground location start failure/i,
+    );
+  });
+  assert.equal((runtime as unknown as Runtime).session, null, 'foreground startup failure discards the ephemeral private session');
+  assert.equal(adminRuntime!.privateReviewMode, null);
+  assert.equal(sessionSaveCount, fieldSessionSavesBefore, 'foreground startup failure cannot persist a private session');
+
   accessOverride = async () => ({
     owner_scope: 'account:admin-preview',
     access_type: 'admin_preview',
@@ -561,6 +713,16 @@ async function main() {
   assert.equal(globals.__originalsRuntimePreviewToken, null, 'the credential closes before destructive cleanup');
   assert.equal(adminRuntime!.privateReviewActive, false);
   assert.equal(adminRuntime!.privateReviewCleanupPending, true, 'partial cleanup retains an exact retry identity');
+  const privateStartsBeforePendingCleanupGate = privateLocationStartCount;
+  await assert.rejects(
+    adminRuntime!.startPrivateFieldDrive(manifest),
+    /Finish removing the pending private review/i,
+  );
+  assert.equal(
+    privateLocationStartCount,
+    privateStartsBeforePendingCleanupGate,
+    'pending exact cleanup fails before foreground GPS',
+  );
   assert.equal(
     (runtime as unknown as Runtime).session,
     null,

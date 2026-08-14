@@ -238,4 +238,22 @@ assert.deepEqual(
   'V1/V2 playback does not gain this V3-only control',
 );
 
+const previewScreenSource = readFileSync(resolve(here, '../../../app/originals/preview.tsx'), 'utf8');
+assert.match(previewScreenSource, /mode === 'field'/);
+assert.match(previewScreenSource, /startPrivateFieldDrive\(manifest, selection\)/);
+assert.match(
+  previewScreenSource,
+  /catch\(async \(caught:[\s\S]*await cleanupPrivateAcquisition\(\)/,
+  'permission/start failures retain the exact private cleanup barrier',
+);
+assert.match(
+  previewScreenSource,
+  /return \(\) => \{[\s\S]*cleanupPrivateAcquisition\(\)/,
+  'navigation away cannot abandon a field-review download or credential',
+);
+const catalogScreenSource = readFileSync(resolve(here, '../../../app/originals/index.tsx'), 'utf8');
+assert.match(catalogScreenSource, /Private GPS field test/);
+assert.match(catalogScreenSource, /FOREGROUND ONLY · PARKED OR PASSENGER/);
+assert.match(catalogScreenSource, /mode: 'field'/);
+
 console.log('Exact R2 admin private-review reachability tests passed.');

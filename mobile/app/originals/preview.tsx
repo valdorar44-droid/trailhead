@@ -22,10 +22,13 @@ export default function OriginalDraftPreviewScreen() {
     id?: string | string[];
     chapter?: string | string[];
     variant?: string | string[];
+    mode?: string | string[];
   }>();
   const id = Array.isArray(params.id) ? params.id[0] : params.id || '';
   const chapter = Array.isArray(params.chapter) ? params.chapter[0] : params.chapter || '';
   const variant = Array.isArray(params.variant) ? params.variant[0] : params.variant || '';
+  const mode = Array.isArray(params.mode) ? params.mode[0] : params.mode || 'synthetic';
+  const privateFieldMode = mode === 'field';
   const user = useStore(state => state.user);
   const runtime = useOriginalsRuntime();
   const adminRuntime = useOriginalsAdminRuntime();
@@ -41,7 +44,7 @@ export default function OriginalDraftPreviewScreen() {
     if (startedRef.current) return;
     startedRef.current = true;
     let active = true;
-    let simulationStarted = false;
+    let reviewStarted = false;
     let handedToPlayer = false;
     let cleanupIdentitySaved = false;
     let cleanupPromise: Promise<void> | null = null;
@@ -88,9 +91,13 @@ export default function OriginalDraftPreviewScreen() {
         await originalBundleStore.remove(scope, item.pack_id, item.version).catch(() => {});
         await originalAccessStore.remove(scope, item.pack_id, item.version).catch(() => {});
       }));
-      setPhase('Opening the trigger test');
-      await adminRuntimeRef.current.startSimulation(manifest, selection);
-      simulationStarted = true;
+      setPhase(privateFieldMode ? 'Starting foreground GPS review' : 'Opening the trigger test');
+      if (privateFieldMode) {
+        await adminRuntimeRef.current.startPrivateFieldDrive(manifest, selection);
+      } else {
+        await adminRuntimeRef.current.startSimulation(manifest, selection);
+      }
+      reviewStarted = true;
       if (!active) {
         await cleanupPrivateAcquisition();
         return;
@@ -101,7 +108,7 @@ export default function OriginalDraftPreviewScreen() {
         params: {
           id: manifest.pack_id,
           version: String(manifest.version),
-          simulate: '1',
+          ...(privateFieldMode ? { field: '1' } : { simulate: '1' }),
           chapter: selection?.chapter_id,
           variant: selection?.variant_id,
         },
@@ -124,11 +131,11 @@ export default function OriginalDraftPreviewScreen() {
     return () => {
       active = false;
       abortController.abort();
-      if ((cleanupIdentitySaved || simulationStarted) && !handedToPlayer) {
+      if ((cleanupIdentitySaved || reviewStarted) && !handedToPlayer) {
         void cleanupPrivateAcquisition().catch(() => {});
       }
     };
-  }, [chapter, id, router, user?.id, user?.is_admin, variant]);
+  }, [chapter, id, privateFieldMode, router, user?.id, user?.is_admin, variant]);
 
   const progress = runtime.downloadProgress;
   const progressLabel = progress
@@ -142,8 +149,8 @@ export default function OriginalDraftPreviewScreen() {
         <View style={[styles.icon, { backgroundColor: C.orange + '18' }] }>
           <Ionicons name={error ? 'alert-circle-outline' : 'speedometer-outline'} size={28} color={C.orange} />
         </View>
-        <Text style={[styles.kicker, { color: C.orange }]}>ADMIN · DRAFT TRIGGER TEST</Text>
-        <Text style={[styles.title, { color: C.text }]}>{error ? 'Draft test needs attention' : 'Preparing the no-driving test'}</Text>
+        <Text style={[styles.kicker, { color: C.orange }]}>{privateFieldMode ? 'ADMIN · PRIVATE GPS FIELD TEST' : 'ADMIN · DRAFT TRIGGER TEST'}</Text>
+        <Text style={[styles.title, { color: C.text }]}>{error ? 'Draft test needs attention' : privateFieldMode ? 'Preparing foreground GPS review' : 'Preparing the no-driving test'}</Text>
         <Text accessibilityLiveRegion="polite" style={[styles.body, { color: C.text2 }]}>{error || progressLabel}</Text>
         {progress ? (
           <View style={[styles.track, { backgroundColor: C.s3 }] }>
@@ -164,7 +171,9 @@ export default function OriginalDraftPreviewScreen() {
             </TouchableOpacity>
           </View>
         )}
-        <Text style={[styles.note, { color: C.text3 }]}>The draft remains unpublished. Synthetic results and playback do not alter saved drive progress or release analytics.</Text>
+        <Text style={[styles.note, { color: C.text3 }]}>{privateFieldMode
+          ? 'ADMIN ONLY · UNPUBLISHED · FOREGROUND GPS ONLY · No saved drive progress, analytics, background tracking, or car state.'
+          : 'The draft remains unpublished. Synthetic results and playback do not alter saved drive progress or release analytics.'}</Text>
         </View>
       </ScrollView>
     </SafeAreaView>

@@ -10,6 +10,7 @@ import {
   originalAdminPreviewRenderableReviewEntries,
   originalAdminPreviewReviewEntries,
   originalAdminPreviewSelectionRequired,
+  originalPrivateFieldSafeDiagnostic,
 } from '../adminPreviewReview';
 import { compileOriginalManifestV3, validateOriginalManifestV3 } from '../manifestV3';
 import type { OriginalManifestV3 } from '../types';
@@ -238,7 +239,78 @@ assert.deepEqual(
   'V1/V2 playback does not gain this V3-only control',
 );
 
+const safeDiagnosticInput = {
+  pack_id: 'great_smoky_mountains_ridges_rivers_living_memory',
+  version: 1_000_000_004,
+  manifest_id: 'original_preview_manifest_smokies_r4',
+  region_id: 'smokies_ridges_rivers_living_memory_union_private_v1',
+  map_bytes: 213_073_997,
+  map_complete: true as const,
+  bundle_verified: true as const,
+};
+assert.equal(
+  originalPrivateFieldSafeDiagnostic(safeDiagnosticInput, { isAdmin: false, privateField: true }),
+  null,
+  'ordinary users never receive the private field diagnostic',
+);
+assert.equal(
+  originalPrivateFieldSafeDiagnostic(safeDiagnosticInput, { isAdmin: true, privateField: false }),
+  null,
+  'admin non-field surfaces never receive the private field diagnostic',
+);
+const safeDiagnostic = originalPrivateFieldSafeDiagnostic(
+  safeDiagnosticInput,
+  { isAdmin: true, privateField: true },
+);
+assert.deepEqual(safeDiagnostic, {
+  pack_id: safeDiagnosticInput.pack_id,
+  version: safeDiagnosticInput.version,
+  manifest_id: safeDiagnosticInput.manifest_id,
+  region_code: 'SMOKIES_RIDGES_RIVERS_V1',
+  region_label: 'Great Smoky Mountains · Ridges, Rivers & Living Memory',
+  map_bytes: 213_073_997,
+  map_complete: true,
+  bundle_verified: true,
+});
+assert.deepEqual(Object.keys(safeDiagnostic!).sort(), [
+  'bundle_verified',
+  'manifest_id',
+  'map_bytes',
+  'map_complete',
+  'pack_id',
+  'region_code',
+  'region_label',
+  'version',
+]);
+assert.throws(
+  () => originalPrivateFieldSafeDiagnostic(
+    { ...safeDiagnosticInput, region_id: 'unreviewed-private-region' },
+    { isAdmin: true, privateField: true },
+  ),
+  /could not be safely rendered/,
+);
+
 const previewScreenSource = readFileSync(resolve(here, '../../../app/originals/preview.tsx'), 'utf8');
+assert.match(previewScreenSource, /!authHydrated \|\| !adminRuntime\.privateReviewRecoveryChecked/);
+const freshAuthorizationIndex = previewScreenSource.indexOf('originalsApi.adminPreviewManifest');
+const consumedRecoveryIndex = previewScreenSource.indexOf('await requireConsumedOriginalPrivateFieldReviewRecovery');
+const recoveredStartIndex = previewScreenSource.indexOf('startPrivateFieldDrive(manifest, selection)');
+assert.ok(
+  freshAuthorizationIndex >= 0
+  && consumedRecoveryIndex > freshAuthorizationIndex
+  && recoveredStartIndex > consumedRecoveryIndex,
+  'recovery requires fresh online authorization before exact local reuse and field start',
+);
+assert.match(
+  previewScreenSource,
+  /if \(durable\) \{[\s\S]*Verifying the saved private bundle and offline map[\s\S]*\} else \{[\s\S]*downloadOriginal/,
+  'the consumed recovery branch never redownloads the private bundle or map',
+);
+assert.match(
+  previewScreenSource,
+  /startPrivateFieldDrive\(manifest, selection\)[\s\S]*armOriginalPrivateFieldReviewRecovery/,
+  'fresh acquisition arms one recovery only after field startup succeeds',
+);
 assert.match(previewScreenSource, /mode === 'field'/);
 assert.match(previewScreenSource, /startPrivateFieldDrive\(manifest, selection\)/);
 assert.match(
@@ -255,5 +327,30 @@ const catalogScreenSource = readFileSync(resolve(here, '../../../app/originals/i
 assert.match(catalogScreenSource, /Private GPS field test/);
 assert.match(catalogScreenSource, /FOREGROUND ONLY · PARKED OR PASSENGER/);
 assert.match(catalogScreenSource, /mode: 'field'/);
+
+const runtimeSource = readFileSync(resolve(here, '../runtime.tsx'), 'utf8');
+assert.match(runtimeSource, /if \(!authHydrated\) return undefined/);
+assert.match(
+  runtimeSource,
+  /getOriginalPrivateReviewCleanupIdentity\(\)[\s\S]*catch \{[\s\S]*getOriginalPrivateReviewCleanupIdentityForCleanup\(\)/,
+  'a corrupt field marker is cleanup-only when its exact resource tuple remains verifiable',
+);
+assert.match(
+  runtimeSource.slice(runtimeSource.indexOf('const consumed = await consumeOriginalPrivateFieldReviewRecovery')),
+  /consumeOriginalPrivateFieldReviewRecovery[\s\S]*dependencies\.access\.get[\s\S]*dependencies\.bundles\.loadManifest/,
+  'the one-time cold lease is consumed before local recovery awaits',
+);
+assert.doesNotMatch(
+  runtimeSource.slice(
+    runtimeSource.indexOf('const consumed = await consumeOriginalPrivateFieldReviewRecovery'),
+    runtimeSource.indexOf('const skipCurrentStory'),
+  ),
+  /startPrivateFieldDrive\(/,
+  'cold-launch quarantine never automatically starts a field session',
+);
+const playerSource = readFileSync(resolve(here, '../../../app/originals/player.tsx'), 'utf8');
+assert.match(playerSource, /isAdmin && privateFieldActive[\s\S]*privateFieldDiagnostic/);
+assert.match(playerSource, /originals\.private-field\.safe-diagnostic/);
+assert.doesNotMatch(playerSource, /privateFieldDiagnostic\.(?:owner_scope|map_pack_id|directory_uri|manifest_uri|local_uri|device_id|capacity|coordinates|token)/);
 
 console.log('Exact R2 admin private-review reachability tests passed.');

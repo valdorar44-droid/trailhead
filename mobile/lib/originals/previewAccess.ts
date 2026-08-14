@@ -25,17 +25,40 @@ export type OriginalPrivateReviewCleanupIdentityV1 = {
   manifest_id: string;
 };
 
-type OriginalPrivateReviewCleanupRecordV1 = OriginalPrivateReviewCleanupIdentityV1 & {
+export type OriginalPrivateFieldReviewIdentityV2 = OriginalPrivateReviewCleanupIdentityV1 & {
+  review_mode: 'field';
+  chapter_id: string;
+  variant_id: string;
+  validation_selection_id: string;
+  delivery_contract_sha256: string;
+};
+
+export type OriginalPrivateReviewCleanupRecordV1 = OriginalPrivateReviewCleanupIdentityV1 & {
   schema_version: 1;
   created_at_ms: number;
 };
 
-function validatePrivateReviewCleanupIdentity(
-  value: Partial<OriginalPrivateReviewCleanupRecordV1> | null | undefined,
-): OriginalPrivateReviewCleanupRecordV1 {
+export type OriginalPrivateFieldReviewRecoveryStateV2 =
+  | 'acquiring'
+  | 'recoverable_once'
+  | 'recovery_consumed';
+
+export type OriginalPrivateFieldReviewRecoveryRecordV2 = OriginalPrivateFieldReviewIdentityV2 & {
+  schema_version: 2;
+  recovery_state: OriginalPrivateFieldReviewRecoveryStateV2;
+  created_at_ms: number;
+  updated_at_ms: number;
+};
+
+export type OriginalPrivateReviewCleanupRecord =
+  | OriginalPrivateReviewCleanupRecordV1
+  | OriginalPrivateFieldReviewRecoveryRecordV2;
+
+function validateCleanupBase(
+  value: Partial<OriginalPrivateReviewCleanupRecord> | null | undefined,
+) {
   if (
-    value?.schema_version !== 1
-    || typeof value.owner_scope !== 'string'
+    typeof value?.owner_scope !== 'string'
     || !value.owner_scope.startsWith('account:')
     || value.owner_scope.length <= 'account:'.length
     || typeof value.pack_id !== 'string'
@@ -44,19 +67,54 @@ function validatePrivateReviewCleanupIdentity(
     || Number(value.version) <= 0
     || typeof value.manifest_id !== 'string'
     || !value.manifest_id.trim()
-    || !Number.isFinite(value.created_at_ms)
   ) throw new Error('The pending private review cleanup identity could not be verified.');
-  return value as OriginalPrivateReviewCleanupRecordV1;
+}
+
+function validatePrivateReviewCleanupIdentity(
+  value: Partial<OriginalPrivateReviewCleanupRecord> | null | undefined,
+): OriginalPrivateReviewCleanupRecord {
+  validateCleanupBase(value);
+  if (value?.schema_version === 1) {
+    if (!Number.isFinite(value.created_at_ms)) {
+      throw new Error('The pending private review cleanup identity could not be verified.');
+    }
+    return value as OriginalPrivateReviewCleanupRecordV1;
+  }
+  if (
+    value?.schema_version !== 2
+    || value.review_mode !== 'field'
+    || typeof value.chapter_id !== 'string'
+    || !value.chapter_id.trim()
+    || typeof value.variant_id !== 'string'
+    || !value.variant_id.trim()
+    || typeof value.validation_selection_id !== 'string'
+    || !value.validation_selection_id.trim()
+    || typeof value.delivery_contract_sha256 !== 'string'
+    || !/^[a-f0-9]{64}$/i.test(value.delivery_contract_sha256)
+    || !['acquiring', 'recoverable_once', 'recovery_consumed'].includes(String(value.recovery_state))
+    || !Number.isFinite(value.created_at_ms)
+    || !Number.isFinite(value.updated_at_ms)
+    || Number(value.updated_at_ms) < Number(value.created_at_ms)
+  ) throw new Error('The pending private review cleanup identity could not be verified.');
+  return value as OriginalPrivateFieldReviewRecoveryRecordV2;
 }
 
 function samePrivateReviewCleanupIdentity(
-  left: OriginalPrivateReviewCleanupIdentityV1,
-  right: OriginalPrivateReviewCleanupIdentityV1,
+  left: OriginalPrivateReviewCleanupRecord | OriginalPrivateReviewCleanupIdentityV1 | OriginalPrivateFieldReviewIdentityV2,
+  right: OriginalPrivateReviewCleanupRecord | OriginalPrivateReviewCleanupIdentityV1 | OriginalPrivateFieldReviewIdentityV2,
 ) {
-  return left.owner_scope === right.owner_scope
+  const sameBase = left.owner_scope === right.owner_scope
     && left.pack_id === right.pack_id
     && left.version === right.version
     && left.manifest_id === right.manifest_id;
+  const leftField = 'review_mode' in left && left.review_mode === 'field';
+  const rightField = 'review_mode' in right && right.review_mode === 'field';
+  if (!sameBase || leftField !== rightField) return false;
+  if (!leftField || !rightField) return true;
+  return left.chapter_id === right.chapter_id
+    && left.variant_id === right.variant_id
+    && left.validation_selection_id === right.validation_selection_id
+    && left.delivery_contract_sha256.toLowerCase() === right.delivery_contract_sha256.toLowerCase();
 }
 
 export async function getOriginalPrivateReviewCleanupIdentity() {
@@ -66,6 +124,34 @@ export async function getOriginalPrivateReviewCleanupIdentity() {
     return validatePrivateReviewCleanupIdentity(JSON.parse(raw));
   } catch {
     throw new Error('The pending private review cleanup identity could not be verified.');
+  }
+}
+
+/**
+ * Recover only the exact destructive target when non-identity V2 fields are
+ * corrupt. The reduced V1 shape is cleanup-only and can never be recovered.
+ */
+export async function getOriginalPrivateReviewCleanupIdentityForCleanup() {
+  const raw = await storage.get(CLEANUP_STORAGE_KEY);
+  if (raw == null) return null;
+  let parsed: Partial<OriginalPrivateReviewCleanupRecord>;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error('The pending private review cleanup target could not be verified.');
+  }
+  try {
+    return validatePrivateReviewCleanupIdentity(parsed);
+  } catch {
+    validateCleanupBase(parsed);
+    return {
+      schema_version: 1 as const,
+      owner_scope: parsed.owner_scope!,
+      pack_id: parsed.pack_id!,
+      version: parsed.version!,
+      manifest_id: parsed.manifest_id!,
+      created_at_ms: Number.isFinite(parsed.created_at_ms) ? Number(parsed.created_at_ms) : 0,
+    };
   }
 }
 
@@ -93,12 +179,107 @@ export function saveOriginalPrivateReviewCleanupIdentity(
   });
 }
 
-/** Remove cleanup intent only after every exact local resource is confirmed absent. */
-export function clearOriginalPrivateReviewCleanupIdentityStrict(
-  expected: OriginalPrivateReviewCleanupIdentityV1,
+/** Save the exact field-only cleanup target before any private bytes are written. */
+export function beginOriginalPrivateFieldReviewRecovery(
+  identity: OriginalPrivateFieldReviewIdentityV2,
+  nowMs = Date.now(),
+) {
+  return serializeCleanupMutation(async () => {
+    const value = validatePrivateReviewCleanupIdentity({
+      schema_version: 2,
+      ...identity,
+      recovery_state: 'acquiring',
+      created_at_ms: nowMs,
+      updated_at_ms: nowMs,
+    }) as OriginalPrivateFieldReviewRecoveryRecordV2;
+    if (await getOriginalPrivateReviewCleanupIdentity()) {
+      throw new Error('Finish the existing private review cleanup before opening another draft.');
+    }
+    await storage.set(CLEANUP_STORAGE_KEY, JSON.stringify(value));
+    const persisted = await getOriginalPrivateReviewCleanupIdentity();
+    if (
+      persisted?.schema_version !== 2
+      || persisted.recovery_state !== 'acquiring'
+      || !samePrivateReviewCleanupIdentity(persisted, value)
+    ) throw new Error('The private field review recovery identity could not be saved on this device.');
+    return persisted;
+  });
+}
+
+function transitionOriginalPrivateFieldReviewRecovery(
+  expected: OriginalPrivateFieldReviewIdentityV2,
+  from: OriginalPrivateFieldReviewRecoveryStateV2,
+  to: OriginalPrivateFieldReviewRecoveryStateV2,
+  nowMs: number,
 ) {
   return serializeCleanupMutation(async () => {
     const current = await getOriginalPrivateReviewCleanupIdentity();
+    if (
+      current?.schema_version !== 2
+      || current.recovery_state !== from
+      || !samePrivateReviewCleanupIdentity(current, expected)
+    ) throw new Error('The private field review recovery state changed; nothing was resumed.');
+    const next = validatePrivateReviewCleanupIdentity({
+      ...current,
+      recovery_state: to,
+      updated_at_ms: Math.max(nowMs, current.updated_at_ms),
+    }) as OriginalPrivateFieldReviewRecoveryRecordV2;
+    await storage.set(CLEANUP_STORAGE_KEY, JSON.stringify(next));
+    const persisted = await getOriginalPrivateReviewCleanupIdentity();
+    if (
+      persisted?.schema_version !== 2
+      || persisted.recovery_state !== to
+      || !samePrivateReviewCleanupIdentity(persisted, expected)
+    ) throw new Error('The private field review recovery transition could not be verified.');
+    return persisted;
+  });
+}
+
+/** Arm one cold-launch quarantine only after the exact field session is ready. */
+export function armOriginalPrivateFieldReviewRecovery(
+  expected: OriginalPrivateFieldReviewIdentityV2,
+  nowMs = Date.now(),
+) {
+  return transitionOriginalPrivateFieldReviewRecovery(
+    expected,
+    'acquiring',
+    'recoverable_once',
+    nowMs,
+  );
+}
+
+/** Consume the sole cold-launch lease before any bundle/access recovery await. */
+export function consumeOriginalPrivateFieldReviewRecovery(
+  expected: OriginalPrivateFieldReviewIdentityV2,
+  nowMs = Date.now(),
+) {
+  return transitionOriginalPrivateFieldReviewRecovery(
+    expected,
+    'recoverable_once',
+    'recovery_consumed',
+    nowMs,
+  );
+}
+
+/** Read-only exact gate used only after a fresh online Studio authorization. */
+export async function requireConsumedOriginalPrivateFieldReviewRecovery(
+  expected: OriginalPrivateFieldReviewIdentityV2,
+) {
+  const current = await getOriginalPrivateReviewCleanupIdentity();
+  if (
+    current?.schema_version !== 2
+    || current.recovery_state !== 'recovery_consumed'
+    || !samePrivateReviewCleanupIdentity(current, expected)
+  ) throw new Error('No exact one-time private field recovery is available.');
+  return current;
+}
+
+/** Remove cleanup intent only after every exact local resource is confirmed absent. */
+export function clearOriginalPrivateReviewCleanupIdentityStrict(
+  expected: OriginalPrivateReviewCleanupIdentityV1 | OriginalPrivateFieldReviewIdentityV2,
+) {
+  return serializeCleanupMutation(async () => {
+    const current = await getOriginalPrivateReviewCleanupIdentityForCleanup();
     if (!current) return;
     if (!samePrivateReviewCleanupIdentity(current, expected)) {
       throw new Error('The pending private review cleanup identity changed; nothing was cleared.');

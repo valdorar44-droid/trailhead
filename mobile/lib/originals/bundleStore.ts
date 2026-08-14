@@ -62,6 +62,16 @@ export type OriginalBundleProgress = {
   percentage: number;
 };
 
+export type OriginalPrivatePreviewInspection = {
+  pack_id: string;
+  version: number;
+  manifest_id: string;
+  region_id: string;
+  map_bytes: number;
+  map_complete: true;
+  bundle_verified: true;
+};
+
 export type OriginalBundleDownloadOptions = {
   ownerScope: OriginalOwnerScope;
   headers?: Record<string, string>;
@@ -292,6 +302,24 @@ export function createOriginalBundleStore(
     }
     throw new Error('The private preview bundle index could not be verified.');
   };
+  const readInspectionIndexStrict = async (): Promise<OriginalBundleIndexV2> => {
+    const info = await files.info(indexPath);
+    if (!info.exists || info.isDirectory) {
+      throw new Error('The private preview bundle index could not be verified.');
+    }
+    try {
+      const parsed = JSON.parse(await files.readText(indexPath));
+      if (
+        parsed?.schema_version === 2
+        && parsed.scopes
+        && typeof parsed.scopes === 'object'
+        && !Array.isArray(parsed.scopes)
+      ) return parsed;
+    } catch {
+      // Inspection is read-only and must not repair or reinterpret index bytes.
+    }
+    throw new Error('The private preview bundle index could not be verified.');
+  };
 
   const writeIndex = (index: OriginalBundleIndexV2) => (
     writeOriginalTextAtomically(files, indexPath, JSON.stringify(index))
@@ -335,8 +363,119 @@ export function createOriginalBundleStore(
       const digest = await files.sha256(asset.local_uri);
       if (digest.toLowerCase() !== asset.sha256.toLowerCase()) return false;
     }
-    if (defaultMapAdapter?.isReady && !await defaultMapAdapter.isReady(record.map_pack_id)) return false;
+    if (!Number.isSafeInteger(record.map_bytes) || record.map_bytes <= 0) return false;
+    try {
+      if (defaultMapAdapter?.inspectStrict) {
+        const liveMap = await defaultMapAdapter.inspectStrict(record.map_pack_id);
+        if (
+          liveMap.pack_id !== record.map_pack_id
+          || !liveMap.ready
+          || !Number.isSafeInteger(liveMap.bytes)
+          || liveMap.bytes !== record.map_bytes
+        ) return false;
+      } else if (defaultMapAdapter?.isReady && !await defaultMapAdapter.isReady(record.map_pack_id)) {
+        return false;
+      }
+    } catch {
+      return false;
+    }
     return true;
+  };
+
+  const inspectRecordStrict = async (
+    record: OriginalBundleRecord,
+    ownerScope: OriginalOwnerScope,
+    packId: string,
+    version: number,
+    expectedManifestId: string,
+  ) => {
+    const expectedDirectory = versionRoot(ownerScope, packId, version);
+    const expectedManifestUri = joinOriginalPath(expectedDirectory, 'manifest.json');
+    if (
+      record?.schema_version !== 1
+      || record.owner_scope !== ownerScope
+      || record.pack_id !== packId
+      || record.version !== version
+      || record.manifest_id !== expectedManifestId
+      || record.directory_uri !== expectedDirectory
+      || record.manifest_uri !== expectedManifestUri
+      || !Array.isArray(record.assets)
+      || typeof record.map_pack_id !== 'string'
+      || !record.map_pack_id
+      || !Number.isSafeInteger(record.map_bytes)
+      || record.map_bytes <= 0
+      || typeof record.manifest_sha256 !== 'string'
+      || !/^[a-f0-9]{64}$/i.test(record.manifest_sha256)
+    ) throw new Error('The private preview bundle identity could not be verified.');
+
+    const directoryInfo = await files.info(expectedDirectory);
+    const manifestInfo = await files.info(expectedManifestUri);
+    if (
+      !directoryInfo.exists
+      || !directoryInfo.isDirectory
+      || !manifestInfo.exists
+      || manifestInfo.isDirectory
+    ) throw new Error('The private preview manifest could not be verified.');
+    const manifestDigest = await files.sha256(expectedManifestUri);
+    if (manifestDigest.toLowerCase() !== record.manifest_sha256.toLowerCase()) {
+      throw new Error('The private preview manifest could not be verified.');
+    }
+
+    let manifest: ReturnType<typeof validateOriginalConsumerManifest>;
+    try {
+      manifest = validateOriginalConsumerManifest(JSON.parse(await files.readText(expectedManifestUri)));
+    } catch {
+      throw new Error('The private preview manifest could not be verified.');
+    }
+    if (
+      manifest.pack_id !== packId
+      || manifest.version !== version
+      || manifest.manifest_id !== expectedManifestId
+      || record.manifest_schema_version !== manifest.schema_version
+      || manifest.assets.length !== record.assets.length
+    ) throw new Error('The private preview manifest identity could not be verified.');
+
+    for (let index = 0; index < manifest.assets.length; index += 1) {
+      const expected = manifest.assets[index];
+      const installed = record.assets[index];
+      if (!installed) throw new Error('The private preview asset index could not be verified.');
+      const expectedLocalUri = joinOriginalPath(
+        expectedDirectory,
+        'assets',
+        `${safePart(expected.id)}${fileExtension(expected)}`,
+      );
+      if (
+        expected.id !== installed.id
+        || expected.kind !== installed.kind
+        || expected.path !== installed.path
+        || expected.mime_type !== installed.mime_type
+        || expected.bytes !== installed.bytes
+        || typeof installed.sha256 !== 'string'
+        || expected.sha256.toLowerCase() !== installed.sha256.toLowerCase()
+        || installed.local_uri !== expectedLocalUri
+      ) throw new Error('The private preview asset index could not be verified.');
+      const info = await files.info(expectedLocalUri);
+      if (!info.exists || info.isDirectory || info.size !== expected.bytes) {
+        throw new Error('The private preview asset bytes could not be verified.');
+      }
+      const digest = await files.sha256(expectedLocalUri);
+      if (digest.toLowerCase() !== expected.sha256.toLowerCase()) {
+        throw new Error('The private preview asset bytes could not be verified.');
+      }
+    }
+
+    if (!defaultMapAdapter?.inspectStrict) {
+      throw new Error('The private preview offline map cannot be inspected on this device.');
+    }
+    const liveMap = await defaultMapAdapter.inspectStrict(record.map_pack_id);
+    if (
+      liveMap.pack_id !== record.map_pack_id
+      || !liveMap.ready
+      || !Number.isSafeInteger(liveMap.bytes)
+      || liveMap.bytes <= 0
+      || liveMap.bytes !== record.map_bytes
+    ) throw new Error('The private preview offline map bytes could not be verified.');
+    return { manifest, liveMap };
   };
 
   return {
@@ -487,6 +626,9 @@ export function createOriginalBundleStore(
           if (privateCleanupJournal && privateCleanupJournal.map_pack_id !== preparedMap.pack_id) {
             throw new Error('The offline map adapter did not preserve its private cleanup identity.');
           }
+          if (!Number.isSafeInteger(preparedMap.bytes) || preparedMap.bytes <= 0) {
+            throw new Error('The offline map adapter did not provide an exact byte count.');
+          }
           completedBytes += manifest.offline_map.estimated_bytes;
 
           const stagedManifestUri = joinOriginalPath(stagingDirectory, 'manifest.json');
@@ -595,6 +737,71 @@ export function createOriginalBundleStore(
         const index = await readIndex();
         const record = bundleScope(index, ownerScope).records[packId]?.[String(version)];
         return record ? verifyRecordInternal(record) : false;
+      });
+    },
+
+    /** Read-only, identity-bound diagnostics for one unpublished preview. */
+    inspectPrivatePreview(
+      ownerScope: OriginalOwnerScope,
+      packId: string,
+      version: number,
+      expectedManifestId: string,
+    ): Promise<OriginalPrivatePreviewInspection> {
+      return serialized(async () => {
+        if (
+          !ownerScope.startsWith('account:')
+          || !packId
+          || !Number.isSafeInteger(version)
+          || version <= 0
+          || !expectedManifestId
+        ) throw new Error('The private preview inspection identity is invalid.');
+        const index = await readInspectionIndexStrict();
+        const scope = index.scopes[ownerScope];
+        if (
+          !scope
+          || typeof scope !== 'object'
+          || Array.isArray(scope)
+          || !scope.records
+          || typeof scope.records !== 'object'
+          || Array.isArray(scope.records)
+          || !scope.pinned_versions
+          || typeof scope.pinned_versions !== 'object'
+          || Array.isArray(scope.pinned_versions)
+        ) throw new Error('The private preview bundle is not indexed exactly.');
+        if (!Object.prototype.hasOwnProperty.call(scope.records, packId)) {
+          throw new Error('The private preview bundle is not indexed exactly.');
+        }
+        const versions = scope.records[packId];
+        if (!versions || typeof versions !== 'object' || Array.isArray(versions)) {
+          throw new Error('The private preview bundle is not indexed exactly.');
+        }
+        const versionKey = String(version);
+        if (!Object.prototype.hasOwnProperty.call(versions, versionKey)) {
+          throw new Error('The private preview bundle is not indexed exactly.');
+        }
+        const record = versions[versionKey];
+        if (!record || typeof record !== 'object' || Array.isArray(record)) {
+          throw new Error('The private preview bundle is not indexed exactly.');
+        }
+        if (scope.pinned_versions[packId] === version) {
+          throw new Error('The private preview bundle is pinned as a released download.');
+        }
+        const { manifest, liveMap } = await inspectRecordStrict(
+          record,
+          ownerScope,
+          packId,
+          version,
+          expectedManifestId,
+        );
+        return {
+          pack_id: packId,
+          version,
+          manifest_id: expectedManifestId,
+          region_id: manifest.offline_map.region_id,
+          map_bytes: liveMap.bytes,
+          map_complete: true,
+          bundle_verified: true,
+        };
       });
     },
 

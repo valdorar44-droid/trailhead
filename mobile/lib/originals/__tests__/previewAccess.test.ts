@@ -157,9 +157,70 @@ async function main() {
     'exact cleanup marker removal is idempotent',
   );
 
+  const fieldIdentity = {
+    ...cleanupIdentity,
+    review_mode: 'field' as const,
+    chapter_id: 'mountain_crossing',
+    variant_id: 'tn_to_nc',
+    validation_selection_id: 'mountain_crossing:tn_to_nc',
+    delivery_contract_sha256: 'a'.repeat(64),
+  };
+  const fieldAcquisitions = await Promise.allSettled([
+    restartedPreview.beginOriginalPrivateFieldReviewRecovery(fieldIdentity, nowMs + 2),
+    restartedPreview.beginOriginalPrivateFieldReviewRecovery(fieldIdentity, nowMs + 2),
+  ]);
+  assert.equal(fieldAcquisitions.filter(result => result.status === 'fulfilled').length, 1);
+  assert.equal(fieldAcquisitions.filter(result => result.status === 'rejected').length, 1);
+  assert.equal(
+    (await restartedPreview.getOriginalPrivateReviewCleanupIdentity())?.schema_version,
+    2,
+  );
+  assert.equal(
+    (await restartedPreview.getOriginalPrivateReviewCleanupIdentity() as any)?.recovery_state,
+    'acquiring',
+    'a crash during acquisition remains cleanup-only',
+  );
+  await assert.rejects(
+    restartedPreview.requireConsumedOriginalPrivateFieldReviewRecovery(fieldIdentity),
+    /No exact one-time private field recovery/,
+  );
+  await assert.rejects(
+    restartedPreview.armOriginalPrivateFieldReviewRecovery({
+      ...fieldIdentity,
+      variant_id: 'nc_to_tn',
+    }, nowMs + 3),
+    /state changed/,
+    'selection mismatch cannot arm another field route',
+  );
+  await restartedPreview.armOriginalPrivateFieldReviewRecovery(fieldIdentity, nowMs + 3);
+  const coldLaunchClaims = await Promise.allSettled([
+    restartedPreview.consumeOriginalPrivateFieldReviewRecovery(fieldIdentity, nowMs + 4),
+    restartedPreview.consumeOriginalPrivateFieldReviewRecovery(fieldIdentity, nowMs + 4),
+  ]);
+  assert.equal(coldLaunchClaims.filter(result => result.status === 'fulfilled').length, 1);
+  assert.equal(coldLaunchClaims.filter(result => result.status === 'rejected').length, 1);
+  assert.equal(
+    (await restartedPreview.requireConsumedOriginalPrivateFieldReviewRecovery(fieldIdentity)).recovery_state,
+    'recovery_consumed',
+  );
+  await assert.rejects(
+    restartedPreview.consumeOriginalPrivateFieldReviewRecovery(fieldIdentity, nowMs + 5),
+    /state changed/,
+    'a second cold launch cannot consume the one-time lease again',
+  );
+  await assert.rejects(
+    restartedPreview.requireConsumedOriginalPrivateFieldReviewRecovery({
+      ...fieldIdentity,
+      delivery_contract_sha256: 'b'.repeat(64),
+    }),
+    /No exact one-time private field recovery/,
+  );
+  await restartedPreview.clearOriginalPrivateReviewCleanupIdentityStrict(fieldIdentity);
+  assert.equal(await restartedPreview.getOriginalPrivateReviewCleanupIdentity(), null);
+
   const concurrentAcquisitions = await Promise.allSettled([
-    restartedPreview.saveOriginalPrivateReviewCleanupIdentity(cleanupIdentity, nowMs + 2),
-    restartedPreview.saveOriginalPrivateReviewCleanupIdentity(cleanupIdentity, nowMs + 2),
+    restartedPreview.saveOriginalPrivateReviewCleanupIdentity(cleanupIdentity, nowMs + 6),
+    restartedPreview.saveOriginalPrivateReviewCleanupIdentity(cleanupIdentity, nowMs + 6),
   ]);
   assert.equal(concurrentAcquisitions.filter(result => result.status === 'fulfilled').length, 1);
   assert.equal(concurrentAcquisitions.filter(result => result.status === 'rejected').length, 1);
@@ -179,6 +240,39 @@ async function main() {
     'an unverifiable cleanup marker is never silently discarded',
   );
   globals.__previewStorage!.delete('trailhead_originals_private_review_cleanup_v1');
+
+  globals.__previewStorage!.set(
+    'trailhead_originals_private_review_cleanup_v1',
+    JSON.stringify({
+      schema_version: 2,
+      ...fieldIdentity,
+      recovery_state: 'recoverable_once',
+      validation_selection_id: '',
+      created_at_ms: nowMs,
+      updated_at_ms: nowMs,
+    }),
+  );
+  await assert.rejects(
+    restartedPreview.getOriginalPrivateReviewCleanupIdentity(),
+    /could not be verified/,
+    'a corrupt field binding never becomes resumable',
+  );
+  const corruptCleanupTarget = await restartedPreview.getOriginalPrivateReviewCleanupIdentityForCleanup();
+  assert.deepEqual(
+    corruptCleanupTarget,
+    {
+      schema_version: 1,
+      ...cleanupIdentity,
+      created_at_ms: nowMs,
+    },
+    'a corrupt field marker exposes only its exact base tuple for cleanup',
+  );
+  await restartedPreview.clearOriginalPrivateReviewCleanupIdentityStrict(cleanupIdentity);
+  assert.equal(
+    await restartedPreview.getOriginalPrivateReviewCleanupIdentityForCleanup(),
+    null,
+    'corrupt field state is deleted only through the exact cleanup target',
+  );
 
   console.log('Originals internal preview access tests passed.');
 }

@@ -5,11 +5,17 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '@/lib/design';
 import {
+  armOriginalPrivateFieldReviewRecovery,
+  beginOriginalPrivateFieldReviewRecovery,
+  getOriginalPrivateReviewCleanupIdentity,
   originalAccessStore,
   originalAdminPreviewSelectionRequired,
   originalBundleStore,
   originalsApi,
+  requireConsumedOriginalPrivateFieldReviewRecovery,
+  resolveOriginalManifestForPlayback,
   saveOriginalPrivateReviewCleanupIdentity,
+  type OriginalPrivateFieldReviewIdentityV2,
   useOriginalsAdminRuntime,
   useOriginalsRuntime,
 } from '@/lib/originals';
@@ -30,6 +36,7 @@ export default function OriginalDraftPreviewScreen() {
   const mode = Array.isArray(params.mode) ? params.mode[0] : params.mode || 'synthetic';
   const privateFieldMode = mode === 'field';
   const user = useStore(state => state.user);
+  const authHydrated = useStore(state => state.authHydrated);
   const runtime = useOriginalsRuntime();
   const adminRuntime = useOriginalsAdminRuntime();
   const runtimeRef = useRef(runtime);
@@ -41,12 +48,14 @@ export default function OriginalDraftPreviewScreen() {
   const [error, setError] = useState('');
 
   useEffect(() => {
+    if (!authHydrated || !adminRuntime.privateReviewRecoveryChecked) return;
     if (startedRef.current) return;
     startedRef.current = true;
     let active = true;
     let reviewStarted = false;
     let handedToPlayer = false;
     let cleanupIdentitySaved = false;
+    let recoveryIdentity: OriginalPrivateFieldReviewIdentityV2 | null = null;
     let cleanupPromise: Promise<void> | null = null;
     const abortController = new AbortController();
     const cleanupPrivateAcquisition = () => {
@@ -57,35 +66,82 @@ export default function OriginalDraftPreviewScreen() {
     void (async () => {
       if (!id) throw new Error('Choose a Studio draft to test.');
       if (!user?.id || !user.is_admin) throw new Error('An admin account is required for unpublished draft testing.');
+      const scope = `account:${String(user.id)}` as const;
+      const durable = await getOriginalPrivateReviewCleanupIdentity();
+      if (durable) {
+        if (durable.owner_scope !== scope) {
+          throw new Error('No private field recovery is available for this account.');
+        }
+        cleanupIdentitySaved = true;
+        if (
+          !privateFieldMode
+          || durable.schema_version !== 2
+          || durable.recovery_state !== 'recovery_consumed'
+        ) throw new Error('The pending private review must be cleaned up before opening this draft.');
+      }
       setError('');
-      setPhase('Checking the latest saved revision');
+      setPhase(durable ? 'Reauthorizing the quarantined field review' : 'Checking the latest saved revision');
       const selection: { chapter_id: string; variant_id: string } | undefined = chapter && variant
         ? { chapter_id: chapter, variant_id: variant }
         : undefined;
+      // This is intentionally fresh and online. A cached role or preview token
+      // can never authorize reuse after a cold launch.
       const manifest = await originalsApi.adminPreviewManifest(id, selection);
       if (originalAdminPreviewSelectionRequired(manifest) && !selection) {
         throw new Error('Choose a chapter and direction before opening this draft test.');
       }
       if (!active) return;
-      const scope = `account:${String(user.id)}` as const;
+      if (privateFieldMode) {
+        const resolved = resolveOriginalManifestForPlayback(manifest, selection);
+        if (
+          resolved.source_schema_version !== 3
+          || !resolved.selection?.delivery_contract_sha256
+        ) throw new Error('Private field recovery requires an exact V3 chapter and delivery selection.');
+        recoveryIdentity = {
+          owner_scope: scope,
+          pack_id: manifest.pack_id,
+          version: manifest.version,
+          manifest_id: manifest.manifest_id,
+          review_mode: 'field',
+          chapter_id: resolved.selection.chapter_id,
+          variant_id: resolved.selection.variant_id,
+          validation_selection_id: resolved.selection.validation_selection_id,
+          delivery_contract_sha256: resolved.selection.delivery_contract_sha256,
+        };
+        if (durable) {
+          await requireConsumedOriginalPrivateFieldReviewRecovery(recoveryIdentity);
+        } else {
+          await beginOriginalPrivateFieldReviewRecovery(recoveryIdentity);
+          cleanupIdentitySaved = true;
+        }
+      } else {
+        await saveOriginalPrivateReviewCleanupIdentity({
+          owner_scope: scope,
+          pack_id: manifest.pack_id,
+          version: manifest.version,
+          manifest_id: manifest.manifest_id,
+        });
+        cleanupIdentitySaved = true;
+      }
+      if (!active) {
+        await cleanupPrivateAcquisition();
+        return;
+      }
       const previousPreviews = (await originalAccessStore.list(scope)).filter(item => (
         item.pack_id === manifest.pack_id
         && item.access_type === 'admin_preview'
         && item.version !== manifest.version
       ));
-      await saveOriginalPrivateReviewCleanupIdentity({
-        owner_scope: scope,
-        pack_id: manifest.pack_id,
-        version: manifest.version,
-        manifest_id: manifest.manifest_id,
-      });
-      cleanupIdentitySaved = true;
       await originalAccessStore.recordAdminPreview(manifest, user.id);
-      setPhase('Downloading and verifying the draft');
-      await runtimeRef.current.downloadOriginal(manifest, {
-        signal: abortController.signal,
-        pinVersion: false,
-      });
+      if (durable) {
+        setPhase('Verifying the saved private bundle and offline map');
+      } else {
+        setPhase('Downloading and verifying the draft');
+        await runtimeRef.current.downloadOriginal(manifest, {
+          signal: abortController.signal,
+          pinVersion: false,
+        });
+      }
       if (!active) return;
       await Promise.all(previousPreviews.map(async item => {
         await originalBundleStore.remove(scope, item.pack_id, item.version).catch(() => {});
@@ -94,6 +150,9 @@ export default function OriginalDraftPreviewScreen() {
       setPhase(privateFieldMode ? 'Starting foreground GPS review' : 'Opening the trigger test');
       if (privateFieldMode) {
         await adminRuntimeRef.current.startPrivateFieldDrive(manifest, selection);
+        if (!durable && recoveryIdentity) {
+          await armOriginalPrivateFieldReviewRecovery(recoveryIdentity);
+        }
       } else {
         await adminRuntimeRef.current.startSimulation(manifest, selection);
       }
@@ -135,7 +194,17 @@ export default function OriginalDraftPreviewScreen() {
         void cleanupPrivateAcquisition().catch(() => {});
       }
     };
-  }, [chapter, id, privateFieldMode, router, user?.id, user?.is_admin, variant]);
+  }, [
+    adminRuntime.privateReviewRecoveryChecked,
+    authHydrated,
+    chapter,
+    id,
+    privateFieldMode,
+    router,
+    user?.id,
+    user?.is_admin,
+    variant,
+  ]);
 
   const progress = runtime.downloadProgress;
   const progressLabel = progress

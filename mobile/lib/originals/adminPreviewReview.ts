@@ -55,6 +55,71 @@ export type OriginalAdminPreviewExitSurface =
   | 'completion_exit'
   | 'privilege_loss';
 
+export type OriginalPrivateFieldSafeDiagnostic = {
+  pack_id: string;
+  version: number;
+  manifest_id: string;
+  region_code: 'SMOKIES_RIDGES_RIVERS_V1';
+  region_label: 'Great Smoky Mountains · Ridges, Rivers & Living Memory';
+  map_bytes: number;
+  map_complete: true;
+  bundle_verified: true;
+};
+
+type OriginalPrivateFieldInspection = {
+  pack_id: string;
+  version: number;
+  manifest_id: string;
+  region_id: string;
+  map_bytes: number;
+  map_complete: true;
+  bundle_verified: true;
+};
+
+const PRIVATE_FIELD_REGIONS = {
+  smokies_ridges_rivers_living_memory_union_private_v1: {
+    code: 'SMOKIES_RIDGES_RIVERS_V1' as const,
+    label: 'Great Smoky Mountains · Ridges, Rivers & Living Memory' as const,
+  },
+};
+
+/**
+ * Project the strict local inspection into an allowlisted, nonsecret UI shape.
+ * The input deliberately has no account, native pack, path, URI, device, GPS,
+ * capacity, or credential fields that could accidentally reach rendering.
+ */
+export function originalPrivateFieldSafeDiagnostic(
+  inspection: OriginalPrivateFieldInspection,
+  gate: { isAdmin: boolean; privateField: boolean },
+): OriginalPrivateFieldSafeDiagnostic | null {
+  if (!gate.isAdmin || !gate.privateField) return null;
+  const region = PRIVATE_FIELD_REGIONS[
+    inspection.region_id as keyof typeof PRIVATE_FIELD_REGIONS
+  ];
+  const safeId = (value: string) => /^[a-z0-9._:-]+$/i.test(value);
+  if (
+    !region
+    || !safeId(inspection.pack_id)
+    || !safeId(inspection.manifest_id)
+    || !Number.isSafeInteger(inspection.version)
+    || inspection.version <= 0
+    || !Number.isSafeInteger(inspection.map_bytes)
+    || inspection.map_bytes <= 0
+    || inspection.map_complete !== true
+    || inspection.bundle_verified !== true
+  ) throw new Error('The private field verification diagnostic could not be safely rendered.');
+  return {
+    pack_id: inspection.pack_id,
+    version: inspection.version,
+    manifest_id: inspection.manifest_id,
+    region_code: region.code,
+    region_label: region.label,
+    map_bytes: inspection.map_bytes,
+    map_complete: true,
+    bundle_verified: true,
+  };
+}
+
 export function originalAdminPreviewSelectionRequired(
   manifest: Pick<OriginalManifest, 'schema_version'>,
 ) {

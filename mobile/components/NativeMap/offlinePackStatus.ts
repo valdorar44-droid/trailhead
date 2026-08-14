@@ -12,6 +12,7 @@ export type InstalledOfflinePackStatus = {
   name: string;
   percentage: number;
   complete: boolean;
+  completedResourceSize: number;
   sizeMb: number;
 };
 
@@ -28,6 +29,13 @@ function finiteNumber(value: unknown, fallback = 0) {
   return Number.isFinite(number) ? number : fallback;
 }
 
+async function nativeOfflinePackStatus(pack: NativeOfflinePackStatusSource) {
+  const source = pack.status;
+  return typeof source === 'function'
+    ? await source.call(pack)
+    : source ?? {};
+}
+
 /**
  * MapLibre exposes an OfflinePack's latest status through an async status()
  * method. Keep the normalization separate from the native module so this
@@ -36,16 +44,51 @@ function finiteNumber(value: unknown, fallback = 0) {
 export async function installedOfflinePackStatus(
   pack: NativeOfflinePackStatusSource,
 ): Promise<InstalledOfflinePackStatus> {
-  const source = pack.status;
-  const status = typeof source === 'function'
-    ? await source.call(pack)
-    : source ?? {};
+  const status = await nativeOfflinePackStatus(pack);
   const percentage = Math.max(0, Math.min(100, finiteNumber(status.percentage)));
   const bytes = Math.max(0, finiteNumber(status.completedResourceSize));
   return {
     name: pack.name || 'unknown',
     percentage,
     complete: percentage >= 100,
+    completedResourceSize: bytes,
+    sizeMb: Math.round(bytes / 1_048_576 * 10) / 10,
+  };
+}
+
+/**
+ * Inspect exactly one physical native pack without hiding native errors or
+ * accepting an ambiguous/incomplete result. Display megabytes are deliberately
+ * derived only after the exact byte count has passed the safe-integer check.
+ */
+export async function installedOfflinePackStatusStrict(
+  packs: NativeOfflinePackStatusSource[],
+  expectedPhysicalName: string,
+): Promise<InstalledOfflinePackStatus & { complete: true }> {
+  if (!Array.isArray(packs)) {
+    throw new Error('The native offline map pack list could not be verified.');
+  }
+  const matches = packs.filter(pack => pack?.name === expectedPhysicalName);
+  if (matches.length === 0) {
+    throw new Error('The exact native offline map pack is missing.');
+  }
+  if (matches.length !== 1) {
+    throw new Error('The exact native offline map pack is duplicated.');
+  }
+  const status = await nativeOfflinePackStatus(matches[0]);
+  const percentage = status.percentage;
+  if (typeof percentage !== 'number' || !Number.isFinite(percentage) || percentage < 100) {
+    throw new Error('The exact native offline map pack is incomplete.');
+  }
+  const bytes = status.completedResourceSize;
+  if (typeof bytes !== 'number' || !Number.isSafeInteger(bytes) || bytes < 0) {
+    throw new Error('The exact native offline map byte count is not a safe integer.');
+  }
+  return {
+    name: expectedPhysicalName,
+    percentage: Math.min(100, percentage),
+    complete: true,
+    completedResourceSize: bytes,
     sizeMb: Math.round(bytes / 1_048_576 * 10) / 10,
   };
 }

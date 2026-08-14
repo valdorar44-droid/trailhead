@@ -12,6 +12,7 @@
 import MapLibreGL from '@maplibre/maplibre-react-native';
 import MapboxGL from '@rnmapbox/maps';
 import {
+  installedOfflinePackStatusStrict,
   installedOfflinePackStatuses,
   mapLibreOfflinePackBounds,
   offlineStyleCoversBounds,
@@ -27,6 +28,7 @@ export interface PackProgress {
   expectedTiles:      number;
   completedResources: number;
   expectedResources:  number;
+  completedResourceSize: number;
   sizeMb:             number;
 }
 
@@ -34,6 +36,7 @@ export interface InstalledPack {
   name:       string;
   percentage: number;
   complete:   boolean;
+  completedResourceSize: number;
   sizeMb:     number;
   renderer:   NativeOfflineRenderer;
 }
@@ -115,8 +118,19 @@ export async function downloadPack(
       const pct = status.percentage ?? 0;
       const cr  = status.completedResourceCount ?? 0;
       const er  = status.requiredResourceCount  ?? 1;
-      const sz  = Math.round((status.completedResourceSize ?? 0) / 1_048_576 * 10) / 10;
-      onProgress({ percentage: pct, completedTiles: cr, expectedTiles: er, completedResources: cr, expectedResources: er, sizeMb: sz });
+      const completedResourceSize = typeof status.completedResourceSize === 'number'
+        ? status.completedResourceSize
+        : 0;
+      const sz = Math.round(completedResourceSize / 1_048_576 * 10) / 10;
+      onProgress({
+        percentage: pct,
+        completedTiles: cr,
+        expectedTiles: er,
+        completedResources: cr,
+        expectedResources: er,
+        completedResourceSize,
+        sizeMb: sz,
+      });
       if (pct >= 100 && !completed) {
         completed = true;
         onComplete();
@@ -159,6 +173,21 @@ export async function hasInstalledPackStrict(
   const packs = await offlineManager(renderer).getPacks();
   const nativeName = physicalPackName(name, renderer);
   return Boolean(packs?.some((pack: any) => pack?.name === nativeName));
+}
+
+/** Strict, renderer-bound inspection for one exact physical native pack. */
+export async function inspectInstalledPackStrict(
+  name: string,
+  renderer: NativeOfflineRenderer,
+): Promise<InstalledPack & { complete: true }> {
+  const packs = await offlineManager(renderer).getPacks();
+  const nativeName = physicalPackName(name, renderer);
+  const status = await installedOfflinePackStatusStrict(packs ?? [], nativeName);
+  return {
+    ...status,
+    name: logicalPackName(status.name, renderer),
+    renderer,
+  };
 }
 
 // ── List installed packs ──────────────────────────────────────────────────────

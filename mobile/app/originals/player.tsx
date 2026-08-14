@@ -143,6 +143,9 @@ export default function OriginalPlayerScreen() {
   const isAdmin = useStore(state => Boolean(state.user?.is_admin));
   const privateFieldActive = privateFieldValue === '1'
     && originalsAdminRuntime.privateReviewMode === 'field';
+  const privateFieldDiagnostic = isAdmin && privateFieldActive
+    ? originalsAdminRuntime.privateFieldDiagnostic
+    : null;
   const runtimeManifest = originalsRuntime.manifest;
   const runtimeSession = originalsRuntime.session;
   const runtimeMatchesRequest = Boolean(
@@ -942,6 +945,13 @@ export default function OriginalPlayerScreen() {
               <View style={styles.alertCopy}>
                 <Text style={[styles.alertTitle, { color: C.text }]}>Private GPS field test · admin only</Text>
                 <Text style={[styles.alertBody, { color: C.text2 }]}>Unpublished content. Foreground GPS only. No saved progress, analytics, background tracking, or car display. Operate only while parked or as a passenger.</Text>
+                {privateFieldDiagnostic ? (
+                  <View testID="originals.private-field.safe-diagnostic">
+                    <Text style={[styles.alertBody, { color: C.text2 }]}>{privateFieldDiagnostic.region_label} · {privateFieldDiagnostic.region_code}</Text>
+                    <Text style={[styles.alertBody, { color: C.text2 }]}>{privateFieldDiagnostic.map_bytes.toLocaleString()} exact map bytes · MAP COMPLETE · BUNDLE VERIFIED</Text>
+                    <Text style={[styles.alertBody, { color: C.text2 }]}>Pack {privateFieldDiagnostic.pack_id} · v{privateFieldDiagnostic.version} · manifest {privateFieldDiagnostic.manifest_id}</Text>
+                  </View>
+                ) : null}
               </View>
             </View>
           ) : null}

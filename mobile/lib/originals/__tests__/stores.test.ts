@@ -58,6 +58,7 @@ async function main() {
     return fixtureDownload(url, destination, options);
   };
   let mapReady = true;
+  let liveMapBytes = 500;
   let strictMapRemovalBlocked = false;
   const removedMapPacks: string[] = [];
   const mapAdapter = {
@@ -75,6 +76,14 @@ async function main() {
       };
     },
     isReady: async () => mapReady,
+    inspectStrict: async (packId: string) => {
+      if (!mapReady) throw new Error('Strict native map inspection is unavailable.');
+      return {
+        pack_id: packId,
+        ready: true as const,
+        bytes: liveMapBytes,
+      };
+    },
     remove: async (packId: string) => { removedMapPacks.push(packId); },
     removeStrict: async (packId: string) => {
       if (strictMapRemovalBlocked) throw new Error('Strict native map absence could not be confirmed.');
@@ -152,6 +161,13 @@ async function main() {
   mapReady = false;
   assert.equal(await bundles.verify('guest', manifest.pack_id, 2), false, 'missing offline maps block restore');
   mapReady = true;
+  liveMapBytes = 501;
+  assert.equal(
+    await bundles.verify('guest', manifest.pack_id, 2),
+    false,
+    'ordinary verified records reject live native bytes that differ from the stored exact count',
+  );
+  liveMapBytes = 500;
 
   const previewLike = originalManifest(4);
   await bundles.download(previewLike, { ownerScope: 'guest', pinVersion: false });
@@ -500,6 +516,118 @@ async function main() {
     pinVersion: false,
     privatePreviewManifestId: previewManifest.manifest_id,
   });
+  const previewFilesBeforeInspection = [...files.files.entries()].map(([path, bytes]) => (
+    [path, Buffer.from(bytes).toString('hex')]
+  ));
+  const previewDirectoriesBeforeInspection = [...files.directories];
+  const removalsBeforeInspection = [...removedMapPacks];
+  const privateInspection = await bundles.inspectPrivatePreview(
+    accountScope,
+    previewManifest.pack_id,
+    previewManifest.version,
+    previewManifest.manifest_id,
+  );
+  assert.deepEqual(privateInspection, {
+    pack_id: previewManifest.pack_id,
+    version: previewManifest.version,
+    manifest_id: previewManifest.manifest_id,
+    region_id: previewManifest.offline_map.region_id,
+    map_bytes: 500,
+    map_complete: true,
+    bundle_verified: true,
+  });
+  assert.deepEqual(Object.keys(privateInspection), [
+    'pack_id',
+    'version',
+    'manifest_id',
+    'region_id',
+    'map_bytes',
+    'map_complete',
+    'bundle_verified',
+  ], 'private diagnostics return only the approved sanitized contract');
+  for (const forbidden of [
+    'owner_scope', 'account', 'map_pack_id', 'native_name', 'directory_uri',
+    'manifest_uri', 'assets', 'device', 'capacity', 'bounds', 'token',
+  ]) assert.equal(forbidden in privateInspection, false, `${forbidden} is not exposed`);
+  assert.deepEqual(
+    [...files.files.entries()].map(([path, bytes]) => [path, Buffer.from(bytes).toString('hex')]),
+    previewFilesBeforeInspection,
+    'strict private diagnostics do not rewrite files or indexes',
+  );
+  assert.deepEqual([...files.directories], previewDirectoriesBeforeInspection);
+  assert.deepEqual(removedMapPacks, removalsBeforeInspection);
+  const mapAdapterWithoutInspection = {
+    prepare: mapAdapter.prepare,
+    isReady: mapAdapter.isReady,
+    remove: mapAdapter.remove,
+    removeStrict: mapAdapter.removeStrict,
+  };
+  await assert.rejects(
+    createOriginalBundleStore(files, undefined, mapAdapterWithoutInspection).inspectPrivatePreview(
+      accountScope,
+      previewManifest.pack_id,
+      previewManifest.version,
+      previewManifest.manifest_id,
+    ),
+    /cannot be inspected/,
+    'sanitized diagnostics fail closed when exact native inspection is unavailable',
+  );
+  await assert.rejects(
+    bundles.inspectPrivatePreview(
+      accountScope,
+      previewManifest.pack_id,
+      previewManifest.version,
+      'different-manifest',
+    ),
+    /identity could not be verified/,
+  );
+  liveMapBytes = 501;
+  await assert.rejects(
+    bundles.inspectPrivatePreview(
+      accountScope,
+      previewManifest.pack_id,
+      previewManifest.version,
+      previewManifest.manifest_id,
+    ),
+    /map bytes could not be verified/,
+  );
+  assert.equal(
+    await bundles.verify(accountScope, previewManifest.pack_id, previewManifest.version),
+    false,
+  );
+  liveMapBytes = 500;
+  mapReady = false;
+  await assert.rejects(
+    bundles.inspectPrivatePreview(
+      accountScope,
+      previewManifest.pack_id,
+      previewManifest.version,
+      previewManifest.manifest_id,
+    ),
+    /Strict native map inspection is unavailable/,
+    'strict native inspection errors propagate without being converted to a GO result',
+  );
+  mapReady = true;
+  const previewRecord = await bundles.get(
+    accountScope,
+    previewManifest.pack_id,
+    previewManifest.version,
+  );
+  assert(previewRecord);
+  const previewAssetUri = previewRecord.assets[0].local_uri;
+  const previewAssetBytes = files.files.get(previewAssetUri);
+  assert(previewAssetBytes);
+  files.files.set(previewAssetUri, new Uint8Array([0]));
+  await assert.rejects(
+    bundles.inspectPrivatePreview(
+      accountScope,
+      previewManifest.pack_id,
+      previewManifest.version,
+      previewManifest.manifest_id,
+    ),
+    /asset bytes could not be verified/,
+  );
+  files.files.set(previewAssetUri, previewAssetBytes);
   await assert.rejects(
     bundles.removePrivatePreview(
       accountScope,
@@ -812,6 +940,16 @@ async function main() {
     ),
     /bundle index could not be verified/,
     'strict preview bundle cleanup never treats an unreadable index as empty',
+  );
+  await assert.rejects(
+    createOriginalBundleStore(corruptBundleFiles, undefined, mapAdapter).inspectPrivatePreview(
+      accountScope,
+      previewManifest.pack_id,
+      previewManifest.version,
+      previewManifest.manifest_id,
+    ),
+    /bundle index could not be verified/,
+    'strict preview inspection never repairs or treats an unreadable index as empty',
   );
 
   console.log('Originals durable store tests passed.');

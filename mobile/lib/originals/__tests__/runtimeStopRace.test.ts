@@ -30,7 +30,10 @@ const nativeRuntimeStubs: Record<string, string> = {
     };
   `,
   '../store': `
-    const state = () => globalThis.__originalsRuntimeAuthState || { user: null, token: null };
+    const state = () => ({
+      authHydrated: true,
+      ...(globalThis.__originalsRuntimeAuthState || { user: null, token: null }),
+    });
     export function useStore(selector) { return selector(state()); }
     useStore.getState = state;
   `,
@@ -93,10 +96,18 @@ const nativeRuntimeStubs: Record<string, string> = {
   `,
   './previewAccess': `
     function same(left, right) {
-      return left.owner_scope === right.owner_scope
+      const sameBase = left.owner_scope === right.owner_scope
         && left.pack_id === right.pack_id
         && left.version === right.version
         && left.manifest_id === right.manifest_id;
+      const leftField = left.review_mode === 'field';
+      const rightField = right.review_mode === 'field';
+      return sameBase && leftField === rightField && (!leftField || (
+        left.chapter_id === right.chapter_id
+        && left.variant_id === right.variant_id
+        && left.validation_selection_id === right.validation_selection_id
+        && left.delivery_contract_sha256 === right.delivery_contract_sha256
+      ));
     }
     export async function getOriginalPreviewToken() {
       return globalThis.__originalsRuntimePreviewToken || null;
@@ -106,7 +117,22 @@ const nativeRuntimeStubs: Record<string, string> = {
       globalThis.__originalsRuntimePreviewToken = null;
     }
     export async function getOriginalPrivateReviewCleanupIdentity() {
+      if (globalThis.__originalsRuntimeCleanupIdentityCorrupt) {
+        throw new Error('The pending private review cleanup identity could not be verified.');
+      }
       return globalThis.__originalsRuntimeCleanupIdentity || null;
+    }
+    export async function getOriginalPrivateReviewCleanupIdentityForCleanup() {
+      const current = globalThis.__originalsRuntimeCleanupIdentity;
+      if (!current || !globalThis.__originalsRuntimeCleanupIdentityCorrupt) return current || null;
+      return {
+        schema_version: 1,
+        owner_scope: current.owner_scope,
+        pack_id: current.pack_id,
+        version: current.version,
+        manifest_id: current.manifest_id,
+        created_at_ms: current.created_at_ms || 0,
+      };
     }
     export async function saveOriginalPrivateReviewCleanupIdentity(identity) {
       const existing = globalThis.__originalsRuntimeCleanupIdentity;
@@ -120,13 +146,39 @@ const nativeRuntimeStubs: Record<string, string> = {
       };
       return globalThis.__originalsRuntimeCleanupIdentity;
     }
+    export async function consumeOriginalPrivateFieldReviewRecovery(identity) {
+      const current = globalThis.__originalsRuntimeCleanupIdentity;
+      if (
+        !current
+        || current.schema_version !== 2
+        || current.recovery_state !== 'recoverable_once'
+        || !same(current, identity)
+      ) throw new Error('The private field review recovery state changed; nothing was resumed.');
+      globalThis.__originalsRuntimeCleanupIdentity = {
+        ...current,
+        recovery_state: 'recovery_consumed',
+        updated_at_ms: Date.now(),
+      };
+      globalThis.__originalsRuntimeRecoveryConsumeCount =
+        (globalThis.__originalsRuntimeRecoveryConsumeCount || 0) + 1;
+      return globalThis.__originalsRuntimeCleanupIdentity;
+    }
     export async function clearOriginalPrivateReviewCleanupIdentityStrict(expected) {
       const current = globalThis.__originalsRuntimeCleanupIdentity;
       if (!current) return;
-      if (!same(current, expected)) {
+      const comparable = globalThis.__originalsRuntimeCleanupIdentityCorrupt ? {
+        schema_version: 1,
+        owner_scope: current.owner_scope,
+        pack_id: current.pack_id,
+        version: current.version,
+        manifest_id: current.manifest_id,
+        created_at_ms: current.created_at_ms || 0,
+      } : current;
+      if (!same(comparable, expected)) {
         throw new Error('The pending private review cleanup identity changed; nothing was removed.');
       }
       globalThis.__originalsRuntimeCleanupIdentity = null;
+      globalThis.__originalsRuntimeCleanupIdentityCorrupt = false;
     }
   `,
   './expoStores': `
@@ -185,20 +237,40 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+type RuntimeCleanupIdentity = {
+  schema_version: 1;
+  owner_scope: `account:${string}`;
+  pack_id: string;
+  version: number;
+  manifest_id: string;
+  created_at_ms: number;
+} | {
+  schema_version: 2;
+  owner_scope: `account:${string}`;
+  pack_id: string;
+  version: number;
+  manifest_id: string;
+  review_mode: 'field';
+  chapter_id: string;
+  variant_id: string;
+  validation_selection_id: string;
+  delivery_contract_sha256: string;
+  recovery_state: 'acquiring' | 'recoverable_once' | 'recovery_consumed';
+  created_at_ms: number;
+  updated_at_ms: number;
+};
+
+type RuntimeFieldCleanupIdentity = Extract<RuntimeCleanupIdentity, { schema_version: 2 }>;
+
 async function main() {
   const globals = globalThis as typeof globalThis & {
     __originalsRuntimeAuthState?: { user: { id: string; is_admin?: boolean } | null; token: string | null };
     __originalsRuntimeEpoch?: number;
     __originalsRuntimePreviewToken?: string | null;
     __originalsRuntimePreviewClearCount?: number;
-    __originalsRuntimeCleanupIdentity?: {
-      schema_version: 1;
-      owner_scope: `account:${string}`;
-      pack_id: string;
-      version: number;
-      manifest_id: string;
-      created_at_ms: number;
-    } | null;
+    __originalsRuntimeRecoveryConsumeCount?: number;
+    __originalsRuntimeCleanupIdentityCorrupt?: boolean;
+    __originalsRuntimeCleanupIdentity?: RuntimeCleanupIdentity | null;
     __originalsRuntimeAcquire?: (...args: unknown[]) => Promise<unknown>;
     __originalsRuntimeClaimFeatured?: (...args: unknown[]) => Promise<unknown>;
     __originalsRuntimeAnalyticsCount?: number;
@@ -212,6 +284,8 @@ async function main() {
   globals.__originalsRuntimeEpoch = 0;
   globals.__originalsRuntimePreviewToken = null;
   globals.__originalsRuntimePreviewClearCount = 0;
+  globals.__originalsRuntimeRecoveryConsumeCount = 0;
+  globals.__originalsRuntimeCleanupIdentityCorrupt = false;
   globals.__originalsRuntimeCleanupIdentity = null;
   globals.__originalsRuntimeAcquire = async () => { throw new Error('unused'); };
   globals.__originalsRuntimeClaimFeatured = async () => { throw new Error('unused'); };
@@ -253,7 +327,10 @@ async function main() {
   let accessOverride: (() => Promise<Record<string, unknown>>) | null = null;
   let bundleOverride: (() => Promise<Record<string, unknown>>) | null = null;
   let verifyOverride: (() => Promise<boolean>) | null = null;
+  let loadManifestOverride: (() => Promise<Record<string, unknown> | null>) | null = null;
+  let privateInspectionCount = 0;
   let bundleDownloadOptions: Record<string, unknown> | null = null;
+  let bundleDownloadCount = 0;
   let privateBundleRemovalFailures = 0;
   let removedPrivateBundleIdentity: unknown[] | null = null;
   let removedPrivateAccessIdentity: unknown[] | null = null;
@@ -273,6 +350,42 @@ async function main() {
     map_bytes: 0,
     total_bytes: 0,
     verified_at_ms: 1,
+  };
+  const fieldManifest = originalManifestV3();
+  const fieldSelection = {
+    chapter_id: 'mountain-crossing',
+    variant_id: 'eastbound',
+  };
+  const fieldCompiled = compileOriginalManifestV3(fieldManifest, fieldSelection);
+  const fieldBundle = {
+    ...bundle,
+    owner_scope: 'account:admin-preview',
+    pack_id: fieldManifest.pack_id,
+    version: fieldManifest.version,
+    manifest_id: fieldManifest.manifest_id,
+    map_bytes: 213_073_997,
+  };
+  const setFieldRecoveryMarker = (
+    recoveryState: 'acquiring' | 'recoverable_once' | 'recovery_consumed' = 'acquiring',
+    overrides: Partial<RuntimeFieldCleanupIdentity> = {},
+  ) => {
+    const now = Date.now();
+    globals.__originalsRuntimeCleanupIdentity = {
+      schema_version: 2,
+      owner_scope: 'account:admin-preview',
+      pack_id: fieldManifest.pack_id,
+      version: fieldManifest.version,
+      manifest_id: fieldManifest.manifest_id,
+      review_mode: 'field',
+      chapter_id: fieldCompiled.selection.chapter_id,
+      variant_id: fieldCompiled.selection.variant_id,
+      validation_selection_id: fieldCompiled.selection.validation_selection_id,
+      delivery_contract_sha256: fieldCompiled.selection.delivery_contract_sha256,
+      recovery_state: recoveryState,
+      created_at_ms: now,
+      updated_at_ms: now,
+      ...overrides,
+    } as RuntimeFieldCleanupIdentity;
   };
   const audioState = {
     loaded: false,
@@ -322,11 +435,24 @@ async function main() {
       async get() { return bundleOverride ? bundleOverride() : bundle; },
       async verify() { return verifyOverride ? verifyOverride() : true; },
       async assetUri() { return 'file:///originals/test/story.mp3'; },
-      async loadManifest() { return null; },
+      async loadManifest() { return loadManifestOverride ? loadManifestOverride() : null; },
       async migrateGuestToAccount() {},
       async download(_manifest: unknown, options: Record<string, unknown>) {
+        bundleDownloadCount += 1;
         bundleDownloadOptions = options;
         return { ...bundle, owner_scope: options.ownerScope };
+      },
+      async inspectPrivatePreview(_scope: string, packId: string, version: number, manifestId: string) {
+        privateInspectionCount += 1;
+        return {
+          pack_id: packId,
+          version,
+          manifest_id: manifestId,
+          region_id: 'smokies_ridges_rivers_living_memory_union_private_v1',
+          map_bytes: 213_073_997,
+          map_complete: true,
+          bundle_verified: true,
+        };
       },
       async removePrivatePreview(...args: unknown[]) {
         if (privateBundleRemovalFailures > 0) {
@@ -539,13 +665,31 @@ async function main() {
   const fieldPreviewClearsBefore = globals.__originalsRuntimePreviewClearCount ?? 0;
   globals.__originalsRuntimeAuthState = { user: { id: 'non-admin' }, token: 'user-token' };
   await assert.rejects(
-    adminRuntime!.startPrivateFieldDrive(manifest),
+    adminRuntime!.startPrivateFieldDrive(fieldManifest, fieldSelection),
     /only to Trailhead admins/i,
   );
   assert.equal(privateLocationStartCount, 0, 'non-admin field review fails before foreground GPS');
   globals.__originalsRuntimeAuthState = { user: { id: 'admin-preview', is_admin: true }, token: 'admin-token' };
-  await act(async () => { await adminRuntime!.startPrivateFieldDrive(manifest); });
+  accessOverride = async () => ({
+    owner_scope: 'account:admin-preview',
+    access_type: 'admin_preview',
+    manifest_id: fieldManifest.manifest_id,
+  });
+  bundleOverride = async () => fieldBundle;
+  setFieldRecoveryMarker('acquiring');
+  await act(async () => { await adminRuntime!.startPrivateFieldDrive(fieldManifest, fieldSelection); });
   assert.equal(adminRuntime!.privateReviewMode, 'field');
+  assert.deepEqual(adminRuntime!.privateFieldDiagnostic, {
+    pack_id: fieldManifest.pack_id,
+    version: fieldManifest.version,
+    manifest_id: fieldManifest.manifest_id,
+    region_code: 'SMOKIES_RIDGES_RIVERS_V1',
+    region_label: 'Great Smoky Mountains · Ridges, Rivers & Living Memory',
+    map_bytes: 213_073_997,
+    map_complete: true,
+    bundle_verified: true,
+  });
+  assert.ok(privateInspectionCount >= 1, 'field start requires the strict sanitized bundle/map inspection');
   assert.equal((runtime as unknown as Runtime).simulation, false, 'field review never enables synthetic controls');
   assert.equal(privateLocationStartCount, 1, 'field review starts the dedicated foreground-only adapter');
   assert.equal(locationStartCount, fieldPublicLocationStartsBefore, 'field review never starts the public/background adapter');
@@ -586,9 +730,9 @@ async function main() {
   assert.equal(globals.__originalsRuntimePreviewClearCount, fieldPreviewClearsBefore + 1, 'account departure closes the private preview credential');
   assert.deepEqual(removedPrivateBundleIdentity, [
     'account:admin-preview',
-    manifest.pack_id,
-    manifest.version,
-    manifest.manifest_id,
+    fieldManifest.pack_id,
+    fieldManifest.version,
+    fieldManifest.manifest_id,
   ], 'account departure removes only the exact private field-review bundle');
   assert.equal(adminRuntime!.privateReviewMode, null);
   globals.__originalsRuntimePreviewClearCount = 0;
@@ -602,9 +746,10 @@ async function main() {
     access_type: 'admin_preview',
     manifest_id: 'wrong-private-manifest',
   });
+  setFieldRecoveryMarker('acquiring');
   await act(async () => {
     await assert.rejects(
-      adminRuntime!.startPrivateFieldDrive(manifest),
+      adminRuntime!.startPrivateFieldDrive(fieldManifest, fieldSelection),
       /Restore or acquire|exact unpublished admin preview/i,
     );
   });
@@ -613,12 +758,13 @@ async function main() {
   accessOverride = async () => ({
     owner_scope: 'account:admin-preview',
     access_type: 'admin_preview',
-    manifest_id: manifest.manifest_id,
+    manifest_id: fieldManifest.manifest_id,
   });
   verifyOverride = async () => false;
+  setFieldRecoveryMarker('acquiring');
   await act(async () => {
     await assert.rejects(
-      adminRuntime!.startPrivateFieldDrive(manifest),
+      adminRuntime!.startPrivateFieldDrive(fieldManifest, fieldSelection),
       /downloading and verifying/i,
     );
   });
@@ -627,7 +773,7 @@ async function main() {
 
   await act(async () => {
     await assert.rejects(
-      adminRuntime!.startPrivateFieldDrive(originalManifestV3(), {
+      adminRuntime!.startPrivateFieldDrive(fieldManifest, {
         chapter_id: 'not-a-chapter',
         variant_id: 'not-a-variant',
       }),
@@ -637,9 +783,10 @@ async function main() {
   assert.equal(privateLocationStartCount, fieldStartsBeforeGates, 'selection mismatch fails before foreground GPS');
 
   privateLocationPermission = 'denied';
+  setFieldRecoveryMarker('acquiring');
   await act(async () => {
     await assert.rejects(
-      adminRuntime!.startPrivateFieldDrive(manifest),
+      adminRuntime!.startPrivateFieldDrive(fieldManifest, fieldSelection),
       /Location permission is required/i,
     );
   });
@@ -649,9 +796,10 @@ async function main() {
   privateLocationPermission = 'foreground';
 
   failPrivateLocationStart = true;
+  setFieldRecoveryMarker('acquiring');
   await act(async () => {
     await assert.rejects(
-      adminRuntime!.startPrivateFieldDrive(manifest),
+      adminRuntime!.startPrivateFieldDrive(fieldManifest, fieldSelection),
       /Injected private foreground location start failure/i,
     );
   });
@@ -659,6 +807,7 @@ async function main() {
   assert.equal(adminRuntime!.privateReviewMode, null);
   assert.equal(sessionSaveCount, fieldSessionSavesBefore, 'foreground startup failure cannot persist a private session');
 
+  bundleOverride = null;
   accessOverride = async () => ({
     owner_scope: 'account:admin-preview',
     access_type: 'admin_preview',
@@ -838,8 +987,254 @@ async function main() {
   );
   globals.__originalsRuntimeCleanupIdentity = null;
   globals.__originalsRuntimeAuthState = { user: { id: 'admin-preview', is_admin: true }, token: 'admin-token' };
-  accessOverride = null;
   globals.__originalsRuntimePreviewToken = null;
+
+  accessOverride = async () => ({
+    owner_scope: 'account:admin-preview',
+    access_type: 'admin_preview',
+    manifest_id: fieldManifest.manifest_id,
+  });
+  bundleOverride = async () => fieldBundle;
+  loadManifestOverride = async () => fieldManifest as unknown as Record<string, unknown>;
+  verifyOverride = async () => true;
+  removedPrivateBundleIdentity = null;
+  removedPrivateAccessIdentity = null;
+  setFieldRecoveryMarker('acquiring');
+  const recoveryConsumesBeforeAcquiringCrash = globals.__originalsRuntimeRecoveryConsumeCount ?? 0;
+  await act(async () => { renderer!.unmount(); });
+  runtime = null;
+  adminRuntime = null;
+  await act(async () => {
+    renderer = TestRenderer.create(
+      React.createElement(
+        runtimeModule.OriginalsRuntimeProvider,
+        { dependencies },
+        React.createElement(CaptureRuntime),
+      ),
+    );
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+  assert.equal(globals.__originalsRuntimeRecoveryConsumeCount, recoveryConsumesBeforeAcquiringCrash);
+  assert.ok(removedPrivateBundleIdentity, 'a cold launch after an acquiring crash performs exact cleanup');
+  assert.equal(globals.__originalsRuntimeCleanupIdentity, null);
+
+  removedPrivateBundleIdentity = null;
+  removedPrivateAccessIdentity = null;
+  const recoveryConsumesBeforeHydration = globals.__originalsRuntimeRecoveryConsumeCount ?? 0;
+  setFieldRecoveryMarker('recoverable_once');
+  globals.__originalsRuntimeAuthState = {
+    authHydrated: false,
+    user: { id: 'admin-preview', is_admin: true },
+    token: 'admin-token',
+  } as any;
+  await act(async () => { renderer!.unmount(); });
+  runtime = null;
+  adminRuntime = null;
+  await act(async () => {
+    renderer = TestRenderer.create(
+      React.createElement(
+        runtimeModule.OriginalsRuntimeProvider,
+        { dependencies },
+        React.createElement(CaptureRuntime),
+      ),
+    );
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+  assert.equal(
+    (globals.__originalsRuntimeCleanupIdentity as any)?.recovery_state,
+    'recoverable_once',
+    'cold recovery waits for auth hydration before touching the lease',
+  );
+  assert.equal(globals.__originalsRuntimeRecoveryConsumeCount, recoveryConsumesBeforeHydration);
+
+  globals.__originalsRuntimeAuthState = {
+    authHydrated: true,
+    user: { id: 'admin-preview', is_admin: true },
+    token: 'admin-token',
+  } as any;
+  await act(async () => { renderer!.unmount(); });
+  runtime = null;
+  adminRuntime = null;
+  const recoveryLocationStartsBefore = privateLocationStartCount;
+  const recoverySessionSavesBefore = sessionSaveCount;
+  const recoverySetActiveBefore = setActiveCount;
+  const recoveryAnalyticsBefore = globals.__originalsRuntimeAnalyticsCount ?? 0;
+  const recoveryCarSyncBefore = globals.__originalsRuntimeCarSyncCount ?? 0;
+  const recoveryDownloadsBefore = bundleDownloadCount;
+  await act(async () => {
+    renderer = TestRenderer.create(
+      React.createElement(
+        runtimeModule.OriginalsRuntimeProvider,
+        { dependencies },
+        React.createElement(CaptureRuntime),
+      ),
+    );
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+  assert.equal(globals.__originalsRuntimeRecoveryConsumeCount, recoveryConsumesBeforeHydration + 1);
+  assert.equal((globals.__originalsRuntimeCleanupIdentity as any)?.recovery_state, 'recovery_consumed');
+  assert.equal(runtime!.session, null, 'first cold launch leaves the verified private bundle quarantined');
+  assert.equal(runtime!.manifest, null, 'quarantine renders no private manifest');
+  assert.equal(adminRuntime!.privateReviewActive, false);
+  assert.equal(adminRuntime!.privateFieldDiagnostic, null, 'quarantine exposes no private diagnostic');
+  assert.equal(privateLocationStartCount, recoveryLocationStartsBefore, 'cold launch never auto-resumes GPS');
+  assert.equal(removedPrivateBundleIdentity, null, 'the one allowed quarantine preserves exact bytes');
+
+  // The preview screen performs a fresh successful online admin-manifest call
+  // before this internal start. Runtime then reuses only the strict local copy.
+  await act(async () => {
+    await adminRuntime!.startPrivateFieldDrive(fieldManifest, fieldSelection);
+  });
+  assert.equal(bundleDownloadCount, recoveryDownloadsBefore, 'explicit recovery never redownloads assets or map');
+  assert.equal(privateLocationStartCount, recoveryLocationStartsBefore + 1);
+  assert.equal(sessionSaveCount, recoverySessionSavesBefore);
+  assert.equal(setActiveCount, recoverySetActiveBefore);
+  assert.equal(globals.__originalsRuntimeAnalyticsCount, recoveryAnalyticsBefore);
+  assert.equal(globals.__originalsRuntimeCarSyncCount, recoveryCarSyncBefore);
+  await act(async () => { await adminRuntime!.endPrivateReview(); });
+  assert.equal(globals.__originalsRuntimeCleanupIdentity, null);
+
+  removedPrivateBundleIdentity = null;
+  removedPrivateAccessIdentity = null;
+  setFieldRecoveryMarker('recoverable_once');
+  const consumesBeforeSecondRestart = globals.__originalsRuntimeRecoveryConsumeCount ?? 0;
+  await act(async () => { renderer!.unmount(); });
+  runtime = null;
+  adminRuntime = null;
+  await act(async () => {
+    renderer = TestRenderer.create(
+      React.createElement(
+        runtimeModule.OriginalsRuntimeProvider,
+        { dependencies },
+        React.createElement(CaptureRuntime),
+      ),
+    );
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+  assert.equal(globals.__originalsRuntimeRecoveryConsumeCount, consumesBeforeSecondRestart + 1);
+  assert.equal((globals.__originalsRuntimeCleanupIdentity as any)?.recovery_state, 'recovery_consumed');
+  await act(async () => { renderer!.unmount(); });
+  runtime = null;
+  adminRuntime = null;
+  await act(async () => {
+    renderer = TestRenderer.create(
+      React.createElement(
+        runtimeModule.OriginalsRuntimeProvider,
+        { dependencies },
+        React.createElement(CaptureRuntime),
+      ),
+    );
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+  assert.deepEqual(removedPrivateBundleIdentity, [
+    'account:admin-preview',
+    fieldManifest.pack_id,
+    fieldManifest.version,
+    fieldManifest.manifest_id,
+  ], 'a second cold launch routes the consumed lease through exact cleanup');
+  assert.equal(globals.__originalsRuntimeCleanupIdentity, null);
+
+  removedPrivateBundleIdentity = null;
+  removedPrivateAccessIdentity = null;
+  setFieldRecoveryMarker('recoverable_once', { validation_selection_id: 'mismatched-selection' } as any);
+  await act(async () => { renderer!.unmount(); });
+  runtime = null;
+  adminRuntime = null;
+  await act(async () => {
+    renderer = TestRenderer.create(
+      React.createElement(
+        runtimeModule.OriginalsRuntimeProvider,
+        { dependencies },
+        React.createElement(CaptureRuntime),
+      ),
+    );
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+  assert.ok(removedPrivateBundleIdentity, 'a local selection mismatch cleans up after consuming once');
+  assert.equal(globals.__originalsRuntimeCleanupIdentity, null);
+
+  removedPrivateBundleIdentity = null;
+  removedPrivateAccessIdentity = null;
+  setFieldRecoveryMarker('recoverable_once', { validation_selection_id: '' } as any);
+  globals.__originalsRuntimeCleanupIdentityCorrupt = true;
+  const consumesBeforeCorruptMarker = globals.__originalsRuntimeRecoveryConsumeCount ?? 0;
+  await act(async () => { renderer!.unmount(); });
+  runtime = null;
+  adminRuntime = null;
+  await act(async () => {
+    renderer = TestRenderer.create(
+      React.createElement(
+        runtimeModule.OriginalsRuntimeProvider,
+        { dependencies },
+        React.createElement(CaptureRuntime),
+      ),
+    );
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+  assert.equal(
+    globals.__originalsRuntimeRecoveryConsumeCount,
+    consumesBeforeCorruptMarker,
+    'a corrupt field marker is cleanup-only and never consumes recovery',
+  );
+  assert.ok(removedPrivateBundleIdentity, 'a corrupt field marker routes its exact base tuple through cleanup');
+  assert.equal(globals.__originalsRuntimeCleanupIdentity, null);
+
+  removedPrivateBundleIdentity = null;
+  removedPrivateAccessIdentity = null;
+  setFieldRecoveryMarker('recoverable_once');
+  globals.__originalsRuntimeAuthState = {
+    user: { id: 'admin-preview', is_admin: false },
+    token: null,
+  };
+  const consumesBeforeRevokedAccount = globals.__originalsRuntimeRecoveryConsumeCount ?? 0;
+  await act(async () => { renderer!.unmount(); });
+  runtime = null;
+  adminRuntime = null;
+  await act(async () => {
+    renderer = TestRenderer.create(
+      React.createElement(
+        runtimeModule.OriginalsRuntimeProvider,
+        { dependencies },
+        React.createElement(CaptureRuntime),
+      ),
+    );
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+  assert.equal(globals.__originalsRuntimeRecoveryConsumeCount, consumesBeforeRevokedAccount);
+  assert.ok(removedPrivateBundleIdentity, 'same-account privilege loss invokes exact cleanup without recovery');
+  assert.equal(globals.__originalsRuntimeCleanupIdentity, null);
+
+  removedPrivateBundleIdentity = null;
+  removedPrivateAccessIdentity = null;
+  setFieldRecoveryMarker('recoverable_once');
+  globals.__originalsRuntimeAuthState = {
+    user: { id: 'different-account', is_admin: true },
+    token: 'different-token',
+  };
+  const consumesBeforeOtherAccount = globals.__originalsRuntimeRecoveryConsumeCount ?? 0;
+  await act(async () => { renderer!.unmount(); });
+  runtime = null;
+  adminRuntime = null;
+  await act(async () => {
+    renderer = TestRenderer.create(
+      React.createElement(
+        runtimeModule.OriginalsRuntimeProvider,
+        { dependencies },
+        React.createElement(CaptureRuntime),
+      ),
+    );
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+  assert.equal(globals.__originalsRuntimeRecoveryConsumeCount, consumesBeforeOtherAccount);
+  assert.equal(removedPrivateBundleIdentity, null, 'another account cannot delete the quarantined review');
+  assert.equal((globals.__originalsRuntimeCleanupIdentity as any)?.owner_scope, 'account:admin-preview');
+
+  globals.__originalsRuntimeCleanupIdentity = null;
+  globals.__originalsRuntimeAuthState = { user: { id: 'admin-preview', is_admin: true }, token: 'admin-token' };
+  accessOverride = null;
+  bundleOverride = null;
+  loadManifestOverride = null;
+  verifyOverride = null;
 
   sessionSaveCount = 0;
   setActiveCount = 0;

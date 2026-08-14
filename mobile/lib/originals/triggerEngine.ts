@@ -30,6 +30,20 @@ const MINIMUM_ROUTE_DIRECTION_SPEED_MPS = 2;
 const OPPOSITE_ROUTE_DIRECTION_DEG = 120;
 const MAXIMUM_REVERSE_CONFIRMATION_FIX_GAP_MS = 10_000;
 
+const ORIGINAL_VIRTUAL_DRIVE_CUE_FAILURE_CODES = new Set<OriginalTriggerDecisionCode>([
+  'after_window',
+  'outside_radius',
+  'missing_bearing',
+  'wrong_bearing',
+]);
+
+export function originalVirtualDriveCueResultOutcome(
+  code: OriginalTriggerDecisionCode,
+): 'passed' | 'failed' | null {
+  if (code === 'triggered' || code === 'queued') return 'passed';
+  return ORIGINAL_VIRTUAL_DRIVE_CUE_FAILURE_CODES.has(code) ? 'failed' : null;
+}
+
 export type OriginalTriggerEngineOptions = {
   [Key in keyof typeof ORIGINAL_TRIGGER_DEFAULTS]?: number;
 };

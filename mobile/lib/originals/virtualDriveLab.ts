@@ -5,7 +5,6 @@ import type {
   OriginalLocationSample,
   OriginalManifestV1,
   OriginalSessionV1,
-  OriginalTriggerDecisionCode,
 } from './types';
 
 export type OriginalVirtualDriveDirection = 'forward' | 'reverse';
@@ -51,20 +50,6 @@ export const ORIGINAL_VIRTUAL_DRIVE_TICK_SIMULATED_MS = 3_100;
 export const ORIGINAL_VIRTUAL_DRIVE_SPEED_MIN_MPS = 0;
 export const ORIGINAL_VIRTUAL_DRIVE_SPEED_MAX_MPS = 40;
 export const ORIGINAL_VIRTUAL_DRIVE_OFF_ROUTE_M = 800;
-
-const ORIGINAL_VIRTUAL_DRIVE_CUE_FAILURE_CODES = new Set<OriginalTriggerDecisionCode>([
-  'after_window',
-  'outside_radius',
-  'missing_bearing',
-  'wrong_bearing',
-]);
-
-export function originalVirtualDriveCueResultOutcome(
-  code: OriginalTriggerDecisionCode,
-): 'passed' | 'failed' | null {
-  if (code === 'triggered' || code === 'queued') return 'passed';
-  return ORIGINAL_VIRTUAL_DRIVE_CUE_FAILURE_CODES.has(code) ? 'failed' : null;
-}
 
 export const ORIGINAL_VIRTUAL_DRIVE_GPS_ACCURACY_M: Readonly<
   Record<OriginalVirtualDriveGpsQuality, number>

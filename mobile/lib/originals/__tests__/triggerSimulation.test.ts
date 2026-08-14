@@ -1,13 +1,15 @@
 import assert from 'node:assert/strict';
 import { validateOriginalManifest } from '../manifest';
 import { createOriginalSession } from '../session';
-import { evaluateOriginalLocation } from '../triggerEngine';
+import {
+  evaluateOriginalLocation,
+  originalVirtualDriveCueResultOutcome,
+} from '../triggerEngine';
 import { originalSimulationSamplesForNextCue } from '../triggerSimulation';
 import {
   createOriginalVirtualDriveLabState,
   nextOriginalVirtualDriveCueProgress,
   ORIGINAL_VIRTUAL_DRIVE_OFF_ROUTE_M,
-  originalVirtualDriveCueResultOutcome,
   originalVirtualDriveCueStatuses,
   seekOriginalVirtualDriveLab,
   tickOriginalVirtualDriveLab,

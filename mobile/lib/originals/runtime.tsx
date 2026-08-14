@@ -99,8 +99,11 @@ import {
   originalBundleStore,
   originalSessionStore,
 } from './expoStores';
-import { evaluateOriginalLocation, remainingOriginalTriggerStops } from './triggerEngine';
-import { originalVirtualDriveCueResultOutcome } from './virtualDriveLab';
+import {
+  evaluateOriginalLocation,
+  originalVirtualDriveCueResultOutcome,
+  remainingOriginalTriggerStops,
+} from './triggerEngine';
 import type {
   OriginalLocationSample,
   OriginalAcquisition,

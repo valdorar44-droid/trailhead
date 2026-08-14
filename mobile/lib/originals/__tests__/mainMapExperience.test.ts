@@ -111,6 +111,8 @@ assert.deepEqual(originalStartDestination('moab', 1), {
 assert.equal(consumerOriginalPlayerShouldRedirect(undefined), true);
 assert.equal(consumerOriginalPlayerShouldRedirect('0'), true);
 assert.equal(consumerOriginalPlayerShouldRedirect('1'), false);
+assert.equal(consumerOriginalPlayerShouldRedirect(undefined, '1'), false);
+assert.equal(consumerOriginalPlayerShouldRedirect(undefined, '0'), true);
 
 const detailScreenSource = readFileSync(
   fileURLToPath(new NodeURL('../../../app/originals/[id].tsx', import.meta.url)),
@@ -196,6 +198,9 @@ const standalonePlayerSource = readFileSync(
 assert.match(standalonePlayerSource, /consumerOriginalPlayerShouldRedirect/);
 assert.match(standalonePlayerSource, /Opening this Original on the Trailhead map/);
 assert.match(standalonePlayerSource, /runtimeSession\.owner_scope === ownerScope/);
+assert.match(standalonePlayerSource, /PRIVATE GPS · FOREGROUND/);
+assert.match(standalonePlayerSource, /No saved progress, analytics, background tracking, or car display/);
+assert.match(standalonePlayerSource, /privateFieldActive[\s\S]*requestClosePlayer\('end_test'\)/);
 assert.match(
   standalonePlayerSource,
   /pathname: '\/originals\/\[id\]'/,

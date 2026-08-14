@@ -119,6 +119,7 @@ import type {
 } from './types';
 
 export type OriginalsRuntimeState = 'idle' | 'ready' | 'tracking' | 'paused' | 'completed' | 'error';
+export type OriginalPrivateReviewMode = 'synthetic' | 'field' | null;
 
 function currentCarTripContext() {
   const current = useStore.getState();
@@ -198,11 +199,16 @@ export type OriginalsRuntimeValue = {
   migrateGuestToAccount: (accountId: string | number) => Promise<OriginalSessionV1[]>;
 };
 
-/** Privileged synthetic controls intentionally excluded from the public runtime API. */
+/** Privileged private-review controls intentionally excluded from the public runtime API. */
 export type OriginalsAdminRuntimeValue = {
+  privateReviewMode: OriginalPrivateReviewMode;
   privateReviewActive: boolean;
   privateReviewCleanupPending: boolean;
   startSimulation: (
+    manifest: OriginalManifest,
+    selection?: OriginalChapterSelectionV2,
+  ) => Promise<OriginalSessionV1>;
+  startPrivateFieldDrive: (
     manifest: OriginalManifest,
     selection?: OriginalChapterSelectionV2,
   ) => Promise<OriginalSessionV1>;
@@ -296,6 +302,7 @@ export function OriginalsRuntimeProvider({
   const [error, setError] = useState<string | null>(null);
   const [muted, setMutedState] = useState(false);
   const [simulation, setSimulation] = useState(false);
+  const [privateReviewMode, setPrivateReviewMode] = useState<OriginalPrivateReviewMode>(null);
   const [privateReviewActive, setPrivateReviewActive] = useState(false);
   const [privateReviewCleanupPending, setPrivateReviewCleanupPending] = useState(false);
   const [lastTriggerEvaluation, setLastTriggerEvaluation] = useState<OriginalTriggerEvaluation | null>(null);
@@ -315,6 +322,7 @@ export function OriginalsRuntimeProvider({
   const priorUserIdRef = useRef<string | number | null>(null);
   const trackingGenerationRef = useRef(0);
   const simulationRef = useRef(false);
+  const privateReviewModeRef = useRef<OriginalPrivateReviewMode>(null);
   const privateReviewIdentityRef = useRef<OriginalPrivateReviewIdentity | null>(null);
   const privateReviewCleanupIdentityRef = useRef<OriginalPrivateReviewIdentity | null>(null);
   const lastTriggerEvaluationRef = useRef<OriginalTriggerEvaluation | null>(null);
@@ -367,9 +375,10 @@ export function OriginalsRuntimeProvider({
   const publishSession = useCallback(async (next: OriginalSessionV1, active = true) => {
     sessionRef.current = next;
     if (mountedRef.current) setSession(next);
-    // Trigger Lab sessions are deliberately ephemeral. They exercise the real
-    // trigger and audio paths without replacing a tester's saved drive state.
-    if (!simulationRef.current) {
+    // Private review sessions are deliberately ephemeral. Both the synthetic
+    // lab and the foreground field drive exercise the real trigger/audio path
+    // without replacing a tester's saved drive state.
+    if (privateReviewModeRef.current == null) {
       if (active) await dependencies.sessions.setActive(next);
       else await dependencies.sessions.save(next);
     }
@@ -475,7 +484,7 @@ export function OriginalsRuntimeProvider({
       activeManifest.pack_id,
       activeManifest.version,
       activeSession.owner_scope,
-      simulationRef.current,
+      privateReviewModeRef.current != null,
       activeManifest.manifest_id,
     );
     if (!operationIsCurrent()) return;
@@ -586,7 +595,7 @@ export function OriginalsRuntimeProvider({
       activeManifest.pack_id,
       activeManifest.version,
       activeSession.owner_scope,
-      simulationRef.current,
+      privateReviewModeRef.current != null,
       activeManifest.manifest_id,
     );
     if (!operationIsCurrent()) return;
@@ -713,7 +722,7 @@ export function OriginalsRuntimeProvider({
       || generation !== trackingGenerationRef.current
       || sessionRef.current?.session_id !== activeSession.session_id
     ) return;
-    if (!manualReplay && !simulationRef.current) {
+    if (!manualReplay && privateReviewModeRef.current == null) {
       trackOriginalsAnalyticsEvent(ORIGINALS_ANALYTICS_EVENTS.stopOutcome, {
         pack_id: activeSession.pack_id,
         version: activeSession.version,
@@ -828,7 +837,7 @@ export function OriginalsRuntimeProvider({
       for (const event of evaluation.events) {
         if (event.type === 'stops_missed') {
           event.stop_ids.forEach(stopId => {
-            if (simulationRef.current) return;
+            if (privateReviewModeRef.current != null) return;
             trackOriginalsAnalyticsEvent(ORIGINALS_ANALYTICS_EVENTS.stopOutcome, {
               pack_id: evaluation.session.pack_id,
               version: evaluation.session.version,
@@ -891,7 +900,10 @@ export function OriginalsRuntimeProvider({
   const startLocation = useCallback(async (operationIsCurrent?: () => boolean) => {
     await stopLocation();
     if (operationIsCurrent && !operationIsCurrent()) throw new Error('Original start was cancelled.');
-    const result = await dependencies.location.start(submitLocationSample);
+    const reviewMode = privateReviewModeRef.current;
+    const result = reviewMode === 'field'
+      ? await dependencies.location.startPrivateForeground(submitLocationSample)
+      : await dependencies.location.start(submitLocationSample);
     if (operationIsCurrent && !operationIsCurrent()) {
       await result.stop().catch(() => {});
       throw new Error('Original start was cancelled.');
@@ -920,7 +932,7 @@ export function OriginalsRuntimeProvider({
     ) return;
     trackingGenerationRef.current += 1;
     const generation = trackingGenerationRef.current;
-    const simulating = simulationRef.current;
+    const reviewMode = privateReviewModeRef.current;
     const operationIsCurrent = () => (
       !stoppingRef.current
       && generation === trackingGenerationRef.current
@@ -928,7 +940,22 @@ export function OriginalsRuntimeProvider({
       && sessionRef.current?.current_stop_id === active.current_stop_id
       && sessionRef.current?.long_form?.current_item_id === active.long_form?.current_item_id
       && manifestRef.current?.manifest_id === activeManifest.manifest_id
+      && privateReviewModeRef.current === reviewMode
     );
+    if (reviewMode === 'field') {
+      const { ownerScope } = await requireCurrentAccess(
+        active.pack_id,
+        active.version,
+        active.owner_scope,
+        true,
+        activeManifest.manifest_id,
+      );
+      if (!operationIsCurrent()) return;
+      if (!await dependencies.bundles.verify(ownerScope, active.pack_id, active.version)) {
+        throw new Error('This private field-review download is incomplete or corrupt.');
+      }
+      if (!operationIsCurrent()) return;
+    }
     await publishSession({
       ...active,
       status: 'active',
@@ -941,25 +968,29 @@ export function OriginalsRuntimeProvider({
       await releaseAudio();
       return;
     }
-    if (!simulating) {
+    if (reviewMode !== 'synthetic') {
       await startLocation(operationIsCurrent);
       if (!operationIsCurrent()) {
         await stopLocation();
         return;
       }
-      await syncOriginalDriveToCar(activeManifest).catch(() => {});
-      if (!operationIsCurrent()) return;
+      if (reviewMode == null) {
+        await syncOriginalDriveToCar(activeManifest).catch(() => {});
+        if (!operationIsCurrent()) return;
+      }
     }
     if (mountedRef.current) setState('tracking');
-  }, [acquireOriginalAudioFocus, publishSession, releaseAudio, startLocation, stopLocation]);
+  }, [acquireOriginalAudioFocus, dependencies.bundles, publishSession, releaseAudio, requireCurrentAccess, startLocation, stopLocation]);
   handleExternalUserPlayRef.current = handleExternalUserPlay;
 
   const activateTour = useCallback(async (
     manifestInput: OriginalManifest,
     restart: boolean,
-    simulate = false,
+    reviewMode: OriginalPrivateReviewMode = null,
     chapterSelection?: OriginalChapterSelectionV2,
   ) => {
+    const simulate = reviewMode === 'synthetic';
+    const privateReview = reviewMode != null;
     let activatedSessionId: string | null = null;
     const requestEpoch = accountStorage.epoch();
     const requestScope = originalOwnerScopeForAccount(useStore.getState().user?.id ?? null);
@@ -984,15 +1015,14 @@ export function OriginalsRuntimeProvider({
       if (privateReviewCleanupIdentityRef.current) {
         throw new Error('Finish removing the pending private review before starting another Original.');
       }
-      if (simulate && !useStore.getState().user?.is_admin) {
-        throw new Error('The Virtual Drive Lab is available only to Trailhead admins.');
+      if (privateReview && !useStore.getState().user?.is_admin) {
+        throw new Error('Private draft review is available only to Trailhead admins.');
       }
-      if (
-        simulate
-        && !simulationRef.current
-        && sessionRef.current?.status === 'active'
-      ) {
+      if (simulate && !simulationRef.current && sessionRef.current?.status === 'active') {
         throw new Error('Pause or end the active drive before opening the trigger test.');
+      }
+      if (reviewMode === 'field' && sessionRef.current) {
+        throw new Error('End the active Original or private review before opening a private field review.');
       }
       const resolved = resolveOriginalManifestForPlayback(manifestInput, chapterSelection);
       const cleanManifest = validateOriginalManifest(resolved.manifest);
@@ -1000,7 +1030,7 @@ export function OriginalsRuntimeProvider({
         cleanManifest.pack_id,
         cleanManifest.version,
         requestScope,
-        simulate,
+        privateReview,
         cleanManifest.manifest_id,
       );
       requireActiveActivation();
@@ -1014,12 +1044,15 @@ export function OriginalsRuntimeProvider({
         throw new Error('Finish downloading and verifying this Original before starting.');
       }
       const exactPrivateReview = Boolean(
-        simulate
+        privateReview
         && useStore.getState().user?.is_admin
         && activationAccess?.owner_scope === ownerScope
         && activationAccess.access_type === 'admin_preview'
         && activationAccess.manifest_id === cleanManifest.manifest_id
       );
+      if (reviewMode === 'field' && !exactPrivateReview) {
+        throw new Error('The exact unpublished admin preview is required for a private field review.');
+      }
       const privateReviewIdentity: OriginalPrivateReviewIdentity | null = exactPrivateReview
         ? {
           ownerScope,
@@ -1028,7 +1061,7 @@ export function OriginalsRuntimeProvider({
           manifestId: cleanManifest.manifest_id,
         }
         : null;
-      const existing = restart || simulate
+      const existing = restart || privateReview
         ? null
         : await dependencies.sessions.load(
           ownerScope,
@@ -1062,6 +1095,7 @@ export function OriginalsRuntimeProvider({
       await releaseAudio();
       requireActiveActivation();
       simulationRef.current = simulate;
+      privateReviewModeRef.current = reviewMode;
       privateReviewIdentityRef.current = privateReviewIdentity;
       privateReviewCleanupIdentityRef.current = null;
       lastTriggerEvaluationRef.current = null;
@@ -1077,6 +1111,7 @@ export function OriginalsRuntimeProvider({
         setBundle(installed);
         setError(null);
         setSimulation(simulate);
+        setPrivateReviewMode(reviewMode);
         setPrivateReviewActive(Boolean(privateReviewIdentity));
         setPrivateReviewCleanupPending(false);
         setLastTriggerEvaluation(null);
@@ -1087,9 +1122,9 @@ export function OriginalsRuntimeProvider({
       requireActiveActivation();
       await publishSession(active);
       requireActiveActivation();
-      if (!simulate) await startLocation(activationIsCurrent);
+      if (reviewMode !== 'synthetic') await startLocation(activationIsCurrent);
       requireActiveActivation();
-      if (!simulate) await syncOriginalDriveToCar(cleanManifest).catch(() => {});
+      if (reviewMode == null) await syncOriginalDriveToCar(cleanManifest).catch(() => {});
       requireActiveActivation();
       if (active.current_stop_id) {
         await playStop(active.current_stop_id, active.current_audio_position_ms);
@@ -1104,14 +1139,41 @@ export function OriginalsRuntimeProvider({
       return sessionRef.current ?? active;
     } catch (caught) {
       if (activatedSessionId) await stopLocation();
-      if (activatedSessionId && !simulate) await clearOriginalDriveFromCar().catch(() => {});
+      if (activatedSessionId && reviewMode == null) await clearOriginalDriveFromCar().catch(() => {});
+      if (activatedSessionId && reviewMode === 'field') {
+        await dependencies.audio.stop().catch(() => {});
+        await dependencies.audio.unload().catch(() => {});
+        await releaseAudio().catch(() => {});
+        await sampleTailRef.current.catch(() => {});
+        simulationRef.current = false;
+        privateReviewModeRef.current = null;
+        privateReviewIdentityRef.current = null;
+        sessionRef.current = null;
+        manifestRef.current = null;
+        selectablePlanRef.current = null;
+        lastLocationSampleRef.current = null;
+        bundleRef.current = null;
+        lastTriggerEvaluationRef.current = null;
+        if (mountedRef.current) {
+          setSession(null);
+          setManifest(null);
+          setSelectablePlan(null);
+          setBundle(null);
+          setSimulation(false);
+          setPrivateReviewMode(null);
+          setPrivateReviewActive(false);
+          setLastTriggerEvaluation(null);
+          setAudioPlaybackState(null);
+          setState('idle');
+        }
+      }
       if (!scopeIsStillCurrent() || trackingGenerationRef.current !== activationGeneration || stoppingRef.current) {
         throw new Error(scopeIsStillCurrent()
           ? 'Original start was cancelled.'
           : 'The signed-in account changed. Try again.');
       }
       const active = sessionRef.current;
-      if (active?.session_id === activatedSessionId && active.status === 'active') {
+      if (reviewMode !== 'field' && active?.session_id === activatedSessionId && active.status === 'active') {
         await publishSession({
           ...active,
           status: 'paused',
@@ -1126,9 +1188,11 @@ export function OriginalsRuntimeProvider({
       }
       if (activatedSessionId && simulate) {
         simulationRef.current = false;
+        privateReviewModeRef.current = null;
         privateReviewIdentityRef.current = null;
         if (mountedRef.current) {
           setSimulation(false);
+          setPrivateReviewMode(null);
           setPrivateReviewActive(false);
         }
       }
@@ -1279,19 +1343,20 @@ export function OriginalsRuntimeProvider({
     if (stoppingRef.current) return;
     trackingGenerationRef.current += 1;
     const generation = trackingGenerationRef.current;
-    const simulating = simulationRef.current;
+    const reviewMode = privateReviewModeRef.current;
+    const simulating = reviewMode === 'synthetic';
     const operationIsCurrent = () => (
       !stoppingRef.current
       && generation === trackingGenerationRef.current
       && sessionRef.current?.session_id === active.session_id
       && manifestRef.current?.manifest_id === activeManifest.manifest_id
-      && simulationRef.current === simulating
+      && privateReviewModeRef.current === reviewMode
     );
     const { ownerScope } = await requireCurrentAccess(
       active.pack_id,
       active.version,
       active.owner_scope,
-      simulating,
+      reviewMode != null,
       activeManifest.manifest_id,
     );
     if (!operationIsCurrent()) return;
@@ -1323,8 +1388,10 @@ export function OriginalsRuntimeProvider({
         await stopLocation();
         return;
       }
-      await syncOriginalDriveToCar(activeManifest).catch(() => {});
-      if (!operationIsCurrent()) return;
+      if (reviewMode == null) {
+        await syncOriginalDriveToCar(activeManifest).catch(() => {});
+        if (!operationIsCurrent()) return;
+      }
     }
     const audioState = await dependencies.audio.getState();
     if (!operationIsCurrent()) return;
@@ -1354,15 +1421,18 @@ export function OriginalsRuntimeProvider({
     if (inFlight) return inFlight;
 
     // Capture the persistence mode before any awaited cleanup. A concurrent
-    // stop must never observe simulation=false and save an ephemeral preview.
-    const wasSimulation = simulationRef.current;
+    // stop must never save an ephemeral private review into durable progress.
+    const wasPrivateReviewMode = privateReviewModeRef.current;
+    const wasPrivateFieldReview = wasPrivateReviewMode === 'field';
     const sessionAtStop = sessionRef.current;
     stoppingRef.current = true;
     trackingGenerationRef.current += 1;
     // Disable the independent cold runtime synchronously, before reading
     // foreground audio state or awaiting any teardown work. Its generation
     // gate must win every End Tour race, including a slow native getState().
-    const headlessStop = stopHeadlessOriginalRuntime().catch(() => {});
+    const headlessStop = wasPrivateFieldReview
+      ? Promise.resolve()
+      : stopHeadlessOriginalRuntime().catch(() => {});
 
     const operation = (async () => {
       try {
@@ -1373,10 +1443,10 @@ export function OriginalsRuntimeProvider({
         }
 
         await stopLocation().catch(() => {});
-        await dependencies.location.stopActive().catch(() => {});
+        if (!wasPrivateFieldReview) await dependencies.location.stopActive().catch(() => {});
         let persistenceError: unknown = null;
         const active = sessionAtStop ?? sessionRef.current;
-        if (!wasSimulation) {
+        if (wasPrivateReviewMode == null) {
           if (active) {
             try {
               const stopped = {
@@ -1429,6 +1499,7 @@ export function OriginalsRuntimeProvider({
         if (persistenceError) throw persistenceError;
       } finally {
         simulationRef.current = false;
+        privateReviewModeRef.current = null;
         privateReviewIdentityRef.current = null;
         lastTriggerEvaluationRef.current = null;
         sessionRef.current = null;
@@ -1444,6 +1515,7 @@ export function OriginalsRuntimeProvider({
           setSelectablePlan(null);
           setBundle(null);
           setSimulation(false);
+          setPrivateReviewMode(null);
           setPrivateReviewActive(false);
           if (!privateReviewCleanupIdentityRef.current) {
             setPrivateReviewCleanupPending(false);
@@ -1463,11 +1535,6 @@ export function OriginalsRuntimeProvider({
     operation.then(clear, clear);
     return operation;
   }, [dependencies.audio, dependencies.location, dependencies.sessions, releaseAudio, stopLocation]);
-
-  useEffect(
-    () => registerOriginalsAccountDepartureStopper(stopTour),
-    [stopTour],
-  );
 
   const reviewPreviewStory = useCallback(async (storyId: string) => {
     const currentUser = useStore.getState().user;
@@ -1591,7 +1658,7 @@ export function OriginalsRuntimeProvider({
         const activeIdentity = privateReviewIdentityRef.current;
         if (
           !currentUser.is_admin
-          || !simulationRef.current
+          || privateReviewModeRef.current == null
           || !active
           || !activeManifest
           || !activeIdentity
@@ -1624,7 +1691,7 @@ export function OriginalsRuntimeProvider({
         setPrivateReviewCleanupPending(true);
       }
       await clearOriginalPreviewAccessStrict();
-      if (simulationRef.current || sessionRef.current) await stopTour();
+      if (privateReviewModeRef.current != null || sessionRef.current) await stopTour();
       await dependencies.bundles.removePrivatePreview(
         identity.ownerScope,
         identity.packId,
@@ -1654,6 +1721,25 @@ export function OriginalsRuntimeProvider({
     operation.then(clear, clear);
     return operation;
   }, [dependencies.access, dependencies.bundles, stopTour]);
+
+  const stopForAccountDeparture = useCallback(async () => {
+    const durablePrivateReview = await getOriginalPrivateReviewCleanupIdentity().catch(() => null);
+    if (
+      durablePrivateReview
+      || privateReviewModeRef.current != null
+      || privateReviewIdentityRef.current
+      || privateReviewCleanupIdentityRef.current
+    ) {
+      await endPrivateReview();
+      return;
+    }
+    await stopTour();
+  }, [endPrivateReview, stopTour]);
+
+  useEffect(
+    () => registerOriginalsAccountDepartureStopper(stopForAccountDeparture),
+    [stopForAccountDeparture],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -1735,7 +1821,7 @@ export function OriginalsRuntimeProvider({
       || generation !== trackingGenerationRef.current
       || sessionRef.current?.session_id !== active.session_id
     ) return;
-    if (!simulationRef.current) {
+    if (privateReviewModeRef.current == null) {
       trackOriginalsAnalyticsEvent(ORIGINALS_ANALYTICS_EVENTS.stopOutcome, {
         pack_id: active.pack_id,
         version: active.version,
@@ -1853,7 +1939,7 @@ export function OriginalsRuntimeProvider({
       active.pack_id,
       active.version,
       active.owner_scope,
-      simulationRef.current,
+      privateReviewModeRef.current != null,
       activeManifest.manifest_id,
     );
     if (
@@ -1884,7 +1970,7 @@ export function OriginalsRuntimeProvider({
       || sessionRef.current?.session_id !== active.session_id
     ) return;
     if (mountedRef.current) setState('tracking');
-    if (!simulationRef.current) {
+    if (privateReviewModeRef.current == null) {
       trackOriginalsAnalyticsEvent(ORIGINALS_ANALYTICS_EVENTS.stopOutcome, {
         pack_id: active.pack_id,
         version: active.version,
@@ -2309,8 +2395,8 @@ export function OriginalsRuntimeProvider({
     audioPlaybackState,
     audioCapabilities: dependencies.audio.capabilities,
     downloadOriginal,
-    startTour: (value, selection) => activateTour(value, false, false, selection),
-    restartTour: (value, selection) => activateTour(value, true, false, selection),
+    startTour: (value, selection) => activateTour(value, false, null, selection),
+    restartTour: (value, selection) => activateTour(value, true, null, selection),
     pauseTour,
     resumeTour,
     stopTour,
@@ -2353,13 +2439,20 @@ export function OriginalsRuntimeProvider({
   ]);
 
   const adminValue = useMemo<OriginalsAdminRuntimeValue>(() => ({
+    privateReviewMode,
     privateReviewActive,
     privateReviewCleanupPending,
     startSimulation: (value, selection) => {
       if (!useStore.getState().user?.is_admin) {
         return Promise.reject(new Error('The Virtual Drive Lab is available only to Trailhead admins.'));
       }
-      return activateTour(value, true, true, selection);
+      return activateTour(value, true, 'synthetic', selection);
+    },
+    startPrivateFieldDrive: (value, selection) => {
+      if (!useStore.getState().user?.is_admin) {
+        return Promise.reject(new Error('Private field review is available only to Trailhead admins.'));
+      }
+      return activateTour(value, true, 'field', selection);
     },
     skipSimulationCue: () => {
       if (!useStore.getState().user?.is_admin || !simulationRef.current) {
@@ -2385,6 +2478,7 @@ export function OriginalsRuntimeProvider({
     endPrivateReview,
     privateReviewActive,
     privateReviewCleanupPending,
+    privateReviewMode,
     reviewPreviewStory,
     skipSimulationCue,
     submitLocationSample,

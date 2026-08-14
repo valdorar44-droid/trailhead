@@ -96,6 +96,7 @@ export default function OriginalPlayerScreen() {
     id?: string | string[];
     version?: string | string[];
     simulate?: string | string[];
+    field?: string | string[];
     chapter?: string | string[];
     variant?: string | string[];
   }>();
@@ -103,16 +104,20 @@ export default function OriginalPlayerScreen() {
   const versionValue = routeParam(params.version) || undefined;
   const requestedVersion = Number.isFinite(Number(versionValue)) ? Number(versionValue) : undefined;
   const simulateValue = routeParam(params.simulate) || undefined;
+  const privateFieldValue = routeParam(params.field) || undefined;
   const requestedChapterId = routeParam(params.chapter);
   const requestedVariantId = routeParam(params.variant);
-  const redirectConsumerToMainMap = consumerOriginalPlayerShouldRedirect(simulateValue);
+  const redirectConsumerToMainMap = consumerOriginalPlayerShouldRedirect(
+    simulateValue,
+    privateFieldValue,
+  );
   const originalsRuntime = useOriginalsRuntime();
   const originalsAdminRuntime = useOriginalsAdminRuntime();
   const runtimeRef = useRef(originalsRuntime);
   runtimeRef.current = originalsRuntime;
   const adminRuntimeRef = useRef(originalsAdminRuntime);
   adminRuntimeRef.current = originalsAdminRuntime;
-  const ownsSimulationRouteRef = useRef(simulateValue === '1');
+  const ownsPrivateReviewRouteRef = useRef(simulateValue === '1' || privateFieldValue === '1');
   const exitPromptVisibleRef = useRef(false);
   const [navigationAllowed, setNavigationAllowed] = useState(false);
   const accountId = useStore(state => state.user?.id ?? null);
@@ -136,6 +141,8 @@ export default function OriginalPlayerScreen() {
   const driveLabManifestKeyRef = useRef('');
   const driveLabTickBusyRef = useRef(false);
   const isAdmin = useStore(state => Boolean(state.user?.is_admin));
+  const privateFieldActive = privateFieldValue === '1'
+    && originalsAdminRuntime.privateReviewMode === 'field';
   const runtimeManifest = originalsRuntime.manifest;
   const runtimeSession = originalsRuntime.session;
   const runtimeMatchesRequest = Boolean(
@@ -219,15 +226,17 @@ export default function OriginalPlayerScreen() {
 
   useEffect(() => () => {
     if (
-      ownsSimulationRouteRef.current
+      ownsPrivateReviewRouteRef.current
       && (
         runtimeRef.current.simulation
+        || adminRuntimeRef.current.privateReviewMode === 'field'
         || adminRuntimeRef.current.privateReviewActive
         || adminRuntimeRef.current.privateReviewCleanupPending
       )
     ) {
       if (
         adminRuntimeRef.current.privateReviewActive
+        || adminRuntimeRef.current.privateReviewMode === 'field'
         || adminRuntimeRef.current.privateReviewCleanupPending
       ) {
         void adminRuntimeRef.current.endPrivateReview().catch(() => {});
@@ -279,10 +288,11 @@ export default function OriginalPlayerScreen() {
   ]);
 
   useEffect(() => {
-    if (!originalsRuntime.simulation || isAdmin) return;
+    if (originalsAdminRuntime.privateReviewMode == null || isAdmin) return;
     commitDriveLabState(null);
     const action = originalAdminPreviewExitAction('privilege_loss', {
-      privateReviewActive: originalsAdminRuntime.privateReviewActive,
+      privateReviewActive: originalsAdminRuntime.privateReviewActive
+        || originalsAdminRuntime.privateReviewMode === 'field',
       cleanupPending: originalsAdminRuntime.privateReviewCleanupPending,
     });
     if (action === 'exact_private_cleanup') {
@@ -296,6 +306,7 @@ export default function OriginalPlayerScreen() {
     originalsAdminRuntime.endPrivateReview,
     originalsAdminRuntime.privateReviewActive,
     originalsAdminRuntime.privateReviewCleanupPending,
+    originalsAdminRuntime.privateReviewMode,
     originalsRuntime.simulation,
     originalsRuntime.stopTour,
   ]);
@@ -431,7 +442,7 @@ export default function OriginalPlayerScreen() {
 
   const finishSimulationExit = useCallback((navigateAfterStop?: () => void) => {
     setNavigationAllowed(true);
-    ownsSimulationRouteRef.current = false;
+    ownsPrivateReviewRouteRef.current = false;
     void originalsRuntime.stopTour().catch(() => {}).finally(() => {
       requestAnimationFrame(() => {
         if (navigateAfterStop) navigateAfterStop();
@@ -470,7 +481,7 @@ export default function OriginalPlayerScreen() {
             void originalsAdminRuntime.endPrivateReview()
               .then(() => {
                 setNavigationAllowed(true);
-                ownsSimulationRouteRef.current = false;
+                ownsPrivateReviewRouteRef.current = false;
                 requestAnimationFrame(() => {
                   if (navigateAfterCleanup) navigateAfterCleanup();
                   else router.replace('/originals' as any);
@@ -498,7 +509,8 @@ export default function OriginalPlayerScreen() {
     navigateAfterStop?: () => void,
   ) => {
     if (originalAdminPreviewExitAction(surface, {
-      privateReviewActive: originalsAdminRuntime.privateReviewActive,
+      privateReviewActive: originalsAdminRuntime.privateReviewActive
+        || originalsAdminRuntime.privateReviewMode === 'field',
       cleanupPending: originalsAdminRuntime.privateReviewCleanupPending,
     }) === 'exact_private_cleanup') {
       requestPrivateReviewCleanup(navigateAfterStop);
@@ -539,13 +551,17 @@ export default function OriginalPlayerScreen() {
     finishSimulationExit,
     originalsAdminRuntime.privateReviewActive,
     originalsAdminRuntime.privateReviewCleanupPending,
+    originalsAdminRuntime.privateReviewMode,
     originalsRuntime.simulation,
     requestPrivateReviewCleanup,
   ]);
 
-  usePreventRemove(simulateValue === '1' && !navigationAllowed, ({ data }) => {
+  usePreventRemove(
+    (simulateValue === '1' || privateFieldValue === '1') && !navigationAllowed,
+    ({ data }) => {
     requestClosePlayer('android_back', () => navigation.dispatch(data.action));
-  });
+    },
+  );
 
   const runSimulation = useCallback(async (scenario: 'trigger' | 'poor_accuracy' | 'off_route') => {
     const manifest = originalsRuntime.manifest;
@@ -739,9 +755,10 @@ export default function OriginalPlayerScreen() {
     );
   }
 
-  if (simulateValue === '1' && !isAdmin) {
+  if ((simulateValue === '1' || privateFieldValue === '1') && !isAdmin) {
     const privateCleanupRequired = (
       originalsAdminRuntime.privateReviewActive
+      || originalsAdminRuntime.privateReviewMode === 'field'
       || originalsAdminRuntime.privateReviewCleanupPending
     );
     return (
@@ -750,7 +767,7 @@ export default function OriginalPlayerScreen() {
         <Text style={[styles.centerText, { color: C.text2 }]}>
           {privateCleanupRequired
             ? 'Admin access changed. Private playback is locked, but this exact local review can still be removed.'
-            : 'The Virtual Drive Lab is available only to Trailhead admins.'}
+            : 'Private draft testing is available only to Trailhead admins.'}
         </Text>
         <TouchableOpacity
           accessibilityRole="button"
@@ -788,6 +805,8 @@ export default function OriginalPlayerScreen() {
   }
 
   if (
+    originalsRuntime.simulation
+    &&
     originalsAdminRuntime.privateReviewActive
     && runtimeMatchesRequest
     && (adminReviewResolution.error || !rawAdminReviewEntries.length)
@@ -837,13 +856,14 @@ export default function OriginalPlayerScreen() {
           session={session}
           onStories={() => setStoriesVisible(true)}
           simulation={originalsRuntime.simulation}
+          privateField={privateFieldActive}
           simulationResults={simulationResults}
           validationBusy={validationBusy}
           validationReport={validationReport}
           onRunValidation={() => void runValidationMatrix()}
           onFeedback={() => setFeedbackVisible(true)}
           onExit={() => requestClosePlayer('completion_exit')}
-          onEndPrivateReview={adminReviewEntries.length ? () => requestPrivateReviewCleanup() : undefined}
+          onEndPrivateReview={privateFieldActive || adminReviewEntries.length ? () => requestPrivateReviewCleanup() : undefined}
           privateReviewCleanupBusy={reviewCleanupBusy}
         />
         <StoriesModal
@@ -856,7 +876,7 @@ export default function OriginalPlayerScreen() {
           reviewBusyId={reviewBusyId}
           onAdminReview={entry => void reviewStory(entry)}
         />
-        {!originalsRuntime.simulation ? <OriginalFeedbackSheet visible={feedbackVisible} packId={id} version={session.version} onClose={() => setFeedbackVisible(false)} /> : null}
+        {!originalsRuntime.simulation && !privateFieldActive ? <OriginalFeedbackSheet visible={feedbackVisible} packId={id} version={session.version} onClose={() => setFeedbackVisible(false)} /> : null}
       </>
     );
   }
@@ -869,14 +889,14 @@ export default function OriginalPlayerScreen() {
           <TouchableOpacity
             testID="originals.legacy-player.minimize"
             accessibilityRole="button"
-            accessibilityLabel={originalsRuntime.simulation ? 'Close trigger test' : 'Minimize tour player'}
+            accessibilityLabel={originalsRuntime.simulation ? 'Close trigger test' : privateFieldActive ? 'End private GPS field test' : 'Minimize tour player'}
             onPress={() => requestClosePlayer('top_close')}
             style={styles.roundButton}
           >
             <Ionicons name="chevron-down" size={22} color="#FFFFFF" />
           </TouchableOpacity>
           <View style={styles.topCopy}>
-            <Text style={styles.topKicker}>TRAILHEAD ORIGINAL</Text>
+            <Text style={styles.topKicker}>{privateFieldActive ? 'ADMIN · UNPUBLISHED PRIVATE FIELD TEST' : 'TRAILHEAD ORIGINAL'}</Text>
             <Text style={styles.topTitle} numberOfLines={1}>{playerDetail.title}</Text>
           </View>
           <TouchableOpacity
@@ -904,7 +924,7 @@ export default function OriginalPlayerScreen() {
             </View>
             <View style={styles.gpsBadge}>
               <View style={[styles.gpsDot, { backgroundColor: status === 'location_unavailable' && !originalsRuntime.simulation ? C.red : C.orange }]} />
-              <Text style={styles.offlineText}>{originalsRuntime.simulation ? 'SYNTHETIC GPS' : status === 'location_unavailable' ? 'GPS PAUSED' : 'GPS ACTIVE'}</Text>
+              <Text style={styles.offlineText}>{originalsRuntime.simulation ? 'SYNTHETIC GPS' : privateFieldActive ? status === 'location_unavailable' ? 'PRIVATE GPS PAUSED' : 'PRIVATE GPS · FOREGROUND' : status === 'location_unavailable' ? 'GPS PAUSED' : 'GPS ACTIVE'}</Text>
             </View>
           </View>
         </View>
@@ -916,6 +936,15 @@ export default function OriginalPlayerScreen() {
             contentContainerStyle={[styles.playerSheetContent, { paddingBottom: Math.max(insets.bottom, 14) }]}
           >
           <View style={[styles.handle, { backgroundColor: C.border2 }]} />
+          {privateFieldActive ? (
+            <View style={[styles.alert, { borderColor: C.orange + '70', backgroundColor: C.orange + '10' }] }>
+              <Ionicons name="shield-checkmark-outline" size={18} color={C.orange} />
+              <View style={styles.alertCopy}>
+                <Text style={[styles.alertTitle, { color: C.text }]}>Private GPS field test · admin only</Text>
+                <Text style={[styles.alertBody, { color: C.text2 }]}>Unpublished content. Foreground GPS only. No saved progress, analytics, background tracking, or car display. Operate only while parked or as a passenger.</Text>
+              </View>
+            </View>
+          ) : null}
           {originalsRuntime.simulation ? (
             <TriggerSimulationPanel
               decision={originalsRuntime.lastTriggerEvaluation?.decision ?? null}
@@ -961,7 +990,7 @@ export default function OriginalPlayerScreen() {
               <Ionicons name={status === 'off_route' ? 'git-compare-outline' : 'location-outline'} size={18} color={C.orange} />
               <View style={styles.alertCopy}>
                 <Text style={[styles.alertTitle, { color: C.text }]}>{status === 'off_route' ? 'Auto-play paused off route' : 'Waiting for a reliable GPS fix'}</Text>
-                <Text style={[styles.alertBody, { color: C.text2 }]}>{session.message || (status === 'off_route' ? 'Rejoin the published route and the next story will re-arm.' : 'Stories remain queued and will not be skipped.')}</Text>
+                <Text style={[styles.alertBody, { color: C.text2 }]}>{session.message || (status === 'off_route' ? `Rejoin the ${privateFieldActive ? 'selected private' : 'published'} route and the next story will re-arm.` : 'Stories remain queued and will not be skipped.')}</Text>
               </View>
             </View>
           ) : null}
@@ -1016,8 +1045,8 @@ export default function OriginalPlayerScreen() {
             <TouchableOpacity
               testID="originals.legacy-player.end"
               accessibilityRole="button"
-              accessibilityLabel={originalsRuntime.simulation ? 'End trigger test' : 'End tour'}
-              onPress={() => originalsRuntime.simulation
+              accessibilityLabel={originalsRuntime.simulation ? 'End trigger test' : privateFieldActive ? 'End private GPS field test' : 'End tour'}
+              onPress={() => originalsRuntime.simulation || privateFieldActive
                 ? requestClosePlayer('end_test')
                 : Alert.alert('End this tour?', 'GPS and narration will stop. Your download and story progress will stay saved.', [
                   { text: 'Keep touring', style: 'cancel' },
@@ -1035,10 +1064,10 @@ export default function OriginalPlayerScreen() {
               style={[styles.secondaryButton, { borderColor: C.border }]}
             >
               <Ionicons name="flag-outline" size={16} color={C.text2} />
-              <Text style={[styles.secondaryLabel, { color: C.text2 }]}>{originalsRuntime.simulation ? 'End test' : 'End tour'}</Text>
+              <Text style={[styles.secondaryLabel, { color: C.text2 }]}>{originalsRuntime.simulation ? 'End test' : privateFieldActive ? 'End field test' : 'End tour'}</Text>
             </TouchableOpacity>
           </View>
-          {originalsRuntime.simulation && adminReviewEntries.length ? (
+          {originalsAdminRuntime.privateReviewActive && (privateFieldActive || adminReviewEntries.length) ? (
             <TouchableOpacity
               testID="originals.private-review.end"
               accessibilityRole="button"
@@ -1053,7 +1082,7 @@ export default function OriginalPlayerScreen() {
               <Text style={[styles.privateReviewCleanupText, { color: C.red }]}>End private review</Text>
             </TouchableOpacity>
           ) : null}
-          {!originalsRuntime.simulation ? (
+          {!originalsRuntime.simulation && !privateFieldActive ? (
             <TouchableOpacity testID="originals.legacy-player.feedback" accessibilityRole="button" accessibilityLabel="Share feedback about this Original" onPress={() => setFeedbackVisible(true)} style={[styles.feedbackButton, { borderColor: C.border }] }>
               <Ionicons name="chatbubble-ellipses-outline" size={16} color={C.orange} />
               <Text style={[styles.feedbackButtonText, { color: C.orange }]}>Share feedback</Text>
@@ -1073,7 +1102,7 @@ export default function OriginalPlayerScreen() {
         reviewBusyId={reviewBusyId}
         onAdminReview={entry => void reviewStory(entry)}
       />
-      {!originalsRuntime.simulation ? <OriginalFeedbackSheet visible={feedbackVisible} packId={id} version={session.version} stopId={currentStory?.id} onClose={() => setFeedbackVisible(false)} /> : null}
+      {!originalsRuntime.simulation && !privateFieldActive ? <OriginalFeedbackSheet visible={feedbackVisible} packId={id} version={session.version} stopId={currentStory?.id} onClose={() => setFeedbackVisible(false)} /> : null}
     </View>
   );
 }
@@ -1624,6 +1653,7 @@ function CompletionState({
   session,
   onStories,
   simulation = false,
+  privateField = false,
   simulationResults = [],
   validationBusy = false,
   validationReport = null,
@@ -1637,6 +1667,7 @@ function CompletionState({
   session: OriginalUiSession;
   onStories: () => void;
   simulation?: boolean;
+  privateField?: boolean;
   simulationResults?: SimulationCueResult[];
   validationBusy?: boolean;
   validationReport?: OriginalRouteValidationReportV1 | null;
@@ -1657,9 +1688,9 @@ function CompletionState({
         <View style={[styles.completionMark, { backgroundColor: C.orange + '18', borderColor: C.orange + '55' }] }>
           <Ionicons name="checkmark" size={39} color={C.orange} />
         </View>
-        <Text style={[styles.completionKicker, { color: C.orange }]}>{simulation ? 'TRIGGER TEST COMPLETE' : 'ORIGINAL COMPLETE'}</Text>
+        <Text style={[styles.completionKicker, { color: C.orange }]}>{simulation ? 'TRIGGER TEST COMPLETE' : privateField ? 'PRIVATE FIELD TEST COMPLETE' : 'ORIGINAL COMPLETE'}</Text>
         <Text style={[styles.completionTitle, { color: C.text }]}>{detail.title}</Text>
-        <Text style={[styles.completionBody, { color: C.text2 }]}>{simulation ? 'The cue sequence is complete. Synthetic results did not change saved drive progress.' : 'Progress is saved. Replay missed stories when parked.'}</Text>
+        <Text style={[styles.completionBody, { color: C.text2 }]}>{simulation ? 'The cue sequence is complete. Synthetic results did not change saved drive progress.' : privateField ? 'This unpublished foreground-GPS review did not save progress or emit release analytics.' : 'Progress is saved. Replay missed stories when parked.'}</Text>
         <View style={styles.completionMetrics}>
           <View style={[styles.completionMetric, { backgroundColor: C.s1, borderColor: C.border }] }>
             <Text style={[styles.completionValue, { color: C.text }]}>{simulation ? passedCount : session.playedCount}</Text>
@@ -1695,12 +1726,12 @@ function CompletionState({
           <Ionicons name="headset-outline" size={18} color="#FFFFFF" />
           <Text style={styles.completionPrimaryText}>Review stories</Text>
         </TouchableOpacity>
-        {!simulation ? (
+        {!simulation && !privateField ? (
           <TouchableOpacity accessibilityRole="button" onPress={onFeedback} style={[styles.completionSecondary, { borderColor: C.border }] }>
             <Text style={[styles.completionSecondaryText, { color: C.orange }]}>Share feedback</Text>
           </TouchableOpacity>
         ) : null}
-        {simulation && onEndPrivateReview ? (
+        {(simulation || privateField) && onEndPrivateReview ? (
           <TouchableOpacity
             testID="originals.private-review.end.completed"
             accessibilityRole="button"
@@ -1713,8 +1744,8 @@ function CompletionState({
             <Text style={[styles.completionSecondaryText, { color: C.red }]}>End private review</Text>
           </TouchableOpacity>
         ) : null}
-        <TouchableOpacity accessibilityRole="button" onPress={() => simulation ? onExit?.() : router.replace('/(tabs)/trips' as any)} style={[styles.completionSecondary, { borderColor: C.border }] }>
-          <Text style={[styles.completionSecondaryText, { color: C.text2 }]}>{simulation ? 'End trigger test' : 'Back to Trips'}</Text>
+        <TouchableOpacity accessibilityRole="button" onPress={() => simulation || privateField ? onExit?.() : router.replace('/(tabs)/trips' as any)} style={[styles.completionSecondary, { borderColor: C.border }] }>
+          <Text style={[styles.completionSecondaryText, { color: C.text2 }]}>{simulation ? 'End trigger test' : privateField ? 'End private field test' : 'Back to Trips'}</Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>

@@ -119,7 +119,7 @@ export default function OriginalsCatalogScreen() {
               </View>
               <Ionicons name="speedometer-outline" size={21} color={C.orange} />
             </View>
-            <Text style={[styles.draftBody, { color: C.text2 }]}>Downloads the latest saved revision and opens the real trigger engine with synthetic GPS. Release flags stay unchanged.</Text>
+            <Text style={[styles.draftBody, { color: C.text2 }]}>Choose the no-driving synthetic lab or the admin-only foreground GPS field test. Both keep the draft unpublished and leave saved progress, analytics, and car state unchanged.</Text>
             {draftLoading || draftLoadedIdentity !== draftRequestIdentity ? (
               <View style={[styles.draftState, styles.draftLoadingState, { borderTopColor: C.border }] }>
                 <ActivityIndicator color={C.orange} />
@@ -146,10 +146,17 @@ export default function OriginalsCatalogScreen() {
                     <View style={styles.draftSelections}>
                       <Text style={[styles.draftSelectionPrompt, { color: C.text2 }]}>Choose a chapter and direction</Text>
                       {draft.preview_selections.map(selection => (
-                        <TouchableOpacity
+                        <View
                           key={`${selection.chapter_id}:${selection.variant_id}`}
+                          style={[styles.draftSelectionGroup, { borderColor: C.border, backgroundColor: C.s2 }]}
+                        >
+                          <View style={styles.draftSelectionCopy}>
+                            <Text style={[styles.draftSelectionChapter, { color: C.text3 }]}>{selection.chapter_title}</Text>
+                            <Text style={[styles.draftSelectionTitle, { color: C.text }]}>{selection.variant_title}</Text>
+                          </View>
+                          <TouchableOpacity
                           accessibilityRole="button"
-                          accessibilityLabel={`Test ${draft.title}, ${selection.chapter_title}, ${selection.variant_title}`}
+                          accessibilityLabel={`Run no-driving trigger test for ${draft.title}, ${selection.chapter_title}, ${selection.variant_title}`}
                           onPress={() => router.push({
                             pathname: '/originals/preview',
                             params: originalAdminDraftPreviewRouteParams(
@@ -158,14 +165,34 @@ export default function OriginalsCatalogScreen() {
                               selection,
                             ),
                           } as any)}
-                          style={[styles.draftSelection, { borderColor: C.border, backgroundColor: C.s2 }]}
+                          style={[styles.draftModeAction, { borderColor: C.border }]}
                         >
-                          <View style={styles.draftSelectionCopy}>
-                            <Text style={[styles.draftSelectionChapter, { color: C.text3 }]}>{selection.chapter_title}</Text>
-                            <Text style={[styles.draftSelectionTitle, { color: C.text }]}>{selection.variant_title}</Text>
-                          </View>
-                          <Ionicons name="arrow-forward" size={14} color={C.orange} />
-                        </TouchableOpacity>
+                            <Ionicons name="speedometer-outline" size={15} color={C.orange} />
+                            <Text style={[styles.draftModeText, { color: C.text2 }]}>No-driving trigger test</Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            accessibilityRole="button"
+                            accessibilityLabel={`Run private GPS field test for ${draft.title}, ${selection.chapter_title}, ${selection.variant_title}`}
+                            onPress={() => router.push({
+                              pathname: '/originals/preview',
+                              params: {
+                                ...originalAdminDraftPreviewRouteParams(
+                                  draft.id,
+                                  draft.schema_version,
+                                  selection,
+                                ),
+                                mode: 'field',
+                              },
+                            } as any)}
+                            style={[styles.draftModeAction, styles.draftFieldAction, { borderColor: C.orange + '70', backgroundColor: C.orange + '10' }]}
+                          >
+                            <Ionicons name="navigate-outline" size={15} color={C.orange} />
+                            <View style={styles.draftModeCopy}>
+                              <Text style={[styles.draftModeText, { color: C.orange }]}>Private GPS field test</Text>
+                              <Text style={[styles.draftModeNote, { color: C.text3 }]}>FOREGROUND ONLY · PARKED OR PASSENGER</Text>
+                            </View>
+                          </TouchableOpacity>
+                        </View>
                       ))}
                     </View>
                   ) : null}
@@ -269,10 +296,15 @@ const styles = StyleSheet.create({
   draftActionText: { color: '#FFFFFF', fontSize: 10, fontWeight: '900' },
   draftSelections: { marginTop: 12, gap: 8 },
   draftSelectionPrompt: { fontSize: 10, lineHeight: 15, fontWeight: '800' },
-  draftSelection: { minHeight: 52, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 9, flexDirection: 'row', alignItems: 'center', gap: 9 },
+  draftSelectionGroup: { borderWidth: 1, borderRadius: 12, padding: 11, gap: 8 },
   draftSelectionCopy: { flex: 1, minWidth: 0 },
   draftSelectionChapter: { fontSize: 8, lineHeight: 11, fontWeight: '900', letterSpacing: 0.35, textTransform: 'uppercase' },
   draftSelectionTitle: { marginTop: 2, fontSize: 11, lineHeight: 15, fontWeight: '900' },
+  draftModeAction: { minHeight: 44, borderWidth: 1, borderRadius: 10, paddingHorizontal: 11, flexDirection: 'row', alignItems: 'center', gap: 7 },
+  draftFieldAction: { minHeight: 52 },
+  draftModeCopy: { flex: 1, minWidth: 0 },
+  draftModeText: { fontSize: 10.5, lineHeight: 14, fontWeight: '900' },
+  draftModeNote: { marginTop: 1, fontSize: 7.5, lineHeight: 10, fontWeight: '900', letterSpacing: 0.25 },
   loading: { minHeight: 210, alignItems: 'center', justifyContent: 'center', gap: 10 },
   loadingText: { fontSize: 12, fontWeight: '700' },
   list: { gap: 15 },

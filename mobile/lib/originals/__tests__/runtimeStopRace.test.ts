@@ -449,6 +449,25 @@ async function main() {
   await act(async () => {
     await adminRuntime!.submitLocationSample({
       lat: 0,
+      lng: 0.001,
+      accuracy_m: 10,
+      heading_deg: 90,
+      speed_mps: 10,
+      timestamp_ms: 600,
+    });
+  });
+  const waitingRuntime = runtime as unknown as Runtime;
+  assert.equal(waitingRuntime.lastTriggerEvaluation?.decision.code, 'before_window');
+  await assert.rejects(
+    adminRuntime!.skipSimulationCue(),
+    /capture a cue-specific failure/i,
+    'an ahead cue cannot be marked failed through a stale or direct runtime call',
+  );
+  assert.deepEqual(waitingRuntime.session?.skipped_stop_ids, [], 'the waiting cue remains unmodified');
+
+  await act(async () => {
+    await adminRuntime!.submitLocationSample({
+      lat: 0,
       lng: 0.0045,
       accuracy_m: 10,
       heading_deg: 90,

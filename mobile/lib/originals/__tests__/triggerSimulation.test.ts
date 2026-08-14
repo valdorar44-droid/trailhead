@@ -7,6 +7,7 @@ import {
   createOriginalVirtualDriveLabState,
   nextOriginalVirtualDriveCueProgress,
   ORIGINAL_VIRTUAL_DRIVE_OFF_ROUTE_M,
+  originalVirtualDriveCueResultOutcome,
   originalVirtualDriveCueStatuses,
   seekOriginalVirtualDriveLab,
   tickOriginalVirtualDriveLab,
@@ -205,5 +206,32 @@ assert.equal(
   ),
   manifest.stops[1].trigger.route_progress_start_m,
 );
+
+const pausedAfterTwoHeard = (['triggered', 'queued', 'before_window'] as const)
+  .map(originalVirtualDriveCueResultOutcome)
+  .filter((outcome): outcome is 'passed' | 'failed' => outcome != null);
+assert.equal(
+  pausedAfterTwoHeard.filter(outcome => outcome === 'passed').length,
+  2,
+  'cues 1-2 remain passed when cue 3 is still ahead',
+);
+assert.equal(
+  pausedAfterTwoHeard.filter(outcome => outcome === 'failed').length,
+  0,
+  'pausing with cue 3 before its window must not add a blocked result',
+);
+assert.equal(pausedAfterTwoHeard.length, 2, 'only exercised cues count as reviewed');
+for (const failureCode of [
+  'after_window',
+  'outside_radius',
+  'missing_bearing',
+  'wrong_bearing',
+] as const) {
+  assert.equal(
+    originalVirtualDriveCueResultOutcome(failureCode),
+    'failed',
+    `${failureCode} remains a failed cue result`,
+  );
+}
 
 console.log('Originals trigger simulation tests passed.');

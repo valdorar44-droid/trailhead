@@ -43,6 +43,7 @@ import {
   ORIGINAL_VIRTUAL_DRIVE_OFF_ROUTE_M,
   ORIGINAL_VIRTUAL_DRIVE_TICK_REAL_MS,
   ORIGINAL_VIRTUAL_DRIVE_TICK_SIMULATED_MS,
+  originalVirtualDriveCueResultOutcome,
   originalVirtualDriveCueStatuses,
   seekOriginalVirtualDriveLab,
   tickOriginalVirtualDriveLab,
@@ -70,14 +71,6 @@ type SimulationCueResult = {
   requiredBearingDeg: number | null;
   bearingToleranceDeg: number | null;
 };
-
-const SIMULATION_CUE_FAILURE_CODES = new Set([
-  'before_window',
-  'after_window',
-  'outside_radius',
-  'missing_bearing',
-  'wrong_bearing',
-]);
 
 function routeParam(value: string | string[] | undefined) {
   const resolved = Array.isArray(value) ? value[0] : value;
@@ -349,16 +342,15 @@ export default function OriginalPlayerScreen() {
     const decision = evaluation?.decision;
     const manifest = originalsRuntime.manifest;
     if (!originalsRuntime.simulation || !decision?.stop_id || !manifest) return;
-    const passed = decision.code === 'triggered' || decision.code === 'queued';
-    const failed = SIMULATION_CUE_FAILURE_CODES.has(decision.code);
-    if (!passed && !failed) return;
+    const outcome = originalVirtualDriveCueResultOutcome(decision.code);
+    if (!outcome) return;
     const stop = manifest.stops.find(item => item.id === decision.stop_id);
     if (!stop) return;
     const result: SimulationCueResult = {
       stopId: stop.id,
       sequence: stop.sequence,
       title: stop.title,
-      outcome: passed ? 'passed' : 'failed',
+      outcome,
       code: decision.code,
       message: decision.message,
       speedMps: simulationSpeedMps,
@@ -649,7 +641,9 @@ export default function OriginalPlayerScreen() {
     !session?.currentStory
     && nextStop
     && originalsRuntime.lastTriggerEvaluation?.decision.stop_id === nextStop.id
-    && SIMULATION_CUE_FAILURE_CODES.has(originalsRuntime.lastTriggerEvaluation.decision.code)
+    && originalVirtualDriveCueResultOutcome(
+      originalsRuntime.lastTriggerEvaluation.decision.code,
+    ) === 'failed'
   );
   const changeSimulationSpeed = useCallback((value: number) => {
     originalsAdminRuntime.clearSimulationDiagnostic();

@@ -100,6 +100,7 @@ import {
   originalSessionStore,
 } from './expoStores';
 import { evaluateOriginalLocation, remainingOriginalTriggerStops } from './triggerEngine';
+import { originalVirtualDriveCueResultOutcome } from './virtualDriveLab';
 import type {
   OriginalLocationSample,
   OriginalAcquisition,
@@ -1764,13 +1765,11 @@ export function OriginalsRuntimeProvider({
     const nextStop = remainingOriginalTriggerStops(activeManifest, active)[0];
     if (!nextStop) return;
     const decision = lastTriggerEvaluationRef.current?.decision;
-    const explicitCueFailure = decision?.stop_id === nextStop.id && [
-      'before_window',
-      'after_window',
-      'outside_radius',
-      'missing_bearing',
-      'wrong_bearing',
-    ].includes(decision.code);
+    const explicitCueFailure = Boolean(
+      decision
+      && decision.stop_id === nextStop.id
+      && originalVirtualDriveCueResultOutcome(decision.code) === 'failed',
+    );
     if (!explicitCueFailure) {
       throw new Error('Test this cue and capture a cue-specific failure before marking it failed.');
     }

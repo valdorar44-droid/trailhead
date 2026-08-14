@@ -1,0 +1,744 @@
+{
+  "bindings": {
+    "admin_preview_review": {
+      "byte_count": 13427,
+      "git_blob_sha1": "aa3fd4a4a5b89c4c1c0dba1376f0acf09091d9c8",
+      "path": "mobile/lib/originals/adminPreviewReview.ts",
+      "sha256": "d287aa2bba8d04df831b2b9b41799c699796e0400c89c38ebfa9a7688908e33a"
+    },
+    "admin_preview_review_tests": {
+      "byte_count": 13947,
+      "git_blob_sha1": "515eb569f697bba5ee0eb5f1be70b00f03d9a1b2",
+      "path": "mobile/lib/originals/__tests__/adminPreviewReview.test.ts",
+      "sha256": "846e0e432518638bf55d0ebfba1e97a15e1ccf05c19eef80e109d14e47006ba6"
+    },
+    "all_six_dispatch_closure": {
+      "framed_sha256": "37219a0e6b0ed3a1490cf526370754ce4be79ca68989fd7d843bf1e91cb4c8f4",
+      "framing": "for each repo-relative path sorted by POSIX path: utf8(path) + NUL + ascii(decimal_byte_count) + NUL + raw_bytes + NUL",
+      "path_count": 174,
+      "selection_keys": [
+        "great_smoky_mountains_ridges_rivers_living_memory:mountain_crossing:tn_to_nc",
+        "great_smoky_mountains_ridges_rivers_living_memory:mountain_crossing:nc_to_tn",
+        "great_smoky_mountains_ridges_rivers_living_memory:little_river_cades_cove:sugarlands_to_cades_cove_loop",
+        "great_smoky_mountains_ridges_rivers_living_memory:roaring_fork:one_way",
+        "great_smoky_mountains_ridges_rivers_living_memory:foothills_parkway:west_to_east",
+        "great_smoky_mountains_ridges_rivers_living_memory:foothills_parkway:east_to_west"
+      ]
+    },
+    "attestation_profile_operator": {
+      "byte_count": 76021,
+      "git_blob_sha1": "4105eeef06b042e2f6556ecfd1a0089f1f2c51b2",
+      "path": "scripts/attest_and_profile_smokies_complete_private.py",
+      "sha256": "c63a47d2030318211df477cf2c791afd632b16db4b1e1667608d5917bb3f8722"
+    },
+    "audit_lineage": {
+      "checkpoint_m3": {
+        "audit_bindings_sha256": "e5f36c48ceb3589ac3fdf78e8c1c54ae9422152faad1f803f169d3b99eb98c2b",
+        "audit_byte_count": 7827,
+        "audit_sha256": "c0d3ead8aa66ce6edb0ce8c932fcb2368e7eca1c47cda929327cb2c0765fa32e",
+        "commit": "00e8b76daffaebd492c68e2f3416646fb8f327d6",
+        "packet_byte_count": 5840841,
+        "packet_sha256": "2c764008c2180db607ea51085c01b6fef0fd28fb436d5aace8970d3319a62c0c",
+        "tree": "8bdfec92208a93b05c919feef046f4f43899e6cd"
+      },
+      "cross_branch_byte_identical_audited_core": {
+        "byte_identical_tree": true,
+        "commit": "f80548531ddc763550b19699ce91eb5374f6c487",
+        "prior_audit_byte_count": 33167,
+        "prior_audit_sha256": "1bebd1c95e6988fdf2ae8f79264672792dbff1d7ff8d5da6f8ce89e3f405f3ae",
+        "tree": "2a8b57a7f9ed803198c14242d2f001e7235c562d"
+      },
+      "guarded_offline_recovery_core": {
+        "commit": "8272cdb8e36bf935f55f12beaaec957cccc25a65",
+        "parent_commit": "70b61a1b707b1dd8006503f5ef21b21118e1a6a2",
+        "parent_tree": "268b2212f8d1b050c2ea53a438c4b1cdbba8573e",
+        "tree": "2a8b57a7f9ed803198c14242d2f001e7235c562d"
+      },
+      "immediate_prior_compatibility_evidence": {
+        "artifact_commit": "70b61a1b707b1dd8006503f5ef21b21118e1a6a2",
+        "artifact_tree": "268b2212f8d1b050c2ea53a438c4b1cdbba8573e",
+        "byte_count": 640212,
+        "git_blob_sha1": "62fada6b40b3966ea009b428143cae730b428cfd",
+        "path": "originals/smokies/smokies_mobile_compatibility_freeze_v1.json",
+        "sha256": "ba741e0b50641b84d0afdfeae1ec9e2d2fa42193fa606c000a25c69d529fcd70",
+        "source_revision": {
+          "checkpoint_m_commit": "00e8b76daffaebd492c68e2f3416646fb8f327d6",
+          "checkpoint_m_tree": "8bdfec92208a93b05c919feef046f4f43899e6cd",
+          "commit": "a85d50f0c40aa23637e7df4102e6ddd7d728a64b",
+          "generated_artifact_excluded_from_source_set": true,
+          "generation_context": {
+            "branch": "release/smokies-s4m-production-20260810",
+            "origin_equal": true,
+            "origin_ref": "origin/release/smokies-s4m-production-20260810",
+            "worktree_clean_except_generated_artifact": true
+          },
+          "same_source_commit_required_for_android_and_ios": true,
+          "tree": "f87e96e4771a0ebddb69c984ba3178574d576e55"
+        },
+        "status": "historical_source_a85d50f0_only_not_current_proof"
+      },
+      "immediate_prior_release_guard_audit": {
+        "artifact_commit": "75935bcc9804726a8d50de3a920f5ccd33a9d2bf",
+        "artifact_tree": "5d9865fbeae04a8b7168ca8c8ba83b0ce1a7f69c",
+        "audited_source_revision": {
+          "commit": "f80548531ddc763550b19699ce91eb5374f6c487",
+          "tree": "2a8b57a7f9ed803198c14242d2f001e7235c562d"
+        },
+        "byte_count": 33167,
+        "git_blob_sha1": "7f973d3b7b199cefcf94c6c7b742249ee4e90b8e",
+        "path": "originals/smokies/smokies_v3_release_guard_audit_v1.json",
+        "sha256": "1bebd1c95e6988fdf2ae8f79264672792dbff1d7ff8d5da6f8ce89e3f405f3ae",
+        "status": "branch_mismatched_source_identity_deleted_history_only"
+      },
+      "source_parent": {
+        "commit": "75935bcc9804726a8d50de3a920f5ccd33a9d2bf",
+        "tree": "5d9865fbeae04a8b7168ca8c8ba83b0ce1a7f69c"
+      }
+    },
+    "bundle_store": {
+      "byte_count": 39610,
+      "git_blob_sha1": "b957171269fa858e2c30ac3c60ce6db12ac852fe",
+      "path": "mobile/lib/originals/bundleStore.ts",
+      "sha256": "6bd39918f84c8d7abc756b251a95cfc80f1d0b30a8e2bd697a4eaa3e2c245978"
+    },
+    "bundle_store_tests": {
+      "byte_count": 40472,
+      "git_blob_sha1": "b8c35e9a4853bcc42fd23e791496738950076a17",
+      "path": "mobile/lib/originals/__tests__/stores.test.ts",
+      "sha256": "198dabc733a984cb64836ea82e943d0d26a710fa0c9b18a62f7688bac890f8a5"
+    },
+    "checkpoint_m_migration_evidence": {
+      "audit_bindings_sha256": "e5f36c48ceb3589ac3fdf78e8c1c54ae9422152faad1f803f169d3b99eb98c2b",
+      "commit": "00e8b76daffaebd492c68e2f3416646fb8f327d6",
+      "historical_immutable": true,
+      "independent_audit": {
+        "byte_count": 7827,
+        "path": "originals/smokies/smokies_complete_private_migration_operator_audit_v1.json",
+        "sha256": "c0d3ead8aa66ce6edb0ce8c932fcb2368e7eca1c47cda929327cb2c0765fa32e"
+      },
+      "local_legacy_migration_files_may_not_substitute": true,
+      "packet": {
+        "byte_count": 5840841,
+        "path": "originals/smokies/smokies_complete_private_migration_packet_v1.json",
+        "sha256": "2c764008c2180db607ea51085c01b6fef0fd28fb436d5aace8970d3319a62c0c"
+      },
+      "source_tree_isolated_from_current_source": true,
+      "tree": "8bdfec92208a93b05c919feef046f4f43899e6cd"
+    },
+    "compatibility_builder": {
+      "byte_count": 40867,
+      "git_blob_sha1": "f26407cb4c73133822c890a333584d02eafefca2",
+      "path": "scripts/build_smokies_mobile_compatibility_freeze.py",
+      "sha256": "d12992938eb4a1f5a5cd82e6705a8bba402e8576699b1ca95aaa3e56e4a91c6a"
+    },
+    "compatibility_builder_tests": {
+      "byte_count": 25450,
+      "git_blob_sha1": "c2dc3c2c023a76225f1d3ec9ede2a9d17fc03619",
+      "path": "tests/test_smokies_mobile_compatibility_freeze.py",
+      "sha256": "2e28a60ee62f8acde17d10c6294e0319efa0d982d2d7ad047d300b4e35682546"
+    },
+    "complete_validation_dispatcher": {
+      "byte_count": 52625,
+      "git_blob_sha1": "79cc32b8bad3105c4783f666989687da1165a8f7",
+      "path": "db/originals_complete_validation.py",
+      "sha256": "6e68f243a0ee1776cfdc9dfa5b1ebb393c18cdffb01a97071bcc14fa3d5104c6"
+    },
+    "dual_platform_preview_marker": {
+      "byte_count": 60144,
+      "git_blob_sha1": "5a9493931b6860a44b002f7062db3b2dc8d20405",
+      "path": "scripts/record_smokies_dual_platform_private_preview.py",
+      "sha256": "ebac75ad7f61629676582808e4442fbbdbea1aff69b6c482dcb96af22b3c5819"
+    },
+    "final_readiness_builder": {
+      "byte_count": 37625,
+      "git_blob_sha1": "6cf724ab5eb0ffee47bc83b3c6ecd7fae76dbfa8",
+      "path": "scripts/build_smokies_full_bundle_final_readiness.py",
+      "sha256": "ddc602ecfaca1f45d4ac83120b67b431789386533ad91acf51b4a0184df9daf3"
+    },
+    "final_readiness_operator": {
+      "byte_count": 15790,
+      "git_blob_sha1": "ac179311f4b035f7e4d08a2e5ac5389cfad0a69a",
+      "path": "scripts/finalize_smokies_full_bundle_readiness.py",
+      "sha256": "034270a61a1de8596bbdad6f0bcfc397992a1ec1681559c32fedf2d27f40981c"
+    },
+    "finalization_review_builder": {
+      "byte_count": 10074,
+      "git_blob_sha1": "a8f2403481ec1df8909db0a049ddf37b38444eea",
+      "path": "scripts/build_smokies_full_bundle_finalization_review.py",
+      "sha256": "271d388822af9fc9229fb1813ec0f48f76f5e42b41582f24da90240d1a060203"
+    },
+    "historical_validation_contract_loader": {
+      "byte_count": 30806,
+      "git_blob_sha1": "ade1a9b249dcd5e75474827f75e3935b1daa2658",
+      "path": "db/originals_smokies_final_readiness.py",
+      "sha256": "a5a847052204691da6fae21863f7a7b9a329f39d5b452fd6f01c38052fd10335"
+    },
+    "map_adapter": {
+      "byte_count": 11367,
+      "git_blob_sha1": "f8290e69465f41741ba1a2405c191bd6caab5850",
+      "path": "mobile/lib/originals/mapAdapter.ts",
+      "sha256": "35d032ce61d4573273610374cd3a2c97a56cc1b0676f1248ec5c52f1d304d72f"
+    },
+    "mobile_app_config": {
+      "byte_count": 8098,
+      "git_blob_sha1": "0b058e6de8df994e3bd9771c93f12cda02885b70",
+      "path": "mobile/app.config.js",
+      "sha256": "00b60df282a71e3c99e5a0840da48a16ee5181032d43ea8ffa126c702776f074"
+    },
+    "mobile_eas_config": {
+      "byte_count": 1152,
+      "git_blob_sha1": "00fa48e02fe26c425c35a73c652d01153da7315c",
+      "path": "mobile/eas.json",
+      "sha256": "1a865a6a3351a17ae02b37d9448f3e705d47e193d34dbfa6cde670e007cd5dbe"
+    },
+    "mobile_package": {
+      "byte_count": 14878,
+      "git_blob_sha1": "4bb8ba54d979e1fc21dcca421a71d76f3702f73c",
+      "path": "mobile/package.json",
+      "sha256": "0849f8c3e8c687c1fad5ac5b3313f7a0aa094d1777a0268ccddc31ef3ab79f22"
+    },
+    "mobile_package_lock": {
+      "byte_count": 469389,
+      "git_blob_sha1": "06a90c8ed1ca3f541df17a69374f0a65b16a4b35",
+      "path": "mobile/package-lock.json",
+      "sha256": "f956b99116a03eeac4bd2b725b4d078b022b4e51e1766f6546377e8dc7c20920"
+    },
+    "native_map_renderer_tests": {
+      "byte_count": 6675,
+      "git_blob_sha1": "e94dd8923651f1e270fe77e33021315b60aefdda",
+      "path": "mobile/lib/originals/__tests__/nativeMapRendererState.test.ts",
+      "sha256": "a1c55778a9b5bab3308626e7fa9f4d375b74bb284ee1af0f5152e5ed860e0ea4"
+    },
+    "offline_manager": {
+      "byte_count": 14653,
+      "git_blob_sha1": "272426a225d194d9310948aeaf1264060926449b",
+      "path": "mobile/components/NativeMap/offlineManager.ts",
+      "sha256": "a8825b6130eaca4353a3b366dc8a56de06466b8bdca9afd0619ef1447e830d25"
+    },
+    "offline_pack_status": {
+      "byte_count": 5048,
+      "git_blob_sha1": "db7e69bd89d39a674ea2f8df0f2e641756f9549d",
+      "path": "mobile/components/NativeMap/offlinePackStatus.ts",
+      "sha256": "a307a259b213a13c2c6ef3794a2616058bc5d2b46c2d5096ad3605252ab55db0"
+    },
+    "offline_pack_status_tests": {
+      "byte_count": 6348,
+      "git_blob_sha1": "13ccd02a12e20a28046f44e11368f08fbba36c22",
+      "path": "mobile/lib/originals/__tests__/offlinePackStatus.test.ts",
+      "sha256": "28f508aa7a226b62b0c83cee9abd66658430a51b5e85da4a923781552d36effe"
+    },
+    "offline_recovery_patch": {
+      "base_revision": {
+        "commit": "70b61a1b707b1dd8006503f5ef21b21118e1a6a2",
+        "tree": "268b2212f8d1b050c2ea53a438c4b1cdbba8573e"
+      },
+      "deleted_stale_evidence": [
+        {
+          "byte_count": 640212,
+          "git_blob_sha1": "62fada6b40b3966ea009b428143cae730b428cfd",
+          "path": "originals/smokies/smokies_mobile_compatibility_freeze_v1.json",
+          "sha256": "ba741e0b50641b84d0afdfeae1ec9e2d2fa42193fa606c000a25c69d529fcd70"
+        },
+        {
+          "byte_count": 29846,
+          "git_blob_sha1": "7896ecc1698fbebfea0c2ded198cd3f62c892f1b",
+          "path": "originals/smokies/smokies_v3_release_guard_audit_v1.json",
+          "sha256": "39887686a2b3924d8302274c98c25f22acfa11da56696ba07acfbb3df67837cd"
+        }
+      ],
+      "full_core_diff_byte_count": 800154,
+      "full_core_diff_sha256": "062b39d594459ea5427803316dc167961194bd5c1450aa0222c8b7c360c15303",
+      "guarded_core_revision": {
+        "commit": "b93a438c5cad376d25140aaa70eff694d40b9fd1",
+        "tree": "2a8b57a7f9ed803198c14242d2f001e7235c562d"
+      },
+      "modified_file_count": 15,
+      "modified_files": [
+        {
+          "byte_count": 102694,
+          "git_blob_sha1": "1ab2a66c03ed72b243c382a681edf13fe3dc0817",
+          "path": "mobile/app/originals/player.tsx",
+          "sha256": "a2563a81b0c5a91218f57567576968cde569ab71de39e9a90dc5688565f1d9ba"
+        },
+        {
+          "byte_count": 12704,
+          "git_blob_sha1": "b8a65a2acb7f79bb0e7a167deb86623124c16753",
+          "path": "mobile/app/originals/preview.tsx",
+          "sha256": "07718f82081aad2af3f64c3ead106c859beb06e6c1858938573b37c342295967"
+        },
+        {
+          "byte_count": 14653,
+          "git_blob_sha1": "272426a225d194d9310948aeaf1264060926449b",
+          "path": "mobile/components/NativeMap/offlineManager.ts",
+          "sha256": "a8825b6130eaca4353a3b366dc8a56de06466b8bdca9afd0619ef1447e830d25"
+        },
+        {
+          "byte_count": 5048,
+          "git_blob_sha1": "db7e69bd89d39a674ea2f8df0f2e641756f9549d",
+          "path": "mobile/components/NativeMap/offlinePackStatus.ts",
+          "sha256": "a307a259b213a13c2c6ef3794a2616058bc5d2b46c2d5096ad3605252ab55db0"
+        },
+        {
+          "byte_count": 13947,
+          "git_blob_sha1": "515eb569f697bba5ee0eb5f1be70b00f03d9a1b2",
+          "path": "mobile/lib/originals/__tests__/adminPreviewReview.test.ts",
+          "sha256": "846e0e432518638bf55d0ebfba1e97a15e1ccf05c19eef80e109d14e47006ba6"
+        },
+        {
+          "byte_count": 6675,
+          "git_blob_sha1": "e94dd8923651f1e270fe77e33021315b60aefdda",
+          "path": "mobile/lib/originals/__tests__/nativeMapRendererState.test.ts",
+          "sha256": "a1c55778a9b5bab3308626e7fa9f4d375b74bb284ee1af0f5152e5ed860e0ea4"
+        },
+        {
+          "byte_count": 6348,
+          "git_blob_sha1": "13ccd02a12e20a28046f44e11368f08fbba36c22",
+          "path": "mobile/lib/originals/__tests__/offlinePackStatus.test.ts",
+          "sha256": "28f508aa7a226b62b0c83cee9abd66658430a51b5e85da4a923781552d36effe"
+        },
+        {
+          "byte_count": 11454,
+          "git_blob_sha1": "a0fb0632b0d7f71acfe073f4618a40a019565aa1",
+          "path": "mobile/lib/originals/__tests__/previewAccess.test.ts",
+          "sha256": "009655b014b288351b3b39a8252d9fbdc92f8c854d12fb90ab7513a77e3f15c9"
+        },
+        {
+          "byte_count": 67192,
+          "git_blob_sha1": "73430c205aa57239dfb514be638a3870847fe73e",
+          "path": "mobile/lib/originals/__tests__/runtimeStopRace.test.ts",
+          "sha256": "791e52ac4c7e24d58fd752d092337103d868068556b69084c012ee49112ad3c3"
+        },
+        {
+          "byte_count": 40472,
+          "git_blob_sha1": "b8c35e9a4853bcc42fd23e791496738950076a17",
+          "path": "mobile/lib/originals/__tests__/stores.test.ts",
+          "sha256": "198dabc733a984cb64836ea82e943d0d26a710fa0c9b18a62f7688bac890f8a5"
+        },
+        {
+          "byte_count": 13427,
+          "git_blob_sha1": "aa3fd4a4a5b89c4c1c0dba1376f0acf09091d9c8",
+          "path": "mobile/lib/originals/adminPreviewReview.ts",
+          "sha256": "d287aa2bba8d04df831b2b9b41799c699796e0400c89c38ebfa9a7688908e33a"
+        },
+        {
+          "byte_count": 39610,
+          "git_blob_sha1": "b957171269fa858e2c30ac3c60ce6db12ac852fe",
+          "path": "mobile/lib/originals/bundleStore.ts",
+          "sha256": "6bd39918f84c8d7abc756b251a95cfc80f1d0b30a8e2bd697a4eaa3e2c245978"
+        },
+        {
+          "byte_count": 11367,
+          "git_blob_sha1": "f8290e69465f41741ba1a2405c191bd6caab5850",
+          "path": "mobile/lib/originals/mapAdapter.ts",
+          "sha256": "35d032ce61d4573273610374cd3a2c97a56cc1b0676f1248ec5c52f1d304d72f"
+        },
+        {
+          "byte_count": 15309,
+          "git_blob_sha1": "81eee6d14495df6e8fd75d1332e119c25934d30f",
+          "path": "mobile/lib/originals/previewAccess.ts",
+          "sha256": "5f307a7acc1f93dff1c185849b9934b07d67434c0d1c960ca7f75af7fd3dcd06"
+        },
+        {
+          "byte_count": 110759,
+          "git_blob_sha1": "6c6b5e776aa1a9fed6f252fb72f646bd8b56c4cc",
+          "path": "mobile/lib/originals/runtime.tsx",
+          "sha256": "e00b22113b1050773a33aacad2005500c6ee31d7589245924fe8baa1aac762c4"
+        }
+      ],
+      "source_and_test_diff_byte_count": 114969,
+      "source_and_test_diff_sha256": "1796d19c20e36cebc0bad6718dd3b25ca4f7c5c80c9b747d05b32ee0014921a4",
+      "source_revision": {
+        "commit": "8272cdb8e36bf935f55f12beaaec957cccc25a65",
+        "tree": "2a8b57a7f9ed803198c14242d2f001e7235c562d"
+      }
+    },
+    "player_private_field": {
+      "byte_count": 102694,
+      "git_blob_sha1": "1ab2a66c03ed72b243c382a681edf13fe3dc0817",
+      "path": "mobile/app/originals/player.tsx",
+      "sha256": "a2563a81b0c5a91218f57567576968cde569ab71de39e9a90dc5688565f1d9ba"
+    },
+    "preserved_historical_and_media_contracts": {
+      "candidate_status": "complete_private_candidate_owner_dual_platform_preview_required",
+      "historical_evidence_mutated": false,
+      "historical_validation": {
+        "expected_manifest_sha256": "b6f730d17922f7b38361d08e9bc97bde1d340a0c42d9b455802fca708585d725",
+        "expected_nested_scenario_count": 13,
+        "expected_report_count": 1,
+        "expected_selection_result_count": 1,
+        "expected_started_by": 3,
+        "expected_worker_pid": 16,
+        "publication_approval": false,
+        "redacted_operator_report_file_sha256": "ffbab03a0bdc839cbbdaa422a1b4910eaeb61acdc1d4102dbdc40e8d643fc059",
+        "redacted_store_report_canonical_sha256": "a9dd8583e1c50869f1de75fe124e5a8590be6b33a5ace5a71ddae974174b3503",
+        "report_id": "original_validation_9df694c93ee9ef3809c33f451d04bf28",
+        "status": "passed"
+      },
+      "media_acceptance_status": "exact_six_derivatives_and_72_narration_files_owner_accepted_downstream_effects_closed",
+      "media_evidence_mutated": false,
+      "pinned_artifact_bindings_sha256": "e917210589a02e66bb4d43a4a6699e58b2f8a76c7f42f2865facbee76ad6bd80",
+      "pinned_artifact_count": 6,
+      "rows": [
+        {
+          "byte_count": 120715,
+          "git_blob_sha1": "df2399577f76d34777230b740ad44c829af7a738",
+          "path": "originals/smokies/remaining_media_acceptance_v1.json",
+          "sha256": "e593b5f280b62e00a0887e24cef131858e768f1cbe056476e3b631342a788a2a"
+        },
+        {
+          "byte_count": 20090,
+          "git_blob_sha1": "9e4629778cc47ddcd97609beb761956160e60001",
+          "path": "originals/smokies/smokies_complete_private_candidate_v1.json",
+          "sha256": "ee01f78dcb43ec9a3b9d02e1cd6e0271675f033dbc9ed6fb18ce2562b4cb0aee"
+        },
+        {
+          "byte_count": 3768450,
+          "git_blob_sha1": "a76237abf254119e85d2fd06d0c42e91dfa280b6",
+          "path": "originals/smokies/smokies_complete_private_manifest_v3.json",
+          "sha256": "d2cfa5aeb0116359326f682fb49d59ee156157f9efbfb8e8a53f99e830ca54eb"
+        },
+        {
+          "byte_count": 7827,
+          "git_blob_sha1": "f606a265ec1351e557c84d5c96f5626d074cc6e8",
+          "path": "originals/smokies/smokies_complete_private_migration_operator_audit_v1.json",
+          "sha256": "c0d3ead8aa66ce6edb0ce8c932fcb2368e7eca1c47cda929327cb2c0765fa32e"
+        },
+        {
+          "byte_count": 5840841,
+          "git_blob_sha1": "f1f9205380a86e362dc27a4eb56c52f760435168",
+          "path": "originals/smokies/smokies_complete_private_migration_packet_v1.json",
+          "sha256": "2c764008c2180db607ea51085c01b6fef0fd28fb436d5aace8970d3319a62c0c"
+        },
+        {
+          "byte_count": 9614,
+          "git_blob_sha1": "0e2521edb01673540dcd83501d6235aadd62a68a",
+          "path": "originals/smokies/smokies_union_offline_map_estimate_v1.json",
+          "sha256": "1b7742efe6b19cf0fc813c6457fed7e4aa0220d2c153d5950a6a9c41c28ad754"
+        }
+      ]
+    },
+    "preview_access": {
+      "byte_count": 15309,
+      "git_blob_sha1": "81eee6d14495df6e8fd75d1332e119c25934d30f",
+      "path": "mobile/lib/originals/previewAccess.ts",
+      "sha256": "5f307a7acc1f93dff1c185849b9934b07d67434c0d1c960ca7f75af7fd3dcd06"
+    },
+    "preview_access_tests": {
+      "byte_count": 11454,
+      "git_blob_sha1": "a0fb0632b0d7f71acfe073f4618a40a019565aa1",
+      "path": "mobile/lib/originals/__tests__/previewAccess.test.ts",
+      "sha256": "009655b014b288351b3b39a8252d9fbdc92f8c854d12fb90ab7513a77e3f15c9"
+    },
+    "preview_private_field": {
+      "byte_count": 12704,
+      "git_blob_sha1": "b8a65a2acb7f79bb0e7a167deb86623124c16753",
+      "path": "mobile/app/originals/preview.tsx",
+      "sha256": "07718f82081aad2af3f64c3ead106c859beb06e6c1858938573b37c342295967"
+    },
+    "release_support_source_set_without_self_audit": {
+      "gate_family_count": 11,
+      "gate_family_source_set_sha256": {
+        "app_links": "5cbdeddf8b2b375d33331df97b8a4e7ee2ed7ec76b8616303b6193606563f755",
+        "background_audio": "15c1680aa0a5de07c7858d24614d642686ed79fa45708e8844d5c4e7fea8f694",
+        "native_drift": "1f244d52fce84a72075cd61daa09ff88b22417654c42e71793f10482d6184ad1",
+        "native_ota_compatibility": "ee21ae4dcca8d0ca53520006d674e1438fca1d1026d1aa75939f02f0241ffc57",
+        "offline_storage_and_cleanup": "b1efa896de5a9d0fe268f40870bf6127f55bb83a298de37b897cfc4f6aa8c362",
+        "preview_cleanup_and_account_isolation": "fd0aa701e016610bcdb4810ece9bb57560a6ae16cf54dd147a72244a429e36da",
+        "preview_selection": "a870b8d4a1ef14eff226c39f8c28d36ab613e00d5fa4fc68d7e6bf903a7701dd",
+        "release_identity": "e6703a5c822f1d9f6141db83f3808f87ec0eee41136e57c1e619c31b331cc119",
+        "signed_build_evidence": "84cb0280381924565d99fbdbc41fe3152094575224a2b25460d0f9468300cf63",
+        "typescript": "306d52584881cc9ea61f24b7b6f9fd11ecd1f728b62853a3aa0014a474a27bfa",
+        "update_channel": "2e95c8cfdecfd7ae32a1a998c89fd96f9b59a739e6eb804921fe7216e17930e6"
+      },
+      "mobile_path_count": 929,
+      "mobile_source_set_sha256": "5d277fe6b449705bea142f8b2265188e507440fc6bb04baec6f96cba245e8b26",
+      "native_input_path_count": 178,
+      "native_input_source_set_sha256": "6a4e6dde43a60a8baf196ea1b9da59224c29966c062412ea1bba871b603c78ca",
+      "path_count": 952,
+      "path_inventory_sha256": "7fdd38edf55544150c45ec585067b4705c04bf8dce8c5c21c40c5f99d06eb132",
+      "scope": "all tracked mobile paths union compatibility REQUIRED_SOURCE_PATHS except the self-referential release-audit path",
+      "self_audit_excluded_to_avoid_self_reference": true,
+      "self_audit_path": "originals/smokies/smokies_v3_release_guard_audit_v1.json",
+      "source_revision": {
+        "commit": "b93a438c5cad376d25140aaa70eff694d40b9fd1",
+        "tree": "2a8b57a7f9ed803198c14242d2f001e7235c562d"
+      },
+      "source_set_sha256": "04fce7ebe7049b5f45f9ede1bbb79cb3d5e88fa3dfce11db0f04657de16ecea4"
+    },
+    "runtime_private_field": {
+      "byte_count": 110759,
+      "git_blob_sha1": "6c6b5e776aa1a9fed6f252fb72f646bd8b56c4cc",
+      "path": "mobile/lib/originals/runtime.tsx",
+      "sha256": "e00b22113b1050773a33aacad2005500c6ee31d7589245924fe8baa1aac762c4"
+    },
+    "runtime_stop_race_tests": {
+      "byte_count": 67192,
+      "git_blob_sha1": "73430c205aa57239dfb514be638a3870847fe73e",
+      "path": "mobile/lib/originals/__tests__/runtimeStopRace.test.ts",
+      "sha256": "791e52ac4c7e24d58fd752d092337103d868068556b69084c012ee49112ad3c3"
+    },
+    "source_revision": {
+      "commit": "b93a438c5cad376d25140aaa70eff694d40b9fd1",
+      "tree": "2a8b57a7f9ed803198c14242d2f001e7235c562d"
+    },
+    "store": {
+      "byte_count": 1146403,
+      "git_blob_sha1": "87c8e741950863c0ef54ca413e90dbef8724dabc",
+      "path": "db/store.py",
+      "sha256": "1415c026ddc6c0f095c04874ee0ed7e604b21c5f23d619016f44e197a37747b6"
+    }
+  },
+  "checks": {
+    "bounded_independent_audit": {
+      "broad_suite_rerun": false,
+      "database_accessed": false,
+      "device_accessed": false,
+      "lineage_rebind_only": true,
+      "mobile_build_performed": false,
+      "p0_count": 0,
+      "p1_count": 0,
+      "product_or_provider_network_accessed": false,
+      "read_only_git_origin_verification_performed": true,
+      "status": "passed",
+      "verdict": "GO"
+    },
+    "commit_qualified_checkpoint_m3": {
+      "audit_bindings_sha256": "e5f36c48ceb3589ac3fdf78e8c1c54ae9422152faad1f803f169d3b99eb98c2b",
+      "audit_byte_count": 7827,
+      "audit_sha256": "c0d3ead8aa66ce6edb0ce8c932fcb2368e7eca1c47cda929327cb2c0765fa32e",
+      "commit": "00e8b76daffaebd492c68e2f3416646fb8f327d6",
+      "local_legacy_substitution_rejected": true,
+      "packet_byte_count": 5840841,
+      "packet_sha256": "2c764008c2180db607ea51085c01b6fef0fd28fb436d5aace8970d3319a62c0c",
+      "resolved_with_git_show": true,
+      "status": "passed",
+      "tree": "8bdfec92208a93b05c919feef046f4f43899e6cd"
+    },
+    "compatibility_loader_contract": {
+      "audit_source_must_be_ancestor_of_compatibility_source": true,
+      "canonical_double_render_equal": true,
+      "canonical_file_render_matches": true,
+      "closure_binding_exact": true,
+      "committed_loader_check_required_after_audit_commit": true,
+      "current_path_bindings_exact": true,
+      "semantic_loader_precheck": "passed",
+      "status": "passed"
+    },
+    "default_locked_dry_run": {
+      "attestation_profile_operator_status": "dry_run_live_apply_locked",
+      "attestation_profile_sentinel": "ATTEST_AND_PROFILE_PRIVATE_SMOKIES_FULL_BUNDLE",
+      "compatibility_builder_status": "dry_run_clean_source_commit_and_tree_required",
+      "database_accessed": false,
+      "device_accessed": false,
+      "dual_platform_preview_marker_status": "dry_run_dual_platform_private_preview_evidence_required",
+      "dual_platform_preview_sentinel": "RECORD_SMOKIES_DUAL_PLATFORM_PRIVATE_PREVIEW",
+      "final_readiness_operator_status": "dry_run_live_apply_locked",
+      "final_readiness_sentinel": "FINALIZE_PRIVATE_SMOKIES_FULL_BUNDLE_READINESS",
+      "mobile_build_performed": false,
+      "network_accessed": false,
+      "publication_performed": false,
+      "status": "passed",
+      "writes_performed": false
+    },
+    "fail_closed_and_privacy": {
+      "absolute_private_paths_serialized": false,
+      "credentials_or_session_material_serialized": false,
+      "historical_or_media_evidence_mutated": false,
+      "location_samples_persisted_by_private_field_mode": false,
+      "private_field_analytics_emitted": false,
+      "private_field_background_task_started": false,
+      "private_field_car_state_mutated": false,
+      "private_field_saved_progress_mutated": false,
+      "raw_database_or_asset_paths_serialized": false,
+      "raw_device_identifiers_serialized": false,
+      "raw_native_map_pack_identifier_serialized": false,
+      "status": "passed"
+    },
+    "frozen_source_identity": {
+      "audited_moving_files": false,
+      "author_source_or_test_edits_by_auditor": 0,
+      "branch": "release/smokies-s4m-production-20260810",
+      "commit": "b93a438c5cad376d25140aaa70eff694d40b9fd1",
+      "origin_ref": "origin/release/smokies-s4m-production-20260810",
+      "pushed_origin_equal": true,
+      "status": "passed",
+      "tree": "2a8b57a7f9ed803198c14242d2f001e7235c562d",
+      "worktree_clean_before_audit_artifact": true
+    },
+    "guarded_branch_lineage_rebind": {
+      "cross_branch_audited_core_commit": "f80548531ddc763550b19699ce91eb5374f6c487",
+      "guarded_core_commit": "b93a438c5cad376d25140aaa70eff694d40b9fd1",
+      "guarded_core_parent": "75935bcc9804726a8d50de3a920f5ccd33a9d2bf",
+      "guarded_offline_recovery_commit": "8272cdb8e36bf935f55f12beaaec957cccc25a65",
+      "guarded_offline_recovery_parent": "70b61a1b707b1dd8006503f5ef21b21118e1a6a2",
+      "prior_branch_mismatched_audit_commit": "75935bcc9804726a8d50de3a920f5ccd33a9d2bf",
+      "prior_branch_mismatched_audit_deleted": true,
+      "same_core_tree": "2a8b57a7f9ed803198c14242d2f001e7235c562d",
+      "status": "passed"
+    },
+    "offline_private_field_recovery_contract": {
+      "account_departure_cleanup_exact": true,
+      "acquiring_to_recoverable_once_exact_cas": true,
+      "auth_hydration_quarantine": true,
+      "cold_launch_auto_resume": false,
+      "corrupt_or_mismatched_state_cleanup_only": true,
+      "fresh_authenticated_admin_manifest_required_before_reuse": true,
+      "location_or_audio_restored_during_quarantine": false,
+      "other_account_access_or_cleanup": false,
+      "recoverable_once_to_recovery_consumed_exact_cas": true,
+      "recovery_redownloads_assets_or_map": false,
+      "second_restart_recovery_allowed": false,
+      "sessions_analytics_car_or_background_restored": false,
+      "status": "passed"
+    },
+    "preserved_historical_and_media_contracts": {
+      "checkpoint_m3_commit_qualified": true,
+      "historical_or_media_bytes_changed": false,
+      "historical_report_nested_scenario_count": 13,
+      "historical_report_worker_pid": 16,
+      "pinned_artifact_bindings_sha256": "e917210589a02e66bb4d43a4a6699e58b2f8a76c7f42f2865facbee76ad6bd80",
+      "pinned_artifact_count": 6,
+      "status": "passed"
+    },
+    "private_field_diagnostic_and_native_map_contract": {
+      "admin_and_active_private_field_gate_required": true,
+      "allowlisted_region_code_and_label_only": true,
+      "completed_resource_size_is_raw_safe_integer": true,
+      "exact_renderer_and_native_pack_name_required": true,
+      "live_map_bytes_equal_bundle_record": true,
+      "single_complete_native_pack_required": true,
+      "status": "passed"
+    },
+    "release_support_source_binding": {
+      "all_current_nonself_release_support_paths_bound": true,
+      "path_count_excluding_self_audit": 952,
+      "path_inventory_sha256": "7fdd38edf55544150c45ec585067b4705c04bf8dce8c5c21c40c5f99d06eb132",
+      "source_set_sha256": "04fce7ebe7049b5f45f9ede1bbb79cb3d5e88fa3dfce11db0f04657de16ecea4",
+      "status": "passed"
+    },
+    "source_path_bindings": {
+      "changed_source_and_test_paths": [
+        "mobile/app/originals/player.tsx",
+        "mobile/app/originals/preview.tsx",
+        "mobile/components/NativeMap/offlineManager.ts",
+        "mobile/components/NativeMap/offlinePackStatus.ts",
+        "mobile/lib/originals/__tests__/adminPreviewReview.test.ts",
+        "mobile/lib/originals/__tests__/nativeMapRendererState.test.ts",
+        "mobile/lib/originals/__tests__/offlinePackStatus.test.ts",
+        "mobile/lib/originals/__tests__/previewAccess.test.ts",
+        "mobile/lib/originals/__tests__/runtimeStopRace.test.ts",
+        "mobile/lib/originals/__tests__/stores.test.ts",
+        "mobile/lib/originals/adminPreviewReview.ts",
+        "mobile/lib/originals/bundleStore.ts",
+        "mobile/lib/originals/mapAdapter.ts",
+        "mobile/lib/originals/previewAccess.ts",
+        "mobile/lib/originals/runtime.tsx"
+      ],
+      "deleted_stale_evidence_paths": [
+        "originals/smokies/smokies_mobile_compatibility_freeze_v1.json",
+        "originals/smokies/smokies_v3_release_guard_audit_v1.json"
+      ],
+      "full_core_diff_byte_count": 800154,
+      "full_core_diff_sha256": "062b39d594459ea5427803316dc167961194bd5c1450aa0222c8b7c360c15303",
+      "git_show_byte_or_hash_mismatches": 0,
+      "rehash_after_artifact_construction_required": true,
+      "release_rehash_mismatches": 0,
+      "source_and_test_diff_byte_count": 114969,
+      "source_and_test_diff_sha256": "1796d19c20e36cebc0bad6718dd3b25ca4f7c5c80c9b747d05b32ee0014921a4",
+      "status": "passed"
+    },
+    "stale_artifact_replacement": {
+      "prior_compatibility_bound_as_history_only": true,
+      "prior_release_audit_bound_as_history_only": true,
+      "replacement_audit_is_only_auditor_created_path": true,
+      "source_commit_omits_stale_compatibility": true,
+      "source_commit_omits_stale_release_audit": true,
+      "status": "passed"
+    },
+    "test_evidence": {
+      "accepted_author_focused_gate": {
+        "broad_suite_rerun": false,
+        "diff_check": "passed",
+        "focused_test_files": [
+          "mobile/lib/originals/__tests__/adminPreviewReview.test.ts",
+          "mobile/lib/originals/__tests__/nativeMapRendererState.test.ts",
+          "mobile/lib/originals/__tests__/offlinePackStatus.test.ts",
+          "mobile/lib/originals/__tests__/previewAccess.test.ts",
+          "mobile/lib/originals/__tests__/runtimeStopRace.test.ts",
+          "mobile/lib/originals/__tests__/stores.test.ts"
+        ],
+        "status": "passed",
+        "typescript": "passed"
+      },
+      "guarded_lineage_rebind_test_rerun": false,
+      "independent_frozen_diff_audit": {
+        "broad_suite_rerun": false,
+        "diff_check": "passed",
+        "focused_test_files_passed": 6,
+        "p0_count": 0,
+        "p1_count": 0,
+        "source_and_test_diff_sha256": "1796d19c20e36cebc0bad6718dd3b25ca4f7c5c80c9b747d05b32ee0014921a4",
+        "status": "passed",
+        "typescript": "passed"
+      },
+      "source_checkpoint_test_rerun": false,
+      "source_tree_byte_identical_to_previously_audited_f805": true,
+      "status": "passed_accepted_focused_evidence_rehashed"
+    },
+    "trusted_validation_closure": {
+      "count_drift_rejected": true,
+      "framed_sha256": "37219a0e6b0ed3a1490cf526370754ce4be79ca68989fd7d843bf1e91cb4c8f4",
+      "path_count": 174,
+      "recomputed_from_exact_git_show_bytes": true,
+      "reported_hash_matches_independent_hash": true,
+      "sorted_unique": true,
+      "status": "passed"
+    }
+  },
+  "contract_id": "smokies_v3_release_guard_audit_v1",
+  "effects": {
+    "database_accessed": false,
+    "database_mutated": false,
+    "deployment_performed": false,
+    "device_accessed": false,
+    "external_media_accessed": false,
+    "historical_evidence_mutated": false,
+    "live_database_accessed": false,
+    "live_database_mutated": false,
+    "mobile_build_performed": false,
+    "network_accessed": false,
+    "non_audit_source_evidence_mutated": false,
+    "production_mutation_performed": false,
+    "provider_accessed": false,
+    "publication_performed": false,
+    "source_files_mutated": false,
+    "test_files_mutated": false,
+    "trusted_validation_performed": false,
+    "upload_performed": false
+  },
+  "findings": {
+    "audit_artifact_created_by_auditor": true,
+    "author_source_files_edited_by_auditor": 0,
+    "author_test_files_edited_by_auditor": 0,
+    "non_audit_artifacts_edited_by_auditor": 0,
+    "p0_count": 0,
+    "p1_count": 0
+  },
+  "kind": "original_v3_single_use_release_guard_independent_audit",
+  "product_contract": {
+    "base_entries": 77,
+    "chapters": 4,
+    "directional_replacements": 8,
+    "explorer_included": true,
+    "images": 13,
+    "narration_assets": 85,
+    "offline_map_regions": 1,
+    "permanent_earned_credit_price": 900,
+    "standalone_chapter_products": 0,
+    "total_content_assets": 98,
+    "variants": 6
+  },
+  "product_id": "great_smoky_mountains_ridges_rivers_living_memory",
+  "schema_version": 1,
+  "status": "independent_audit_passed"
+}

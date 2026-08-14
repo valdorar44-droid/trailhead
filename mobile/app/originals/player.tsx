@@ -990,7 +990,9 @@ export default function OriginalPlayerScreen() {
               <Ionicons name={status === 'off_route' ? 'git-compare-outline' : 'location-outline'} size={18} color={C.orange} />
               <View style={styles.alertCopy}>
                 <Text style={[styles.alertTitle, { color: C.text }]}>{status === 'off_route' ? 'Auto-play paused off route' : 'Waiting for a reliable GPS fix'}</Text>
-                <Text style={[styles.alertBody, { color: C.text2 }]}>{session.message || (status === 'off_route' ? `Rejoin the ${privateFieldActive ? 'selected private' : 'published'} route and the next story will re-arm.` : 'Stories remain queued and will not be skipped.')}</Text>
+                <Text style={[styles.alertBody, { color: C.text2 }]}>{privateFieldActive && status === 'off_route'
+                  ? 'Rejoin the selected private route and the next story will re-arm.'
+                  : session.message || (status === 'off_route' ? `Rejoin the ${privateFieldActive ? 'selected private' : 'published'} route and the next story will re-arm.` : 'Stories remain queued and will not be skipped.')}</Text>
               </View>
             </View>
           ) : null}

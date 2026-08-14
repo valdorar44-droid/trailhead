@@ -203,6 +203,11 @@ assert.match(standalonePlayerSource, /No saved progress, analytics, background t
 assert.match(standalonePlayerSource, /privateFieldActive[\s\S]*requestClosePlayer\('end_test'\)/);
 assert.match(
   standalonePlayerSource,
+  /privateFieldActive && status === 'off_route'[\s\S]*\? 'Rejoin the selected private route and the next story will re-arm\.'[\s\S]*: session\.message \|\| \(status === 'off_route'/,
+  'private-field off-route guidance must take precedence over a runtime session message without changing the published fallback',
+);
+assert.match(
+  standalonePlayerSource,
   /pathname: '\/originals\/\[id\]'/,
   'a cold legacy player link must return to the Original detail instead of opening a blank map',
 );

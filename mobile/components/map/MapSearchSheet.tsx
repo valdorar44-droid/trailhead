@@ -265,7 +265,11 @@ export default function MapSearchSheet({
                 ) : usingSearchV2 && searchV2Status === 'error' && activeResults.length === 0 ? (
                   <View style={s.stateCard} testID="map.search.error">
                     <Ionicons name="cloud-offline-outline" size={18} color={C.text3} />
-                    <Text style={s.stateText}>Search is not available right now.</Text>
+                    <Text style={s.stateText}>
+                      {searchV2Mode === 'suggest'
+                        ? 'Suggestions are taking longer. Search to continue.'
+                        : 'Search is not available right now.'}
+                    </Text>
                     {onRetrySearchV2 && searchV2RetryAvailable ? (
                       <TouchableOpacity
                         style={s.loadMoreButton}
@@ -273,9 +277,9 @@ export default function MapSearchSheet({
                         testID="map.search.retry"
                         activeOpacity={0.82}
                         accessibilityRole="button"
-                        accessibilityLabel="Retry this search"
+                        accessibilityLabel={searchV2Mode === 'suggest' ? 'Search this query' : 'Retry this search'}
                       >
-                        <Text style={s.loadMoreText}>Try again</Text>
+                        <Text style={s.loadMoreText}>{searchV2Mode === 'suggest' ? 'Search' : 'Try again'}</Text>
                       </TouchableOpacity>
                     ) : null}
                   </View>

@@ -27832,10 +27832,16 @@ function MapScreen() {
                   onPress={searchV2CanRetry(mapSearchV2.state.error) ? () => { void mapSearchV2.retry(); } : undefined}
                   testID={`map.search.inline.error.${searchV2DiagnosticCode(mapSearchV2.state.error)}`}
                   accessibilityRole={searchV2CanRetry(mapSearchV2.state.error) ? 'button' : undefined}
-                  accessibilityLabel={searchV2CanRetry(mapSearchV2.state.error) ? 'Search unavailable. Try again.' : 'Search unavailable.'}
+                  accessibilityLabel={
+                    mapSearchV2.state.mode === 'suggest'
+                      ? searchV2CanRetry(mapSearchV2.state.error) ? 'Suggestions delayed. Search this query.' : 'Suggestions delayed.'
+                      : searchV2CanRetry(mapSearchV2.state.error) ? 'Search unavailable. Try again.' : 'Search unavailable.'
+                  }
                 >
                   <Text style={[s.inlineMapSearchStateText, { color: mapChrome.textMuted }]}>
-                    {searchV2CanRetry(mapSearchV2.state.error) ? 'Search unavailable · Try again' : 'Search unavailable'}
+                    {mapSearchV2.state.mode === 'suggest'
+                      ? searchV2CanRetry(mapSearchV2.state.error) ? 'Suggestions delayed · Search' : 'Suggestions delayed'
+                      : searchV2CanRetry(mapSearchV2.state.error) ? 'Search unavailable · Try again' : 'Search unavailable'}
                   </Text>
                 </TouchableOpacity>
               ) : !searchV2Enabled && mapSearchDisplayResults.some(place => place.name === '__error__') ? (

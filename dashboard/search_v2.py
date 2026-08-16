@@ -21,7 +21,7 @@ from collections import OrderedDict, deque
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
 
 
 SearchSurfaceV2 = Literal[
@@ -92,6 +92,28 @@ _DESTINATION_INTENT_FACETS = frozenset({
 _EXTERNAL_GEOCODE_FACETS = frozenset({
     "destination", "address", "street", "postcode", "city", "place", "locality",
     "neighborhood", "district", "region", "country",
+})
+_ADMINISTRATIVE_DESTINATION_FACETS = frozenset({
+    "destination", "place", "city", "locality", "district", "region", "country",
+})
+_US_STATE_NAMES = frozenset({
+    "alabama", "alaska", "arizona", "arkansas", "california", "colorado",
+    "connecticut", "delaware", "florida", "georgia", "hawaii", "idaho",
+    "illinois", "indiana", "iowa", "kansas", "kentucky", "louisiana",
+    "maine", "maryland", "massachusetts", "michigan", "minnesota",
+    "mississippi", "missouri", "montana", "nebraska", "nevada",
+    "new hampshire", "new jersey", "new mexico", "new york",
+    "north carolina", "north dakota", "ohio", "oklahoma", "oregon",
+    "pennsylvania", "rhode island", "south carolina", "south dakota",
+    "tennessee", "texas", "utah", "vermont", "virginia", "washington",
+    "west virginia", "wisconsin", "wyoming",
+})
+_US_STATE_CODES = frozenset({
+    "al", "ak", "az", "ar", "ca", "co", "ct", "de", "fl", "ga", "hi",
+    "id", "il", "in", "ia", "ks", "ky", "la", "me", "md", "ma", "mi",
+    "mn", "ms", "mo", "mt", "ne", "nv", "nh", "nj", "nm", "ny", "nc",
+    "nd", "oh", "ok", "or", "pa", "ri", "sc", "sd", "tn", "tx", "ut",
+    "vt", "va", "wa", "wv", "wi", "wy",
 })
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
@@ -171,6 +193,12 @@ class SearchProvenanceV2(BaseModel):
 
 
 class SearchRequestV2(BaseModel):
+    # Server-derived context only. Private attributes never enter the public
+    # request schema, signed provider references, cursors, or cache keys.
+    _destination_context: bool = PrivateAttr(default=False)
+    _destination_query: str = PrivateAttr(default="")
+    _destination_country: str = PrivateAttr(default="")
+
     query: str = Field(min_length=2, max_length=_MAX_QUERY_CHARS)
     surface: SearchSurfaceV2 = "map"
     intent: SearchIntentV2 = "any"
@@ -297,6 +325,62 @@ class SearchResultV2(BaseModel):
     detail_ref: str | None = Field(default=None, max_length=260)
     score: float = 0.0
     match_reason: str = Field(default="search_match", max_length=48)
+
+
+def _explicit_us_destination_query(query: str) -> str:
+    """Return the city portion of an explicit ``city, state`` US query."""
+    raw = re.sub(r"\s+", " ", str(query or "").strip())
+    clean = normalize_search_text(query)
+    if not clean or re.search(
+        r"\b(?:trails?|trailheads?|hikes?|hiking|camps?|campgrounds?|viewpoints?|fuel|gas|water|grocery|repair|parking|things?)\b",
+        clean,
+    ):
+        return ""
+    state_code = re.fullmatch(r"(.+?),\s*([A-Za-z]{2})", raw)
+    if state_code and state_code.group(2).lower() in _US_STATE_CODES:
+        return normalize_search_text(state_code.group(1))
+    tokens = clean.split()
+    for width in (2, 1):
+        if len(tokens) <= width:
+            continue
+        suffix = " ".join(tokens[-width:])
+        if suffix in _US_STATE_NAMES:
+            return " ".join(tokens[:-width])
+    return ""
+
+
+def _result_has_administrative_facet(result: SearchResultV2) -> bool:
+    facets = {
+        normalize_search_text(value).replace(" ", "_")
+        for value in [result.kind, *result.categories]
+        if normalize_search_text(value)
+    }
+    return bool(facets.intersection(_ADMINISTRATIVE_DESTINATION_FACETS))
+
+
+def infer_destination_search_request_v2(
+    request: SearchRequestV2,
+    internal: list[SearchResultV2],
+) -> SearchRequestV2:
+    """Attach deterministic destination context without changing API fields."""
+    if request.intent in {"trail", "camp", "service"} or request.categories:
+        return request
+    explicit_city = _explicit_us_destination_query(request.query)
+    query_norm = normalize_search_text(request.query)
+    canonical_exact = next((
+        item for item in internal
+        if item.match_reason in {"exact_title", "exact_alias"}
+        and _result_has_administrative_facet(item)
+    ), None)
+    if not explicit_city and canonical_exact is None:
+        return request
+    if request.intent != "destination" and not explicit_city and " " in query_norm:
+        return request
+    contextual = request.model_copy()
+    contextual._destination_context = True
+    contextual._destination_query = explicit_city or query_norm
+    contextual._destination_country = "US" if explicit_city else ""
+    return contextual
 
 
 class SearchPageV2(BaseModel):
@@ -1026,7 +1110,7 @@ class SearchV2Service:
     ) -> None:
         self._source_loader = source_loader
         self._external_provider = external_provider
-        self._external_timeout_seconds = max(0.05, min(float(external_timeout_seconds), 2.5))
+        self._external_timeout_seconds = max(0.05, min(float(external_timeout_seconds), 5.0))
         self._external_cache_ttl_seconds = max(1.0, min(float(external_cache_ttl_seconds), 300.0))
         self._external_cache_max_entries = max(1, min(int(external_cache_max_entries), 4096))
         self._external_rate_window_seconds = max(1.0, min(float(external_rate_window_seconds), 300.0))
@@ -1062,6 +1146,7 @@ class SearchV2Service:
         offset = _decode_cursor(request.cursor, fingerprint, self._index.revision)
         target = min(_MAX_CURSOR_OFFSET + 31, offset + request.limit + 1)
         internal = await asyncio.to_thread(self._index.search, request, target)
+        request = infer_destination_search_request_v2(request, internal)
         combined = list(internal)
         external_count = 0
         if (
@@ -1080,7 +1165,11 @@ class SearchV2Service:
                 external_subject=external_subject,
             )
             combined = _merge_results_internal_first(
-                combined, external, query=request.query,
+                combined,
+                external,
+                query=request.query,
+                destination_context=request._destination_context,
+                destination_query=request._destination_query,
             )
             external_count = max(0, len(combined) - len(internal))
         page_results = combined[offset:offset + request.limit]
@@ -1141,9 +1230,13 @@ class SearchV2Service:
             self._external_cache_put(cache_key, [])
             return []
         try:
+            timeout_seconds = min(
+                self._external_timeout_seconds,
+                2.5 if mode == "suggest" else 5.0,
+            )
             external = await asyncio.wait_for(
                 self._external_provider(request, provider_limit, mode),
-                timeout=self._external_timeout_seconds,
+                timeout=timeout_seconds,
             )
         except asyncio.CancelledError:
             raise
@@ -1299,7 +1392,8 @@ class SearchV2Service:
 
 def _merge_results_internal_first(
     internal: list[SearchResultV2], external: list[SearchResultV2],
-    *, query: str = "",
+    *, query: str = "", destination_context: bool = False,
+    destination_query: str = "",
 ) -> list[SearchResultV2]:
     accepted_external: list[SearchResultV2] = []
     seen_ids = {item.result_id.lower() for item in internal}
@@ -1328,6 +1422,29 @@ def _merge_results_internal_first(
             seen_canonical.add(item.canonical_place_id.lower())
         if item.coordinates:
             seen_places.add(place_key)
+
+    if destination_context:
+        exact_canonical_destinations = [
+            item for item in internal
+            if item.match_reason in {"exact_title", "exact_alias"}
+            and _result_has_administrative_facet(item)
+        ]
+        exact_external_destinations = [
+            item for item in accepted_external
+            if _external_destination_is_exact(item, destination_query)
+        ]
+        remaining_internal = [
+            item for item in internal if item not in exact_canonical_destinations
+        ]
+        remaining_external = [
+            item for item in accepted_external if item not in exact_external_destinations
+        ]
+        return [
+            *exact_canonical_destinations,
+            *exact_external_destinations,
+            *remaining_internal,
+            *remaining_external,
+        ]
 
     # Canonical exact identities are never displaced. A strong temporary
     # destination/address match gets the next reserved tier so city searches do
@@ -1367,6 +1484,16 @@ def _merge_results_internal_first(
         *weak_internal,
         *remaining_external,
     ]
+
+
+def _external_destination_is_exact(
+    result: SearchResultV2, destination_query: str,
+) -> bool:
+    return bool(
+        destination_query
+        and _result_has_administrative_facet(result)
+        and normalize_search_text(result.title) == normalize_search_text(destination_query)
+    )
 
 
 def _external_geocode_match_tier(

@@ -98,6 +98,22 @@ def _fixture_service(*, external_provider=None, timeout: float = 0.2) -> SearchV
 
 
 class SearchV2ServiceTests(unittest.IsolatedAsyncioTestCase):
+    def test_destination_context_is_private_and_does_not_change_request_schema(self):
+        request = SearchRequestV2(query="Moab Utah")
+        request._destination_context = True
+        request._destination_query = "moab"
+        request._destination_country = "US"
+
+        self.assertEqual(
+            set(SearchRequestV2.model_json_schema()["properties"]),
+            {
+                "query", "surface", "intent", "scope", "center", "bounds",
+                "route_ref", "radius_meters", "categories", "filters", "cursor",
+                "limit", "session_id", "include_external",
+            },
+        )
+        self.assertNotIn("destination", json.dumps(request.model_dump()))
+
     async def test_moab_destination_exact_identity_wins(self):
         service = _fixture_service()
         response = await service.resolve(SearchRequestV2(
@@ -565,6 +581,34 @@ class SearchV2ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls, 0)
         self.assertEqual(response.source_counts["external"], 0)
 
+    async def test_provider_deadline_is_mode_aware_for_suggest_and_results(self):
+        observed_timeouts: list[float] = []
+
+        async def provider(_request, _limit, _mode):
+            return []
+
+        real_wait_for = asyncio.wait_for
+
+        async def tracked_wait_for(awaitable, *, timeout):
+            observed_timeouts.append(timeout)
+            return await real_wait_for(awaitable, timeout=timeout)
+
+        service = SearchV2Service(
+            lambda: ([], "mode-timeout-v1"), provider,
+            external_timeout_seconds=4.5,
+        )
+        with patch("dashboard.search_v2.asyncio.wait_for", side_effect=tracked_wait_for):
+            await service.page(SearchRequestV2(
+                query="Moab", include_external=True,
+                session_id="mode-timeout-suggest",
+            ), mode="suggest")
+            await service.page(SearchRequestV2(
+                query="Moab", include_external=True,
+                session_id="mode-timeout-results",
+            ), mode="results")
+
+        self.assertEqual(observed_timeouts, [2.5, 4.5])
+
     async def test_external_cache_is_bounded_hashed_and_rate_limited(self):
         calls = 0
 
@@ -997,6 +1041,105 @@ class SearchV2ServiceTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(provider_calls, 1)
 
+    async def test_city_state_query_promotes_exact_mapbox_city_before_canonical_pois(self):
+        observed: list[SearchRequestV2] = []
+
+        async def provider(request, _limit, _mode):
+            observed.append(request)
+            return [SearchResultV2(
+                result_id="mapbox:place.moab",
+                title="Moab",
+                subtitle="Utah, United States",
+                kind="destination",
+                categories=["place"],
+                provenance=SearchProvenanceV2(
+                    provider="mapbox", source_label="Mapbox search",
+                    provider_result_id="place.moab", temporary_use_only=True,
+                ),
+                persistence_policy="temporary",
+                detail_ref="provider:mapbox:place.moab:signed",
+                score=100_000,
+                match_reason="provider_fallback",
+            )]
+
+        documents = [
+            _document(
+                "poi:moab-utah-properties", "Moab Utah Properties",
+                kind="place", categories=("real_estate",),
+            ),
+            _document(
+                "trail:moab-utah", "Moab Utah", kind="trail",
+                categories=("trail",),
+            ),
+        ]
+        for index, query in enumerate(("Moab Utah", "Moab, UT")):
+            with self.subTest(query=query):
+                service = SearchV2Service(
+                    lambda: (documents, f"destination-query-v{index}"), provider,
+                )
+                response = await service.page(SearchRequestV2(
+                    query=query,
+                    center=SearchCenterV2(lat=49.8951, lng=-97.1384),
+                    include_external=True,
+                    session_id=f"destination-query-session-{index}",
+                    limit=5,
+                ))
+
+                self.assertEqual(response.results[0].result_id, "mapbox:place.moab")
+                self.assertTrue(observed[-1]._destination_context)
+                self.assertEqual(observed[-1]._destination_query, "moab")
+                self.assertEqual(observed[-1]._destination_country, "US")
+
+    async def test_one_word_city_keeps_exact_canonical_destination_first(self):
+        async def provider(_request, _limit, _mode):
+            return [SearchResultV2(
+                result_id="mapbox:place.moab",
+                title="Moab",
+                subtitle="Utah, United States",
+                kind="destination",
+                categories=["place"],
+                provenance=SearchProvenanceV2(
+                    provider="mapbox", source_label="Mapbox search",
+                    provider_result_id="place.moab", temporary_use_only=True,
+                ),
+                persistence_policy="temporary",
+                detail_ref="provider:mapbox:place.moab:signed",
+                score=100_000,
+                match_reason="provider_fallback",
+            )]
+
+        service = _fixture_service(external_provider=provider)
+        response = await service.page(SearchRequestV2(
+            query="Moab", center=SearchCenterV2(lat=49.8951, lng=-97.1384),
+            include_external=True, session_id="one-word-destination", limit=5,
+        ))
+
+        self.assertEqual(response.results[0].result_id, "destination:moab-utah")
+        self.assertEqual(response.results[1].result_id, "mapbox:place.moab")
+
+    async def test_trail_viewpoint_and_service_queries_do_not_enter_destination_mode(self):
+        observed: list[SearchRequestV2] = []
+
+        async def provider(request, _limit, _mode):
+            observed.append(request)
+            return []
+
+        service = SearchV2Service(
+            lambda: (_fixture_documents(), "non-destination-v1"), provider,
+        )
+        for index, query in enumerate((
+            "Moab Rim Trail", "viewpoint near Moab", "fuel near Flagstaff",
+            "things near me", "hikes in", "say hi",
+        )):
+            with self.subTest(query=query):
+                await service.page(SearchRequestV2(
+                    query=query,
+                    center=SearchCenterV2(lat=49.8951, lng=-97.1384),
+                    include_external=True,
+                    session_id=f"non-destination-query-{index}",
+                ))
+                self.assertFalse(observed[-1]._destination_context)
+
     async def test_external_fallback_uses_one_stable_snapshot_after_canonical_rows(self):
         requested_limits: list[int] = []
 
@@ -1184,6 +1327,87 @@ class SearchV2ServiceTests(unittest.IsolatedAsyncioTestCase):
             re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"),
         )
         legacy_geocoder.assert_not_awaited()
+
+    async def test_mapbox_explicit_city_state_removes_phone_bias_and_uses_admin_types(self):
+        provider = AsyncMock(return_value={"suggestions": []})
+        request = SearchRequestV2(
+            query="Moab Utah",
+            center=SearchCenterV2(lat=49.8951, lng=-97.1384),
+            include_external=True,
+            session_id="remote-destination-session",
+        )
+        request._destination_context = True
+        request._destination_query = "moab"
+        request._destination_country = "US"
+        with (
+            patch.object(server.settings, "mapbox_token", "pk.test"),
+            patch.object(server, "_mapbox_get", provider),
+        ):
+            await server._search_v2_external_mapbox(request, 8, "suggest")
+
+        _url, params = provider.await_args.args
+        self.assertEqual(params["country"], "US")
+        self.assertNotIn("proximity", params)
+        self.assertNotIn("origin", params)
+        self.assertEqual(
+            params["types"],
+            "place,city,locality,district,region,country",
+        )
+
+    async def test_mapbox_retrieve_is_bounded_below_mobile_deadline(self):
+        request = SearchRequestV2(
+            query="Moab", include_external=True,
+            session_id="bounded-retrieve-session",
+        )
+        issued_at = 1_800_000_000
+        detail_ref = server._search_v2_mapbox_detail_ref(
+            request, "place.bounded-retrieve", issued_at=issued_at,
+        )
+        observed_timeouts: list[float] = []
+
+        async def bounded_wait(awaitable, *, timeout):
+            observed_timeouts.append(timeout)
+            awaitable.close()
+            raise TimeoutError
+
+        service = SearchV2Service(lambda: ([], "bounded-retrieve-v1"))
+        with (
+            patch.object(server.settings, "mapbox_token", "pk.test"),
+            patch.object(server, "_search_v2_service", service),
+            patch.object(server, "_search_v2_external_timeout_seconds", return_value=4.5),
+            patch("dashboard.server.asyncio.wait_for", side_effect=bounded_wait),
+            patch("dashboard.server.time.time", return_value=issued_at),
+            self.assertRaises(HTTPException) as raised,
+        ):
+            await server._search_v2_resolve_mapbox_selection(
+                request,
+                selected_result_id="mapbox:place.bounded-retrieve",
+                selected_detail_ref=detail_ref,
+                external_subject="bounded-retrieve-subject",
+            )
+
+        self.assertEqual(raised.exception.status_code, 503)
+        self.assertEqual(observed_timeouts, [4.5])
+
+    async def test_generic_destination_preserves_address_search_context(self):
+        provider = AsyncMock(return_value={"suggestions": []})
+        request = SearchRequestV2(
+            query="123 Center Street",
+            intent="destination",
+            center=SearchCenterV2(lat=38.5733, lng=-109.5498),
+            include_external=True,
+            session_id="address-destination-session",
+        )
+        with (
+            patch.object(server.settings, "mapbox_token", "pk.test"),
+            patch.object(server, "_mapbox_get", provider),
+        ):
+            await server._search_v2_external_mapbox(request, 8, "suggest")
+
+        _url, params = provider.await_args.args
+        self.assertIn("address", params["types"])
+        self.assertIn("proximity", params)
+        self.assertIn("origin", params)
 
     async def test_concurrent_mapbox_selection_replays_share_one_retrieve(self):
         request = SearchRequestV2(

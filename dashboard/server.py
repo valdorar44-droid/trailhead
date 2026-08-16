@@ -19040,7 +19040,9 @@ async def _search_v2_external_mapbox(
         or not request.session_id
     ):
         return []
-    if request.intent == "destination":
+    if request._destination_context:
+        mapbox_types = "place,city,locality,district,region,country"
+    elif request.intent == "destination":
         mapbox_types = "place,locality,neighborhood,district,region,country,address"
     elif request.intent == "trail":
         mapbox_types = "poi"
@@ -19050,6 +19052,9 @@ async def _search_v2_external_mapbox(
         f"{request.center.lng:.6f},{request.center.lat:.6f}"
         if request.center else ""
     )
+    if request._destination_context:
+        # An explicit remote destination must not be biased toward the phone.
+        proximity = ""
     bbox = (
         f"{request.bounds.west:.6f},{request.bounds.south:.6f},"
         f"{request.bounds.east:.6f},{request.bounds.north:.6f}"
@@ -19062,6 +19067,7 @@ async def _search_v2_external_mapbox(
         "origin": proximity,
         "bbox": bbox,
         "types": mapbox_types,
+        "country": request._destination_country,
         "language": "en",
         "limit": str(max(1, min(int(limit), 10))),
     })
@@ -19414,14 +19420,26 @@ async def _search_v2_resolve_mapbox_selection(
                             "code": "search_provider_rate_limited",
                             "message": "Search is busy. Try again in a moment.",
                         })
-                    data = await _mapbox_get(
-                        "https://api.mapbox.com/search/searchbox/v1/retrieve/"
-                        f"{quote(provider_id, safe='')}",
-                        _searchbox_params({
-                            "session_token": _search_v2_mapbox_session_token(request.session_id),
-                            "language": "en",
-                        }),
-                    )
+                    try:
+                        data = await asyncio.wait_for(
+                            _mapbox_get(
+                                "https://api.mapbox.com/search/searchbox/v1/retrieve/"
+                                f"{quote(provider_id, safe='')}",
+                                _searchbox_params({
+                                    "session_token": _search_v2_mapbox_session_token(request.session_id),
+                                    "language": "en",
+                                }),
+                            ),
+                            timeout=max(
+                                0.5,
+                                min(_search_v2_external_timeout_seconds(), 5.0),
+                            ),
+                        )
+                    except TimeoutError as exc:
+                        raise HTTPException(503, {
+                            "code": "search_provider_unavailable",
+                            "message": "That place is no longer available. Search again or drop a pin.",
+                        }) from exc
                     selected = None
                     for feature in data.get("features", []):
                         if not isinstance(feature, dict):
@@ -19523,7 +19541,7 @@ async def _search_v2_resolve_geoapify_selection(
                             _search_v2_geoapify_candidates(request, 10),
                             timeout=max(
                                 0.5,
-                                min(_search_v2_external_timeout_seconds(), 2.5),
+                                min(_search_v2_external_timeout_seconds(), 5.0),
                             ),
                         )
                     except TimeoutError as exc:
@@ -19576,9 +19594,12 @@ async def _search_v2_resolve_geoapify_selection(
 
 def _search_v2_external_timeout_seconds() -> float:
     try:
-        return float(os.getenv("TRAILHEAD_SEARCH_V2_EXTERNAL_TIMEOUT_SECONDS", "0.9"))
+        return max(0.5, min(
+            5.0,
+            float(os.getenv("TRAILHEAD_SEARCH_V2_EXTERNAL_TIMEOUT_SECONDS", "4.5")),
+        ))
     except (TypeError, ValueError):
-        return 0.9
+        return 4.5
 
 
 _search_v2_service = SearchV2Service(

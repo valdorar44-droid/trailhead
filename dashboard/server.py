@@ -76,6 +76,7 @@ from dashboard.search_v2 import (
     SearchResultV2,
     SearchV2Service,
     documents_from_canonical,
+    infer_remote_category_search_request_v2,
     normalize_search_text,
     _external_result_for_request,
 )
@@ -19941,6 +19942,7 @@ async def api_search_v2_resolve(
         exclude={"selected_result_id", "selected_detail_ref"},
     ))
     request = _authorize_search_v2_request(request, user)
+    request = infer_remote_category_search_request_v2(request)
     if selected_result_id and selected_detail_ref:
         external_subject = _search_v2_external_subject(http_request, user)
         if selected_result_id.startswith("geoapify:"):

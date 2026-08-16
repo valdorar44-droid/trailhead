@@ -413,7 +413,7 @@ def infer_remote_category_search_request_v2(
     """Attach category-near-destination context without changing API fields."""
     if (
         not request.include_external
-        or request.scope != "global"
+        or request.scope not in {"global", "nearby", "viewport"}
         or request.surface == "route_editor"
         or request.intent in {"destination", "trail", "camp"}
         or request.categories
@@ -1636,6 +1636,13 @@ def _external_result_for_request(
         has_coordinates=result.coordinates is not None,
     ):
         return None
+    # An explicit "category near named destination" query intentionally
+    # replaces the caller's phone/viewport context with the server-resolved
+    # destination anchor. The private flag is recomputed from the query on
+    # both search and resolve; ordinary nearby/viewport requests still use
+    # the spatial gates below.
+    if request._remote_category_context:
+        return result
     if request.bounds:
         if not result.coordinates:
             # External suggestions may intentionally omit coordinates. They

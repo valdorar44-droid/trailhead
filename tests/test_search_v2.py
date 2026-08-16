@@ -1170,7 +1170,9 @@ class SearchV2ServiceTests(unittest.IsolatedAsyncioTestCase):
             include_external=True,
             session_id="nearby-context-query",
         ))
-        self.assertFalse(observed[-1]._remote_category_context)
+        self.assertTrue(observed[-1]._remote_category_context)
+        self.assertEqual(observed[-1]._remote_category, "fuel")
+        self.assertEqual(observed[-1]._remote_destination_query, "Flagstaff")
         await service.page(SearchRequestV2(
             query="viewpoint near Moab",
             scope="viewport",
@@ -1180,7 +1182,59 @@ class SearchV2ServiceTests(unittest.IsolatedAsyncioTestCase):
             include_external=True,
             session_id="viewport-context-query",
         ))
-        self.assertFalse(observed[-1]._remote_category_context)
+        self.assertTrue(observed[-1]._remote_category_context)
+        self.assertEqual(observed[-1]._remote_category, "viewpoint")
+        self.assertEqual(observed[-1]._remote_destination_query, "Moab")
+
+    def test_remote_category_context_replaces_only_named_destination_spatial_scope(self):
+        result = SearchResultV2(
+            result_id="mapbox:poi.flagstaff-fuel",
+            title="Flagstaff Fuel",
+            subtitle="Flagstaff, Arizona",
+            kind="place",
+            categories=["gas_station"],
+            coordinates=SearchCenterV2(lat=35.1983, lng=-111.6513),
+            provenance=SearchProvenanceV2(
+                provider="mapbox",
+                source_label="Mapbox search",
+                provider_result_id="poi.flagstaff-fuel",
+                temporary_use_only=True,
+            ),
+            persistence_policy="temporary",
+            detail_ref="provider:mapbox:v2:1800000000:0123456789abcdef0123456789abcdef",
+        )
+        viewport_request = SearchRequestV2(
+            query="fuel near Flagstaff",
+            scope="viewport",
+            bounds=SearchBoundsV2(
+                west=-97.2, south=49.8, east=-97.0, north=50.0,
+            ),
+            include_external=True,
+            session_id="viewport-remote-context",
+        )
+        nearby_request = SearchRequestV2(
+            query="fuel near Flagstaff",
+            scope="nearby",
+            center=SearchCenterV2(lat=49.8951, lng=-97.1384),
+            include_external=True,
+            session_id="nearby-remote-context",
+        )
+        ordinary_viewport = viewport_request.model_copy(
+            update={"query": "fuel stations"},
+        )
+
+        for request in (viewport_request, nearby_request):
+            contextual = server.infer_remote_category_search_request_v2(request)
+            self.assertTrue(contextual._remote_category_context)
+            self.assertIs(server._external_result_for_request(result, contextual), result)
+        self.assertFalse(
+            server.infer_remote_category_search_request_v2(
+                ordinary_viewport,
+            )._remote_category_context,
+        )
+        self.assertIsNone(
+            server._external_result_for_request(result, ordinary_viewport),
+        )
 
     async def test_remote_category_provider_rows_precede_unanchored_catalog_matches(self):
         observed: list[SearchRequestV2] = []
@@ -2165,6 +2219,50 @@ class SearchV2ApiTests(unittest.TestCase):
         self.assertEqual(selected["coordinates"], {"lat": 38.5734, "lng": -109.5499})
         self.assertEqual(forged.status_code, 422)
         provider.assert_awaited_once()
+
+    def test_remote_category_resolve_recomputes_private_viewport_context(self):
+        resolver = AsyncMock(return_value=server.SearchResolveResponseV2(
+            query="fuel near Flagstaff",
+            status="not_found",
+            selected=None,
+            alternatives=[],
+            reason="fixture",
+            revision="remote-context-fixture",
+        ))
+        body = {
+            "query": "fuel near Flagstaff",
+            "surface": "map",
+            "intent": "any",
+            "scope": "viewport",
+            "bounds": {
+                "west": -97.2,
+                "south": 49.8,
+                "east": -97.0,
+                "north": 50.0,
+            },
+            "session_id": "viewport-resolve-context",
+            "include_external": True,
+            "selected_result_id": "mapbox:poi.flagstaff-fuel",
+            "selected_detail_ref": (
+                "provider:mapbox:v2:1800000000:"
+                "0123456789abcdef0123456789abcdef"
+            ),
+        }
+        with (
+            patch.dict(os.environ, {"TRAILHEAD_SEARCH_V2_ENABLED": "1"}),
+            patch.object(server, "_search_v2_resolve_mapbox_selection", resolver),
+        ):
+            response = self.client.post("/api/search/v2/resolve", json=body)
+
+        self.assertEqual(response.status_code, 200)
+        resolver.assert_awaited_once()
+        resolved_request = resolver.await_args.args[0]
+        self.assertTrue(resolved_request._remote_category_context)
+        self.assertEqual(resolved_request._remote_category, "fuel")
+        self.assertEqual(
+            resolved_request._remote_destination_query,
+            "Flagstaff",
+        )
 
     def test_mapbox_suggestion_retrieves_only_after_explicit_valid_selection(self):
         request = SearchRequestV2(

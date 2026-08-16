@@ -1328,6 +1328,37 @@ class SearchV2ServiceTests(unittest.IsolatedAsyncioTestCase):
         )
         legacy_geocoder.assert_not_awaited()
 
+    async def test_mapbox_http_client_reuses_connections_and_closes_on_shutdown(self):
+        response = SimpleNamespace(
+            status_code=200,
+            headers={"content-type": "application/json"},
+            json=lambda: {"suggestions": []},
+        )
+        client = SimpleNamespace(
+            is_closed=False,
+            get=AsyncMock(return_value=response),
+            aclose=AsyncMock(),
+        )
+        server._mapbox_client = None
+
+        with patch.object(server.httpx, "AsyncClient", return_value=client) as factory:
+            first = await server._mapbox_get(
+                "https://api.mapbox.com/search/searchbox/v1/suggest",
+                {"q": "Moab"},
+            )
+            second = await server._mapbox_get(
+                "https://api.mapbox.com/search/searchbox/v1/suggest",
+                {"q": "Moab Utah"},
+            )
+            await server._close_mapbox_client()
+
+        self.assertEqual(first, {"suggestions": []})
+        self.assertEqual(second, {"suggestions": []})
+        self.assertEqual(factory.call_count, 1)
+        self.assertEqual(client.get.await_count, 2)
+        client.aclose.assert_awaited_once()
+        self.assertIsNone(server._mapbox_client)
+
     async def test_mapbox_explicit_city_state_removes_phone_bias_and_uses_admin_types(self):
         provider = AsyncMock(return_value={"suggestions": []})
         request = SearchRequestV2(

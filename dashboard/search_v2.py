@@ -198,6 +198,10 @@ class SearchRequestV2(BaseModel):
     _destination_context: bool = PrivateAttr(default=False)
     _destination_query: str = PrivateAttr(default="")
     _destination_country: str = PrivateAttr(default="")
+    _remote_category_context: bool = PrivateAttr(default=False)
+    _remote_category: str = PrivateAttr(default="")
+    _remote_destination_query: str = PrivateAttr(default="")
+    _remote_destination_country: str = PrivateAttr(default="")
 
     query: str = Field(min_length=2, max_length=_MAX_QUERY_CHARS)
     surface: SearchSurfaceV2 = "map"
@@ -347,6 +351,85 @@ def _explicit_us_destination_query(query: str) -> str:
         if suffix in _US_STATE_NAMES:
             return " ".join(tokens[:-width])
     return ""
+
+
+_REMOTE_CATEGORY_ALIASES = {
+    "fuel": "fuel",
+    "gas": "fuel",
+    "gas station": "fuel",
+    "gas stations": "fuel",
+    "viewpoint": "viewpoint",
+    "viewpoints": "viewpoint",
+    "scenic viewpoint": "viewpoint",
+    "scenic viewpoints": "viewpoint",
+    "grocery": "grocery",
+    "groceries": "grocery",
+    "parking": "parking",
+    "campground": "campground",
+    "campgrounds": "campground",
+    "hotel": "hotel",
+    "hotels": "hotel",
+    "restaurant": "restaurant",
+    "restaurants": "restaurant",
+    "coffee": "coffee",
+    "cafe": "coffee",
+    "cafes": "coffee",
+    "mechanic": "mechanic",
+    "mechanics": "mechanic",
+    "propane": "propane",
+    "water": "water",
+}
+_LOCAL_CONTEXT_DESTINATIONS = frozenset({
+    "here", "me", "my location", "current location", "nearby",
+    "this area", "the map", "map",
+})
+
+
+def _remote_category_destination_query(query: str) -> tuple[str, str]:
+    """Return a closed category and named destination for ``X near Y``.
+
+    This intentionally excludes relative phrases such as ``near me``. Those
+    continue to use the request's frozen device/map context. The destination
+    remains server-private and never changes the public Search V2 schema.
+    """
+    raw = re.sub(r"\s+", " ", str(query or "").strip())
+    match = re.fullmatch(r"(.+?)\s+(?:near|in|around)\s+(.+)", raw, re.IGNORECASE)
+    if not match:
+        return "", ""
+    category = _REMOTE_CATEGORY_ALIASES.get(normalize_search_text(match.group(1)), "")
+    destination = re.sub(r"\s+", " ", match.group(2).strip())[:120]
+    if (
+        not category
+        or len(normalize_search_text(destination)) < 2
+        or normalize_search_text(destination) in _LOCAL_CONTEXT_DESTINATIONS
+    ):
+        return "", ""
+    return category, destination
+
+
+def infer_remote_category_search_request_v2(
+    request: SearchRequestV2,
+) -> SearchRequestV2:
+    """Attach category-near-destination context without changing API fields."""
+    if (
+        not request.include_external
+        or request.scope != "global"
+        or request.surface == "route_editor"
+        or request.intent in {"destination", "trail", "camp"}
+        or request.categories
+    ):
+        return request
+    category, destination = _remote_category_destination_query(request.query)
+    if not category:
+        return request
+    contextual = request.model_copy()
+    contextual._remote_category_context = True
+    contextual._remote_category = category
+    contextual._remote_destination_query = destination
+    contextual._remote_destination_country = (
+        "US" if _explicit_us_destination_query(destination) else ""
+    )
+    return contextual
 
 
 def _result_has_administrative_facet(result: SearchResultV2) -> bool:
@@ -1140,6 +1223,7 @@ class SearchV2Service:
         external_subject: str | None = None,
     ) -> SearchPageV2:
         started = time.perf_counter()
+        request = infer_remote_category_search_request_v2(request)
         documents, revision = await asyncio.to_thread(self._source_loader)
         await asyncio.to_thread(self._index.ensure, documents, revision)
         fingerprint = _request_fingerprint(request, mode)
@@ -1170,6 +1254,7 @@ class SearchV2Service:
                 query=request.query,
                 destination_context=request._destination_context,
                 destination_query=request._destination_query,
+                remote_category_context=request._remote_category_context,
             )
             external_count = max(0, len(combined) - len(internal))
         page_results = combined[offset:offset + request.limit]
@@ -1393,7 +1478,7 @@ class SearchV2Service:
 def _merge_results_internal_first(
     internal: list[SearchResultV2], external: list[SearchResultV2],
     *, query: str = "", destination_context: bool = False,
-    destination_query: str = "",
+    destination_query: str = "", remote_category_context: bool = False,
 ) -> list[SearchResultV2]:
     accepted_external: list[SearchResultV2] = []
     seen_ids = {item.result_id.lower() for item in internal}
@@ -1422,6 +1507,12 @@ def _merge_results_internal_first(
             seen_canonical.add(item.canonical_place_id.lower())
         if item.coordinates:
             seen_places.add(place_key)
+
+    if remote_category_context:
+        # The provider rows have already been spatially anchored to the named
+        # destination. Canonical rows from the global catalog may still be
+        # useful, but must not outrank that explicit remote context.
+        return [*accepted_external, *internal]
 
     if destination_context:
         exact_canonical_destinations = [

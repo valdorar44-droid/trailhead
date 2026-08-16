@@ -16341,9 +16341,38 @@ def _mapbox_session_hash(session_token: str) -> str:
     token = str(session_token or "").encode("utf-8")
     return hashlib.sha1(token).hexdigest()[:16] if token else ""
 
+
+_MAPBOX_HTTP_TIMEOUT = httpx.Timeout(8.0)
+_MAPBOX_HTTP_LIMITS = httpx.Limits(
+    max_keepalive_connections=20,
+    max_connections=50,
+    keepalive_expiry=300.0,
+)
+_mapbox_client: httpx.AsyncClient | None = None
+
+
+def _get_mapbox_client() -> httpx.AsyncClient:
+    """Reuse Mapbox connections so search does not pay TLS setup every time."""
+    global _mapbox_client
+    if _mapbox_client is None or _mapbox_client.is_closed:
+        _mapbox_client = httpx.AsyncClient(
+            timeout=_MAPBOX_HTTP_TIMEOUT,
+            limits=_MAPBOX_HTTP_LIMITS,
+        )
+    return _mapbox_client
+
+
+@app.on_event("shutdown")
+async def _close_mapbox_client() -> None:
+    global _mapbox_client
+    client = _mapbox_client
+    _mapbox_client = None
+    if client is not None and not client.is_closed:
+        await client.aclose()
+
+
 async def _mapbox_get(url: str, params: dict) -> dict:
-    async with httpx.AsyncClient(timeout=8) as client:
-        res = await client.get(url, params=params)
+    res = await _get_mapbox_client().get(url, params=params)
     if res.status_code >= 400:
         detail = res.json() if res.headers.get("content-type", "").startswith("application/json") else {"message": res.text[:500]}
         raise HTTPException(res.status_code, detail)

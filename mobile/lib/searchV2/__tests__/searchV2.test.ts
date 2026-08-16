@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
+import { fileURLToPath, URL as NodeURL } from 'node:url';
 
 import { SearchV2PageCache } from '../cache';
 import {
@@ -15,6 +17,7 @@ import {
   SearchV2HttpError,
   SearchV2TimeoutError,
   normalizeRequest,
+  searchV2CanRetry,
   searchV2DiagnosticCode,
   type SearchV2Client,
 } from '../client';
@@ -58,6 +61,15 @@ test('typed service searches gain deterministic category and proximity context',
   });
   assert.equal(destination.intent, undefined);
   assert.equal(destination.categories, undefined);
+});
+
+test('iOS and Android share one platform-neutral Search V2 implementation', () => {
+  const sources = ['../client.ts', '../session.ts', '../react.ts'].map(relativePath => (
+    readFileSync(fileURLToPath(new NodeURL(relativePath, import.meta.url)), 'utf8')
+  ));
+  for (const source of sources) {
+    assert.doesNotMatch(source, /Platform\.OS|Platform\.select|\.ios\b|\.android\b/);
+  }
 });
 
 test('Explore search maps visible filters to real server facets', () => {
@@ -279,6 +291,53 @@ test('search diagnostics expose only fixed error classes and HTTP status', () =>
   assert.equal(searchV2DiagnosticCode(new SearchV2HttpError('private response', 422)), 'http_422');
   assert.equal(searchV2DiagnosticCode(new TypeError('private URL failed')), 'network');
   assert.equal(searchV2DiagnosticCode(new Error('private message')), 'unknown');
+  assert.equal(searchV2CanRetry(new SearchV2TimeoutError(5_000)), true);
+  assert.equal(searchV2CanRetry(new TypeError('network')), true);
+  assert.equal(searchV2CanRetry(new SearchV2HttpError('server', 503)), false);
+});
+
+test('HTTP diagnostics are closed, bucketed, and mark an explicit retry', async () => {
+  const events: unknown[] = [];
+  const client = new HttpSearchV2Client({
+    baseUrl: 'https://api.example.test',
+    isEnabled: () => true,
+    onDiagnostic: event => events.push(event),
+    fetchImpl: (async () => ({
+      ok: true,
+      status: 200,
+      json: async () => makePage([makeResult('mapbox:moab', 'Moab')]),
+    }) as Response) as typeof fetch,
+  });
+
+  await client.results({
+    query: 'Moab Utah', include_external: true, session_id: 'private-session',
+  }, { retry: true });
+
+  assert.deepEqual(events, [{
+    stage: 'results',
+    provider_attempted: true,
+    outcome: 'success',
+    duration_bucket: 'under_500ms',
+    result_count_bucket: 'one',
+    retry: true,
+  }]);
+  const serialized = JSON.stringify(events);
+  assert.doesNotMatch(serialized, /Moab|private-session|lat|lng|query|session/i);
+});
+
+test('HTTP diagnostics reduce network failures to a fixed outcome', async () => {
+  const events: unknown[] = [];
+  const client = new HttpSearchV2Client({
+    baseUrl: 'https://api.example.test',
+    isEnabled: () => true,
+    onDiagnostic: event => events.push(event),
+    fetchImpl: (async () => { throw new TypeError('private URL and query'); }) as typeof fetch,
+  });
+
+  await assert.rejects(client.results({ query: 'Moab Utah' }), TypeError);
+  assert.equal((events[0] as { outcome: string }).outcome, 'network');
+  assert.equal((events[0] as { result_count_bucket: string }).result_count_bucket, 'unknown');
+  assert.doesNotMatch(JSON.stringify(events), /private URL|Moab Utah/);
 });
 
 test('HTTP client deadline covers a response body that stalls after headers', async () => {
@@ -443,6 +502,87 @@ test('typeahead shows offline rows immediately, then debounces canonical and pro
   assert.equal(controller.getState().selectedResult, null);
   assert.equal(controller.selectResult('server-moab')?.title, 'Moab');
   assert.equal(controller.getState().selectedResult?.result_id, 'server-moab');
+});
+
+test('submitted timeout or network failure allows one same-query retry without duplication', async () => {
+  const retried = deferred<SearchPageV2>();
+  const calls: Array<{ request: SearchRequestV2; retry: boolean }> = [];
+  const client = pageClient({
+    results: async (request, options) => {
+      calls.push({ request, retry: options?.retry === true });
+      if (calls.length === 1) throw new TypeError('network unavailable');
+      return retried.promise;
+    },
+  });
+  const controller = new SearchV2SessionController({
+    client,
+    context: { surface: 'map', include_external: true },
+    createSessionId: () => 'same-session',
+  });
+
+  await controller.search('Moab Utah');
+  assert.equal(controller.getState().status, 'error');
+  assert.equal(calls.length, 1, 'failure must not trigger an automatic retry');
+
+  const retryPending = controller.retry();
+  assert.equal(await controller.retry(), false, 'an in-flight retry must not duplicate');
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].request.query, calls[1].request.query);
+  assert.equal(calls[0].request.session_id, calls[1].request.session_id);
+  assert.equal(calls[1].retry, true);
+
+  retried.resolve(makePage([makeResult('destination:moab', 'Moab')]));
+  assert.equal(await retryPending, true);
+  assert.equal(controller.getState().status, 'ready');
+  assert.equal(await controller.retry(), false, 'a successful search is not retryable');
+});
+
+test('autocomplete network failure retries the same query as an explicit submitted search', async () => {
+  const scheduler = new ManualScheduler();
+  const calls: Array<{ mode: 'suggest' | 'results'; request: SearchRequestV2; retry: boolean }> = [];
+  const controller = new SearchV2SessionController({
+    client: pageClient({
+      suggest: async (request, options) => {
+        calls.push({ mode: 'suggest', request, retry: options?.retry === true });
+        throw new TypeError('network unavailable');
+      },
+      results: async (request, options) => {
+        calls.push({ mode: 'results', request, retry: options?.retry === true });
+        return makePage([makeResult('destination:moab', 'Moab')]);
+      },
+    }),
+    context: { surface: 'map', include_external: false },
+    scheduler,
+    createSessionId: () => 'autocomplete-retry-session',
+  });
+
+  controller.setQuery('Moab');
+  scheduler.advance(220);
+  await flushPromises();
+  assert.equal(controller.getState().mode, 'suggest');
+  assert.equal(controller.getState().status, 'error');
+
+  assert.equal(await controller.retry(), true);
+  assert.equal(controller.getState().mode, 'results');
+  assert.equal(controller.getState().status, 'ready');
+  assert.deepEqual(calls.map(call => [call.mode, call.request.query, call.retry]), [
+    ['suggest', 'Moab', false],
+    ['results', 'Moab', true],
+  ]);
+});
+
+test('HTTP failures other than timeout or network do not expose same-query retry', async () => {
+  const controller = new SearchV2SessionController({
+    client: pageClient({
+      results: async () => { throw new SearchV2HttpError('server rejected', 422); },
+    }),
+    context: { surface: 'map' },
+    createSessionId: () => 'session-http-error',
+  });
+
+  await controller.search('Moab');
+  assert.equal(controller.getState().status, 'error');
+  assert.equal(await controller.retry(), false);
 });
 
 test('rapid destination typing issues one canonical request for the finished query', async () => {

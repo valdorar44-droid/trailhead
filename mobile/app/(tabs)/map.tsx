@@ -367,6 +367,7 @@ import {
   normalizeSearchV2Query,
   productFeaturesAllowSearchV2,
   searchPlaceIsTemporary,
+  searchV2CanRetry,
   searchV2DiagnosticCode,
   searchResultV2ToDisplayPlace,
   searchResultV2ToLegacyPlace,
@@ -27826,12 +27827,17 @@ function MapScreen() {
                   <Text style={[s.inlineMapSearchStateText, { color: mapChrome.textMuted }]}>Searching</Text>
                 </View>
               ) : searchV2Enabled && mapSearchV2.state.status === 'error' && mapSearchV2RenderResults.length === 0 ? (
-                <Text
-                  style={[s.inlineMapSearchStateText, { color: mapChrome.textMuted }]}
+                <TouchableOpacity
+                  style={s.inlineMapSearchStateRow}
+                  onPress={searchV2CanRetry(mapSearchV2.state.error) ? () => { void mapSearchV2.retry(); } : undefined}
                   testID={`map.search.inline.error.${searchV2DiagnosticCode(mapSearchV2.state.error)}`}
+                  accessibilityRole={searchV2CanRetry(mapSearchV2.state.error) ? 'button' : undefined}
+                  accessibilityLabel={searchV2CanRetry(mapSearchV2.state.error) ? 'Search unavailable. Try again.' : 'Search unavailable.'}
                 >
-                  Search unavailable
-                </Text>
+                  <Text style={[s.inlineMapSearchStateText, { color: mapChrome.textMuted }]}>
+                    {searchV2CanRetry(mapSearchV2.state.error) ? 'Search unavailable · Try again' : 'Search unavailable'}
+                  </Text>
+                </TouchableOpacity>
               ) : !searchV2Enabled && mapSearchDisplayResults.some(place => place.name === '__error__') ? (
                 <Text style={[s.inlineMapSearchStateText, { color: mapChrome.textMuted }]}>Search unavailable</Text>
               ) : searchV2Enabled ? (
@@ -29145,6 +29151,7 @@ function MapScreen() {
           searchV2ResolvingResultId={mapSearchV2.state.resolvingResultId}
           searchV2HasMore={mapSearchV2.state.hasMore}
           searchV2LoadMoreError={mapSearchV2.state.loadMoreError ? 'More results could not load.' : ''}
+          searchV2RetryAvailable={searchV2CanRetry(mapSearchV2.state.error)}
           unitMode={weatherUnitMode}
           searching={isSearching}
           hasLocation={!!userLoc}
@@ -29205,6 +29212,7 @@ function MapScreen() {
             });
           }}
           onLoadMoreSearchV2={() => { void mapSearchV2.loadNextPage(); }}
+          onRetrySearchV2={() => { void mapSearchV2.retry(); }}
           onQuickAction={action => {
             runMapQuickActionSearch(action);
           }}

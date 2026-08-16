@@ -90,6 +90,7 @@ export function useSearchV2Session({
     controller.setContext(next, refreshCurrent);
   }, [controller]);
   const search = useCallback((query?: string) => controller.search(query), [controller]);
+  const retry = useCallback(() => controller.retry(), [controller]);
   const refreshOffline = useCallback(() => controller.refreshOffline(), [controller]);
   const loadNextPage = useCallback(() => controller.loadNextPage(), [controller]);
   const selectResult = useCallback((resultId: string) => controller.selectResult(resultId), [controller]);
@@ -102,6 +103,7 @@ export function useSearchV2Session({
     setContext,
     setQuery,
     search,
+    retry,
     refreshOffline,
     loadNextPage,
     selectResult,

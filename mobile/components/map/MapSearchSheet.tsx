@@ -70,6 +70,7 @@ type Props = {
   searchV2ResolvingResultId?: string | null;
   searchV2HasMore?: boolean;
   searchV2LoadMoreError?: string;
+  searchV2RetryAvailable?: boolean;
   unitMode?: SearchDistanceUnitMode;
   searching: boolean;
   hasLocation: boolean;
@@ -82,6 +83,7 @@ type Props = {
   onSelectSearchV2?: (result: SearchResultV2) => void;
   onRouteSearchV2?: (result: SearchResultV2) => void;
   onLoadMoreSearchV2?: () => void;
+  onRetrySearchV2?: () => void;
   onQuickAction: (action: MapSearchQuickAction) => void;
   onClose: () => void;
   onClear: () => void;
@@ -100,6 +102,7 @@ export default function MapSearchSheet({
   searchV2ResolvingResultId = null,
   searchV2HasMore = false,
   searchV2LoadMoreError = '',
+  searchV2RetryAvailable = false,
   unitMode = 'auto',
   searching,
   hasLocation,
@@ -112,6 +115,7 @@ export default function MapSearchSheet({
   onSelectSearchV2,
   onRouteSearchV2,
   onLoadMoreSearchV2,
+  onRetrySearchV2,
   onQuickAction,
   onClose,
   onClear,
@@ -262,6 +266,18 @@ export default function MapSearchSheet({
                   <View style={s.stateCard} testID="map.search.error">
                     <Ionicons name="cloud-offline-outline" size={18} color={C.text3} />
                     <Text style={s.stateText}>Search is not available right now.</Text>
+                    {onRetrySearchV2 && searchV2RetryAvailable ? (
+                      <TouchableOpacity
+                        style={s.loadMoreButton}
+                        onPress={onRetrySearchV2}
+                        testID="map.search.retry"
+                        activeOpacity={0.82}
+                        accessibilityRole="button"
+                        accessibilityLabel="Retry this search"
+                      >
+                        <Text style={s.loadMoreText}>Try again</Text>
+                      </TouchableOpacity>
+                    ) : null}
                   </View>
                 ) : !usingSearchV2 && hasError ? (
                   <View style={s.stateCard} testID="map.search.error">

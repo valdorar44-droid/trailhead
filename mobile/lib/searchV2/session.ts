@@ -1,5 +1,6 @@
 import {
   SearchV2FeatureDisabledError,
+  searchV2CanRetry,
   type SearchV2Client,
 } from './client';
 import {
@@ -264,6 +265,30 @@ export class SearchV2SessionController {
     await this.loadFirstPage('results', generation);
   }
 
+  /** Retry the same submitted query once only after a network/timeout error. */
+  async retry(): Promise<boolean> {
+    if (
+      this.disposed
+      || this.state.status !== 'error'
+      || this.requestController !== null
+      || this.state.query.length < 2
+      || !searchV2CanRetry(this.state.error)
+    ) return false;
+    const generation = this.startGeneration();
+    this.onlineResults = [];
+    this.resultSessionIds.clear();
+    this.setState({
+      ...this.state,
+      mode: 'results',
+      status: 'loading',
+      error: null,
+      loadingPresentation: this.currentResults().length === 0 ? 'skeleton' : 'inline',
+    });
+    this.touchExternalSession();
+    await this.loadFirstPage('results', generation, true);
+    return true;
+  }
+
   async loadNextPage(): Promise<void> {
     if (
       this.disposed
@@ -482,7 +507,11 @@ export class SearchV2SessionController {
     this.listeners.clear();
   }
 
-  private async loadFirstPage(mode: SearchPageModeV2, generation: number): Promise<void> {
+  private async loadFirstPage(
+    mode: SearchPageModeV2,
+    generation: number,
+    retry = false,
+  ): Promise<void> {
     if (!this.isGenerationCurrent(generation)) return;
     const request = this.buildRequest(this.state.query, mode);
     const cacheKey = searchV2CacheKey(mode, request);
@@ -506,7 +535,7 @@ export class SearchV2SessionController {
         : 'inline',
     });
     try {
-      const page = await this.requestPage(mode, request, controller.signal);
+      const page = await this.requestPage(mode, request, controller.signal, retry);
       if (!this.isCurrent(generation, controller)) return;
       this.rememberResultSessions(page.results, request.session_id);
       this.cache.set(cacheKey, page);
@@ -808,10 +837,11 @@ export class SearchV2SessionController {
     mode: SearchPageModeV2,
     request: SearchRequestV2,
     signal: AbortSignal,
+    retry = false,
   ): Promise<SearchPageV2> {
     return mode === 'suggest'
-      ? this.client.suggest(request, { signal })
-      : this.client.results(request, { signal });
+      ? this.client.suggest(request, { signal, retry })
+      : this.client.results(request, { signal, retry });
   }
 
   private currentResults(): SearchResultV2[] {

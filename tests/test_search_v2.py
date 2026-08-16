@@ -1236,7 +1236,7 @@ class SearchV2ServiceTests(unittest.IsolatedAsyncioTestCase):
             server._external_result_for_request(result, ordinary_viewport),
         )
 
-    async def test_remote_category_provider_rows_precede_unanchored_catalog_matches(self):
+    async def test_remote_category_uses_only_anchored_provider_rows(self):
         observed: list[SearchRequestV2] = []
 
         async def provider(request, _limit, _mode):
@@ -1275,10 +1275,66 @@ class SearchV2ServiceTests(unittest.IsolatedAsyncioTestCase):
             limit=5,
         ))
 
-        self.assertEqual(response.results[0].result_id, "mapbox:poi.flagstaff-fuel")
+        self.assertEqual(
+            [item.result_id for item in response.results],
+            ["mapbox:poi.flagstaff-fuel"],
+        )
+        self.assertEqual(response.source_counts, {"trailhead": 0, "external": 1})
         self.assertTrue(observed[0]._remote_category_context)
         self.assertEqual(observed[0]._remote_category, "fuel")
         self.assertEqual(observed[0]._remote_destination_query, "Flagstaff")
+
+    async def test_remote_category_provider_failure_does_not_fall_back_to_unanchored_catalog(self):
+        async def provider(_request, _limit, _mode):
+            raise TimeoutError("provider timeout")
+
+        service = SearchV2Service(
+            lambda: ([
+                _document(
+                    "service:flagstaff-plaza", "Flagstaff Plaza Fuel",
+                    kind="service", categories=("fuel",), parent="Virginia",
+                ),
+            ], "remote-category-timeout-v1"),
+            provider,
+        )
+        response = await service.page(SearchRequestV2(
+            query="fuel near Flagstaff",
+            center=SearchCenterV2(lat=49.8951, lng=-97.1384),
+            include_external=True,
+            session_id="remote-category-timeout-session",
+            limit=5,
+        ))
+
+        self.assertEqual(response.results, [])
+        self.assertEqual(response.source_counts, {"trailhead": 0, "external": 0})
+
+    async def test_remote_category_without_external_provider_fails_closed(self):
+        provider_calls = 0
+
+        async def provider(_request, _limit, _mode):
+            nonlocal provider_calls
+            provider_calls += 1
+            return []
+
+        service = SearchV2Service(
+            lambda: ([
+                _document(
+                    "service:flagstaff-plaza", "Flagstaff Plaza Fuel",
+                    kind="service", categories=("fuel",), parent="Virginia",
+                ),
+            ], "remote-category-no-external-v1"),
+            provider,
+        )
+        response = await service.page(SearchRequestV2(
+            query="fuel near Flagstaff",
+            include_external=False,
+            session_id="remote-category-no-external-session",
+            limit=5,
+        ))
+
+        self.assertEqual(response.results, [])
+        self.assertEqual(response.source_counts, {"trailhead": 0, "external": 0})
+        self.assertEqual(provider_calls, 0)
 
     async def test_external_fallback_uses_one_stable_snapshot_after_canonical_rows(self):
         requested_limits: list[int] = []

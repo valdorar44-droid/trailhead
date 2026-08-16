@@ -412,8 +412,7 @@ def infer_remote_category_search_request_v2(
 ) -> SearchRequestV2:
     """Attach category-near-destination context without changing API fields."""
     if (
-        not request.include_external
-        or request.scope not in {"global", "nearby", "viewport"}
+        request.scope not in {"global", "nearby", "viewport"}
         or request.surface == "route_editor"
         or request.intent in {"destination", "trail", "camp"}
         or request.categories
@@ -1229,7 +1228,17 @@ class SearchV2Service:
         fingerprint = _request_fingerprint(request, mode)
         offset = _decode_cursor(request.cursor, fingerprint, self._index.revision)
         target = min(_MAX_CURSOR_OFFSET + 31, offset + request.limit + 1)
-        internal = await asyncio.to_thread(self._index.search, request, target)
+        # A named-destination category query (for example, "fuel near
+        # Flagstaff") has replaced the caller's phone/map context with a
+        # server-resolved destination anchor. Catalog search cannot prove that
+        # its literal text matches are at that anchor, so allowing those rows
+        # to survive a slow/empty provider response can surface places in an
+        # unrelated city. Fail closed to the anchored provider snapshot for
+        # this query class; ordinary destination, nearby, viewport, route, and
+        # offline searches retain the canonical catalog path below.
+        internal = [] if request._remote_category_context else await asyncio.to_thread(
+            self._index.search, request, target,
+        )
         request = infer_destination_search_request_v2(request, internal)
         combined = list(internal)
         external_count = 0
@@ -1509,10 +1518,10 @@ def _merge_results_internal_first(
             seen_places.add(place_key)
 
     if remote_category_context:
-        # The provider rows have already been spatially anchored to the named
-        # destination. Canonical rows from the global catalog may still be
-        # useful, but must not outrank that explicit remote context.
-        return [*accepted_external, *internal]
+        # Page construction excludes unanchored catalog rows for this query
+        # class. Keep this merge branch fail closed as a second line of defense
+        # for direct callers and future refactors.
+        return accepted_external
 
     if destination_context:
         exact_canonical_destinations = [

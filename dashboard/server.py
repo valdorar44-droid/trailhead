@@ -16420,6 +16420,28 @@ def _map_context_category_provider(category: str = "") -> str:
     clean = re.sub(r"[^a-z0-9_ -]+", "", str(category or "").lower()).strip()
     return MAP_CONTEXT_CATEGORY_ALIASES.get(clean.replace(" ", "_"), clean)
 
+
+def _search_v2_remote_anchor_bbox(lat: float, lng: float) -> str:
+    """Return an approximately 80 km hard search box around a named place.
+
+    Search Box proximity is only a ranking bias, so an exact street-name match
+    thousands of miles away can still outrank nearby POIs. Named-destination
+    category searches need a real geographic boundary as well as proximity.
+    Eighty kilometres keeps city-adjacent trailheads and services eligible
+    while excluding unrelated regions.
+    """
+    radius_km = 80.0
+    safe_lat = max(-90.0, min(90.0, float(lat)))
+    safe_lng = max(-180.0, min(180.0, float(lng)))
+    lat_delta = radius_km / 111.32
+    longitude_scale = max(0.2, abs(math.cos(math.radians(safe_lat))))
+    lng_delta = radius_km / (111.32 * longitude_scale)
+    west = max(-180.0, safe_lng - lng_delta)
+    south = max(-90.0, safe_lat - lat_delta)
+    east = min(180.0, safe_lng + lng_delta)
+    north = min(90.0, safe_lat + lat_delta)
+    return f"{west:.6f},{south:.6f},{east:.6f},{north:.6f}"
+
 def _map_context_limit(limit: int, default: int = 8, max_value: int = 12) -> int:
     try:
         parsed = int(limit or default)
@@ -19106,7 +19128,7 @@ async def _search_v2_external_mapbox(
         if not provider_query:
             return []
         proximity = f"{anchor[1]:.6f},{anchor[0]:.6f}"
-        bbox = ""
+        bbox = _search_v2_remote_anchor_bbox(anchor[0], anchor[1])
         mapbox_types = "poi"
         provider_country = request._remote_destination_country
     elif request._destination_context:

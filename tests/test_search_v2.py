@@ -1629,6 +1629,16 @@ class SearchV2ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(params["proximity"], "-111.651300,35.198300")
         self.assertEqual(params["origin"], params["proximity"])
         self.assertNotIn("-97.138400", params["proximity"])
+        west, south, east, north = [
+            float(value) for value in params["bbox"].split(",")
+        ]
+        self.assertLess(west, -111.6513)
+        self.assertGreater(east, -111.6513)
+        self.assertLess(south, 35.1983)
+        self.assertGreater(north, 35.1983)
+        self.assertLess(east - west, 2.0)
+        self.assertLess(north - south, 1.5)
+        self.assertNotIn("-97.138400", params["bbox"])
         self.assertEqual(results[0].result_id, "mapbox:poi.flagstaff-fuel")
         self.assertIsNone(results[0].coordinates)
 

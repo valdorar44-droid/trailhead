@@ -1588,6 +1588,10 @@ class SearchV2ServiceTests(unittest.IsolatedAsyncioTestCase):
                 "name": "Flagstaff Fuel",
                 "feature_type": "poi",
                 "place_formatted": "Flagstaff, Arizona",
+                "context": {
+                    "place": {"name": "Flagstaff"},
+                    "region": {"name": "Arizona"},
+                },
             }],
         })
         geocoder = AsyncMock(return_value=[{
@@ -1641,6 +1645,128 @@ class SearchV2ServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("-97.138400", params["bbox"])
         self.assertEqual(results[0].result_id, "mapbox:poi.flagstaff-fuel")
         self.assertIsNone(results[0].coordinates)
+
+    async def test_mapbox_remote_category_rejects_street_name_false_destination(self):
+        provider = AsyncMock(return_value={
+            "suggestions": [
+                {
+                    "mapbox_id": "poi.ashburn-flagstaff-plaza",
+                    "name": "Exxon",
+                    "feature_type": "poi",
+                    "full_address": "22405 Flagstaff Plz, Ashburn, Virginia",
+                    "context": {
+                        "place": {"name": "Ashburn"},
+                        "region": {"name": "Virginia"},
+                    },
+                },
+                {
+                    "mapbox_id": "poi.flagstaff-shell",
+                    "name": "Shell",
+                    "feature_type": "poi",
+                    "full_address": "North of Flagstaff, Arizona",
+                    "context": {
+                        "place": {"name": "Flagstaff"},
+                        "region": {"name": "Arizona"},
+                    },
+                },
+            ],
+        })
+        geocoder = AsyncMock(return_value=[{
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [-111.6513, 35.1983]},
+            "properties": {"feature_type": "place", "name": "Flagstaff"},
+        }])
+        request = SearchRequestV2(
+            query="fuel near Flagstaff",
+            include_external=True,
+            session_id="remote-category-context-filter-session",
+        )
+        request._remote_category_context = True
+        request._remote_category = "fuel"
+        request._remote_destination_query = "Flagstaff"
+        with (
+            patch.object(server.settings, "mapbox_token", "pk.test"),
+            patch.object(server, "_mapbox_forward_geocode_features", geocoder),
+            patch.object(server, "_mapbox_get", provider),
+        ):
+            results = await server._search_v2_external_mapbox(
+                request, 8, "results",
+            )
+
+        self.assertEqual(
+            [result.result_id for result in results],
+            ["mapbox:poi.flagstaff-shell"],
+        )
+
+    def test_mapbox_remote_destination_context_honors_state_qualifier(self):
+        anchor = {
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [-94.62, 39.11]},
+            "properties": {
+                "feature_type": "place",
+                "name": "Kansas City",
+                "context": {
+                    "region": {"name": "Kansas", "region_code": "KS"},
+                    "country": {"name": "United States", "country_code": "US"},
+                },
+            },
+        }
+        correct_state = {
+            "feature_type": "poi",
+            "context": {
+                "place": {"name": "Kansas City"},
+                "region": {"name": "Kansas", "region_code": "KS"},
+                "country": {"name": "United States", "country_code": "US"},
+            },
+        }
+        wrong_state = {
+            "feature_type": "poi",
+            "context": {
+                "place": {"name": "Kansas City"},
+                "region": {"name": "Missouri", "region_code": "MO"},
+                "country": {"name": "United States", "country_code": "US"},
+            },
+        }
+
+        self.assertTrue(
+            server._search_v2_remote_suggestion_matches_destination(
+                correct_state, anchor,
+            ),
+        )
+        self.assertFalse(
+            server._search_v2_remote_suggestion_matches_destination(
+                wrong_state, anchor,
+            ),
+        )
+
+        v5_anchor = {
+            "id": "place.kansas-city-kansas",
+            "place_type": ["place"],
+            "text": "Kansas City",
+            "properties": {"wikidata": "Q486479"},
+            "context": [
+                {
+                    "id": "region.kansas",
+                    "text": "Kansas",
+                    "short_code": "US-KS",
+                },
+                {
+                    "id": "country.united-states",
+                    "text": "United States",
+                    "short_code": "US",
+                },
+            ],
+        }
+        self.assertTrue(
+            server._search_v2_remote_suggestion_matches_destination(
+                correct_state, v5_anchor,
+            ),
+        )
+        self.assertFalse(
+            server._search_v2_remote_suggestion_matches_destination(
+                wrong_state, v5_anchor,
+            ),
+        )
 
     async def test_mapbox_remote_category_fails_closed_without_destination_anchor(self):
         request = SearchRequestV2(

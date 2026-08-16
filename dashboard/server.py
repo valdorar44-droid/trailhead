@@ -19069,34 +19069,63 @@ async def _search_v2_external_mapbox(
         or not request.session_id
     ):
         return []
-    if request._destination_context:
+    provider_query = request.query
+    provider_country = request._destination_country
+    proximity = (
+        f"{request.center.lng:.6f},{request.center.lat:.6f}"
+        if request.center else ""
+    )
+    bbox = (
+        f"{request.bounds.west:.6f},{request.bounds.south:.6f},"
+        f"{request.bounds.east:.6f},{request.bounds.north:.6f}"
+        if request.bounds else ""
+    )
+    if request._remote_category_context:
+        anchor_features = await _mapbox_forward_geocode_features(
+            _get_mapbox_client(),
+            request._remote_destination_query,
+            limit=1,
+            country=request._remote_destination_country,
+            types="place,locality,district,region",
+            language="en",
+        )
+        anchor = next((
+            (lat, lng)
+            for feature in anchor_features
+            if isinstance(feature, dict)
+            for lat, lng in [_map_context_feature_coords(feature)]
+            if (
+                lat is not None and lng is not None
+                and -90 <= lat <= 90 and -180 <= lng <= 180
+            )
+        ), None)
+        if anchor is None:
+            return []
+        provider_query = _map_context_category_provider(request._remote_category)
+        if not provider_query:
+            return []
+        proximity = f"{anchor[1]:.6f},{anchor[0]:.6f}"
+        bbox = ""
+        mapbox_types = "poi"
+        provider_country = request._remote_destination_country
+    elif request._destination_context:
         mapbox_types = "place,city,locality,district,region,country"
+        # An explicit remote destination must not be biased toward the phone.
+        proximity = ""
     elif request.intent == "destination":
         mapbox_types = "place,locality,neighborhood,district,region,country,address"
     elif request.intent == "trail":
         mapbox_types = "poi"
     else:
         mapbox_types = "poi,place,address"
-    proximity = (
-        f"{request.center.lng:.6f},{request.center.lat:.6f}"
-        if request.center else ""
-    )
-    if request._destination_context:
-        # An explicit remote destination must not be biased toward the phone.
-        proximity = ""
-    bbox = (
-        f"{request.bounds.west:.6f},{request.bounds.south:.6f},"
-        f"{request.bounds.east:.6f},{request.bounds.north:.6f}"
-        if request.bounds else ""
-    )
     params = _searchbox_params({
-        "q": request.query,
+        "q": provider_query,
         "session_token": _search_v2_mapbox_session_token(request.session_id),
         "proximity": proximity,
         "origin": proximity,
         "bbox": bbox,
         "types": mapbox_types,
-        "country": request._destination_country,
+        "country": provider_country,
         "language": "en",
         "limit": str(max(1, min(int(limit), 10))),
     })

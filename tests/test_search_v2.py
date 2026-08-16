@@ -42,6 +42,7 @@ def _document(
     activities: tuple[str, ...] = (),
     verified: bool = True,
     quality_score: float = 95,
+    parent: str = "Utah",
 ) -> SearchDocumentV2:
     return SearchDocumentV2(
         result_id=result_id,
@@ -52,7 +53,7 @@ def _document(
         categories=categories or (kind,),
         lat=lat,
         lng=lng,
-        parent="Utah",
+        parent=parent,
         aliases=aliases,
         provider="trailhead",
         source_label="Trailhead",
@@ -103,6 +104,10 @@ class SearchV2ServiceTests(unittest.IsolatedAsyncioTestCase):
         request._destination_context = True
         request._destination_query = "moab"
         request._destination_country = "US"
+        request._remote_category_context = True
+        request._remote_category = "fuel"
+        request._remote_destination_query = "Flagstaff"
+        request._remote_destination_country = "US"
 
         self.assertEqual(
             set(SearchRequestV2.model_json_schema()["properties"]),
@@ -113,6 +118,7 @@ class SearchV2ServiceTests(unittest.IsolatedAsyncioTestCase):
             },
         )
         self.assertNotIn("destination", json.dumps(request.model_dump()))
+        self.assertNotIn("remote_category", json.dumps(request.model_dump()))
 
     async def test_moab_destination_exact_identity_wins(self):
         service = _fixture_service()
@@ -1140,6 +1146,86 @@ class SearchV2ServiceTests(unittest.IsolatedAsyncioTestCase):
                 ))
                 self.assertFalse(observed[-1]._destination_context)
 
+        self.assertFalse(observed[0]._remote_category_context)
+        self.assertTrue(observed[1]._remote_category_context)
+        self.assertEqual(observed[1]._remote_category, "viewpoint")
+        self.assertEqual(observed[1]._remote_destination_query, "Moab")
+        self.assertTrue(observed[2]._remote_category_context)
+        self.assertEqual(observed[2]._remote_category, "fuel")
+        self.assertEqual(observed[2]._remote_destination_query, "Flagstaff")
+        self.assertTrue(all(
+            not item._remote_category_context for item in observed[3:]
+        ))
+        await service.page(SearchRequestV2(
+            query="fuel near Flagstaff",
+            surface="route_editor",
+            include_external=True,
+            session_id="route-editor-context-query",
+        ))
+        self.assertFalse(observed[-1]._remote_category_context)
+        await service.page(SearchRequestV2(
+            query="fuel near Flagstaff",
+            scope="nearby",
+            center=SearchCenterV2(lat=49.8951, lng=-97.1384),
+            include_external=True,
+            session_id="nearby-context-query",
+        ))
+        self.assertFalse(observed[-1]._remote_category_context)
+        await service.page(SearchRequestV2(
+            query="viewpoint near Moab",
+            scope="viewport",
+            bounds=SearchBoundsV2(
+                west=-97.2, south=49.8, east=-97.0, north=50.0,
+            ),
+            include_external=True,
+            session_id="viewport-context-query",
+        ))
+        self.assertFalse(observed[-1]._remote_category_context)
+
+    async def test_remote_category_provider_rows_precede_unanchored_catalog_matches(self):
+        observed: list[SearchRequestV2] = []
+
+        async def provider(request, _limit, _mode):
+            observed.append(request)
+            return [SearchResultV2(
+                result_id="mapbox:poi.flagstaff-fuel",
+                title="Flagstaff Fuel",
+                subtitle="Flagstaff, Arizona",
+                kind="service",
+                categories=["gas_station"],
+                provenance=SearchProvenanceV2(
+                    provider="mapbox", source_label="Mapbox search",
+                    provider_result_id="poi.flagstaff-fuel",
+                    temporary_use_only=True,
+                ),
+                persistence_policy="temporary",
+                detail_ref="provider:mapbox:poi.flagstaff-fuel:signed",
+                score=100_000,
+                match_reason="provider_fallback",
+            )]
+
+        documents = [
+            _document(
+                "service:flagstaff-plaza", "Flagstaff Plaza Fuel",
+                kind="service", categories=("fuel",), parent="Virginia",
+            ),
+        ]
+        service = SearchV2Service(
+            lambda: (documents, "remote-category-v1"), provider,
+        )
+        response = await service.page(SearchRequestV2(
+            query="fuel near Flagstaff",
+            center=SearchCenterV2(lat=49.8951, lng=-97.1384),
+            include_external=True,
+            session_id="remote-category-session",
+            limit=5,
+        ))
+
+        self.assertEqual(response.results[0].result_id, "mapbox:poi.flagstaff-fuel")
+        self.assertTrue(observed[0]._remote_category_context)
+        self.assertEqual(observed[0]._remote_category, "fuel")
+        self.assertEqual(observed[0]._remote_destination_query, "Flagstaff")
+
     async def test_external_fallback_uses_one_stable_snapshot_after_canonical_rows(self):
         requested_limits: list[int] = []
 
@@ -1384,6 +1470,79 @@ class SearchV2ServiceTests(unittest.IsolatedAsyncioTestCase):
             params["types"],
             "place,city,locality,district,region,country",
         )
+
+    async def test_mapbox_remote_category_resolves_destination_before_poi_search(self):
+        provider = AsyncMock(return_value={
+            "suggestions": [{
+                "mapbox_id": "poi.flagstaff-fuel",
+                "name": "Flagstaff Fuel",
+                "feature_type": "poi",
+                "place_formatted": "Flagstaff, Arizona",
+            }],
+        })
+        geocoder = AsyncMock(return_value=[{
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [-111.6513, 35.1983]},
+            "properties": {"feature_type": "place", "name": "Flagstaff"},
+        }])
+        client = object()
+        request = SearchRequestV2(
+            query="fuel near Flagstaff",
+            center=SearchCenterV2(lat=49.8951, lng=-97.1384),
+            include_external=True,
+            session_id="remote-category-provider-session",
+        )
+        request._remote_category_context = True
+        request._remote_category = "fuel"
+        request._remote_destination_query = "Flagstaff"
+        with (
+            patch.object(server.settings, "mapbox_token", "pk.test"),
+            patch.object(server, "_get_mapbox_client", return_value=client),
+            patch.object(server, "_mapbox_forward_geocode_features", geocoder),
+            patch.object(server, "_mapbox_get", provider),
+        ):
+            results = await server._search_v2_external_mapbox(
+                request, 8, "results",
+            )
+
+        geocoder.assert_awaited_once_with(
+            client,
+            "Flagstaff",
+            limit=1,
+            country="",
+            types="place,locality,district,region",
+            language="en",
+        )
+        _url, params = provider.await_args.args
+        self.assertEqual(params["q"], "gas station")
+        self.assertEqual(params["types"], "poi")
+        self.assertEqual(params["proximity"], "-111.651300,35.198300")
+        self.assertEqual(params["origin"], params["proximity"])
+        self.assertNotIn("-97.138400", params["proximity"])
+        self.assertEqual(results[0].result_id, "mapbox:poi.flagstaff-fuel")
+        self.assertIsNone(results[0].coordinates)
+
+    async def test_mapbox_remote_category_fails_closed_without_destination_anchor(self):
+        request = SearchRequestV2(
+            query="viewpoint near Moab",
+            include_external=True,
+            session_id="missing-remote-anchor-session",
+        )
+        request._remote_category_context = True
+        request._remote_category = "viewpoint"
+        request._remote_destination_query = "Moab"
+        provider = AsyncMock()
+        with (
+            patch.object(server.settings, "mapbox_token", "pk.test"),
+            patch.object(server, "_mapbox_forward_geocode_features", AsyncMock(return_value=[])),
+            patch.object(server, "_mapbox_get", provider),
+        ):
+            results = await server._search_v2_external_mapbox(
+                request, 8, "results",
+            )
+
+        self.assertEqual(results, [])
+        provider.assert_not_awaited()
 
     async def test_mapbox_retrieve_is_bounded_below_mobile_deadline(self):
         request = SearchRequestV2(

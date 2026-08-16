@@ -16442,6 +16442,82 @@ def _search_v2_remote_anchor_bbox(lat: float, lng: float) -> str:
     north = min(90.0, safe_lat + lat_delta)
     return f"{west:.6f},{south:.6f},{east:.6f},{north:.6f}"
 
+
+_SEARCH_V2_ADMIN_CONTEXT_LEVELS = (
+    "locality", "place", "district", "region", "country",
+)
+
+
+def _search_v2_mapbox_admin_context(
+    feature: dict,
+) -> tuple[dict[str, set[str]], str]:
+    """Return normalized Mapbox administrative identities and the own level."""
+    identities = {level: set() for level in _SEARCH_V2_ADMIN_CONTEXT_LEVELS}
+    properties = feature.get("properties")
+    values = properties if isinstance(properties, dict) else {}
+
+    def add(level: str, item: object) -> None:
+        if level == "city":
+            level = "place"
+        if level not in identities or not isinstance(item, dict):
+            return
+        for key in (
+            "name_preferred", "name", "text", "id", "mapbox_id",
+            "region_code", "region_code_full", "country_code",
+            "country_code_alpha_3", "short_code",
+        ):
+            normalized = normalize_search_text(item.get(key))
+            if normalized:
+                identities[level].add(normalized)
+
+    # Geocoding V6 nests context under properties. The active V5 fallback
+    # keeps it at the feature root even when a separate properties object is
+    # present, so parse both shapes rather than letting one hide the other.
+    for source in (feature, values):
+        context = source.get("context")
+        if isinstance(context, dict):
+            for level in _SEARCH_V2_ADMIN_CONTEXT_LEVELS:
+                add(level, context.get(level))
+        elif isinstance(context, list):
+            for item in context:
+                if not isinstance(item, dict):
+                    continue
+                identifier = str(item.get("id") or "").split(".", 1)[0].lower()
+                add(identifier, item)
+
+    raw_type = values.get("feature_type") or feature.get("place_type") or ""
+    if isinstance(raw_type, list):
+        raw_type = raw_type[0] if raw_type else ""
+    own_level = str(raw_type or "").strip().lower()
+    if own_level == "city":
+        own_level = "place"
+    add(own_level, {**feature, **values})
+    return identities, own_level
+
+
+def _search_v2_remote_suggestion_matches_destination(
+    suggestion: dict, anchor_feature: dict,
+) -> bool:
+    """Require the resolved destination's full administrative context.
+
+    Search Box can rank an exact street-name match outside the requested city
+    ahead of nearby services (for example, ``Flagstaff Plz`` in Virginia for
+    ``fuel near Flagstaff``). The hard bbox remains the geographic boundary,
+    while this structural check fails closed unless the suggestion matches the
+    resolved anchor's city and every available parent level. Free-form
+    addresses are intentionally excluded so a street name cannot satisfy it.
+    """
+    anchor, own_level = _search_v2_mapbox_admin_context(anchor_feature)
+    candidate, _candidate_level = _search_v2_mapbox_admin_context(suggestion)
+    if own_level not in _SEARCH_V2_ADMIN_CONTEXT_LEVELS:
+        return False
+    start = _SEARCH_V2_ADMIN_CONTEXT_LEVELS.index(own_level)
+    for level in _SEARCH_V2_ADMIN_CONTEXT_LEVELS[start:]:
+        expected = anchor[level]
+        if expected and not expected.intersection(candidate[level]):
+            return False
+    return bool(anchor[own_level] and anchor[own_level].intersection(candidate[own_level]))
+
 def _map_context_limit(limit: int, default: int = 8, max_value: int = 12) -> int:
     try:
         parsed = int(limit or default)
@@ -19112,8 +19188,8 @@ async def _search_v2_external_mapbox(
             types="place,locality,district,region",
             language="en",
         )
-        anchor = next((
-            (lat, lng)
+        anchor_feature = next((
+            feature
             for feature in anchor_features
             if isinstance(feature, dict)
             for lat, lng in [_map_context_feature_coords(feature)]
@@ -19122,13 +19198,16 @@ async def _search_v2_external_mapbox(
                 and -90 <= lat <= 90 and -180 <= lng <= 180
             )
         ), None)
-        if anchor is None:
+        if anchor_feature is None:
+            return []
+        anchor_lat, anchor_lng = _map_context_feature_coords(anchor_feature)
+        if anchor_lat is None or anchor_lng is None:
             return []
         provider_query = _map_context_category_provider(request._remote_category)
         if not provider_query:
             return []
-        proximity = f"{anchor[1]:.6f},{anchor[0]:.6f}"
-        bbox = _search_v2_remote_anchor_bbox(anchor[0], anchor[1])
+        proximity = f"{anchor_lng:.6f},{anchor_lat:.6f}"
+        bbox = _search_v2_remote_anchor_bbox(anchor_lat, anchor_lng)
         mapbox_types = "poi"
         provider_country = request._remote_destination_country
     elif request._destination_context:
@@ -19158,6 +19237,13 @@ async def _search_v2_external_mapbox(
     suggestions = [
         item for item in data.get("suggestions", []) if isinstance(item, dict)
     ]
+    if request._remote_category_context:
+        suggestions = [
+            item for item in suggestions
+            if _search_v2_remote_suggestion_matches_destination(
+                item, anchor_feature,
+            )
+        ]
     results: list[SearchResultV2] = []
     for index, suggestion in enumerate(suggestions):
         provider_id = _clean_mapbox_param(str(

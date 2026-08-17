@@ -291,6 +291,10 @@ import {
   visualWorkRequestIsCurrent,
 } from '@/lib/screenActivityState';
 import { useKeyboardInset } from '@/lib/keyboardInset';
+import {
+  androidMapSearchKeyboardCoversVisualWork,
+  scheduleMapSearchV2Query,
+} from '@/lib/mapSearchPerformance';
 import { mapModeOwnsRoutePreview, resolveMapExperienceMode } from '@/lib/mapExperienceMode';
 import {
   cancelMapCameraClaimForGesture,
@@ -8034,15 +8038,22 @@ function MapScreen() {
     );
   }, [mapCameraOwnership]);
   const routeBuildMapActive = mapModeOwnsRoutePreview(mapExperienceMode);
+  const androidMapSearchKeyboardActive = androidMapSearchKeyboardCoversVisualWork(
+    Platform.OS,
+    keyboardVisible,
+    inlineSearchOpen,
+    showFullMapSearch,
+  );
+  const mapVisuallyCovered = showOfflineModal || androidMapSearchKeyboardActive;
   const mapVisualWorkActive = mapVisualWorkShouldRun(
     screenActivity.isActive,
     screenActivity.isAppActive,
     navMode,
-    showOfflineModal,
+    mapVisuallyCovered,
   );
   const mapVisualTreeMounted = mapVisualTreeShouldRemainMounted(
     mapVisualWorkActive,
-    showOfflineModal,
+    mapVisuallyCovered,
   );
   const mapVisualWorkActiveRef = useRef(mapVisualWorkActive);
   const mapVisualWorkGenerationRef = useRef(0);
@@ -12065,19 +12076,20 @@ function MapScreen() {
 
   useEffect(() => {
     const cleanQuery = searchQuery.trim();
-    if (!screenActivity.isFocused || (!inlineSearchOpen && !showFullMapSearch) || navMode) {
-      if (!screenActivity.isFocused) autoMapSearchRef.current = '';
+    if (!screenActivity.isActive || (!inlineSearchOpen && !showFullMapSearch) || navMode) {
+      if (!screenActivity.isActive) autoMapSearchRef.current = '';
       cancelMapSearchRequest();
       return;
     }
     if (searchV2Enabled) {
       setMapSearchOwnerScopeKey(mapAccountInventoryScope.key);
-      if (
-        mapSearchV2.state.mode === 'results'
-        && mapSearchV2.state.query === normalizeSearchV2Query(cleanQuery)
-      ) return;
-      mapSearchV2.setQuery(cleanQuery);
-      return;
+      const normalizedQuery = normalizeSearchV2Query(cleanQuery);
+      if (mapSearchV2.state.query === normalizedQuery) return;
+      if (normalizedQuery.length === 0) {
+        mapSearchV2.setQuery('');
+        return;
+      }
+      return scheduleMapSearchV2Query(cleanQuery, mapSearchV2.setQuery);
     }
     if (cleanQuery.length < 2) {
       autoMapSearchRef.current = '';
@@ -12101,7 +12113,7 @@ function MapScreen() {
     mapSearchV2.state.query,
     mapSearchV2.setQuery,
     navMode,
-    screenActivity.isFocused,
+    screenActivity.isActive,
     searchQuery,
     searchV2Enabled,
     showFullMapSearch,

@@ -101,7 +101,11 @@ test('Map search changes viewport scope only through the explicit Search this ar
 });
 
 test('Map full search and nearby quick actions retain their requested mode and scope', () => {
-  assert.match(mapSource, /mapSearchV2\.state\.mode === 'results'[\s\S]{0,180}mapSearchV2\.state\.query === normalizeSearchV2Query\(cleanQuery\)[\s\S]{0,80}return;/);
+  assert.match(mapSource, /mapSearchV2\.state\.query === normalizedQuery\) return;/);
+  assert.match(mapSource, /return scheduleMapSearchV2Query\(cleanQuery, mapSearchV2\.setQuery\);/);
+  assert.match(mapSource, /if \(!screenActivity\.isActive \|\| \(!inlineSearchOpen && !showFullMapSearch\) \|\| navMode\)/);
+  assert.match(mapSource, /androidMapSearchKeyboardActive = androidMapSearchKeyboardCoversVisualWork\([\s\S]{0,160}showFullMapSearch/);
+  assert.match(mapSource, /mapVisualTreeShouldRemainMounted\([\s\S]{0,100}mapVisuallyCovered/);
   assert.match(mapSource, /function runMapQuickActionSearch\(action: MapSearchQuickAction\)/);
   assert.match(mapSource, /scope: 'nearby' as const,[\s\S]{0,260}radius_meters: quickScope\.radius_meters/);
   assert.match(mapSource, /mapSearchV2\.setContext\(nextContext, false\);[\s\S]{0,100}mapSearchV2\.search\(action\.query\)/);

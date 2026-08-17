@@ -10,6 +10,12 @@ import {
   visualWorkRequestIsCurrent,
 } from '../screenActivityState';
 import { completeLegacyMapSearch } from '../legacyMapSearchPolicy';
+import {
+  androidMapSearchKeyboardCoversVisualWork,
+  MAP_SEARCH_V2_QUERY_COALESCE_MS,
+  scheduleMapSearchV2Query,
+  type MapSearchQueryScheduler,
+} from '../mapSearchPerformance';
 import { subscriptionManagementUrl } from '../subscriptionManagement';
 import {
   tabBarIsHidden,
@@ -56,6 +62,53 @@ test('a full-screen manager pauses work without tearing down the native layer tr
   assert.equal(mapVisualTreeShouldRemainMounted(true, false), true);
   assert.equal(mapVisualTreeShouldRemainMounted(false, true), true);
   assert.equal(mapVisualTreeShouldRemainMounted(false, false), false);
+});
+
+test('Android keyboard search can pause visual work while retaining the native map', () => {
+  const androidSearchKeyboardActive = androidMapSearchKeyboardCoversVisualWork(
+    'android',
+    true,
+    true,
+    false,
+  );
+  const visualWorkActive = mapVisualWorkShouldRun(true, true, false, androidSearchKeyboardActive);
+
+  assert.equal(androidMapSearchKeyboardCoversVisualWork('android', true, false, true), true);
+  assert.equal(androidMapSearchKeyboardCoversVisualWork('android', false, true, false), false);
+  assert.equal(androidMapSearchKeyboardCoversVisualWork('ios', true, true, true), false);
+  assert.equal(visualWorkActive, false);
+  assert.equal(mapVisualTreeShouldRemainMounted(visualWorkActive, androidSearchKeyboardActive), true);
+});
+
+test('Map search query coalescing is cancelable before a pending value dispatches', () => {
+  let nextHandle = 1;
+  let observedDelay = 0;
+  const pending = new Map<number, () => void>();
+  const scheduler: MapSearchQueryScheduler = {
+    setTimeout(callback, delayMs) {
+      const handle = nextHandle++;
+      observedDelay = delayMs;
+      pending.set(handle, callback);
+      return handle;
+    },
+    clearTimeout(handle) {
+      pending.delete(Number(handle));
+    },
+  };
+  const dispatched: string[] = [];
+  const cancel = scheduleMapSearchV2Query('moa', query => dispatched.push(query), scheduler);
+
+  assert.equal(observedDelay, MAP_SEARCH_V2_QUERY_COALESCE_MS);
+  assert.equal(pending.size, 1);
+  cancel();
+  assert.equal(pending.size, 0);
+  assert.equal(dispatched.length, 0);
+
+  scheduleMapSearchV2Query('moab', query => dispatched.push(query), scheduler);
+  const [handle, callback] = Array.from(pending.entries())[0]!;
+  pending.delete(handle);
+  callback();
+  assert.deepEqual(dispatched, ['moab']);
 });
 
 test('visual work requests cannot commit across blur and refocus generations', () => {

@@ -68,11 +68,11 @@ const ciTriggerSource = ciWorkflow.slice(0, ciWorkflow.indexOf('\npermissions:')
 const mobileCiJob = workflowJobSource(ciWorkflow, 'mobile');
 const androidNativeCiJob = workflowJobSource(ciWorkflow, 'android-native');
 
-expect(pkg.version === '1.0.12', 'package.json must use marketing version 1.0.12.');
-expect(lockRoot?.version === '1.0.12', 'package-lock.json root version must use 1.0.12.');
-expect(config.version === '1.0.12', 'app.config.js must use marketing version 1.0.12.');
-expect(config.ios.runtimeVersion === 'native-1.0.12-ios.1', 'iOS runtime is not native-1.0.12-ios.1.');
-expect(config.android.runtimeVersion === 'native-1.0.12-android.1', 'Android runtime is not native-1.0.12-android.1.');
+expect(pkg.version === '1.0.13', 'package.json must use marketing version 1.0.13.');
+expect(lockRoot?.version === '1.0.13', 'package-lock.json root version must use 1.0.13.');
+expect(config.version === '1.0.13', 'app.config.js must use marketing version 1.0.13.');
+expect(config.ios.runtimeVersion === 'native-1.0.13-ios.1', 'iOS runtime is not native-1.0.13-ios.1.');
+expect(config.android.runtimeVersion === 'native-1.0.13-android.1', 'Android runtime is not native-1.0.13-android.1.');
 expect(
   !/(?:BRANCH_API_KEY|EXPO_PUBLIC_BRANCH_|react-native-branch)/.test(`${appConfigSource}\n${easConfigSource}`),
   'Branch configuration must not be restored to app.config.js or EAS profiles.',
@@ -170,7 +170,7 @@ for (const pathPrefix of ['/originals', '/app', '/r', '/support', '/trips', '/pr
   expect(androidManifest.includes(`android:pathPrefix="${pathPrefix}"`), `Android app-link path is missing: ${pathPrefix}`);
 }
 expect(!androidManifest.includes('android:pathPrefix="/reset-password"'), 'Password-reset web forms must not be captured by Android.');
-expect(androidGradle.includes('versionName "1.0.12"'), 'Android versionName is not 1.0.12.');
+expect(androidGradle.includes('versionName "1.0.13"'), 'Android versionName is not 1.0.13.');
 expect(androidGradle.includes('androidx.car.app:app-projected:1.7.0'), 'Android Auto projected dependency changed or is missing.');
 expect(androidGradle.includes('@sentry/react-native/package.json'), 'Android Sentry source-map wiring is missing.');
 expect(androidGradle.includes('"io.branch."'), 'Release manifest verification must continue blocking Branch entries.');
@@ -180,12 +180,12 @@ expect(
   ),
   'Branch native wiring remains in the Android project.',
 );
-contains('android/app/src/main/res/values/strings.xml', 'native-1.0.12-android.1', 'Android native runtime resource is stale.');
+contains('android/app/src/main/res/values/strings.xml', 'native-1.0.13-android.1', 'Android native runtime resource is stale.');
 
-expect(iosInfo.includes('<string>1.0.12</string>'), 'iOS Info.plist marketing version is stale.');
+expect(iosInfo.includes('<string>1.0.13</string>'), 'iOS Info.plist marketing version is stale.');
 expect(iosInfo.includes('<string>Automatic</string>'), 'iOS appearance must follow the app theme.');
 expect(iosInfo.includes('BarlowCondensed-SemiBold.ttf') && iosInfo.includes('BarlowCondensed-Bold.ttf'), 'iOS font registration is incomplete.');
-expect(iosProject.match(/MARKETING_VERSION = 1\.0\.12;/g)?.length === 2, 'Xcode marketing versions are not both 1.0.12.');
+expect(iosProject.match(/MARKETING_VERSION = 1\.0\.13;/g)?.length === 2, 'Xcode marketing versions are not both 1.0.13.');
 expect(
   !/(?:RNBranch|branch_key|branch_universal_link_domains|Branch\.json|zswub(?:-alternate)?\.app\.link|go\.gettrailhead\.app)/.test(
     `${iosInfo}\n${iosProject}\n${iosEntitlements}\n${iosAppDelegate}`,
@@ -210,7 +210,7 @@ for (const pathPattern of ['/originals/*', '/app/*', '/r/*', '/support/*', '/tri
   expect(siteProxyWorker.includes(`'${pathPattern}'`), `Cloudflare association path is missing: ${pathPattern}`);
 }
 expect(!applePaths.some(path => String(path).startsWith('/reset-password')), 'Password-reset web forms must not be captured by iOS.');
-contains('ios/Trailhead/Supporting/Expo.plist', 'native-1.0.12-ios.1', 'iOS native runtime resource is stale.');
+contains('ios/Trailhead/Supporting/Expo.plist', 'native-1.0.13-ios.1', 'iOS native runtime resource is stale.');
 contains('.gitignore', '*.mobileprovision', 'Mobile provisioning profiles must stay ignored.');
 expect(!source('.gitignore').split(/\r?\n/).includes('/ios/'), 'The authoritative iOS project is still ignored.');
 

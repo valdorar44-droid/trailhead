@@ -24,6 +24,7 @@ type Props = {
   iconButtonStyle: StyleProp<ViewStyle>;
   iconColor: ColorValue;
   spinnerColor: ColorValue;
+  openOnPress?: boolean;
   onFocus: () => void;
   onQueryChange: (query: string) => void;
   onSubmit: (query: string) => void;
@@ -39,6 +40,7 @@ const MapInlineSearchField = memo(forwardRef<TextInput, Props>(function MapInlin
   iconButtonStyle,
   iconColor,
   spinnerColor,
+  openOnPress = false,
   onFocus,
   onQueryChange,
   onSubmit,
@@ -89,21 +91,48 @@ const MapInlineSearchField = memo(forwardRef<TextInput, Props>(function MapInlin
 
   return (
     <>
-      <TextInput
-        ref={ref}
-        testID="map.search.inline.input"
-        value={draftQuery}
-        onFocus={onFocus}
-        onChangeText={updateDraft}
-        placeholder="Search places or services"
-        placeholderTextColor={placeholderTextColor}
-        style={inputStyle}
-        returnKeyType="search"
-        autoCorrect={false}
-        autoCapitalize="none"
-        blurOnSubmit={false}
-        onSubmitEditing={submitDraft}
-      />
+      {openOnPress ? (
+        <TouchableOpacity
+          style={{ flex: 1, minWidth: 0 }}
+          onPress={onOpen}
+          activeOpacity={0.84}
+          testID="map.search.inline.input"
+          accessibilityRole="button"
+          accessibilityLabel="Search places or services"
+          accessibilityHint="Opens full map search"
+        >
+          <TextInput
+            ref={ref}
+            value={draftQuery}
+            editable={false}
+            showSoftInputOnFocus={false}
+            accessible={false}
+            importantForAccessibility="no"
+            pointerEvents="none"
+            placeholder="Search places or services"
+            placeholderTextColor={placeholderTextColor}
+            style={inputStyle}
+            autoCorrect={false}
+            autoCapitalize="none"
+          />
+        </TouchableOpacity>
+      ) : (
+        <TextInput
+          ref={ref}
+          testID="map.search.inline.input"
+          value={draftQuery}
+          onFocus={onFocus}
+          onChangeText={updateDraft}
+          placeholder="Search places or services"
+          placeholderTextColor={placeholderTextColor}
+          style={inputStyle}
+          returnKeyType="search"
+          autoCorrect={false}
+          autoCapitalize="none"
+          blurOnSubmit={false}
+          onSubmitEditing={submitDraft}
+        />
+      )}
       {searching && !hasResults ? (
         <ActivityIndicator size="small" color={spinnerColor} />
       ) : draftQuery.trim().length > 0 ? (

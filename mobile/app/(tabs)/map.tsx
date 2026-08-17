@@ -27794,6 +27794,11 @@ function MapScreen() {
               query={searchQuery}
               searching={isSearching}
               hasResults={searchV2Enabled ? mapSearchV2RenderResults.length > 0 : mapSearchDisplayResults.length > 0}
+              // Android's adjustResize window makes the 33k-line Map surface
+              // rerender as the keyboard opens. Route that platform through
+              // the existing modal sheet so typing never competes with the
+              // live native map; iOS keeps the compact inline interaction.
+              openOnPress={Platform.OS === 'android'}
               onFocus={() => setInlineSearchOpen(true)}
               onQueryChange={text => {
                 updateMapSearchQuery(text);
@@ -27805,7 +27810,7 @@ function MapScreen() {
               iconColor={mapChrome.textMuted}
               spinnerColor={mapChrome.toastText}
               onSubmit={query => { void searchMap(query); }}
-              onOpen={focusInlineMapSearch}
+              onOpen={Platform.OS === 'android' ? openFullMapSearch : focusInlineMapSearch}
             />
           </View>
 

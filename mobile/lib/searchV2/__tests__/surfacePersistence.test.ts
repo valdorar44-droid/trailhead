@@ -103,11 +103,23 @@ test('Map search changes viewport scope only through the explicit Search this ar
 
 test('Map full search and nearby quick actions retain their requested mode and scope', () => {
   assert.match(mapSource, /mapSearchV2\.state\.query === normalizedQuery\) return;/);
-  assert.match(mapSource, /<MapInlineSearchField[\s\S]{0,500}onQueryChange=\{text =>/);
+  assert.match(mapSource, /<MapInlineSearchField[\s\S]{0,1200}onQueryChange=\{text =>/);
+  assert.match(mapSource, /openOnPress=\{Platform\.OS === 'android'\}/);
+  assert.match(mapSource, /onOpen=\{Platform\.OS === 'android' \? openFullMapSearch : focusInlineMapSearch\}/);
   assert.match(mapSource, /if \(!screenActivity\.isActive \|\| \(!inlineSearchOpen && !showFullMapSearch\) \|\| navMode\)/);
   assert.match(mapSource, /androidMapSearchKeyboardActive = androidMapSearchKeyboardCoversVisualWork\([\s\S]{0,160}showFullMapSearch/);
   assert.match(mapSource, /mapVisualTreeShouldRemainMounted\([\s\S]{0,100}mapVisuallyCovered/);
   assert.match(inlineMapSearchFieldSource, /const \[draftQuery, setDraftQuery\] = useState\(query\);/);
+  assert.match(inlineMapSearchFieldSource, /openOnPress \? \(/);
+  assert.match(inlineMapSearchFieldSource, /onPress=\{onOpen\}/);
+  assert.match(inlineMapSearchFieldSource, /testID="map\.search\.inline\.input"/);
+  assert.match(inlineMapSearchFieldSource, /accessibilityRole="button"/);
+  assert.match(inlineMapSearchFieldSource, /accessibilityLabel="Search places or services"/);
+  assert.match(inlineMapSearchFieldSource, /accessible=\{false\}/);
+  assert.match(inlineMapSearchFieldSource, /importantForAccessibility="no"/);
+  assert.match(inlineMapSearchFieldSource, /pointerEvents="none"/);
+  assert.match(inlineMapSearchFieldSource, /onChangeText=\{updateDraft\}/);
+  assert.match(inlineMapSearchFieldSource, /onSubmitEditing=\{submitDraft\}/);
   assert.match(inlineMapSearchFieldSource, /cancelPendingCommitRef\.current = scheduleMapSearchV2Query/);
   assert.match(inlineMapSearchFieldSource, /observedExternalQueryRef\.current = nextQuery;/);
   assert.match(inlineMapSearchFieldSource, /commitMapSearchV2QueryNow\(draftQuery,[\s\S]{0,260}onSubmitRef\.current\(nextQuery\);/);

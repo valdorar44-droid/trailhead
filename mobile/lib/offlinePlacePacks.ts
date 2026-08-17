@@ -2,6 +2,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import type { PlacePack, PlacePackPoint } from './api';
 import { accountStorage } from './storage';
 import { nextOfflinePlacePackIndex } from './offlinePlacePackIndex';
+import { claimRuntimeOfflineDocumentBudget } from './offlineV2/runtimeCatalogBudget';
 import {
   collectOfflinePlacePackDiagnosticsV1,
   nextOfflinePlacePackPointMetadataV1,
@@ -33,6 +34,34 @@ async function ensureDir() {
 
 function packPath(packId: string) {
   return DIR + encodeURIComponent(packId) + '.json';
+}
+
+function parseOfflinePlacePack(raw: string): PlacePack | null {
+  const parsed = JSON.parse(raw);
+  return parsed && Array.isArray(parsed.points) ? parsed : null;
+}
+
+async function loadOfflinePlacePacksWithinRuntimeBudget(packIds: readonly string[]): Promise<PlacePack[]> {
+  const packs: PlacePack[] = [];
+  let claimedBytes = 0;
+  for (const packId of packIds) {
+    const path = packPath(packId);
+    try {
+      const info = await FileSystem.getInfoAsync(path);
+      if (!info.exists || info.isDirectory) continue;
+      const budget = claimRuntimeOfflineDocumentBudget(
+        claimedBytes,
+        Number((info as { size?: unknown }).size),
+      );
+      if (!budget.materialize) continue;
+      claimedBytes = budget.next_claimed_bytes;
+      const parsed = parseOfflinePlacePack(await FileSystem.readAsStringAsync(path));
+      if (parsed) packs.push(parsed);
+    } catch {
+      // A corrupt or oversized legacy pack must not block online or indexed search.
+    }
+  }
+  return packs;
 }
 
 async function getIndex(): Promise<string[]> {
@@ -85,28 +114,22 @@ export async function saveOfflinePlacePack(pack: PlacePack, preserveIds: string[
 }
 
 export async function loadOfflinePlacePack(packId: string): Promise<PlacePack | null> {
-  try {
-    const raw = await FileSystem.readAsStringAsync(packPath(packId));
-    const parsed = JSON.parse(raw);
-    return parsed && Array.isArray(parsed.points) ? parsed : null;
-  } catch {
-    return null;
-  }
+  return (await loadOfflinePlacePacksWithinRuntimeBudget([packId]))[0] ?? null;
 }
 
 export async function listOfflinePlacePacks(): Promise<OfflinePlacePackSummary[]> {
   const index = await getIndex();
-  const packs = await Promise.all(index.map(loadOfflinePlacePack));
-  return packs.filter(Boolean).map(pack => ({
-    pack_id: pack!.pack_id,
-    trip_id: pack!.trip_id,
-    region_id: pack!.region_id,
-    name: pack!.name,
-    trip_name: pack!.trip_name,
-    region_name: pack!.region_name,
-    generated_at: pack!.generated_at,
-    point_count: pack!.points?.length ?? 0,
-    categories: Array.isArray(pack!.categories) ? pack!.categories : [],
+  const packs = await loadOfflinePlacePacksWithinRuntimeBudget(index);
+  return packs.map(pack => ({
+    pack_id: pack.pack_id,
+    trip_id: pack.trip_id,
+    region_id: pack.region_id,
+    name: pack.name,
+    trip_name: pack.trip_name,
+    region_name: pack.region_name,
+    generated_at: pack.generated_at,
+    point_count: pack.points?.length ?? 0,
+    categories: Array.isArray(pack.categories) ? pack.categories : [],
   }));
 }
 
@@ -154,17 +177,17 @@ export async function deleteOfflinePlacePack(packId: string): Promise<void> {
 export async function loadTripPlacePoints(tripId?: string | null): Promise<PlacePackPoint[]> {
   if (!tripId) return [];
   const index = await getIndex();
-  const packs = await Promise.all(index.map(loadOfflinePlacePack));
-  const matches = packs.filter(pack => pack?.trip_id === tripId);
+  const packs = await loadOfflinePlacePacksWithinRuntimeBudget(index);
+  const matches = packs.filter(pack => pack.trip_id === tripId);
   const points: PlacePackPoint[] = [];
-  matches.forEach(pack => points.push(...(pack?.points ?? [])));
+  matches.forEach(pack => points.push(...(pack.points ?? [])));
   return points;
 }
 
 export async function loadAllPlacePoints(): Promise<PlacePackPoint[]> {
   const index = await getIndex();
-  const packs = await Promise.all(index.map(loadOfflinePlacePack));
+  const packs = await loadOfflinePlacePacksWithinRuntimeBudget(index);
   const points: PlacePackPoint[] = [];
-  packs.filter(Boolean).forEach(pack => points.push(...(pack?.points ?? [])));
+  packs.forEach(pack => points.push(...(pack.points ?? [])));
   return points;
 }

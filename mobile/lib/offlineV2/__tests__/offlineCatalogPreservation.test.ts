@@ -510,6 +510,7 @@ async function main() {
   const mapSource = readFileSync('app/(tabs)/map.tsx', 'utf8');
   const guideSource = readFileSync('app/(tabs)/guide.tsx', 'utf8');
   const catalogSource = readFileSync('lib/offlineV2/expoCatalog.ts', 'utf8');
+  const legacyPackSource = readFileSync('lib/offlinePlacePacks.ts', 'utf8');
   const runtimeSource = readFileSync('lib/offlineV2/expoRuntime.ts', 'utf8');
   const sqliteSource = readFileSync('lib/offlineV2/sqliteIndex.ts', 'utf8');
   assert.match(catalogSource, /searchDownloadedOfflineIndexesV2\(\{/);
@@ -527,6 +528,38 @@ async function main() {
     catalogSource.indexOf('claimRuntimeOfflineDocumentBudget(claimedDocumentBytes, artifact.bytes)')
       < catalogSource.indexOf('persistence.storage.readText(state.local_uri)'),
     'the manifest byte budget must be enforced before any whole-document read',
+  );
+  assert.match(legacyPackSource, /loadOfflinePlacePacksWithinRuntimeBudget/);
+  assert.doesNotMatch(legacyPackSource, /Promise\.all\(index\.map\(loadOfflinePlacePack\)\)/);
+  assert.equal(
+    legacyPackSource.match(/FileSystem\.readAsStringAsync\(path\)/g)?.length,
+    1,
+    'legacy pack content must have exactly one guarded whole-file read site',
+  );
+  for (const [loader, argument] of [
+    ['loadOfflinePlacePack', '[packId]'],
+    ['listOfflinePlacePacks', 'index'],
+    ['loadTripPlacePoints', 'index'],
+    ['loadAllPlacePoints', 'index'],
+  ] as const) {
+    const functionStart = legacyPackSource.indexOf(`export async function ${loader}`);
+    assert.notEqual(functionStart, -1, `${loader} must remain exported`);
+    const nextFunction = legacyPackSource.indexOf('\nexport async function ', functionStart + 1);
+    const functionSource = legacyPackSource.slice(
+      functionStart,
+      nextFunction === -1 ? legacyPackSource.length : nextFunction,
+    );
+    assert.ok(
+      functionSource.includes(`loadOfflinePlacePacksWithinRuntimeBudget(${argument})`),
+      `${loader} must use the shared runtime budget`,
+    );
+  }
+  assert.ok(
+    legacyPackSource.indexOf('const info = await FileSystem.getInfoAsync(path)')
+      < legacyPackSource.indexOf('claimRuntimeOfflineDocumentBudget(')
+      && legacyPackSource.indexOf('claimRuntimeOfflineDocumentBudget(')
+        < legacyPackSource.indexOf('FileSystem.readAsStringAsync(path)'),
+    'legacy place packs must be statted and budgeted before any whole-file read',
   );
   assert.match(
     runtimeSource,

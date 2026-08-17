@@ -10,6 +10,7 @@ import {
   searchDownloadedOfflineIndexesV2,
 } from './offlineSearchPresentation';
 import { normalizeOfflineV2PoiType } from './placeTypes';
+import { claimRuntimeOfflineDocumentBudget } from './runtimeCatalogBudget';
 import { trailGeometryRepresentativePointV2 } from './trailGeometry';
 import type {
   OfflineBoundsV2,
@@ -157,6 +158,7 @@ export async function loadExpoOfflineV2Catalog(ownerScope: string): Promise<Expo
   const trailFeatures = new Map<string, GeoJSON.Feature>();
   const searchIndexes: ExpoOfflineV2SearchIndex[] = [];
   const diagnostics: string[] = [];
+  let claimedDocumentBytes = 0;
 
   for (const installation of installations) {
     const manifest = await persistence.repository.getManifest(installation.bundle_id, installation.revision);
@@ -168,6 +170,14 @@ export async function loadExpoOfflineV2Catalog(ownerScope: string): Promise<Expo
       const state = installation.artifacts[artifact.id];
       if (state?.status !== 'ready' || !state.local_uri) continue;
       try {
+        if (artifact.kind === 'places' || artifact.kind === 'trails') {
+          const budget = claimRuntimeOfflineDocumentBudget(claimedDocumentBytes, artifact.bytes);
+          if (!budget.materialize) {
+            diagnostics.push(`${manifest.bundle_id} ${artifact.kind}: deferred from the in-memory catalog (${budget.reason}).`);
+            continue;
+          }
+          claimedDocumentBytes = budget.next_claimed_bytes;
+        }
         if (artifact.kind === 'places') {
           for (const place of parsePlaces(await persistence.storage.readText(state.local_uri), manifest, artifact.record_count)) {
             if (!places.has(place.id)) places.set(place.id, place);

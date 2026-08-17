@@ -20,6 +20,11 @@ import {
   searchDownloadedOfflineIndexesV2,
 } from '../offlineSearchPresentation';
 import { trailGeometryRepresentativePointV2 } from '../trailGeometry';
+import {
+  claimRuntimeOfflineDocumentBudget,
+  OFFLINE_V2_RUNTIME_DOCUMENT_ARTIFACT_BYTE_LIMIT,
+  OFFLINE_V2_RUNTIME_DOCUMENT_TOTAL_BYTE_LIMIT,
+} from '../runtimeCatalogBudget';
 
 async function flush() {
   await Promise.resolve();
@@ -463,6 +468,45 @@ async function main() {
   ]));
   assert.equal(offlineInstallationRevisionV2([]), 'empty');
 
+  assert.deepEqual(
+    claimRuntimeOfflineDocumentBudget(0, 175_302_104),
+    { materialize: false, next_claimed_bytes: 0, reason: 'artifact_limit' },
+    'the exact Android OOM-sized document must never cross the native/JS bridge',
+  );
+  assert.deepEqual(
+    claimRuntimeOfflineDocumentBudget(0, OFFLINE_V2_RUNTIME_DOCUMENT_ARTIFACT_BYTE_LIMIT),
+    {
+      materialize: true,
+      next_claimed_bytes: OFFLINE_V2_RUNTIME_DOCUMENT_ARTIFACT_BYTE_LIMIT,
+      reason: 'accepted',
+    },
+  );
+  assert.deepEqual(
+    claimRuntimeOfflineDocumentBudget(
+      OFFLINE_V2_RUNTIME_DOCUMENT_ARTIFACT_BYTE_LIMIT,
+      OFFLINE_V2_RUNTIME_DOCUMENT_TOTAL_BYTE_LIMIT - OFFLINE_V2_RUNTIME_DOCUMENT_ARTIFACT_BYTE_LIMIT,
+    ),
+    {
+      materialize: true,
+      next_claimed_bytes: OFFLINE_V2_RUNTIME_DOCUMENT_TOTAL_BYTE_LIMIT,
+      reason: 'accepted',
+    },
+    'the exact total catalog budget remains accepted',
+  );
+  assert.deepEqual(
+    claimRuntimeOfflineDocumentBudget(
+      OFFLINE_V2_RUNTIME_DOCUMENT_ARTIFACT_BYTE_LIMIT,
+      OFFLINE_V2_RUNTIME_DOCUMENT_TOTAL_BYTE_LIMIT - OFFLINE_V2_RUNTIME_DOCUMENT_ARTIFACT_BYTE_LIMIT + 1,
+    ),
+    {
+      materialize: false,
+      next_claimed_bytes: OFFLINE_V2_RUNTIME_DOCUMENT_ARTIFACT_BYTE_LIMIT,
+      reason: 'catalog_limit',
+    },
+    'several individually safe documents must still respect the total catalog budget',
+  );
+  assert.equal(claimRuntimeOfflineDocumentBudget(-1, 1).reason, 'invalid_size');
+
   const mapSource = readFileSync('app/(tabs)/map.tsx', 'utf8');
   const guideSource = readFileSync('app/(tabs)/guide.tsx', 'utf8');
   const catalogSource = readFileSync('lib/offlineV2/expoCatalog.ts', 'utf8');
@@ -477,6 +521,12 @@ async function main() {
     catalogSource,
     /validateExpoOfflineSearchIndex/,
     'opening a runtime catalog must not repeat install-time SQLite integrity verification',
+  );
+  assert.match(catalogSource, /claimRuntimeOfflineDocumentBudget\(claimedDocumentBytes, artifact\.bytes\)/);
+  assert.ok(
+    catalogSource.indexOf('claimRuntimeOfflineDocumentBudget(claimedDocumentBytes, artifact.bytes)')
+      < catalogSource.indexOf('persistence.storage.readText(state.local_uri)'),
+    'the manifest byte budget must be enforced before any whole-document read',
   );
   assert.match(
     runtimeSource,

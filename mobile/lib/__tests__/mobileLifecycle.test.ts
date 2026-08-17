@@ -12,6 +12,7 @@ import {
 import { completeLegacyMapSearch } from '../legacyMapSearchPolicy';
 import {
   androidMapSearchKeyboardCoversVisualWork,
+  commitMapSearchV2QueryNow,
   MAP_SEARCH_V2_QUERY_COALESCE_MS,
   scheduleMapSearchV2Query,
   type MapSearchQueryScheduler,
@@ -109,6 +110,29 @@ test('Map search query coalescing is cancelable before a pending value dispatche
   pending.delete(handle);
   callback();
   assert.deepEqual(dispatched, ['moab']);
+});
+
+test('an immediate Map search choice cancels a stale pending draft before it can overwrite the choice', () => {
+  let nextHandle = 1;
+  const pending = new Map<number, () => void>();
+  const scheduler: MapSearchQueryScheduler = {
+    setTimeout(callback) {
+      const handle = nextHandle++;
+      pending.set(handle, callback);
+      return handle;
+    },
+    clearTimeout(handle) {
+      pending.delete(Number(handle));
+    },
+  };
+  const dispatched: string[] = [];
+  const cancelStaleDraft = scheduleMapSearchV2Query('', query => dispatched.push(query), scheduler);
+
+  commitMapSearchV2QueryNow('Moab', query => dispatched.push(query), cancelStaleDraft);
+  for (const callback of pending.values()) callback();
+
+  assert.deepEqual(dispatched, ['Moab']);
+  assert.equal(pending.size, 0);
 });
 
 test('visual work requests cannot commit across blur and refocus generations', () => {

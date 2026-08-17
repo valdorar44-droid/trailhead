@@ -9,6 +9,7 @@ const mapSource = readFileSync(resolve(testDirectory, '../../../app/(tabs)/map.t
 const exploreSource = readFileSync(resolve(testDirectory, '../../../app/(tabs)/guide.tsx'), 'utf8');
 const routeBuilderSource = readFileSync(resolve(testDirectory, '../../../app/(tabs)/route-builder.tsx'), 'utf8');
 const searchSheetSource = readFileSync(resolve(testDirectory, '../../../components/search/SearchV2Sheet.tsx'), 'utf8');
+const inlineMapSearchFieldSource = readFileSync(resolve(testDirectory, '../../../components/map/MapInlineSearchField.tsx'), 'utf8');
 const mapSearchSheetSource = readFileSync(resolve(testDirectory, '../../../components/map/MapSearchSheet.tsx'), 'utf8');
 const premiumPlaceSheetSource = readFileSync(resolve(testDirectory, '../../../components/PremiumPlaceSheet.tsx'), 'utf8');
 const nativeMapSource = readFileSync(resolve(testDirectory, '../../../components/NativeMap/index.tsx'), 'utf8');
@@ -52,7 +53,7 @@ test('Explore hides account-owned rows during cleanup and rejects stale selectio
 });
 
 test('Map and Explore retain useful rows while provider completion is still running', () => {
-  assert.match(mapSource, /isSearching && \(searchV2Enabled \? mapSearchV2RenderResults\.length === 0 : mapSearchDisplayResults\.length === 0\)/);
+  assert.match(inlineMapSearchFieldSource, /searching && !hasResults/);
   assert.match(mapSearchSheetSource, /searching && \(usingSearchV2 \? activeResults\.length === 0 : usableResults\.length === 0\)/);
   assert.match(searchSheetSource, /searchV2ShouldShowEmptyState\(\{[\s\S]*displayedQuery: query,[\s\S]*settledQuery,/);
   assert.match(exploreSource, /exploreSearchV2\.setQuery\(value\);/);
@@ -102,10 +103,19 @@ test('Map search changes viewport scope only through the explicit Search this ar
 
 test('Map full search and nearby quick actions retain their requested mode and scope', () => {
   assert.match(mapSource, /mapSearchV2\.state\.query === normalizedQuery\) return;/);
-  assert.match(mapSource, /return scheduleMapSearchV2Query\(cleanQuery, mapSearchV2\.setQuery\);/);
+  assert.match(mapSource, /<MapInlineSearchField[\s\S]{0,500}onQueryChange=\{text =>/);
   assert.match(mapSource, /if \(!screenActivity\.isActive \|\| \(!inlineSearchOpen && !showFullMapSearch\) \|\| navMode\)/);
   assert.match(mapSource, /androidMapSearchKeyboardActive = androidMapSearchKeyboardCoversVisualWork\([\s\S]{0,160}showFullMapSearch/);
   assert.match(mapSource, /mapVisualTreeShouldRemainMounted\([\s\S]{0,100}mapVisuallyCovered/);
+  assert.match(inlineMapSearchFieldSource, /const \[draftQuery, setDraftQuery\] = useState\(query\);/);
+  assert.match(inlineMapSearchFieldSource, /cancelPendingCommitRef\.current = scheduleMapSearchV2Query/);
+  assert.match(inlineMapSearchFieldSource, /observedExternalQueryRef\.current = nextQuery;/);
+  assert.match(inlineMapSearchFieldSource, /commitMapSearchV2QueryNow\(draftQuery,[\s\S]{0,260}onSubmitRef\.current\(nextQuery\);/);
+  assert.match(mapSearchSheetSource, /const \[draftQuery, setDraftQuery\] = useState\(query\);/);
+  assert.match(mapSearchSheetSource, /observedExternalQueryRef\.current = nextQuery;/);
+  assert.match(mapSearchSheetSource, /commitMapSearchV2QueryNow\(draftQuery,[\s\S]{0,260}onSubmit\(nextQuery\);/);
+  assert.match(mapSearchSheetSource, /onPress=\{\(\) => runQuickAction\(action\)\}/);
+  assert.match(mapSearchSheetSource, /onPress=\{\(\) => submitRecent\(item\.name\)\}/);
   assert.match(mapSource, /function runMapQuickActionSearch\(action: MapSearchQuickAction\)/);
   assert.match(mapSource, /scope: 'nearby' as const,[\s\S]{0,260}radius_meters: quickScope\.radius_meters/);
   assert.match(mapSource, /mapSearchV2\.setContext\(nextContext, false\);[\s\S]{0,100}mapSearchV2\.search\(action\.query\)/);
@@ -219,7 +229,7 @@ test('Native Map initializes only the selected renderer and keeps POI taps in na
 
 test('Map, Search V2, Route Editor, and route-ready actions expose stable automation IDs', () => {
   assert.match(mapSource, /testID="map\.screen"/);
-  assert.match(mapSource, /testID="map\.search\.inline\.input"/);
+  assert.match(inlineMapSearchFieldSource, /testID="map\.search\.inline\.input"/);
   assert.match(mapSource, /testID="map\.compass"/);
   assert.match(mapSource, /testID="map\.navigation\.end"/);
   assert.match(mapSource, /testID="map\.navigation\.recenter"/);

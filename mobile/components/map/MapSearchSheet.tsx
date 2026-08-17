@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Keyboard,
@@ -19,6 +19,10 @@ import { TrailheadSkeletonLine } from '@/components/TrailheadUI';
 import SearchResultRowV2, { type SearchDistanceUnitMode } from '@/components/search/SearchResultRowV2';
 import { useTheme, type ColorPalette } from '@/lib/design';
 import { cleanExploreSourceLabel } from '@/lib/exploreContextFilters';
+import {
+  commitMapSearchV2QueryNow,
+  scheduleMapSearchV2Query,
+} from '@/lib/mapSearchPerformance';
 import {
   searchV2ShouldShowEmptyState,
   type SearchPageModeV2,
@@ -124,7 +128,12 @@ export default function MapSearchSheet({
   const s = useMemo(() => makeStyles(C), [C]);
   const insets = useSafeAreaInsets();
   const inputRef = useRef<TextInput | null>(null);
-  const cleanQuery = query.trim();
+  const [draftQuery, setDraftQuery] = useState(query);
+  const observedExternalQueryRef = useRef(query);
+  const cancelPendingCommitRef = useRef<(() => void) | null>(null);
+  const onQueryChangeRef = useRef(onQueryChange);
+  onQueryChangeRef.current = onQueryChange;
+  const cleanQuery = draftQuery.trim();
   const usingSearchV2 = searchV2Results != null;
   const hasError = results.some(result => result.name === '__error__');
   const usableResults = results.filter(result => result.name !== '__error__');
@@ -133,7 +142,7 @@ export default function MapSearchSheet({
     && searchV2LoadingPresentation === 'skeleton'
     && activeResults.length === 0;
   const showSearchV2Empty = usingSearchV2 && searchV2ShouldShowEmptyState({
-    displayedQuery: query,
+    displayedQuery: draftQuery,
     settledQuery: searchV2SettledQuery,
     status: searchV2Status,
     isEnriching: searchV2IsEnriching,
@@ -148,6 +157,72 @@ export default function MapSearchSheet({
     const t = setTimeout(() => inputRef.current?.focus(), Platform.OS === 'android' ? 180 : 90);
     return () => clearTimeout(t);
   }, [visible]);
+
+  useEffect(() => {
+    if (query === observedExternalQueryRef.current) return;
+    observedExternalQueryRef.current = query;
+    cancelPendingCommitRef.current?.();
+    cancelPendingCommitRef.current = null;
+    setDraftQuery(query);
+  }, [query]);
+
+  useEffect(() => () => {
+    cancelPendingCommitRef.current?.();
+    cancelPendingCommitRef.current = null;
+  }, []);
+
+  function updateDraft(text: string) {
+    setDraftQuery(text);
+    cancelPendingCommitRef.current?.();
+    cancelPendingCommitRef.current = scheduleMapSearchV2Query(
+      text,
+      nextQuery => {
+        observedExternalQueryRef.current = nextQuery;
+        onQueryChangeRef.current(nextQuery);
+      },
+    );
+  }
+
+  function submitDraft() {
+    const cancelPending = cancelPendingCommitRef.current;
+    cancelPendingCommitRef.current = null;
+    commitMapSearchV2QueryNow(draftQuery, nextQuery => {
+      observedExternalQueryRef.current = nextQuery;
+      onQueryChangeRef.current(nextQuery);
+      onSubmit(nextQuery);
+    }, cancelPending);
+  }
+
+  function clearDraft() {
+    const cancelPending = cancelPendingCommitRef.current;
+    cancelPendingCommitRef.current = null;
+    commitMapSearchV2QueryNow('', nextQuery => {
+      observedExternalQueryRef.current = nextQuery;
+      setDraftQuery(nextQuery);
+    }, cancelPending);
+    onClear();
+  }
+
+  function runQuickAction(action: MapSearchQuickAction) {
+    const cancelPending = cancelPendingCommitRef.current;
+    cancelPendingCommitRef.current = null;
+    commitMapSearchV2QueryNow(action.query, nextQuery => {
+      observedExternalQueryRef.current = nextQuery;
+      setDraftQuery(nextQuery);
+    }, cancelPending);
+    onQuickAction(action);
+  }
+
+  function submitRecent(query: string) {
+    const cancelPending = cancelPendingCommitRef.current;
+    cancelPendingCommitRef.current = null;
+    commitMapSearchV2QueryNow(query, nextQuery => {
+      observedExternalQueryRef.current = nextQuery;
+      setDraftQuery(nextQuery);
+      onQueryChangeRef.current(nextQuery);
+      onSubmit(nextQuery);
+    }, cancelPending);
+  }
 
   function close() {
     Keyboard.dismiss();
@@ -185,22 +260,22 @@ export default function MapSearchSheet({
               <TextInput
                 ref={inputRef}
                 testID="map.search.input"
-                value={query}
-                onChangeText={onQueryChange}
+                value={draftQuery}
+                onChangeText={updateDraft}
                 placeholder="Search camps, trails, fuel"
                 placeholderTextColor={C.text3}
                 style={s.input}
                 returnKeyType="search"
                 autoCorrect={false}
                 autoCapitalize="none"
-                onSubmitEditing={() => onSubmit()}
+                onSubmitEditing={submitDraft}
               />
               {showFieldSpinner ? (
                 <ActivityIndicator size="small" color={C.orange} />
               ) : cleanQuery ? (
                 <TouchableOpacity
                   style={s.clearButton}
-                  onPress={onClear}
+                  onPress={clearDraft}
                   hitSlop={8}
                   accessibilityRole="button"
                   accessibilityLabel="Clear search"
@@ -226,7 +301,7 @@ export default function MapSearchSheet({
                     <TouchableOpacity
                       key={action.id || action.label}
                       style={s.quickChip}
-                      onPress={() => onQuickAction(action)}
+                      onPress={() => runQuickAction(action)}
                       activeOpacity={0.84}
                       accessibilityRole="button"
                       accessibilityLabel={action.label}
@@ -327,7 +402,7 @@ export default function MapSearchSheet({
                 {showSearchAll ? (
                   <TouchableOpacity
                     style={s.searchAllButton}
-                    onPress={() => onSubmit()}
+                    onPress={submitDraft}
                     testID="map.search.search-all"
                     activeOpacity={0.82}
                     accessibilityRole="button"
@@ -361,10 +436,7 @@ export default function MapSearchSheet({
                       key={`${item.name}-${idx}`}
                       style={s.recentRow}
                       testID={`map.search.recent.${idx}`}
-                      onPress={() => {
-                        onQueryChange(item.name);
-                        onSubmit(item.name);
-                      }}
+                      onPress={() => submitRecent(item.name)}
                       activeOpacity={0.84}
                     >
                       <View style={s.resultIcon}>

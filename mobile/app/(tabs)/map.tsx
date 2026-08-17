@@ -31,6 +31,7 @@ import MapDrawerSheet from '@/components/map/MapDrawerSheet';
 import MapFilterSheet from '@/components/map/MapFilterSheet';
 import MapLegendSheet from '@/components/map/MapLegendSheet';
 import MapLayerSheetContent from '@/components/map/MapLayerSheetContent';
+import MapInlineSearchField from '@/components/map/MapInlineSearchField';
 import MapSearchSheet, { type MapSearchQuickAction, type MapSearchResultItem } from '@/components/map/MapSearchSheet';
 import { searchResultSubtitleV2, searchResultTrailingLabelV2 } from '@/components/search/SearchResultRowV2';
 import MapStyleSheet from '@/components/map/MapStyleSheet';
@@ -293,7 +294,6 @@ import {
 import { useKeyboardInset } from '@/lib/keyboardInset';
 import {
   androidMapSearchKeyboardCoversVisualWork,
-  scheduleMapSearchV2Query,
 } from '@/lib/mapSearchPerformance';
 import { mapModeOwnsRoutePreview, resolveMapExperienceMode } from '@/lib/mapExperienceMode';
 import {
@@ -12029,6 +12029,21 @@ function MapScreen() {
     }
   }
 
+  function updateMapSearchQuery(text: string) {
+    setSearchQuery(text);
+    if (normalizeSearchV2Query(text) !== normalizeSearchV2Query(mapSearchQuickScope?.query || '')) {
+      setMapSearchQuickScope(null);
+    }
+    if (mapSearchSession && normalizeScopedSearchText(text) !== mapSearchSession.query) {
+      setMapSearchSession(null);
+    }
+    if (text.trim().length < 2) {
+      setSearchResults([]);
+      setMapSearchViewportScope(null);
+      setMapSearchAreaDirty(false);
+    }
+  }
+
   function runMapQuickActionSearch(action: MapSearchQuickAction) {
     if (action.id === 'trails-in-view') {
       closeFullMapSearch(false);
@@ -12089,7 +12104,8 @@ function MapScreen() {
         mapSearchV2.setQuery('');
         return;
       }
-      return scheduleMapSearchV2Query(cleanQuery, mapSearchV2.setQuery);
+      mapSearchV2.setQuery(cleanQuery);
+      return;
     }
     if (cleanQuery.length < 2) {
       autoMapSearchRef.current = '';
@@ -27773,58 +27789,24 @@ function MapScreen() {
             testID="map.search.inline"
           >
             <Ionicons name="search" size={16} color={mapChrome.textMuted} />
-            <TextInput
+            <MapInlineSearchField
               ref={inlineSearchInputRef}
-              testID="map.search.inline.input"
-              value={searchQuery}
+              query={searchQuery}
+              searching={isSearching}
+              hasResults={searchV2Enabled ? mapSearchV2RenderResults.length > 0 : mapSearchDisplayResults.length > 0}
               onFocus={() => setInlineSearchOpen(true)}
-              onChangeText={text => {
-                setSearchQuery(text);
-                if (normalizeSearchV2Query(text) !== normalizeSearchV2Query(mapSearchQuickScope?.query || '')) {
-                  setMapSearchQuickScope(null);
-                }
+              onQueryChange={text => {
+                updateMapSearchQuery(text);
                 if (!inlineSearchOpen) setInlineSearchOpen(true);
-                if (mapSearchSession && normalizeScopedSearchText(text) !== mapSearchSession.query) setMapSearchSession(null);
-                if (text.trim().length < 2) {
-                  setSearchResults([]);
-                  setMapSearchViewportScope(null);
-                  setMapSearchAreaDirty(false);
-                }
               }}
-              placeholder="Search places or services"
               placeholderTextColor={mapChrome.textMuted}
-              style={[s.inlineMapSearchInput, { color: mapChrome.toastText }]}
-              returnKeyType="search"
-              autoCorrect={false}
-              autoCapitalize="none"
-              blurOnSubmit={false}
-              onKeyPress={event => {
-                if (event.nativeEvent.key !== 'Enter') return;
-                searchMap();
-              }}
-              onSubmitEditing={() => searchMap()}
+              inputStyle={[s.inlineMapSearchInput, { color: mapChrome.toastText }]}
+              iconButtonStyle={s.inlineMapSearchIconBtn}
+              iconColor={mapChrome.textMuted}
+              spinnerColor={mapChrome.toastText}
+              onSubmit={query => { void searchMap(query); }}
+              onOpen={focusInlineMapSearch}
             />
-            {isSearching && (searchV2Enabled ? mapSearchV2RenderResults.length === 0 : mapSearchDisplayResults.length === 0) ? (
-              <ActivityIndicator size="small" color={mapChrome.toastText} />
-            ) : searchQuery.trim().length > 0 ? (
-              <TouchableOpacity
-                style={s.inlineMapSearchIconBtn}
-                onPress={() => searchMap()}
-                hitSlop={8}
-                testID="map.search.inline.submit"
-              >
-                <Ionicons name="arrow-forward" size={15} color={mapChrome.textMuted} />
-              </TouchableOpacity>
-            ) : (
-              <TouchableOpacity
-                style={s.inlineMapSearchIconBtn}
-                onPress={focusInlineMapSearch}
-                hitSlop={8}
-                testID="map.search.inline.open"
-              >
-                <Ionicons name="chevron-forward" size={15} color={mapChrome.textMuted} />
-              </TouchableOpacity>
-            )}
           </View>
 
           {inlineSearchOpen && (
@@ -29175,18 +29157,7 @@ function MapScreen() {
           hasLocation={!!userLoc}
           recent={searchHistory}
           quickActions={FULL_MAP_SEARCH_QUICK_ACTIONS}
-          onQueryChange={text => {
-            setSearchQuery(text);
-            if (normalizeSearchV2Query(text) !== normalizeSearchV2Query(mapSearchQuickScope?.query || '')) {
-              setMapSearchQuickScope(null);
-            }
-            if (mapSearchSession && normalizeScopedSearchText(text) !== mapSearchSession.query) setMapSearchSession(null);
-            if (text.trim().length < 2) {
-              setSearchResults([]);
-              setMapSearchViewportScope(null);
-              setMapSearchAreaDirty(false);
-            }
-          }}
+          onQueryChange={updateMapSearchQuery}
           onSubmit={queryOverride => {
             if (queryOverride != null) setSearchQuery(queryOverride);
             searchMap(queryOverride);

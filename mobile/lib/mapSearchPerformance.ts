@@ -19,6 +19,15 @@ export function scheduleMapSearchV2Query(
   return () => scheduler.clearTimeout(handle);
 }
 
+export function commitMapSearchV2QueryNow(
+  query: string,
+  setQuery: (query: string) => void,
+  cancelPending: (() => void) | null = null,
+) {
+  cancelPending?.();
+  setQuery(query);
+}
+
 export function androidMapSearchKeyboardCoversVisualWork(
   platform: string,
   keyboardVisible: boolean,

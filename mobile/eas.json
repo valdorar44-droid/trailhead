@@ -41,6 +41,7 @@
   "submit": {
     "production": {
       "android": {
+        "applicationId": "com.trailhead.app",
         "track": "production",
         "releaseStatus": "draft"
       },

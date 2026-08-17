@@ -523,11 +523,16 @@ async function main() {
     /validateExpoOfflineSearchIndex/,
     'opening a runtime catalog must not repeat install-time SQLite integrity verification',
   );
-  assert.match(catalogSource, /claimRuntimeOfflineDocumentBudget\(claimedDocumentBytes, artifact\.bytes\)/);
+  assert.match(catalogSource, /runtimeInfo\.size !== artifact\.bytes/);
+  assert.match(catalogSource, /claimRuntimeOfflineDocumentBudget\(claimedDocumentBytes, runtimeInfo\.size\)/);
   assert.ok(
-    catalogSource.indexOf('claimRuntimeOfflineDocumentBudget(claimedDocumentBytes, artifact.bytes)')
-      < catalogSource.indexOf('persistence.storage.readText(state.local_uri)'),
-    'the manifest byte budget must be enforced before any whole-document read',
+    catalogSource.indexOf('const runtimeInfo = await persistence.storage.info(state.local_uri)')
+      < catalogSource.indexOf('runtimeInfo.size !== artifact.bytes')
+      && catalogSource.indexOf('runtimeInfo.size !== artifact.bytes')
+        < catalogSource.indexOf('claimRuntimeOfflineDocumentBudget(claimedDocumentBytes, runtimeInfo.size)')
+      && catalogSource.indexOf('claimRuntimeOfflineDocumentBudget(claimedDocumentBytes, runtimeInfo.size)')
+        < catalogSource.indexOf('persistence.storage.readText(state.local_uri)'),
+    'actual runtime size and the document budget must be enforced before any whole-document read',
   );
   assert.match(legacyPackSource, /loadOfflinePlacePacksWithinRuntimeBudget/);
   assert.doesNotMatch(legacyPackSource, /Promise\.all\(index\.map\(loadOfflinePlacePack\)\)/);

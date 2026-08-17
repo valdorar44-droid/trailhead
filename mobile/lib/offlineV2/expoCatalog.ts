@@ -171,7 +171,12 @@ export async function loadExpoOfflineV2Catalog(ownerScope: string): Promise<Expo
       if (state?.status !== 'ready' || !state.local_uri) continue;
       try {
         if (artifact.kind === 'places' || artifact.kind === 'trails') {
-          const budget = claimRuntimeOfflineDocumentBudget(claimedDocumentBytes, artifact.bytes);
+          const runtimeInfo = await persistence.storage.info(state.local_uri);
+          if (!runtimeInfo.exists || runtimeInfo.isDirectory || runtimeInfo.size !== artifact.bytes) {
+            diagnostics.push(`${manifest.bundle_id} ${artifact.kind}: runtime file verification failed.`);
+            continue;
+          }
+          const budget = claimRuntimeOfflineDocumentBudget(claimedDocumentBytes, runtimeInfo.size);
           if (!budget.materialize) {
             diagnostics.push(`${manifest.bundle_id} ${artifact.kind}: deferred from the in-memory catalog (${budget.reason}).`);
             continue;

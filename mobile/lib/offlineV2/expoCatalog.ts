@@ -3,7 +3,7 @@ import type { SearchRequestV2, SearchResultV2, SearchSurfaceV2 } from '../search
 import { offlineSearchResultsV2 } from '../searchV2/presentation';
 import { createExpoOfflineV2Persistence } from './expoAdapters';
 import { markOfflineV2ArtifactsConsumed } from './consumption';
-import { searchExpoOfflineIndex, validateExpoOfflineSearchIndex } from './sqliteIndex';
+import { searchExpoOfflineIndex } from './sqliteIndex';
 import {
   type DownloadedSearchResultPoiV2,
   offlineInstallationRevisionV2,
@@ -184,7 +184,13 @@ export async function loadExpoOfflineV2Catalog(ownerScope: string): Promise<Expo
           }
           markOfflineV2ArtifactsConsumed(ownerScope, manifest.bundle_id, manifest.revision, ['trails']);
         } else if (artifact.kind === 'search_index') {
-          await validateExpoOfflineSearchIndex(state.local_uri, artifact.record_count);
+          // The download/repair runtime verifies the artifact hash, record
+          // count, FTS/RTree schema, and SQLite quick-check before it can
+          // become ready. Repeating quick-check while a search surface opens
+          // can monopolize a SQLite worker for minutes on older Android
+          // devices, so runtime catalog reads bind only the already-verified
+          // ready descriptor. A missing or corrupt file still fails closed
+          // when the best-effort offline query attempts to open it.
           searchIndexes.push({
             bundle_id: manifest.bundle_id,
             revision: manifest.revision,

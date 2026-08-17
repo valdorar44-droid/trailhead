@@ -466,12 +466,23 @@ async function main() {
   const mapSource = readFileSync('app/(tabs)/map.tsx', 'utf8');
   const guideSource = readFileSync('app/(tabs)/guide.tsx', 'utf8');
   const catalogSource = readFileSync('lib/offlineV2/expoCatalog.ts', 'utf8');
+  const runtimeSource = readFileSync('lib/offlineV2/expoRuntime.ts', 'utf8');
   const sqliteSource = readFileSync('lib/offlineV2/sqliteIndex.ts', 'utf8');
   assert.match(catalogSource, /searchDownloadedOfflineIndexesV2\(\{/);
   assert.match(catalogSource, /const indexed = await searchExpoOfflineV2Catalog[\s\S]*const legacy = offlineSearchResultsV2/);
   assert.doesNotMatch(catalogSource, /if \(fallback\.length > 0\) return fallback;/);
   assert.match(catalogSource, /offline_entity_kind: fallbackType === 'trail' \? 'trail_profile' : 'place'/);
   assert.match(catalogSource, /trailGeometryRepresentativePointV2\(feature\.geometry, manifest\.bounds\)/);
+  assert.doesNotMatch(
+    catalogSource,
+    /validateExpoOfflineSearchIndex/,
+    'opening a runtime catalog must not repeat install-time SQLite integrity verification',
+  );
+  assert.match(
+    runtimeSource,
+    /validateSearchIndex:\s*validateExpoOfflineSearchIndex/,
+    'download and repair promotion must retain authoritative SQLite integrity verification',
+  );
   assert.match(sqliteSource, /LIMIT \? OFFSET \?/);
   assert.match(sqliteSource, /d\.title, d\.result_id/);
   assert.match(

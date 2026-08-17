@@ -142,6 +142,12 @@ test('Search surfaces prefer the offline FTS index and clear stale place modules
     assert.doesNotMatch(source, /if \(fallback\.length > 0\) return fallback;/);
   }
   assert.match(mapSource, /setSearchRouteCard\(null\);\s*setSelectedPlaceContext\(null\);\s*setSelectedPlaceTripContext/);
+  const reloadOfflineInventory = mapSource.match(
+    /const reloadOfflinePlacePois = useCallback\([\s\S]*?\n\s*useEffect\(\(\) => \{/,
+  )?.[0] ?? '';
+  assert.match(reloadOfflineInventory, /await mapSearchV2\.refreshOffline\(\);/);
+  assert.doesNotMatch(reloadOfflineInventory, /inlineSearchOpen|showFullMapSearch/);
+  assert.match(mapSource, /onOfflinePlacesChanged=\{reloadOfflinePlacePois\}/);
 });
 
 test('temporary place sheets expose session-safe actions only', () => {

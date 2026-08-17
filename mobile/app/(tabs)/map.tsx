@@ -10046,20 +10046,12 @@ function MapScreen() {
     setOfflinePlaceInventory(nextInventory);
     setMapSearchOwnerScopeKey(requestScope.key);
     if (searchV2Enabled) {
-      const activeQuery = searchQueryRef.current;
-      if (normalizeSearchV2Query(activeQuery).length > 0
-        && (inlineSearchOpen || showFullMapSearch)) {
-        mapSearchV2.setQuery(activeQuery);
-      }
       await mapSearchV2.refreshOffline();
     }
   }, [
-    inlineSearchOpen,
     mapSearchV2.refreshOffline,
-    mapSearchV2.setQuery,
     mapAccountTransitionBlocked,
     searchV2Enabled,
-    showFullMapSearch,
   ]);
 
   useEffect(() => {

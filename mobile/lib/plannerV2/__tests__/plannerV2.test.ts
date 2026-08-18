@@ -115,12 +115,33 @@ test('bounded preview keeps both endpoints and every safety research category', 
 });
 
 test('resume storage is account-scoped', () => {
-  assert.equal(plannerRunStorageKey(12), 'planner_research_run:12');
+  assert.equal(plannerRunStorageKey(12), 'planner_research_run.12');
   assert.notEqual(plannerRunStorageKey(12), plannerRunStorageKey(13));
-  assert.equal(plannerConversationStorageKey(12), 'planner_research_conversation:12');
+  assert.equal(plannerConversationStorageKey(12), 'planner_research_conversation.12');
   assert.notEqual(plannerConversationStorageKey(12), plannerConversationStorageKey(13));
-  assert.equal(plannerStartRequestStorageKey(12), 'planner_research_start_request:12');
+  assert.equal(plannerStartRequestStorageKey(12), 'planner_research_start_request.12');
   assert.notEqual(plannerStartRequestStorageKey(12), plannerStartRequestStorageKey(13));
+  for (const key of [
+    plannerRunStorageKey(12),
+    plannerConversationStorageKey(12),
+    plannerStartRequestStorageKey(12),
+  ]) {
+    assert.match(key, /^[\w.-]+$/);
+    assert.doesNotMatch(key, /:/);
+  }
+});
+
+test('welcome starts as a compact conversation and expands after the first message', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const screen = readFileSync(resolve(here, '../../../components/plannerV2/PlannerV2Screen.tsx'), 'utf8');
+  assert.match(screen, /const isWelcome = messages\.length === 0/);
+  assert.match(screen, /What kind of trip are you imagining\?/);
+  assert.match(screen, /Help me create a camping trip/);
+  assert.match(screen, /Where are some of the best campgrounds around Moab\?/);
+  assert.match(screen, /Find campsites around Moab that will fit my RV/);
+  assert.match(screen, /submitBehavior="submit"/);
+  assert.match(screen, /!isWelcome \? \(/);
+  assert.doesNotMatch(screen, /Build a desert road trip|Moab to Flagstaff · 3 days|TRY A CONVERSATION/);
 });
 
 test('start retry preserves one account-scoped request and cancel copy is truthful', () => {

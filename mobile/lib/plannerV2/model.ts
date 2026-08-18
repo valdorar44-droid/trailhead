@@ -142,13 +142,13 @@ export function plannerDraftSummary(trip: TripResult | null) {
 }
 
 export function plannerRunStorageKey(userId: string | number | null | undefined) {
-  return `planner_research_run:${String(userId ?? 'signed-out')}`;
+  return `planner_research_run.${String(userId ?? 'signed-out')}`;
 }
 
 export function plannerStartRequestStorageKey(userId: string | number | null | undefined) {
-  return `planner_research_start_request:${String(userId ?? 'signed-out')}`;
+  return `planner_research_start_request.${String(userId ?? 'signed-out')}`;
 }
 
 export function plannerConversationStorageKey(userId: string | number | null | undefined) {
-  return `planner_research_conversation:${String(userId ?? 'signed-out')}`;
+  return `planner_research_conversation.${String(userId ?? 'signed-out')}`;
 }

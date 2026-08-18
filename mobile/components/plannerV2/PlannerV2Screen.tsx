@@ -51,23 +51,17 @@ import {
 
 const STARTERS = [
   {
-    title: 'Build a desert road trip',
-    detail: 'Moab to Flagstaff · 3 days · camps and scenic stops',
-    prompt: 'Plan a 3-day road trip from Moab, Utah to Flagstaff, Arizona. Research legal camps, fuel spacing, scenic stops, permits, and current access concerns.',
+    prompt: 'Help me create a camping trip',
   },
   {
-    title: 'Find a quieter long weekend',
-    detail: 'Olympic Peninsula · forests, coast, and realistic driving',
-    prompt: 'Help me plan a quiet long weekend around the Olympic Peninsula with good camps, hikes, realistic drive times, and backup options.',
+    prompt: 'Where are some of the best campgrounds around Moab?',
   },
   {
-    title: 'Plan around my vehicle',
-    detail: 'Yellowstone · camper-friendly roads, fuel, and reservations',
-    prompt: 'Plan a Yellowstone trip for a camper. Ask what you need to know, then research camp access, fuel, reservations, closures, and worthwhile stops.',
+    prompt: 'Find campsites around Moab that will fit my RV',
   },
 ];
 
-const GUIDE_GREETING = "Tell me the trip you're imagining. I'll research the route, camps, fuel, permits, and worthwhile stops—then show you what I checked before building anything.";
+const GUIDE_GREETING = "Tell me where you want to go—or just the kind of trip you want. I'll ask what matters, research the route, and show you what I checked.";
 
 function restoreConversation(raw: string | null): {
   messages: PlannerV2Message[];
@@ -612,31 +606,59 @@ function ConversationView({
   bottomInset: number;
 }) {
   const isWelcome = messages.length === 0;
+  const composer = (welcome = false) => (
+    <View style={[s.composer, welcome && s.welcomeComposer]}>
+      <TextInput
+        testID="planner.v2.composer"
+        accessibilityLabel="Describe your trip"
+        style={[s.composerInput, welcome && s.welcomeComposerInput]}
+        value={input}
+        onChangeText={setInput}
+        placeholder="Describe your trip…"
+        placeholderTextColor={C.text3}
+        multiline
+        maxLength={2000}
+        editable={!busy}
+        returnKeyType="send"
+        submitBehavior="submit"
+        onSubmitEditing={() => sendMessage()}
+      />
+      <TouchableOpacity accessibilityLabel="Send trip message" style={[s.sendButton, (!input.trim() || busy) && s.sendButtonDisabled]} disabled={!input.trim() || busy} onPress={() => sendMessage()}>
+        <Ionicons name="arrow-up" size={21} color="#fff" />
+      </TouchableOpacity>
+    </View>
+  );
   return (
     <View style={s.flex}>
-      <ScrollView ref={scrollRef} style={s.flex} contentContainerStyle={[s.conversationContent, { paddingBottom: 24 }]} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        ref={scrollRef}
+        style={s.flex}
+        contentContainerStyle={isWelcome ? s.welcomeContent : [s.conversationContent, { paddingBottom: 24 }]}
+        keyboardShouldPersistTaps="handled"
+      >
         {isWelcome ? (
-          <>
-            <LinearGradient colors={[C.s2, C.s1]} style={s.welcomeCard}>
-              <View style={s.guideMark}><Ionicons name="sparkles" size={24} color={C.orange} /></View>
-              <Text style={s.welcomeTitle}>Start with the trip you can picture.</Text>
-              <Text style={s.welcomeBody}>{GUIDE_GREETING}</Text>
-              <View style={s.truthRow}>
-                <Ionicons name="checkmark-circle-outline" size={16} color={C.green} />
-                <Text style={s.truthText}>You will see what was checked, what needs review, and every source we can verify.</Text>
-              </View>
-            </LinearGradient>
-            <Text style={s.sectionLabel}>TRY A CONVERSATION</Text>
-            {STARTERS.map(starter => (
-              <TouchableOpacity key={starter.title} style={s.starterCard} onPress={() => sendMessage(starter.prompt, starter.prompt)} activeOpacity={0.82}>
-                <View style={s.starterCopy}>
-                  <Text style={s.starterTitle}>{starter.title}</Text>
-                  <Text style={s.starterDetail}>{starter.detail}</Text>
-                </View>
-                <Ionicons name="arrow-forward" size={20} color={C.orange} />
-              </TouchableOpacity>
-            ))}
-          </>
+          <View style={s.welcomeConversation}>
+            <View style={s.welcomeGuideMark}><Ionicons name="sparkles" size={20} color={C.orange} /></View>
+            <Text style={s.welcomeTitle}>What kind of trip are you imagining?</Text>
+            <Text style={s.welcomeBody}>{GUIDE_GREETING}</Text>
+            {composer(true)}
+            <Text style={s.welcomePromptLabel}>TRY ASKING</Text>
+            <View style={s.starterChipWrap}>
+              {STARTERS.map(starter => (
+                <TouchableOpacity
+                  key={starter.prompt}
+                  accessibilityRole="button"
+                  accessibilityLabel={starter.prompt}
+                  style={s.starterChip}
+                  disabled={busy}
+                  onPress={() => sendMessage(starter.prompt)}
+                  activeOpacity={0.78}
+                >
+                  <Text style={s.starterChipText}>{starter.prompt}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
         ) : (
           <>
             <View style={[s.chatBubble, s.guideBubble]}>
@@ -690,25 +712,11 @@ function ConversationView({
         {error ? <InlineWarning s={s} C={C} text={error} /> : null}
       </ScrollView>
 
-      <View style={[s.composerDock, { paddingBottom: Math.max(bottomInset, 10) }]}>
-        <View style={s.composer}>
-          <TextInput
-            testID="planner.v2.composer"
-            style={s.composerInput}
-            value={input}
-            onChangeText={setInput}
-            placeholder="Describe your trip…"
-            placeholderTextColor={C.text3}
-            multiline
-            maxLength={2000}
-            editable={!busy}
-            onSubmitEditing={() => sendMessage()}
-          />
-          <TouchableOpacity accessibilityLabel="Send trip message" style={[s.sendButton, (!input.trim() || busy) && s.sendButtonDisabled]} disabled={!input.trim() || busy} onPress={() => sendMessage()}>
-            <Ionicons name="arrow-up" size={21} color="#fff" />
-          </TouchableOpacity>
+      {!isWelcome ? (
+        <View style={[s.composerDock, { paddingBottom: Math.max(bottomInset, 10) }]}>
+          {composer()}
         </View>
-      </View>
+      ) : null}
     </View>
   );
 }
@@ -1037,16 +1045,19 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   signInTitle: { color: C.text, fontSize: 31, lineHeight: 34, fontFamily: 'BarlowCondensed_700Bold', textAlign: 'center', maxWidth: 330 },
   signInBody: { color: C.text2, fontSize: 15, lineHeight: 22, textAlign: 'center', maxWidth: 350, marginTop: 10, marginBottom: 24 },
   conversationContent: { paddingHorizontal: 16, paddingTop: 16 },
-  welcomeCard: { borderWidth: 1, borderColor: C.border, borderRadius: 22, padding: 22, marginBottom: 24 },
-  welcomeTitle: { color: C.text, fontSize: 34, lineHeight: 36, fontFamily: 'BarlowCondensed_700Bold', maxWidth: 330 },
-  welcomeBody: { color: C.text2, fontSize: 15, lineHeight: 23, marginTop: 12 },
-  truthRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginTop: 18, paddingTop: 16, borderTopWidth: 1, borderTopColor: C.border },
-  truthText: { flex: 1, color: C.text3, fontSize: 12, lineHeight: 18 },
+  welcomeContent: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 20, paddingTop: 22, paddingBottom: 26 },
+  welcomeConversation: { width: '100%', maxWidth: 560, alignSelf: 'center' },
+  welcomeGuideMark: { width: 42, height: 42, borderRadius: 15, borderWidth: 1, borderColor: C.orange + '55', backgroundColor: C.orangeGlow, alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+  welcomeTitle: { color: C.text, fontSize: 29, lineHeight: 31, fontFamily: 'BarlowCondensed_700Bold', maxWidth: 350 },
+  welcomeBody: { color: C.text2, fontSize: 14, lineHeight: 21, marginTop: 8, marginBottom: 18, maxWidth: 390 },
+  welcomeComposer: { minHeight: 74, borderRadius: 22, borderColor: C.orange + '66', backgroundColor: C.s1, padding: 10 },
+  welcomeComposerInput: { minHeight: 52, fontSize: 15, lineHeight: 21 },
+  welcomePromptLabel: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '800', letterSpacing: 1.1, marginTop: 16, marginBottom: 9 },
+  starterChipWrap: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'flex-start', gap: 8 },
+  starterChip: { maxWidth: '100%', minHeight: 36, justifyContent: 'center', borderWidth: 1, borderColor: C.border, backgroundColor: C.s1, borderRadius: 18, paddingHorizontal: 13, paddingVertical: 8 },
+  starterChipText: { color: C.text2, fontSize: 12, lineHeight: 17, fontWeight: '700' },
   sectionLabel: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '800', letterSpacing: 1.2, marginBottom: 10 },
-  starterCard: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1, borderColor: C.border, backgroundColor: C.s1, borderRadius: 15, padding: 16, marginBottom: 10 },
   starterCopy: { flex: 1 },
-  starterTitle: { color: C.text, fontSize: 16, lineHeight: 20, fontWeight: '800' },
-  starterDetail: { color: C.text3, fontSize: 12, lineHeight: 17, marginTop: 4 },
   chatBubble: { maxWidth: '88%', borderRadius: 16, paddingHorizontal: 15, paddingVertical: 13, marginBottom: 10, borderWidth: 1 },
   guideBubble: { alignSelf: 'flex-start', borderColor: C.border, backgroundColor: C.s1, borderBottomLeftRadius: 4 },
   userBubble: { alignSelf: 'flex-end', borderColor: C.orange + '55', backgroundColor: C.orangeGlow, borderBottomRightRadius: 4 },

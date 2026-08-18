@@ -177,6 +177,7 @@ export default function PlannerV2Screen() {
   const route = useMemo(() => draft ? routeBuildCoordsFromTrip(draft) : [], [draft]);
   const mapPins = useMemo(() => plannerMapPins(draft), [draft]);
   const progress = useMemo(() => plannerTaskProgress(snapshot?.tasks ?? []), [snapshot?.tasks]);
+  const researchActive = Boolean(snapshot && !plannerRunIsTerminal(snapshot.status));
 
   const applySnapshot = useCallback((next: PlannerV2Snapshot) => {
     setSnapshot(previous => ({
@@ -184,7 +185,6 @@ export default function PlannerV2Screen() {
       events: mergePlannerEvents(previous?.events ?? [], next.events ?? []),
     }));
     if (['ready_for_review', 'committing', 'committed'].includes(next.status)) setView('reveal');
-    else if (next.status !== 'cancelled' && next.status !== 'failed') setView('research');
   }, []);
 
   useEffect(() => {
@@ -525,6 +525,10 @@ export default function PlannerV2Screen() {
             setInput={setInput}
             sendMessage={sendMessage}
             startResearch={startResearch}
+            snapshot={snapshot}
+            progress={progress}
+            researchActive={researchActive}
+            onOpenResearch={() => setView('research')}
             scrollRef={scrollRef}
             bottomInset={insets.bottom}
           />
@@ -538,7 +542,6 @@ export default function PlannerV2Screen() {
             busy={busy}
             onCancel={cancelResearch}
             onReturn={() => setView('conversation')}
-            scrollRef={scrollRef}
           />
         ) : view === 'review' ? (
           <FullReview
@@ -591,7 +594,7 @@ type SharedViewProps = { C: ColorPalette; s: ReturnType<typeof makeStyles> };
 
 function ConversationView({
   C, s, messages, question, outline, busy, error, input, setInput, sendMessage,
-  startResearch, scrollRef, bottomInset,
+  startResearch, snapshot, progress, researchActive, onOpenResearch, scrollRef, bottomInset,
 }: SharedViewProps & {
   messages: PlannerV2Message[];
   question: PlannerQuestion | null;
@@ -602,10 +605,14 @@ function ConversationView({
   setInput: (value: string) => void;
   sendMessage: (text?: string, visibleText?: string) => void;
   startResearch: () => void;
+  snapshot: PlannerV2Snapshot | null;
+  progress: { completed: number; total: number; ratio: number };
+  researchActive: boolean;
+  onOpenResearch: () => void;
   scrollRef: RefObject<ScrollView | null>;
   bottomInset: number;
 }) {
-  const isWelcome = messages.length === 0;
+  const isWelcome = messages.length === 0 && !researchActive;
   const composer = (welcome = false) => (
     <View style={[s.composer, welcome && s.welcomeComposer]}>
       <TextInput
@@ -693,7 +700,26 @@ function ConversationView({
           </View>
         ) : null}
 
-        {outline ? (
+        {researchActive && snapshot ? (
+          <TouchableOpacity
+            testID="planner.v2.open-research-checklist"
+            accessibilityRole="button"
+            accessibilityLabel={`Researching your trip. ${newestPlannerMessage(snapshot)}. ${progress.completed} of ${progress.total} checks finished. View research checklist.`}
+            style={s.activeResearchCard}
+            onPress={onOpenResearch}
+            activeOpacity={0.78}
+          >
+            <View style={s.activeResearchIcon}>
+              <ActivityIndicator size="small" color={C.orange} />
+            </View>
+            <View style={s.flex}>
+              <Text style={s.activeResearchTitle}>Researching your trip</Text>
+              <Text style={s.activeResearchBody}>{newestPlannerMessage(snapshot)}</Text>
+              <Text style={s.activeResearchMeta}>{progress.completed} of {progress.total} checks finished · View research checklist</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={C.text3} />
+          </TouchableOpacity>
+        ) : outline ? (
           <View style={s.researchReadyCard}>
             <View style={s.readyIcon}><Ionicons name="search" size={20} color={C.green} /></View>
             <View style={s.flex}>
@@ -721,20 +747,19 @@ function ConversationView({
   );
 }
 
-function ResearchView({ C, s, snapshot, progress, error, busy, onCancel, onReturn, scrollRef }: SharedViewProps & {
+function ResearchView({ C, s, snapshot, progress, error, busy, onCancel, onReturn }: SharedViewProps & {
   snapshot: PlannerV2Snapshot | null;
   progress: { completed: number; total: number; ratio: number };
   error: string;
   busy: boolean;
   onCancel: () => void;
   onReturn: () => void;
-  scrollRef: RefObject<ScrollView | null>;
 }) {
   const status = snapshot?.status ?? 'pending';
   const failed = status === 'failed';
   const cancelled = status === 'cancelled';
   return (
-    <ScrollView ref={scrollRef} style={s.flex} contentContainerStyle={s.researchContent}>
+    <ScrollView style={s.flex} contentContainerStyle={s.researchContent}>
       <LinearGradient colors={[C.s2, C.s1]} style={s.researchHero}>
         <Text style={s.researchKicker}>{failed ? 'RESEARCH NEEDS ATTENTION' : cancelled ? 'RESEARCH STOPPED' : 'RESEARCHING YOUR TRIP'}</Text>
         <Text style={s.researchTitle}>{failed || cancelled ? 'Your completed checks are still here.' : newestPlannerMessage(snapshot)}</Text>
@@ -767,6 +792,10 @@ function ResearchView({ C, s, snapshot, progress, error, busy, onCancel, onRetur
             <Ionicons name="shield-checkmark-outline" size={18} color={C.green} />
             <Text style={s.researchNoticeText}>A checkmark appears only after that work has finished. Missing evidence stays visible as a warning.</Text>
           </View>
+          <TouchableOpacity style={s.secondaryButton} onPress={onReturn}>
+            <Ionicons name="chatbubble-outline" size={17} color={C.text} />
+            <Text style={s.secondaryButtonText}>Back to the conversation</Text>
+          </TouchableOpacity>
           <TouchableOpacity disabled={busy} style={s.cancelButton} onPress={onCancel}>
             <Text style={s.cancelButtonText}>Stop this research</Text>
           </TouchableOpacity>
@@ -1074,6 +1103,11 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   readyIcon: { width: 38, height: 38, borderRadius: 13, backgroundColor: C.green + '18', alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
   readyTitle: { color: C.text, fontSize: 18, fontWeight: '900' },
   readyBody: { color: C.text2, fontSize: 13, lineHeight: 19, marginTop: 5, marginBottom: 16 },
+  activeResearchCard: { flexDirection: 'row', alignItems: 'center', gap: 11, borderWidth: 1, borderColor: C.orange + '55', backgroundColor: C.orangeGlow, borderRadius: 16, padding: 14, marginTop: 8, marginBottom: 12 },
+  activeResearchIcon: { width: 38, height: 38, borderRadius: 13, backgroundColor: C.s1, alignItems: 'center', justifyContent: 'center' },
+  activeResearchTitle: { color: C.text, fontSize: 14, fontWeight: '900' },
+  activeResearchBody: { color: C.text2, fontSize: 12, lineHeight: 17, marginTop: 2 },
+  activeResearchMeta: { color: C.orange, fontSize: 10, lineHeight: 15, fontWeight: '800', marginTop: 5 },
   thinkingRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 10 },
   thinkingText: { color: C.text3, fontSize: 12 },
   composerDock: { borderTopWidth: 1, borderTopColor: C.border, backgroundColor: C.bg, paddingHorizontal: 12, paddingTop: 10 },

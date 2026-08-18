@@ -144,6 +144,28 @@ test('welcome starts as a compact conversation and expands after the first messa
   assert.doesNotMatch(screen, /Build a desert road trip|Moab to Flagstaff · 3 days|TRY A CONVERSATION/);
 });
 
+test('live research stays attached to the conversation with an expandable checklist', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const screen = readFileSync(resolve(here, '../../../components/plannerV2/PlannerV2Screen.tsx'), 'utf8');
+  const applySnapshotStart = screen.indexOf('const applySnapshot');
+  const applySnapshotEnd = screen.indexOf('useEffect(() =>', applySnapshotStart);
+  assert.ok(applySnapshotStart >= 0 && applySnapshotEnd > applySnapshotStart);
+  assert.doesNotMatch(screen.slice(applySnapshotStart, applySnapshotEnd), /setView\('research'\)/);
+  assert.match(screen, /testID="planner\.v2\.open-research-checklist"/);
+  assert.match(screen, /Researching your trip/);
+  assert.match(screen, /View research checklist/);
+  assert.match(screen, /Back to the conversation/);
+  assert.match(screen, /researchActive && snapshot \? \(/);
+  assert.match(screen, /onOpenResearch=\{\(\) => setView\('research'\)\}/);
+  assert.match(screen, /const isWelcome = messages\.length === 0 && !researchActive/);
+  assert.match(screen, /accessibilityLabel=\{`Researching your trip\. \$\{newestPlannerMessage\(snapshot\)\}\. \$\{progress\.completed\} of \$\{progress\.total\} checks finished\. View research checklist\.`\}/);
+  assert.match(screen, /!isWelcome \? \([\s\S]*composer\(\)/);
+  const researchViewStart = screen.indexOf('function ResearchView');
+  const revealViewStart = screen.indexOf('function RevealView', researchViewStart);
+  assert.ok(researchViewStart >= 0 && revealViewStart > researchViewStart);
+  assert.doesNotMatch(screen.slice(researchViewStart, revealViewStart), /ref=\{scrollRef\}/);
+});
+
 test('start retry preserves one account-scoped request and cancel copy is truthful', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const screen = readFileSync(resolve(here, '../../../components/plannerV2/PlannerV2Screen.tsx'), 'utf8');

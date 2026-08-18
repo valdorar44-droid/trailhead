@@ -42,8 +42,11 @@ import {
   plannerCampCardSummary,
   plannerDraftSummary,
   plannerMapPins,
+  plannerPresentationNotices,
+  plannerReadinessCopy,
   plannerRunIsTerminal,
   plannerRunStorageKey,
+  plannerSourceSummaryCopy,
   plannerStartRequestStorageKey,
   plannerConversationStorageKey,
   plannerTaskProgress,
@@ -840,6 +843,7 @@ function RevealView({ C, s, trip, snapshot, summary, route, pins, error, busy, o
   if (!trip || !snapshot) return <View style={s.centered}><ActivityIndicator color={C.orange} /></View>;
   const camps = (trip.campsites ?? []).slice(0, 3);
   const experiences = (trip.route_pois ?? []).slice(0, 3);
+  const readiness = plannerReadinessCopy(trip);
   const pendingDetours = (snapshot.detour_proposals ?? []).filter(proposal => !proposal.decision || proposal.decision === 'pending').length;
   const routeStops = trip.plan.waypoints ?? [];
   const startName = routeStops[0]?.name || 'your starting point';
@@ -853,7 +857,7 @@ function RevealView({ C, s, trip, snapshot, summary, route, pins, error, busy, o
       <View style={s.revealIntro}>
         <Text style={s.revealKicker}>YOUR RESEARCHED ROUTE</Text>
         <Text style={s.revealTitle}>{trip.plan.trip_name}</Text>
-        <Text style={s.revealTagline}>A {summary.days}-day route from {startName} to {destinationName}, with road timing, sourced stops, and current conditions ready to review.</Text>
+        <Text style={s.revealTagline}>A {summary.days}-day route from {startName} to {destinationName}, with road timing and sourced stops ready to review.</Text>
       </View>
 
       <View style={s.heroMapShell}>
@@ -879,8 +883,8 @@ function RevealView({ C, s, trip, snapshot, summary, route, pins, error, busy, o
       <View style={s.bentoGrid}>
         <BentoCard s={s} C={C} icon="navigate-outline" label="DRIVING RHYTHM" title={`${summary.days} days · ${summary.miles.toLocaleString()} miles`} body={dayRhythm || 'Confirmed route anchors are ready for review.'} />
         <BentoCard s={s} C={C} icon="bed-outline" label="OVERNIGHTS" title={`${camps.length} highlighted ${camps.length === 1 ? 'camp' : 'camps'}`} body={camps.map(camp => camp.name).join('\n') || 'No sourced camp was confirmed. Review the warning before leaving.'} warning={!camps.length} />
-        <BentoCard s={s} C={C} icon="trail-sign-outline" label="BEST EXPERIENCES" title={`${experiences.length} route-fit ideas`} body={experiences.map(place => place.name).join('\n') || 'No sourced experience was confirmed for this draft.'} warning={!experiences.length} />
-        <BentoCard s={s} C={C} icon="car-sport-outline" label="READINESS" title={`${summary.fuel} fuel · ${trip.weather_checks?.length ?? 0} weather areas`} body={`${trip.plan.logistics?.fuel_strategy || 'Review fuel spacing.'}\n${trip.route_conditions?.length ? `${trip.route_conditions.length} current route condition${trip.route_conditions.length === 1 ? '' : 's'} flagged for review.` : 'No current route warning was returned; recheck before departure.'}`} />
+        <BentoCard s={s} C={C} icon="trail-sign-outline" label="BEST EXPERIENCES" title={experiences.length ? `${experiences.length} route-fit ideas` : 'Keep this trip focused'} body={experiences.map(place => place.name).join('\n') || 'No optional experiences were added. Ask Trailhead if you want ideas along the route.'} />
+        <BentoCard s={s} C={C} icon="car-sport-outline" label="READINESS" title="Fuel & road readiness" body={`${trip.plan.logistics?.fuel_strategy || 'Review fuel spacing.'}\n${readiness.fuel}\n${readiness.conditions}`} />
       </View>
 
       {(snapshot.detour_proposals ?? []).length ? (
@@ -930,18 +934,13 @@ function RevealView({ C, s, trip, snapshot, summary, route, pins, error, busy, o
         </View>
       ) : null}
 
-      {(snapshot.warnings ?? []).length ? (
-        <View style={s.warningPanel}>
-          <View style={s.panelHeading}><Ionicons name="warning-outline" size={18} color={C.yellow} /><Text style={s.panelTitle}>What still needs your attention</Text></View>
-          {snapshot.warnings.map(warning => <Text key={warning} style={s.warningLine}>• {warning}</Text>)}
-        </View>
-      ) : null}
+      <PlannerNoticePanels s={s} C={C} warnings={snapshot.warnings ?? []} />
 
       <TouchableOpacity style={s.sourceSummary} onPress={onSources}>
         <View style={s.sourceSummaryIcon}><Ionicons name="documents-outline" size={20} color={C.green} /></View>
         <View style={s.flex}>
           <Text style={s.sourceSummaryTitle}>What Trailhead checked</Text>
-          <Text style={s.sourceSummaryBody}>{snapshot.source_summary.source_count} direct sources · {snapshot.source_summary.official_count} official · every shown finding opens its source</Text>
+          <Text style={s.sourceSummaryBody}>{plannerSourceSummaryCopy(snapshot.source_summary.source_count, snapshot.source_summary.official_count)}</Text>
         </View>
         <Ionicons name="chevron-forward" size={18} color={C.text3} />
       </TouchableOpacity>
@@ -977,6 +976,7 @@ function FullReview({ C, s, trip, findings, warnings, busy, saved, saving, onBac
   const destinationName = stops[stops.length - 1]?.name || 'your destination';
   const allCamps = trip.campsites ?? [];
   const reviewCamps = allCamps.slice(0, 6);
+  const readiness = plannerReadinessCopy(trip);
   const days = Array.from({ length: Math.max(1, Number(trip.plan.duration_days || 1)) }, (_, index) => ({
     day: index + 1,
     stops: stops.filter(stop => Number(stop.day || 1) === index + 1),
@@ -986,7 +986,7 @@ function FullReview({ C, s, trip, findings, warnings, busy, saved, saving, onBac
       <TouchableOpacity style={s.backButton} onPress={onBack}><Ionicons name="arrow-back" size={18} color={C.text} /><Text style={s.backButtonText}>Back to trip preview</Text></TouchableOpacity>
       <Text style={s.reviewKicker}>FULL TRIP REVIEW</Text>
       <Text style={s.reviewTitle}>{trip.plan.trip_name}</Text>
-      <Text style={s.reviewOverview}>Review the confirmed route from {startName} to {destinationName}. Sourced camps, fuel, experiences, weather, and active conditions remain linked below.</Text>
+      <Text style={s.reviewOverview}>Review the confirmed route from {startName} to {destinationName}. Research notes and available sources remain linked below.</Text>
 
       {days.map(day => (
         <View key={day.day} style={s.dayCard}>
@@ -1019,12 +1019,12 @@ function FullReview({ C, s, trip, findings, warnings, busy, saved, saving, onBac
 
       <View style={s.reviewSection}>
         <Text style={s.sectionLabel}>FUEL, PERMITS & CONDITIONS</Text>
-        <ReviewRow s={s} C={C} icon="car-outline" title="Fuel plan" body={`${trip.gas_stations?.length ?? 0} sourced fuel options are included. Open the source list and confirm hours before departure.`} />
-        <ReviewRow s={s} C={C} icon="document-text-outline" title="Permits" body="Treat permits as unconfirmed unless a direct agency source appears in What Trailhead checked." />
-        <ReviewRow s={s} C={C} icon="partly-sunny-outline" title="Conditions" body={`${trip.weather_checks?.length ?? 0} weather areas checked · ${trip.route_conditions?.length ?? 0} current route conditions returned. Recheck both before departure.`} />
+        <ReviewRow s={s} C={C} icon="car-outline" title="Fuel plan" body={readiness.fuel} />
+        <ReviewRow s={s} C={C} icon="document-text-outline" title="Permits" body={readiness.permits} />
+        <ReviewRow s={s} C={C} icon="partly-sunny-outline" title="Weather & road updates" body={readiness.conditions} />
       </View>
 
-      {warnings.length ? <View style={s.warningPanel}>{warnings.map(warning => <Text key={warning} style={s.warningLine}>• {warning}</Text>)}</View> : null}
+      <PlannerNoticePanels s={s} C={C} warnings={warnings} />
       <TouchableOpacity style={s.sourceSummary} onPress={onSources}><Ionicons name="documents-outline" size={20} color={C.green} /><View style={s.flex}><Text style={s.sourceSummaryTitle}>{findings.length} sourced findings</Text><Text style={s.sourceSummaryBody}>Open the evidence behind camps, fuel, and worthwhile stops.</Text></View><Ionicons name="chevron-forward" size={18} color={C.text3} /></TouchableOpacity>
       <TouchableOpacity style={s.secondaryButton} onPress={onMap}><Ionicons name="map-outline" size={17} color={C.text} /><Text style={s.secondaryButtonText}>Continue on the full map</Text></TouchableOpacity>
       <TouchableOpacity testID="planner.v2.save-to-trips" style={[s.primaryButton, saved && s.savedButton]} disabled={busy || saved} onPress={onSave}>
@@ -1059,8 +1059,8 @@ function SourcesModal({ C, s, visible, findings, warnings, onClose }: SharedView
                 <Text style={s.findingSource}>{finding.source_title} · {finding.freshness}</Text>
               </TouchableOpacity>
             ))}
-            {!findings.length ? <InlineWarning s={s} C={C} text="No direct source links were available for this draft." /> : null}
-            {warnings.map(warning => <InlineWarning key={warning} s={s} C={C} text={warning} />)}
+            {!findings.length ? <InlineNote s={s} C={C} text="Research links will appear here after Trailhead confirms a source for a finding." /> : null}
+            <PlannerNoticePanels s={s} C={C} warnings={warnings} />
           </ScrollView>
         </View>
       </View>
@@ -1080,6 +1080,30 @@ function BentoCard({ s, C, icon, label, title, body, warning = false }: SharedVi
 
 function ReviewRow({ s, C, icon, title, body }: SharedViewProps & { icon: keyof typeof Ionicons.glyphMap; title: string; body: string }) {
   return <View style={s.reviewRow}><View style={s.reviewRowIcon}><Ionicons name={icon} size={18} color={C.orange} /></View><View style={s.flex}><Text style={s.reviewRowTitle}>{title}</Text><Text style={s.reviewRowBody}>{body}</Text></View></View>;
+}
+
+function PlannerNoticePanels({ s, C, warnings }: SharedViewProps & { warnings: string[] }) {
+  const notices = plannerPresentationNotices(warnings);
+  return (
+    <>
+      {notices.notes.length ? (
+        <View style={s.notePanel}>
+          <View style={s.panelHeading}><Ionicons name="information-circle-outline" size={18} color={C.green} /><Text style={s.panelTitle}>Planning notes</Text></View>
+          {notices.notes.map(note => <Text key={note} style={s.noticeLine}>{note}</Text>)}
+        </View>
+      ) : null}
+      {notices.cautions.length ? (
+        <View style={s.warningPanel}>
+          <View style={s.panelHeading}><Ionicons name="warning-outline" size={18} color={C.yellow} /><Text style={s.panelTitle}>Before you go</Text></View>
+          {notices.cautions.map(caution => <Text key={caution} style={s.warningLine}>• {caution}</Text>)}
+        </View>
+      ) : null}
+    </>
+  );
+}
+
+function InlineNote({ s, C, text }: SharedViewProps & { text: string }) {
+  return <View style={s.inlineNote}><Ionicons name="information-circle-outline" size={17} color={C.green} /><Text style={s.inlineNoteText}>{text}</Text></View>;
 }
 
 function InlineWarning({ s, C, text }: SharedViewProps & { text: string }) {
@@ -1153,6 +1177,8 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   secondaryButtonText: { color: C.text, fontSize: 13, fontWeight: '800' },
   inlineWarning: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, borderWidth: 1, borderColor: C.yellow + '55', backgroundColor: C.yellow + '0F', borderRadius: 13, padding: 12, marginVertical: 8 },
   inlineWarningText: { flex: 1, color: C.text2, fontSize: 12, lineHeight: 18 },
+  inlineNote: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, borderWidth: 1, borderColor: C.green + '44', backgroundColor: C.green + '08', borderRadius: 13, padding: 12, marginVertical: 8 },
+  inlineNoteText: { flex: 1, color: C.text2, fontSize: 12, lineHeight: 18 },
   researchContent: { padding: 16, paddingBottom: 120 },
   researchHero: { borderWidth: 1, borderColor: C.border, borderRadius: 22, padding: 20, marginBottom: 16 },
   researchKicker: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 1.2 },
@@ -1198,8 +1224,10 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   detourActions: { flexDirection: 'row', gap: 9, marginTop: 14 },
   detourButton: { flex: 1, minHeight: 44, paddingHorizontal: 8 },
   warningPanel: { borderWidth: 1, borderColor: C.yellow + '55', backgroundColor: C.yellow + '0A', borderRadius: 16, padding: 15, marginBottom: 12 },
+  notePanel: { borderWidth: 1, borderColor: C.green + '44', backgroundColor: C.green + '08', borderRadius: 16, padding: 15, marginBottom: 12 },
   panelHeading: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
   panelTitle: { color: C.text, fontSize: 14, fontWeight: '900' },
+  noticeLine: { color: C.text2, fontSize: 12, lineHeight: 18, marginTop: 4 },
   warningLine: { color: C.text2, fontSize: 12, lineHeight: 18, marginTop: 4 },
   sourceSummary: { flexDirection: 'row', alignItems: 'center', gap: 11, borderWidth: 1, borderColor: C.green + '44', backgroundColor: C.green + '0A', borderRadius: 16, padding: 14, marginBottom: 12 },
   sourceSummaryIcon: { width: 38, height: 38, borderRadius: 12, backgroundColor: C.green + '18', alignItems: 'center', justifyContent: 'center' },

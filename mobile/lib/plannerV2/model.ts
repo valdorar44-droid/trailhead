@@ -147,6 +147,86 @@ export function plannerCampCardSummary(camp: Pick<Campsite, 'reservable'>) {
   return `${availability}Open it on the map for access, amenities, current conditions, and complete campground details.`;
 }
 
+export type PlannerPresentationNotices = {
+  notes: string[];
+  cautions: string[];
+};
+
+function customerPlanningNote(warning: string): string | null {
+  if (/^No sourced fuel options were returned\.?$/i.test(warning)) {
+    return 'Fuel stops are not pinned in this draft yet. Add preferred stations on the map or ask Trailhead to refine the route.';
+  }
+  if (/^No sourced activity or trail options were returned\.?$/i.test(warning)) {
+    return 'No optional activities were added, so this draft stays focused on the route and camps. Ask Trailhead if you want more ideas.';
+  }
+  if (/^(?:Live|Current) (?:road|route) conditions .*unavailable\.?$/i.test(warning)) {
+    return 'Live road updates were not attached to this draft. Refresh them on the map closer to departure.';
+  }
+  if (/left out because .*direct source/i.test(warning)) return warning;
+  return null;
+}
+
+export function plannerPresentationNotices(warnings: string[]): PlannerPresentationNotices {
+  const notes: string[] = [];
+  const cautions: string[] = [];
+  const seen = new Set<string>();
+  for (const source of warnings) {
+    const warning = String(source || '').trim();
+    if (!warning) continue;
+    let text = customerPlanningNote(warning);
+    let target = notes;
+    if (!text) {
+      target = cautions;
+      text = /domestic road route passed (?:its )?border controls/i.test(warning)
+        && /secondary country check/i.test(warning)
+        ? 'The route stayed inside the confirmed country. One backup country lookup did not respond, so review the route map before departure.'
+        : warning;
+    }
+    const key = `${target === notes ? 'note' : 'caution'}:${text}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    target.push(text);
+  }
+  return { notes, cautions };
+}
+
+export function plannerReadinessCopy(trip: TripResult | null) {
+  const fuelCount = trip?.gas_stations?.length ?? 0;
+  const weatherCount = trip?.weather_checks?.length ?? 0;
+  const conditionCount = trip?.route_conditions?.length ?? 0;
+  const conditionTitles = (trip?.route_conditions ?? [])
+    .map(condition => String(condition?.title || '').trim().slice(0, 90))
+    .filter(Boolean)
+    .slice(0, 2);
+  const conditionDetail = conditionTitles.length ? `: ${conditionTitles.join('; ')}` : '';
+  const fuel = fuelCount > 0
+    ? `${fuelCount} fuel ${fuelCount === 1 ? 'stop is' : 'stops are'} linked. Confirm hours and availability before departure.`
+    : 'Fuel stops are not pinned yet. Open the map to add the stations you prefer before departure.';
+  let conditions = 'No live alerts are attached to this draft. Refresh weather and road updates on the map closer to departure.';
+  if (weatherCount > 0 && conditionCount > 0) {
+    conditions = `${weatherCount} forecast ${weatherCount === 1 ? 'area is' : 'areas are'} linked. ${conditionCount} road ${conditionCount === 1 ? 'alert needs' : 'alerts need'} review${conditionDetail}. Refresh them before departure.`;
+  } else if (weatherCount > 0) {
+    conditions = `${weatherCount} forecast ${weatherCount === 1 ? 'area is' : 'areas are'} linked. No active road update was attached; refresh before departure.`;
+  } else if (conditionCount > 0) {
+    conditions = `${conditionCount} road ${conditionCount === 1 ? 'alert needs' : 'alerts need'} review${conditionDetail}. Refresh weather and road updates before departure.`;
+  }
+  return {
+    fuel,
+    permits: 'Permit guidance appears when Trailhead has a direct agency source. Confirm access rules in the linked sources before departure.',
+    conditions,
+  };
+}
+
+export function plannerSourceSummaryCopy(sourceCount: number, officialCount: number) {
+  const sources = Math.max(0, Math.trunc(Number(sourceCount) || 0));
+  const official = Math.min(sources, Math.max(0, Math.trunc(Number(officialCount) || 0)));
+  if (!sources) return 'Research links will appear here when the draft includes sourced findings.';
+  const agencyCopy = official > 0
+    ? ` · ${official} government or agency ${official === 1 ? 'source' : 'sources'}`
+    : '';
+  return `${sources} linked ${sources === 1 ? 'source' : 'sources'}${agencyCopy} · Open any finding to review it`;
+}
+
 export function plannerRunStorageKey(userId: string | number | null | undefined) {
   return `planner_research_run.${String(userId ?? 'signed-out')}`;
 }

@@ -9,8 +9,11 @@ import {
   plannerCampCardSummary,
   plannerDraftSummary,
   plannerMapPins,
+  plannerPresentationNotices,
+  plannerReadinessCopy,
   plannerConversationStorageKey,
   plannerRunStorageKey,
+  plannerSourceSummaryCopy,
   plannerStartRequestStorageKey,
   plannerTaskProgress,
 } from '../model';
@@ -90,6 +93,50 @@ test('planner campground cards stay concise and hand full details to the map', (
   assert.match(screen, /highlighted \$\{camps\.length === 1 \? 'camp' : 'camps'\}/);
   assert.doesNotMatch(screen, /\$\{summary\.camps\} camp options/);
   assert.doesNotMatch(screen, /body=\{camp\.description/);
+});
+
+test('ordinary research gaps read as planning notes while safety cautions stay visible', () => {
+  assert.deepEqual(plannerPresentationNotices([
+    'No sourced fuel options were returned.',
+    'No sourced activity or trail options were returned.',
+    'Live route conditions were unavailable.',
+    'The domestic road route passed its border controls, but one secondary country check was unavailable.',
+    'High wind closure reported on the planned road.',
+  ]), {
+    notes: [
+      'Fuel stops are not pinned in this draft yet. Add preferred stations on the map or ask Trailhead to refine the route.',
+      'No optional activities were added, so this draft stays focused on the route and camps. Ask Trailhead if you want more ideas.',
+      'Live road updates were not attached to this draft. Refresh them on the map closer to departure.',
+    ],
+    cautions: [
+      'The route stayed inside the confirmed country. One backup country lookup did not respond, so review the route map before departure.',
+      'High wind closure reported on the planned road.',
+    ],
+  });
+});
+
+test('readiness copy avoids zero-count error language without inventing evidence', () => {
+  const empty = plannerReadinessCopy({
+    gas_stations: [], weather_checks: [], route_conditions: [],
+  } as unknown as TripResult);
+  assert.equal(empty.fuel, 'Fuel stops are not pinned yet. Open the map to add the stations you prefer before departure.');
+  assert.equal(empty.conditions, 'No live alerts are attached to this draft. Refresh weather and road updates on the map closer to departure.');
+  assert.equal(plannerSourceSummaryCopy(5, 0), '5 linked sources · Open any finding to review it');
+  assert.equal(plannerSourceSummaryCopy(6, 2), '6 linked sources · 2 government or agency sources · Open any finding to review it');
+  assert.equal(plannerSourceSummaryCopy(2, 5), '2 linked sources · 2 government or agency sources · Open any finding to review it');
+  const alert = plannerReadinessCopy({
+    gas_stations: [],
+    weather_checks: [{ id: 'weather' }],
+    route_conditions: [{ title: 'High Wind Warning', severity: 'high' }],
+  } as unknown as TripResult);
+  assert.equal(alert.conditions, '1 forecast area is linked. 1 road alert needs review: High Wind Warning. Refresh them before departure.');
+  const here = dirname(fileURLToPath(import.meta.url));
+  const screen = readFileSync(resolve(here, '../../../components/plannerV2/PlannerV2Screen.tsx'), 'utf8');
+  assert.doesNotMatch(screen, /0 sourced fuel options are included/);
+  assert.doesNotMatch(screen, /What still needs your attention/);
+  assert.match(screen, />Planning notes</);
+  assert.match(screen, />Before you go</);
+  assert.match(screen, /body=\{`\$\{trip\.plan\.logistics\?\.fuel_strategy[^`]*\$\{readiness\.fuel\}/);
 });
 
 test('bounded preview keeps both endpoints and every safety research category', () => {

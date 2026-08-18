@@ -1,3 +1,4 @@
+import asyncio
 import json
 import tempfile
 import time
@@ -199,10 +200,38 @@ class PlannerV2SafetyTests(unittest.IsolatedAsyncioTestCase):
             rejected = await server._planner_v2_route_country_guard(geometry, ["us"])
         self.assertFalse(rejected["ok"])
         self.assertIn("not confirmed", rejected["reason"].lower())
+        with patch.object(
+            server,
+            "_planner_v2_candidate_country_code",
+            AsyncMock(side_effect=["us", "mx", asyncio.TimeoutError()]),
+        ):
+            mixed = await server._planner_v2_route_country_guard(geometry, ["us"])
+        self.assertFalse(mixed["ok"])
+        self.assertIn("not confirmed", mixed["reason"].lower())
         with patch.object(server, "_planner_v2_candidate_country_code", AsyncMock(side_effect=["us", "", "us"])):
             unresolved = await server._planner_v2_route_country_guard(geometry, ["us"])
         self.assertFalse(unresolved["ok"])
-        self.assertIn("verify every country", unresolved["reason"].lower())
+        self.assertIn("secondary country check", unresolved["reason"].lower())
+
+        guarded_geometry = {
+            **geometry,
+            "countryBorderExclusionApplied": True,
+            "countryBorderNotificationsChecked": True,
+        }
+        with patch.object(server, "_planner_v2_candidate_country_code", AsyncMock(side_effect=["us", "", "us"])):
+            guarded = await server._planner_v2_route_country_guard(guarded_geometry, ["us"])
+        self.assertTrue(guarded["ok"])
+        self.assertEqual(guarded["severity"], "warning")
+        self.assertIn("border controls", guarded["details"][0].lower())
+
+        dense_geometry = {
+            "coords": [[-109.55 - index * 0.1, 38.57 - index * 0.2] for index in range(12)],
+        }
+        resolver = AsyncMock(return_value="us")
+        with patch.object(server, "_planner_v2_candidate_country_code", resolver):
+            dense = await server._planner_v2_route_country_guard(dense_geometry, ["us"])
+        self.assertTrue(dense["ok"])
+        self.assertEqual(resolver.await_count, 5)
 
     async def test_nominatim_fallback_is_not_trusted_as_endpoint_disambiguation(self):
         response = unittest.mock.Mock()
@@ -352,6 +381,29 @@ class PlannerV2SafetyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request.profile, "mapbox/driving-traffic")
         self.assertEqual(len(request.coordinates), 3)
         self.assertIn("country_border", request.exclude)
+        self.assertEqual(request.notifications, "all")
+        self.assertTrue(route["countryBorderExclusionApplied"])
+        self.assertTrue(route["countryBorderNotificationsChecked"])
+
+    async def test_map_context_directions_requests_border_notifications(self):
+        provider = AsyncMock(return_value={"routes": []})
+        with (
+            patch.object(server.settings, "mapbox_token", "test-token"),
+            patch.object(server, "_mapbox_get", provider),
+        ):
+            await server._map_context_directions(server.MapContextRouteRequest(
+                coordinates=[[-109.5498, 38.5733], [-111.6513, 35.1983]],
+                notifications="all",
+            ))
+        self.assertEqual(provider.await_args.args[1]["notifications"], "all")
+        with (
+            patch.object(server.settings, "mapbox_token", "test-token"),
+            patch.object(server, "_mapbox_get", provider),
+        ):
+            await server._map_context_directions(server.ExtremeDirectionsRequest(
+                coordinates=[[-109.5498, 38.5733], [-111.6513, 35.1983]],
+            ))
+        self.assertEqual(provider.await_args.args[1]["notifications"], "all")
 
     async def test_domestic_mapbox_route_rejects_a_border_notification(self):
         directions = AsyncMock(return_value={
@@ -621,6 +673,57 @@ class PlannerV2ActionTests(unittest.IsolatedAsyncioTestCase):
         unchanged = server._planner_v2_snapshot(store.get_plan_job("border-detour-run"))
         self.assertEqual(unchanged["detour_proposals"][0]["decision"], "pending")
         self.assertEqual([item["name"] for item in unchanged["draft"]["plan"]["waypoints"]], ["Moab", "Flagstaff"])
+
+    async def test_approve_detour_preserves_a_secondary_country_check_warning(self):
+        job = self._ready_run("warning-detour-run")
+        warning = "The domestic road route passed its border controls, but one secondary country check was temporarily unavailable."
+        result = json.loads(job["result"])
+        result["planner_readiness_warnings"] = [
+            "Weather needs another look.",
+            "A closure feed was unavailable.",
+            "One permit should be confirmed.",
+            "Fuel hours may change.",
+        ]
+        store.update_plan_job("warning-detour-run", "ready_for_review", result=json.dumps(result))
+        job = store.get_plan_job("warning-detour-run")
+        verified_route = {
+            "coords": [[-109.55, 38.57], [-110.2, 37.0], [-111.65, 35.20]],
+            "totalDistance": 560_000,
+            "totalDuration": 23_000,
+            "source": "mapbox-directions",
+        }
+        with (
+            patch.object(server, "_planner_v2_mapbox_route_geometry", AsyncMock(return_value=verified_route)),
+            patch.object(server, "_planner_v2_route_country_guard", AsyncMock(return_value={
+                "ok": True,
+                "reason": "",
+                "details": [warning],
+                "severity": "warning",
+                "route_country_codes": ["us"],
+            })),
+            patch.object(server, "_build_trip_timeline", return_value=[]),
+        ):
+            snapshot = await server.planner_v2_action(
+                "warning-detour-run",
+                server.PlannerV2ActionRequest(
+                    action="approve_detour",
+                    proposal_id="detour-1",
+                    expected_revision=int(job["revision"]),
+                ),
+                self.user,
+                None,
+            )
+        self.assertIn(warning, snapshot["draft"]["planner_readiness_warnings"])
+        self.assertEqual(snapshot["draft"]["planner_readiness_warnings"][0], warning)
+        self.assertEqual(len(snapshot["draft"]["planner_readiness_warnings"]), 4)
+        self.assertIn(
+            "secondary country check was unavailable",
+            snapshot["detour_proposals"][0]["risk_reason"],
+        )
+        self.assertNotIn("full road-route verification", snapshot["detour_proposals"][0]["risk_reason"])
+        events = store.list_plan_job_events("warning-detour-run")
+        self.assertEqual(events[-1]["state"], "warning")
+        self.assertIn("secondary country check", events[-1]["payload"]["message"])
 
     async def test_commit_requires_detour_decisions(self):
         job = self._ready_run("pending-commit-run")

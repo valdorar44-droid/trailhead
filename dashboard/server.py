@@ -7815,6 +7815,7 @@ class MapContextRouteRequest(BaseModel):
     language: str = "en"
     voice_units: str = "imperial"
     overview: str = "full"
+    notifications: str = "all"
     units: str = "miles"
     snapshot: Optional[MapContextSnapshot] = None
     metadata: dict = Field(default_factory=dict)
@@ -11160,6 +11161,7 @@ async def _planner_v2_mapbox_route_geometry(
             exclude="toll,ferry" if allow_country_borders else "toll,ferry,country_border",
             language="en",
             overview="full",
+            notifications="all",
         ))
         routes = data.get("routes") if isinstance(data, dict) else None
         route = routes[0] if isinstance(routes, list) and routes and isinstance(routes[0], dict) else None
@@ -11218,6 +11220,8 @@ async def _planner_v2_mapbox_route_geometry(
         "source": "mapbox-directions",
         "engine": "mapbox-directions",
         "confidence": "high",
+        "countryBorderExclusionApplied": not allow_country_borders,
+        "countryBorderNotificationsChecked": not allow_country_borders,
         "routeStyle": style,
         "waypointSignature": _planner_waypoint_signature(waypoints),
         "routableWaypointSignature": _planner_waypoint_signature(waypoints, routable_only=True),
@@ -11239,7 +11243,7 @@ async def _planner_v2_candidate_country_code(candidate: dict) -> str:
                 "longitude": f"{lng:.7f}",
                 "language": "en",
                 "limit": "1",
-                "types": "country,region,place",
+                "types": "country",
             }),
         )
         for feature in data.get("features") or []:
@@ -11274,7 +11278,10 @@ async def _planner_v2_route_country_guard(
     # Directions is also asked to exclude controlled country borders for
     # domestic routes. These bounded reverse checks are independent defense in
     # depth, including for provider data or routing-notification drift.
-    sample_count = min(17, len(route))
+    # Search Box reverse lookup is limited to 10 requests/second by default.
+    # Five low-concurrency samples supplement the Directions border controls
+    # without creating the burst that previously caused false route failures.
+    sample_count = min(5, len(route))
     indexes = sorted({round(index * (len(route) - 1) / max(1, sample_count - 1)) for index in range(sample_count)})
     samples: list[dict] = []
     for index in indexes:
@@ -11282,20 +11289,21 @@ async def _planner_v2_route_country_guard(
         if not isinstance(point, (list, tuple)) or len(point) < 2:
             return _route_validation_result(False, "Trailhead could not verify the road route countries.")
         samples.append({"lng": point[0], "lat": point[1]})
-    try:
-        resolved = await asyncio.gather(*[
-            asyncio.wait_for(_planner_v2_candidate_country_code(sample), timeout=4)
-            for sample in samples
-        ])
-    except Exception:
-        resolved = []
+    resolver_limit = asyncio.Semaphore(2)
+
+    async def resolve_country(sample: dict) -> str:
+        async with resolver_limit:
+            return await asyncio.wait_for(_planner_v2_candidate_country_code(sample), timeout=4)
+
+    raw_resolved = await asyncio.gather(
+        *[resolve_country(sample) for sample in samples],
+        return_exceptions=True,
+    )
+    resolved = [
+        "" if isinstance(value, BaseException) else str(value or "")
+        for value in raw_resolved
+    ]
     codes = {str(code or "").strip().lower() for code in resolved if str(code or "").strip()}
-    if len(resolved) != len(samples) or len(codes) == 0 or any(not str(code or "").strip() for code in resolved):
-        return _route_validation_result(
-            False,
-            "Trailhead could not verify every country crossed by the road route.",
-            ["Review the endpoints and try the route check again."],
-        )
     outside = sorted(codes - allowed)
     if outside:
         return _route_validation_result(
@@ -11303,7 +11311,39 @@ async def _planner_v2_route_country_guard(
             "The road route crosses a country that was not confirmed.",
             ["A border crossing must be confirmed before Trailhead can continue."],
         )
-    return {**_route_validation_result(True), "route_country_codes": sorted(codes)}
+    unresolved = (
+        len(resolved) != len(samples)
+        or len(codes) == 0
+        or any(not str(code or "").strip() for code in resolved)
+    )
+    provider_guarded = (
+        len(allowed) == 1
+        and route_geometry.get("countryBorderExclusionApplied") is True
+        and route_geometry.get("countryBorderNotificationsChecked") is True
+    )
+    if unresolved and provider_guarded:
+        return {
+            **_route_validation_result(
+                True,
+                severity="warning",
+                details=[
+                    "The domestic road route passed its border controls, but one secondary country check was temporarily unavailable."
+                ],
+            ),
+            "route_country_codes": sorted(codes or allowed),
+            "country_check": "provider_border_controls",
+        }
+    if unresolved:
+        return _route_validation_result(
+            False,
+            "Trailhead could not finish a secondary country check for this road route.",
+            ["Try the route check again before reviewing or saving this trip."],
+        )
+    return {
+        **_route_validation_result(True),
+        "route_country_codes": sorted(codes),
+        "country_check": "reverse_samples",
+    }
 
 
 def _planner_v2_closest_route_point(route: list[list[float]], lat: float, lng: float) -> tuple[list[float] | None, float]:
@@ -11595,6 +11635,7 @@ async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, c
     refundable_cost = cost
     trip_saved = False
     draft_only = bool(body.draft_only)
+    route_country_warnings: list[str] = []
     try:
         if draft_only:
             _planner_v2_stage(
@@ -11779,6 +11820,11 @@ async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, c
                 )
                 return
             plan_data["route_country_codes"] = route_country_validation.get("route_country_codes", [])
+            route_country_warnings = [
+                str(item).strip()[:240]
+                for item in route_country_validation.get("details") or []
+                if str(item).strip()
+            ]
             if model_idea_count:
                 append_plan_job_event(
                     job_id,
@@ -11796,8 +11842,12 @@ async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, c
                 job_id,
                 "enriching",
                 "road_route",
-                "completed",
-                "Base road route and drive timing are ready",
+                "warning" if route_country_warnings else "completed",
+                (
+                    "Base road route and drive timing are ready; one extra location check was unavailable"
+                    if route_country_warnings
+                    else "Base road route and drive timing are ready"
+                ),
             )
             for task_id, message in (
                 ("camps", "Checking public-land camps and overnight rules along the route"),
@@ -11907,6 +11957,7 @@ async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, c
             )
             result["route_conditions"] = route_conditions
             result["weather_checks"] = weather_checks
+            readiness_warnings = list(dict.fromkeys([*route_country_warnings, *readiness_warnings]))[:4]
             result["planner_readiness_warnings"] = readiness_warnings
             append_plan_job_event(
                 job_id,
@@ -12625,6 +12676,16 @@ async def planner_v2_action(
         route_country_check = await _planner_v2_route_country_guard(updated_geometry, sorted(allowed))
         if not route_country_check["ok"]:
             raise HTTPException(409, "That road route crosses a country that was not confirmed")
+        detour_country_warnings = [
+            str(item).strip()[:240]
+            for item in route_country_check.get("details") or []
+            if str(item).strip()
+        ]
+        if detour_country_warnings:
+            result["planner_readiness_warnings"] = list(dict.fromkeys([
+                *detour_country_warnings,
+                *(result.get("planner_readiness_warnings") or []),
+            ]))[:4]
         prior_geometry = result.get("route_geometry") if isinstance(result.get("route_geometry"), dict) else {}
         added_seconds = max(0.0, float(updated_geometry.get("totalDuration") or 0) - float(prior_geometry.get("totalDuration") or 0))
         added_meters = max(0.0, float(updated_geometry.get("totalDistance") or 0) - float(prior_geometry.get("totalDistance") or 0))
@@ -12667,7 +12728,11 @@ async def planner_v2_action(
             "decision": "approved",
             "added_drive_minutes": actual_minutes,
             "added_distance_miles": actual_miles,
-            "risk_reason": "Approved after full road-route verification",
+            "risk_reason": (
+                "Approved after road-route rebuild; one secondary country check was unavailable"
+                if detour_country_warnings
+                else "Approved after full road-route verification"
+            ),
             "confirmation_count": confirmation_count + 1,
         })
         pending_after = sum(
@@ -12682,12 +12747,31 @@ async def planner_v2_action(
             run_id,
             "detour",
             task_id="detours",
-            state="needs_input" if pending_after else "completed",
+            state=(
+                "needs_input"
+                if pending_after
+                else "warning"
+                if detour_country_warnings
+                else "completed"
+            ),
             payload={
                 "message": (
-                    f"Added {str(proposal.get('title') or 'the approved stop')[:120]} and rechecked the road route"
-                    if not pending_after
-                    else f"Route rechecked; {pending_after} detour decision{'s' if pending_after != 1 else ''} remain"
+                    (
+                        f"Route rebuilt with a location-check warning; {pending_after} detour decision"
+                        f"{'s' if pending_after != 1 else ''} remain"
+                    )
+                    if pending_after and detour_country_warnings
+                    else (
+                        f"Route rechecked; {pending_after} detour decision"
+                        f"{'s' if pending_after != 1 else ''} remain"
+                    )
+                    if pending_after
+                    else (
+                        f"Added {str(proposal.get('title') or 'the approved stop')[:120]}; "
+                        "the road route passed its border controls, but one secondary country check was unavailable"
+                    )
+                    if detour_country_warnings
+                    else f"Added {str(proposal.get('title') or 'the approved stop')[:120]} and rechecked the road route"
                 ),
                 "pending_count": pending_after,
             },
@@ -18503,6 +18587,9 @@ async def _map_context_directions(body: MapContextRouteRequest | ExtremeDirectio
     exclude = _clean_mapbox_param(body.exclude, r"[^a-zA-Z_,]+", 80)
     if exclude:
         params["exclude"] = exclude
+    notifications = str(getattr(body, "notifications", "all") or "").strip().lower()
+    if notifications in {"all", "none"}:
+        params["notifications"] = notifications
     data = await _mapbox_get(_mapbox_directions_url(profile, coords), params)
     data["_trailhead"] = {"engine": "mapbox-directions", "temporary_use_only": True, "profile": profile}
     return data

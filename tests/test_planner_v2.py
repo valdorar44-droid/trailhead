@@ -59,6 +59,27 @@ class PlannerV2StoreTests(unittest.TestCase):
         store.update_plan_job("run-2", "cancelled", error="Planning stopped")
         self.assertFalse(store.request_plan_job_cancel("run-2", self.user_id))
 
+    def test_failed_run_closes_the_active_task_instead_of_leaving_it_running(self):
+        store.create_plan_job("run-failed", self.user_id, "session-failed", "Research", draft_only=True)
+        store.append_plan_job_event(
+            "run-failed", "task", task_id="trip_shape", state="completed",
+            payload={"message": "Trip priorities are set"},
+        )
+        store.append_plan_job_event(
+            "run-failed", "task", task_id="confirm_places", state="running",
+            payload={"message": "Confirming route places"},
+        )
+
+        server._mark_plan_job_failed("run-failed", "Trailhead could not confirm both route endpoints.")
+
+        snapshot = server._planner_v2_snapshot(store.get_plan_job("run-failed"))
+        tasks = {task["id"]: task for task in snapshot["tasks"]}
+        self.assertEqual(snapshot["status"], "failed")
+        self.assertEqual(tasks["trip_shape"]["state"], "completed")
+        self.assertEqual(tasks["confirm_places"]["state"], "blocked")
+        self.assertFalse(any(task["state"] == "running" for task in tasks.values()))
+        self.assertEqual(tasks["road_route"]["state"], "queued")
+
     def test_review_draft_update_is_revision_bound(self):
         store.create_plan_job("run-3", self.user_id, "session-3", "Research", draft_only=True)
         store.update_plan_job("run-3", "ready_for_review", result=json.dumps({"trip_id": "trip-3"}))
@@ -349,6 +370,93 @@ class PlannerV2SafetyTests(unittest.IsolatedAsyncioTestCase):
                     ("source_review", "warning"),
                     ("trip_preview", "completed"),
                 }.issubset(completed))
+                event_copy = " ".join(
+                    str((event.get("payload") or {}).get("message") or "") for event in events
+                )
+                self.assertNotIn("No sourced", event_copy)
+                self.assertIn("Fuel stops are ready to add on the map", event_copy)
+                self.assertIn("This draft stays focused on the route and camps", event_copy)
+            finally:
+                settings.db_path = original_db_path
+
+    async def test_explicit_return_trip_routes_through_the_named_turnaround(self):
+        original_db_path = settings.db_path
+        with tempfile.TemporaryDirectory() as temp:
+            settings.db_path = str(Path(temp) / "return-route.db")
+            try:
+                store.init_db()
+                store.create_plan_job(
+                    "return-route-run", None, "", "Portland to Olympic and back", draft_only=True,
+                )
+                store.append_plan_job_event(
+                    "return-route-run", "run", state="queued", payload={"message": "Trip research is queued"},
+                )
+                generated = [
+                    {"name": "Portland, Oregon", "day": 1, "type": "start", "route_point_type": "break"},
+                    {"name": "Model-invented inland detour", "day": 2, "type": "waypoint", "route_point_type": "break"},
+                    {"name": "Portland, Oregon", "day": 5, "type": "waypoint", "route_point_type": "break"},
+                ]
+                plan = {
+                    "trip_name": "Olympic return trip",
+                    "overview": "A five-day coastal return trip.",
+                    "duration_days": 5,
+                    "states": ["OR", "WA"],
+                    "total_est_miles": 700,
+                    "waypoints": generated,
+                    "daily_itinerary": [],
+                    "logistics": {"fuel_strategy": "Confirm stations", "permits_needed": "Check current rules"},
+                }
+                resolved = [
+                    {"name": "Portland Oregon", "day": 1, "type": "start", "route_point_type": "break", "lat": 45.5152, "lng": -122.6784, "country_code": "us"},
+                    {"name": "Olympic National Park", "day": 3, "type": "waypoint", "route_point_type": "break", "lat": 47.8021, "lng": -123.6044, "country_code": "us"},
+                    {"name": "Portland", "day": 5, "type": "waypoint", "route_point_type": "break", "lat": 45.5152, "lng": -122.6784, "country_code": "us"},
+                ]
+                geometry = {
+                    "coords": [
+                        [-122.6784, 45.5152], [-123.6044, 47.8021], [-122.6784, 45.5152],
+                    ],
+                    "totalDistance": 1_100_000,
+                    "totalDuration": 50_000,
+                    "source": "mapbox-directions",
+                }
+                enrichment = {
+                    "waypoints": resolved,
+                    "campsites": [],
+                    "gas_stations": [],
+                    "route_pois": [],
+                }
+                geocode_mock = AsyncMock(return_value=resolved)
+                route_mock = AsyncMock(return_value=geometry)
+                request = (
+                    "Plan a five day loop from Portland Oregon to Olympic National Park and back to Portland "
+                    "with tent camping and a dog."
+                )
+                with (
+                    patch.object(server, "plan_trip", return_value=plan),
+                    patch.object(server, "_geocode_waypoints", geocode_mock),
+                    patch.object(server, "_planner_v2_mapbox_route_geometry", route_mock),
+                    patch.object(server, "_planner_v2_route_country_guard", AsyncMock(return_value={
+                        "ok": True, "reason": "", "details": [], "route_country_codes": ["us"],
+                    })),
+                    patch.object(server, "enrich_trip_along_route", AsyncMock(return_value=enrichment)),
+                    patch.object(server, "_planner_v2_detour_proposals", AsyncMock(return_value=[])),
+                    patch.object(server, "_planner_v2_route_readiness", AsyncMock(return_value=([], [], []))),
+                    patch.object(server, "save_trip") as save_mock,
+                ):
+                    await server._execute_plan_job(
+                        "return-route-run",
+                        server.PlanRequest(request=request, draft_only=True, strict_country_guard=True),
+                        None,
+                        0,
+                    )
+
+                geocoded_names = [item["name"] for item in geocode_mock.await_args.args[0]]
+                routed_names = [item["name"] for item in route_mock.await_args.args[0]]
+                self.assertEqual(geocoded_names, ["Portland Oregon", "Olympic National Park", "Portland"])
+                self.assertEqual(routed_names, ["Portland Oregon", "Olympic National Park", "Portland"])
+                self.assertNotIn("Model-invented inland detour", json.dumps(store.get_plan_job("return-route-run")))
+                self.assertEqual(store.get_plan_job("return-route-run")["status"], "ready_for_review")
+                save_mock.assert_not_called()
             finally:
                 settings.db_path = original_db_path
 

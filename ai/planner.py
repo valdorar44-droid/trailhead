@@ -914,6 +914,33 @@ Return ONLY valid JSON:
         return {}
 
 
+def _parse_chat_guide_response(raw: str) -> dict:
+    """Separate the private ready marker from customer-facing guide copy.
+
+    Providers occasionally attach the marker directly to the final sentence
+    instead of putting it on its own line. Decode a trailing marker from any
+    character boundary, while refusing lookalikes followed by more prose.
+    """
+    source = str(raw or "").strip()
+    decoder = json.JSONDecoder()
+    starts = [match.start() for match in re.finditer(r'\{\s*"_ready"\s*:', source)]
+    for start in reversed(starts):
+        try:
+            signal, consumed = decoder.raw_decode(source[start:])
+        except (json.JSONDecodeError, ValueError, TypeError):
+            continue
+        if not isinstance(signal, dict) or signal.get("_ready") is not True:
+            continue
+        tail = source[start + consumed:].strip()
+        if tail not in {"", "```"}:
+            continue
+        outline = str(signal.get("_outline") or "").strip()[:2_000]
+        content = source[:start].rstrip()
+        content = re.sub(r'```(?:json)?\s*$', '', content, flags=re.IGNORECASE).strip()
+        return {"type": "ready", "content": content, "outline": outline}
+    return {"type": "message", "content": source, "outline": None}
+
+
 def chat_guide(messages: list[dict], trail_dna: dict | None = None) -> dict:
     """Conversational trip planning. Returns {type, content, outline}."""
     system = CHAT_SYSTEM
@@ -937,27 +964,7 @@ def chat_guide(messages: list[dict], trail_dna: dict | None = None) -> dict:
         system=system,
         messages=messages,
     )
-    raw = msg.content[0].text.strip()
-
-    # Scan entire response for _ready signal (not just last N lines)
-    outline = None
-    is_ready = False
-    lines = raw.split('\n')
-    for i in range(len(lines) - 1, -1, -1):
-        stripped = lines[i].strip()
-        if stripped.startswith('{"_ready"') or stripped.startswith('{ "_ready"'):
-            try:
-                signal = json.loads(stripped)
-                if signal.get('_ready'):
-                    is_ready = True
-                    outline = signal.get('_outline', '')
-                    lines.pop(i)
-                    break
-            except (json.JSONDecodeError, ValueError):
-                pass
-
-    content = '\n'.join(lines).strip()
-    return {"type": "ready" if is_ready else "message", "content": content, "outline": outline}
+    return _parse_chat_guide_response(msg.content[0].text)
 
 
 def edit_trip(current_trip: dict, edit_request: str) -> dict:

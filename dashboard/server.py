@@ -11093,6 +11093,110 @@ def _planner_v2_confirmed_endpoints(waypoints: list[dict]) -> list[dict]:
     return endpoints
 
 
+_PLANNER_V2_EXPLICIT_RETURN_ROUTE_RE = re.compile(
+    r"\bfrom\s+(?P<start>[A-Za-z0-9][A-Za-z0-9 .,'’\-]{1,95}?)\s+"
+    r"(?:to|through|toward)\s+"
+    r"(?P<destination>[A-Za-z0-9][A-Za-z0-9 .,'’&\-]{1,115}?)\s+"
+    r"(?:and\s+back|then\s+back|and\s+return(?:ing)?|then\s+return(?:ing)?)"
+    r"(?:\s+to\s+(?P<return>[A-Za-z0-9][A-Za-z0-9 .,'’\-]{1,95}?))?"
+    r"(?=$|[.!?;\n]|,\s+(?:for|with|during|using|driving|camping|while|but)\b|"
+    r"\s+(?:for|with|during|using|driving|camping|while|but)\b)",
+    re.I,
+)
+_PLANNER_V2_EXPLICIT_ROUTE_PAIR_RE = re.compile(
+    r"\bfrom\s+(?P<start>[A-Za-z0-9][A-Za-z0-9 .,'’\-]{1,95}?)\s+"
+    r"(?:to|through|toward)\s+"
+    r"(?P<destination>[A-Za-z0-9][A-Za-z0-9 .,'’&\-]{1,115}?)"
+    r"(?=$|[.!?;\n]|,\s+(?:for|with|during|using|driving|camping|while|but)\b)",
+    re.I,
+)
+_PLANNER_V2_RETURN_ROUTE_SUPERSESSION_RE = re.compile(
+    r"\b(?:one[- ]way|not\s+(?:a\s+)?loop|skip\s+the\s+return|"
+    r"do\s+not\s+return|don't\s+return|no\s+return\s+leg)\b",
+    re.I,
+)
+_PLANNER_V2_ROUTE_CORRECTION_CUE_RE = re.compile(
+    r"\b(?:actually|instead|change|switch|update|replace|start\s+over)\b|"
+    r"\bmake\s+(?:it|this|the\s+(?:route|trip))\b|"
+    r"^\s*(?:route|plan|build)\b",
+    re.I,
+)
+_PLANNER_V2_MEASUREMENT_RE = re.compile(
+    r"\b(?:miles?|mi|kilometers?|km|hours?|hrs?|days?|nights?|mph|kmh|"
+    r"gallons?|liters?|litres?|range|minutes?|mins?|dates?|times?|"
+    r"am|pm|january|february|march|april|may|june|july|august|"
+    r"september|october|november|december|monday|tuesday|wednesday|"
+    r"thursday|friday|saturday|sunday|spring|summer|fall|autumn|winter)\b",
+    re.I,
+)
+
+
+def _planner_v2_clean_explicit_route_place(value: object) -> str:
+    """Trim only syntax around a user-named place; never remove name words."""
+    return re.sub(r"\s+", " ", str(value or "")).strip(" .,'-\n\r\t")[:120]
+
+
+def _planner_v2_route_pair_supersedes_return_route(text: str) -> bool:
+    match = _PLANNER_V2_EXPLICIT_ROUTE_PAIR_RE.search(text)
+    if not match or not _PLANNER_V2_ROUTE_CORRECTION_CUE_RE.search(text):
+        return False
+    start = _planner_v2_clean_explicit_route_place(match.group("start"))
+    destination = _planner_v2_clean_explicit_route_place(match.group("destination"))
+    pair_text = f"{start} {destination}"
+    if _PLANNER_V2_MEASUREMENT_RE.search(pair_text):
+        return False
+    return bool(re.search(r"[A-Za-z]", start) and re.search(r"[A-Za-z]", destination))
+
+
+def _planner_v2_explicit_return_route_anchors(
+    messages: list[dict],
+    fallback_request: str = "",
+    duration_days: int = 1,
+) -> list[dict]:
+    """Create only route anchors the traveler explicitly named for a return trip.
+
+    A generated intermediate remains an untrusted research idea. This narrow
+    parser is used only for phrases such as "from Portland to Olympic and back"
+    so the base road route can reach the named turnaround before returning.
+    """
+    candidates = [
+        str(message.get("content") or "")
+        for message in reversed(messages or [])
+        if isinstance(message, dict) and str(message.get("role") or "").lower() == "user"
+    ]
+    if not candidates and str(fallback_request or "").strip():
+        candidates = [str(fallback_request)]
+    for text in candidates:
+        normalized_text = re.sub(r"\s+", " ", text).strip()
+        match = _PLANNER_V2_EXPLICIT_RETURN_ROUTE_RE.search(normalized_text)
+        if not match:
+            # A newer explicit endpoint/shape correction supersedes any older
+            # return-trip phrase. The generated plan must then earn confirmation
+            # through the ordinary fail-closed endpoint path.
+            if (
+                _planner_v2_route_pair_supersedes_return_route(normalized_text)
+                or _PLANNER_V2_RETURN_ROUTE_SUPERSESSION_RE.search(normalized_text)
+            ):
+                return []
+            continue
+        start = _planner_v2_clean_explicit_route_place(match.group("start"))
+        destination = _planner_v2_clean_explicit_route_place(match.group("destination"))
+        return_place = _planner_v2_clean_explicit_route_place(match.group("return")) or start
+        if not start or not destination or start.casefold() == destination.casefold():
+            continue
+        try:
+            duration = max(1, min(14, int(duration_days or 1)))
+        except (TypeError, ValueError):
+            duration = 1
+        midpoint = max(1, min(duration, (duration + 1) // 2))
+        return [
+            {"name": start, "day": 1, "type": "start", "route_point_type": "break"},
+            {"name": destination, "day": midpoint, "type": "waypoint", "route_point_type": "break"},
+            {"name": return_place, "day": duration, "type": "waypoint", "route_point_type": "break"},
+        ]
+    return []
+
+
 def _planner_v2_mapbox_steps(route: dict) -> tuple[list[dict], list[list[dict]]]:
     flat: list[dict] = []
     by_leg: list[list[dict]] = []
@@ -11616,6 +11720,23 @@ def _mark_plan_job_failed(job_id: str, error: str) -> None:
             update_plan_job(job_id, "failed", error=error)
             job = get_plan_job(job_id)
             if job and bool(job.get("draft_only")):
+                latest_task_states: dict[str, str] = {}
+                for event in list_plan_job_events(job_id, after=0, limit=500):
+                    task_id = str(event.get("task_id") or "")
+                    if task_id:
+                        latest_task_states[task_id] = str(event.get("state") or "")
+                for task_id, _title in PLANNER_V2_TASKS:
+                    if latest_task_states.get(task_id) != "running":
+                        continue
+                    append_plan_job_event(
+                        job_id,
+                        "task",
+                        task_id=task_id,
+                        state="blocked",
+                        payload={
+                            "message": "This check stopped before it could finish. Review the note above, then try again."
+                        },
+                    )
                 append_plan_job_event(
                     job_id,
                     "run",
@@ -11723,16 +11844,32 @@ async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, c
             _planner_v2_require_active(job_id)
         else:
             update_plan_job(job_id, "geocoding")
+        generated_waypoints = plan_data.get("waypoints", [])
+        explicit_return_anchors = (
+            _planner_v2_explicit_return_route_anchors(
+                preference_messages,
+                body.request or "",
+                int(plan_data.get("duration_days") or 1),
+            )
+            if draft_only
+            else []
+        )
+        geocode_candidates = explicit_return_anchors or generated_waypoints
         try:
             geocode_timeout = 60 if is_long_trip else 50
-            geocoded = await asyncio.wait_for(_geocode_waypoints(plan_data.get("waypoints", [])), timeout=geocode_timeout)
+            geocoded = await asyncio.wait_for(_geocode_waypoints(geocode_candidates), timeout=geocode_timeout)
         except Exception:
-            geocoded = plan_data.get("waypoints", [])
+            geocoded = geocode_candidates
         plan_data["waypoints"] = geocoded
-        confirmed_endpoints = _planner_v2_confirmed_endpoints(geocoded)
+        confirmed_endpoints = (
+            _planner_v2_routable_waypoints(geocoded)
+            if explicit_return_anchors
+            else _planner_v2_confirmed_endpoints(geocoded)
+        )
         validation_points = confirmed_endpoints if draft_only else geocoded
         validation = _validate_route_waypoints(validation_points, body.request or "")
-        if len(confirmed_endpoints) != 2 or not validation["ok"]:
+        expected_anchor_count = 3 if explicit_return_anchors else 2
+        if len(confirmed_endpoints) != expected_anchor_count or not validation["ok"]:
             if user and refundable_cost > 0:
                 add_credits(user["id"], refundable_cost, "Refund — unsupported route")
                 refundable_cost = 0
@@ -11746,7 +11883,7 @@ async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, c
             )
             return
         model_idea_count = max(0, sum(
-            1 for item in geocoded
+            1 for item in generated_waypoints
             if isinstance(item, dict) and _planner_route_point_type(item) != "side_stop"
         ) - 2)
 
@@ -11898,6 +12035,11 @@ async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, c
             result = _planner_v2_sourced_result(result, body.request or "")
             plan_data = result["plan"]
             timeline = result["timeline"]
+            empty_result_copy = {
+                "camps": "No campground was added to this preview yet",
+                "fuel": "Fuel stops are ready to add on the map",
+                "experiences": "This draft stays focused on the route and camps",
+            }
             for task_id, count, singular, plural in (
                 ("camps", len(result.get("campsites") or []), "camp option", "camp options"),
                 ("fuel", len(result.get("gas_stations") or []), "fuel option", "fuel options"),
@@ -11911,7 +12053,7 @@ async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, c
                     payload={
                         "message": (
                             f"{count} {singular if count == 1 else plural} checked"
-                            if count else f"No sourced {plural} were returned"
+                            if count else empty_result_copy[task_id]
                         ),
                         "result_count": count,
                     },
@@ -11967,7 +12109,7 @@ async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, c
                 payload={
                     "message": (
                         "Weather and route conditions checked"
-                        if not readiness_warnings else "Condition checks finished with gaps to review"
+                        if not readiness_warnings else "Weather and road details need a quick refresh before departure"
                     ),
                     "alert_count": len(route_conditions),
                     "weather_area_count": len(weather_checks),
@@ -11990,7 +12132,7 @@ async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, c
                 payload={
                     "message": (
                         f"{len(findings)} sourced finding{'s' if len(findings) != 1 else ''} ready"
-                        if not source_warnings else "Source review finished with gaps to review"
+                        if not source_warnings else "Research links are ready; a few details still need a check"
                     ),
                     "finding_count": len(findings),
                     "warning_count": len(source_warnings),

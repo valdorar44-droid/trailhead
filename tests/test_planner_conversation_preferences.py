@@ -1,5 +1,6 @@
 import unittest
 
+from ai import planner
 from dashboard import server
 
 
@@ -8,6 +9,147 @@ def user_messages(*content: str) -> list[dict]:
 
 
 class PlannerConversationPreferenceTests(unittest.TestCase):
+    def test_inline_ready_marker_is_not_exposed_as_chat_copy(self):
+        response = planner._parse_chat_guide_response(
+            'I am ready to build this route now.'
+            '{"_ready":true,"_outline":"Phoenix to Chaco to Flagstaff, 6 days"}'
+        )
+
+        self.assertEqual(response, {
+            "type": "ready",
+            "content": "I am ready to build this route now.",
+            "outline": "Phoenix to Chaco to Flagstaff, 6 days",
+        })
+
+    def test_standalone_ready_marker_stays_private(self):
+        response = planner._parse_chat_guide_response(
+            '{"_ready":true,"_outline":"Portland to Olympic and back, 5 days"}'
+        )
+
+        self.assertEqual(response["type"], "ready")
+        self.assertEqual(response["content"], "")
+        self.assertEqual(response["outline"], "Portland to Olympic and back, 5 days")
+
+    def test_ready_lookalike_inside_customer_copy_is_not_consumed(self):
+        raw = 'The marker {"_ready":true,"_outline":"not final"} is only an example.'
+        response = planner._parse_chat_guide_response(raw)
+
+        self.assertEqual(response, {"type": "message", "content": raw, "outline": None})
+
+    def test_explicit_return_trip_uses_only_the_named_turnaround(self):
+        anchors = server._planner_v2_explicit_return_route_anchors(
+            user_messages(
+                "Start over. Plan a five day loop from Portland Oregon to Olympic National Park "
+                "and back to Portland with tent camping and a dog."
+            ),
+            duration_days=5,
+        )
+
+        self.assertEqual([item["name"] for item in anchors], [
+            "Portland Oregon", "Olympic National Park", "Portland",
+        ])
+        self.assertEqual([item["day"] for item in anchors], [1, 3, 5])
+        self.assertEqual([item["route_point_type"] for item in anchors], ["break", "break", "break"])
+
+    def test_vague_loop_does_not_promote_a_model_stop_to_route_control(self):
+        anchors = server._planner_v2_explicit_return_route_anchors(
+            user_messages("Plan a five day loop around Olympic National Park."),
+            duration_days=5,
+        )
+
+        self.assertEqual(anchors, [])
+
+    def test_newer_one_way_route_supersedes_an_older_return_trip(self):
+        anchors = server._planner_v2_explicit_return_route_anchors(
+            user_messages(
+                "Plan a five day trip from Portland to Olympic National Park and back to Portland.",
+                "Actually make it one-way from Seattle to Vancouver.",
+            ),
+            duration_days=5,
+        )
+
+        self.assertEqual(anchors, [])
+
+    def test_newer_vehicle_answer_keeps_the_explicit_return_trip(self):
+        anchors = server._planner_v2_explicit_return_route_anchors(
+            user_messages(
+                "Plan a five day trip from Portland to Olympic National Park and back to Portland.",
+                "I am driving an SUV and maintained dirt roads are okay.",
+            ),
+            duration_days=5,
+        )
+
+        self.assertEqual([item["name"] for item in anchors], [
+            "Portland", "Olympic National Park", "Portland",
+        ])
+
+    def test_newer_numeric_ranges_do_not_look_like_route_corrections(self):
+        for answer in (
+            "My fuel range is from 200 to 250 miles.",
+            "I can drive from four to six hours each day.",
+            "This trip is from June to July.",
+            "I drive from 8am to 4pm.",
+            "Actually change my trip dates from June to July.",
+        ):
+            with self.subTest(answer=answer):
+                anchors = server._planner_v2_explicit_return_route_anchors(
+                    user_messages(
+                        "Plan a five day trip from Portland to Olympic National Park and back to Portland.",
+                        answer,
+                    ),
+                    duration_days=5,
+                )
+                self.assertEqual([item["name"] for item in anchors], [
+                    "Portland", "Olympic National Park", "Portland",
+                ])
+
+    def test_newer_place_pair_with_route_language_supersedes_return_trip(self):
+        for correction in (
+            "Actually change the trip from Seattle to Vancouver.",
+            "Instead go from Seattle to Vancouver.",
+            "Start over. Plan from Seattle to Vancouver.",
+            "Route from Seattle to Vancouver.",
+        ):
+            with self.subTest(correction=correction):
+                anchors = server._planner_v2_explicit_return_route_anchors(
+                    user_messages(
+                        "Plan a five day trip from Portland to Olympic National Park and back to Portland.",
+                        correction,
+                    ),
+                    duration_days=5,
+                )
+
+                self.assertEqual(anchors, [])
+
+    def test_non_route_from_to_language_keeps_the_explicit_return_trip(self):
+        for answer in (
+            "We travel from dawn to dusk.",
+            "Update: our dates are from spring to fall.",
+            "Make this trip from Monday to Friday.",
+        ):
+            with self.subTest(answer=answer):
+                anchors = server._planner_v2_explicit_return_route_anchors(
+                    user_messages(
+                        "Plan a five day trip from Portland to Olympic National Park and back to Portland.",
+                        answer,
+                    ),
+                    duration_days=5,
+                )
+
+                self.assertEqual([item["name"] for item in anchors], [
+                    "Portland", "Olympic National Park", "Portland",
+                ])
+
+    def test_legitimate_place_words_are_not_removed_from_return_route(self):
+        for destination in ("Camp Verde", "Wild Rose", "Route 66"):
+            with self.subTest(destination=destination):
+                anchors = server._planner_v2_explicit_return_route_anchors(
+                    user_messages(f"Plan a loop from Phoenix to {destination} and back to Phoenix."),
+                    duration_days=3,
+                )
+
+                self.assertEqual([item["name"] for item in anchors], ["Phoenix", destination, "Phoenix"])
+
     def test_explicit_dirt_request_overrides_balanced_default(self):
         messages = user_messages(
             "Plan a three-day loop from Denver.",

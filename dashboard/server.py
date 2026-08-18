@@ -187,7 +187,12 @@ from db.store import (
     submit_community_publication, list_community_publications_for_user,
     retract_community_publication, list_community_publications_for_review,
     moderate_community_publication, list_approved_place_publications,
-    create_plan_job, get_plan_job, update_plan_job,
+    create_plan_job, create_or_get_planner_run, get_plan_job, update_plan_job,
+    append_plan_job_event, list_plan_job_events, request_plan_job_cancel,
+    update_plan_job_draft_result,
+    claim_plan_job_commit, finish_plan_job_commit, release_plan_job_commit,
+    claim_plan_job_execution, renew_plan_job_execution,
+    release_plan_job_execution, list_recoverable_planner_runs,
     submit_field_report, get_field_reports, get_field_report_summary,
     add_camp_comment, get_camp_comments,
     upsert_canonical_place, canonical_place_id, get_place,
@@ -626,6 +631,84 @@ def _validate_route_waypoints(waypoints: list[dict], context: str = "") -> dict:
                 [f"{a['name']} to {b['name']} is about {round(miles):,} miles direct.", "Break the trip into supported land routes before saving or navigating."],
             )
     return _route_validation_result(True)
+
+
+def _planner_v2_country_guard(waypoints: list[dict], *, confirm_cross_border: bool = False) -> dict:
+    """Bind every generated stop to the countries confirmed by the route endpoints.
+
+    Coordinates remain provider-resolved. The model can suggest place names, but
+    it cannot expand the allowed country set or silently introduce a border.
+    """
+    located = [
+        waypoint
+        for waypoint in waypoints
+        if isinstance(waypoint, dict)
+        and waypoint.get("lat") is not None
+        and waypoint.get("lng") is not None
+    ]
+    if len(located) < 2:
+        return _route_validation_result(
+            False,
+            "Trailhead could not confirm both ends of this route.",
+            ["Clarify the starting place and destination, including the state or country."],
+        )
+
+    ambiguous = [
+        str(waypoint.get("name") or "Route stop").strip() or "Route stop"
+        for waypoint in located
+        if bool(waypoint.get("geocode_ambiguous"))
+        or waypoint.get("geocode_ambiguity_verified") is False
+    ]
+    if ambiguous:
+        return _route_validation_result(
+            False,
+            "A route place could refer to more than one location.",
+            [f"Add the state, province, or country for: {', '.join(dict.fromkeys(ambiguous[:4]))}."],
+        )
+
+    start, destination = located[0], located[-1]
+    endpoint_codes = [str(start.get("country_code") or "").strip().lower(), str(destination.get("country_code") or "").strip().lower()]
+    if not all(endpoint_codes):
+        return _route_validation_result(
+            False,
+            "Trailhead could not confirm the route countries.",
+            ["Add the state or country to the start and destination, then try again."],
+        )
+
+    allowed = set(endpoint_codes)
+    if len(allowed) > 1 and not confirm_cross_border:
+        return _route_validation_result(
+            False,
+            "This route crosses an international border and needs your approval.",
+            ["Confirm the cross-border trip before Trailhead adds any stops."],
+        )
+
+    outside: list[str] = []
+    unconfirmed: list[str] = []
+    for waypoint in located:
+        code = str(waypoint.get("country_code") or "").strip().lower()
+        name = str(waypoint.get("name") or "Route stop").strip() or "Route stop"
+        if not code:
+            unconfirmed.append(name)
+        elif code not in allowed:
+            outside.append(name)
+    if outside:
+        return _route_validation_result(
+            False,
+            "A suggested stop falls outside the confirmed route countries.",
+            [f"Remove or replace: {', '.join(dict.fromkeys(outside[:4]))}."],
+        )
+    if unconfirmed:
+        return _route_validation_result(
+            False,
+            "Trailhead could not verify the country for every route stop.",
+            [f"Clarify or replace: {', '.join(dict.fromkeys(unconfirmed[:4]))}."],
+        )
+    return {
+        **_route_validation_result(True),
+        "allowed_country_codes": sorted(allowed),
+        "cross_border": len(allowed) > 1,
+    }
 
 def _validate_route_locations(locations: list[dict]) -> dict:
     for a, b in zip(locations, locations[1:]):
@@ -10421,6 +10504,9 @@ class PlanRequest(BaseModel):
     camp_reuse_policy: str = "different_each_night"
     max_daily_drive_hours: Optional[float] = None
     trip_preferences: Optional[dict] = None
+    draft_only: bool = False
+    strict_country_guard: bool = False
+    confirm_cross_border: bool = False
 
 
 TRIP_PLANNER_UNAVAILABLE = "Trip Planner is temporarily unavailable. Try again shortly."
@@ -10492,6 +10578,47 @@ def _ai_profile_key(session_id: str, user: dict | None) -> str:
     if user and user.get("id") is not None:
         return f"user:{user['id']}:profile"
     return f"anon:{session_id or 'default'}"
+
+
+def _planner_v2_question(content: object, trail_dna: object) -> dict | None:
+    """Attach safe, contextual answer cards without inventing route facts."""
+    prompt = re.sub(r"\s+", " ", str(content or "")).strip()
+    if "?" not in prompt:
+        return None
+    lower = prompt.lower()
+    options: list[dict] = []
+    question_kind = "freeform"
+    if any(term in lower for term in ("driving", "vehicle", "rig", "2wd", "4wd", "clearance")):
+        question_kind = "vehicle"
+        options = [
+            {"id": "vehicle_2wd", "label": "2WD", "detail": "Paved access only", "value": "I am driving a 2WD vehicle. Keep camps and stops on paved access."},
+            {"id": "vehicle_awd", "label": "SUV / AWD", "detail": "Maintained dirt roads are okay", "value": "I am driving an SUV or AWD vehicle. Maintained dirt roads are okay."},
+            {"id": "vehicle_4wd", "label": "High-clearance 4WD", "detail": "Rougher access is possible", "value": "I have a high-clearance 4WD vehicle. Rougher access is possible, but disclose it clearly."},
+        ]
+    elif any(term in lower for term in ("camp", "overnight", "sleep", "hookup", "dispersed")):
+        question_kind = "camp_style"
+        options = [
+            {"id": "camp_developed", "label": "Developed camps", "detail": "More services and predictable access", "value": "Prefer developed or reservable campgrounds with reliable access."},
+            {"id": "camp_dispersed", "label": "Quiet public land", "detail": "Fewer services; rules must be checked", "value": "Prefer legal dispersed camping on public land, with rules and access clearly checked."},
+            {"id": "camp_mix", "label": "A mix", "detail": "Balance comfort and solitude", "value": "Use a mix of developed campgrounds and quiet public-land options."},
+        ]
+    elif any(term in lower for term in ("pace", "hours", "drive", "miles", "long day")):
+        question_kind = "drive_pace"
+        options = [
+            {"id": "pace_relaxed", "label": "Relaxed", "detail": "About 3–4 hours of driving a day", "value": "Keep driving relaxed, around 3 to 4 hours per day."},
+            {"id": "pace_balanced", "label": "Balanced", "detail": "About 5–6 hours on travel days", "value": "Use a balanced pace, around 5 to 6 hours on travel days."},
+            {"id": "pace_long", "label": "Cover ground", "detail": "Longer days are okay when needed", "value": "Longer drive days are okay when they make the route work, but keep breaks realistic."},
+        ]
+    elif any(term in lower for term in ("interest", "must-do", "want to do", "priorit", "highlight")):
+        question_kind = "interests"
+        options = [
+            {"id": "interest_trails", "label": "Trails", "detail": "Hikes and trailheads near the route", "value": "Prioritize worthwhile trails and hikes near the route."},
+            {"id": "interest_scenic", "label": "Scenic stops", "detail": "Viewpoints, geology, and quiet roads", "value": "Prioritize scenic roads, viewpoints, and memorable landscapes."},
+            {"id": "interest_stars", "label": "Night skies", "detail": "Dark camps and stargazing", "value": "Prioritize dark-sky camps and stargazing opportunities."},
+        ]
+    if not options:
+        return None
+    return {"kind": question_kind, "prompt": prompt[:700], "options": options, "allow_freeform": True}
 
 
 @app.post("/api/chat")
@@ -10788,7 +10915,8 @@ async def chat_endpoint(request: Request, body: ChatRequest, user: dict = Depend
         raise HTTPException(503, TRIP_PLANNER_UNAVAILABLE)
 
     return {"type": response["type"], "content": response["content"],
-            "outline": response.get("outline"), "trail_dna": trail_dna}
+            "outline": response.get("outline"), "trail_dna": trail_dna,
+            "question": _planner_v2_question(response.get("content"), trail_dna) if response.get("type") == "message" else None}
 
 
 async def _send_expo_push(token: str, title: str, body_text: str, data: dict) -> dict:
@@ -10894,25 +11022,592 @@ async def _send_admin_push_campaign(body: AdminPushCampaignBody, admin: dict) ->
     }
 
 
+PLANNER_V2_TASKS = (
+    ("trip_shape", "Understanding your trip"),
+    ("confirm_places", "Confirming route places"),
+    ("road_route", "Building the road route"),
+    ("camps", "Checking camps and overnight options"),
+    ("fuel", "Checking fuel and resupply"),
+    ("experiences", "Comparing trails and worthwhile stops"),
+    ("detours", "Measuring optional detours by road"),
+    ("conditions", "Checking weather and route conditions"),
+    ("source_review", "Reviewing sources and unresolved warnings"),
+    ("trip_preview", "Preparing your trip preview"),
+)
+PLANNER_V2_EXECUTION_LEASE_SECONDS = 600
+_planner_v2_execution_owner_context: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "planner_v2_execution_owner", default=None,
+)
+_planner_v2_background_tasks: set[asyncio.Task] = set()
+
+
+class PlannerRunCancelled(RuntimeError):
+    pass
+
+
+def _planner_v2_routable_waypoints(waypoints: list[dict]) -> list[dict]:
+    points: list[dict] = []
+    for waypoint in waypoints:
+        if not isinstance(waypoint, dict) or _planner_route_point_type(waypoint) == "side_stop":
+            continue
+        try:
+            lat = float(waypoint.get("lat"))
+            lng = float(waypoint.get("lng"))
+        except (TypeError, ValueError):
+            return []
+        if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+            return []
+        if points and abs(points[-1]["lat"] - lat) < 1e-7 and abs(points[-1]["lng"] - lng) < 1e-7:
+            continue
+        points.append({**waypoint, "lat": lat, "lng": lng})
+    return points
+
+
+def _planner_v2_confirmed_endpoints(waypoints: list[dict]) -> list[dict]:
+    """Return only the provider-resolved start and destination for the base route."""
+    candidates = [
+        waypoint
+        for waypoint in waypoints
+        if isinstance(waypoint, dict) and _planner_route_point_type(waypoint) != "side_stop"
+    ]
+    if len(candidates) < 2:
+        return []
+    start = next((item for item in candidates if str(item.get("type") or "").lower() == "start"), candidates[0])
+    destination = next(
+        (item for item in reversed(candidates) if str(item.get("type") or "").lower() == "destination"),
+        candidates[-1],
+    )
+    endpoints: list[dict] = []
+    for waypoint in (start, destination):
+        try:
+            lat = float(waypoint.get("lat"))
+            lng = float(waypoint.get("lng"))
+        except (TypeError, ValueError):
+            return []
+        if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+            return []
+        endpoints.append({**waypoint, "lat": lat, "lng": lng})
+    if abs(endpoints[0]["lat"] - endpoints[1]["lat"]) < 1e-7 and abs(endpoints[0]["lng"] - endpoints[1]["lng"]) < 1e-7:
+        return []
+    return endpoints
+
+
+def _planner_v2_mapbox_steps(route: dict) -> tuple[list[dict], list[list[dict]]]:
+    flat: list[dict] = []
+    by_leg: list[list[dict]] = []
+    for leg in route.get("legs") or []:
+        leg_steps: list[dict] = []
+        for step in leg.get("steps") or []:
+            if not isinstance(step, dict):
+                continue
+            maneuver = step.get("maneuver") if isinstance(step.get("maneuver"), dict) else {}
+            location = maneuver.get("location") if isinstance(maneuver.get("location"), list) else [None, None]
+            item = {
+                "type": str(maneuver.get("type") or "continue"),
+                "modifier": str(maneuver.get("modifier") or ""),
+                "name": str(step.get("name") or ""),
+                "distance": max(0.0, float(step.get("distance") or 0)),
+                "duration": max(0.0, float(step.get("duration") or 0)),
+                "lat": location[1] if len(location) > 1 else None,
+                "lng": location[0] if location else None,
+                "instruction": str(maneuver.get("instruction") or ""),
+                "verbalPre": str(maneuver.get("instruction") or ""),
+                "verbalPost": "",
+                "roundaboutExit": maneuver.get("exit") if isinstance(maneuver.get("exit"), int) else None,
+            }
+            leg_steps.append(item)
+            flat.append(item)
+        by_leg.append(leg_steps)
+    return flat, by_leg
+
+
+async def _planner_v2_mapbox_route_geometry(
+    waypoints: list[dict],
+    route_style: str = "balanced",
+    *,
+    allow_country_borders: bool = False,
+) -> dict | None:
+    """Build the preview route from provider-resolved anchors using road routing.
+
+    Mapbox accepts at most 25 coordinates per request, so long routes are split
+    into overlapping chunks and reassembled without dropping an anchor.
+    """
+    if not settings.mapbox_token:
+        return None
+    points = _planner_v2_routable_waypoints(waypoints)
+    if len(points) < 2:
+        return None
+    chunks: list[list[dict]] = []
+    start = 0
+    while start < len(points) - 1:
+        chunk = points[start:start + 25]
+        if len(chunk) < 2:
+            return None
+        chunks.append(chunk)
+        start += len(chunk) - 1
+    all_coords: list[list[float]] = []
+    all_steps: list[dict] = []
+    all_legs: list[list[dict]] = []
+    distance_m = 0.0
+    duration_s = 0.0
+    for chunk in chunks:
+        data = await _map_context_directions(MapContextRouteRequest(
+            coordinates=[[point["lng"], point["lat"]] for point in chunk],
+            profile="mapbox/driving-traffic",
+            steps=True,
+            alternatives=False,
+            annotations="duration,distance",
+            exclude="toll,ferry" if allow_country_borders else "toll,ferry,country_border",
+            language="en",
+            overview="full",
+        ))
+        routes = data.get("routes") if isinstance(data, dict) else None
+        route = routes[0] if isinstance(routes, list) and routes and isinstance(routes[0], dict) else None
+        notifications = route.get("notifications") if isinstance(route, dict) and isinstance(route.get("notifications"), list) else []
+        if not allow_country_borders and any(
+            isinstance(item, dict) and str(item.get("subtype") or "") == "countryBorderCrossing"
+            for item in notifications
+        ):
+            return None
+        geometry = route.get("geometry") if isinstance(route, dict) and isinstance(route.get("geometry"), dict) else {}
+        coords = geometry.get("coordinates") if isinstance(geometry.get("coordinates"), list) else []
+        clean_coords = [
+            [float(point[0]), float(point[1])]
+            for point in coords
+            if isinstance(point, list) and len(point) >= 2
+            and isinstance(point[0], (int, float)) and isinstance(point[1], (int, float))
+            and -180 <= float(point[0]) <= 180 and -90 <= float(point[1]) <= 90
+        ]
+        if not route or len(clean_coords) < 2:
+            return None
+        if all_coords and _haversine_m(all_coords[-1][1], all_coords[-1][0], clean_coords[0][1], clean_coords[0][0]) > 160.934:
+            return None
+        if all_coords and all_coords[-1] == clean_coords[0]:
+            clean_coords = clean_coords[1:]
+        all_coords.extend(clean_coords)
+        flat_steps, leg_steps = _planner_v2_mapbox_steps(route)
+        all_steps.extend(flat_steps)
+        all_legs.extend(leg_steps)
+        distance_m += max(0.0, float(route.get("distance") or 0))
+        duration_s += max(0.0, float(route.get("duration") or 0))
+    if len(all_coords) < 2 or distance_m <= 0 or duration_s <= 0:
+        return None
+    stride = max(1, math.ceil(len(all_coords) / 8192))
+    sampled = all_coords[::stride]
+    if sampled[-1] != all_coords[-1]:
+        sampled.append(all_coords[-1])
+    search_start = 0
+    for point in points:
+        best_index = search_start
+        best_distance = float("inf")
+        for index in range(search_start, len(sampled)):
+            distance = _haversine_m(point["lat"], point["lng"], sampled[index][1], sampled[index][0])
+            if distance < best_distance:
+                best_distance = distance
+                best_index = index
+        if best_distance > 8_000:
+            return None
+        search_start = best_index
+    style = _normalized_planner_route_style(route_style)
+    return {
+        "coords": all_coords,
+        "steps": all_steps,
+        "legs": all_legs,
+        "totalDistance": distance_m,
+        "totalDuration": duration_s,
+        "source": "mapbox-directions",
+        "engine": "mapbox-directions",
+        "confidence": "high",
+        "routeStyle": style,
+        "waypointSignature": _planner_waypoint_signature(waypoints),
+        "routableWaypointSignature": _planner_waypoint_signature(waypoints, routable_only=True),
+        "ts": int(time.time() * 1000),
+    }
+
+
+async def _planner_v2_candidate_country_code(candidate: dict) -> str:
+    direct = str(candidate.get("country_code") or "").strip().lower()
+    if direct:
+        return direct
+    try:
+        lat = float(candidate.get("lat"))
+        lng = float(candidate.get("lng"))
+        data = await _mapbox_get(
+            "https://api.mapbox.com/search/searchbox/v1/reverse",
+            _searchbox_params({
+                "latitude": f"{lat:.7f}",
+                "longitude": f"{lng:.7f}",
+                "language": "en",
+                "limit": "1",
+                "types": "country,region,place",
+            }),
+        )
+        for feature in data.get("features") or []:
+            normalized = _map_context_normalize_mapbox_feature(feature, category="place", source="planner_reverse_check")
+            code = str((normalized or {}).get("country_code") or "").strip().lower()
+            if code:
+                return code
+    except Exception:
+        return ""
+    return ""
+
+
+async def _planner_v2_route_country_guard(
+    route_geometry: dict,
+    allowed_country_codes: list[str],
+) -> dict:
+    """Fail closed when the returned road line leaves the confirmed countries."""
+    route = route_geometry.get("coords") if isinstance(route_geometry, dict) else None
+    if not isinstance(route, list) or len(route) < 2:
+        return _route_validation_result(
+            False,
+            "Trailhead could not verify the countries crossed by this road route.",
+            ["Try again before reviewing or saving this trip."],
+        )
+    allowed = {str(code or "").strip().lower() for code in allowed_country_codes if str(code or "").strip()}
+    if not allowed:
+        return _route_validation_result(
+            False,
+            "Trailhead could not verify the countries crossed by this road route.",
+            ["Confirm the start and destination countries, then try again."],
+        )
+    # Directions is also asked to exclude controlled country borders for
+    # domestic routes. These bounded reverse checks are independent defense in
+    # depth, including for provider data or routing-notification drift.
+    sample_count = min(17, len(route))
+    indexes = sorted({round(index * (len(route) - 1) / max(1, sample_count - 1)) for index in range(sample_count)})
+    samples: list[dict] = []
+    for index in indexes:
+        point = route[index]
+        if not isinstance(point, (list, tuple)) or len(point) < 2:
+            return _route_validation_result(False, "Trailhead could not verify the road route countries.")
+        samples.append({"lng": point[0], "lat": point[1]})
+    try:
+        resolved = await asyncio.gather(*[
+            asyncio.wait_for(_planner_v2_candidate_country_code(sample), timeout=4)
+            for sample in samples
+        ])
+    except Exception:
+        resolved = []
+    codes = {str(code or "").strip().lower() for code in resolved if str(code or "").strip()}
+    if len(resolved) != len(samples) or len(codes) == 0 or any(not str(code or "").strip() for code in resolved):
+        return _route_validation_result(
+            False,
+            "Trailhead could not verify every country crossed by the road route.",
+            ["Review the endpoints and try the route check again."],
+        )
+    outside = sorted(codes - allowed)
+    if outside:
+        return _route_validation_result(
+            False,
+            "The road route crosses a country that was not confirmed.",
+            ["A border crossing must be confirmed before Trailhead can continue."],
+        )
+    return {**_route_validation_result(True), "route_country_codes": sorted(codes)}
+
+
+def _planner_v2_closest_route_point(route: list[list[float]], lat: float, lng: float) -> tuple[list[float] | None, float]:
+    if not route:
+        return None, float("inf")
+    stride = max(1, math.ceil(len(route) / 1500))
+    candidates = route[::stride]
+    if candidates[-1] != route[-1]:
+        candidates.append(route[-1])
+    best = min(candidates, key=lambda point: _haversine_m(lat, lng, float(point[1]), float(point[0])))
+    return best, _haversine_m(lat, lng, float(best[1]), float(best[0]))
+
+
+async def _planner_v2_detour_proposals(
+    enrichment: dict,
+    route_geometry: dict,
+    allowed_country_codes: list[str],
+) -> list[dict]:
+    """Measure a small, sourced candidate set by road without adding any stop."""
+    if not settings.mapbox_token:
+        return []
+    route = route_geometry.get("coords") if isinstance(route_geometry.get("coords"), list) else []
+    allowed = {str(code).lower() for code in allowed_country_codes if str(code).strip()}
+    candidates = [
+        *((enrichment.get("route_pois") or [])[:3]),
+        *((enrichment.get("campsites") or [])[:2]),
+    ]
+    proposals: list[dict] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        if len(proposals) >= 3 or not isinstance(candidate, dict):
+            break
+        source_url = _planner_v2_source_url(candidate)
+        if not source_url:
+            continue
+        try:
+            lat = float(candidate.get("lat"))
+            lng = float(candidate.get("lng"))
+        except (TypeError, ValueError):
+            continue
+        if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+            continue
+        identity = str(candidate.get("id") or f"{lat:.5f}:{lng:.5f}")
+        if identity in seen:
+            continue
+        seen.add(identity)
+        try:
+            country_code = await asyncio.wait_for(_planner_v2_candidate_country_code(candidate), timeout=3)
+        except Exception:
+            country_code = ""
+        if not country_code or country_code not in allowed:
+            continue
+        route_point, geometric_distance = _planner_v2_closest_route_point(route, lat, lng)
+        if not route_point or geometric_distance > 80_000:
+            continue
+        try:
+            matrix = await asyncio.wait_for(
+                _map_context_matrix(MapContextMatrixRequest(
+                    coordinates=[[float(route_point[0]), float(route_point[1])], [lng, lat]],
+                    profile="mapbox/driving",
+                    sources="all",
+                    destinations="all",
+                    annotations="duration,distance",
+                )),
+                timeout=5,
+            )
+            durations = matrix.get("durations")
+            distances = matrix.get("distances")
+            out_seconds = float(durations[0][1])
+            back_seconds = float(durations[1][0])
+            out_meters = float(distances[0][1])
+            back_meters = float(distances[1][0])
+        except Exception:
+            continue
+        if not all(math.isfinite(value) and value >= 0 for value in (out_seconds, back_seconds, out_meters, back_meters)):
+            continue
+        added_minutes = int(math.ceil((out_seconds + back_seconds) / 60))
+        added_miles = round((out_meters + back_meters) / 1609.344, 1)
+        if added_minutes <= 10:
+            continue
+        title = re.sub(r"\s+", " ", str(candidate.get("name") or candidate.get("title") or "Optional stop")).strip()[:140]
+        proposal_id = hashlib.sha256(f"{identity}:{route_geometry.get('waypointSignature')}".encode()).hexdigest()[:20]
+        proposals.append({
+            "id": proposal_id,
+            "title": title or "Optional stop",
+            "kind": str(candidate.get("type") or ("camp" if candidate in (enrichment.get("campsites") or []) else "place"))[:48],
+            "added_drive_minutes": added_minutes,
+            "added_distance_miles": added_miles,
+            "decision": "pending",
+            "requires_approval": True,
+            "risk_reason": "More than 30 added minutes" if added_minutes > 30 else "More than 10 added minutes",
+            "road_verified": True,
+            "source_url": source_url,
+            "source_label": str(candidate.get("source_label") or candidate.get("source") or "Direct source")[:100],
+            "country_code": country_code,
+            "lat": lat,
+            "lng": lng,
+            "recommended_day": max(1, int(candidate.get("recommended_day") or 1)),
+        })
+    return proposals
+
+
+def _planner_v2_public_detours(result: dict | None) -> list[dict]:
+    proposals = result.get("planner_detour_proposals") if isinstance(result, dict) else []
+    out: list[dict] = []
+    for proposal in proposals or []:
+        if not isinstance(proposal, dict):
+            continue
+        out.append({key: proposal.get(key) for key in (
+            "id", "title", "kind", "added_drive_minutes", "added_distance_miles",
+            "decision", "requires_approval", "risk_reason", "road_verified", "source_url", "source_label",
+        )})
+    return out[:3]
+
+
+PLANNER_V2_CONDITION_SOURCES = {
+    "nws": ("National Weather Service", "https://www.weather.gov/", "official"),
+    "wfigs": ("National Interagency Fire Center", "https://www.nifc.gov/fire-information/maps", "official"),
+    "firms": ("NASA FIRMS", "https://firms.modaps.eosdis.nasa.gov/", "official"),
+    "airnow": ("AirNow", "https://www.airnow.gov/", "official"),
+    "gdacs": ("GDACS", "https://www.gdacs.org/", "official"),
+    "tomtom": ("TomTom traffic", "https://www.tomtom.com/traffic-index/", "commercial"),
+}
+
+
+def _planner_v2_safe_condition(alert: dict) -> dict | None:
+    try:
+        lat = float(alert.get("lat"))
+        lng = float(alert.get("lng"))
+    except (TypeError, ValueError):
+        return None
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        return None
+    provider = re.sub(r"[^a-z0-9_-]+", "", str(alert.get("provider") or "").lower())[:32]
+    source_title, source_url, source_kind = PLANNER_V2_CONDITION_SOURCES.get(
+        provider,
+        ("Route condition source", "", "other"),
+    )
+    if not source_url:
+        return None
+    alert_type = re.sub(r"\s+", " ", str(alert.get("subtype") or alert.get("type") or "Route condition")).strip()[:100]
+    description = re.sub(r"\s+", " ", str(alert.get("description") or "Review this condition before departure.")).strip()[:360]
+    severity = str(alert.get("severity") or "low").lower()
+    if severity not in {"low", "moderate", "high", "critical"}:
+        severity = "low"
+    identity = hashlib.sha256(
+        f"{provider}:{alert.get('id')}:{lat:.5f}:{lng:.5f}".encode()
+    ).hexdigest()[:20]
+    return {
+        "id": identity,
+        "title": alert_type or "Route condition",
+        "description": description,
+        "severity": severity,
+        "lat": lat,
+        "lng": lng,
+        "source_label": source_title,
+        "source_url": source_url,
+        "source_kind": source_kind,
+        "updated_at": int(alert.get("updated_at") or alert.get("created_at") or time.time()),
+    }
+
+
+async def _planner_v2_route_readiness(waypoints: list[dict], trip_id: str) -> tuple[list[dict], list[dict], list[str]]:
+    """Run bounded route-condition and weather checks without model-written facts."""
+    routable = _planner_v2_routable_waypoints(waypoints)
+    if len(routable) < 2:
+        return [], [], ["Weather and route conditions could not be checked because the route anchors were incomplete."]
+    sampled = [routable[0]]
+    if len(routable) > 2:
+        sampled.append(routable[len(routable) // 2])
+    sampled.append(routable[-1])
+    unique_sampled: list[dict] = []
+    seen: set[tuple[float, float]] = set()
+    for waypoint in sampled:
+        key = (round(float(waypoint["lat"]), 4), round(float(waypoint["lng"]), 4))
+        if key not in seen:
+            seen.add(key)
+            unique_sampled.append(waypoint)
+
+    alerts_result, weather_result = await asyncio.gather(
+        asyncio.wait_for(_provider_alerts_along_route(routable, radius_deg=0.12), timeout=14),
+        asyncio.wait_for(
+            route_weather(RouteWeatherRequest(waypoints=unique_sampled, trip_id=trip_id, units="auto")),
+            timeout=14,
+        ),
+        return_exceptions=True,
+    )
+    warnings: list[str] = []
+    conditions: list[dict] = []
+    if isinstance(alerts_result, list):
+        for alert in alerts_result[:20]:
+            if isinstance(alert, dict):
+                safe = _planner_v2_safe_condition(alert)
+                if safe:
+                    conditions.append(safe)
+        # The shared conditions pipeline intentionally converts individual
+        # provider failures into empty lists. Until it exposes per-source
+        # health, Planner V2 must conservatively show a visible gap instead of
+        # awarding a completed checkmark for an indistinguishable empty result.
+        warnings.append(
+            "Live closure and alert feeds may be incomplete. Recheck official road and public-land notices before departure."
+        )
+    else:
+        warnings.append("Live route conditions were unavailable. Recheck closures and alerts before departure.")
+
+    forecasts = weather_result.get("forecasts") if isinstance(weather_result, dict) and isinstance(weather_result.get("forecasts"), dict) else {}
+    weather_checks: list[dict] = []
+    for waypoint in unique_sampled:
+        name = str(waypoint.get("name") or "Route area")[:140]
+        forecast = forecasts.get(name) if isinstance(forecasts, dict) else None
+        if not isinstance(forecast, dict) or forecast.get("available") is False:
+            continue
+        weather_checks.append({
+            "id": hashlib.sha256(f"weather:{name}:{waypoint['lat']}:{waypoint['lng']}".encode()).hexdigest()[:20],
+            "title": f"Weather check: {name}",
+            "description": "Forecast data was available when this draft was researched. Recheck it close to departure.",
+            "lat": float(waypoint["lat"]),
+            "lng": float(waypoint["lng"]),
+            "source_label": str(forecast.get("source_label") or "Open-Meteo forecast")[:100],
+            "source_url": "https://open-meteo.com/",
+            "source_kind": "other",
+        })
+    if not weather_checks:
+        warnings.append("Weather forecasts were unavailable. Recheck weather before departure.")
+    return conditions, weather_checks, warnings[:4]
+
+
+def _planner_v2_stage(
+    job_id: str,
+    status: str,
+    task_id: str,
+    state: str,
+    message: str,
+    *,
+    payload: dict | None = None,
+) -> None:
+    execution_owner = _planner_v2_execution_owner_context.get()
+    if execution_owner and not renew_plan_job_execution(
+        job_id,
+        execution_owner,
+        lease_seconds=PLANNER_V2_EXECUTION_LEASE_SECONDS,
+    ):
+        raise RuntimeError("Planner execution lease was lost")
+    update_plan_job(job_id, status)
+    append_plan_job_event(
+        job_id,
+        "task",
+        task_id=task_id,
+        state=state,
+        payload={"message": message[:240], **(payload or {})},
+    )
+
+
+def _planner_v2_require_active(job_id: str) -> None:
+    execution_owner = _planner_v2_execution_owner_context.get()
+    if execution_owner and not renew_plan_job_execution(
+        job_id,
+        execution_owner,
+        lease_seconds=PLANNER_V2_EXECUTION_LEASE_SECONDS,
+    ):
+        raise RuntimeError("Planner execution lease was lost")
+    job = get_plan_job(job_id)
+    if job and bool(job.get("cancel_requested")):
+        raise PlannerRunCancelled()
+
+
 def _mark_plan_job_failed(job_id: str, error: str) -> None:
     for attempt in range(2):
         try:
             update_plan_job(job_id, "failed", error=error)
+            job = get_plan_job(job_id)
+            if job and bool(job.get("draft_only")):
+                append_plan_job_event(
+                    job_id,
+                    "run",
+                    state="blocked",
+                    payload={"message": str(error or TRIP_PLANNER_UNAVAILABLE)[:240]},
+                )
             return
         except Exception as exc:
             _log_planner_failure(f"plan_job_failure_status_{attempt + 1}", exc)
 
 
 async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, cost: int) -> None:
-    """Background task: generate the trip, geocode, enrich, save, notify."""
+    """Background task: generate, verify, route, enrich, then save or hold a draft."""
     import anthropic as _anthropic
     import re as _re
     started_at = time.time()
     refundable_cost = cost
     trip_saved = False
+    draft_only = bool(body.draft_only)
     try:
-        update_plan_job(job_id, "running")
-        update_plan_job(job_id, "ai")
+        if draft_only:
+            _planner_v2_stage(
+                job_id,
+                "ai",
+                "trip_shape",
+                "running",
+                "Reviewing the conversation and trip priorities",
+            )
+            _planner_v2_require_active(job_id)
+        else:
+            update_plan_job(job_id, "running")
+            update_plan_job(job_id, "ai")
         msgs: list[dict] = []
         if body.session_id:
             msgs = get_conversation(_ai_conversation_key(body.session_id, user))
@@ -10969,47 +11664,171 @@ async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, c
 
         is_long_trip = int(plan_data.get("duration_days") or 0) >= 10 or len(plan_data.get("waypoints", [])) >= 28
 
-        update_plan_job(job_id, "geocoding")
+        if draft_only:
+            _planner_v2_stage(
+                job_id,
+                "geocoding",
+                "trip_shape",
+                "completed",
+                "Trip priorities and driving rhythm are set",
+            )
+            append_plan_job_event(
+                job_id,
+                "task",
+                task_id="confirm_places",
+                state="running",
+                payload={"message": "Confirming the start, destination, and planned stops"},
+            )
+            _planner_v2_require_active(job_id)
+        else:
+            update_plan_job(job_id, "geocoding")
         try:
             geocode_timeout = 60 if is_long_trip else 50
             geocoded = await asyncio.wait_for(_geocode_waypoints(plan_data.get("waypoints", [])), timeout=geocode_timeout)
         except Exception:
             geocoded = plan_data.get("waypoints", [])
         plan_data["waypoints"] = geocoded
-        validation = _validate_route_waypoints(geocoded, body.request or "")
-        if not validation["ok"]:
+        confirmed_endpoints = _planner_v2_confirmed_endpoints(geocoded)
+        validation_points = confirmed_endpoints if draft_only else geocoded
+        validation = _validate_route_waypoints(validation_points, body.request or "")
+        if len(confirmed_endpoints) != 2 or not validation["ok"]:
             if user and refundable_cost > 0:
                 add_credits(user["id"], refundable_cost, "Refund — unsupported route")
                 refundable_cost = 0
-            _mark_plan_job_failed(job_id, f"{validation['reason']} {' '.join(validation['details'])}")
+            _mark_plan_job_failed(
+                job_id,
+                (
+                    f"{validation['reason']} {' '.join(validation['details'])}"
+                    if not validation["ok"]
+                    else "Trailhead could not confirm both route endpoints. Add the start and destination, then try again."
+                ),
+            )
             return
+        model_idea_count = max(0, sum(
+            1 for item in geocoded
+            if isinstance(item, dict) and _planner_route_point_type(item) != "side_stop"
+        ) - 2)
 
-        update_plan_job(job_id, "routing")
+        if body.strict_country_guard:
+            country_validation = _planner_v2_country_guard(
+                confirmed_endpoints,
+                confirm_cross_border=bool(body.confirm_cross_border),
+            )
+            if not country_validation["ok"]:
+                if user and refundable_cost > 0:
+                    add_credits(user["id"], refundable_cost, "Refund — route countries need review")
+                    refundable_cost = 0
+                _mark_plan_job_failed(
+                    job_id,
+                    f"{country_validation['reason']} {' '.join(country_validation['details'])}",
+                )
+                return
+            plan_data["allowed_country_codes"] = country_validation.get("allowed_country_codes", [])
+
+        # Model-written intermediate names are research ideas, never trusted
+        # route controls. The base road line starts with the two confirmed
+        # endpoints; sourced camps, fuel and experiences are measured later.
+        plan_data["waypoints"] = confirmed_endpoints
+
+        if draft_only:
+            _planner_v2_stage(
+                job_id,
+                "routing",
+                "confirm_places",
+                "completed",
+                "Route places and countries are confirmed",
+                payload={"allowed_country_count": len(plan_data.get("allowed_country_codes") or [])},
+            )
+            append_plan_job_event(
+                job_id,
+                "task",
+                task_id="road_route",
+                state="running",
+                payload={"message": "Building the base road route and drive timing"},
+            )
+            _planner_v2_require_active(job_id)
+        else:
+            update_plan_job(job_id, "routing")
         try:
             route_geometry = await asyncio.wait_for(
-                _planner_route_geometry(geocoded, route_style=route_style),
-                timeout=45,
+                (
+                    _planner_v2_mapbox_route_geometry(
+                        confirmed_endpoints,
+                        route_style=route_style,
+                        allow_country_borders=len(plan_data.get("allowed_country_codes") or []) > 1,
+                    )
+                    if draft_only
+                    else _planner_route_geometry(geocoded, route_style=route_style)
+                ),
+                timeout=55 if draft_only else 45,
             )
         except Exception as exc:
             _log_planner_failure("plan_job_routing", exc)
             route_geometry = None
         if not _planner_geometry_is_valid(route_geometry):
             raise PlannerRouteUnavailable()
+        if draft_only:
+            route_country_validation = await _planner_v2_route_country_guard(
+                route_geometry,
+                plan_data.get("allowed_country_codes") or [],
+            )
+            if not route_country_validation["ok"]:
+                _mark_plan_job_failed(
+                    job_id,
+                    f"{route_country_validation['reason']} {' '.join(route_country_validation.get('details') or [])}",
+                )
+                return
+            plan_data["route_country_codes"] = route_country_validation.get("route_country_codes", [])
+            if model_idea_count:
+                append_plan_job_event(
+                    job_id,
+                    "research",
+                    task_id="road_route",
+                    state="completed",
+                    payload={
+                        "message": "Built the base road route from confirmed endpoints; unverified stop ideas were not added",
+                        "unverified_idea_count": model_idea_count,
+                    },
+                )
 
-        update_plan_job(job_id, "enriching")
+        if draft_only:
+            _planner_v2_stage(
+                job_id,
+                "enriching",
+                "road_route",
+                "completed",
+                "Base road route and drive timing are ready",
+            )
+            for task_id, message in (
+                ("camps", "Checking public-land camps and overnight rules along the route"),
+                ("fuel", "Checking fuel and resupply along the route"),
+                ("experiences", "Checking trails and worthwhile stops along the route"),
+            ):
+                append_plan_job_event(
+                    job_id,
+                    "task",
+                    task_id=task_id,
+                    state="running",
+                    payload={"message": message},
+                )
+            _planner_v2_require_active(job_id)
+        else:
+            update_plan_job(job_id, "enriching")
         try:
             enrich_timeout = 10 if is_long_trip or (time.time() - started_at) > 70 else 28
             enrichment = await asyncio.wait_for(
                 enrich_trip_along_route(
-                    geocoded,
+                    confirmed_endpoints if draft_only else geocoded,
                     route_style=route_style,
                     route_geometry=route_geometry,
                 ),
                 timeout=enrich_timeout,
             )
         except Exception:
-            enrichment = {"waypoints": geocoded, "campsites": [], "gas_stations": [], "route_pois": []}
-        plan_data["waypoints"] = enrichment.get("waypoints", geocoded)
+            base_waypoints = confirmed_endpoints if draft_only else geocoded
+            enrichment = {"waypoints": base_waypoints, "campsites": [], "gas_stations": [], "route_pois": []}
+        base_waypoints = confirmed_endpoints if draft_only else geocoded
+        plan_data["waypoints"] = enrichment.get("waypoints", base_waypoints)
         timeline = _build_trip_timeline(
             plan_data,
             enrichment.get("campsites", []),
@@ -11024,9 +11843,136 @@ async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, c
                   "route_pois": enrichment["route_pois"][:50],
                   "timeline": timeline}
         result["route_geometry"] = route_geometry
+        if draft_only:
+            result["planner_source_warnings"] = _planner_v2_source_omission_warnings(result)
+            result = _planner_v2_sourced_result(result, body.request or "")
+            plan_data = result["plan"]
+            timeline = result["timeline"]
+            for task_id, count, singular, plural in (
+                ("camps", len(result.get("campsites") or []), "camp option", "camp options"),
+                ("fuel", len(result.get("gas_stations") or []), "fuel option", "fuel options"),
+                ("experiences", len(result.get("route_pois") or []), "route-fit stop", "route-fit stops"),
+            ):
+                append_plan_job_event(
+                    job_id,
+                    "task",
+                    task_id=task_id,
+                    state="completed" if count else "warning",
+                    payload={
+                        "message": (
+                            f"{count} {singular if count == 1 else plural} checked"
+                            if count else f"No sourced {plural} were returned"
+                        ),
+                        "result_count": count,
+                    },
+                )
+            append_plan_job_event(
+                job_id,
+                "task",
+                task_id="detours",
+                state="running",
+                payload={"message": "Measuring optional route stops by road time and distance"},
+            )
+            _planner_v2_require_active(job_id)
+            proposals = await _planner_v2_detour_proposals(
+                enrichment,
+                route_geometry,
+                plan_data.get("allowed_country_codes") or [],
+            )
+            result["planner_detour_proposals"] = proposals
+            append_plan_job_event(
+                job_id,
+                "task",
+                task_id="detours",
+                state="needs_input" if proposals else "skipped",
+                payload={
+                    "message": (
+                        f"{len(proposals)} meaningful detour{'s' if len(proposals) != 1 else ''} need your decision"
+                        if proposals else "No meaningful detour needed approval"
+                    ),
+                    "proposal_count": len(proposals),
+                },
+            )
+            append_plan_job_event(
+                job_id,
+                "task",
+                task_id="conditions",
+                state="running",
+                payload={"message": "Checking current weather, fire, road, and public-safety conditions"},
+            )
+            _planner_v2_require_active(job_id)
+            route_conditions, weather_checks, readiness_warnings = await _planner_v2_route_readiness(
+                confirmed_endpoints,
+                trip_id,
+            )
+            result["route_conditions"] = route_conditions
+            result["weather_checks"] = weather_checks
+            result["planner_readiness_warnings"] = readiness_warnings
+            append_plan_job_event(
+                job_id,
+                "task",
+                task_id="conditions",
+                state="warning" if readiness_warnings else "completed",
+                payload={
+                    "message": (
+                        "Weather and route conditions checked"
+                        if not readiness_warnings else "Condition checks finished with gaps to review"
+                    ),
+                    "alert_count": len(route_conditions),
+                    "weather_area_count": len(weather_checks),
+                    "warning_count": len(readiness_warnings),
+                },
+            )
+            append_plan_job_event(
+                job_id,
+                "task",
+                task_id="source_review",
+                state="running",
+                payload={"message": "Checking direct source links and unresolved gaps"},
+            )
+            findings, _, source_warnings = _planner_v2_findings(result)
+            append_plan_job_event(
+                job_id,
+                "task",
+                task_id="source_review",
+                state="completed" if findings and not source_warnings else "warning",
+                payload={
+                    "message": (
+                        f"{len(findings)} sourced finding{'s' if len(findings) != 1 else ''} ready"
+                        if not source_warnings else "Source review finished with gaps to review"
+                    ),
+                    "finding_count": len(findings),
+                    "warning_count": len(source_warnings),
+                },
+            )
         stored = dict(result)
         stored.pop("route_geometry", None)
         serialized_result = json.dumps(result)
+        if draft_only:
+            _planner_v2_stage(
+                job_id,
+                "reviewing",
+                "trip_preview",
+                "running",
+                "Checking the draft for missing stops and unresolved warnings",
+            )
+            _planner_v2_require_active(job_id)
+            update_plan_job(job_id, "ready_for_review", result=serialized_result)
+            append_plan_job_event(
+                job_id,
+                "task",
+                task_id="trip_preview",
+                state="completed",
+                payload={"message": "Your unsaved trip preview is ready"},
+            )
+            append_plan_job_event(
+                job_id,
+                "run",
+                state="completed",
+                payload={"message": "Review the trip before saving it to Trips"},
+            )
+            refundable_cost = 0
+            return
         # Keep the finished payload with the job before saving the trip. If the
         # final status write fails, polling can verify the saved trip and recover.
         update_plan_job(job_id, "saving", result=serialized_result)
@@ -11085,6 +12031,18 @@ async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, c
             except Exception as exc:
                 _log_planner_failure("plan_job_push", exc)
 
+    except PlannerRunCancelled:
+        if user and refundable_cost > 0:
+            add_credits(user["id"], refundable_cost, "Refund — trip planning was cancelled")
+            refundable_cost = 0
+        update_plan_job(job_id, "cancelled", error="Planning stopped")
+        if draft_only:
+            append_plan_job_event(
+                job_id,
+                "run",
+                state="skipped",
+                payload={"message": "Planning stopped before the trip was saved"},
+            )
     except asyncio.CancelledError:
         if not trip_saved and user and refundable_cost > 0:
             add_credits(user["id"], refundable_cost, "Refund - trip planning was interrupted")
@@ -11104,6 +12062,51 @@ async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, c
             add_credits(user["id"], refundable_cost, "Refund — planning error")
             refundable_cost = 0
         _mark_plan_job_failed(job_id, TRIP_PLANNER_UNAVAILABLE)
+
+
+async def _planner_v2_run_persisted_job(job_id: str) -> None:
+    """Claim and execute one durable V2 job; another process may win safely."""
+    execution_owner = uuid.uuid4().hex
+    claimed = claim_plan_job_execution(
+        job_id,
+        execution_owner,
+        lease_seconds=PLANNER_V2_EXECUTION_LEASE_SECONDS,
+    )
+    if not claimed:
+        return
+    try:
+        payload = json.loads(str(claimed.get("planner_request_json") or "{}"))
+        body = PlanRequest.model_validate(payload)
+        if not body.draft_only or not body.strict_country_guard:
+            raise ValueError("Planner V2 recovery payload is invalid")
+        user_id = claimed.get("user_id")
+        user = get_user_by_id(int(user_id)) if user_id is not None else None
+        if not user:
+            raise ValueError("Planner V2 account is unavailable")
+        marker = _planner_v2_execution_owner_context.set(execution_owner)
+        try:
+            # Preview runs are intentionally free while the gated contract is
+            # being evaluated, so a restart can resume without billing twice.
+            await _execute_plan_job(job_id, body, user, 0)
+        finally:
+            _planner_v2_execution_owner_context.reset(marker)
+    except Exception as exc:
+        _log_planner_failure("planner_v2_recovery", exc)
+        _mark_plan_job_failed(job_id, TRIP_PLANNER_UNAVAILABLE)
+    finally:
+        release_plan_job_execution(job_id, execution_owner)
+
+
+def _schedule_planner_v2_job(job_id: str) -> None:
+    task = asyncio.create_task(_planner_v2_run_persisted_job(job_id))
+    _planner_v2_background_tasks.add(task)
+    task.add_done_callback(_planner_v2_background_tasks.discard)
+
+
+@app.on_event("startup")
+async def _recover_planner_v2_runs() -> None:
+    for job in list_recoverable_planner_runs(limit=50):
+        _schedule_planner_v2_job(str(job["id"]))
 
 
 @app.post("/api/plan")
@@ -11141,7 +12144,20 @@ async def plan(request: Request, body: PlanRequest, user: dict = Depends(_option
 
     job_id = str(uuid.uuid4())[:12]
     try:
-        create_plan_job(job_id, user["id"] if user else None, body.session_id or "", body.request or "")
+        create_plan_job(
+            job_id,
+            user["id"] if user else None,
+            body.session_id or "",
+            body.request or "",
+            draft_only=bool(body.draft_only),
+        )
+        if body.draft_only:
+            append_plan_job_event(
+                job_id,
+                "run",
+                state="queued",
+                payload={"message": "Trip research is queued"},
+            )
     except Exception as exc:
         _log_planner_failure("plan_job_create", exc)
         if user and cost > 0:
@@ -11175,6 +12191,583 @@ async def plan_job_status(job_id: str, user: dict | None = Depends(_optional_use
             except Exception as exc:
                 _log_planner_failure("plan_job_poll_recovery", exc)
     return {"job_id": job_id, "status": status, "result": result if status == "done" else None, "error": job.get("error")}
+
+
+class PlannerV2StartRequest(BaseModel):
+    session_id: str = Field(min_length=1, max_length=160)
+    client_request_id: str = Field(min_length=12, max_length=96)
+    request: str = Field(default="", max_length=2000)
+    resume_run_id: Optional[str] = Field(default=None, max_length=64)
+    route_style: str = "balanced"
+    camp_preference: str = "public"
+    region_hint: str = ""
+    camp_reuse_policy: str = "different_each_night"
+    max_daily_drive_hours: Optional[float] = None
+    trip_preferences: Optional[dict] = None
+    confirm_cross_border: bool = False
+
+
+class PlannerV2ActionRequest(BaseModel):
+    action: str = Field(min_length=1, max_length=40)
+    proposal_id: Optional[str] = Field(default=None, max_length=96)
+    decision: Optional[str] = Field(default=None, max_length=24)
+    expected_revision: Optional[int] = Field(default=None, ge=1)
+
+
+class PlannerV2CommitRequest(BaseModel):
+    expected_revision: int = Field(ge=1)
+
+
+def _planner_v2_preview_gate(
+    capability: str | None = Header(default=None, alias="X-Trailhead-Planner-Capability"),
+) -> None:
+    # This is a rollout capability marker, not an authentication secret. User
+    # ownership and authorization are still enforced independently.
+    if capability != "planner-research-preview-1":
+        raise HTTPException(404, "Planner preview not found")
+
+
+def _planner_v2_owned_job(run_id: str, user: dict) -> dict:
+    job = get_plan_job(run_id)
+    if not job or not bool(job.get("draft_only")):
+        raise HTTPException(404, "Planner run not found")
+    if job.get("user_id") != user.get("id"):
+        raise HTTPException(403, "Not authorized to view this planner run")
+    return job
+
+
+def _planner_v2_task_snapshot(events: list[dict]) -> list[dict]:
+    tasks = {
+        task_id: {"id": task_id, "title": title, "state": "queued", "message": "Waiting to start"}
+        for task_id, title in PLANNER_V2_TASKS
+    }
+    for event in events:
+        task_id = str(event.get("task_id") or "")
+        if task_id not in tasks:
+            continue
+        state = str(event.get("state") or "queued")
+        if state not in {"queued", "running", "completed", "warning", "blocked", "skipped", "needs_input"}:
+            continue
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        tasks[task_id] = {
+            **tasks[task_id],
+            "state": state,
+            "message": str(payload.get("message") or tasks[task_id]["message"])[:240],
+        }
+    return list(tasks.values())
+
+
+def _planner_v2_source_url(item: dict) -> str | None:
+    source_pack = item.get("source_pack") if isinstance(item.get("source_pack"), dict) else {}
+    for value in (
+        item.get("official_url"),
+        item.get("source_url"),
+        item.get("url"),
+        source_pack.get("official_url"),
+        source_pack.get("source_url"),
+        item.get("website"),
+        item.get("booking_url"),
+    ):
+        text = str(value or "").strip()
+        if text.startswith("https://") or text.startswith("http://"):
+            return text[:1200]
+    return None
+
+
+def _planner_v2_sourced_items(items: object, limit: int) -> list[dict]:
+    if not isinstance(items, list):
+        return []
+    return [
+        item for item in items
+        if isinstance(item, dict) and _planner_v2_source_url(item)
+    ][:max(0, int(limit))]
+
+
+def _planner_v2_source_omission_warnings(result: dict) -> list[str]:
+    warnings: list[str] = []
+    for kind, items in (
+        ("camp", result.get("campsites")),
+        ("fuel", result.get("gas_stations")),
+        ("activity or trail", result.get("route_pois")),
+    ):
+        if not isinstance(items, list):
+            continue
+        missing = sum(1 for item in items if isinstance(item, dict) and not _planner_v2_source_url(item))
+        if missing:
+            warnings.append(
+                f"{missing} {kind} option{'s were' if missing != 1 else ' was'} left out because no direct source link was available."
+            )
+    return warnings
+
+
+def _planner_v2_sourced_result(result: dict, request_context: str = "") -> dict:
+    """Return a public/saveable draft whose research claims all retain a source."""
+    sanitized = dict(result)
+    sanitized["campsites"] = _planner_v2_sourced_items(sanitized.get("campsites"), 70)
+    sanitized["gas_stations"] = _planner_v2_sourced_items(sanitized.get("gas_stations"), 45)
+    sanitized["route_pois"] = _planner_v2_sourced_items(sanitized.get("route_pois"), 50)
+    plan = dict(sanitized.get("plan") or {})
+    timeline = _build_trip_timeline(
+        plan,
+        sanitized["campsites"],
+        sanitized["gas_stations"],
+        sanitized["route_pois"],
+        request_context,
+    )
+    plan["timeline"] = timeline
+    sanitized["plan"] = plan
+    sanitized["timeline"] = timeline
+    return sanitized
+
+
+def _planner_v2_findings(result: dict | None) -> tuple[list[dict], dict, list[str]]:
+    if not isinstance(result, dict):
+        return [], {"source_count": 0, "official_count": 0, "commercial_count": 0}, []
+    findings: list[dict] = []
+    source_urls: set[str] = set()
+    official_count = 0
+    commercial_count = 0
+    warnings: list[str] = [
+        re.sub(r"\s+", " ", str(warning)).strip()[:240]
+        for warning in result.get("planner_source_warnings") or []
+        if re.sub(r"\s+", " ", str(warning)).strip()
+    ]
+    groups = (
+        ("camp", result.get("campsites") or []),
+        ("fuel", result.get("gas_stations") or []),
+        ("place", result.get("route_pois") or []),
+    )
+    for kind, items in groups:
+        if not isinstance(items, list) or not items:
+            warnings.append({"camp": "No sourced camp options were returned.", "fuel": "No sourced fuel options were returned.", "place": "No sourced activity or trail options were returned."}[kind])
+            continue
+        added = 0
+        missing_source = 0
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            url = _planner_v2_source_url(item)
+            if not url:
+                missing_source += 1
+                continue
+            source_pack = item.get("source_pack") if isinstance(item.get("source_pack"), dict) else {}
+            source_title = str(
+                item.get("source_label")
+                or item.get("source")
+                or source_pack.get("primary")
+                or "Source"
+            ).strip()[:100]
+            lower_source = source_title.lower()
+            source_kind = "official" if any(token in lower_source for token in ("national park", "nps", "blm", "forest service", "usfs", "recreation.gov", "department", "state park")) else "commercial" if any(token in lower_source for token in ("viator", "outdoorsy", "foursquare")) else "other"
+            official_count += int(source_kind == "official")
+            commercial_count += int(source_kind == "commercial")
+            source_urls.add(url)
+            summary = re.sub(r"\s+", " ", str(item.get("summary") or item.get("description") or item.get("address") or "")).strip()
+            findings.append({
+                "id": hashlib.sha256(f"{kind}:{item.get('id')}:{url}".encode()).hexdigest()[:20],
+                "kind": kind,
+                "title": re.sub(r"\s+", " ", str(item.get("name") or item.get("title") or kind.title())).strip()[:160],
+                "summary": summary[:360],
+                "source_title": source_title or "Source",
+                "source_url": url,
+                "source_kind": source_kind,
+                "freshness": "Source available; confirm current conditions before departure",
+            })
+            added += 1
+            if added >= 4 or len(findings) >= 12:
+                break
+        if added == 0:
+            warnings.append(f"{kind.title()} options were found, but no direct source link was available.")
+        elif missing_source:
+            label = {"camp": "camp", "fuel": "fuel", "place": "activity or trail"}[kind]
+            warnings.append(
+                f"{missing_source} {label} option{'s were' if missing_source != 1 else ' was'} left out because no direct source link was available."
+            )
+    for kind, items in (
+        ("condition", result.get("route_conditions") or []),
+        ("weather", result.get("weather_checks") or []),
+    ):
+        for item in items[:4] if isinstance(items, list) else []:
+            if not isinstance(item, dict):
+                continue
+            url = _planner_v2_source_url(item)
+            if not url:
+                continue
+            source_title = str(item.get("source_label") or "Direct source").strip()[:100]
+            source_kind = str(item.get("source_kind") or "other").lower()
+            if source_kind not in {"official", "commercial", "other"}:
+                source_kind = "other"
+            official_count += int(source_kind == "official")
+            commercial_count += int(source_kind == "commercial")
+            source_urls.add(url)
+            findings.append({
+                "id": str(item.get("id") or hashlib.sha256(f"{kind}:{url}".encode()).hexdigest()[:20]),
+                "kind": kind,
+                "title": re.sub(r"\s+", " ", str(item.get("title") or kind.title())).strip()[:160],
+                "summary": re.sub(r"\s+", " ", str(item.get("description") or "")).strip()[:360],
+                "source_title": source_title or "Direct source",
+                "source_url": url,
+                "source_kind": source_kind,
+                "freshness": "Conditions change; recheck before departure",
+            })
+            if len(findings) >= 16:
+                break
+    for warning in result.get("planner_readiness_warnings") or []:
+        clean_warning = re.sub(r"\s+", " ", str(warning)).strip()[:240]
+        if clean_warning:
+            warnings.append(clean_warning)
+    return findings, {
+        "source_count": len(source_urls),
+        "official_count": official_count,
+        "commercial_count": commercial_count,
+    }, list(dict.fromkeys(warnings))[:8]
+
+
+def _planner_v2_snapshot(job: dict, after: int = 0) -> dict:
+    all_events = list_plan_job_events(str(job["id"]), after=0, limit=500)
+    new_events = [event for event in all_events if int(event.get("seq") or 0) > max(0, int(after or 0))]
+    result = None
+    if job.get("result") and job.get("status") in {"ready_for_review", "committing", "committed"}:
+        try:
+            result = json.loads(job["result"])
+        except Exception:
+            result = None
+    findings, source_summary, warnings = _planner_v2_findings(result)
+    public_draft = _planner_v2_sourced_result(result, str(job.get("request") or "")) if isinstance(result, dict) else None
+    if public_draft is not None:
+        public_draft.pop("planner_detour_proposals", None)
+    cursor = max((int(event.get("seq") or 0) for event in all_events), default=0)
+    return {
+        "run_id": job["id"],
+        "status": job.get("status"),
+        "revision": int(job.get("revision") or 1),
+        "cursor": cursor,
+        "events": new_events,
+        "tasks": _planner_v2_task_snapshot(all_events),
+        "draft": public_draft,
+        "findings": findings,
+        "source_summary": source_summary,
+        "warnings": warnings,
+        "detour_proposals": _planner_v2_public_detours(result),
+        "error": str(job.get("error") or "")[:500] or None,
+        "saved": job.get("status") == "committed",
+    }
+
+
+@app.post("/api/planner/v2/conversation")
+async def planner_v2_conversation(
+    request: Request,
+    body: ChatRequest,
+    user: dict = Depends(_current_user),
+    _: None = Depends(_planner_v2_preview_gate),
+):
+    return await chat_endpoint(request, body, user)
+
+
+@app.post("/api/planner/v2/runs")
+async def planner_v2_start(
+    request: Request,
+    body: PlannerV2StartRequest,
+    user: dict = Depends(_current_user),
+    _: None = Depends(_planner_v2_preview_gate),
+):
+    if body.resume_run_id:
+        job = _planner_v2_owned_job(body.resume_run_id, user)
+        _schedule_planner_v2_job(str(job["id"]))
+        return _planner_v2_snapshot(job)
+    if not _planner_provider_configured():
+        raise HTTPException(503, TRIP_PLANNER_UNAVAILABLE)
+    plan_body = PlanRequest(
+        request=body.request,
+        session_id=body.session_id,
+        route_style=body.route_style,
+        camp_preference=body.camp_preference,
+        region_hint=body.region_hint,
+        camp_reuse_policy=body.camp_reuse_policy,
+        max_daily_drive_hours=body.max_daily_drive_hours,
+        trip_preferences=body.trip_preferences,
+        draft_only=True,
+        strict_country_guard=True,
+        confirm_cross_border=body.confirm_cross_border,
+    )
+    try:
+        job, created = create_or_get_planner_run(
+            str(uuid.uuid4())[:12],
+            int(user["id"]),
+            body.session_id,
+            body.request,
+            body.client_request_id,
+            plan_body.model_dump(),
+        )
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+    if created:
+        append_plan_job_event(
+            str(job["id"]),
+            "run",
+            state="queued",
+            payload={"message": "Trip research is queued"},
+        )
+    _schedule_planner_v2_job(str(job["id"]))
+    return _planner_v2_snapshot(_planner_v2_owned_job(str(job["id"]), user))
+
+
+@app.get("/api/planner/v2/runs/{run_id}/events")
+async def planner_v2_events(
+    run_id: str,
+    after: int = Query(default=0, ge=0, le=1_000_000),
+    user: dict = Depends(_current_user),
+    _: None = Depends(_planner_v2_preview_gate),
+):
+    job = _planner_v2_owned_job(run_id, user)
+    _schedule_planner_v2_job(run_id)
+    return _planner_v2_snapshot(job, after=after)
+
+
+@app.post("/api/planner/v2/runs/{run_id}/actions")
+async def planner_v2_action(
+    run_id: str,
+    body: PlannerV2ActionRequest,
+    user: dict = Depends(_current_user),
+    _: None = Depends(_planner_v2_preview_gate),
+):
+    job = _planner_v2_owned_job(run_id, user)
+    action = body.action.strip().lower()
+    if action == "resume":
+        _schedule_planner_v2_job(run_id)
+        return _planner_v2_snapshot(job)
+    if action == "cancel":
+        if job.get("status") in {"ready_for_review", "committed"}:
+            raise HTTPException(409, "This planner run has already finished")
+        request_plan_job_cancel(run_id, int(user["id"]))
+        return _planner_v2_snapshot(_planner_v2_owned_job(run_id, user))
+    if action in {"approve_detour", "reject_detour"}:
+        if job.get("status") != "ready_for_review" or not job.get("result"):
+            raise HTTPException(409, "Trip preview is not ready for a detour decision")
+        if body.expected_revision is None:
+            raise HTTPException(409, "Refresh this trip before deciding on a detour")
+        try:
+            result = json.loads(job["result"])
+        except Exception:
+            raise HTTPException(409, "Trip preview is not available")
+        proposals = result.get("planner_detour_proposals") if isinstance(result.get("planner_detour_proposals"), list) else []
+        proposal = next((item for item in proposals if isinstance(item, dict) and item.get("id") == body.proposal_id), None)
+        if not proposal or proposal.get("decision") != "pending" or not proposal.get("road_verified"):
+            raise HTTPException(409, "This detour decision is no longer pending")
+        if action == "reject_detour":
+            proposal["decision"] = "rejected"
+            pending_after = sum(
+                1 for item in proposals
+                if isinstance(item, dict) and item.get("decision") == "pending"
+            )
+            try:
+                update_plan_job_draft_result(run_id, int(user["id"]), body.expected_revision, result)
+            except RevisionConflictError as exc:
+                raise HTTPException(409, detail={"code": "planner_run_changed", "current_revision": exc.current_revision})
+            append_plan_job_event(
+                run_id,
+                "detour",
+                task_id="detours",
+                state="needs_input" if pending_after else "completed",
+                payload={
+                    "message": (
+                        f"Kept {str(proposal.get('title') or 'the optional stop')[:120]} out of the route"
+                        if not pending_after
+                        else f"Kept that stop out; {pending_after} detour decision{'s' if pending_after != 1 else ''} remain"
+                    ),
+                    "pending_count": pending_after,
+                },
+            )
+            return _planner_v2_snapshot(_planner_v2_owned_job(run_id, user))
+
+        plan_data = result.get("plan") if isinstance(result.get("plan"), dict) else None
+        waypoints = [dict(item) for item in (plan_data or {}).get("waypoints") or [] if isinstance(item, dict)]
+        if not plan_data or len(waypoints) < 2:
+            raise HTTPException(409, "Trip route is not ready for this detour")
+        allowed = {str(code).lower() for code in plan_data.get("allowed_country_codes") or []}
+        proposal_country = str(proposal.get("country_code") or "").lower()
+        if not proposal_country or proposal_country not in allowed:
+            raise HTTPException(409, "This stop falls outside the confirmed route countries")
+        detour_waypoint = {
+            "name": str(proposal.get("title") or "Approved stop")[:160],
+            "lat": float(proposal["lat"]),
+            "lng": float(proposal["lng"]),
+            "country_code": proposal_country,
+            "day": max(1, int(proposal.get("recommended_day") or 1)),
+            "type": "waypoint",
+            "route_point_type": "break",
+            "description": "Optional stop approved after reviewing its measured road detour.",
+            "source_url": proposal.get("source_url"),
+        }
+        target_day = int(detour_waypoint["day"])
+        insert_at = len(waypoints) - 1
+        for index in range(1, len(waypoints) - 1):
+            if int(waypoints[index].get("day") or 1) > target_day:
+                insert_at = index
+                break
+        updated_waypoints = [*waypoints[:insert_at], detour_waypoint, *waypoints[insert_at:]]
+        country_check = _planner_v2_country_guard(updated_waypoints, confirm_cross_border=len(allowed) > 1)
+        if not country_check["ok"] or set(country_check.get("allowed_country_codes") or []) != allowed:
+            raise HTTPException(409, "This stop did not pass the confirmed-country check")
+        try:
+            updated_geometry = await asyncio.wait_for(
+                _planner_v2_mapbox_route_geometry(
+                    updated_waypoints,
+                    route_style=str((plan_data.get("route_preferences") or {}).get("route_style") or "balanced"),
+                    allow_country_borders=len(allowed) > 1,
+                ),
+                timeout=55,
+            )
+        except Exception:
+            updated_geometry = None
+        if not _planner_geometry_is_valid(updated_geometry):
+            raise HTTPException(409, "Trailhead could not verify a drivable route through that stop")
+        route_country_check = await _planner_v2_route_country_guard(updated_geometry, sorted(allowed))
+        if not route_country_check["ok"]:
+            raise HTTPException(409, "That road route crosses a country that was not confirmed")
+        prior_geometry = result.get("route_geometry") if isinstance(result.get("route_geometry"), dict) else {}
+        added_seconds = max(0.0, float(updated_geometry.get("totalDuration") or 0) - float(prior_geometry.get("totalDuration") or 0))
+        added_meters = max(0.0, float(updated_geometry.get("totalDistance") or 0) - float(prior_geometry.get("totalDistance") or 0))
+        actual_minutes = int(math.ceil(added_seconds / 60))
+        actual_miles = round(added_meters / 1609.344, 1)
+        disclosed_minutes = int(proposal.get("added_drive_minutes") or 0)
+        confirmation_count = int(proposal.get("confirmation_count") or 0)
+        if confirmation_count < 1 and actual_minutes > max(disclosed_minutes + 10, int(math.ceil(disclosed_minutes * 1.25))):
+            proposal.update({
+                "added_drive_minutes": actual_minutes,
+                "added_distance_miles": actual_miles,
+                "risk_reason": "The full road route is longer than the first estimate; review again",
+                "confirmation_count": 1,
+            })
+            try:
+                update_plan_job_draft_result(run_id, int(user["id"]), body.expected_revision, result)
+            except RevisionConflictError as exc:
+                raise HTTPException(409, detail={"code": "planner_run_changed", "current_revision": exc.current_revision})
+            append_plan_job_event(
+                run_id,
+                "detour",
+                task_id="detours",
+                state="needs_input",
+                payload={"message": "The full road route adds more time than the first estimate; review the updated detour"},
+            )
+            return _planner_v2_snapshot(_planner_v2_owned_job(run_id, user))
+
+        plan_data["waypoints"] = updated_waypoints
+        plan_data["total_est_miles"] = round(float(updated_geometry.get("totalDistance") or 0) / 1609.344)
+        result["route_geometry"] = updated_geometry
+        result["timeline"] = _build_trip_timeline(
+            plan_data,
+            result.get("campsites") or [],
+            result.get("gas_stations") or [],
+            result.get("route_pois") or [],
+            str(job.get("request") or ""),
+        )
+        plan_data["timeline"] = result["timeline"]
+        proposal.update({
+            "decision": "approved",
+            "added_drive_minutes": actual_minutes,
+            "added_distance_miles": actual_miles,
+            "risk_reason": "Approved after full road-route verification",
+            "confirmation_count": confirmation_count + 1,
+        })
+        pending_after = sum(
+            1 for item in proposals
+            if isinstance(item, dict) and item.get("decision") == "pending"
+        )
+        try:
+            update_plan_job_draft_result(run_id, int(user["id"]), body.expected_revision, result)
+        except RevisionConflictError as exc:
+            raise HTTPException(409, detail={"code": "planner_run_changed", "current_revision": exc.current_revision})
+        append_plan_job_event(
+            run_id,
+            "detour",
+            task_id="detours",
+            state="needs_input" if pending_after else "completed",
+            payload={
+                "message": (
+                    f"Added {str(proposal.get('title') or 'the approved stop')[:120]} and rechecked the road route"
+                    if not pending_after
+                    else f"Route rechecked; {pending_after} detour decision{'s' if pending_after != 1 else ''} remain"
+                ),
+                "pending_count": pending_after,
+            },
+        )
+        return _planner_v2_snapshot(_planner_v2_owned_job(run_id, user))
+    raise HTTPException(400, "Unknown planner action")
+
+
+@app.post("/api/planner/v2/runs/{run_id}/commit")
+async def planner_v2_commit(
+    run_id: str,
+    body: PlannerV2CommitRequest,
+    user: dict = Depends(_current_user),
+    _: None = Depends(_planner_v2_preview_gate),
+):
+    job = _planner_v2_owned_job(run_id, user)
+    existing_result = json.loads(job["result"]) if job.get("result") else None
+    pending_detours = [
+        proposal
+        for proposal in (existing_result or {}).get("planner_detour_proposals") or []
+        if isinstance(proposal, dict) and proposal.get("decision") == "pending"
+    ]
+    if pending_detours:
+        raise HTTPException(409, "Decide on every proposed detour before saving this trip")
+    trip_id = str((existing_result or {}).get("trip_id") or "")
+    if job.get("status") in {"committing", "committed"} and trip_id:
+        saved = get_trip(trip_id)
+        if saved and saved.get("user_id") == user.get("id"):
+            if job.get("status") != "committed":
+                finish_plan_job_commit(run_id, int(user["id"]), int(saved.get("version") or 1))
+            return {"run": _planner_v2_snapshot(_planner_v2_owned_job(run_id, user)), "trip": saved}
+    try:
+        claimed = claim_plan_job_commit(run_id, int(user["id"]), body.expected_revision)
+    except RevisionConflictError as exc:
+        raise HTTPException(409, detail={"code": "planner_run_changed", "current_revision": exc.current_revision})
+    except ValueError as exc:
+        raise HTTPException(409, str(exc))
+    if not claimed:
+        raise HTTPException(404, "Planner run not found")
+    result = json.loads(claimed["result"]) if claimed.get("result") else None
+    if not isinstance(result, dict) or not result.get("trip_id") or not isinstance(result.get("plan"), dict):
+        release_plan_job_commit(run_id, int(user["id"]))
+        raise HTTPException(409, "Trip preview is not ready to save")
+    stored = dict(result)
+    route_geometry = stored.pop("route_geometry", None)
+    stored.pop("planner_detour_proposals", None)
+    stored = _planner_v2_sourced_result(stored, str(claimed.get("request") or ""))
+    try:
+        version = save_trip(
+            str(result["trip_id"]),
+            str(claimed.get("request") or ""),
+            stored,
+            user_id=int(user["id"]),
+            route_geometry=route_geometry,
+            expected_version=0,
+        )
+        result["version"] = int(version or 1)
+        finish_plan_job_commit(run_id, int(user["id"]), int(version or 1))
+        append_plan_job_event(
+            run_id,
+            "run",
+            state="completed",
+            payload={"message": "Trip saved to Trips"},
+        )
+        saved = get_trip(str(result["trip_id"])) or {
+            **stored,
+            "route_geometry": route_geometry,
+            "version": int(version or 1),
+        }
+        return {"run": _planner_v2_snapshot(_planner_v2_owned_job(run_id, user)), "trip": saved}
+    except RevisionConflictError:
+        saved = get_trip(str(result["trip_id"]))
+        if saved and saved.get("user_id") == user.get("id"):
+            finish_plan_job_commit(run_id, int(user["id"]), int(saved.get("version") or 1))
+            return {"run": _planner_v2_snapshot(_planner_v2_owned_job(run_id, user)), "trip": saved}
+        release_plan_job_commit(run_id, int(user["id"]))
+        raise HTTPException(409, "This trip changed before it could be saved")
+    except Exception:
+        release_plan_job_commit(run_id, int(user["id"]))
+        raise
 
 
 class PushTokenRequest(BaseModel):
@@ -35593,6 +37186,25 @@ async def packing_list(body: PackingRequest, user: dict = Depends(_current_user)
 
 # ── Geocoding ─────────────────────────────────────────────────────────────────
 
+def _planner_v2_geocode_is_ambiguous(query: str, places: list[dict]) -> bool:
+    """Flag only same-named provider localities in distinct admin areas."""
+    target = re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", str(query or "").lower())).strip()
+    if not target:
+        return False
+    admin_areas: set[tuple[str, str]] = set()
+    for place in places:
+        if not isinstance(place, dict):
+            continue
+        name = re.sub(r"\s+", " ", re.sub(r"[^a-z0-9]+", " ", str(place.get("name") or "").lower())).strip()
+        if name != target:
+            continue
+        country = str(place.get("country_code") or place.get("country") or "").strip().lower()
+        region = str(place.get("region") or "").strip().lower()
+        if country and region:
+            admin_areas.add((country, region))
+    return len(admin_areas) > 1
+
+
 async def _geocode_one(client: httpx.AsyncClient, wp: dict, sem: asyncio.Semaphore) -> dict:
     name = wp.get("name", "")
     if not name:
@@ -35606,19 +37218,34 @@ async def _geocode_one(client: httpx.AsyncClient, wp: dict, sem: asyncio.Semapho
                 feats = await _mapbox_forward_geocode_features(
                     client,
                     query,
-                    limit=1,
+                    limit=5,
                     country=country_filter,
                     types="place,address,poi",
                     language="en",
                 )
                 if feats:
-                    place = _map_context_normalize_mapbox_feature(feats[0], category="place", source="mapbox_geocode")
+                    places = [
+                        place
+                        for feature in feats
+                        if (place := _map_context_normalize_mapbox_feature(feature, category="place", source="mapbox_geocode"))
+                    ]
+                    place = places[0] if places else None
                     if place:
-                        return [place["lng"], place["lat"]], place.get("name") or feats[0].get("place_name", query)
+                        return (
+                            [place["lng"], place["lat"]],
+                            place.get("name") or feats[0].get("place_name", query),
+                            {
+                                "country_code": str(place.get("country_code") or "").lower() or None,
+                                "country_name": place.get("country"),
+                                "region_name": place.get("region"),
+                                "geocode_ambiguous": _planner_v2_geocode_is_ambiguous(query, places),
+                                "geocode_ambiguity_verified": True,
+                            },
+                        )
             except Exception:
                 pass
         try:
-            params = {"format": "json", "limit": 1, "q": query}
+            params = {"format": "json", "limit": 5, "q": query, "addressdetails": 1}
             if country_filter:
                 params["countrycodes"] = country_filter
             resp = await client.get("https://nominatim.openstreetmap.org/search", params=params)
@@ -35626,16 +37253,32 @@ async def _geocode_one(client: httpx.AsyncClient, wp: dict, sem: asyncio.Semapho
             hits = resp.json()
             if hits:
                 hit = hits[0]
-                return [float(hit["lon"]), float(hit["lat"])], hit.get("display_name", query)
+                address = hit.get("address") if isinstance(hit.get("address"), dict) else {}
+                return (
+                    [float(hit["lon"]), float(hit["lat"])],
+                    hit.get("display_name", query),
+                    {
+                        "country_code": str(address.get("country_code") or "").lower() or None,
+                        "country_name": address.get("country"),
+                        "region_name": address.get("state") or address.get("region"),
+                        # Nominatim is a resilience fallback, not the ambiguity
+                        # authority for a route endpoint. Planner V2 must ask for
+                        # clarification rather than silently trust it.
+                        "geocode_ambiguity_verified": False,
+                    },
+                )
         except Exception:
             pass
-        return None, None
+        return None, None, {}
 
     async with sem:
         # Try full name first
-        coords, place_name = await _try(name)
+        coords, place_name, admin = await _try(name)
         if coords:
             wp["lat"], wp["lng"], wp["geocoded_name"] = coords[1], coords[0], place_name
+            # Preserve an explicit False ambiguity-verification result. It is a
+            # route-safety boundary for Planner V2, not an optional display value.
+            wp.update({key: value for key, value in admin.items() if value is not None and value != ""})
             return wp
 
         # Fallback: strip leading comma-parts (handles "Road Mile 24, Area, State" → "Area, State" → "State")
@@ -35643,9 +37286,10 @@ async def _geocode_one(client: httpx.AsyncClient, wp: dict, sem: asyncio.Semapho
         for i in range(1, len(parts)):
             shorter = ", ".join(parts[i:])
             if shorter:
-                coords, place_name = await _try(shorter)
+                coords, place_name, admin = await _try(shorter)
                 if coords:
                     wp["lat"], wp["lng"], wp["geocoded_name"] = coords[1], coords[0], place_name
+                    wp.update({key: value for key, value in admin.items() if value is not None and value != ""})
                     return wp
 
     return wp

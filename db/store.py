@@ -1663,6 +1663,28 @@ def init_db():
             created_at  REAL NOT NULL,
             updated_at  REAL NOT NULL
         )""",
+        "ALTER TABLE plan_jobs ADD COLUMN draft_only INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE plan_jobs ADD COLUMN revision INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE plan_jobs ADD COLUMN cancel_requested INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE plan_jobs ADD COLUMN committed_at REAL",
+        "ALTER TABLE plan_jobs ADD COLUMN committed_version INTEGER",
+        "ALTER TABLE plan_jobs ADD COLUMN client_request_id TEXT",
+        "ALTER TABLE plan_jobs ADD COLUMN planner_request_json TEXT",
+        "ALTER TABLE plan_jobs ADD COLUMN execution_owner TEXT",
+        "ALTER TABLE plan_jobs ADD COLUMN execution_lease_until REAL",
+        "ALTER TABLE plan_jobs ADD COLUMN commit_lease_until REAL",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_plan_jobs_planner_request ON plan_jobs(user_id, client_request_id) WHERE draft_only=1 AND client_request_id IS NOT NULL",
+        """CREATE TABLE IF NOT EXISTS planner_run_events (
+            run_id      TEXT NOT NULL REFERENCES plan_jobs(id) ON DELETE CASCADE,
+            seq         INTEGER NOT NULL,
+            event_type  TEXT NOT NULL,
+            task_id     TEXT,
+            state       TEXT,
+            payload     TEXT NOT NULL DEFAULT '{}',
+            created_at  REAL NOT NULL,
+            PRIMARY KEY (run_id, seq)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_planner_run_events_cursor ON planner_run_events(run_id, seq)",
         """CREATE TABLE IF NOT EXISTS report_interactions (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
             report_id  INTEGER NOT NULL,
@@ -2500,7 +2522,9 @@ def cleanup_stale_data():
         # already persisted separately, so old job envelopes need not live forever.
         plan_job_cutoff = now - 7 * 86400
         db.execute(
-            "DELETE FROM plan_jobs WHERE status IN ('done','failed') AND updated_at < ?",
+            """DELETE FROM plan_jobs
+               WHERE status IN ('done','failed','cancelled','committed','ready_for_review')
+                 AND updated_at < ?""",
             (plan_job_cutoff,),
         )
         # Quota subjects are scoped HMACs, but they still have no purpose after
@@ -7561,14 +7585,176 @@ def update_support_thread_status(thread_id: int, status: str) -> bool:
 
 # ── Plan jobs (async background trip planning) ────────────────────────────────
 
-def create_plan_job(job_id: str, user_id: int | None, session_id: str, request: str) -> None:
+def create_plan_job(
+    job_id: str,
+    user_id: int | None,
+    session_id: str,
+    request: str,
+    *,
+    draft_only: bool = False,
+) -> None:
     db = _conn()
     now = time.time()
     db.execute(
-        "INSERT INTO plan_jobs (id,user_id,session_id,request,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
-        (job_id, user_id, session_id, request, "pending", now, now)
+        """INSERT INTO plan_jobs
+           (id,user_id,session_id,request,status,draft_only,revision,cancel_requested,created_at,updated_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?)""",
+        (job_id, user_id, session_id, request, "pending", int(draft_only), 1, 0, now, now),
     )
     db.commit(); db.close()
+
+
+def create_or_get_planner_run(
+    job_id: str,
+    user_id: int,
+    session_id: str,
+    request: str,
+    client_request_id: str,
+    planner_request: dict,
+) -> tuple[dict, bool]:
+    """Create one account-scoped Planner V2 run or return its exact retry."""
+    request_key = str(client_request_id or "").strip()
+    if not request_key or len(request_key) > 96:
+        raise ValueError("Planner request identifier is invalid")
+    encoded = json.dumps(planner_request, separators=(",", ":"), sort_keys=True)
+    if len(encoded.encode("utf-8")) > 64 * 1024:
+        raise ValueError("Planner request exceeds 64 KiB")
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        existing = db.execute(
+            """SELECT * FROM plan_jobs
+               WHERE user_id=? AND draft_only=1 AND client_request_id=?""",
+            (int(user_id), request_key),
+        ).fetchone()
+        if existing:
+            if str(existing["planner_request_json"] or "") != encoded:
+                raise ValueError("Planner request identifier was already used for different research")
+            db.commit()
+            return dict(existing), False
+        now = time.time()
+        db.execute(
+            """INSERT INTO plan_jobs
+               (id,user_id,session_id,request,status,draft_only,revision,cancel_requested,
+                client_request_id,planner_request_json,created_at,updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                job_id,
+                int(user_id),
+                session_id,
+                request,
+                "pending",
+                1,
+                1,
+                0,
+                request_key,
+                encoded,
+                now,
+                now,
+            ),
+        )
+        created = db.execute("SELECT * FROM plan_jobs WHERE id=?", (job_id,)).fetchone()
+        db.commit()
+        if not created:
+            raise RuntimeError("Planner run was not created")
+        return dict(created), True
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def claim_plan_job_execution(
+    job_id: str,
+    execution_owner: str,
+    *,
+    lease_seconds: int = 600,
+) -> dict | None:
+    """Lease a durable, nonterminal Planner V2 job to exactly one worker."""
+    owner = str(execution_owner or "")[:96]
+    if not owner:
+        raise ValueError("Planner execution owner is required")
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute("SELECT * FROM plan_jobs WHERE id=?", (job_id,)).fetchone()
+        if not row or not bool(row["draft_only"]) or bool(row["cancel_requested"]):
+            db.commit()
+            return None
+        current = dict(row)
+        if current.get("status") in {"ready_for_review", "committing", "committed", "cancelled", "failed", "done"}:
+            db.commit()
+            return None
+        now = time.time()
+        lease_until = float(current.get("execution_lease_until") or 0)
+        if lease_until > now and current.get("execution_owner") != owner:
+            db.commit()
+            return None
+        cursor = db.execute(
+            """UPDATE plan_jobs
+               SET execution_owner=?,execution_lease_until=?,updated_at=?
+               WHERE id=? AND draft_only=1
+                 AND status NOT IN ('ready_for_review','committing','committed','cancelled','failed','done')
+                 AND cancel_requested=0
+                 AND (execution_lease_until IS NULL OR execution_lease_until<=? OR execution_owner=?)""",
+            (owner, now + max(60, int(lease_seconds)), now, job_id, now, owner),
+        )
+        if cursor.rowcount != 1:
+            db.commit()
+            return None
+        claimed = db.execute("SELECT * FROM plan_jobs WHERE id=?", (job_id,)).fetchone()
+        db.commit()
+        return dict(claimed) if claimed else None
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def renew_plan_job_execution(
+    job_id: str,
+    execution_owner: str,
+    *,
+    lease_seconds: int = 600,
+) -> bool:
+    db = _conn()
+    now = time.time()
+    cursor = db.execute(
+        """UPDATE plan_jobs SET execution_lease_until=?,updated_at=?
+           WHERE id=? AND execution_owner=? AND draft_only=1
+             AND status NOT IN ('ready_for_review','committing','committed','cancelled','failed','done')""",
+        (now + max(60, int(lease_seconds)), now, job_id, str(execution_owner or "")[:96]),
+    )
+    db.commit(); db.close()
+    return cursor.rowcount == 1
+
+
+def release_plan_job_execution(job_id: str, execution_owner: str) -> None:
+    db = _conn()
+    db.execute(
+        """UPDATE plan_jobs
+           SET execution_owner=NULL,execution_lease_until=NULL,updated_at=?
+           WHERE id=? AND execution_owner=?""",
+        (time.time(), job_id, str(execution_owner or "")[:96]),
+    )
+    db.commit(); db.close()
+
+
+def list_recoverable_planner_runs(limit: int = 20) -> list[dict]:
+    db = _conn()
+    rows = db.execute(
+        """SELECT * FROM plan_jobs
+           WHERE draft_only=1 AND cancel_requested=0
+             AND planner_request_json IS NOT NULL
+             AND status NOT IN ('ready_for_review','committing','committed','cancelled','failed','done')
+             AND (execution_lease_until IS NULL OR execution_lease_until<=?)
+           ORDER BY updated_at ASC LIMIT ?""",
+        (time.time(), max(1, min(int(limit or 20), 100))),
+    ).fetchall()
+    db.close()
+    return [dict(row) for row in rows]
 
 def get_plan_job(job_id: str) -> dict | None:
     db = _conn()
@@ -7581,9 +7767,226 @@ def update_plan_job(job_id: str, status: str, result: str | None = None, error: 
     db.execute(
         """UPDATE plan_jobs
            SET status=?, result=CASE WHEN ? IS NULL THEN result ELSE ? END,
-               error=?, updated_at=?
-           WHERE id=? AND (status NOT IN ('done','failed') OR status=?)""",
-        (status, result, result, error, time.time(), job_id, status)
+               error=?, revision=COALESCE(revision,1)+1, updated_at=?
+           WHERE id=? AND (status NOT IN ('done','failed','cancelled','committed') OR status=?)""",
+        (status, result, result, error, time.time(), job_id, status),
+    )
+    db.commit(); db.close()
+
+
+def append_plan_job_event(
+    job_id: str,
+    event_type: str,
+    *,
+    task_id: str | None = None,
+    state: str | None = None,
+    payload: dict | None = None,
+) -> dict:
+    """Append one ordered, user-safe planner event and return its cursor."""
+    clean_payload = payload if isinstance(payload, dict) else {}
+    encoded = json.dumps(clean_payload, separators=(",", ":"), sort_keys=True)
+    if len(encoded.encode("utf-8")) > 16_384:
+        raise ValueError("Planner event payload exceeds 16 KiB")
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        if not db.execute("SELECT 1 FROM plan_jobs WHERE id=?", (job_id,)).fetchone():
+            raise ValueError("Planner run not found")
+        row = db.execute(
+            "SELECT COALESCE(MAX(seq),0)+1 AS next_seq FROM planner_run_events WHERE run_id=?",
+            (job_id,),
+        ).fetchone()
+        seq = int(row["next_seq"] or 1)
+        created_at = time.time()
+        db.execute(
+            """INSERT INTO planner_run_events
+               (run_id,seq,event_type,task_id,state,payload,created_at)
+               VALUES (?,?,?,?,?,?,?)""",
+            (
+                job_id,
+                seq,
+                str(event_type or "progress")[:48],
+                str(task_id)[:64] if task_id else None,
+                str(state)[:32] if state else None,
+                encoded,
+                created_at,
+            ),
+        )
+        db.execute(
+            "UPDATE plan_jobs SET revision=COALESCE(revision,1)+1,updated_at=? WHERE id=?",
+            (created_at, job_id),
+        )
+        db.commit()
+        return {
+            "seq": seq,
+            "event_type": str(event_type or "progress")[:48],
+            "task_id": str(task_id)[:64] if task_id else None,
+            "state": str(state)[:32] if state else None,
+            "payload": clean_payload,
+            "created_at": created_at,
+        }
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def list_plan_job_events(job_id: str, after: int = 0, limit: int = 200) -> list[dict]:
+    db = _conn()
+    rows = db.execute(
+        """SELECT seq,event_type,task_id,state,payload,created_at
+           FROM planner_run_events
+           WHERE run_id=? AND seq>?
+           ORDER BY seq ASC LIMIT ?""",
+        (job_id, max(0, int(after or 0)), max(1, min(int(limit or 200), 500))),
+    ).fetchall()
+    db.close()
+    out: list[dict] = []
+    for row in rows:
+        try:
+            payload = json.loads(row["payload"] or "{}")
+        except Exception:
+            payload = {}
+        out.append({
+            "seq": int(row["seq"]),
+            "event_type": row["event_type"],
+            "task_id": row["task_id"],
+            "state": row["state"],
+            "payload": payload if isinstance(payload, dict) else {},
+            "created_at": float(row["created_at"]),
+        })
+    return out
+
+
+def request_plan_job_cancel(job_id: str, user_id: int) -> bool:
+    db = _conn()
+    now = time.time()
+    cursor = db.execute(
+        """UPDATE plan_jobs
+           SET cancel_requested=1,status='cancelling',revision=COALESCE(revision,1)+1,updated_at=?
+           WHERE id=? AND user_id=? AND draft_only=1
+             AND status NOT IN ('done','failed','cancelled','committed','ready_for_review')""",
+        (now, job_id, user_id),
+    )
+    db.commit()
+    changed = cursor.rowcount == 1
+    db.close()
+    return changed
+
+
+def update_plan_job_draft_result(
+    job_id: str,
+    user_id: int,
+    expected_revision: int,
+    result: dict,
+) -> dict:
+    """Atomically replace one review draft without weakening its ownership gate."""
+    encoded = json.dumps(result, separators=(",", ":"), sort_keys=True)
+    if len(encoded.encode("utf-8")) > 8 * 1024 * 1024:
+        raise ValueError("Planner draft exceeds 8 MiB")
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute("SELECT * FROM plan_jobs WHERE id=?", (job_id,)).fetchone()
+        if not row or row["user_id"] != user_id or not bool(row["draft_only"]):
+            raise ValueError("Planner run not found")
+        current_revision = int(row["revision"] or 1)
+        if row["status"] != "ready_for_review":
+            raise ValueError("Planner run is not ready to change")
+        if current_revision != int(expected_revision):
+            raise RevisionConflictError(current_revision)
+        now = time.time()
+        cursor = db.execute(
+            """UPDATE plan_jobs
+               SET result=?,revision=revision+1,updated_at=?
+               WHERE id=? AND user_id=? AND draft_only=1
+                 AND status='ready_for_review' AND revision=?""",
+            (encoded, now, job_id, user_id, current_revision),
+        )
+        if cursor.rowcount != 1:
+            latest = db.execute("SELECT revision FROM plan_jobs WHERE id=?", (job_id,)).fetchone()
+            raise RevisionConflictError(int(latest["revision"] or 1) if latest else 0)
+        db.commit()
+        return {"revision": current_revision + 1, "result": result}
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def claim_plan_job_commit(job_id: str, user_id: int, expected_revision: int) -> dict | None:
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute("SELECT * FROM plan_jobs WHERE id=?", (job_id,)).fetchone()
+        if not row or row["user_id"] != user_id or not bool(row["draft_only"]):
+            db.rollback()
+            return None
+        current = dict(row)
+        if current.get("status") == "committed":
+            db.commit()
+            return current
+        now = time.time()
+        recovering_stale_commit = (
+            current.get("status") == "committing"
+            and float(current.get("commit_lease_until") or 0) <= now
+        )
+        if current.get("status") not in {"ready_for_review", "committing"}:
+            raise ValueError("Planner run is not ready to save")
+        if current.get("status") == "committing" and not recovering_stale_commit:
+            raise ValueError("Planner run save is still in progress")
+        if not recovering_stale_commit and int(current.get("revision") or 1) != int(expected_revision):
+            raise RevisionConflictError(int(current.get("revision") or 1))
+        next_revision = int(current.get("revision") or 1) + 1
+        cursor = db.execute(
+            """UPDATE plan_jobs
+               SET status='committing',commit_lease_until=?,revision=?,updated_at=?
+               WHERE id=? AND user_id=? AND draft_only=1
+                 AND ((status='ready_for_review' AND revision=?)
+                      OR (status='committing' AND COALESCE(commit_lease_until,0)<=?))""",
+            (now + 120, next_revision, now, job_id, user_id, int(expected_revision), now),
+        )
+        if cursor.rowcount != 1:
+            latest = db.execute("SELECT revision FROM plan_jobs WHERE id=?", (job_id,)).fetchone()
+            raise RevisionConflictError(int(latest["revision"] or 1) if latest else 0)
+        db.commit()
+        current["status"] = "committing"
+        current["revision"] = next_revision
+        current["commit_lease_until"] = now + 120
+        return current
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def finish_plan_job_commit(job_id: str, user_id: int, committed_version: int) -> None:
+    db = _conn()
+    now = time.time()
+    cursor = db.execute(
+        """UPDATE plan_jobs
+           SET status='committed',committed_at=?,committed_version=?,
+               commit_lease_until=NULL,revision=COALESCE(revision,1)+1,updated_at=?
+           WHERE id=? AND user_id=? AND draft_only=1 AND status IN ('committing','committed')""",
+        (now, int(committed_version), now, job_id, user_id),
+    )
+    db.commit()
+    db.close()
+    if cursor.rowcount != 1:
+        raise ValueError("Planner run commit state changed")
+
+
+def release_plan_job_commit(job_id: str, user_id: int) -> None:
+    db = _conn()
+    db.execute(
+        """UPDATE plan_jobs
+           SET status='ready_for_review',commit_lease_until=NULL,
+               revision=COALESCE(revision,1)+1,updated_at=?
+           WHERE id=? AND user_id=? AND draft_only=1 AND status='committing'""",
+        (time.time(), job_id, user_id),
     )
     db.commit(); db.close()
 

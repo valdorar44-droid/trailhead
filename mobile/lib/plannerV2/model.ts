@@ -1,4 +1,5 @@
 import type {
+  Campsite,
   PlannerV2Event,
   PlannerV2Finding,
   PlannerV2Snapshot,
@@ -139,6 +140,11 @@ export function plannerDraftSummary(trip: TripResult | null) {
     camps: trip.campsites?.length ?? 0,
     fuel: trip.gas_stations?.length ?? 0,
   };
+}
+
+export function plannerCampCardSummary(camp: Pick<Campsite, 'reservable'>) {
+  const availability = camp.reservable ? 'Reservations may be available. ' : '';
+  return `${availability}Open it on the map for access, amenities, current conditions, and complete campground details.`;
 }
 
 export function plannerRunStorageKey(userId: string | number | null | undefined) {

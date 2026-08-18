@@ -39,6 +39,7 @@ import { useStore } from '@/lib/store';
 import {
   mergePlannerEvents,
   newestPlannerMessage,
+  plannerCampCardSummary,
   plannerDraftSummary,
   plannerMapPins,
   plannerRunIsTerminal,
@@ -877,7 +878,7 @@ function RevealView({ C, s, trip, snapshot, summary, route, pins, error, busy, o
 
       <View style={s.bentoGrid}>
         <BentoCard s={s} C={C} icon="navigate-outline" label="DRIVING RHYTHM" title={`${summary.days} days · ${summary.miles.toLocaleString()} miles`} body={dayRhythm || 'Confirmed route anchors are ready for review.'} />
-        <BentoCard s={s} C={C} icon="bed-outline" label="OVERNIGHTS" title={`${summary.camps} camp options`} body={camps.map(camp => camp.name).join('\n') || 'No sourced camp was confirmed. Review the warning before leaving.'} warning={!camps.length} />
+        <BentoCard s={s} C={C} icon="bed-outline" label="OVERNIGHTS" title={`${camps.length} highlighted ${camps.length === 1 ? 'camp' : 'camps'}`} body={camps.map(camp => camp.name).join('\n') || 'No sourced camp was confirmed. Review the warning before leaving.'} warning={!camps.length} />
         <BentoCard s={s} C={C} icon="trail-sign-outline" label="BEST EXPERIENCES" title={`${experiences.length} route-fit ideas`} body={experiences.map(place => place.name).join('\n') || 'No sourced experience was confirmed for this draft.'} warning={!experiences.length} />
         <BentoCard s={s} C={C} icon="car-sport-outline" label="READINESS" title={`${summary.fuel} fuel · ${trip.weather_checks?.length ?? 0} weather areas`} body={`${trip.plan.logistics?.fuel_strategy || 'Review fuel spacing.'}\n${trip.route_conditions?.length ? `${trip.route_conditions.length} current route condition${trip.route_conditions.length === 1 ? '' : 's'} flagged for review.` : 'No current route warning was returned; recheck before departure.'}`} />
       </View>
@@ -974,6 +975,8 @@ function FullReview({ C, s, trip, findings, warnings, busy, saved, saving, onBac
   const stops = trip.plan.waypoints ?? [];
   const startName = stops[0]?.name || 'your starting point';
   const destinationName = stops[stops.length - 1]?.name || 'your destination';
+  const allCamps = trip.campsites ?? [];
+  const reviewCamps = allCamps.slice(0, 6);
   const days = Array.from({ length: Math.max(1, Number(trip.plan.duration_days || 1)) }, (_, index) => ({
     day: index + 1,
     stops: stops.filter(stop => Number(stop.day || 1) === index + 1),
@@ -998,9 +1001,20 @@ function FullReview({ C, s, trip, findings, warnings, busy, saved, saving, onBac
 
       <View style={s.reviewSection}>
         <Text style={s.sectionLabel}>CAMPS & OVERNIGHTS</Text>
-        {(trip.campsites ?? []).length ? trip.campsites.map(camp => (
-          <ReviewRow key={camp.id} s={s} C={C} icon="bed-outline" title={camp.name} body={camp.description || (camp.reservable ? 'Reservable camp' : 'Confirm current access')} />
+        {reviewCamps.length ? reviewCamps.map(camp => (
+          <ReviewRow key={camp.id} s={s} C={C} icon="bed-outline" title={camp.name} body={plannerCampCardSummary(camp)} />
         )) : <InlineWarning s={s} C={C} text="No camp with a direct source was confirmed. Choose an overnight before departure." />}
+        {reviewCamps.length ? (
+          <>
+            <Text style={s.reviewSectionNote}>
+              Showing {reviewCamps.length} sourced route options here. The complete campground inventory and full details stay on the map.
+            </Text>
+            <TouchableOpacity testID="planner.v2.open-all-camps-on-map" style={s.secondaryButton} onPress={onMap}>
+              <Ionicons name="map-outline" size={17} color={C.text} />
+              <Text style={s.secondaryButtonText}>See all campground details on the map</Text>
+            </TouchableOpacity>
+          </>
+        ) : null}
       </View>
 
       <View style={s.reviewSection}>
@@ -1212,6 +1226,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   reviewRowIcon: { width: 34, height: 34, borderRadius: 11, backgroundColor: C.orangeGlow, alignItems: 'center', justifyContent: 'center' },
   reviewRowTitle: { color: C.text, fontSize: 13, fontWeight: '900' },
   reviewRowBody: { color: C.text3, fontSize: 11, lineHeight: 17, marginTop: 3 },
+  reviewSectionNote: { color: C.text3, fontSize: 10, lineHeight: 16, marginTop: 3, marginBottom: 9 },
   savedButton: { backgroundColor: C.green },
   modalBackdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.58)' },
   sourceSheet: { maxHeight: '86%', minHeight: '58%', backgroundColor: C.bg, borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 1, borderColor: C.border },

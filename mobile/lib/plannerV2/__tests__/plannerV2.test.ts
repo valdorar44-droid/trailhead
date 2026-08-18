@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   mergePlannerEvents,
+  plannerCampCardSummary,
   plannerDraftSummary,
   plannerMapPins,
   plannerConversationStorageKey,
@@ -70,6 +71,25 @@ test('map preview derives camps fuel trails and actual route summary from the dr
   const pins = plannerMapPins(trip);
   assert.deepEqual(new Set(pins.map(pin => pin.kind)), new Set(['place', 'camp', 'fuel', 'trail', 'warning', 'weather']));
   assert.deepEqual(plannerDraftSummary(trip), { days: 3, miles: 330, stops: 3, camps: 0, fuel: 1 });
+});
+
+test('planner campground cards stay concise and hand full details to the map', () => {
+  assert.equal(
+    plannerCampCardSummary({ reservable: true }),
+    'Reservations may be available. Open it on the map for access, amenities, current conditions, and complete campground details.',
+  );
+  assert.equal(
+    plannerCampCardSummary({ reservable: false }),
+    'Open it on the map for access, amenities, current conditions, and complete campground details.',
+  );
+  const here = dirname(fileURLToPath(import.meta.url));
+  const screen = readFileSync(resolve(here, '../../../components/plannerV2/PlannerV2Screen.tsx'), 'utf8');
+  assert.match(screen, /const reviewCamps = allCamps\.slice\(0, 6\)/);
+  assert.match(screen, /testID="planner\.v2\.open-all-camps-on-map"/);
+  assert.match(screen, /The complete campground inventory and full details stay on the map\./);
+  assert.match(screen, /highlighted \$\{camps\.length === 1 \? 'camp' : 'camps'\}/);
+  assert.doesNotMatch(screen, /\$\{summary\.camps\} camp options/);
+  assert.doesNotMatch(screen, /body=\{camp\.description/);
 });
 
 test('bounded preview keeps both endpoints and every safety research category', () => {

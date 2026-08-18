@@ -159,8 +159,8 @@ function customerPlanningNote(warning: string): string | null {
   if (/^No sourced activity or trail options were returned\.?$/i.test(warning)) {
     return 'No optional activities were added, so this draft stays focused on the route and camps. Ask Trailhead if you want more ideas.';
   }
-  if (/^(?:Live|Current) (?:road|route) conditions .*unavailable\.?$/i.test(warning)) {
-    return 'Live road updates were not attached to this draft. Refresh them on the map closer to departure.';
+  if (/^(?:Live|Current) (?:road|route) conditions (?:were )?unavailable(?:\.|$)/i.test(warning)) {
+    return 'Live road updates were not attached to this draft. Refresh them on the map and check closures before departure.';
   }
   if (/left out because .*direct source/i.test(warning)) return warning;
   return null;

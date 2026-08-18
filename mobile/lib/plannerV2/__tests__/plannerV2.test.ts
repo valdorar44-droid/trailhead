@@ -99,14 +99,14 @@ test('ordinary research gaps read as planning notes while safety cautions stay v
   assert.deepEqual(plannerPresentationNotices([
     'No sourced fuel options were returned.',
     'No sourced activity or trail options were returned.',
-    'Live route conditions were unavailable.',
+    'Live route conditions were unavailable. Recheck closures and alerts before departure.',
     'The domestic road route passed its border controls, but one secondary country check was unavailable.',
     'High wind closure reported on the planned road.',
   ]), {
     notes: [
       'Fuel stops are not pinned in this draft yet. Add preferred stations on the map or ask Trailhead to refine the route.',
       'No optional activities were added, so this draft stays focused on the route and camps. Ask Trailhead if you want more ideas.',
-      'Live road updates were not attached to this draft. Refresh them on the map closer to departure.',
+      'Live road updates were not attached to this draft. Refresh them on the map and check closures before departure.',
     ],
     cautions: [
       'The route stayed inside the confirmed country. One backup country lookup did not respond, so review the route map before departure.',

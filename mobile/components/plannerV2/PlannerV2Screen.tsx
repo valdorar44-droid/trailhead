@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } fro
 import {
   ActivityIndicator,
   Alert,
+  Keyboard,
   KeyboardAvoidingView,
   Linking,
   Modal,
@@ -62,6 +63,7 @@ const STARTERS = [
 ];
 
 const GUIDE_GREETING = "Tell me where you want to go—or just the kind of trip you want. I'll ask what matters, research the route, and show you what I checked.";
+const TAB_BAR_COMPOSER_CLEARANCE = 94;
 
 function restoreConversation(raw: string | null): {
   messages: PlannerV2Message[];
@@ -166,6 +168,7 @@ export default function PlannerV2Screen() {
   const [restoring, setRestoring] = useState(true);
   const [error, setError] = useState('');
   const [sourcesOpen, setSourcesOpen] = useState(false);
+  const [keyboardOpen, setKeyboardOpen] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
   const pollBusyRef = useRef(false);
 
@@ -178,6 +181,20 @@ export default function PlannerV2Screen() {
   const mapPins = useMemo(() => plannerMapPins(draft), [draft]);
   const progress = useMemo(() => plannerTaskProgress(snapshot?.tasks ?? []), [snapshot?.tasks]);
   const researchActive = Boolean(snapshot && !plannerRunIsTerminal(snapshot.status));
+  const composerBottomPadding = keyboardOpen
+    ? Math.max(insets.bottom, 10)
+    : TAB_BAR_COMPOSER_CLEARANCE + insets.bottom;
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const show = Keyboard.addListener(showEvent, () => setKeyboardOpen(true));
+    const hide = Keyboard.addListener(hideEvent, () => setKeyboardOpen(false));
+    return () => {
+      show.remove();
+      hide.remove();
+    };
+  }, []);
 
   const applySnapshot = useCallback((next: PlannerV2Snapshot) => {
     setSnapshot(previous => ({
@@ -530,7 +547,7 @@ export default function PlannerV2Screen() {
             researchActive={researchActive}
             onOpenResearch={() => setView('research')}
             scrollRef={scrollRef}
-            bottomInset={insets.bottom}
+            composerBottomPadding={composerBottomPadding}
           />
         ) : view === 'research' ? (
           <ResearchView
@@ -594,7 +611,7 @@ type SharedViewProps = { C: ColorPalette; s: ReturnType<typeof makeStyles> };
 
 function ConversationView({
   C, s, messages, question, outline, busy, error, input, setInput, sendMessage,
-  startResearch, snapshot, progress, researchActive, onOpenResearch, scrollRef, bottomInset,
+  startResearch, snapshot, progress, researchActive, onOpenResearch, scrollRef, composerBottomPadding,
 }: SharedViewProps & {
   messages: PlannerV2Message[];
   question: PlannerQuestion | null;
@@ -610,7 +627,7 @@ function ConversationView({
   researchActive: boolean;
   onOpenResearch: () => void;
   scrollRef: RefObject<ScrollView | null>;
-  bottomInset: number;
+  composerBottomPadding: number;
 }) {
   const isWelcome = messages.length === 0 && !researchActive;
   const composer = (welcome = false) => (
@@ -739,7 +756,7 @@ function ConversationView({
       </ScrollView>
 
       {!isWelcome ? (
-        <View style={[s.composerDock, { paddingBottom: Math.max(bottomInset, 10) }]}>
+        <View style={[s.composerDock, { paddingBottom: composerBottomPadding }]}>
           {composer()}
         </View>
       ) : null}

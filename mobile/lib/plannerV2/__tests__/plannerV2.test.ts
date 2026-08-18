@@ -166,6 +166,18 @@ test('live research stays attached to the conversation with an expandable checkl
   assert.doesNotMatch(screen.slice(researchViewStart, revealViewStart), /ref=\{scrollRef\}/);
 });
 
+test('conversation composer clears the tab bar and closes the gap while typing', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const screen = readFileSync(resolve(here, '../../../components/plannerV2/PlannerV2Screen.tsx'), 'utf8');
+  assert.match(screen, /const TAB_BAR_COMPOSER_CLEARANCE = 94/);
+  assert.match(screen, /const composerBottomPadding = keyboardOpen[\s\S]*TAB_BAR_COMPOSER_CLEARANCE \+ insets\.bottom/);
+  assert.match(screen, /Keyboard\.addListener\(showEvent, \(\) => setKeyboardOpen\(true\)\)/);
+  assert.match(screen, /Keyboard\.addListener\(hideEvent, \(\) => setKeyboardOpen\(false\)\)/);
+  assert.match(screen, /composerBottomPadding=\{composerBottomPadding\}/);
+  assert.match(screen, /paddingBottom: composerBottomPadding/);
+  assert.doesNotMatch(screen, /paddingBottom: Math\.max\(bottomInset, 10\)/);
+});
+
 test('start retry preserves one account-scoped request and cancel copy is truthful', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const screen = readFileSync(resolve(here, '../../../components/plannerV2/PlannerV2Screen.tsx'), 'utf8');

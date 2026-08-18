@@ -36,6 +36,8 @@ import {
   routeBuildCoordsFromTrip,
   routeBuildPreviewStopsFromTrip,
 } from '@/lib/routeBuildSession';
+import PlannerV2Screen from '@/components/plannerV2/PlannerV2Screen';
+import { PLANNER_RESEARCH_PREVIEW_ENABLED } from '@/lib/plannerV2/featureFlag';
 
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
 const TRAILHEAD_LOGO = require('../../assets/icon.png');
@@ -1169,7 +1171,7 @@ function TripCard({ trip, C, onViewMap, onViewGuide, onNextLeg }: {
 }
 
 export default function PlanScreen() {
-  return <PlanScreenContent />;
+  return PLANNER_RESEARCH_PREVIEW_ENABLED ? <PlannerV2Screen /> : <PlanScreenContent />;
 }
 
 // ── Styles ─────────────────────────────────────────────────────────────────────

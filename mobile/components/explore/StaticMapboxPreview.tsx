@@ -18,6 +18,7 @@ export type StaticMapboxPin = {
 
 type Props = {
   pins: StaticMapboxPin[];
+  route?: [number, number][];
   title: string;
   subtitle?: string;
   imageUrl?: string;
@@ -57,6 +58,7 @@ function loadPreviewMapboxToken() {
 
 export function StaticMapboxPreview({
   pins,
+  route = [],
   title,
   subtitle,
   imageUrl,
@@ -80,9 +82,10 @@ export function StaticMapboxPreview({
     () => dedupePreviewPins(pins).slice(0, 16),
     [pins],
   );
+  const cleanRoute = useMemo(() => samplePreviewRoute(route, 48), [route]);
   const mapUrl = useMemo(
-    () => buildStaticMapboxUrl(cleanPins, token, Math.max(180, Math.min(640, Math.round(height))), mapboxStyle),
-    [cleanPins, height, mapboxStyle, token],
+    () => buildStaticMapboxUrl(cleanPins, cleanRoute, token, Math.max(180, Math.min(640, Math.round(height))), mapboxStyle),
+    [cleanPins, cleanRoute, height, mapboxStyle, token],
   );
   const safeImageUrl = useMemo(
     () => boundedExploreImageUrl(imageUrl, EXPLORE_IMAGE_BOUNDS.mapPreview),
@@ -222,13 +225,46 @@ function dedupePreviewPins(pins: StaticMapboxPin[]) {
   return out.sort((a, b) => Number(Boolean(b.active)) - Number(Boolean(a.active)));
 }
 
-function buildStaticMapboxUrl(pins: StaticMapboxPin[], token: string, height: number, mapboxStyle: string) {
-  if (!token || !pins.length) return '';
-  const overlay = pins
-    .map(pin => `pin-s+${pinColor(pin)}(${trimCoord(pin.lng)},${trimCoord(pin.lat)})`)
-    .join(',');
+export function samplePreviewRoute(route: [number, number][], limit = 48) {
+  const clean = route.filter(point => (
+    Array.isArray(point)
+    && Number.isFinite(Number(point[0]))
+    && Number.isFinite(Number(point[1]))
+    && Number(point[0]) >= -180
+    && Number(point[0]) <= 180
+    && Number(point[1]) >= -90
+    && Number(point[1]) <= 90
+  )).map(point => [Number(point[0]), Number(point[1])] as [number, number]);
+  if (clean.length <= limit) return clean;
+  const sampled: [number, number][] = [];
+  for (let index = 0; index < limit; index += 1) {
+    const sourceIndex = Math.round(index * (clean.length - 1) / (limit - 1));
+    sampled.push(clean[sourceIndex]);
+  }
+  return sampled;
+}
+
+function buildStaticMapboxUrl(
+  pins: StaticMapboxPin[],
+  route: [number, number][],
+  token: string,
+  height: number,
+  mapboxStyle: string,
+) {
+  if (!token || (!pins.length && route.length < 2)) return '';
+  const overlays: string[] = [];
+  if (route.length >= 2) {
+    const routeOverlay = {
+      type: 'Feature',
+      properties: { stroke: '#D97706', 'stroke-width': 4, 'stroke-opacity': 0.92 },
+      geometry: { type: 'LineString', coordinates: route },
+    };
+    overlays.push(`geojson(${encodeURIComponent(JSON.stringify(routeOverlay))})`);
+  }
+  overlays.push(...pins.map(pin => `pin-s+${pinColor(pin)}(${trimCoord(pin.lng)},${trimCoord(pin.lat)})`));
+  const overlay = overlays.join(',');
   const size = `600x${height}@2x`;
-  const padding = pins.length > 1 ? '64,48,64,48' : '72';
+  const padding = pins.length > 1 || route.length > 1 ? '64,48,64,48' : '72';
   return `https://api.mapbox.com/styles/v1/${mapboxStyle}/static/${overlay}/auto/${size}?padding=${padding}&access_token=${encodeURIComponent(token)}`;
 }
 
@@ -240,6 +276,9 @@ function pinColor(pin: StaticMapboxPin) {
   if (pin.active) return '166534';
   const kind = String(pin.kind || '').toLowerCase();
   if (/camp|stay|lodging|hut/.test(kind)) return '7c4a2a';
+  if (/fuel|gas|service/.test(kind)) return '334155';
+  if (/warning|closure|alert|permit/.test(kind)) return 'dc2626';
+  if (/weather|forecast/.test(kind)) return '2563eb';
   if (/visitor|info/.test(kind)) return '2563eb';
   if (/trail|route/.test(kind)) return '0891b2';
   return 'd97706';

@@ -256,6 +256,72 @@ export type PlanRequestOptions = {
   trip_preferences?: TripPreferencesPayload | null;
 };
 
+const PLANNER_V2_HEADERS = { 'X-Trailhead-Planner-Capability': 'planner-research-preview-1' };
+
+export type PlannerV2TaskState = 'queued' | 'running' | 'completed' | 'warning' | 'blocked' | 'skipped' | 'needs_input';
+
+export type PlannerV2Task = {
+  id: string;
+  title: string;
+  state: PlannerV2TaskState;
+  message: string;
+};
+
+export type PlannerV2Event = {
+  seq: number;
+  event_type: string;
+  task_id?: string | null;
+  state?: PlannerV2TaskState | null;
+  payload: { message?: string; [key: string]: unknown };
+  created_at: number;
+};
+
+export type PlannerV2Finding = {
+  id: string;
+  kind: 'camp' | 'fuel' | 'place' | string;
+  title: string;
+  summary: string;
+  source_title: string;
+  source_url: string;
+  source_kind: 'official' | 'commercial' | 'other' | string;
+  freshness: string;
+};
+
+export type PlannerV2Snapshot = {
+  run_id: string;
+  status: string;
+  revision: number;
+  cursor: number;
+  events: PlannerV2Event[];
+  tasks: PlannerV2Task[];
+  draft: TripResult | null;
+  findings: PlannerV2Finding[];
+  source_summary: { source_count: number; official_count: number; commercial_count: number };
+  warnings: string[];
+  detour_proposals: Array<{
+    id: string;
+    title: string;
+    kind?: string;
+    added_drive_minutes: number;
+    added_distance_miles: number;
+    decision?: 'pending' | 'approved' | 'rejected';
+    requires_approval?: boolean;
+    risk_reason?: string;
+    road_verified?: boolean;
+    source_url?: string | null;
+    source_label?: string | null;
+  }>;
+  error: string | null;
+  saved: boolean;
+};
+
+export type PlannerQuestion = {
+  kind: string;
+  prompt: string;
+  allow_freeform: boolean;
+  options: Array<{ id: string; label: string; detail: string; value: string }>;
+};
+
 function geocodeOptionsQuery(options: GeocodeRequestOptions = {}) {
   const parts: string[] = [];
   const countrycodes = normalizeRequestText(options.countrycodes ?? '');
@@ -476,6 +542,67 @@ export const api = {
   getPlanJob: (jobId: string) =>
     req<{ job_id: string; status: string; result: TripResult | null; error: string | null }>(
       `/api/plan/job/${jobId}`
+    ),
+
+  plannerV2Conversation: (
+    message: string,
+    sessionId: string,
+    rigContext?: Record<string, unknown> | null,
+  ) => req<ChatResponse>('/api/planner/v2/conversation', {
+    method: 'POST',
+    headers: PLANNER_V2_HEADERS,
+    body: JSON.stringify({
+      message,
+      session_id: sessionId,
+      rig_context: rigContext ?? undefined,
+    }),
+  }),
+
+  plannerV2Start: (
+    sessionId: string,
+    clientRequestId: string,
+    request = '',
+    options: PlanRequestOptions = {},
+  ) => req<PlannerV2Snapshot>('/api/planner/v2/runs', {
+    method: 'POST',
+    headers: PLANNER_V2_HEADERS,
+    body: JSON.stringify({
+      session_id: sessionId,
+      client_request_id: clientRequestId,
+      request,
+      ...options,
+    }),
+  }),
+
+  plannerV2Events: (runId: string, after = 0) =>
+    req<PlannerV2Snapshot>(
+      `/api/planner/v2/runs/${encodeURIComponent(runId)}/events?after=${Math.max(0, Math.trunc(after))}`,
+      { headers: PLANNER_V2_HEADERS },
+    ),
+
+  plannerV2Action: (
+    runId: string,
+    action: 'cancel' | 'resume' | 'approve_detour' | 'reject_detour',
+    detourId?: string,
+    expectedRevision?: number,
+  ) => req<PlannerV2Snapshot>(`/api/planner/v2/runs/${encodeURIComponent(runId)}/actions`, {
+    method: 'POST',
+    headers: PLANNER_V2_HEADERS,
+    body: JSON.stringify({
+      action,
+      proposal_id: detourId,
+      expected_revision: expectedRevision,
+    }),
+  }),
+
+  plannerV2Commit: (runId: string, expectedRevision: number) =>
+    req<{ run: PlannerV2Snapshot; trip: TripResult }>(
+      `/api/planner/v2/runs/${encodeURIComponent(runId)}/commit`,
+      {
+        method: 'POST',
+        headers: PLANNER_V2_HEADERS,
+        body: JSON.stringify({ expected_revision: expectedRevision }),
+      },
     ),
 
   registerPushToken: (token: string) =>
@@ -1689,6 +1816,7 @@ export interface ChatResponse {
   trip?: TripResult;
   trail_dna?: TrailDNA;
   route_validation?: RouteValidationResult;
+  question?: PlannerQuestion;
 }
 
 export interface User {
@@ -2738,6 +2866,16 @@ export interface AccountTripDocumentPage {
 export interface TripResult {
   trip_id: string; plan: TripPlan; campsites: Campsite[]; gas_stations: GasStation[];
   route_pois?: OsmPoi[];
+  route_conditions?: Array<{
+    id: string; title: string; description: string; severity: string;
+    lat: number; lng: number; source_label: string; source_url: string;
+    source_kind?: string; updated_at?: number;
+  }>;
+  weather_checks?: Array<{
+    id: string; title: string; description: string; lat: number; lng: number;
+    source_label: string; source_url: string; source_kind?: string;
+  }>;
+  planner_readiness_warnings?: string[];
   timeline?: TripTimeline;
   audio_guide?: Record<string, string>;
   route_geometry?: SavedRouteGeometryPayload;

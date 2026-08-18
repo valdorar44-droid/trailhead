@@ -11,6 +11,7 @@ import {
   plannerMapPins,
   plannerPresentationNotices,
   plannerReadinessCopy,
+  plannerResearchFailureCopy,
   plannerConversationStorageKey,
   plannerRunStorageKey,
   plannerSourceSummaryCopy,
@@ -31,6 +32,21 @@ test('event cursor ordering deduplicates reconnects and suppresses stale replace
   assert.deepEqual(merged.map(event => event.seq), [1, 2, 3]);
   assert.equal(merged[1].state, 'completed');
   assert.equal(merged[2].payload.message, 'Checking sources');
+});
+
+test('failed research explains endpoint and route checks without raw server wording', () => {
+  assert.equal(
+    plannerResearchFailureCopy('Trailhead could not confirm both route endpoints. Add the start and destination, then try again.'),
+    "I couldn't confirm both route places. Return to the conversation, name them clearly, and try again.",
+  );
+  assert.equal(
+    plannerResearchFailureCopy('Returned road route crosses a country that was not confirmed.'),
+    'This route needs a country or border check. Return to the conversation and review the route places.',
+  );
+  assert.equal(
+    plannerResearchFailureCopy('provider_internal_failure'),
+    "I couldn't finish this research. Your completed checks are still here.",
+  );
 });
 
 test('checklist progress counts only terminal truthful states', () => {
@@ -93,6 +109,8 @@ test('planner campground cards stay concise and hand full details to the map', (
   assert.match(screen, /highlighted \$\{camps\.length === 1 \? 'camp' : 'camps'\}/);
   assert.doesNotMatch(screen, /\$\{summary\.camps\} camp options/);
   assert.doesNotMatch(screen, /body=\{camp\.description/);
+  assert.doesNotMatch(screen, /No sourced camp was confirmed/);
+  assert.match(screen, /No campground was added to this preview yet\. Open the map for nearby options/);
 });
 
 test('ordinary research gaps read as planning notes while safety cautions stay visible', () => {
@@ -100,6 +118,8 @@ test('ordinary research gaps read as planning notes while safety cautions stay v
     'No sourced fuel options were returned.',
     'No sourced activity or trail options were returned.',
     'Live route conditions were unavailable. Recheck closures and alerts before departure.',
+    'Live closure and alert feeds may be incomplete. Recheck official road and public-land notices before departure.',
+    'Weather forecasts were unavailable. Recheck weather before departure.',
     'The domestic road route passed its border controls, but one secondary country check was unavailable.',
     'High wind closure reported on the planned road.',
   ]), {
@@ -107,6 +127,8 @@ test('ordinary research gaps read as planning notes while safety cautions stay v
       'Fuel stops are not pinned in this draft yet. Add preferred stations on the map or ask Trailhead to refine the route.',
       'No optional activities were added, so this draft stays focused on the route and camps. Ask Trailhead if you want more ideas.',
       'Live road updates were not attached to this draft. Refresh them on the map and check closures before departure.',
+      'Current closure and public-land updates need a quick refresh on the map before departure.',
+      "A forecast wasn't attached to this draft. Refresh weather on the map closer to departure.",
     ],
     cautions: [
       'The route stayed inside the confirmed country. One backup country lookup did not respond, so review the route map before departure.',

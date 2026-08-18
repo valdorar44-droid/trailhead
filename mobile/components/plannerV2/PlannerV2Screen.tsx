@@ -44,6 +44,7 @@ import {
   plannerMapPins,
   plannerPresentationNotices,
   plannerReadinessCopy,
+  plannerResearchFailureCopy,
   plannerRunIsTerminal,
   plannerRunStorageKey,
   plannerSourceSummaryCopy,
@@ -783,7 +784,13 @@ function ResearchView({ C, s, snapshot, progress, error, busy, onCancel, onRetur
     <ScrollView style={s.flex} contentContainerStyle={s.researchContent}>
       <LinearGradient colors={[C.s2, C.s1]} style={s.researchHero}>
         <Text style={s.researchKicker}>{failed ? 'RESEARCH NEEDS ATTENTION' : cancelled ? 'RESEARCH STOPPED' : 'RESEARCHING YOUR TRIP'}</Text>
-        <Text style={s.researchTitle}>{failed || cancelled ? 'Your completed checks are still here.' : newestPlannerMessage(snapshot)}</Text>
+        <Text style={s.researchTitle}>{
+          failed
+            ? plannerResearchFailureCopy(snapshot?.error)
+            : cancelled
+              ? 'Your completed checks are still here.'
+              : newestPlannerMessage(snapshot)
+        }</Text>
         <View style={s.progressTrack}><View style={[s.progressFill, { width: `${Math.max(4, progress.ratio * 100)}%` }]} /></View>
         <Text style={s.progressCopy}>{progress.completed} of {progress.total} research sections finished</Text>
       </LinearGradient>
@@ -882,7 +889,7 @@ function RevealView({ C, s, trip, snapshot, summary, route, pins, error, busy, o
 
       <View style={s.bentoGrid}>
         <BentoCard s={s} C={C} icon="navigate-outline" label="DRIVING RHYTHM" title={`${summary.days} days · ${summary.miles.toLocaleString()} miles`} body={dayRhythm || 'Confirmed route anchors are ready for review.'} />
-        <BentoCard s={s} C={C} icon="bed-outline" label="OVERNIGHTS" title={`${camps.length} highlighted ${camps.length === 1 ? 'camp' : 'camps'}`} body={camps.map(camp => camp.name).join('\n') || 'No sourced camp was confirmed. Review the warning before leaving.'} warning={!camps.length} />
+        <BentoCard s={s} C={C} icon="bed-outline" label="OVERNIGHTS" title={`${camps.length} highlighted ${camps.length === 1 ? 'camp' : 'camps'}`} body={camps.map(camp => camp.name).join('\n') || 'No campground was added to this preview yet. Open the map for nearby options or ask Trailhead to refine the overnight plan.'} warning={!camps.length} />
         <BentoCard s={s} C={C} icon="trail-sign-outline" label="BEST EXPERIENCES" title={experiences.length ? `${experiences.length} route-fit ideas` : 'Keep this trip focused'} body={experiences.map(place => place.name).join('\n') || 'No optional experiences were added. Ask Trailhead if you want ideas along the route.'} />
         <BentoCard s={s} C={C} icon="car-sport-outline" label="READINESS" title="Fuel & road readiness" body={`${trip.plan.logistics?.fuel_strategy || 'Review fuel spacing.'}\n${readiness.fuel}\n${readiness.conditions}`} />
       </View>

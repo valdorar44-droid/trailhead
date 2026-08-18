@@ -48,6 +48,20 @@ export function plannerRunCanResume(status: string) {
   return ['pending', 'running', 'ai', 'geocoding', 'routing', 'enriching', 'saving', 'committing'].includes(status);
 }
 
+export function plannerResearchFailureCopy(error: unknown) {
+  const message = String(error || '').trim();
+  if (/confirm both (?:route )?(?:endpoints|ends)|confirm the start and destination/i.test(message)) {
+    return "I couldn't confirm both route places. Return to the conversation, name them clearly, and try again.";
+  }
+  if (/country|border|outside the confirmed/i.test(message)) {
+    return 'This route needs a country or border check. Return to the conversation and review the route places.';
+  }
+  if (/road route|route unavailable|could not build.*route/i.test(message)) {
+    return "I couldn't build a reliable road route. Return to the conversation and check the route places.";
+  }
+  return "I couldn't finish this research. Your completed checks are still here.";
+}
+
 function waypointPinKind(type: string) {
   const normalized = type.toLowerCase();
   if (/camp|motel|overnight/.test(normalized)) return 'camp';
@@ -161,6 +175,12 @@ function customerPlanningNote(warning: string): string | null {
   }
   if (/^(?:Live|Current) (?:road|route) conditions (?:were )?unavailable(?:\.|$)/i.test(warning)) {
     return 'Live road updates were not attached to this draft. Refresh them on the map and check closures before departure.';
+  }
+  if (/^Live closure and alert feeds may be incomplete(?:\.|$)/i.test(warning)) {
+    return 'Current closure and public-land updates need a quick refresh on the map before departure.';
+  }
+  if (/^Weather forecasts were unavailable(?:\.|$)/i.test(warning)) {
+    return "A forecast wasn't attached to this draft. Refresh weather on the map closer to departure.";
   }
   if (/left out because .*direct source/i.test(warning)) return warning;
   return null;
